@@ -21,6 +21,9 @@ import { RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
+import { contactWhereBase } from '../crm/crm.helpers';
+import { contactIdentityViolation } from '../crm/crm.service';
 
 /** The caller as AuthMiddleware attaches it. */
 type ActorRequest = { user?: { id?: string; role?: string } };
@@ -141,8 +144,107 @@ function isTrashed(row: { deletedAt?: unknown } | null | undefined): boolean {
   return row != null && row.deletedAt != null;
 }
 
-type TrashSql = { list: string; count: string; find: string };
-const TRASH_SQL = new Map<TrashableModel, TrashSql>();
+/**
+ * W6-TRASH-MODULE-SCOPE review repair SEC-W6T-2 (V1-52 review SEC-V52-1): the
+ * fields no trash answer carries. A quote's viewToken is the customer's bearer
+ * credential (whoever holds it can view, accept or reject the quote on the
+ * public routes once it is restored); the commerce reads withhold it from
+ * every revenue:read answer and give it only through POST .../public-link
+ * (revenue:write). The listing and the restore answer drop it here.
+ */
+const WITHHELD_FIELDS: Partial<Record<TrashableModel, readonly string[]>> = { quote: ['viewToken'] };
+
+/** `row` as the trash serves it: without `model`'s WITHHELD_FIELDS. */
+function served<R>(model: TrashableModel, row: R): R {
+  const withheld = WITHHELD_FIELDS[model];
+  if (!withheld || row == null || typeof row !== 'object') return row;
+  const copy = { ...(row as Record<string, unknown>) };
+  for (const field of withheld) delete copy[field];
+  return copy as R;
+}
+
+/** A Prisma model's datamodel entry, by its client name (contact, staffMember, ...). */
+function datamodelOf(model: string) {
+  const meta = Prisma.dmmf.datamodel.models.find((m) => m.name.charAt(0).toLowerCase() + m.name.slice(1) === model);
+  if (!meta) throw new Error(`No datamodel for the model '${model}'`);
+  return {
+    table: `"${meta.dbName ?? meta.name}"`,
+    column: (field: string) => `"${meta.fields.find((f) => f.name === field)?.dbName ?? field}"`,
+    scalars: meta.fields.filter((f) => f.kind === 'scalar' || f.kind === 'enum').map((f) => f.name),
+  };
+}
+
+/** The visibility clause of the CRM module (crm-permissions.helper.ts visibilityClause), or null for full read access. */
+type ContactVisibility = ReturnType<typeof visibilityClause>;
+
+/**
+ * W6-TRASH-MODULE-SCOPE review repair SEC-W6T-1 / CR-W6T-1 (D-95 with the
+ * contact visibility rule of R0-01, V1-08 and D-74): visibilityClause stated in
+ * SQL for a raw read of contacts, with its values as parameters numbered from
+ * $`first`. The clause is translated term by term (visibility in a set, the
+ * owner, a share with the member), the shapes visibilityClause builds; any
+ * other shape throws, so a change to the CRM rule fails closed here instead of
+ * listing rows it would hide.
+ */
+function contactVisibilitySql(clause: NonNullable<ContactVisibility>, first: number): { sql: string; params: unknown[] } {
+  const contact = datamodelOf('contact');
+  const share = datamodelOf('contactShare');
+  const params: unknown[] = [];
+  const param = (value: unknown) => {
+    params.push(value);
+    return `$${first + params.length - 1}`;
+  };
+  const unsupported = (term: unknown) => new Error(`The trash cannot state the contact visibility term ${JSON.stringify(term)} in SQL`);
+  const term = (t: Record<string, unknown>): string => {
+    const [key, ...rest] = Object.keys(t);
+    if (rest.length > 0) throw unsupported(t);
+    if (key === 'visibility') {
+      const values = (t.visibility as { in?: unknown } | null)?.in;
+      if (!Array.isArray(values) || values.length === 0 || Object.keys(t.visibility as object).length !== 1) throw unsupported(t);
+      return `${contact.table}.${contact.column('visibility')} IN (${values.map((v) => param(String(v))).join(', ')})`;
+    }
+    if (key === 'ownerId' && typeof t.ownerId === 'string') return `${contact.table}.${contact.column('ownerId')} = ${param(t.ownerId)}`;
+    if (key === 'shares') {
+      const some = (t.shares as { some?: Record<string, unknown> } | null)?.some;
+      if (!some || Object.keys(some).length !== 1 || typeof some.userId !== 'string') throw unsupported(t);
+      return `EXISTS (SELECT 1 FROM ${share.table} s WHERE s.${share.column('contactId')} = ${contact.table}.${contact.column('id')} AND s.${share.column('userId')} = ${param(some.userId)})`;
+    }
+    throw unsupported(t);
+  };
+  const or = (clause as { OR?: unknown }).OR;
+  if (!Array.isArray(or) || or.length === 0 || Object.keys(clause).length !== 1) throw unsupported(clause);
+  return { sql: `(${or.map((t) => term(t as Record<string, unknown>)).join(' OR ')})`, params };
+}
+
+/**
+ * W6-TRASH-MODULE-SCOPE review repair SEC-W6T-3 (D-25): the trashed contacts
+ * another flow holds, which the trash never lists, restores or deletes:
+ *   - a contact an open forget request soft-deleted for its grace period: only
+ *     ContactPrivacyService.cancelForget brings it back (it closes the request
+ *     and writes the forget_cancelled audit row; a plain un-delete left the
+ *     request open, and the purge then erased the contact the trash had
+ *     restored);
+ *   - a contact a purged forget request erased: the anonymised row keeps
+ *     deletedAt and is named by the request's hash alone (hashContact,
+ *     sha256("<businessId>:<contactId>"), as the purge's legacy repair reads it);
+ *   - a merged duplicate (mergedIntoId set): the merge's undo is revertMerge,
+ *     and the purge erases a forgotten contact's duplicates in place, with no
+ *     request or hash naming them.
+ */
+function heldContactSql(): string {
+  const contact = datamodelOf('contact');
+  const request = datamodelOf('contactForgetRequest');
+  const c = (field: string) => `${contact.table}.${contact.column(field)}`;
+  return [
+    `${c('mergedIntoId')} IS NULL`,
+    `NOT EXISTS (SELECT 1 FROM ${request.table} r WHERE r.${request.column('contactId')} = ${c('id')} AND r.${request.column('status')} = 'requested')`,
+    `NOT EXISTS (SELECT 1 FROM ${request.table} r WHERE r.${request.column('contactHash')} = 'sha256:' || encode(sha256(convert_to(${c('businessId')} || ':' || ${c('id')}, 'UTF8')), 'hex')` +
+      ` AND r.${request.column('businessId')} = ${c('businessId')} AND r.${request.column('status')} = 'purged')`,
+  ].join(' AND ');
+}
+
+type TrashSqlParts = { select: string; table: string; where: string; deletedAt: string; id: string };
+const TRASH_SQL = new Map<TrashableModel, TrashSqlParts>();
 
 /**
  * W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): the raw reads of `model`'s
@@ -152,25 +254,35 @@ const TRASH_SQL = new Map<TrashableModel, TrashSql>();
  * a Prisma read of the model answers it. Filtered on the model's own tenant
  * column and on deleted_at IS NOT NULL (the trash filter trashedWhere states).
  * `list` takes LIMIT $2 OFFSET $3, `find` the id as $2.
+ *
+ * Review repairs SEC-W6T-1 and SEC-W6T-3: a contact read also leaves out the
+ * contacts another flow holds (heldContactSql) and, given the caller's CRM
+ * visibility clause, the contacts it hides (contactVisibilitySql, its values
+ * as the read's next parameters, returned in `params`).
  */
-function trashedSql(model: TrashableModel): TrashSql {
-  const cached = TRASH_SQL.get(model);
-  if (cached) return cached;
-  const meta = Prisma.dmmf.datamodel.models.find((m) => m.name.charAt(0).toLowerCase() + m.name.slice(1) === model);
-  if (!meta) throw new Error(`No datamodel for the trash model '${model}'`);
-  const column = (field: string) => `"${meta.fields.find((f) => f.name === field)?.dbName ?? field}"`;
-  const select = meta.fields
-    .filter((f) => f.kind === 'scalar' || f.kind === 'enum')
-    .map((f) => `${column(f.name)} AS "${f.name}"`)
-    .join(', ');
-  const from = `FROM "${meta.dbName ?? meta.name}" WHERE ${column(TENANT_COLUMN[model] ?? 'businessId')} = $1 AND ${column('deletedAt')} IS NOT NULL`;
-  const sql: TrashSql = {
-    list: `SELECT ${select} ${from} ORDER BY ${column('deletedAt')} DESC LIMIT $2 OFFSET $3`,
-    count: `SELECT count(*)::int AS "n" ${from}`,
-    find: `SELECT ${select} ${from} AND ${column('id')} = $2 LIMIT 1`,
-  };
-  TRASH_SQL.set(model, sql);
-  return sql;
+function trashedSql(model: TrashableModel, read: 'list' | 'count' | 'find', visibility: ContactVisibility = null): { sql: string; params: unknown[] } {
+  let parts = TRASH_SQL.get(model);
+  if (!parts) {
+    const meta = datamodelOf(model);
+    parts = {
+      select: meta.scalars.map((field) => `${meta.column(field)} AS "${field}"`).join(', '),
+      table: meta.table,
+      where: `${meta.column(TENANT_COLUMN[model] ?? 'businessId')} = $1 AND ${meta.column('deletedAt')} IS NOT NULL` +
+        (model === 'contact' ? ` AND ${heldContactSql()}` : ''),
+      deletedAt: meta.column('deletedAt'),
+      id: meta.column('id'),
+    };
+    TRASH_SQL.set(model, parts);
+  }
+  const fixed = read === 'list' ? 3 : read === 'find' ? 2 : 1;
+  const scope = model === 'contact' && visibility ? contactVisibilitySql(visibility, fixed + 1) : null;
+  const from = `FROM ${parts.table} WHERE ${parts.where}${scope ? ` AND ${scope.sql}` : ''}`;
+  const params = scope?.params ?? [];
+  switch (read) {
+    case 'list': return { sql: `SELECT ${parts.select} ${from} ORDER BY ${parts.deletedAt} DESC LIMIT $2 OFFSET $3`, params };
+    case 'count': return { sql: `SELECT count(*)::int AS "n" ${from}`, params };
+    case 'find': return { sql: `SELECT ${parts.select} ${from} AND ${parts.id} = $2 LIMIT 1`, params };
+  }
 }
 
 /** What a caller may read: every module (a SUPER_ADMIN), a Membership's scope map, or nothing (no Membership). */
@@ -206,6 +318,9 @@ export class TrashController {
   // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model is listed only to a
   // caller holding read access to its module (TRASH_MODULE; readRefusal), and
   // the trashed rows of a model the client soft-deletes are read raw (readTrashed).
+  // Review repairs: contacts are listed under the caller's CRM visibility
+  // (SEC-W6T-1 / CR-W6T-1) and without those another flow holds (SEC-W6T-3);
+  // no row carries a withheld field (SEC-W6T-2: a quote's viewToken).
   @Get()
   @RequireModuleScope('settings')
   async listTrashed(
@@ -219,21 +334,26 @@ export class TrashController {
       if (!isTrashableModel(model)) {
         throw new BadRequestException(`Model '${model}' is not trashable`);
       }
-      const refusal = readRefusal(await this.readAccess(req, businessId), model);
+      const access = await this.readAccess(req, businessId);
+      const refusal = readRefusal(access, model);
       if (refusal) throw new ForbiddenException(refusal);
-      const items = (await this.readTrashed(model, businessId, limit, offset)).filter(isTrashed);
-      const total = await this.countTrashed(model, businessId);
+      // Review repair SEC-W6T-1 / CR-W6T-1: contacts the caller's CRM visibility hides are not listed or counted.
+      const visibility = model === 'contact' ? await this.contactVisibility(req, businessId, access) : null;
+      const items = (await this.readTrashed(model, businessId, limit, offset, visibility)).filter(isTrashed).map((item) => served(model, item));
+      const total = await this.countTrashed(model, businessId, visibility);
       return { items, total, model };
     }
 
-    // Every model: one lookup at most; a caller gets the models whose module
-    // it may read (D-95) and none of the others'.
+    // Every model: one module lookup at most (and, for contacts, the CRM
+    // access visibilityClause reads); a caller gets the models whose module it
+    // may read (D-95) and none of the others'.
     const access = await this.readAccess(req, businessId);
     if (access === null) throw new ForbiddenException('Not a member of this business');
     const allItems: Array<Record<string, unknown>> = [];
     for (const m of TRASHABLE_MODELS) {
       if (readRefusal(access, m)) continue;
-      const items = await this.readTrashed(m, businessId, 10, 0);
+      const visibility = m === 'contact' ? await this.contactVisibility(req, businessId, access) : null;
+      const items = (await this.readTrashed(m, businessId, 10, 0, visibility)).map((item) => served(m, item));
       // W5-TRASH-LIST-500 (D46-S09g): a row with no deletedAt is live, not
       // trash. The client's soft-delete extension rewrites the filter to
       // deletedAt null for the models it covers (Contact, Invoice, Quote and
@@ -276,19 +396,25 @@ export class TrashController {
    *
    * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3): every other
    * trash model is held to write access to its own module (TRASH_MODULE), the
-   * same rule and messages with that module named. A SUPER_ADMIN keeps
-   * ModuleScopeGuard's admission there (no lookup); D-46 still refuses a
-   * non-member SUPER_ADMIN on the revenue models above.
+   * same rule and messages with that module named.
+   *
+   * Review repair SEC-W6T-4 (D-95: "D-46 still refuses a non-member
+   * SUPER_ADMIN", a ruling about every trash model): a SUPER_ADMIN no longer
+   * skips the lookup outside revenue. Like every caller it needs a Membership
+   * whose scope map (or role defaults) holds the module's write level, FOLLOW3-
+   * A2's rule; a non-member SUPER_ADMIN gets 'Not a member of this business'
+   * there ('Not authorized to update this invoice|quote' on the revenue models,
+   * as before). Before, it restored any non-revenue record in any tenant (and
+   * erased the models the client does not soft-delete) with no Membership.
    */
   private async assertMayWrite(req: ActorRequest | undefined, businessId: string, model: TrashableModel): Promise<void> {
     const module = TRASH_MODULE[model];
     const subject = REVENUE_TRASH_SUBJECT[model];
     const user = req?.user;
-    if (user?.role === 'SUPER_ADMIN' && !subject) return;
     const scopes = await this.memberScopes(user?.id, businessId);
     if (scopes === null) {
       throw new ForbiddenException(
-        user?.role === 'SUPER_ADMIN' ? `Not authorized to update this ${subject}` : 'Not a member of this business',
+        user?.role === 'SUPER_ADMIN' && subject ? `Not authorized to update this ${subject}` : 'Not a member of this business',
       );
     }
     const level = scopes[module] || 'none';
@@ -330,27 +456,62 @@ export class TrashController {
   }
 
   /**
+   * W6-TRASH-MODULE-SCOPE review repair SEC-W6T-1 / CR-W6T-1 (D-95 with the
+   * contact visibility rule of R0-01, V1-08 and D-74): the CRM visibility clause
+   * a read of trashed contacts applies for this caller, as GET contacts/:id
+   * applies it (resolveCrmAccess, visibilityClause): none for a SUPER_ADMIN
+   * (ModuleScopeGuard's read admission, `access` 'all') or the business owner;
+   * TEAM and SHARED rows plus the member's own and shared ones for a crm_view
+   * 'all' member; only their own and shared ones for a 'my book' member. Before,
+   * a crm:read member read every trashed contact, PRIVATE ones of other members
+   * (notesInternal included) too.
+   */
+  private async contactVisibility(req: ActorRequest | undefined, businessId: string, access: ReadAccess): Promise<ContactVisibility> {
+    if (access === 'all') return null;
+    const { access: crm, userId } = await this.crmAccess(req, businessId);
+    return visibilityClause(crm, userId);
+  }
+
+  /** The caller's CrmAccess in `businessId` (resolveCrmAccess: 403 for a caller with no Membership). */
+  private async crmAccess(req: ActorRequest | undefined, businessId: string): Promise<{ access: CrmAccess; userId: string }> {
+    const userId = req?.user?.id;
+    if (!userId) throw new ForbiddenException('Not a member of this business');
+    return { access: await resolveCrmAccess(this.prisma, businessId, userId), userId };
+  }
+
+  /**
    * W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): the trashed rows of `model` in
    * `businessId`, newest first. A model the client soft-deletes is read raw
-   * (trashedSql), its page bounded as the client's findMany bounds one.
+   * (trashedSql), its page bounded as the client's findMany bounds one. A
+   * contact read leaves out the contacts `visibility` hides and those another
+   * flow holds (review repairs SEC-W6T-1, SEC-W6T-3).
    */
-  private async readTrashed(model: TrashableModel, businessId: string, take: number, skip: number): Promise<Array<Record<string, unknown>>> {
+  private async readTrashed(
+    model: TrashableModel,
+    businessId: string,
+    take: number,
+    skip: number,
+    visibility: ContactVisibility = null,
+  ): Promise<Array<Record<string, unknown>>> {
     if (!CLIENT_SOFT_DELETED.has(model)) {
       return (await this.queryModel(model, trashedWhere(model, businessId), take, skip)) as Array<Record<string, unknown>>;
     }
+    const { sql, params } = trashedSql(model, 'list', visibility);
     const rows = await this.prisma.client.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      trashedSql(model).list,
+      sql,
       businessId,
       Math.min(Math.max(take, 0), 1000),
       Math.max(skip, 0),
+      ...params,
     );
     return rows ?? [];
   }
 
-  /** W6-TRASH-MODULE-SCOPE: how many trashed rows `model` has in `businessId` (raw where readTrashed reads raw). */
-  private async countTrashed(model: TrashableModel, businessId: string): Promise<number> {
+  /** W6-TRASH-MODULE-SCOPE: how many trashed rows `model` has in `businessId` (raw where readTrashed reads raw, with its filters). */
+  private async countTrashed(model: TrashableModel, businessId: string, visibility: ContactVisibility = null): Promise<number> {
     if (!CLIENT_SOFT_DELETED.has(model)) return this.countModel(model, trashedWhere(model, businessId));
-    const rows = await this.prisma.client.$queryRawUnsafe<Array<{ n: number }>>(trashedSql(model).count, businessId);
+    const { sql, params } = trashedSql(model, 'count', visibility);
+    const rows = await this.prisma.client.$queryRawUnsafe<Array<{ n: number }>>(sql, businessId, ...params);
     return Number(rows?.[0]?.n ?? 0);
   }
 
@@ -359,13 +520,90 @@ export class TrashController {
    * another business's, is never found). W5-TRASH-LIST-500 review repair
    * SEC-TL500-1: this lookup is the only tenant check before the write, which
    * keys on the id alone. W6-TRASH-MODULE-SCOPE: raw where readTrashed reads raw.
+   * Review repairs SEC-W6T-1 / SEC-W6T-3: a contact `visibility` hides, or one
+   * another flow holds, is not found either (the caller's 404, as GET
+   * contacts/:id answers a contact the caller may not open).
    */
-  private async findTrashed(model: TrashableModel, businessId: string, id: string): Promise<Record<string, unknown> | null> {
+  private async findTrashed(
+    model: TrashableModel,
+    businessId: string,
+    id: string,
+    visibility: ContactVisibility = null,
+  ): Promise<Record<string, unknown> | null> {
     if (!CLIENT_SOFT_DELETED.has(model)) {
       return (await this.findUnique(model, { id, ...trashedWhere(model, businessId) })) as Record<string, unknown> | null;
     }
-    const rows = await this.prisma.client.$queryRawUnsafe<Array<Record<string, unknown>>>(trashedSql(model).find, businessId, id);
+    const { sql, params } = trashedSql(model, 'find', visibility);
+    const rows = await this.prisma.client.$queryRawUnsafe<Array<Record<string, unknown>>>(sql, businessId, id, ...params);
     return rows?.[0] ?? null;
+  }
+
+  /**
+   * W6-TRASH-MODULE-SCOPE review repair SEC-W6T-1 / CR-W6T-1: the CRM record
+   * rules a restore or permanent delete of a trashed contact applies after the
+   * module check (assertMayWrite), those of the contact write routes
+   * (CrmService.assertCanEditContact): for a member who is not the owner or a
+   * SUPER_ADMIN, crm_edit 'none' is refused before the lookup (restore only;
+   * nothing is written by a permanent delete, which answers 409); the lookup
+   * then applies the caller's visibility clause (findTrashed: 404).
+   */
+  private async contactWriteAccess(
+    req: ActorRequest | undefined,
+    businessId: string,
+    restoring: boolean,
+  ): Promise<{ access: CrmAccess; userId: string; visibility: ContactVisibility }> {
+    const { access, userId } = await this.crmAccess(req, businessId);
+    if (restoring && !access.isOwner && !access.isSuperAdmin && access.editScope === 'none') {
+      throw new ForbiddenException('You do not have permission to edit contacts');
+    }
+    return { access, userId, visibility: visibilityClause(access, userId) };
+  }
+
+  /**
+   * crm_edit 'owned' on a restore (CrmService.assertCanEditContact): a member
+   * so limited restores only a contact they own or one shared with them.
+   */
+  private async assertMayEditContact(access: CrmAccess, userId: string, contact: Record<string, unknown>): Promise<void> {
+    if (access.isOwner || access.isSuperAdmin || access.editScope !== 'owned' || contact.ownerId === userId) return;
+    const shared = await this.prisma.client.contactShare.findFirst({
+      where: { contactId: String(contact.id), userId },
+      select: { id: true },
+    });
+    if (!shared) throw new ForbiddenException('You can only edit contacts you own');
+  }
+
+  /**
+   * W6-TRASH-MODULE-SCOPE review repair CR-W6T-2: since D-16 a deleted contact
+   * releases its email and phone (the identity uniques cover live rows only),
+   * so a live contact may hold one of them by now and the un-delete is a P2002.
+   * It answers like every other identity conflict, cancelForget's included:
+   * 409 contact_email_taken / contact_phone_taken naming the live holder the
+   * caller may open (the same visibility clause; null otherwise). It answered
+   * 500. Anything else is rethrown untouched.
+   */
+  private async rejectContactIdentityTaken(
+    err: unknown,
+    businessId: string,
+    trashed: Record<string, unknown>,
+    visibility: ContactVisibility,
+  ): Promise<never> {
+    const field = contactIdentityViolation(err);
+    if (!field) throw err;
+    const value = trashed[field === 'email' ? 'emailNormalized' : 'phoneNormalized'];
+    let holder: { id: string } | null = null;
+    if (typeof value === 'string' && value.length > 0) {
+      const where: Prisma.ContactWhereInput = field === 'email'
+        ? { ...contactWhereBase(businessId), emailNormalized: value }
+        : { ...contactWhereBase(businessId), phoneNormalized: value };
+      if (visibility) where.AND = [visibility as Prisma.ContactWhereInput];
+      holder = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    }
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: `A contact with this ${label} already exists in this business`,
+      existingContactId: holder?.id ?? null,
+    });
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWrite first.
@@ -376,6 +614,10 @@ export class TrashController {
   // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model runs assertMayWrite
   // (write access to its module) first, and the trashed row of a model the
   // client soft-deletes is found (findTrashed reads it raw).
+  // Review repairs: a contact also holds the CRM record rules (SEC-W6T-1 /
+  // CR-W6T-1: visibility, crm_edit), is never one another flow holds
+  // (SEC-W6T-3), and an identity conflict answers 409 (CR-W6T-2); the answer
+  // never carries a withheld field (SEC-W6T-2: a quote's viewToken).
   @Post(':model/:id/restore')
   @RequireModuleScope('settings')
   async restore(
@@ -388,10 +630,18 @@ export class TrashController {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
     await this.assertMayWrite(req, businessId, model);
-    const existing = await this.findTrashed(model, businessId, id);
+    const contactRules = model === 'contact' ? await this.contactWriteAccess(req, businessId, true) : null;
+    const existing = await this.findTrashed(model, businessId, id, contactRules?.visibility ?? null);
     if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
 
     let restored: any;
+    if (contactRules) {
+      await this.assertMayEditContact(contactRules.access, contactRules.userId, existing!);
+      restored = await this.updateModel(model, id, { deletedAt: null }).catch((err: unknown) =>
+        this.rejectContactIdentityTaken(err, businessId, existing!, contactRules.visibility),
+      );
+      return { restored: true, model, id, item: restored };
+    }
     // W6-TRASH-MODULE-SCOPE: CatalogService.updateProduct ignores deletedAt (the
     // restore answered restored while the product stayed in the trash) and
     // updateService cannot find a trashed service, so deletedAt is cleared here
@@ -405,7 +655,7 @@ export class TrashController {
     } else {
       restored = await this.updateModel(model, id, { deletedAt: null } as any);
     }
-    return { restored: true, model, id, item: restored };
+    return { restored: true, model, id, item: served(model, restored) };
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWrite first.
@@ -428,7 +678,9 @@ export class TrashController {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
     await this.assertMayWrite(req, businessId, model);
-    const existing = await this.findTrashed(model, businessId, id);
+    // Review repairs SEC-W6T-1 / SEC-W6T-3: a contact the caller may not open, or one another flow holds, is not found.
+    const contactRules = model === 'contact' ? await this.contactWriteAccess(req, businessId, false) : null;
+    const existing = await this.findTrashed(model, businessId, id, contactRules?.visibility ?? null);
     if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
     if (CLIENT_SOFT_DELETED.has(model)) {
       throw new ConflictException(`Permanent delete is not available for a trashed ${model}: it can only be restored`);
