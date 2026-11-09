@@ -331,6 +331,8 @@ const RESOLVER: Record<string, ResolverAnswer[] | ((before: number) => ResolverA
   'v86e-import.example.test': [{ address: PUBLIC_V4, family: 4 }],
   'v86e-public.example.test': [{ address: PUBLIC_V4, family: 4 }],
   'v86e-public6.example.test': [{ address: PUBLIC_V6, family: 6 }],
+  // Review CR-PIN-1: a dual-stack name answering AAAA first (verbatim order).
+  'v86e-dual.example.test': [{ address: PUBLIC_V6, family: 6 }, { address: PUBLIC_V4, family: 4 }],
   // A public first answer, then the loopback address: a fetch that resolved the name again would reach 127.0.0.1.
   'v86e-rebind.example.test': (before) => [{ address: before === 0 ? PUBLIC_V4 : '127.0.0.1', family: 4 }],
   '127.0.0.1.nip.io': [{ address: '127.0.0.1', family: 4 }],
@@ -822,9 +824,11 @@ describe('ST-38c-2 (V1-38c review): import/link fetches only a public address, a
  * checking a name and then letting fetch resolve it again would be open to DNS
  * rebinding. import/link now resolves the host once (RESOLVER above stands in
  * for DNS), refuses it when any address is not public or none comes back, and
- * fetches through a dispatcher pinned to the address it checked (SNI and Host
+ * fetches through a dispatcher pinned to the addresses it checked (SNI and Host
  * stay the name; outbound-address.spec.ts proves the pinned connection on a
  * local server). A redirect target is resolved and checked the same way.
+ * Review CR-PIN-1: every checked address is pinned, not only the first, so a
+ * dual-stack link whose first answer cannot be reached still imports.
  * Global fetch stands in for the servers: a private name is answered with an
  * "internal" file, as the internal service would answer, so a private name
  * that reached fetch would be imported rather than refused; each fetch's init
@@ -844,6 +848,7 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
   const NXDOMAIN = 'https://v86e-nxdomain.example.test/contacts.csv';
   const PUBLIC_URL = 'https://v86e-public.example.test/contacts.csv';
   const PUBLIC6_URL = 'http://v86e-public6.example.test/contacts.csv';
+  const DUAL_URL = 'https://v86e-dual.example.test/contacts.csv';
   const REBIND_URL = 'https://v86e-rebind.example.test/contacts.csv';
   const TO_PRIVATE_NAME = 'https://v86e-public.example.test/to-private-name.csv';
   const TO_PUBLIC6 = 'https://v86e-public.example.test/to-public6.csv';
@@ -861,7 +866,7 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
       if (PRIVATE_HOSTS.has(new URL(url).hostname)) return ok(csv(`${P}W4PinInternal`, INTERNAL_EMAIL));
       if (url === TO_PRIVATE_NAME) return redirect(302, 'http://v86e-metadata.example.test/latest/meta-data/');
       if (url === TO_PUBLIC6) return redirect(301, PUBLIC6_URL);
-      if (url === PUBLIC_URL || url === PUBLIC6_URL || url === REBIND_URL) return ok(csv(`${P}W4Pin`, emailFor(url)));
+      if (url === PUBLIC_URL || url === PUBLIC6_URL || url === REBIND_URL || url === DUAL_URL) return ok(csv(`${P}W4Pin`, emailFor(url)));
       throw new Error(`unexpected outbound fetch in a test: ${url}`);
     }) as any);
   });
@@ -874,7 +879,7 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
   }
 
   const fetchedUrls = () => fetchSpy.mock.calls.map((call: unknown[]) => String(call[0]));
-  /** The address each fetch's dispatcher is pinned to (undefined when a fetch was given none). */
+  /** The addresses each fetch's dispatcher is pinned to (undefined when a fetch was given none). */
   const pinnedTargets = () =>
     (fetchSpy.mock.calls as unknown[][]).map((call) => (call[1] as { dispatcher?: { target?: unknown } } | undefined)?.dispatcher?.target);
 
@@ -918,9 +923,28 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
     const hostname = new URL(url).hostname;
     expect(lookedUpNames()).toEqual([hostname]);
     expect(fetchedUrls()).toEqual([url]);
-    expect(pinnedTargets()).toEqual([{ hostname, address, family }]);
+    expect(pinnedTargets()).toEqual([{ hostname, addresses: [{ address, family }] }]);
     expect((fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.redirect, 'fetch must not follow a redirect unchecked').toBe('manual');
     expect(await storedStatus(ID.bizB, emailFor(url))).toBe('CLIENT');
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): a link whose dual-stack name answers AAAA first is fetched once through a dispatcher pinned to every checked address, in that order, and the file is imported', async () => {
+    clearSpies();
+    const res = await linkImport(ID.owner, DUAL_URL, ID.bizB);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
+    expect(lookedUpNames()).toEqual(['v86e-dual.example.test']);
+    expect(fetchedUrls()).toEqual([DUAL_URL]);
+    expect(pinnedTargets()).toEqual([
+      {
+        hostname: 'v86e-dual.example.test',
+        addresses: [
+          { address: PUBLIC_V6, family: 6 },
+          { address: PUBLIC_V4, family: 4 },
+        ],
+      },
+    ]);
+    expect(await storedStatus(ID.bizB, emailFor(DUAL_URL))).toBe('CLIENT');
   });
 
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): DNS rebinding: the name is resolved once, and the fetch stays pinned to that public answer though the next answer would be 127.0.0.1', async () => {
@@ -929,7 +953,7 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
     expect(lookedUpNames()).toEqual(['v86e-rebind.example.test']);
-    expect(pinnedTargets()).toEqual([{ hostname: 'v86e-rebind.example.test', address: PUBLIC_V4, family: 4 }]);
+    expect(pinnedTargets()).toEqual([{ hostname: 'v86e-rebind.example.test', addresses: [{ address: PUBLIC_V4, family: 4 }] }]);
     expect(await storedStatus(ID.bizB, emailFor(REBIND_URL))).toBe('CLIENT');
   });
 
@@ -951,8 +975,8 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, 
     expect(fetchedUrls()).toEqual([TO_PUBLIC6, PUBLIC6_URL]);
     expect(lookedUpNames()).toEqual(['v86e-public.example.test', 'v86e-public6.example.test']);
     expect(pinnedTargets()).toEqual([
-      { hostname: 'v86e-public.example.test', address: PUBLIC_V4, family: 4 },
-      { hostname: 'v86e-public6.example.test', address: PUBLIC_V6, family: 6 },
+      { hostname: 'v86e-public.example.test', addresses: [{ address: PUBLIC_V4, family: 4 }] },
+      { hostname: 'v86e-public6.example.test', addresses: [{ address: PUBLIC_V6, family: 6 }] },
     ]);
     for (const call of fetchSpy.mock.calls as unknown[][]) {
       expect((call[1] as RequestInit | undefined)?.redirect, 'fetch must not follow a redirect unchecked').toBe('manual');

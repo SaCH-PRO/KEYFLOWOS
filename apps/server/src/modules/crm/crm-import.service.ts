@@ -358,8 +358,10 @@ export class CrmImportService {
    * only, so one that resolves to a private address (127.0.0.1.nip.io,
    * *.localtest.me) was fetched. The host is now resolved once, here, every
    * address asked for, and refused with 400 when any address is not public or
-   * when it does not resolve. The address given back is the one the fetch is
-   * pinned to (fetchImportLink), so a second DNS answer is never used.
+   * when it does not resolve. The addresses given back are the only ones the
+   * fetch is pinned to (fetchImportLink), so a second DNS answer is never
+   * used; every checked address is kept, not only the first (review CR-PIN-1),
+   * so a dual-stack link whose first answer is unreachable still imports.
    */
   private async checkImportUrl(url: string): Promise<CheckedAddress> {
     let parsed: URL;
@@ -398,11 +400,11 @@ export class CrmImportService {
   /**
    * ST-38c-2: fetch the link without letting fetch follow a redirect on its
    * own, at most MAX_IMPORT_REDIRECTS of them. W4-IMPORT-SSRF-PIN: each fetch
-   * goes through a dispatcher pinned to the address its host was checked at,
-   * so the connection is made to exactly that address (the URL's name stays
-   * the Host and the TLS server name); a redirect target is checked and
-   * resolved the same way (checkImportUrl) before it is fetched through its
-   * own pinned dispatcher.
+   * goes through a dispatcher pinned to the addresses its host was checked
+   * at, so the connection is made only to those addresses, tried in turn (the
+   * URL's name stays the Host and the TLS server name); a redirect target is
+   * checked and resolved the same way (checkImportUrl) before it is fetched
+   * through its own pinned dispatcher.
    */
   private async fetchImportLink(sourceUrl: string, checked: CheckedAddress): Promise<Response> {
     let url = sourceUrl;

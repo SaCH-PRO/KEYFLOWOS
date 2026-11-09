@@ -8,11 +8,15 @@
  *   public either.
  * - resolvePublicAddress: a host name is resolved once, every address asked
  *   for, and refused when any answer is not public or there is none; an IP
- *   literal is checked as itself and never resolved.
+ *   literal is checked as itself and never resolved. Every checked address is
+ *   given back, in the resolver's order (review CR-PIN-1).
  * - PinnedDispatcher / pinnedLookup: a fetch through the dispatcher connects
- *   to the address that was checked whatever DNS would say now (no second
- *   resolution, so no DNS rebinding), while the URL's name stays the Host (and
- *   the TLS server name, which undici takes from the same host).
+ *   only to the addresses that were checked whatever DNS would say now (no
+ *   second resolution, so no DNS rebinding), while the URL's name stays the
+ *   Host (and the TLS server name, which undici takes from the same host).
+ *   Review CR-PIN-1: when the first checked address cannot be reached (an AAAA
+ *   answer where IPv6 egress is broken) the connection falls back to the next
+ *   checked one, as an unpinned fetch did, and never to any other address.
  *
  * No real network traffic: the resolver (node:dns promises lookup, the one the
  * guard calls) is stubbed, the only server is a local http server on
@@ -87,6 +91,11 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): resolvePublicAddress resolves a name on
       { address: PUBLIC_V6, family: 6 },
     ],
     'v90d-public6.invalid': [{ address: PUBLIC_V6, family: 6 }],
+    // Review CR-PIN-1: an AAAA answer first, as a verbatim-order resolver gives it.
+    'v90d-dual.invalid': [
+      { address: PUBLIC_V6, family: 6 },
+      { address: PUBLIC_V4, family: 4 },
+    ],
   };
   let lookupSpy: ReturnType<typeof vi.spyOn>;
 
@@ -128,15 +137,35 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): resolvePublicAddress resolves a name on
     expect((await refusal('v90d-empty.invalid')).reason).toBe('unresolvable');
   });
 
-  it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a name whose every address is public gives its first address, the one the fetch is pinned to', async () => {
-    await expect(resolvePublicAddress('v90d-public.invalid')).resolves.toEqual({ hostname: 'v90d-public.invalid', address: PUBLIC_V4, family: 4 });
-    await expect(resolvePublicAddress('v90d-public6.invalid')).resolves.toEqual({ hostname: 'v90d-public6.invalid', address: PUBLIC_V6, family: 6 });
+  it("ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): a name whose every address is public gives every address, in the resolver's order, all of them the fetch is pinned to", async () => {
+    await expect(resolvePublicAddress('v90d-public.invalid')).resolves.toEqual({
+      hostname: 'v90d-public.invalid',
+      addresses: [
+        { address: PUBLIC_V4, family: 4 },
+        { address: PUBLIC_V6, family: 6 },
+      ],
+    });
+    await expect(resolvePublicAddress('v90d-public6.invalid')).resolves.toEqual({
+      hostname: 'v90d-public6.invalid',
+      addresses: [{ address: PUBLIC_V6, family: 6 }],
+    });
     expect(lookupSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): a dual-stack name answering AAAA first keeps its A address too, so the fetch can fall back to it', async () => {
+    await expect(resolvePublicAddress('v90d-dual.invalid')).resolves.toEqual({
+      hostname: 'v90d-dual.invalid',
+      addresses: [
+        { address: PUBLIC_V6, family: 6 },
+        { address: PUBLIC_V4, family: 4 },
+      ],
+    });
+    expect(lookupSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): an IP literal is checked as itself and never resolved', async () => {
-    await expect(resolvePublicAddress(PUBLIC_V4)).resolves.toEqual({ hostname: PUBLIC_V4, address: PUBLIC_V4, family: 4 });
-    await expect(resolvePublicAddress(PUBLIC_V6)).resolves.toEqual({ hostname: PUBLIC_V6, address: PUBLIC_V6, family: 6 });
+    await expect(resolvePublicAddress(PUBLIC_V4)).resolves.toEqual({ hostname: PUBLIC_V4, addresses: [{ address: PUBLIC_V4, family: 4 }] });
+    await expect(resolvePublicAddress(PUBLIC_V6)).resolves.toEqual({ hostname: PUBLIC_V6, addresses: [{ address: PUBLIC_V6, family: 6 }] });
     expect((await refusal('169.254.169.254')).reason).toBe('non_public');
     expect((await refusal('::ffff:7f00:1')).reason).toBe('non_public');
     expect(lookupSpy).not.toHaveBeenCalled();
@@ -144,11 +173,18 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): resolvePublicAddress resolves a name on
 });
 
 describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): pinnedLookup answers only with the checked address, and only for the checked name', () => {
-  const lookup = pinnedLookup({ hostname: 'v90d-pinned.invalid', address: PUBLIC_V4, family: 4 });
+  const lookup = pinnedLookup({ hostname: 'v90d-pinned.invalid', addresses: [{ address: PUBLIC_V4, family: 4 }] });
+  const dualLookup = pinnedLookup({
+    hostname: 'v90d-dual.invalid',
+    addresses: [
+      { address: PUBLIC_V6, family: 6 },
+      { address: PUBLIC_V4, family: 4 },
+    ],
+  });
 
-  function ask(hostname: string, options: { all?: boolean }): Promise<unknown[]> {
+  function ask(hostname: string, options: { all?: boolean; family?: number }, using = lookup): Promise<unknown[]> {
     return new Promise((resolve) => {
-      lookup(hostname, options as any, (err: unknown, address: unknown, family?: unknown) => resolve([err, address, family]));
+      using(hostname, options as any, (err: unknown, address: unknown, family?: unknown) => resolve([err, address, family]));
     });
   }
 
@@ -159,10 +195,34 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): pinnedLookup answers only with the chec
     expect(await ask('V90D-PINNED.invalid.', {})).toEqual([null, PUBLIC_V4, 4]);
   });
 
+  it("ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): every checked address comes back in the all form, in the resolver's order, and the first in the one-address form", async () => {
+    expect(await ask('v90d-dual.invalid', { all: true }, dualLookup)).toEqual([
+      null,
+      [
+        { address: PUBLIC_V6, family: 6 },
+        { address: PUBLIC_V4, family: 4 },
+      ],
+      undefined,
+    ]);
+    expect(await ask('v90d-dual.invalid', {}, dualLookup)).toEqual([null, PUBLIC_V6, 6]);
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): a family asked for keeps only the checked addresses of that family, and one with none is refused', async () => {
+    expect(await ask('v90d-dual.invalid', { family: 4 }, dualLookup)).toEqual([null, PUBLIC_V4, 4]);
+    expect(await ask('v90d-dual.invalid', { family: 4, all: true }, dualLookup)).toEqual([null, [{ address: PUBLIC_V4, family: 4 }], undefined]);
+    expect(await ask('v90d-dual.invalid', { family: 6 }, dualLookup)).toEqual([null, PUBLIC_V6, 6]);
+    const [err, address] = await ask('v90d-pinned.invalid', { family: 6 });
+    expect(err).toBeInstanceOf(Error);
+    expect(address).toBeUndefined();
+  });
+
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): any other name is refused, so a pinned dispatcher cannot reach a host it was not checked for', async () => {
     const [err, address] = await ask('v90d-other.invalid', { all: true });
     expect(err).toBeInstanceOf(Error);
     expect(address).toBeUndefined();
+    const [dualErr, dualAddress] = await ask('v90d-other.invalid', { all: true }, dualLookup);
+    expect(dualErr).toBeInstanceOf(Error);
+    expect(dualAddress).toBeUndefined();
   });
 });
 
@@ -199,8 +259,8 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): a fetch through a PinnedDispatcher conn
   });
 
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a name that never resolves (.invalid) is reached at the pinned address, the request names it as Host, and the whole body is read after the dispatcher is closed', async () => {
-    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', address: '127.0.0.1', family: 4 });
-    expect(dispatcher.target).toEqual({ hostname: 'v90d-pinned.invalid', address: '127.0.0.1', family: 4 });
+    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', addresses: [{ address: '127.0.0.1', family: 4 }] });
+    expect(dispatcher.target).toEqual({ hostname: 'v90d-pinned.invalid', addresses: [{ address: '127.0.0.1', family: 4 }] });
     const res = await fetch(`http://v90d-pinned.invalid:${port}/contacts.csv`, { redirect: 'manual', dispatcher } as RequestInit);
     const closed = dispatcher.close();
     expect(res.status).toBe(200);
@@ -210,7 +270,7 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): a fetch through a PinnedDispatcher conn
   });
 
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a redirect comes back to the caller (redirect manual) and is not followed through the pinned dispatcher', async () => {
-    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', address: '127.0.0.1', family: 4 });
+    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', addresses: [{ address: '127.0.0.1', family: 4 }] });
     const res = await fetch(`http://v90d-pinned.invalid:${port}/moved.csv`, { redirect: 'manual', dispatcher } as RequestInit);
     await dispatcher.close();
     expect(res.status).toBe(302);
@@ -218,8 +278,38 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): a fetch through a PinnedDispatcher conn
     expect(seen).toEqual([{ host: `v90d-pinned.invalid:${port}`, url: '/moved.csv' }]);
   });
 
+  it.each([
+    ['an AAAA address (IPv6 egress broken)', { address: '::1', family: 6 as const }],
+    ['an A address', { address: '127.0.0.2', family: 4 as const }],
+  ])('ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): when the first checked address, %s, cannot be reached, the fetch falls back to the next checked address and the name stays the Host', async (_first, unreachable) => {
+    // Nothing listens on the first address: the server is bound to 127.0.0.1 only.
+    const dispatcher = new PinnedDispatcher({
+      hostname: 'v90d-dual.invalid',
+      addresses: [unreachable, { address: '127.0.0.1', family: 4 }],
+    });
+    const res = await fetch(`http://v90d-dual.invalid:${port}/contacts.csv`, { redirect: 'manual', dispatcher } as RequestInit);
+    const closed = dispatcher.close();
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(BODY);
+    await closed;
+    expect(seen).toEqual([{ host: `v90d-dual.invalid:${port}`, url: '/contacts.csv' }]);
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): when no checked address can be reached the fetch fails; it never falls back to DNS or to any other address', async () => {
+    const dispatcher = new PinnedDispatcher({
+      hostname: 'v90d-dual.invalid',
+      addresses: [
+        { address: '::1', family: 6 },
+        { address: '127.0.0.2', family: 4 },
+      ],
+    });
+    await expect(fetch(`http://v90d-dual.invalid:${port}/contacts.csv`, { redirect: 'manual', dispatcher } as RequestInit)).rejects.toThrow();
+    await dispatcher.close();
+    expect(seen).toEqual([]);
+  });
+
   it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a dispatcher pinned for one name does not connect for another name, and nothing reaches the server', async () => {
-    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', address: '127.0.0.1', family: 4 });
+    const dispatcher = new PinnedDispatcher({ hostname: 'v90d-pinned.invalid', addresses: [{ address: '127.0.0.1', family: 4 }] });
     await expect(fetch(`http://v90d-other.invalid:${port}/contacts.csv`, { redirect: 'manual', dispatcher } as RequestInit)).rejects.toThrow();
     await dispatcher.close();
     expect(seen).toEqual([]);
