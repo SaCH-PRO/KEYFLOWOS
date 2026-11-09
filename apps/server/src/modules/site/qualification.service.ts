@@ -1,6 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { CrmService } from '../crm/crm.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 
@@ -38,16 +39,19 @@ export class QualificationService {
     return meta.qualificationFlow ?? null;
   }
 
+  /**
+   * FOLLOW3-D13: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (an owner's
+   * cleared payment secret) is not undone by this one's copy.
+   */
   async updateQualificationConfig(businessId: string, config: Record<string, any>) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, any>) ?? {};
-    const updated = { ...meta, qualificationFlow: config };
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: updated },
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = (business?.metaData as Record<string, any>) ?? {};
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, qualificationFlow: config } },
+      });
     });
     return config;
   }

@@ -1,5 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { SeoService } from './seo.service';
 
 @Injectable()
@@ -26,47 +28,52 @@ export class SeoGoogleSearchConsoleService {
     };
   }
 
+  /**
+   * FOLLOW3-D13 (review D12-ST-2: metaData.gsc holds the Google OAuth tokens):
+   * the connection save, the disconnect and the sync's lastSync stamp read and
+   * write metaData under the business row lock (lockBusinessMeta), so none of
+   * them writes back a copy that undoes another metaData write (a disconnect,
+   * an owner's cleared payment secret) committed meanwhile.
+   */
   async saveConnection(businessId: string, data: {
     siteUrl: string;
     accessToken?: string;
     refreshToken?: string;
   }) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) throw new Error('Business not found');
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) throw new Error('Business not found');
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const gsc = {
-      ...(meta.gsc ?? {}),
-      siteUrl: data.siteUrl,
-      ...(data.accessToken ? { accessToken: data.accessToken } : {}),
-      ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
-      connectedAt: new Date().toISOString(),
-    };
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const gsc = {
+        ...(meta.gsc ?? {}),
+        siteUrl: data.siteUrl,
+        ...(data.accessToken ? { accessToken: data.accessToken } : {}),
+        ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
+        connectedAt: new Date().toISOString(),
+      };
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, gsc } },
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, gsc } },
+      });
     });
 
     return { connected: true, siteUrl: data.siteUrl };
   }
 
   async disconnectGsc(businessId: string) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) return { disconnected: true };
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) return;
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    delete meta.gsc;
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      delete meta.gsc;
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: meta },
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: meta },
+      });
     });
 
     return { disconnected: true };
@@ -108,14 +115,25 @@ export class SeoGoogleSearchConsoleService {
         dimension: 'page',
       });
 
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          metaData: {
-            ...meta,
-            gsc: { ...gsc, lastSync: new Date().toISOString() },
+      // FOLLOW3-D13: the copy read above is stale after the Google fetches (no
+      // lock is held across them). Stamp lastSync on the metaData read under
+      // the row lock now, and only while Search Console is still connected: a
+      // disconnect that committed meanwhile stays disconnected (its tokens are
+      // not restored).
+      await this.prisma.client.$transaction(async (tx) => {
+        const current = await lockBusinessMeta(tx, businessId, { live: true });
+        const fresh = (current?.metaData as Record<string, unknown> | null) ?? {};
+        const connected = fresh.gsc as Record<string, unknown> | undefined;
+        if (!current || !connected) return;
+        await tx.business.update({
+          where: { id: businessId },
+          data: {
+            metaData: {
+              ...fresh,
+              gsc: { ...connected, lastSync: new Date().toISOString() },
+            } as Prisma.InputJsonValue,
           },
-        },
+        });
       });
 
       return {

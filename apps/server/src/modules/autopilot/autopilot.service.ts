@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
 import { BusinessEventService } from '../business-events/business-event.service';
 import { isSystemActor } from '../../core/auth/system-actor';
@@ -372,42 +373,47 @@ export class AutopilotService {
     };
   }
 
+  /**
+   * FOLLOW3-D13: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (a lead
+   * magnet, an owner's cleared payment secret) is not undone by this one's
+   * copy (RED-before MW-11: the lead magnet was lost).
+   */
   async updateSettings(businessId: string, settings: Record<string, unknown>) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = (business?.metaData as Record<string, unknown>) || {};
-    const existingAutopilot = (meta.autopilot as Record<string, unknown>) || {};
+      const meta = (business?.metaData as Record<string, unknown>) || {};
+      const existingAutopilot = (meta.autopilot as Record<string, unknown>) || {};
 
-    const triggers = settings.triggers as Record<string, boolean> | undefined;
-    const updatedAutopilot = {
-      ...existingAutopilot,
-      ...(settings.pausedUntil !== undefined ? { pausedUntil: settings.pausedUntil } : {}),
-      ...(triggers ? {
-        trigger_follow_up: triggers.follow_up,
-        trigger_birthday: triggers.birthday,
-        trigger_payment_reminder: triggers.payment_reminder,
-        trigger_check_in: triggers.check_in,
-        trigger_offer: triggers.offer,
-      } : {}),
-      ...(settings.autoApproveTypes !== undefined ? { autoApproveTypes: settings.autoApproveTypes } : {}),
-      ...(settings.quietHoursStart !== undefined ? { quietHoursStart: settings.quietHoursStart } : {}),
-      ...(settings.quietHoursEnd !== undefined ? { quietHoursEnd: settings.quietHoursEnd } : {}),
-    };
+      const triggers = settings.triggers as Record<string, boolean> | undefined;
+      const updatedAutopilot = {
+        ...existingAutopilot,
+        ...(settings.pausedUntil !== undefined ? { pausedUntil: settings.pausedUntil } : {}),
+        ...(triggers ? {
+          trigger_follow_up: triggers.follow_up,
+          trigger_birthday: triggers.birthday,
+          trigger_payment_reminder: triggers.payment_reminder,
+          trigger_check_in: triggers.check_in,
+          trigger_offer: triggers.offer,
+        } : {}),
+        ...(settings.autoApproveTypes !== undefined ? { autoApproveTypes: settings.autoApproveTypes } : {}),
+        ...(settings.quietHoursStart !== undefined ? { quietHoursStart: settings.quietHoursStart } : {}),
+        ...(settings.quietHoursEnd !== undefined ? { quietHoursEnd: settings.quietHoursEnd } : {}),
+      };
 
-    const updateData: Record<string, unknown> = {
-      metaData: { ...meta, autopilot: updatedAutopilot },
-    };
+      const updateData: Record<string, unknown> = {
+        metaData: { ...meta, autopilot: updatedAutopilot },
+      };
 
-    if (settings.enabled !== undefined) {
-      updateData.autopilotEnabled = settings.enabled;
-    }
+      if (settings.enabled !== undefined) {
+        updateData.autopilotEnabled = settings.enabled;
+      }
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: updateData as any,
+      await tx.business.update({
+        where: { id: businessId },
+        data: updateData as any,
+      });
     });
 
     return this.getSettings(businessId);
