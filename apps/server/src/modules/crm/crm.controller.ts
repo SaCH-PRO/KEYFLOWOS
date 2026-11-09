@@ -1507,8 +1507,13 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.crm.listContactEvents({ businessId, contactId });
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W6-CONTACT-EVENTS-MONEY (SEC-W5FC-1; D-90 / D-63): the reading member,
+    // so CrmTimelineService.listContactEvents withholds the money events from a
+    // member without revenue read. CrmService.listContactEvents hands these
+    // params to it unchanged.
+    const query: Parameters<CrmTimelineService['listContactEvents']>[0] = { businessId, contactId, viewerUserId: actorUserId };
+    return this.crm.listContactEvents(query);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
