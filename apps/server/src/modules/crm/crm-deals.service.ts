@@ -4,7 +4,8 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CrmTimelineService } from './crm-timeline.service';
-import { contactVisibilityFilter, resolveCrmAccess, type CrmAccess } from './crm-permissions.helper';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { contactWhereBase } from './crm.helpers';
 import { WonLostReasonService } from './won-lost-reason.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
@@ -504,12 +505,28 @@ export class CrmDealsService {
   }
 
   async listDeals(input: DealListFilters) {
+    // V1-89 (FOLLOW3-D3 residual ST-1): the contacts the member bound to this
+    // call may open (null: nothing is withheld). A deal of any other contact
+    // is listed without what it holds of that contact (below), and the filters
+    // on those fields do not match it (review SEC-V89-4, SEC-V89-5).
+    const openable = await this.boundMemberContactWhere(input.businessId);
+    const ofOpenableContact: Prisma.DealWhereInput | null = openable ? { contact: openable } : null;
     const where: Prisma.DealWhereInput = {
       businessId: input.businessId,
       deletedAt: null,
     };
-    if (input.contactId) where.contactId = input.contactId;
-    if (input.accountId) where.accountId = input.accountId;
+    const narrowed: Prisma.DealWhereInput[] = [];
+    // Filtered by a contact the member cannot open, the list is empty exactly
+    // as for an unknown id (KEY's deals_list passes its contactId here; D-37).
+    if (input.contactId) {
+      where.contactId = input.contactId;
+      if (ofOpenableContact) narrowed.push(ofOpenableContact);
+    }
+    // accountId may have been copied from the deal's contact (createDeal).
+    if (input.accountId) {
+      where.accountId = input.accountId;
+      if (ofOpenableContact) narrowed.push(ofOpenableContact);
+    }
     if (input.stageIds && input.stageIds.length > 0) where.stageId = { in: input.stageIds };
     if (input.ownerId) where.ownerUserId = input.ownerId;
     if (input.status && input.status !== 'ALL') where.status = input.status;
@@ -528,13 +545,17 @@ export class CrmDealsService {
     }
     if (input.search) {
       const s = input.search.trim();
+      // companyName may have been copied from the deal's contact (createDeal):
+      // it is searched only on deals whose contact the member may open.
+      const byCompany: Prisma.DealWhereInput = { companyName: { contains: s, mode: 'insensitive' } };
       where.OR = [
         { title: { contains: s, mode: 'insensitive' } },
-        { companyName: { contains: s, mode: 'insensitive' } },
+        ofOpenableContact ? { AND: [byCompany, ofOpenableContact] } : byCompany,
         { description: { contains: s, mode: 'insensitive' } },
         { notes: { contains: s, mode: 'insensitive' } },
       ];
     }
+    if (narrowed.length > 0) where.AND = narrowed;
 
     const take = Math.min(input.take ?? 50, 200);
     const skip = input.skip ?? 0;
@@ -555,40 +576,52 @@ export class CrmDealsService {
     ]);
     // V1-89 (FOLLOW3-D3 residual ST-1): a deal whose contact the member cannot
     // open is listed without that contact (contact and contactId null), so the
-    // list names no contact GET crm contacts/:contactId would refuse.
-    const canOpen = await this.boundMemberContactFilter(input.businessId, items.map((d) => d.contactId));
-    const deals = canOpen
-      ? items.map((d) => (canOpen(d.contactId) ? d : { ...d, contactId: null, contact: null }))
+    // list names no contact GET crm contacts/:contactId would refuse, and
+    // without the company name and account createDeal copies from that contact
+    // (review SEC-V89-4).
+    const contactIds = [...new Set(items.map((d) => d.contactId))];
+    const open = openable && contactIds.length > 0
+      ? new Set(
+        (await this.prisma.client.contact.findMany({
+          where: { AND: [openable, { id: { in: contactIds } }] },
+          select: { id: true },
+        })).map((c: { id: string }) => c.id),
+      )
+      : new Set<string>();
+    const deals = openable
+      ? items.map((d) => (open.has(d.contactId)
+        ? d
+        : { ...d, contactId: null, contact: null, companyName: null, accountId: null }))
       : items;
     return { deals, total, skip, take };
   }
 
   /**
-   * Which of `contactIds` the member the TenantInterceptor bound to this
-   * request may open, by the GET crm contacts/:contactId rule
-   * (contactVisibilityFilter: the tenant predicate, deletedAt null and the
-   * visibility clause). Null, so nothing is withheld, for the OWNER and
-   * SUPER_ADMIN, and for a call no member is bound to (a queue or plan run:
-   * the OWNER's view, as D-88 has KEY's reads take it). A member bound to
-   * another tenant, or one who is not a member of this business, opens none.
-   * The request's member is read as BusinessCommandCenterService reads it, so
-   * GET crm deals, whose handler does not pass its caller, is covered.
+   * The contacts the member the TenantInterceptor bound to this request may
+   * open, as a Contact where clause, by the GET crm contacts/:contactId rule
+   * (the tenant predicate, deletedAt null and visibilityClause). Null, so
+   * nothing is withheld, for the OWNER and SUPER_ADMIN, and for a call no
+   * member is bound to (a queue or plan run: the OWNER's view, as D-88 has
+   * KEY's reads take it). A member bound to another tenant, or one who is not
+   * a member of this business, opens none. The request's member is read as
+   * BusinessCommandCenterService reads it, so GET crm deals, whose handler
+   * does not pass its caller, is covered (V1-89).
    */
-  private async boundMemberContactFilter(
-    businessId: string,
-    contactIds: string[],
-  ): Promise<((contactId: string) => boolean) | null> {
+  private async boundMemberContactWhere(businessId: string): Promise<Prisma.ContactWhereInput | null> {
     const ctx = getTenantContext();
     if (!ctx?.userId) return null;
-    if (ctx.businessId !== businessId) return () => false;
+    const opensNone: Prisma.ContactWhereInput = { id: { in: [] } };
+    if (ctx.businessId !== businessId) return opensNone;
     let access: CrmAccess;
     try {
       access = await resolveCrmAccess(this.prisma, businessId, ctx.userId);
     } catch (err) {
-      if (err instanceof ForbiddenException) return () => false;
+      if (err instanceof ForbiddenException) return opensNone;
       throw err;
     }
-    return contactVisibilityFilter(this.prisma, businessId, access, ctx.userId, contactIds);
+    const clause = visibilityClause(access, ctx.userId);
+    if (!clause) return null;
+    return { ...contactWhereBase(businessId), AND: [clause as Prisma.ContactWhereInput] };
   }
 
   async listContactDeals(input: { businessId: string; contactId: string; status?: DealStatus | 'ALL' }) {

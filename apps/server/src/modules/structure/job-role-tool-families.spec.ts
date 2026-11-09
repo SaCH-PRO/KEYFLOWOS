@@ -1924,7 +1924,13 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       // V1-84: CallLogService.listCalls bounds the list by the clause through the call log's contact
       // when handed a viewer (GET calls); the dispatcher's call_list_tasks hands it none, so on the KEY
       // path it lists every call log, like the other reads here (flow-orchestrator.service.ts is V1-43's).
-      expect(reads).toEqual(['calendar_list_events', 'call_list_tasks', 'crm_list_contacts', 'crm_search_contacts']);
+      // V1-89 (review SEC-V89-4/5, D-37): CrmDealsService.listDeals (crm_list_deals, deals_list) bounds
+      // the deals' contacts, and its contactId, accountId and company search, by the clause for the
+      // member the tenant context binds (boundMemberContactWhere); a run with no member keeps the
+      // OWNER view (D-88).
+      expect(reads).toEqual(
+        ['calendar_list_events', 'call_list_tasks', 'crm_list_contacts', 'crm_list_deals', 'crm_search_contacts', 'deals_list'],
+      );
     });
 
     it('the dispatcher passes them no actor, so the clause never runs on the KEY path', () => {

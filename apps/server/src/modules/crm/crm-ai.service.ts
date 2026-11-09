@@ -5,6 +5,8 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmTimelineService } from './crm-timeline.service';
+import { CrmService } from './crm.service';
+import { isContactStatus } from './crm.constants';
 import { normalizeContactEventType } from '@keyflow/shared';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
@@ -46,6 +48,9 @@ type AiAnalysisResult = {
  */
 export type ContactScope = Prisma.ContactWhereInput | null | undefined;
 
+/** bulk_status_change writes in the batches PATCH crm contacts/bulk accepts (at most 100 contactIds). */
+const BULK_STATUS_BATCH = 100;
+
 @Injectable()
 export class CrmAiService {
   private readonly logger = new Logger(CrmAiService.name);
@@ -56,6 +61,7 @@ export class CrmAiService {
     @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(CrmService) private readonly crm: CrmService,
   ) {}
 
   private get db() {
@@ -1202,7 +1208,10 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
   /**
    * `editableScope` narrows bulk_status_change to the contacts the caller may
    * open and edit (V1-89 (d)); null or absent for the OWNER and SUPER_ADMIN.
-   * The single-contact actions are gated on their contactId by the controller.
+   * bulk_status_change writes as `userId` through CrmService.bulkUpdateContacts
+   * (V1-89 review SEC-V89-2). The single-contact actions are gated on their
+   * contactId by the controller (record visibility, and PATCH contacts/:contactId's
+   * edit scope for change_status and toggle_favorite; review SEC-V89-1).
    */
   async executeAiCommand(
     businessId: string,
@@ -1268,14 +1277,36 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         }
 
         case 'bulk_status_change': {
-          const fromStatus = (params?.fromStatus as string);
-          const toStatus = (params?.toStatus as string);
+          const fromStatus = params?.fromStatus;
+          const toStatus = params?.toStatus;
+          const filterTag = params?.filter;
           if (!fromStatus || !toStatus) return { success: false, message: 'fromStatus and toStatus are required', data: null };
-          const where: any = { ...this.contactWhere(businessId, editableScope), status: fromStatus };
-          const filterTag = params?.filter as string;
+          // V1-89 review SEC-V89-3: the body's params reach Prisma only as
+          // plain values. toStatus is written, so it must be a status of the
+          // vocabulary PATCH contacts/bulk admits; fromStatus and the filter
+          // are equality terms (one status, one tag), never an operator object.
+          if (!isContactStatus(toStatus)) {
+            return { success: false, message: 'toStatus must be one of LEAD, PROSPECT, CLIENT, LOST', data: null };
+          }
+          if (typeof fromStatus !== 'string') return { success: false, message: 'fromStatus must be one status', data: null };
+          if (filterTag !== undefined && filterTag !== null && typeof filterTag !== 'string') {
+            return { success: false, message: 'filter must be one tag', data: null };
+          }
+          const where: Prisma.ContactWhereInput = { ...this.contactWhere(businessId, editableScope), status: fromStatus };
           if (filterTag) where.tags = { has: filterTag };
-          const result = await this.db.contact.updateMany({ where, data: { status: toStatus } });
-          return { success: true, message: `Changed ${result.count} contacts from ${fromStatus} to ${toStatus}`, data: { count: result.count } };
+          const matched = await this.db.contact.findMany({ where, select: { id: true }, orderBy: { id: 'asc' } });
+          // V1-89 review SEC-V89-2: written by CrmService.bulkUpdateContacts,
+          // the writer PATCH contacts/bulk uses, in that route's batches of
+          // 100: each changed contact gets a 'bulk_updated' audit entry and a
+          // bulk.updated event naming the member, and the CRM caches are
+          // invalidated. It applies the member's edit scope again at the write.
+          let count = 0;
+          for (let i = 0; i < matched.length; i += BULK_STATUS_BATCH) {
+            const contactIds = matched.slice(i, i + BULK_STATUS_BATCH).map((c: { id: string }) => c.id);
+            const result = await this.crm.bulkUpdateContacts({ businessId, contactIds, status: toStatus, actorUserId: userId });
+            count += result.updated;
+          }
+          return { success: true, message: `Changed ${count} contacts from ${fromStatus} to ${toStatus}`, data: { count } };
         }
 
         case 'add_note': {

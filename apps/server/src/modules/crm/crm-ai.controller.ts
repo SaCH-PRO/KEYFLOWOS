@@ -11,7 +11,19 @@ import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { checkAiRateLimit } from './ai-rate-limit.util';
 import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
-import { contactWhereBase } from './crm.helpers';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+
+/**
+ * The ai-execute actions that rewrite the contact row's own fields: status
+ * (change_status) and tags (toggle_favorite), which PATCH crm
+ * contacts/:contactId otherwise writes. They hold that route's edit scope
+ * (V1-89 (d), review SEC-V89-1). The other single-contact actions write a
+ * child row or a membership of the contact (add_note, add_task,
+ * log_communication, the list and sequence actions) and keep the rule of
+ * their own routes (POST contacts/:contactId/notes, tasks, log-communication,
+ * the list and sequence routes): record visibility.
+ */
+const CONTACT_EDIT_ACTIONS: ReadonlySet<string> = new Set(['change_status', 'toggle_favorite']);
 
 /**
  * Every route requires CRM module scope (ModuleScopeGuard): crm write where the
@@ -23,8 +35,10 @@ import { contactWhereBase } from './crm.helpers';
  * is counted and before any service runs (FOLLOW3-D3).
  *
  * The routes that take a contact id in the body hold the same rule (review
- * ST-2): ai-execute answers 404 for a hidden contactId before the action runs,
- * ai-analyze answers 404 when one of its contactIds is a contact the caller
+ * ST-2): ai-execute answers 404 for a hidden contactId before the action runs
+ * (its change_status and toggle_favorite also hold PATCH contacts/:contactId's
+ * edit scope, CONTACT_EDIT_ACTIONS; V1-89 review SEC-V89-1), ai-analyze
+ * answers 404 when one of its contactIds is a contact the caller
  * cannot open, exactly as for an unknown id, before the AI rate limit is
  * counted (V1-89), and ai-analyze/execute creates tasks only for the contacts
  * the caller may open, counting a hidden contact as failed exactly like an
@@ -41,7 +55,10 @@ import { contactWhereBase } from './crm.helpers';
  * bulk_status_change changes only the matching contacts the caller may open
  * and edit, the rule PATCH crm contacts/bulk applies (V1-89 (d)): a caller
  * whose crm_edit is 'none' is refused 403, and a matching contact outside the
- * caller's reach is left as it is and is not counted.
+ * caller's reach is left as it is and is not counted. It writes through
+ * CrmService.bulkUpdateContacts as that route does (audit entry, timeline
+ * event and cache invalidation; review SEC-V89-2), with its params checked
+ * first (review SEC-V89-3).
  */
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -324,7 +341,11 @@ export class CrmAiController {
       throw new BadRequestException('action is required');
     }
     if (body.contactId !== undefined && body.contactId !== null && body.contactId !== '') {
-      await assertContactVisible(this.prisma, businessId, String(body.contactId), req.user.id);
+      if (CONTACT_EDIT_ACTIONS.has(body.action)) {
+        await this.assertContactEditable(businessId, String(body.contactId), req.user.id);
+      } else {
+        await assertContactVisible(this.prisma, businessId, String(body.contactId), req.user.id);
+      }
     }
     const editableScope = body.action === 'bulk_status_change' ? await this.editableScope(businessId, req.user.id) : null;
     const userId = req.user?.id ?? req.user?.sub ?? 'system';
@@ -412,11 +433,30 @@ export class CrmAiController {
   }
 
   /**
-   * The contacts bulk_status_change may change for the caller (V1-89 (d)): the
-   * rule PATCH crm contacts/bulk applies (CrmService.editableContactClause):
-   * those the caller may open (visibilityClause) and, for crm_edit 'owned',
-   * owns or has been shared. A caller whose crm_edit is 'none' is refused 403
-   * as that route refuses it. Null for the OWNER and SUPER_ADMIN.
+   * The edit gate of an ai-execute action that rewrites the contact row's own
+   * fields (CONTACT_EDIT_ACTIONS), in the order PATCH crm contacts/:contactId
+   * applies it (CrmService.assertCanEditContact; V1-89 (d), review
+   * SEC-V89-1): a caller whose crm_edit is 'none' is refused 403 before the
+   * contact is looked up; a contact the caller cannot open answers 404 'Contact
+   * not found' like an unknown id; a visible contact outside crm_edit 'owned'
+   * (neither owned by nor shared with the caller) is refused 403. The OWNER
+   * and SUPER_ADMIN pass on any live contact of the business.
+   */
+  private async assertContactEditable(businessId: string, contactId: string, actorUserId: string): Promise<void> {
+    const editable = await this.editableScope(businessId, actorUserId);
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
+    if (!editable) return;
+    const found = await this.prisma.client.contact.count({ where: { ...contactWhereWithId(businessId, contactId), AND: [editable] } });
+    if (found === 0) throw new ForbiddenException('You can only edit contacts you own');
+  }
+
+  /**
+   * The contacts the caller may edit (V1-89 (d)): the rule PATCH crm
+   * contacts/bulk applies (CrmService.editableContactClause): those the
+   * caller may open (visibilityClause) and, for crm_edit 'owned', owns or has
+   * been shared. A caller whose crm_edit is 'none' is refused 403 as that
+   * route refuses it. Null for the OWNER and SUPER_ADMIN. bulk_status_change
+   * changes only these; assertContactEditable gates a single contact on it.
    */
   private async editableScope(businessId: string, actorUserId: string): Promise<ContactScope> {
     const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
