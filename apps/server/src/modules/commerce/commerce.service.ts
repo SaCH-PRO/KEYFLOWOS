@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -1061,13 +1061,8 @@ export class CommerceService {
 
   async bulkUpdateInvoices(businessId: string, ids: string[], action: 'send' | 'void' | 'delete') {
     if (action === 'delete') {
-      // Delete is not a state transition; gated by status check.
-      const result = await this.prisma.client.invoice.updateMany({
-        where: { id: { in: ids }, businessId, deletedAt: null, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
-        data: { deletedAt: new Date() },
-      });
-      this.statsCache.invalidateCache(businessId);
-      return { updated: result.count, action };
+      // Delete is not a state transition (FOLLOW3-B6, D-66: bulkDeleteInvoices).
+      return this.bulkDeleteInvoices(businessId, ids);
     }
     // 'send' / 'void' route through the workflow so the state machine is
     // enforced per-row; illegal transitions silently no-op (the bulk caller
@@ -1212,24 +1207,129 @@ export class CommerceService {
     return { updated, action: bulkAction, skipped, skippedCount: skipped.length };
   }
 
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): only a DRAFT or a VOID invoice may be
+   * deleted; an issued invoice is voided first (the void reverses its
+   * recognition). The guard was PAID / PARTIALLY_PAID alone, and a delete
+   * reverses nothing, while every reader (listInvoices, receivables, aging)
+   * drops a deleted invoice: an ACCRUAL invoice of 100 sent and deleted left
+   * AR 100 in the trial balance for an invoice nothing listed, and an OVERDUE
+   * or FAILED invoice with 40 received left that cash (and AR 60, or CASH
+   * income 40) against a deleted document. The refusal (409, nothing written,
+   * no invoice.deleted) names the status and the remedy (invoiceDeleteRefusal).
+   */
   async deleteInvoice(invoiceId: string, businessId: string) {
-    const invoice = await this.prisma.client.invoice.findFirst({
-      where: { id: invoiceId, businessId },
-    });
-    if (!invoice) {
+    const outcome = await this.softDeleteInvoiceRow(invoiceId, businessId, { liveOnly: false });
+    if (outcome.kind === 'missing') {
       throw new NotFoundException('Invoice not found');
     }
-    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+    if (outcome.kind === 'refused') {
       // R0-D3: a state guard is a 409, not a 500.
-      throw new ConflictException('Cannot delete a paid or partially paid invoice');
+      throw new ConflictException(outcome.reason);
     }
-    const result = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { deletedAt: new Date() },
-    });
     this.events.emit('invoice.deleted', { businessId, invoiceId });
     this.statsCache.invalidateCache(businessId);
-    return result;
+    return outcome.row;
+  }
+
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): the bulk and KEY delete deletes only what
+   * the single DELETE deletes, row by row through the same locked check
+   * (softDeleteInvoiceRow): a DRAFT or VOID invoice that holds no money
+   * received and no issued recognition. It was one updateMany over
+   * `status notIn [PAID, PARTIALLY_PAID]`, so a SENT invoice with its
+   * receivable posted, or an OVERDUE one with money received, was soft-deleted
+   * with both left in the books. Each refused row is listed in `skipped` with
+   * its status and the single route's reason, as bulk quote delete lists its
+   * own; ids of another business, unknown or already deleted are left out, as
+   * before, and no invoice.deleted is emitted, as before.
+   */
+  private async bulkDeleteInvoices(businessId: string, ids: string[]) {
+    const candidates = await this.prisma.client.invoice.findMany({
+      where: { id: { in: ids }, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    let updated = 0;
+    const skipped: Array<{ id: string; invoiceStatus: string; reason: string }> = [];
+    for (const row of candidates) {
+      const outcome = await this.softDeleteInvoiceRow(row.id, businessId, { liveOnly: true });
+      if (outcome.kind === 'deleted') updated++;
+      else if (outcome.kind === 'refused') skipped.push({ id: row.id, invoiceStatus: outcome.status, reason: outcome.reason });
+    }
+    this.statsCache.invalidateCache(businessId);
+    return { updated, action: 'delete' as const, skipped, skippedCount: skipped.length };
+  }
+
+  /**
+   * FOLLOW3-B6 (D-66): the soft delete of one invoice, shared by the single
+   * DELETE (deleteInvoice) and the bulk / KEY delete (bulkUpdateInvoices). One
+   * transaction that first takes the invoice row lock every money door takes
+   * (lockInvoiceForPayment) and decides on the row and its payments as they
+   * stand under it, so a payment, a Send or a void that commits meanwhile is
+   * either seen or waits for the delete. `liveOnly` (bulk) leaves an invoice
+   * already deleted alone; the single route re-stamps one, as before. Emits
+   * nothing: the caller does, after the commit.
+   */
+  private async softDeleteInvoiceRow(invoiceId: string, businessId: string, opts: { liveOnly: boolean }) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, invoiceId);
+      if (!locked || locked.businessId !== businessId) return { kind: 'missing' as const };
+      const invoice = await tx.invoice.findFirst({
+        where: { id: invoiceId, businessId, ...(opts.liveOnly ? { deletedAt: null } : {}) },
+      });
+      if (!invoice) return { kind: 'missing' as const };
+      const reason = await CommerceService.invoiceDeleteRefusal(txClient, invoice);
+      if (reason) return { kind: 'refused' as const, status: invoice.status, reason };
+      const row = await tx.invoice.update({ where: { id: invoiceId }, data: { deletedAt: new Date() } });
+      return { kind: 'deleted' as const, row };
+    });
+  }
+
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): why this invoice may not be deleted, or
+   * null when it may. Read on the delete's transaction, under the invoice row
+   * lock. Deletable: a DRAFT or VOID invoice that holds no money received net
+   * of refunds (balanceOfStoredRows over its own-tenant Payment rows) and, for
+   * a DRAFT, no issued recognition or credit note (holdsIssuedMoney: the AI
+   * undo returns an issued invoice to DRAFT with its recognition kept, as
+   * D-60 reads it, FOLLOW3-B2). Refused:
+   *  - PAID and PARTIALLY_PAID, with the message they always had;
+   *  - money received on it: refund it first (then void it, when it may be
+   *    voided); a VOID invoice still holding money (voided before FOLLOW3-B1
+   *    closed that door) is refused too;
+   *  - any other issued invoice: void it first (DRAFT, SENT, PENDING, OVERDUE
+   *    and FAILED may be voided, and the void reverses the recognition); a
+   *    credited invoice cannot be voided and stays on the books.
+   */
+  private static async invoiceDeleteRefusal(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string; status: string; total: number; currency: string | null },
+  ): Promise<string | null> {
+    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+      return 'Cannot delete a paid or partially paid invoice';
+    }
+    const payments = await tx.payment.findMany({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId },
+      select: { amount: true, status: true },
+    });
+    const { net } = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
+    const holdsMoney = net > 0;
+    const returnedToDraft = invoice.status === 'DRAFT' && (await CommerceService.holdsIssuedMoney(tx, invoice));
+    const deletableStatus = invoice.status === 'DRAFT' || invoice.status === 'VOID';
+    if (deletableStatus && !holdsMoney && !returnedToDraft) return null;
+
+    const article = /^[AEIOU]/.test(invoice.status) ? 'an' : 'a';
+    const what = returnedToDraft ? 'an issued invoice returned to DRAFT' : `${article} ${invoice.status} invoice`;
+    const mayVoid = invoice.status !== 'VOID' && isLegalTransition(invoice.status as InvoiceStatus, 'VOID');
+    if (holdsMoney) {
+      const received = `${normalizeCurrency(invoice.currency)} ${net.toFixed(2)}`;
+      return `Cannot delete ${what}: it holds ${received} received; refund the money received first${mayVoid ? ', then void it' : ''}`;
+    }
+    if (returnedToDraft) {
+      return `Cannot delete ${what}: its issued total is still on the books; void it first`;
+    }
+    return `Cannot delete ${what}: only DRAFT and VOID invoices can be deleted${mayVoid ? '; void it first' : ''}`;
   }
 
   /**

@@ -24,7 +24,8 @@
  *                    invoice.deleted, recognition POSTED, the invoice still listed and in the customer balance;
  *                    the remedy then works: void (recognition REVERSED) and DELETE -> 200
  *   DL-02 RED-BEFORE ACCRUAL SENT 100, paid 40 (PARTIALLY_PAID), PATCH status/overdue, DELETE -> 409 naming
- *                    OVERDUE, the 40 received and "refund ... first"; AR 60 / income 100 / cash 40 kept
+ *                    OVERDUE, the 40 received and "refund ... first"; AR 60 / income 100 / cash 40 kept; the
+ *                    remedy then works: refund, void, DELETE -> 200 with AR, income and cash 0
  *   DL-03 RED-BEFORE CASH SENT 100, paid 40, PATCH payment-failed (FAILED), DELETE -> 409 naming FAILED and
  *                    "refund ... first"; income 40 / cash 40 stay on a live invoice
  *   DL-04 RED-BEFORE PATCH invoices/bulk {action:'delete', ids:[DRAFT, VOID, SENT with AR, OVERDUE part-paid]}
@@ -39,6 +40,9 @@
  *                    DELETE -> 200 with AR 0
  *
  *   DL-07 RED-BEFORE the invariant below over every invoice of both businesses, deleted ones included
+ *   DL-08 (added with the fix; 200 on the base) a CASH invoice paid 40 and VOID, as a void before
+ *                    FOLLOW3-B1 left it: DELETE and bulk delete -> refused "refund ... first" (not "void it");
+ *                    refund, then DELETE -> 200 with income and cash 0
  *
  * Ledger invariant asserted after every case (booksAgree, over the invoices the
  * case created): for each live ACCRUAL invoice its own ledger AR equals
@@ -199,6 +203,14 @@ async function voided(biz: string, label: string) {
   const id = await sent(biz, label);
   await moveTo(biz, id, 'VOID');
   return id;
+}
+/** Refund every successful payment of the invoice through the refund route (a negative REFUNDED row each, D-14). */
+async function refundAll(biz: string, invoiceId: string) {
+  const rows: any[] = await db.payment.findMany({ where: { invoiceId, businessId: biz, status: 'SUCCESSFUL' } });
+  for (const p of rows) {
+    const res = await as(agent().post(`/commerce/businesses/${biz}/payments/${p.id}/refund`)).send({ reason: 'v82f refund' });
+    expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+  }
 }
 function del(biz: string, invoiceId: string, user: string = ID.owner) {
   return as(agent().delete(`/commerce/businesses/${biz}/invoices/${invoiceId}`), user);
@@ -543,6 +555,16 @@ describe('V1-82 D-66: an issued invoice is not deleted; it is voided first (real
     expect.soft((await invoiceRow(id)).status).toBe('OVERDUE');
     expect.soft(await ledgerOf(ID.acc, id)).toEqual({ ar: 6_000, income: 10_000, cash: 4_000, finalized: 'POSTED' });
     expect.soft(await netReceivedCents(id)).toBe(4_000);
+
+    // The remedy the refusal names: refund the 40, void, then delete; the books close at 0.
+    if (!(await invoiceRow(id)).deletedAt) {
+      await refundAll(ID.acc, id);
+      expect(await netReceivedCents(id)).toBe(0);
+      await moveTo(ID.acc, id, 'VOID');
+      const ok = await del(ID.acc, id);
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(await ledgerOf(ID.acc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    }
   }, 60_000);
 
   it('DL-03 RED-BEFORE: CASH sent, paid 40, PATCH payment-failed (FAILED), DELETE -> 409 naming FAILED and "refund ... first"; income 40 / cash 40 stay on a live invoice', async () => {
@@ -676,6 +698,35 @@ describe('V1-82 D-66: an issued invoice returned to DRAFT by the AI undo is stil
       const ok = await del(ID.acc, id);
       expect(ok.status, JSON.stringify(ok.body)).toBe(200);
       expect(await ledgerOf(ID.acc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    }
+  }, 60_000);
+});
+
+describe('V1-82 D-66: a VOID invoice still holding money received is not deleted (real rows)', () => {
+  it('DL-08 (added with the fix; 200 on the base): a CASH invoice paid 40 and VOID, as a void before FOLLOW3-B1 left it, DELETE -> 409 "refund ... first"; refund, then DELETE -> 200 with nothing left', async () => {
+    const id = await sent(ID.cash, 'DL-08');
+    await pay(ID.cash, id, 40);
+    // FOLLOW3-B1 refuses this void (where it has landed); a VOID row holding money is what an earlier
+    // void left (on CASH the void posts nothing, so the raw status write is that row exactly).
+    await db.$executeRawUnsafe(`UPDATE invoices SET status = 'VOID' WHERE id = $1`, id);
+    expect(await ledgerOf(ID.cash, id)).toEqual({ ar: 0, income: 4_000, cash: 4_000, finalized: null });
+    const before = await books(ID.cash);
+
+    emitted.length = 0;
+    const res = await del(ID.cash, id);
+    await expectDeleteRefused(res, REFUND_FIRST('VOID', '40.00'), ID.cash, id, before);
+    expect.soft(String(res.body?.message ?? ''), 'a VOID invoice is not told to void it').not.toMatch(/void it/);
+
+    const bulk = await as(agent().patch(`/commerce/businesses/${ID.cash}/invoices/bulk`)).send({ action: 'delete', ids: [id] });
+    expect(bulk.status, JSON.stringify(bulk.body)).toBe(200);
+    expect.soft(bulk.body.updated).toBe(0);
+    expect.soft(String(bulk.body.skipped?.[0]?.reason ?? '')).toMatch(REFUND_FIRST('VOID', '40.00'));
+
+    if (!(await invoiceRow(id)).deletedAt) {
+      await refundAll(ID.cash, id);
+      const ok = await del(ID.cash, id);
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(await ledgerOf(ID.cash, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: null });
     }
   }, 60_000);
 });
