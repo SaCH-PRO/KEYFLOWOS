@@ -1065,6 +1065,7 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | Id | Ruling | Effect on the queue |
 |---|---|---|
 | D-95 | Restoring or permanently deleting a trashed record needs write access to the module the record belongs to (CRM for contacts, accounts and opportunities; revenue for invoices, quotes and recurring invoices; people for staff; marketing for community posts and landing pages); seeing it in the trash needs that module's read access. D-46 still refuses a non-member SUPER_ADMIN. | W6 trash packet (SEC-TL500-3). |
+| D-96 | The Command Center cockpit snapshot stays open to every member; each tile is filtered by that member's own module permissions (V1-47). D-40's operations scope does not gate it. | None (as built); closes the R0-35 referred explanation. |
 
 ---
 

@@ -644,14 +644,13 @@ export class TrashController {
     }
     // W6-TRASH-MODULE-SCOPE: CatalogService.updateProduct ignores deletedAt (the
     // restore answered restored while the product stayed in the trash) and
-    // updateService cannot find a trashed service, so deletedAt is cleared here
-    // and the catalog's update then runs with no change, for its events.
+    // updateService cannot find a trashed service, so the Catalog module's own
+    // restore clears deletedAt and emits the update events (the catalog boundary
+    // keeps Product/Service writes inside apps/server/src/modules/catalog).
     if (model === 'product') {
-      await this.updateModel(model, id, { deletedAt: null });
-      restored = await this.catalog.updateProduct({ businessId, productId: id });
+      restored = await this.catalog.restoreProduct(businessId, id);
     } else if (model === 'service') {
-      await this.updateModel(model, id, { deletedAt: null });
-      restored = await this.catalog.updateService({ businessId, serviceId: id });
+      restored = await this.catalog.restoreService(businessId, id);
     } else {
       restored = await this.updateModel(model, id, { deletedAt: null } as any);
     }
@@ -778,9 +777,6 @@ export class TrashController {
   private async updateModel(model: TrashableModel, id: string, data: any) {
     switch (model) {
       case 'contact': return this.prisma.client.contact.update({ where: { id }, data });
-      // W6-TRASH-MODULE-SCOPE: the restore of a product or service clears deletedAt here (see restore).
-      case 'product': return this.prisma.client.product.update({ where: { id }, data });
-      case 'service': return this.prisma.client.service.update({ where: { id }, data });
       case 'deal': return this.prisma.client.deal.update({ where: { id }, data });
       case 'quote': return this.prisma.client.quote.update({ where: { id }, data });
       case 'invoice': return this.prisma.client.invoice.update({ where: { id }, data });

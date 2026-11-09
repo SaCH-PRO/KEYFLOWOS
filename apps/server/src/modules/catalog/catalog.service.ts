@@ -373,6 +373,22 @@ export class CatalogService {
     return product;
   }
 
+  /**
+   * Restore this business's trashed product (the trash's restore, D-95): clears
+   * deletedAt and emits the update events, inside the Catalog module (the
+   * catalog boundary keeps Product/Service writes here).
+   */
+  async restoreProduct(businessId: string, productId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const product = await client.product.update({
+      where: { id: productId, businessId },
+      data: { deletedAt: null },
+    });
+    this.events.emit('catalog.product.updated', { product, businessId } as CatalogProductUpdatedPayload);
+    this.events.emit('product.updated', { product, businessId } as ProductUpdatedPayload);
+    return product;
+  }
+
   async deleteProduct(businessId: string, productId: string, tx?: TransactionClient) {
     const client = tx ?? this.prisma.client;
     const product = await client.product.update({
@@ -471,6 +487,17 @@ export class CatalogService {
       data,
     });
     this.events.emit('catalog.service.updated', { service, businessId: input.businessId } as CatalogServiceUpdatedPayload);
+    return service;
+  }
+
+  /** Restore this business's trashed service (the trash's restore, D-95); see restoreProduct. */
+  async restoreService(businessId: string, serviceId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const service = await client.service.update({
+      where: { id: serviceId, businessId },
+      data: { deletedAt: null },
+    });
+    this.events.emit('catalog.service.updated', { service, businessId } as CatalogServiceUpdatedPayload);
     return service;
   }
 

@@ -1045,20 +1045,18 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     }
   });
 
-  it("D95-U05 W6-TRASH-MODULE-SCOPE: restore of a trashed product or service (now found: it is looked up raw) clears deletedAt with a Prisma update, then runs the catalog's update for its events; CatalogService.updateProduct ignores deletedAt, so the restore answered restored while the product stayed in the trash", async () => {
-    for (const [model, method, idKey] of [['product', 'updateProduct', 'productId'], ['service', 'updateService', 'serviceId']] as const) {
+  it("D95-U05 W6-TRASH-MODULE-SCOPE: restore of a trashed product or service (now found: it is looked up raw) clears deletedAt through the Catalog module's own restore (restoreProduct / restoreService, which emit the update events; the catalog boundary keeps Product/Service writes there); CatalogService.updateProduct ignores deletedAt, so the restore answered restored while the product stayed in the trash", async () => {
+    for (const [model, method] of [['product', 'restoreProduct'], ['service', 'restoreService']] as const) {
       const row = { id: `${model}_d46`, businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
       const { calls, error } = await trashCall('restore', model, { id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, {
         [RAW]: async () => [row],
-        [`prisma.client.${model}.update`]: async () => ({ ...row, deletedAt: null }),
         [`catalog.${method}`]: async () => ({ ...row, deletedAt: null }),
       });
       // RED-BEFORE: the lookup is prisma.client.<model>.findFirst (unanswered here; the extension hides the row).
       expect(error, `${model}: ${String(error)}`).toBeNull();
       const paths = calls.map((c) => c.path);
-      expect(paths, model).toEqual([MEMBERSHIP_LOOKUP, RAW, `prisma.client.${model}.update`, `catalog.${method}`]);
-      expect(calls[2]!.args[0], model).toEqual({ where: { id: row.id }, data: { deletedAt: null } });
-      expect(calls[3]!.args[0], model).toEqual({ businessId: BIZ, [idKey]: row.id });
+      expect(paths, model).toEqual([MEMBERSHIP_LOOKUP, RAW, `catalog.${method}`]);
+      expect(calls[2]!.args, model).toEqual([BIZ, row.id]);
     }
   });
 

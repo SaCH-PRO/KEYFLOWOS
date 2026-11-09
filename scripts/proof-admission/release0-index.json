@@ -1374,10 +1374,16 @@
       "suite": "test/evidence-feed.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "V55-13e (SEC-W5FC-1, D-90 / D-63, outside the write set)",
-      "reason": "OPEN at this head. GET /crm/businesses/:b/contacts/:c/events returns ContactEvent data with payment amounts to a member with crm read and revenue 'none', which the feed withholds under D-90 / D-63; the W6 (FOLLOW7) contact-events money packet is closing it in parallel.",
-      "owner": "D-90 / D-63 (rulings); W6 (FOLLOW7) contact-events money packet",
-      "status": "OPEN",
-      "followUp": "D-90"
+      "reason": "CLOSED by W6-CONTACT-EVENTS-MONEY: V55-13e is a live case (GET contact events withholds money rows from a member with crm read and revenue none, D-90 / D-63).",
+      "owner": "W6-CONTACT-EVENTS-MONEY",
+      "status": "CLOSED",
+      "followUp": "D-90",
+      "closedBy": [
+        {
+          "file": "apps/server/test/evidence-feed.integration.test.ts",
+          "contains": "it(\"V55-13e"
+        }
+      ]
     },
     {
       "suite": "test/identity-boundary.integration.test.ts",
@@ -1413,10 +1419,11 @@
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T01] the cockpit snapshot",
-      "reason": "REFERRED TO THE OWNER. Whether D-40's operations scope covers the cockpit snapshot: the journey (step 5) pins a STAFF member without operations reading it 200 and V1-47 projects each tile by the member's scopes.",
-      "owner": "D-40 (ruling); R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT parked it",
-      "status": "OPEN",
-      "followUp": "D-40"
+      "reason": "RULED by owner ruling D-96: the cockpit snapshot stays open to every member and each tile is filtered by that member's own module permissions (V1-47); D-40's operations scope does not gate it.",
+      "owner": "D-96 (owner ruling, 2026-11-10)",
+      "status": "RULED",
+      "followUp": "D-96",
+      "ruling": "D-96"
     },
     {
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
@@ -1560,6 +1567,33 @@
       "owner": "V1-23-PUB-PUBLIC-PROJECTIONS (parked it, review SEC-V123-3)",
       "status": "V1-SCOPE",
       "followUp": "V1-23-PUB-PUBLIC-PROJECTIONS"
+    },
+    {
+      "suite": "test/evidence-feed.integration.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "V55-13f (SEC-W6CEM-1, D-90 / D-63, residual of W",
+      "reason": "OPEN. the contact cross-journey, story and dossier (CrmJourneyService; the dossier insight text carries amounts) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
+      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
+      "status": "OPEN",
+      "followUp": "D-90"
+    },
+    {
+      "suite": "test/evidence-feed.integration.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "V55-13g (SEC-W6CEM-2, D-90 / D-63, residual of W",
+      "reason": "OPEN. the contact revenue summary (CrmRevenueService.getContactRevenueSummary) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
+      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
+      "status": "OPEN",
+      "followUp": "D-90"
+    },
+    {
+      "suite": "test/evidence-feed.integration.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "V55-13h (CR-W6CEM-1, D-90 / D-63, residual of W6",
+      "reason": "OPEN. the contact detail (CrmStatsService.contactDetail: invoices[].total, meta.totalRevenue, outstandingBalance) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
+      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
+      "status": "OPEN",
+      "followUp": "D-90"
     }
   ],
   "editedOnly": [
