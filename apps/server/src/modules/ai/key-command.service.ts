@@ -56,6 +56,12 @@ export interface DoItForMeResult {
 }
 
 /**
+ * What generateDoItForMe returns: the items it filed, and `dataWithheld` when
+ * the caller's scope narrowed what it read (FOLLOW3-D9).
+ */
+export type DoItForMeOutcome = DoItForMeResult & { commandItemIds: string[]; dataWithheld?: true };
+
+/**
  * One step's outcome. `notExecuted` means nothing ran: the step was refused or
  * is awaiting approval (the same flag KeyCortexToolResult uses for it).
  */
@@ -123,6 +129,12 @@ interface CommandViewer {
   seesAllRows: boolean;
   /** Module read as ModuleScopeGuard computes it (SUPER_ADMIN reads every module). */
   reads: (module: CanonicalModule) => boolean;
+  /**
+   * Module write as ModuleScopeGuard computes it (SUPER_ADMIN writes every
+   * module; a Business.ownerId without a membership writes none, as
+   * ModuleScopeGuard refuses a non-member on every scoped route).
+   */
+  writes: (module: CanonicalModule) => boolean;
   /** The contacts list route's clause; null sees every contact of the business. */
   contactScope: ContactScope;
   /** Nothing to withhold: every contact, and read on every module but connect. */
@@ -131,9 +143,10 @@ interface CommandViewer {
 
 /**
  * SUPER_ADMIN, and a Business.ownerId BusinessGuard admits without a
- * Membership (CR-V109b-1): every row, every module, every contact.
+ * Membership (CR-V109b-1): every row, every module, every contact. The
+ * latter writes no module (commandViewer), as ModuleScopeGuard refuses it.
  */
-const EVERY_ROW_EVERY_READ: CommandViewer = { seesAllRows: true, reads: () => true, contactScope: null, unrestricted: true };
+const EVERY_ROW_EVERY_READ: CommandViewer = { seesAllRows: true, reads: () => true, writes: () => true, contactScope: null, unrestricted: true };
 
 /** A KeyCommand row as GET key/commands lists it; `dataWithheld` marks another member's withheld text (SEC-V109b-1). */
 export type ListedKeyCommand = KeyCommand & { dataWithheld?: true };
@@ -694,12 +707,13 @@ export class KeyCommandService {
    * SEC-V109b-2. The POST key/command 'do'/'auto'/'draft' response, projected
    * exactly as listCommands projects the executionResult that POST wrote, so a
    * member cannot read by POSTing what GET key/commands withholds from them.
-   * The row itself keeps what generateDoItForMe found business-wide.
+   * Since FOLLOW3-D9 generateDoItForMe reads only what the caller may read, so
+   * the row holds no more than this projection lets its author see.
    */
   async projectDoItForMe(
     businessId: string,
     userId: string | undefined,
-    result: DoItForMeResult & { commandItemIds: string[] },
+    result: DoItForMeOutcome,
   ): Promise<ProjectedDoItForMe> {
     if (!userId) throw new ForbiddenException('Authentication required');
     const viewer = await this.commandViewer(businessId, userId);
@@ -721,15 +735,17 @@ export class KeyCommandService {
       // the founding OWNER membership was written with them). That owner
       // listed every row before V1-09b and still does. Anyone else is refused.
       const owned = await this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId }, select: { id: true } });
-      if (owned) return EVERY_ROW_EVERY_READ;
+      if (owned) return { ...EVERY_ROW_EVERY_READ, writes: () => false };
       throw new ForbiddenException('Not a member of this business');
     }
     const crm = await resolveCrmAccess(this.prisma, businessId, userId);
     const reads = (module: CanonicalModule) => rankOf(member.scopes[module] || 'none') >= LEVEL_RANK.read;
+    const writes = (module: CanonicalModule) => rankOf(member.scopes[module] || 'none') >= LEVEL_RANK.write;
     const contactScope = visibilityClause(crm, userId) as ContactScope;
     return {
       seesAllRows: member.role === 'OWNER' || member.role === 'ADMIN',
       reads,
+      writes,
       contactScope,
       // connect is NONE for every role by default; the connect data KEY rows
       // keep (drive intake) needs membership only.
@@ -822,7 +838,34 @@ export class KeyCommandService {
 
   // ── Do It For Me: real business intelligence ───────────────────────────
 
-  async generateDoItForMe(businessId: string, rawInput: string, userId?: string, keyCommandId?: string): Promise<DoItForMeResult & { commandItemIds: string[] }> {
+  /**
+   * FOLLOW3-D9 (V1-09b review SEC-V109b-2 residual, R0-13g review SEC-R013g-3).
+   * Reads only what the caller may read, decided before anything is read by
+   * the rule GET key/commands projects by (commandViewer): contacts and their
+   * tasks with crm read, invoices and quotes with revenue read, bookings with
+   * bookings read, each limited to the contacts the contacts list route shows
+   * the caller (visibilityClause). An action is built only when the caller
+   * reads every module it names (ACTION_READS), and states an amount only with
+   * revenue read. So the KeyCommand row the controller writes from this result
+   * holds nothing its author may not read, and `dataWithheld` says the answer
+   * was narrowed. CommandItems are filed only for a caller with operations
+   * write, the level ModuleScopeGuard requires on POST command items (D-40).
+   * Fails closed: no caller, an unknown user or a non-member reads nothing.
+   */
+  async generateDoItForMe(businessId: string, rawInput: string, userId?: string, keyCommandId?: string): Promise<DoItForMeOutcome> {
+    if (!userId) throw new ForbiddenException('Authentication required');
+    const viewer = await this.commandViewer(businessId, userId);
+    const scope = viewer.contactScope;
+    // The contacts the caller may open, as a Contact where and as the relation filter of a row that names one.
+    const visibleContact = scope ? { AND: [scope] } : {};
+    const ofVisibleContact = scope ? { contact: scope } : {};
+    const readsCrm = viewer.reads('crm');
+    const readsRevenue = viewer.reads('revenue');
+    const readsBookings = viewer.reads('bookings');
+    const mayBuild = (actionType: SuggestedAction['actionType']) => ACTION_READS[actionType].every((m) => viewer.reads(m));
+    const amount = (value: number | undefined) => (readsRevenue ? value : undefined);
+    const nothing = Promise.resolve([]);
+
     const findings: string[] = [];
     const actions: SuggestedAction[] = [];
     const now = new Date();
@@ -849,24 +892,26 @@ export class KeyCommandService {
       // Stale contacts: no interaction in 14 days, not lost. (CF-49: 'DORMANT'
       // is a relationshipHealth value, never a Contact.status; the old filter
       // excluded nothing.)
-      (this.prisma.client as any).contact.findMany({
+      !readsCrm ? nothing : (this.prisma.client as any).contact.findMany({
         where: {
           businessId,
           deletedAt: null,
           lastInteractionAt: { lt: fourteenDaysAgo },
           status: { not: 'LOST' },
+          ...visibleContact,
         },
         select: { id: true, firstName: true, lastName: true, email: true, status: true, lastInteractionAt: true, leadScore: true },
         orderBy: { lastInteractionAt: 'asc' },
         take: 10,
       }),
       // Overdue invoices
-      (this.prisma.client as any).invoice.findMany({
+      !readsRevenue ? nothing : (this.prisma.client as any).invoice.findMany({
         where: {
           businessId,
           deletedAt: null,
           status: { in: ['SENT', 'OVERDUE'] },
           dueDate: { lt: now },
+          ...ofVisibleContact,
         },
         select: {
           id: true,
@@ -879,12 +924,13 @@ export class KeyCommandService {
         take: 10,
       }),
       // Pending bookings (last 7 days, not confirmed)
-      (this.prisma.client as any).booking.findMany({
+      !readsBookings ? nothing : (this.prisma.client as any).booking.findMany({
         where: {
           businessId,
           deletedAt: null,
           status: 'PENDING',
           startTime: { gte: now },
+          ...ofVisibleContact,
         },
         select: {
           id: true,
@@ -896,12 +942,13 @@ export class KeyCommandService {
         take: 10,
       }),
       // Sent quotes not yet accepted/rejected
-      (this.prisma.client as any).quote.findMany({
+      !readsRevenue ? nothing : (this.prisma.client as any).quote.findMany({
         where: {
           businessId,
           deletedAt: null,
           status: 'SENT',
           issueDate: { gte: thirtyDaysAgo },
+          ...ofVisibleContact,
         },
         select: {
           id: true,
@@ -914,20 +961,21 @@ export class KeyCommandService {
       }),
       // Recent clients for review requests (CF-49: CLIENT is the canonical
       // status; 'CUSTOMER' is not one the CRM admits).
-      (this.prisma.client as any).contact.findMany({
+      !readsCrm ? nothing : (this.prisma.client as any).contact.findMany({
         where: {
           businessId,
           deletedAt: null,
           status: 'CLIENT',
           updatedAt: { gte: thirtyDaysAgo },
+          ...visibleContact,
         },
         select: { id: true, firstName: true, lastName: true, email: true },
         orderBy: { updatedAt: 'desc' },
         take: 10,
       }),
-      // Open tasks
-      (this.prisma.client as any).contactTask.findMany({
-        where: { businessId, status: 'OPEN' },
+      // Open tasks (GET crm/businesses/:b/tasks requires crm read)
+      !readsCrm ? nothing : (this.prisma.client as any).contactTask.findMany({
+        where: { businessId, status: 'OPEN', ...ofVisibleContact },
         select: {
           id: true,
           title: true,
@@ -958,7 +1006,7 @@ export class KeyCommandService {
     }
 
     // Build actions based on intent
-    if ((isFollowUp || isAll) && staleContacts.length > 0) {
+    if ((isFollowUp || isAll) && staleContacts.length > 0 && mayBuild('follow_up')) {
       for (const contact of staleContacts.slice(0, 5)) {
         const days = contact.lastInteractionAt
           ? Math.floor((now.getTime() - new Date(contact.lastInteractionAt).getTime()) / 86400000)
@@ -969,13 +1017,13 @@ export class KeyCommandService {
           contactId: contact.id,
           reason: `No contact in ${days} days`,
           suggestedMessage: `Hi ${contact.firstName || 'there'}, just checking in to see how things are going. Let me know if there's anything I can help with!`,
-          expectedValue: contact.leadScore ? contact.leadScore * 10 : undefined,
+          expectedValue: amount(contact.leadScore ? contact.leadScore * 10 : undefined),
           actionType: 'follow_up',
         });
       }
     }
 
-    if ((isInvoice || isAll) && overdueInvoices.length > 0) {
+    if ((isInvoice || isAll) && overdueInvoices.length > 0 && mayBuild('invoice_reminder')) {
       for (const inv of overdueInvoices.slice(0, 5)) {
         const daysOverdue = inv.dueDate
           ? Math.floor((now.getTime() - new Date(inv.dueDate).getTime()) / 86400000)
@@ -992,7 +1040,7 @@ export class KeyCommandService {
       }
     }
 
-    if ((isBooking || isAll) && pendingBookings.length > 0) {
+    if ((isBooking || isAll) && pendingBookings.length > 0 && mayBuild('booking_confirm')) {
       for (const booking of pendingBookings.slice(0, 5)) {
         const dateStr = new Date(booking.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         actions.push({
@@ -1001,13 +1049,13 @@ export class KeyCommandService {
           contactId: booking.contact?.id,
           reason: `Booking on ${dateStr} awaiting confirmation`,
           suggestedMessage: `Hi ${booking.contact?.firstName || 'there'}, your ${booking.service?.name || 'appointment'} on ${dateStr} is pending. Please confirm so we can reserve your spot!`,
-          expectedValue: booking.service?.price ? Number(booking.service.price) : undefined,
+          expectedValue: amount(booking.service?.price ? Number(booking.service.price) : undefined),
           actionType: 'booking_confirm',
         });
       }
     }
 
-    if ((isReview || isAll) && recentCustomers.length > 0) {
+    if ((isReview || isAll) && recentCustomers.length > 0 && mayBuild('review_request')) {
       for (const contact of recentCustomers.slice(0, 3)) {
         actions.push({
           id: `review-${contact.id}`,
@@ -1021,7 +1069,7 @@ export class KeyCommandService {
     }
 
     // If no specific intent matched but we have open tasks, suggest those
-    if (actions.length === 0 && openTasks.length > 0) {
+    if (actions.length === 0 && openTasks.length > 0 && mayBuild('custom')) {
       for (const task of openTasks.slice(0, 5)) {
         actions.push({
           id: `task-${task.id}`,
@@ -1038,9 +1086,11 @@ export class KeyCommandService {
 
     const goal = this.inferGoal(rawInput, actions);
 
-    // Create CommandItems for high-value actions
+    // Create CommandItems for high-value actions, only for a caller who may
+    // create them by hand: POST command/businesses/:b/items requires
+    // operations write (D-40, ModuleScopeGuard).
     const commandItemIds: string[] = [];
-    for (const action of actions) {
+    for (const action of viewer.writes('operations') ? actions : []) {
       try {
         const categoryMap: Record<string, string> = {
           follow_up: 'PEOPLE',
@@ -1072,7 +1122,10 @@ export class KeyCommandService {
       }
     }
 
-    return { goal, findings, actions, commandItemIds };
+    // The answer was narrowed whenever the caller does not see every contact or
+    // cannot read one of the modules it summarises.
+    const narrowed = scope !== null || FINDINGS_READS.some((m) => !viewer.reads(m));
+    return { goal, findings, actions, commandItemIds, ...(narrowed ? { dataWithheld: true as const } : {}) };
   }
 
   private contactName(contact: any): string {
