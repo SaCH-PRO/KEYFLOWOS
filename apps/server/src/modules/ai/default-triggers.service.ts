@@ -16,6 +16,14 @@ export { DEFAULT_AGENT_TRIGGERS } from './default-triggers.constants';
  * part of the rule (a copy of 'New Lead' with no condition fires on every contact created), and a
  * plan stored with no member is never taken as a default rule's at run time (systemPlanMember), so a
  * copy this answers null for fires plans that run as no member.
+ *
+ * W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93; review SEC-D93-3, case CV-08m): the shape alone no longer
+ * decides. POST and PUT agent/triggers now record the member who wrote the rule in its stored
+ * condition (agent-trigger.service.ts, agentTriggerWriter; a client's own key of that name is
+ * dropped), and the seeded rules never carry one, so a rule a member wrote (an exact copy of a
+ * default included) is never recognised here: it runs as that member. Switching a seeded rule on,
+ * off or editing it is the business owner's alone (ownerRunDefaultTrigger, which asks this on the
+ * rule's content with the recorded writer aside).
  */
 export function defaultAgentTriggerFor(trigger: {
   name: string;
