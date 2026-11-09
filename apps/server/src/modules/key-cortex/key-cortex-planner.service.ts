@@ -20,6 +20,7 @@ import {
   noMemberPlanStepRefusal,
   planStepContactIds,
   planStepIsRead,
+  planStepTaskIds,
 } from './key-cortex-plan-authority';
 
 export interface CreateGoalInput {
@@ -821,7 +822,9 @@ export class KeyCortexPlannerService {
    * (memberPlanStepScopeRefusal). This used to hold a plan only to revenue write, and only for
    * commerce steps. The business OWNER (either arm) and SUPER_ADMIN (the platform bypass; D-46 is
    * checked above) pass every step; an ADMIN keeps every module (D-71). A crm step also keeps to the
-   * member's own-contact rules (assertCrmStepWithinView). Checked before the claim: a refused plan
+   * member's own-contact rules (assertCrmStepWithinView), an ADMIN's included: D-71 keeps an ADMIN
+   * every module scope, not another member's PRIVATE contact, which an ADMIN's visibility excludes
+   * (D-37; KEY-R3b review CR-R3b-1, kept deliberately). Checked before the claim: a refused plan
    * is left as it was, 403. `principal.role` undefined: the creator on the no-member path, whose
    * platform role is read only when a step would be refused.
    */
@@ -877,7 +880,14 @@ export class KeyCortexPlannerService {
    * kept to its own), and a write on it needs crm_edit (crm_delete to delete or merge) for that
    * contact ('owned': the member owns it). A read that names no contact reads the whole book, which
    * no visibility clause can bound, so it runs only for a member who sees every contact (the OWNER
-   * returned earlier). Nothing here applies to the OWNER or SUPER_ADMIN, whose clause is empty.
+   * returned earlier; an ADMIN, whose visibility excludes another member's PRIVATE contact, does
+   * not). Nothing here applies to the OWNER or SUPER_ADMIN, whose clause is empty.
+   *
+   * KEY-R3b review SEC-R3b-3 / CR-R3b-2: a step that names a task (crm.complete_task, which the
+   * adapter reaches by taskId alone) reaches that task's contact, whatever contact it names beside
+   * it, so the task is looked up in the business (as POST tasks/:taskId/complete does with
+   * assertVisibleChildRow) and its contact checked with the ones the step names. A task id not in
+   * the business is refused: there is no contact to check it against.
    */
   private async assertCrmStepWithinView(
     businessId: string,
@@ -888,6 +898,17 @@ export class KeyCortexPlannerService {
     if (!crm.clause) return;
     const label = `crm.${step.action}`;
     const ids = planStepContactIds(step.inputPayload);
+    const taskIds = planStepTaskIds(step.inputPayload);
+    if (taskIds.length > 0) {
+      const tasks = await this.prisma.client.contactTask.findMany({
+        where: { businessId, id: { in: taskIds } },
+        select: { id: true, contactId: true },
+      });
+      if (tasks.length !== new Set(taskIds).size) {
+        throw new ForbiddenException(`Plan step "${label}" names a task this member cannot open, so it is not run (D-71)`);
+      }
+      ids.push(...tasks.map((task: { contactId: string }) => task.contactId));
+    }
     const read = planStepIsRead('crm', step.action);
     if (ids.length === 0) {
       if (read) {

@@ -13,7 +13,9 @@ import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-regi
  * a direct command to (key-cortex.controller.ts CORTEX_MODULE_RULES: commerce -> revenue, finance ->
  * expenses, ...), without that route's crm owner-only rule and registry check: a plan step is the
  * member's own plan, so a STAFF member's crm steps run within its crm scope, and its own-contact
- * (owned-view) rules are applied to the contacts a step reaches (KeyCortexPlannerService).
+ * (owned-view) rules are applied to the contacts a step reaches (KeyCortexPlannerService); an
+ * ADMIN's contact visibility applies the same way (D-37: it keeps every module, not another
+ * member's PRIVATE contact).
  * settings is enforced by its adapter on the actor (SettingsAdapterService), so it needs nothing
  * here. A module mapped to nothing is refused for a member held to scopes (deny by default).
  *
@@ -102,6 +104,18 @@ export function planStepContactIds(parameters: unknown): string[] {
   if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return [];
   const p = parameters as Record<string, unknown>;
   return CONTACT_ID_PARAMETERS.map((key) => p[key]).filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * KEY-R3b review SEC-R3b-3 / CR-R3b-2: the parameters of a crm step that name a contact's child row
+ * the adapter reaches by its own id, whatever contact the step names beside it: crm.complete_task
+ * completes the task `taskId` names (CrmService.completeTask reads the task by that id alone). The
+ * contact such a row belongs to is the one the step reaches (KeyCortexPlannerService resolves it).
+ */
+export function planStepTaskIds(parameters: unknown): string[] {
+  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return [];
+  const taskId = (parameters as Record<string, unknown>).taskId;
+  return typeof taskId === 'string' && taskId.length > 0 ? [taskId] : [];
 }
 
 /** The crm actions that delete a contact (the crm_delete sub-permission, not crm_edit). */

@@ -69,6 +69,8 @@ const ID = {
   cOwned: `${P}c_owned`, // a TEAM contact staffOwned owns
   task: `${P}task_deny`,
   taskDash: `${P}task_deny_dash`,
+  ctPriv: `${P}ct_priv`, // a contact task on the OWNER's PRIVATE contact
+  ctOwned: `${P}ct_owned`, // a contact task on staffOwned's own contact
 };
 
 let db: any;
@@ -84,6 +86,11 @@ let autopilot: any;
 let busHandler: ((event: any) => Promise<void>) | undefined;
 let isSystemActor: (id?: string | null) => boolean;
 let defaultScopesForRole: (role: string) => Record<string, string>;
+let noMemberToolRefusal: (toolName: string) => string | null;
+let planStepRunRefusal: (prisma: any, businessId: string, planId: string, toolName: string) => Promise<string | null>;
+let assertMayRunGraphAction: (...args: any[]) => Promise<void>;
+let graphPlanReadScope: (...args: any[]) => Promise<{ stepOutput: (toolName: string) => boolean }>;
+let PLAN_APPROVER_ROLES: ReadonlySet<string>;
 
 interface Routed { marker: unknown; module: unknown; action: unknown; userId: unknown; planId?: unknown }
 /** Every command the KEY executor routed to the connector (the external effect). */
@@ -103,6 +110,7 @@ async function cleanup() {
     `DELETE FROM saga_executions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM key_cortex_trigger_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM autopilot_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -147,6 +155,18 @@ async function seedQueuePlan(id: string, userId: string | null, toolName: string
   return `${id}_s1`;
 }
 
+/** The daily briefing as MorningBriefingService writes it (no member, approved, scope 'briefing'), its one step `toolName`. */
+async function seedBriefingPlan(id: string, userId: string | null, toolName: string, args: Record<string, unknown> = {}, businessId = ID.biz) {
+  await db.aiPlan.create({
+    data: {
+      id, businessId, userId, objective: `Daily Briefing — v87b ${id}`, rawInput: 'Morning briefing auto-generated scan',
+      scope: ['briefing'], status: 'approved',
+      steps: { create: [{ id: `${id}_s1`, order: 1, toolName, action: toolName, module: 'ai', status: 'pending', inputPayload: args }] },
+    },
+  });
+  return `${id}_s1`;
+}
+
 /** Runs the plan-queue worker body on the plan's one step, as BullMQ hands it a job. */
 async function runQueueStep(planId: string, toolName: string, args: Record<string, unknown> = {}, businessId = ID.biz) {
   const stepId = `${planId}_s1`;
@@ -170,6 +190,8 @@ beforeAll(async () => {
 
   ({ isSystemActor } = await import('../src/core/auth/system-actor'));
   ({ defaultScopesForRole } = await import('../src/core/authority/module-vocabulary') as any);
+  ({ noMemberToolRefusal, planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority') as any);
+  ({ assertMayRunGraphAction, graphPlanReadScope, PLAN_APPROVER_ROLES } = await import('../src/modules/ai/graph-actions.controller') as any);
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { KeyCortexExecutorService } = await import('../src/modules/key-cortex/key-cortex-executor.service');
   const { KeyCortexSagaService } = await import('../src/modules/key-cortex/key-cortex-saga.service');
@@ -232,15 +254,18 @@ beforeAll(async () => {
     businessGraph: { invalidateCache: () => undefined },
   });
   const realExecuteToolAction = FlowOrchestratorService.prototype['executeToolAction' as keyof typeof FlowOrchestratorService.prototype] as any;
+  // Contact reads run the orchestrator's own query (crm_list_contacts with contactReadAccess;
+  // segment_contacts, which applies no member's visibility at all).
+  const REAL_TOOLS = new Set(['crm_list_contacts', 'segment_contacts']);
   flow.executeToolAction = async (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) => {
     monitorCalls.push({ toolName, action });
-    if (toolName === 'crm_list_contacts') return realExecuteToolAction.call(flow, businessId, toolName, args, action);
+    if (REAL_TOOLS.has(toolName)) return realExecuteToolAction.call(flow, businessId, toolName, args, action);
     return { id: `${P}fake_${toolName}` };
   };
   const flowForQueue = {
     executeToolDirectly: async (businessId: string, toolName: string, args: Record<string, unknown>, planContext?: { planStepId: string }, action?: any) => {
       dispatched.push({ toolName, planStepId: planContext?.planStepId, principal: action?.principalUserId, surface: action?.surface });
-      if (toolName === 'crm_list_contacts') return realExecuteToolAction.call(flow, businessId, toolName, args, action);
+      if (REAL_TOOLS.has(toolName)) return realExecuteToolAction.call(flow, businessId, toolName, args, action);
       return { id: `${P}fake_${toolName}` };
     },
   };
@@ -289,6 +314,8 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.cPriv, businessId: ID.biz, firstName: 'V87B Private', visibility: 'PRIVATE', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cTeam, businessId: ID.biz, firstName: 'V87B Team', visibility: 'TEAM', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cOwned, businessId: ID.biz, firstName: 'V87B Owned', visibility: 'TEAM', ownerId: ID.staffOwned } });
+  await db.contactTask.create({ data: { id: ID.ctPriv, businessId: ID.biz, contactId: ID.cPriv, title: 'v87b task on the private contact' } });
+  await db.contactTask.create({ data: { id: ID.ctOwned, businessId: ID.biz, contactId: ID.cOwned, title: 'v87b task on staffOwned\'s contact' } });
   await db.autopilotTask.create({ data: { id: ID.task, businessId: ID.biz, title: 'v87b denied by a system plan', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
   await db.autopilotTask.create({ data: { id: ID.taskDash, businessId: ID.biz, title: 'v87b denied by the adapter fallback', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
 }, 180_000);
@@ -626,7 +653,7 @@ describe('PRO_AUTO_MONITOR has no member: it reads no contacts and writes no mon
 describe('briefing/:planId/execute-all runs the briefing as the member who asked, in the business it named', () => {
   it('BR-01 RED-BEFORE: a STAFF member executing the daily briefing (written with no member) records itself as the plan\'s member, so its contact read is checked against the STAFF member and refused at run time', async () => {
     const planId = `${P}br01`;
-    const stepId = await seedQueuePlan(planId, null, 'crm_list_contacts');
+    const stepId = await seedBriefingPlan(planId, null, 'crm_list_contacts');
     const res = await briefing.executeAllBriefingCards(ID.biz, planId, ID.staffCrmW);
     expect(res).toMatchObject({ executed: 1 });
     expect((await planRow(planId)).userId).toBe(ID.staffCrmW);
@@ -637,7 +664,7 @@ describe('briefing/:planId/execute-all runs the briefing as the member who asked
 
   it("BR-02 RED-BEFORE: a member of biz naming biz cannot execute another business's briefing by its id: refused, its steps still pending", async () => {
     const planId = `${P}br02`;
-    await seedQueuePlan(planId, null, 'crm_list_contacts', {}, ID.bizB);
+    await seedBriefingPlan(planId, null, 'crm_list_contacts', {}, ID.bizB);
     const err = await briefing.executeAllBriefingCards(ID.biz, planId, ID.owner).then(() => null, (e: unknown) => e);
     expect(err).not.toBeNull();
     const row = await planRow(planId);
@@ -662,5 +689,210 @@ describe('a task denied by a system actor is recorded as the system\'s denial', 
     await autopilot.denyTask(ID.taskDash, ID.biz, 'key-cortex');
     const events = businessEvents.slice(from).filter((e) => e.eventType === 'autopilot_task.denied');
     expect(events.map((e) => [e.actorId, e.actorType])).toEqual([['key_cortex', 'system'], ['key-cortex', 'system']]);
+  });
+});
+
+/**
+ * KEY-R3b-PLAN-AUTHORITY review repairs. SEC-R3b-1: the no-member gate and the member path at run
+ * time knew contact reads only as the four GRAPH_ACTION_CONTACT_READ_TOOLS, so segment_contacts
+ * (every contact of the business, no visibility clause) and the other crm tools that read contacts
+ * passed. SEC-R3b-2: the no-member gate allowed by default a tool the authority map refuses
+ * (execute_custom_logic) or does not map, and the Business.ownerId shortcut ran a refused tool.
+ */
+describe('review repairs: a contact read is known by what the tool does; a refused or unmapped tool is denied by default', () => {
+  const CONTACT_READERS = ['segment_contacts', 'draft_followup_message', 'create_followup_queue', 'deals_get', 'portal_list_access', 'call_list_tasks'];
+
+  it('RV-01 RED-BEFORE (SEC-R3b-1): a plan or monitor with no member refuses every crm tool that reads contacts, not only the four contact-list tools; a tool that reads none still passes', () => {
+    for (const tool of CONTACT_READERS) {
+      expect(noMemberToolRefusal(tool), tool).toMatch(/reads the business's contacts/);
+    }
+    expect(noMemberToolRefusal('helpdesk_create_ticket')).toBeNull();
+    expect(noMemberToolRefusal('crm_create_contact')).toBeNull();
+  });
+
+  it('RV-02 RED-BEFORE (SEC-R3b-1): a plan with no member with segment_contacts is refused on the queue and recorded, nothing dispatched, the PRIVATE contact not read', async () => {
+    const planId = `${P}rv02`;
+    const stepId = await seedQueuePlan(planId, null, 'segment_contacts', { name: 'v87b segment' });
+    await runQueueStep(planId, 'segment_contacts', { name: 'v87b segment' });
+    expect(dispatchedFor(stepId)).toEqual([]);
+    const row = await planRow(planId);
+    expect(row.steps[0].status).toBe('failed');
+    expect(String(row.steps[0].errorMessage)).toMatch(/no member/i);
+    expect(JSON.stringify(row.steps[0].outputResult ?? null)).not.toContain(ID.cPriv);
+  });
+
+  it('RV-03 RED-BEFORE (SEC-R3b-1): PRO_AUTO_MONITOR refuses segment_contacts and draft_followup_message before they run', async () => {
+    for (const tool of ['segment_contacts', 'draft_followup_message']) {
+      const from = monitorCalls.length;
+      const result = await flow.autoExecuteToolForMonitoring(ID.biz, tool, { name: 'v87b segment', contactId: ID.cPriv });
+      expect(monitorCalls.slice(from), tool).toEqual([]);
+      expect(result, tool).toMatchObject({ success: false, blocked: true });
+      expect(JSON.stringify(result)).not.toContain(ID.cPriv);
+    }
+  });
+
+  it("RV-04 RED-BEFORE (SEC-R3b-1): a member's plan with a crm contact reader runs only for the OWNER at run time (the queue hands the dispatcher no principal): STAFF kept to its own book and an ADMIN are refused; the OWNER's runs", async () => {
+    const args = { name: 'v87b segment', dealId: `${P}nodeal` };
+    for (const [planId, member, tool] of [
+      [`${P}rv04_staff`, ID.staffOwned, 'segment_contacts'],
+      [`${P}rv04_admin`, ID.admin, 'deals_get'],
+    ] as const) {
+      const stepId = await seedQueuePlan(planId, member, tool, args);
+      await runQueueStep(planId, tool, args);
+      expect(dispatchedFor(stepId), planId).toEqual([]);
+      const row = await planRow(planId);
+      expect(row.steps[0].status, planId).toBe('failed');
+      expect(JSON.stringify(row.steps[0].outputResult ?? null)).not.toContain(ID.cPriv);
+    }
+    const owner = `${P}rv04_owner`;
+    const ownerStep = await seedQueuePlan(owner, ID.owner, 'segment_contacts', { name: 'v87b segment' });
+    await runQueueStep(owner, 'segment_contacts', { name: 'v87b segment' });
+    expect(dispatchedFor(ownerStep)).toHaveLength(1);
+    const ownerRow = await planRow(owner);
+    expect(ownerRow.steps[0].status).toBe('completed');
+    expect(JSON.stringify(ownerRow.steps[0].outputResult)).toContain(ID.cPriv);
+  });
+
+  it('RV-05 RED-BEFORE (SEC-R3b-1): POST ai/plans/:planId/approve applies the same rule (no principal): an ADMIN may not approve a contact reader, the OWNER may; the plans read shows such a step\'s stored output to the OWNER only', async () => {
+    const opts = { proposerOverrideRoles: PLAN_APPROVER_ROLES, noPrincipal: true };
+    const adminRead = await graphPlanReadScope(prisma, ID.biz, { id: ID.admin, role: 'USER' });
+    const ownerRead = await graphPlanReadScope(prisma, ID.biz, { id: ID.owner, role: 'USER' });
+    for (const tool of ['segment_contacts', 'deals_get']) {
+      const err = await assertMayRunGraphAction(prisma, ID.biz, { id: ID.admin, role: 'USER' }, tool, ID.admin, opts).then(() => null, (e: unknown) => e);
+      expect(err, tool).toBeInstanceOf(ForbiddenException);
+      await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.owner, role: 'USER' }, tool, ID.owner, opts)).resolves.toBeUndefined();
+      expect(adminRead.stepOutput(tool), tool).toBe(false);
+      expect(ownerRead.stepOutput(tool), tool).toBe(true);
+    }
+    expect(adminRead.stepOutput('helpdesk_create_ticket')).toBe(true);
+  });
+
+  it('RV-06 RED-BEFORE (SEC-R3b-2): a refused tool (execute_custom_logic) and an unmapped one are refused with no member, by the gate, the queue and the monitor; nothing runs', async () => {
+    expect(noMemberToolRefusal('execute_custom_logic')).not.toBeNull();
+    expect(noMemberToolRefusal(`${P}not_a_tool`)).not.toBeNull();
+    const code = "const r = await api.callTool('crm_list_contacts', {}); return JSON.stringify(r);";
+    const planId = `${P}rv06`;
+    const stepId = await seedQueuePlan(planId, null, 'execute_custom_logic', { code });
+    expect(await planStepRunRefusal(prisma, ID.biz, planId, 'execute_custom_logic')).not.toBeNull();
+    await runQueueStep(planId, 'execute_custom_logic', { code });
+    expect(dispatchedFor(stepId)).toEqual([]);
+    expect((await planRow(planId)).steps[0].status).toBe('failed');
+    const from = monitorCalls.length;
+    const result = await flow.autoExecuteToolForMonitoring(ID.biz, 'execute_custom_logic', { code });
+    expect(monitorCalls.slice(from)).toEqual([]);
+    expect(result).toMatchObject({ success: false, blocked: true });
+  });
+
+  it('RV-07 RED-BEFORE (SEC-R3b-2): the business owner (Business.ownerId) is refused a tool the authority map never runs, whoever asks; an unmapped tool still passes the owner', async () => {
+    const planId = `${P}rv07`;
+    const stepId = await seedQueuePlan(planId, ID.owner, 'execute_custom_logic', { code: 'return 1;' });
+    expect(await planStepRunRefusal(prisma, ID.biz, planId, 'execute_custom_logic')).toMatch(/not executed/);
+    await runQueueStep(planId, 'execute_custom_logic', { code: 'return 1;' });
+    expect(dispatchedFor(stepId)).toEqual([]);
+    expect(await planStepRunRefusal(prisma, ID.biz, planId, 'mcp__v87b__tool')).toBeNull();
+  });
+});
+
+/**
+ * KEY-R3b review SEC-R3b-3 / CR-R3b-2: the owned-view rule found the contacts a crm step reaches
+ * only through contactId, masterContactId and duplicateContactId. crm.complete_task reaches a task by
+ * taskId alone (the adapter ignores contactId), so a member kept to its own book completed a task on
+ * the OWNER's PRIVATE contact. POST tasks/:taskId/complete refuses it (assertVisibleChildRow).
+ */
+describe("review repairs: a crm step that names a task is checked against the task's contact", () => {
+  it("RV-08 RED-BEFORE: a STAFF member kept to its own book is refused crm.complete_task on a task of the OWNER's PRIVATE contact, with or without its own contactId as cover, and on a task id not in the business; nothing routed", async () => {
+    for (const [suffix, params] of [
+      ['bare', { taskId: ID.ctPriv }],
+      ['cover', { taskId: ID.ctPriv, contactId: ID.cOwned }],
+      ['unknown', { taskId: `${P}no_such_task` }],
+    ] as const) {
+      const planId = `${P}rv08_${suffix}`;
+      await seedCortexPlan(planId, [{ module: 'crm', action: 'complete_task', params }], ID.staffOwned);
+      const from = routed.length;
+      const err = await planner.executePlan(planId, {}, asMember(ID.staffOwned)).catch((e: unknown) => e);
+      expect(err, `${suffix} ${String(err)}`).toBeInstanceOf(ForbiddenException);
+      expect(routedFor(planId, from), suffix).toEqual([]);
+      expect(await planRow(planId), suffix).toMatchObject({ status: 'pending', startedAt: null });
+    }
+  });
+
+  it("RV-09 regression control: the same member completes a task on its own contact; the OWNER completes the PRIVATE contact's task", async () => {
+    for (const [planId, member, taskId] of [
+      [`${P}rv09_own`, ID.staffOwned, ID.ctOwned],
+      [`${P}rv09_owner`, ID.owner, ID.ctPriv],
+    ] as const) {
+      await seedCortexPlan(planId, [{ module: 'crm', action: 'complete_task', params: { taskId } }], member);
+      const from = routed.length;
+      expect(await planner.executePlan(planId, {}, asMember(member)), planId).toMatchObject({ status: 'completed', executed: 1 });
+      expect(routedFor(planId, from).map((r) => r.userId), planId).toEqual([member]);
+    }
+  });
+});
+
+/**
+ * KEY-R3b review CR-R3b-1, ruled a deliberate consequence of D-37 and pinned here: D-71 keeps every
+ * module scope for an ADMIN, but an ADMIN's contact visibility still excludes another member's
+ * PRIVATE contact (visibilityClause), and the crm adapter reads with none. So a crm read naming no
+ * contact (crm.list_contacts, the first step of the invoice and booking fallback plans) runs for the
+ * business OWNER only, an ADMIN included, as POST ai/plans/:planId/approve already rules for the
+ * dispatcher's contact reads with no principal. A crm step naming a contact the ADMIN can open runs.
+ */
+describe('review repairs: an ADMIN keeps every module, and its crm steps keep to its contact visibility (D-71, D-37)', () => {
+  it("RV-10 an ADMIN's plan opening with crm.list_contacts (the invoice fallback plan's shape) is refused 403 before the claim: nothing routed, the plan still pending", async () => {
+    const planId = `${P}rv10`;
+    await seedCortexPlan(planId, [{ module: 'crm', action: 'list_contacts' }, { module: 'commerce', action: 'create_invoice' }], ID.admin);
+    const from = routed.length;
+    const err = await planner.executePlan(planId, {}, asMember(ID.admin)).catch((e: unknown) => e);
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(String((err as Error).message)).toMatch(/business owner/);
+    expect(routedFor(planId, from)).toEqual([]);
+    expect(await planRow(planId)).toMatchObject({ status: 'pending', startedAt: null });
+  });
+
+  it("RV-11 an ADMIN's crm step naming a TEAM contact runs with the ADMIN's invoice step; one naming the OWNER's PRIVATE contact is refused", async () => {
+    const team = `${P}rv11_team`;
+    await seedCortexPlan(team, [{ module: 'crm', action: 'get_contact', params: { contactId: ID.cTeam } }, { module: 'commerce', action: 'create_invoice' }], ID.admin);
+    const from = routed.length;
+    expect(await planner.executePlan(team, {}, asMember(ID.admin))).toMatchObject({ status: 'completed', executed: 2 });
+    expect(routedFor(team, from).map((r) => r.userId)).toEqual([ID.admin, ID.admin]);
+
+    const priv = `${P}rv11_priv`;
+    await seedCortexPlan(priv, [{ module: 'crm', action: 'get_contact', params: { contactId: ID.cPriv } }], ID.admin);
+    const privFrom = routed.length;
+    const err = await planner.executePlan(priv, {}, asMember(ID.admin)).catch((e: unknown) => e);
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(routedFor(priv, privFrom)).toEqual([]);
+  });
+});
+
+/**
+ * KEY-R3b review SEC-R3b-4: POST briefing/:planId/execute-all took any plan with no member (a journey,
+ * an agent trigger, a KEY-cortex system plan), bound it for good to the first member who called, and
+ * no one could rebind it, the OWNER included. Only the daily briefing is taken now, and the business
+ * OWNER (or an ADMIN) who runs it takes it over.
+ */
+describe('review repairs: briefing execute-all takes only the daily briefing, and the owner can take a briefing over', () => {
+  it('RV-12 RED-BEFORE: a plan with no member that is not the daily briefing is not taken: refused, still no member, its step still pending', async () => {
+    const planId = `${P}rv12`;
+    await seedQueuePlan(planId, null, 'bookings_create', { serviceId: `${P}svc` });
+    const err = await briefing.executeAllBriefingCards(ID.biz, planId, ID.staffNoBook).then(() => null, (e: unknown) => e);
+    expect(err).not.toBeNull();
+    const row = await planRow(planId);
+    expect(row.userId).toBeNull();
+    expect(row.steps[0].status).toBe('pending');
+  });
+
+  it('RV-13 RED-BEFORE: a briefing a STAFF member took is taken over by the OWNER, whose scopes then run its step; another STAFF member is refused', async () => {
+    const planId = `${P}rv13`;
+    const stepId = await seedBriefingPlan(planId, null, 'bookings_create', { serviceId: `${P}svc` });
+    await briefing.executeAllBriefingCards(ID.biz, planId, ID.staffNoBook);
+    expect((await planRow(planId)).userId).toBe(ID.staffNoBook);
+    await briefing.executeAllBriefingCards(ID.biz, planId, ID.owner);
+    expect((await planRow(planId)).userId).toBe(ID.owner);
+    const err = await briefing.executeAllBriefingCards(ID.biz, planId, ID.staff).then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect((await planRow(planId)).userId).toBe(ID.owner);
+    await runQueueStep(planId, 'bookings_create', { serviceId: `${P}svc` });
+    expect(dispatchedFor(stepId)).toHaveLength(1);
   });
 });

@@ -20,6 +20,14 @@ export interface BriefingCard {
   module: string;
 }
 
+/**
+ * What marks the daily briefing among a business's ai plans (generateBriefing writes them; KEY-R3b
+ * review SEC-R3b-4: POST briefing/:planId/execute-all takes no other plan).
+ */
+const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
+const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
+const BRIEFING_SCOPE = 'briefing';
+
 export interface BriefingResult {
   planId: string;
   date: string;
@@ -102,10 +110,10 @@ export class MorningBriefingService implements OnModuleInit {
     const plan = await this.prisma.client.aiPlan.create({
       data: {
         businessId,
-        objective: `Daily Briefing — ${today}`,
-        rawInput: 'Morning briefing auto-generated scan',
+        objective: `${BRIEFING_OBJECTIVE_PREFIX}${today}`,
+        rawInput: BRIEFING_RAW_INPUT,
         urgency: 'normal',
-        scope: ['briefing'],
+        scope: [BRIEFING_SCOPE],
         modules: [...new Set(topCards.map((c) => c.module))],
         maxRiskTier: Math.max(...topCards.map((c) => this.governance.getToolTier(c.toolName))),
         status: 'approved', // Briefings are pre-approved as plans
@@ -185,15 +193,29 @@ export class MorningBriefingService implements OnModuleInit {
    * the plan's member when it has none, so the plan queue checks every step against that member when
    * it runs it (QueueService.processPlanStep). A plan another member already runs is that member's:
    * only it, the business OWNER or an ADMIN executes it.
+   *
+   * KEY-R3b review SEC-R3b-4: only the daily briefing is taken (the plan generateBriefing writes:
+   * scope 'briefing', its objective and raw input), never another plan with no member (a journey,
+   * an agent trigger, a KEY-cortex system plan), which a member could otherwise adopt or bind. And
+   * the business OWNER or an ADMIN who runs a briefing another member took takes it over: the plan
+   * is theirs from then on, so a member who took it first cannot hold it to scopes that refuse its
+   * steps.
    */
   async executeAllBriefingCards(businessId: string, planId: string, userId?: string): Promise<{ executed: number; failed: number }> {
     if (!userId) throw new ForbiddenException('A member runs the briefing');
-    const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } });
+    const briefing = {
+      id: planId,
+      businessId,
+      scope: { has: BRIEFING_SCOPE },
+      objective: { startsWith: BRIEFING_OBJECTIVE_PREFIX },
+      rawInput: BRIEFING_RAW_INPUT,
+    };
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true } });
     if (!plan) throw new NotFoundException('Briefing not found');
     if (!plan.userId) {
-      await this.prisma.client.aiPlan.updateMany({ where: { id: planId, businessId, userId: null }, data: { userId } });
+      await this.prisma.client.aiPlan.updateMany({ where: { ...briefing, userId: null }, data: { userId } });
     }
-    const runsAs = (await this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } }))?.userId;
+    const runsAs = (await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true } }))?.userId;
     if (runsAs !== userId) {
       const membership = await this.prisma.client.membership.findUnique({
         where: { userId_businessId: { userId, businessId } },
@@ -202,6 +224,7 @@ export class MorningBriefingService implements OnModuleInit {
       if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
         throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin runs it');
       }
+      await this.prisma.client.aiPlan.updateMany({ where: briefing, data: { userId } });
     }
     const steps = await this.prisma.client.aiPlanStep.findMany({
       where: { planId, status: 'pending' },

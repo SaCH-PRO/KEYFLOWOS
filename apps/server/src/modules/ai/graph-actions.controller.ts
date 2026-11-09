@@ -187,6 +187,34 @@ export const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set([
 const CONTACT_READ_NO_PRINCIPAL =
   "it reads every contact when it runs with no principal (the plan executor), so no visibility clause keeps another member's PRIVATE contact out";
 
+/**
+ * KEY-R3b-PLAN-AUTHORITY review SEC-R3b-1: crm tools of a writing family that still read the
+ * business's contacts with no member's visibility clause and return them (names, emails, notes):
+ * segment_contacts (every contact matching a status or tag), create_followup_queue (stale leads),
+ * draft_followup_message (a contact and its notes, into the draft), call_generate_script (a contact
+ * and its history, into the script).
+ */
+const GRAPH_ACTION_CONTACT_READING_WRITES: ReadonlySet<string> = new Set([
+  'segment_contacts',
+  'create_followup_queue',
+  'draft_followup_message',
+  'call_generate_script',
+]);
+
+/**
+ * Whether `toolName` reads the business's contacts, by what it does (KEY-R3b review SEC-R3b-1): a
+ * contact list tool (GRAPH_ACTION_CONTACT_READ_TOOLS), any read of the crm module (deals, call
+ * tasks, portal access, sequences: each row carries its contact), or a crm tool that reads contacts
+ * while it writes (GRAPH_ACTION_CONTACT_READING_WRITES). Run with no principal, none of these keeps
+ * another member's PRIVATE contact out, so there they are the OWNER's only, and a run with no
+ * member at all runs none of them (D-73; plan-step-authority.ts).
+ */
+export function graphActionReadsContacts(toolName: string): boolean {
+  if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName) || GRAPH_ACTION_CONTACT_READING_WRITES.has(toolName)) return true;
+  const scope = graphActionModuleScope(toolName);
+  return scope?.module === 'crm' && scope.minLevel === 'read';
+}
+
 /** What a member must hold to execute a stored step of `toolName` from this route. */
 export interface GraphActionRequirement {
   /** Every module scope, as ModuleScopeGuard reads it. */
@@ -222,6 +250,9 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
     requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
+  } else if (graphActionReadsContacts(toolName)) {
+    // KEY-R3b review SEC-R3b-1: every other contact read, known by what the tool does.
+    requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   }
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
   else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
@@ -344,7 +375,7 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
  * a SUPER_ADMIN; otherwise a step whose tool graphActionRequirement maps, with each of its module
  * scopes held at read as ModuleScopeGuard computes them). `stepOutput`: whether that step's stored
  * output is shown: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read
- * (GRAPH_ACTION_CONTACT_READ_TOOLS), whose output the plan executor writes from a run with no
+ * (graphActionReadsContacts), whose output the plan executor writes from a run with no
  * principal (every contact, another member's PRIVATE ones included).
  */
 export interface GraphPlanReadScope {
@@ -377,7 +408,8 @@ export async function graphPlanReadScope(
       if (!requirement || 'refused' in requirement) return false;
       return requirement.scopes.every(({ module }) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read);
     },
-    stepOutput: (toolName) => !GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName),
+    // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does.
+    stepOutput: (toolName) => !graphActionReadsContacts(toolName),
   };
 }
 

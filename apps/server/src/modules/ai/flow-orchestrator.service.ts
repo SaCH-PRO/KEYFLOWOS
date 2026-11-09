@@ -7696,7 +7696,8 @@ ${triage.standingContext}`;
   ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
     // KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): the monitor acts for no member, so it
     // reads no contacts (with no principal contactReadAccess reads every contact, PRIVATE ones
-    // included) and writes no money or invoices. Refused before anything runs, and recorded.
+    // included) and writes no money or invoices; nor does it run a tool the authority map refuses
+    // or does not map (KEY-R3b review SEC-R3b-2). Refused before anything runs, and recorded.
     // (Imported at call time: plan-step-authority imports graph-actions.controller, which imports
     // this file.)
     const { noMemberToolRefusal } = await import('./plan-step-authority');
