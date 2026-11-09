@@ -1037,7 +1037,18 @@ Raised by the review of PR #196 (`feat/core-journeys-and-foundation-completion`,
 | D-86 | Waitlisted customers get no public accept link yet: staff are notified and the offered slot is held for a fixed 120 minutes. | PR196-WAITLIST-EXPIRY. |
 | D-87 | A project task's assignee may be a member of the business or one of its booking staff. | PR196-PROJECTS-SERVER, PR196-PROJECTS-WEB. |
 
-**D-59 as built (FOLLOW3-A10).** The booking status route keeps V1-28's contract: completion with a live deposit in another currency than the final invoice answers 201, the booking is COMPLETED, and its `invoicing` result is `{ status: FAILED, code: DEPOSIT_CURRENCY_MISMATCH }` with no invoice written or netted. POST create-invoice for that booking answers 409 `DEPOSIT_CURRENCY_MISMATCH`. The operator settles by hand (D-13). Still open: the commerce PATCH accepts a currency switch on a netted DRAFT deposit or on the DRAFT final (SEC-A10-1, follow-up).
+**D-59 as built (FOLLOW3-A10; accepted as D-91 below).** The booking status route keeps V1-28's contract: completion with a live deposit in another currency than the final invoice answers 201, the booking is COMPLETED, and its `invoicing` result is `{ status: FAILED, code: DEPOSIT_CURRENCY_MISMATCH }` with no invoice written or netted. POST create-invoice for that booking answers 409 `DEPOSIT_CURRENCY_MISMATCH`. The operator settles by hand (D-13). Still open: the commerce PATCH accepts a currency switch on a netted DRAFT deposit or on the DRAFT final (SEC-A10-1, follow-up).
+
+### Owner rulings, 2026-11-09 (wave-2 residuals)
+
+Raised by the FOLLOW3 wave-2 packets' recorded residuals. All accepted as recommended.
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-88 | KEY's commerce tools follow D-64 by acting as the member: the dispatcher hands invoice and quote create, update and convert the member the command runs for, and D-64 applies to that member; a run with no member (the autonomous plan queue) uses the OWNER's view, as KEY's contact reads do since KEY-R3b. | W3 D-64 completion (SEC-D6-1). |
+| D-89 | An invoice edit that would bring its total below the money it holds (received net of refunds) is refused with 409, including a DRAFT the AI undo returned from an issued state. | W3 overpaid-edit packet (B2 residual). |
+| D-90 | The finance payment row in the feed names who recorded the payment, and the CRM `invoice.payment_recorded` Activity copy is no longer written: one feed row per payment (D-08). | W3 V1-55c (V55-07b). |
+| D-91 | D-59 is amended to the shipped shape: completion keeps V1-28's contract (201, booking COMPLETED, invoicing FAILED with `DEPOSIT_CURRENCY_MISMATCH`, no invoice written); POST create-invoice answers 409; the operator settles by hand. | No change (FOLLOW3-A10 as built). |
 
 ---
 
