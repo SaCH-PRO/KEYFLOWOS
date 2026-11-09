@@ -67,6 +67,23 @@
  *             never as a SUPER_ADMIN) still bills a schedule the SUPER_ADMIN
  *             member created.
  *
+ * W4-TRASH-D46 (V1-90, owner ruling D-46; review SEC-W3D46R-3, census it.todo
+ * D46-S09): TrashController (api/businesses/:b/trash) restored and permanently
+ * deleted revenue rows behind BusinessGuard alone.
+ *   D46-S09a,b  POST trash/recurringInvoice/:id/restore and DELETE
+ *             trash/recurringInvoice/:id by the non-member SUPER_ADMIN.
+ *             RED-BEFORE: 201 (the trashed ACTIVE, due schedule back, billed on
+ *             the next run) and 200 (the row erased).
+ *             GREEN-AFTER: 403 'Not authorized to update this invoice', A
+ *             byte-identical, and the real recurring run bills nothing from it.
+ *   D46-S09c,d  the same two calls by a revenue:read USER member, and by the
+ *             SUPER_ADMIN members below revenue:write: the guard's
+ *             'Insufficient permissions' 403, nothing changed, never billed.
+ *   D46-S09e  the trash's other revenue models (invoice, quote) by the
+ *             non-member SUPER_ADMIN: 403 before any lookup.
+ *   controls  owner A and the SUPER_ADMIN ADMIN member restore (201) and
+ *             permanently delete (200); owner B keeps BusinessGuard's 403.
+ *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
  * tenant's PaymentIntent stored a SUCCESSFUL provider 'stripe' row. The Stripe
@@ -422,6 +439,7 @@ beforeAll(async () => {
   const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
   const { RecurringInvoiceController } = await import('../src/modules/commerce/recurring-invoice.controller');
   const { RecurringInvoiceService } = await import('../src/modules/commerce/recurring-invoice.service');
+  const { TrashController } = await import('../src/modules/trash/trash.controller');
   storedBalanceFn = workflowMod.balanceOfStoredRows;
   keyActorId = KEY_SYSTEM_ACTOR_ID;
 
@@ -429,7 +447,8 @@ beforeAll(async () => {
 
   const moduleRef = await Test.createTestingModule({
     // W3-D46-CREATE-AND-RECURRING: RecurringInvoiceController too (D46-S07a..e).
-    controllers: [CommerceController, RecurringInvoiceController],
+    // W4-TRASH-D46: TrashController too (D46-S09a..e; its CatalogService is the stub below).
+    controllers: [CommerceController, RecurringInvoiceController, TrashController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -1152,5 +1171,149 @@ describe('W3-D46-CREATE-AND-RECURRING (D-46): POST invoices and the recurring-in
     const schedule = await scheduleOf(res.body.id);
     expect(schedule.generatedCount).toBe(1);
     expect(schedule.nextRunDate.getTime()).toBeGreaterThan(due.getTime());
+  });
+});
+
+/**
+ * W4-TRASH-D46 (owner ruling D-46; review SEC-W3D46R-3, census it.todo D46-S09):
+ * TrashController restored and permanently deleted recurringInvoice rows behind
+ * BusinessGuard alone (its @RequireModuleScope('settings') has no
+ * ModuleScopeGuard), so a non-member SUPER_ADMIN and a revenue:read member
+ * brought a trashed ACTIVE schedule back (it then billed again) or erased it.
+ * Trashed schedules here are ACTIVE and due (nextRunDate in the past), so a
+ * restore would bill on the next run; the controls use a schedule that is not due.
+ */
+const TRASH = `/api/businesses/${ID.bizA}/trash`;
+
+/** A trashed (soft-deleted) ACTIVE schedule of A; `due` puts its nextRunDate in the past. */
+async function makeTrashedSchedule(tag: string, due: boolean): Promise<string> {
+  const id = await makeSchedule(tag);
+  await db.recurringInvoice.update({
+    where: { id },
+    data: { deletedAt: new Date(), ...(due ? { nextRunDate: new Date(Date.now() - 60_000) } : {}) },
+  });
+  return id;
+}
+
+/** A trashed invoice or quote of A (raw: the client's soft-delete extension hides the row from its own reads). */
+async function trashDocument(table: 'invoices' | 'quotes', id: string) {
+  await db.$executeRawUnsafe(`UPDATE ${table} SET deleted_at = now() WHERE id = $1`, id);
+}
+
+/** The real recurring run over A bills nothing from these schedules, which stay trashed. */
+async function expectNeverBilled(ids: string[]) {
+  const result = await recurringRunner(ID.bizA).processRecurringInvoices();
+  for (const id of ids) {
+    expect(result.map((r: any) => r.recurringId), id).not.toContain(id);
+    const billed: Array<{ n: number }> = await db.$queryRawUnsafe('SELECT count(*)::int AS n FROM invoices WHERE recurring_invoice_id = $1', id);
+    expect(billed[0]!.n, `${id}: invoices billed`).toBe(0);
+    const row = await scheduleOf(id);
+    expect(row, id).not.toBeNull();
+    expect(row.deletedAt, `${id} stays in the trash`).not.toBeNull();
+    expect(row.generatedCount, id).toBe(0);
+  }
+}
+
+const trashRestore = (actor: string, model: string, id: string) => as(actor, agent().post(`${TRASH}/${model}/${id}/restore`)).send({});
+const trashDelete = (actor: string, model: string, id: string) => as(actor, agent().delete(`${TRASH}/${model}/${id}`));
+
+describe('W4-TRASH-D46 (D-46, D46-S09): trash restore and permanent delete of revenue records hold D-46 and revenue:write', () => {
+  it("D46-S09a (D-46): POST trash/recurringInvoice/:id/restore by the non-member SUPER_ADMIN answers 403 'Not authorized to update this invoice'; A is byte-identical and the due schedule never bills on that call", async () => {
+    const rec = await makeTrashedSchedule('s09a', true);
+    const before = await stateOf(ID.bizA);
+    const jobsBefore = auditJobs.length;
+    const res = await trashRestore(ID.saNon, 'recurringInvoice', rec);
+    // RED-BEFORE: 201 and the row back {status ACTIVE, deletedAt null}, billed on the next run.
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.message).toBe('Not authorized to update this invoice');
+    expect(await stateOf(ID.bizA)).toEqual(before);
+    expect(auditJobs.slice(jobsBefore)).toEqual([]);
+    await expectNeverBilled([rec]);
+  });
+
+  it("D46-S09b (D-46): DELETE trash/recurringInvoice/:id by the non-member SUPER_ADMIN answers 403 'Not authorized to update this invoice'; the schedule is still there and A is byte-identical", async () => {
+    const rec = await makeTrashedSchedule('s09b', true);
+    const before = await stateOf(ID.bizA);
+    const jobsBefore = auditJobs.length;
+    const res = await trashDelete(ID.saNon, 'recurringInvoice', rec);
+    // RED-BEFORE: 200 and the row gone.
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.message).toBe('Not authorized to update this invoice');
+    expect(await stateOf(ID.bizA)).toEqual(before);
+    expect(auditJobs.slice(jobsBefore)).toEqual([]);
+    expect(await scheduleOf(rec)).not.toBeNull();
+  });
+
+  it("D46-S09c (D-46, revenue:write): a revenue:read member of A (USER, STAFF default) gets the guard's 403 'Insufficient permissions' on restore and on permanent delete of a trashed schedule; A is byte-identical and the schedule never bills on their call", async () => {
+    const rec = await makeTrashedSchedule('s09c', true);
+    for (const call of [trashRestore, trashDelete]) {
+      const before = await stateOf(ID.bizA);
+      const res = await call(ID.staffReadA, 'recurringInvoice', rec);
+      // RED-BEFORE: 201 (restored ACTIVE) / 200 (erased).
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: revenue requires write access (you have read)');
+      expect(await stateOf(ID.bizA)).toEqual(before);
+    }
+    await expectNeverBilled([rec]);
+  });
+
+  it("D46-S09d (D-46, A2 rule): a SUPER_ADMIN whose membership in A holds revenue:read (STAFF default) or an explicit revenue:'none' gets the guard's 403 'Insufficient permissions' on restore and on permanent delete; A is byte-identical and the schedule never bills on their call", async () => {
+    const rec = await makeTrashedSchedule('s09d', true);
+    for (const [actor, level] of BELOW_WRITE) {
+      for (const call of [trashRestore, trashDelete]) {
+        const before = await stateOf(ID.bizA);
+        const res = await call(actor, 'recurringInvoice', rec);
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body.message, actor).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+        expect(await stateOf(ID.bizA), actor).toEqual(before);
+      }
+    }
+    await expectNeverBilled([rec]);
+  });
+
+  it("D46-S09e (D-46): the trash's other revenue models: restore and permanent delete of a trashed invoice and quote by the non-member SUPER_ADMIN answer 403 'Not authorized to update this invoice|quote' before any lookup; A is byte-identical", async () => {
+    const inv = await makeInvoice(ID.bizA, 's09e', 'SENT');
+    const quote = await makeQuote(ID.bizA, 's09e');
+    await trashDocument('invoices', inv);
+    await trashDocument('quotes', quote);
+    for (const [model, id, subject] of [['invoice', inv, 'invoice'], ['quote', quote, 'quote']] as const) {
+      for (const call of [trashRestore, trashDelete]) {
+        const before = await stateOf(ID.bizA);
+        const res = await call(ID.saNon, model, id);
+        // RED-BEFORE: 404 'Trashed ... not found' (a lookup ran for the non-member).
+        expect(res.status, `${model}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body.message, model).toBe(`Not authorized to update this ${subject}`);
+        expect(await stateOf(ID.bizA), model).toEqual(before);
+      }
+    }
+  });
+
+  it('D46-S09 control (D-46): owner A and a SUPER_ADMIN that is an ADMIN member of A restore a trashed schedule (201, back in its stored status) and permanently delete another (200, gone)', async () => {
+    for (const actor of [ID.ownerA, ID.saAdminA]) {
+      const tag = actor.slice(P.length);
+      const kept = await makeTrashedSchedule(`s09ok_r_${tag}`, false);
+      const restored = await trashRestore(actor, 'recurringInvoice', kept);
+      expect(restored.status, `${actor}: ${JSON.stringify(restored.body)}`).toBe(201);
+      expect(restored.body).toMatchObject({ restored: true, model: 'recurringInvoice', id: kept });
+      const row = await scheduleOf(kept);
+      expect([row.deletedAt, row.status], actor).toEqual([null, 'ACTIVE']);
+
+      const gone = await makeTrashedSchedule(`s09ok_d_${tag}`, false);
+      const deleted = await trashDelete(actor, 'recurringInvoice', gone);
+      expect(deleted.status, `${actor}: ${JSON.stringify(deleted.body)}`).toBe(200);
+      expect(deleted.body).toEqual({ deleted: true, model: 'recurringInvoice', id: gone });
+      expect(await scheduleOf(gone), actor).toBeNull();
+    }
+  });
+
+  it('D46-S09 control: a non-member USER (owner B on A) is refused by BusinessGuard (403 No access to this business); A is byte-identical', async () => {
+    const rec = await makeTrashedSchedule('s09_ownerB', true);
+    for (const call of [trashRestore, trashDelete]) {
+      const before = await stateOf(ID.bizA);
+      const res = await call(ID.ownerB, 'recurringInvoice', rec);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.message).toBe('No access to this business');
+      expect(await stateOf(ID.bizA)).toEqual(before);
+    }
   });
 });
