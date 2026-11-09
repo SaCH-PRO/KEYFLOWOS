@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -117,6 +117,13 @@ function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undef
   return obj?.payment_status === undefined || obj.payment_status === 'paid';
 }
 
+/**
+ * W3-VOID-PROVIDER-RACE (VN-08; the D-76 `refused:<reason>` mark): the event
+ * type a provider delivery's webhook_events row is kept under when its
+ * payment was not recorded because the invoice is VOID.
+ */
+const INVOICE_VOID_REFUSAL = 'refused:invoice_void';
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -138,9 +145,24 @@ export class PaymentsService {
    * the Payment row and posts the deposit-side ledger entries together;
    * returns the created row so callers can keep their existing logging.
    * Idempotency on (Payment, id, payment_recorded) means replay is safe.
+   *
+   * W3-VOID-PROVIDER-RACE (VN-08; review SEC-V82-1 / CR-B1-1): every provider
+   * settlement door (the Stripe charge / session webhook, the PayPal capture
+   * webhook, the WiPay callback, capturePaypalOrder) records here, so here the
+   * payment takes the invoice row lock (lockInvoice, the lock
+   * InvoiceWorkflowService.transition holds while a void decides) and reads the
+   * status under it. A void that holds the lock is waited for; a payment the
+   * lock finds the invoice VOID for is not written and null is returned (the
+   * caller keeps the event refused and tells the owner: refuseVoidInvoicePayment,
+   * the D-76 pattern). A void that comes after waits for this commit and then
+   * finds the money received (D-14: refund first). The insert's own foreign-key
+   * check (FOR KEY SHARE) was never blocked by the void's FOR NO KEY UPDATE.
    */
   private async createPaymentWithPosting(data: Prisma.PaymentUncheckedCreateInput) {
     return this.prisma.client.$transaction(async (tx) => {
+      await PaymentsService.lockInvoice(tx as unknown as Prisma.TransactionClient, data.invoiceId);
+      const invoice = await tx.invoice.findUnique({ where: { id: data.invoiceId }, select: { status: true } });
+      if (invoice?.status === 'VOID') return null;
       const created = await tx.payment.create({ data });
       if (created.status === 'SUCCESSFUL') {
         await this.revenuePosting.onPaymentRecorded(created.id, {
@@ -149,6 +171,93 @@ export class PaymentsService {
       }
       return created;
     });
+  }
+
+  /**
+   * W3-VOID-PROVIDER-RACE (VN-08), the pattern owner ruling D-76 set for a
+   * WiPay success the invoice cannot take: a provider reported a successful
+   * payment for an invoice that is VOID (voided before the payment arrived, or
+   * while the door waited on its lock). Nothing is recorded as money on it: no
+   * Payment row, no posting, no reconcile, no payment-received event. The
+   * delivery's webhook_events row (the claim its door made: Stripe's or
+   * PayPal's event id, WiPay's transaction id; capturePaypalOrder, which has
+   * none, keeps one under its capture id) is kept, marked
+   * `refused:invoice_void` with the invoice's business, so every redelivery
+   * is a no-op; and the business is told once per payment (a 'payment.refused'
+   * notification) to refund it or record it by hand. Best effort: a failure
+   * here is logged and the refusal stands.
+   */
+  private async refuseVoidInvoicePayment(input: {
+    provider: 'stripe' | 'paypal' | 'wipay';
+    providerPaymentId: string;
+    /** The delivery's own webhook_events id; the payment's id when it has none. */
+    eventId?: string;
+    invoiceId: string;
+    businessId: string;
+    amount: number;
+    currency: string;
+  }): Promise<void> {
+    const label = { stripe: 'Stripe', paypal: 'PayPal', wipay: 'WiPay' }[input.provider];
+    const currency = normalizeCurrency(input.currency) || input.currency;
+    this.logger.error(
+      `${label} payment ${input.providerPaymentId} for invoice ${input.invoiceId} not recorded: the invoice is VOID (VN-08, D-76 pattern)`,
+    );
+    const eventId = input.eventId ?? input.providerPaymentId;
+    try {
+      const kept = await this.prisma.client.webhookEvent.updateMany({
+        where: { provider: input.provider, providerEventId: eventId },
+        data: { eventType: INVOICE_VOID_REFUSAL, businessId: input.businessId },
+      });
+      if (kept.count === 0) {
+        await this.prisma.client.webhookEvent.create({
+          data: { provider: input.provider, providerEventId: eventId, eventType: INVOICE_VOID_REFUSAL, businessId: input.businessId },
+        });
+      }
+    } catch (e: unknown) {
+      // A row another delivery of this payment kept meanwhile (unique provider + event id) is the same refusal.
+      if ((e as { code?: string } | null)?.code !== 'P2002') {
+        this.logger.error(`Refusal of ${label} ${eventId} could not be kept: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    try {
+      // Told once per payment: capturePaypalOrder and PayPal's own capture webhook refuse the same capture.
+      const told = await this.prisma.client.notification.findFirst({
+        where: {
+          businessId: input.businessId,
+          type: 'payment.refused',
+          AND: [
+            { data: { path: ['provider'], equals: input.provider } },
+            { data: { path: ['transactionId'], equals: input.providerPaymentId } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (told) return;
+      await this.prisma.client.notification.create({
+        data: {
+          businessId: input.businessId,
+          type: 'payment.refused',
+          title: `${label} payment not recorded`,
+          body:
+            `${label} reported a successful payment (${input.providerPaymentId}) of ${currency} ${Number(input.amount).toFixed(2)} ` +
+            `for invoice ${input.invoiceId}, which is void, so it was not recorded. Check the payment in your ${label} ` +
+            'account and refund it or record it by hand.',
+          data: {
+            provider: input.provider,
+            transactionId: input.providerPaymentId,
+            payableType: 'invoice',
+            payableId: input.invoiceId,
+            currency,
+            amount: Number(input.amount),
+            reason: 'invoice_void',
+          },
+        },
+      });
+    } catch (e: unknown) {
+      this.logger.error(
+        `Could not notify business ${input.businessId} of refused ${label} payment ${input.providerPaymentId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   /**
@@ -1070,16 +1179,30 @@ export class PaymentsService {
       (typeof obj.latest_charge === 'string' ? obj.latest_charge : null) ||
       null;
 
-    await this.createPaymentWithPosting({
+    const recordedAmount = amount > 0 ? amount : expectedAmount;
+    const created = await this.createPaymentWithPosting({
       provider: 'stripe',
       providerPaymentId,
-      amount: amount > 0 ? amount : expectedAmount,
+      amount: recordedAmount,
       currency,
       status: 'SUCCESSFUL',
       invoiceId,
       businessId: invoice.businessId,
       reference,
     });
+    if (!created) {
+      // VN-08 (D-76 pattern): the invoice is VOID under its lock; the delivery is acked, its event kept refused.
+      await this.refuseVoidInvoicePayment({
+        provider: 'stripe',
+        providerPaymentId,
+        eventId,
+        invoiceId,
+        businessId: invoice.businessId,
+        amount: recordedAmount,
+        currency,
+      });
+      return;
+    }
     // Workflow recomputes the invoice balance from ALL payment rows and
     // decides PARTIALLY_PAID vs PAID. Single source of truth for state.
     await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
@@ -1501,7 +1624,7 @@ export class PaymentsService {
     return this.underProviderEventClaim<WebhookAck>('paypal', event.id, async () => {
       switch (eventType) {
         case 'PAYMENT.CAPTURE.COMPLETED':
-          await this.processPaypalCaptureCompleted(resource);
+          await this.processPaypalCaptureCompleted(resource, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'CHECKOUT.ORDER.COMPLETED':
           // For ORDER.COMPLETED, resource.id is the *order* id, not the
@@ -1509,7 +1632,7 @@ export class PaymentsService {
           // Persist a Payment row per capture so refund linkage (which keys on
           // capture id) keeps working, and idempotency stays intact even if
           // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
-          await this.processPaypalOrderCompleted(resource);
+          await this.processPaypalOrderCompleted(resource, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'PAYMENT.CAPTURE.REFUNDED':
         case 'PAYMENT.CAPTURE.REVERSED':
@@ -1550,7 +1673,7 @@ export class PaymentsService {
    * resource.id is the order id (not a capture id), so persisting it
    * directly would create a row that refund events cannot link to.
    */
-  private async processPaypalOrderCompleted(resource: any): Promise<void> {
+  private async processPaypalOrderCompleted(resource: any, eventId?: string): Promise<void> {
     const orderId: string | undefined = resource?.id;
     const purchaseUnits: any[] = Array.isArray(resource?.purchase_units) ? resource.purchase_units : [];
     const captures: any[] = [];
@@ -1574,7 +1697,7 @@ export class PaymentsService {
       return;
     }
     for (const cap of captures) {
-      await this.processPaypalCaptureCompleted(cap);
+      await this.processPaypalCaptureCompleted(cap, eventId);
     }
   }
 
@@ -1608,7 +1731,7 @@ export class PaymentsService {
     return null;
   }
 
-  private async processPaypalCaptureCompleted(resource: any): Promise<void> {
+  private async processPaypalCaptureCompleted(resource: any, eventId?: string): Promise<void> {
     const captureId: string | undefined = resource?.id;
     if (!captureId) {
       this.logger.warn('PayPal capture completed event missing capture id');
@@ -1652,7 +1775,7 @@ export class PaymentsService {
     const amount = Number(resource?.amount?.value ?? invoice.total);
     const currency = (resource?.amount?.currency_code || invoice.currency || 'USD').toUpperCase();
 
-    await this.createPaymentWithPosting({
+    const created = await this.createPaymentWithPosting({
       provider: 'paypal',
       providerPaymentId: captureId,
       amount,
@@ -1662,6 +1785,19 @@ export class PaymentsService {
       businessId: invoice.businessId,
       reference: resource?.supplementary_data?.related_ids?.order_id ?? null,
     });
+    if (!created) {
+      // VN-08 (D-76 pattern): the invoice is VOID under its lock; the delivery is acked, its event kept refused.
+      await this.refuseVoidInvoicePayment({
+        provider: 'paypal',
+        providerPaymentId: captureId,
+        eventId,
+        invoiceId: invoice.id,
+        businessId: invoice.businessId,
+        amount,
+        currency,
+      });
+      return;
+    }
 
     await this.invoiceWorkflow.reconcileFromPayments(invoice.id).catch((e) => {
       this.logger.warn(`PayPal reconcile failed for invoice ${invoice.id}: ${e instanceof Error ? e.message : e}`);
@@ -2091,6 +2227,15 @@ export class PaymentsService {
       });
     }
 
+    // W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern): a verified success for a
+    // VOID invoice is not recorded as money on it. Refused before the claim (as
+    // D-76's currency refusal), so a repeat callback is refused the same way
+    // rather than answered 'Duplicate callback ignored'; a transaction already
+    // recorded before the void is left to the duplicate answer below.
+    if (invoice?.status === 'VOID' && !(await this.paymentRecorded(transaction_id))) {
+      return this.refuseWipayForVoidInvoice(invoice, transaction_id!, requestedTotal);
+    }
+
     // Provider-event-id idempotency. WiPay's transaction_id (verified above)
     // identifies a callback delivery; re-deliveries become no-ops.
     const wipayEventId = transaction_id!;
@@ -2135,7 +2280,7 @@ export class PaymentsService {
 
       if (!existingPayment) {
         // V1-05: the requested total the verified hash binds, never the callback's `total`.
-        await this.createPaymentWithPosting({
+        const created = await this.createPaymentWithPosting({
           provider: 'wipay',
           providerPaymentId: wipayEventId,
           amount: requestedTotal,
@@ -2144,6 +2289,8 @@ export class PaymentsService {
           invoiceId: order_id,
           businessId: invoice!.businessId,
         });
+        // VN-08: voided while this callback waited on the invoice lock; its claim is kept, marked refused.
+        if (!created) return this.refuseWipayForVoidInvoice(invoice!, wipayEventId, requestedTotal);
 
         await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
           this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
@@ -2227,6 +2374,28 @@ export class PaymentsService {
       invoiceId: input.payableId,
       message: `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only: this ${input.payableType} is in ${currency}, so the payment was not recorded`,
     };
+  }
+
+  /**
+   * W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern): a verified WiPay success
+   * for a VOID invoice records no money; its transaction is kept refused, the
+   * owner is told once (refuseVoidInvoicePayment) and the payer is answered
+   * { success: false }.
+   */
+  private async refuseWipayForVoidInvoice(
+    invoice: { id: string; businessId: string; currency: string },
+    transactionId: string,
+    total: number,
+  ): Promise<{ success: boolean; invoiceId?: string; message: string }> {
+    await this.refuseVoidInvoicePayment({
+      provider: 'wipay',
+      providerPaymentId: transactionId,
+      invoiceId: invoice.id,
+      businessId: invoice.businessId,
+      amount: total,
+      currency: invoice.currency,
+    });
+    return { success: false, invoiceId: invoice.id, message: 'This invoice is void, so the payment was not recorded' };
   }
 
   async getPaypalClientToken(): Promise<{ clientToken: string }> {
@@ -2561,10 +2730,11 @@ export class PaymentsService {
       // abort (P2028 behind a lock, P2034 a deadlock) is retried; when the
       // retries are spent the capture is left to that delivery, whose claim a
       // failure releases, so PayPal's redelivery records it (V1-15c).
-      let recorded: 'here' | 'elsewhere' | 'not' = 'not';
+      // W3-VOID-PROVIDER-RACE (VN-08): 'refused' when the invoice was voided while PayPal captured.
+      let recorded: 'here' | 'elsewhere' | 'refused' | 'not' = 'not';
       for (let attempt = 1; recorded === 'not'; attempt += 1) {
         try {
-          await this.createPaymentWithPosting({
+          const created = await this.createPaymentWithPosting({
             provider: 'paypal',
             providerPaymentId: captureId,
             amount: invoice.total,
@@ -2573,7 +2743,7 @@ export class PaymentsService {
             invoiceId,
             businessId: invoice.businessId,
           });
-          recorded = 'here';
+          recorded = created ? 'here' : 'refused';
         } catch (e: unknown) {
           if (await this.paymentRecorded(captureId).catch(() => false)) {
             recorded = 'elsewhere';
@@ -2587,6 +2757,21 @@ export class PaymentsService {
           );
           break;
         }
+      }
+
+      if (recorded === 'refused') {
+        // VN-08 (D-76 pattern): PayPal took the money but the invoice is VOID; nothing is recorded on it.
+        await this.refuseVoidInvoicePayment({
+          provider: 'paypal',
+          providerPaymentId: captureId,
+          invoiceId,
+          businessId: invoice.businessId,
+          amount: Number(invoice.total),
+          currency: invoice.currency,
+        });
+        throw new ConflictException(
+          'This invoice was voided while PayPal took the payment, so it was not recorded; the business has been told to refund it or record it by hand',
+        );
       }
 
       if (recorded !== 'not') {
