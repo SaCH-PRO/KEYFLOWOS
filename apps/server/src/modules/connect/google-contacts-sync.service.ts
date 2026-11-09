@@ -1,8 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@keyflow/db';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, type Contact } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../crm/crm.constants';
 import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import { CrmService } from '../crm/crm.service';
+import { ContactAuditService, type ContactAuditActor } from '../crm/privacy/contact-audit.service';
 import { GoogleTokenHelper } from './google-token.helper';
 
 interface PeopleConnection {
@@ -114,6 +117,86 @@ export async function memberDefaultOwnerId(
 }
 
 /**
+ * W6-CONNECT-TAG-MERGE (W5-D92-RESIDUALS review SEC-D92R-2; owner ruling
+ * D-93): the key, in a contact-sync connector_status row's metadata, of the
+ * member who last saved its rules (the configuring member). Only the server
+ * writes it (saveMappingRules), beside mappingRules, which a client's body is
+ * spread into, so a client cannot name it.
+ */
+export const RULES_CONFIGURED_BY = 'rulesConfiguredBy';
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member a connector configuration save
+ * records as its configuring member: the member the caller names (the contact
+ * sync rules routes pass their caller), else the member the TenantInterceptor
+ * bound to this request for this business (the connector form mapping route
+ * does not pass its caller; read as CrmDealsService reads it, V1-89), else
+ * none.
+ */
+export function configuringMember(businessId: string, actorUserId?: string | null): string | null {
+  if (actorUserId) return actorUserId;
+  const ctx = getTenantContext();
+  return ctx?.userId && ctx.businessId === businessId ? ctx.userId : null;
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93): the member a contact sync or a
+ * connector form backfill writes existing contacts as, and records as the
+ * actor of every contact it writes: the configuring member its configuration
+ * records, whoever runs it; else, for a configuration no member saved since
+ * W6 (saved before, or never saved), the business owner, read when it runs
+ * (D-93: a system-run job runs with the business owner as its member). A
+ * recorded member who has since left the business opens no contact
+ * (resolveCrmAccess refuses a non-member), so such a run writes no existing
+ * contact. Null only for a business that does not exist.
+ */
+export async function syncActingMember(
+  prisma: PrismaService,
+  businessId: string,
+  configuredBy: unknown,
+): Promise<string | null> {
+  if (typeof configuredBy === 'string' && configuredBy) return configuredBy;
+  const business = await prisma.client.business.findUnique({
+    where: { id: businessId },
+    select: { ownerId: true },
+  });
+  return business?.ownerId ?? null;
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2): the existing contact a sync may write as
+ * `actor`, read through the CRM's own edit check (CrmService.assertCanEditContact,
+ * the check PATCH contacts/:contactId and the enrichment route make): a live
+ * contact of this business, which a member who is not the owner may write only
+ * when they can open it (the GET detail visibility clause) and their edit scope
+ * reaches it. Null when they may not, or when there is no acting member: the
+ * sync then leaves the contact exactly as it is and reports it skipped. A sync
+ * wrote every contact it matched before, the owner's PRIVATE ones and trashed
+ * ones included, and recorded no actor.
+ */
+export async function contactWritableBy(
+  prisma: PrismaService,
+  crm: CrmService,
+  businessId: string,
+  contactId: string,
+  actor: string | null,
+): Promise<Contact | null> {
+  if (!actor) return null;
+  try {
+    const { reachableWhere } = await crm.assertCanEditContact(businessId, contactId, actor);
+    return await prisma.client.contact.findFirst({ where: reachableWhere });
+  } catch (err) {
+    if (err instanceof NotFoundException || err instanceof ForbiddenException) return null;
+    throw err;
+  }
+}
+
+/** W6-CONNECT-TAG-MERGE: the ContactAuditEntry actor of a contact a sync writes (SYSTEM only with no acting member). */
+export function syncAuditActor(actor: string | null): ContactAuditActor {
+  return actor ? { type: 'USER', id: actor } : { type: 'SYSTEM' };
+}
+
+/**
  * D-92 (W5-D92-RESIDUALS): a rule is read, and so applied, through
  * canonicalContactStatus, because a rule stored before D-92 may hold any value:
  * a legacy DORMANT or CUSTOMER reads as CLIENT, and a value with no
@@ -140,7 +223,11 @@ export class GoogleContactsSyncService {
   private readonly logger = new Logger(GoogleContactsSyncService.name);
   private readonly tokens: GoogleTokenHelper;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ContactAuditService) private readonly audit: ContactAuditService,
+  ) {
     this.tokens = new GoogleTokenHelper(prisma);
   }
 
@@ -173,6 +260,15 @@ export class GoogleContactsSyncService {
     return parseRules(meta.mappingRules);
   }
 
+  /** W6-CONNECT-TAG-MERGE: the configuring member the stored rules record (saveMappingRules), or none. */
+  private async rulesConfiguredBy(businessId: string): Promise<unknown> {
+    const row = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      select: { metadata: true },
+    });
+    return ((row?.metadata ?? {}) as Record<string, unknown>)[RULES_CONFIGURED_BY];
+  }
+
   /** Persist mapping rules on the connector_status row metadata. */
   async saveMappingRules(
     businessId: string,
@@ -201,7 +297,10 @@ export class GoogleContactsSyncService {
       select: { metadata: true },
     });
     const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const merged = { ...meta, mappingRules: next };
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
+    // member a sync writes existing contacts as, whoever runs it.
+    const configuredBy = configuringMember(businessId, actorUserId);
+    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
       create: {
@@ -294,11 +393,12 @@ export class GoogleContactsSyncService {
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }
 
+  /** The new contact with the rule's defaults applied, or null when none applied. */
   private async applyDefaultsToNewContact(
     businessId: string,
     contactId: string,
     rules: ContactMappingRules,
-  ) {
+  ): Promise<Contact | null> {
     const data: Prisma.ContactUpdateInput = {};
     if (rules.defaultTags.length > 0) {
       data.tags = { set: rules.defaultTags };
@@ -308,10 +408,13 @@ export class GoogleContactsSyncService {
     if (defaultStatus) data.status = defaultStatus;
     if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
     if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
-    if (Object.keys(data).length === 0) return;
-    await this.prisma.client.contact
+    if (Object.keys(data).length === 0) return null;
+    return this.prisma.client.contact
       .update({ where: { id: contactId }, data })
-      .catch((e) => this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`));
+      .catch((e) => {
+        this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`);
+        return null;
+      });
   }
 
   /**
@@ -363,6 +466,9 @@ export class GoogleContactsSyncService {
       !!rules.defaultStatus ||
       !!rules.defaultOwnerId ||
       !!rules.defaultLifecycleStage;
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93): the member this sync writes
+    // existing contacts as and records on every contact it writes.
+    const actor = await syncActingMember(this.prisma, businessId, await this.rulesConfiguredBy(businessId));
 
     let imported = 0;
     let updated = 0;
@@ -438,6 +544,7 @@ export class GoogleContactsSyncService {
 
         let contactId = mapping?.contactId;
         let isNew = false;
+        let createdRow: Contact | null = null;
         if (!contactId) {
           const existing = await this.prisma.client.contact.findFirst({
             where: {
@@ -453,7 +560,15 @@ export class GoogleContactsSyncService {
         }
 
         if (contactId) {
-          await this.prisma.client.contact.update({
+          // W6-CONNECT-TAG-MERGE (SEC-D92R-2): an existing contact is written
+          // only as the acting member may write it; one they cannot open or
+          // edit is left as it is (not linked either) and reported skipped.
+          const before = await contactWritableBy(this.prisma, this.crm, businessId, contactId, actor);
+          if (!before) {
+            skipped += 1;
+            continue;
+          }
+          const after = await this.prisma.client.contact.update({
             where: { id: contactId },
             data: {
               firstName: firstName ?? undefined,
@@ -466,6 +581,15 @@ export class GoogleContactsSyncService {
             },
           });
           updated += 1;
+          await this.audit.write({
+            businessId,
+            contactId,
+            action: 'updated',
+            before,
+            after,
+            actor: syncAuditActor(actor),
+            reason: 'google_contacts sync',
+          });
         } else {
           const created = await this.prisma.client.contact.create({
             data: {
@@ -484,6 +608,7 @@ export class GoogleContactsSyncService {
           contactId = created.id;
           imported += 1;
           isNew = true;
+          createdRow = created;
         }
 
         if (!mapping) {
@@ -506,8 +631,17 @@ export class GoogleContactsSyncService {
             .catch(() => undefined);
         }
 
-        if (isNew && hasRules && contactId) {
-          await this.applyDefaultsToNewContact(businessId, contactId, rules);
+        if (isNew && contactId) {
+          const withDefaults = hasRules ? await this.applyDefaultsToNewContact(businessId, contactId, rules) : null;
+          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
+          await this.audit.write({
+            businessId,
+            contactId,
+            action: 'created',
+            after: withDefaults ?? createdRow,
+            actor: syncAuditActor(actor),
+            reason: 'google_contacts sync',
+          });
         }
       }
 

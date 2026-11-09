@@ -178,6 +178,21 @@ const crm = {
     crmCreated.push(input);
     return db.contact.insert({ ...input, status: input.status ?? 'LEAD', tags: input.tags ?? [], deletedAt: null });
   }),
+  /**
+   * W6-CONNECT-TAG-MERGE (SEC-D92R-2): CrmService.bulkUpdateContacts' tag merge,
+   * which the connector form backfill now merges a linked contact's tags
+   * through, as it runs for the business owner (the acting member of a mapping
+   * that records no configuring member, D-93): live contacts of the business
+   * only. The member checks are the real service's, proven against the
+   * database in test/connect-sync-actor.integration.test.ts.
+   */
+  bulkUpdateContacts: vi.fn(async (input: Row) => {
+    const rows = db.contact.rows.filter(
+      (r) => r.businessId === input.businessId && !r.deletedAt && input.contactIds.includes(r.id),
+    );
+    for (const row of rows) row.tags = Array.from(new Set([...(row.tags ?? []), ...(input.addTags ?? [])]));
+    return { updated: rows.length };
+  }),
 };
 
 const formResponses: Row[] = [];
@@ -185,8 +200,11 @@ const googleForms = {
   listResponses: vi.fn(async () => ({ responses: formResponses })),
 };
 
-const google = new GoogleContactsSyncService(prisma as any);
-const outlook = new OutlookContactsSyncService(prisma as any);
+/** W6-CONNECT-TAG-MERGE: the ContactAuditEntry writer the syncs record their actor with (a recorder here). */
+const contactAudit = { write: vi.fn(async () => undefined) };
+
+const google = new GoogleContactsSyncService(prisma as any, crm as any, contactAudit as any);
+const outlook = new OutlookContactsSyncService(prisma as any, crm as any, contactAudit as any);
 const connectorForms = new ConnectorFormMappingService(prisma as any, crm as any);
 const formsMapping = new GoogleFormsMappingService(prisma as any, googleForms as any, crm as any);
 // The token helpers read and refresh OAuth tokens on the business row; the
@@ -503,7 +521,9 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       for (const [legacy, stored] of LEGACY) {
         resetDb();
         const businessId = 'biz-form-apply';
-        db.business.insert({ id: businessId });
+        // Business.ownerId (required): W6-CONNECT-TAG-MERGE (D-93), a mapping
+        // that records no configuring member runs as the business owner.
+        db.business.insert({ id: businessId, ownerId: 'u-owner' });
         const form = db.leadForm.insert({ businessId, name: 'Intake', embedCode: 'typeform:form-ext', deletedAt: null });
         db.connectorStatus.insert({
           businessId,
@@ -533,7 +553,7 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
 
     it('SEC-D92R-2: a backfill never writes the status of a contact a submission is already linked to (an external adapter never overwrites an existing contact\'s status), and leaves a trashed contact or another business\'s contact untouched', async () => {
       const businessId = 'biz-form-linked';
-      db.business.insert({ id: businessId });
+      db.business.insert({ id: businessId, ownerId: 'u-owner' }); // the acting member (D-93), as above
       const form = db.leadForm.insert({ businessId, name: 'Intake', embedCode: 'typeform:form-ext', deletedAt: null });
       await agent().post(mappingUrl(businessId)).send({ fieldMappings, defaultStatus: 'LOST', defaultTags: ['web'] }).expect(201);
       const live = db.contact.insert({ businessId, status: 'CLIENT', tags: ['old'], deletedAt: null });

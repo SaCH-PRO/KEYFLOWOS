@@ -1,11 +1,18 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
+import { CrmService } from '../crm/crm.service';
+import { ContactAuditService } from '../crm/privacy/contact-audit.service';
 import {
+  RULES_CONFIGURED_BY,
+  configuringMember,
+  contactWritableBy,
   memberDefaultOwnerId,
   settingDefaultContactStatus,
   settingDefaultOwnerId,
+  syncActingMember,
+  syncAuditActor,
 } from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
 
@@ -65,7 +72,11 @@ export class OutlookContactsSyncService {
   private readonly logger = new Logger(OutlookContactsSyncService.name);
   private readonly tokens: MicrosoftTokenHelper;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ContactAuditService) private readonly audit: ContactAuditService,
+  ) {
     this.tokens = new MicrosoftTokenHelper(prisma);
   }
 
@@ -87,6 +98,15 @@ export class OutlookContactsSyncService {
     });
     const meta = (row?.metadata ?? {}) as Record<string, unknown>;
     return parseRules(meta.mappingRules);
+  }
+
+  /** W6-CONNECT-TAG-MERGE: the configuring member the stored rules record (saveMappingRules), or none. */
+  private async rulesConfiguredBy(businessId: string): Promise<unknown> {
+    const row = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
+      select: { metadata: true },
+    });
+    return ((row?.metadata ?? {}) as Record<string, unknown>)[RULES_CONFIGURED_BY];
   }
 
   async saveMappingRules(
@@ -116,7 +136,10 @@ export class OutlookContactsSyncService {
       select: { metadata: true },
     });
     const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const merged = { ...meta, mappingRules: next };
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
+    // member a sync writes existing contacts as, whoever runs it (as on Google).
+    const configuredBy = configuringMember(businessId, actorUserId);
+    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
       create: {
@@ -229,6 +252,9 @@ export class OutlookContactsSyncService {
       !!rules.defaultStatus ||
       !!rules.defaultOwnerId ||
       !!rules.defaultLifecycleStage;
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93): the member this sync writes
+    // existing contacts as and records on every contact it writes.
+    const actor = await syncActingMember(this.prisma, businessId, await this.rulesConfiguredBy(businessId));
 
     let imported = 0;
     let updated = 0;
@@ -274,9 +300,28 @@ export class OutlookContactsSyncService {
             },
           });
           if (map) {
-            await this.prisma.client.contact
+            // W6-CONNECT-TAG-MERGE (SEC-D92R-2): a tombstone deletes the linked
+            // contact only as the acting member may write it; one they cannot
+            // open or edit is left as it is (and stays linked), reported skipped.
+            const before = await contactWritableBy(this.prisma, this.crm, businessId, map.contactId, actor);
+            if (!before) {
+              skipped += 1;
+              continue;
+            }
+            const removed = await this.prisma.client.contact
               .update({ where: { id: map.contactId }, data: { deletedAt: new Date() } })
               .catch(() => undefined);
+            if (removed) {
+              await this.audit.write({
+                businessId,
+                contactId: map.contactId,
+                action: 'deleted',
+                before: { deletedAt: before.deletedAt },
+                after: { deletedAt: removed.deletedAt },
+                actor: syncAuditActor(actor),
+                reason: 'outlook_contacts sync',
+              });
+            }
             await this.prisma.client.contactExternalMapping
               .delete({ where: { id: map.id } })
               .catch(() => undefined);
@@ -334,18 +379,22 @@ export class OutlookContactsSyncService {
         }
 
         if (contactId) {
+          // W6-CONNECT-TAG-MERGE (SEC-D92R-2): an existing contact is written
+          // only as the acting member may write it; one they cannot open or
+          // edit is left as it is (not linked either) and reported skipped.
+          const local = await contactWritableBy(this.prisma, this.crm, businessId, contactId, actor);
+          if (!local) {
+            skipped += 1;
+            continue;
+          }
           // Most-recent-write-wins: only overwrite if Graph's lastModifiedDateTime
           // is newer than our updatedAt.
-          const local = await this.prisma.client.contact.findUnique({
-            where: { id: contactId },
-            select: { updatedAt: true },
-          });
           const remoteTime = c.lastModifiedDateTime
             ? new Date(c.lastModifiedDateTime).getTime()
             : Date.now();
-          const localTime = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+          const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
           if (remoteTime >= localTime) {
-            await this.prisma.client.contact.update({
+            const after = await this.prisma.client.contact.update({
               where: { id: contactId },
               data: {
                 firstName: firstName ?? undefined,
@@ -359,6 +408,15 @@ export class OutlookContactsSyncService {
               },
             });
             updated += 1;
+            await this.audit.write({
+              businessId,
+              contactId,
+              action: 'updated',
+              before: local,
+              after,
+              actor: syncAuditActor(actor),
+              reason: 'outlook_contacts sync',
+            });
             await this.prisma.client.contactSyncAudit
               .create({
                 data: {
@@ -409,6 +467,15 @@ export class OutlookContactsSyncService {
           });
           contactId = created.id;
           imported += 1;
+          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
+          await this.audit.write({
+            businessId,
+            contactId,
+            action: 'created',
+            after: created,
+            actor: syncAuditActor(actor),
+            reason: 'outlook_contacts sync',
+          });
           await this.prisma.client.contactSyncAudit
             .create({
               data: {
