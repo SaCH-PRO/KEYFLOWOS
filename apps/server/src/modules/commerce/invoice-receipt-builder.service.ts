@@ -1,6 +1,13 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { balanceOfStoredRows, isShareableInvoiceStatus, type BalanceSummary } from './invoice-workflow.service';
+import {
+  appliedCreditsOf,
+  balanceOfStoredRows,
+  creditAwareBalance,
+  isCreditAwareShareableInvoiceStatus,
+  type BalanceSummary,
+} from './invoice-workflow.service';
 
 /** The invoice fields a receipt email's figures come from (full Payment rows carry businessId). */
 export interface ReceiptBalanceSource {
@@ -104,6 +111,16 @@ export class InvoiceReceiptBuilderService {
    * full refund returns the invoice to SENT, D-14). With a positive net,
    * amountDue stays below the total. A DRAFT, VOID, PENDING, FAILED, soft-deleted or
    * other-tenant invoice answers the same 404 as an unknown token. Read-only.
+   *
+   * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-75, D-78): the
+   * credit-aware shareable statuses (isCreditAwareShareableInvoiceStatus), so
+   * a PARTIALLY_CREDITED invoice with money received has a receipt, which it
+   * keeps once its remainder is paid (D-78: it stays PARTIALLY_CREDITED).
+   * amountDue is the remaining net of the invoice's own APPLIED credit notes
+   * (creditAwareBalance over appliedCreditsOf), the figure the token view and
+   * the status poll state, and a credited invoice's receipt lists `credited`,
+   * the notes netted, so total, received, credited and due add up. An invoice
+   * with nothing credited keeps its keys. FULLY_CREDITED answers 404.
    */
   async buildPublicReceipt(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -121,8 +138,13 @@ export class InvoiceReceiptBuilderService {
         business: { select: { name: true, logoUrl: true, primaryColor: true, email: true, phone: true } },
       },
     });
-    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Receipt not found');
-    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    if (!invoice || !isCreditAwareShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Receipt not found');
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+      id: invoiceId,
+      businessId,
+      status: invoice.status,
+    });
+    const balance = creditAwareBalance(balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency), credited);
     if (balance.net <= 0) {
       // "Nothing received" would be false after a refund, so that case gets a neutral message.
       throw new ConflictException(
@@ -135,6 +157,7 @@ export class InvoiceReceiptBuilderService {
       currency: invoice.currency,
       total: invoice.total,
       amountPaid: balance.net,
+      ...(balance.credited > 0 ? { credited: balance.credited } : {}),
       amountDue: balance.remaining,
       paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
       issuedAt: invoice.issueDate,

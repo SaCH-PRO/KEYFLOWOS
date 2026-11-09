@@ -47,6 +47,7 @@ import {
   getPayLinkGateways,
   getPayLinkStatus,
   type PayLinkCheckoutBody,
+  type PayLinkStatus,
 } from "@/lib/client";
 import { PublicPageState } from "@/components/ui/public-page-state";
 import {
@@ -113,6 +114,8 @@ type Invoice = {
   paidAt: string | null;
   /** From the public projection (computeBalance): what is still owed. */
   remaining?: number;
+  /** From the public projection: the money received, net of refunds. */
+  paid?: number;
   contact?: {
     firstName: string | null;
     lastName: string | null;
@@ -133,6 +136,23 @@ type Gateway = {
   name: string;
   currencies: string[];
 };
+
+/**
+ * W5-CREDIT-AWARE-PAY (W4-CREDIT-AWARE-READERS review CR-AR-2; D-78): whether nothing is owed. PAID, or
+ * a PARTIALLY_CREDITED invoice whose remainder (the server's figure, net of its APPLIED credit notes) is
+ * paid: paying what a credit leaves owing keeps it PARTIALLY_CREDITED, never PAID.
+ */
+function isSettled(inv: { status?: string; remaining?: number } | null | undefined): boolean {
+  if (!inv) return false;
+  if (inv.status === "PAID") return true;
+  return inv.status === "PARTIALLY_CREDITED" && typeof inv.remaining === "number" && inv.remaining <= 0;
+}
+
+/** W5-CREDIT-AWARE-PAY: the token status poll's `credited` (present only for a credited invoice). */
+function creditedOf(poll: PayLinkStatus | undefined | null): number | null {
+  const figure = (poll as (PayLinkStatus & { credited?: unknown }) | undefined | null)?.credited;
+  return typeof figure === "number" ? figure : null;
+}
 
 type PaymentMethod = "wipay" | "paypal" | "stripe" | "google_pay" | "bank_transfer" | "cash";
 
@@ -264,6 +284,8 @@ function TokenPaymentPageInner() {
   const [step, setStep] = useState<"review" | "gateway" | "processing">("review");
   const [showConfetti, setShowConfetti] = useState(false);
   const [offlineConfirmed, setOfflineConfirmed] = useState(false);
+  // W5-CREDIT-AWARE-PAY (CR-AR-2): the server's credited figure for a part-credited invoice; null otherwise.
+  const [credited, setCredited] = useState<number | null>(null);
 
   const [googlePayAvailable, setGooglePayAvailable] = useState(false);
 
@@ -288,7 +310,9 @@ function TokenPaymentPageInner() {
       const poll = async (attempt = 0) => {
         const res = await getPayLinkStatus(token);
         if (cancelled) return;
-        if (res.data?.status === "PAID") {
+        // W5-CREDIT-AWARE-PAY (D-78): a part-credited invoice is settled at remaining 0, never PAID.
+        if (isSettled(res.data)) {
+          if (creditedOf(res.data) !== null) setCredited(creditedOf(res.data));
           const fresh = await apiGet<Invoice>(payPath);
           if (cancelled) return;
           if (fresh.data) setInvoice(fresh.data);
@@ -379,8 +403,13 @@ function TokenPaymentPageInner() {
       const gatewayRes = await getPayLinkGateways(token);
 
       setInvoice(loaded);
-      if (loaded.status === "PAID") {
+      if (isSettled(loaded)) {
         setPaid(true);
+      }
+      // W5-CREDIT-AWARE-PAY (CR-AR-2): a part-credited invoice shows the server's credited figure.
+      if (loaded.status === "PARTIALLY_CREDITED") {
+        const poll = await getPayLinkStatus(token);
+        if (creditedOf(poll.data) !== null) setCredited(creditedOf(poll.data));
       }
 
       if (gatewayRes.data) {
@@ -429,7 +458,8 @@ function TokenPaymentPageInner() {
     setPaying(true);
     setStep("processing");
 
-    const invTotal = String(invoice.total ?? 0);
+    // W5-CREDIT-AWARE-PAY: what is still owed (net of payments and credit notes), not the total.
+    const invTotal = String(typeof invoice.remaining === "number" ? invoice.remaining : invoice.total ?? 0);
     const invCurrency = invoice.currency ?? "TTD";
 
     try {
@@ -601,7 +631,7 @@ function TokenPaymentPageInner() {
         const fresh = await apiGet<Invoice>(payPath);
         if (fresh.data) {
           setInvoice(fresh.data);
-          if (fresh.data.status === "PAID") {
+          if (isSettled(fresh.data)) {
             setPaid(true);
             return;
           }
@@ -782,11 +812,24 @@ function TokenPaymentPageInner() {
                   {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                 </span>
               </div>
+              {/* W5-CREDIT-AWARE-PAY (CR-AR-2, D-78): a settled part-credited invoice states its credit, and
+                  what was paid is the server's received figure, not the total. */}
+              {credited !== null && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Credited</span>
+                  <span className="font-medium text-emerald-400" data-testid="pay-link-credited">
+                    {formatPrice(credited, currency)}
+                  </span>
+                </div>
+              )}
               <div className="border-t border-white/[0.08] pt-3 mt-3">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400 text-sm">Total Paid</span>
-                  <span className="text-xl font-bold" style={{ color: primaryColor }}>
-                    {formatPrice(total, currency)}
+                  <span className="text-xl font-bold" style={{ color: primaryColor }} data-testid="pay-link-total-paid">
+                    {formatPrice(
+                      invoice.status === "PARTIALLY_CREDITED" && typeof invoice.paid === "number" ? invoice.paid : total,
+                      currency,
+                    )}
                   </span>
                 </div>
               </div>
@@ -916,8 +959,8 @@ function TokenPaymentPageInner() {
               <span
                 className="text-xs font-medium px-2.5 py-1 rounded-full"
                 style={{
-                  backgroundColor: invoice?.status === "PAID" ? "#10B98120" : `${primaryColor}20`,
-                  color: invoice?.status === "PAID" ? "#10B981" : primaryColor,
+                  backgroundColor: isSettled(invoice) ? "#10B98120" : `${primaryColor}20`,
+                  color: isSettled(invoice) ? "#10B981" : primaryColor,
                 }}
               >
                 {invoice?.status || "PENDING"}
@@ -1007,6 +1050,21 @@ function TokenPaymentPageInner() {
                   {formatPrice(total, currency)}
                 </span>
               </div>
+              {/* W5-CREDIT-AWARE-PAY (CR-AR-2): a part-credited invoice states its credit and what it still owes. */}
+              {invoice?.status === "PARTIALLY_CREDITED" && (
+                <>
+                  {credited !== null && (
+                    <div className="flex justify-between text-sm text-emerald-400">
+                      <span>Credited</span>
+                      <span data-testid="pay-link-credited">-{formatPrice(credited, currency)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-semibold">
+                    <span>Amount due</span>
+                    <span data-testid="pay-link-amount-due">{formatPrice(amountDue, currency)}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {invoice?.notes && (
@@ -1018,7 +1076,7 @@ function TokenPaymentPageInner() {
           </div>
         </div>
 
-        {!paid && invoice?.status !== "PAID" && (
+        {!paid && !isSettled(invoice) && (
           <div className={`${glassCard} overflow-hidden`}>
             <div className="p-6 space-y-5">
               <div className="flex items-center gap-2">
@@ -1319,13 +1377,14 @@ function TokenPaymentPageInner() {
                           <svg viewBox="0 0 24 24" className="w-4 h-4 mr-2" fill="none">
                             <path d="M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.345-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z" fill="white"/>
                           </svg>
-                          Pay {formatPrice(total, currency)} with Google Pay
+                          Pay {formatPrice(amountDue, currency)} with Google Pay
                           <ArrowRight className="w-4 h-4 ml-2" />
                         </>
                       ) : selectedMethod === "wipay" || selectedMethod === "paypal" || selectedMethod === "stripe" ? (
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
-                          Pay {formatPrice(total, currency)}
+                          {/* W5-CREDIT-AWARE-PAY: every provider checkout asks for the remainder, not the total. */}
+                          Pay {formatPrice(amountDue, currency)}
                           <ArrowRight className="w-4 h-4 ml-2" />
                         </>
                       ) : (

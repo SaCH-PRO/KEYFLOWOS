@@ -247,3 +247,77 @@ describe("the receipt button follows the received amount, not the status (V1-49 
     expect(await screen.findByTestId("public-invoice-receipt-button")).toBeInTheDocument();
   });
 });
+
+/**
+ * W5-CREDIT-AWARE-PAY (W4-CREDIT-AWARE-READERS review CR-AR-2, web half; D-78): a PARTIALLY_CREDITED
+ * invoice stays PARTIALLY_CREDITED once its remainder is paid, so "settled" is not status === 'PAID'.
+ * The credited figure is the server's: the token status poll states it (`credited`, net of the
+ * invoice's own APPLIED credit notes), and the receipt carries it too; the page does no arithmetic.
+ */
+function stubCreditedReads(view: unknown, poll: unknown, receiptBody?: unknown) {
+  const requested: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(url, "http://localhost");
+      requested.push(pathname);
+      if (pathname.endsWith(`/payments/public/invoice-link/${TOKEN}/status`)) return jsonResponse(200, poll);
+      if (pathname.endsWith(`/commerce/public/invoice-link/${TOKEN}/receipt`) && receiptBody) return jsonResponse(200, receiptBody);
+      if (pathname.endsWith(`/commerce/public/invoice-link/${TOKEN}`)) return jsonResponse(200, view);
+      return jsonResponse(404, { message: "Not Found" }, "Not Found");
+    }),
+  );
+  return requested;
+}
+
+describe("W5-CREDIT-AWARE-PAY CR-AR-2 (D-78): a part-credited invoice", () => {
+  it("W-10 W5-CREDIT-AWARE-PAY CR-AR-2: a settled PARTIALLY_CREDITED invoice (70 paid, 30 credited, 0 due) reads as paid: no Pay button, the settled message, the server's Credited figure beside Paid and Remaining, and its receipt states the credit", async () => {
+    const requested = stubCreditedReads(
+      { ok: true, token: TOKEN, invoice: invoice({ status: "PARTIALLY_CREDITED", total: 100 }), balance: { amountPaid: 70, amountDue: 0, paidAt: null } },
+      { status: "PARTIALLY_CREDITED", paid: 70, remaining: 0, credited: 30, currency: "TTD", lastPaymentAt: null },
+      { invoiceNumber: "INV-0042", status: "PARTIALLY_CREDITED", currency: "TTD", total: 100, amountPaid: 70, credited: 30, amountDue: 0, paidAt: null, issuedAt: null },
+    );
+    render(<PublicInvoicePage />);
+
+    expect(await screen.findByTestId("public-invoice-credited")).toHaveTextContent(money(30));
+    expect(screen.getByTestId("public-invoice-paid")).toHaveTextContent(money(70));
+    expect(screen.getByTestId("public-invoice-remaining")).toHaveTextContent(money(0));
+    expect(screen.getByTestId("public-invoice-amount-due")).toHaveTextContent(money(0));
+    expect(screen.queryByRole("button", { name: /pay this invoice/i })).toBeNull();
+    expect(screen.getByTestId("public-invoice-settled")).toHaveTextContent(/nothing is owed/i);
+    expect(requested.some((p) => p.endsWith(`/payments/public/invoice-link/${TOKEN}/status`))).toBe(true);
+
+    fireEvent.click(screen.getByTestId("public-invoice-receipt-button"));
+    expect(await screen.findByTestId("public-receipt-credited")).toHaveTextContent(money(30));
+    expect(screen.getByTestId("public-receipt-paid")).toHaveTextContent(money(70));
+    expect(screen.getByTestId("public-receipt-remaining")).toHaveTextContent(money(0));
+  });
+
+  it("W-11 W5-CREDIT-AWARE-PAY CR-AR-2: a PARTIALLY_CREDITED invoice still owing (20 paid, 30 credited, 50 due) keeps the Pay button and shows Credited 30 and Remaining 50; an uncredited invoice asks for no credited figure", async () => {
+    const requested = stubCreditedReads(
+      { ok: true, token: TOKEN, invoice: invoice({ status: "PARTIALLY_CREDITED", total: 100 }), balance: { amountPaid: 20, amountDue: 50, paidAt: null } },
+      { status: "PARTIALLY_CREDITED", paid: 20, remaining: 50, credited: 30, currency: "TTD", lastPaymentAt: null },
+    );
+    render(<PublicInvoicePage />);
+
+    expect(await screen.findByTestId("public-invoice-credited")).toHaveTextContent(money(30));
+    expect(screen.getByTestId("public-invoice-remaining")).toHaveTextContent(money(50));
+    expect(screen.getByTestId("public-invoice-amount-due")).toHaveTextContent(money(50));
+    expect(screen.getByRole("button", { name: /pay this invoice/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("public-invoice-settled")).toBeNull();
+    expect(requested.filter((p) => p.endsWith("/status"))).toHaveLength(1);
+    cleanup();
+    vi.unstubAllGlobals();
+
+    // Control: a part-paid invoice with no credit makes no status read and shows no Credited row.
+    const plain = stubCreditedReads(
+      { ok: true, token: TOKEN, invoice: invoice(), balance: { amountPaid: 100, amountDue: 150, paidAt: null } },
+      { status: "PARTIALLY_PAID", paid: 100, remaining: 150, currency: "TTD", lastPaymentAt: null },
+    );
+    render(<PublicInvoicePage />);
+    expect(await screen.findByTestId("public-invoice-remaining")).toHaveTextContent(money(150));
+    expect(screen.queryByTestId("public-invoice-credited")).toBeNull();
+    expect(plain.some((p) => p.endsWith("/status"))).toBe(false);
+  });
+});
