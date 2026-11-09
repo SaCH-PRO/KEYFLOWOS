@@ -405,7 +405,7 @@ export default function CommandCenterPage() {
             stored step, through the bound execute route, no re-planning).
             /app/control-tower redirects here, so this is where an approval
             leads to the approved step running. */}
-        <ApprovedActionsPanel key={businessId} businessId={businessId} />
+        <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />
 
         <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
           <CommandQueueV2
@@ -547,7 +547,7 @@ export default function CommandCenterPage() {
           </div>
         </div>
 
-        <CommandGenomeOutcomesCardV2 key={businessId} businessId={businessId} />
+        <CommandGenomeOutcomesCardV2 key={`genome-outcomes:${businessId}`} businessId={businessId} />
 
         <CrossDomainPanelV2 businessId={businessId} />
 

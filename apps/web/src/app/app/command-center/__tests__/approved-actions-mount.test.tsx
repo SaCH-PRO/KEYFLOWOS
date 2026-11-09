@@ -286,10 +286,23 @@ describe("D-72: the Command Center page mounts the approved-action queue with it
    * "Loading approved actions...", index 7 the live empty state), and renderCommandCenter() holds
    * the first panel it found, the orphan. Unloaded, the orphan had already shown the answer, so the
    * case passed with a stale duplicate on the page. Waiting longer or re-querying the live panel
-   * would only hide that defect, and the fix (a distinct key, e.g. `approved-actions:${businessId}`;
-   * checked locally: one panel) is in page.tsx, outside this packet's write set.
+   * would only hide that defect. Fixed at the wave-4 integration (trial-S): page.tsx keys the two
+   * siblings `approved-actions:${businessId}` and `genome-outcomes:${businessId}`. CC-AQ-10 pins it
+   * through React's duplicate-key report, which fires on every render, loaded or not.
    */
-  it.todo("CC-AQ-10 (W4-FLAKE-HARDEN, D-72) the Command Center page mounts exactly one approved-actions panel, and it is the one that shows the queue answer (blocked: page.tsx keys ApprovedActionsPanel and CommandGenomeOutcomesCardV2 both by businessId, so a re-render leaves an orphaned duplicate; the fix is in page.tsx, outside the write set)");
+  it("CC-AQ-10 (W4-FLAKE-HARDEN, D-72) the Command Center page mounts exactly one approved-actions panel, and it is the one that shows the queue answer", async () => {
+    const consoleError = vi.spyOn(console, "error");
+    serve({ queue: [{ status: 200, body: queueBody([PENDING, EXECUTED]) }] });
+    await renderCommandCenter();
+
+    await waitFor(() => expect(screen.getAllByTestId("approved-actions-empty").length).toBeGreaterThan(0), { timeout: 10_000 });
+    // The defect's deterministic trace: React reports the shared sibling key on every render, loaded or not.
+    const duplicateKey = consoleError.mock.calls.filter((args) => args.some((a) => typeof a === "string" && a.includes("Encountered two children with the same key")));
+    expect(duplicateKey, "no two Command Center siblings share a React key").toEqual([]);
+    const panels = screen.getAllByTestId("approved-actions-panel");
+    expect(panels, "one approved-actions panel on the page (no orphan left by a shared sibling key)").toHaveLength(1);
+    expect(within(panels[0]).getByTestId("approved-actions-empty")).toBeTruthy();
+  }, 30_000);
 
   it("CC-AQ-05 a queue that could not be read says so and is never shown as nothing approved", async () => {
     // A 500, not a 503: fetch-with-retry retries a 503 with backoff before answering.
