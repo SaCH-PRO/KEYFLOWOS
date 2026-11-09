@@ -115,6 +115,8 @@ interface StubOptions {
   status?: (taskId: string, body: { status: string; position?: number }) => { status: number; body: unknown };
   /** How POST .../tasks/reorder answers (default 201). */
   reorder?: () => { status: number; body: unknown };
+  /** What GET .../task-assignments/options answers (default OPTIONS). */
+  options?: unknown[];
 }
 
 function stubApi(tasks: BoardTask[], options: StubOptions = {}) {
@@ -126,7 +128,7 @@ function stubApi(tasks: BoardTask[], options: StubOptions = {}) {
     const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
     sent.push({ method, path: pathname, body });
 
-    if (method === "GET" && pathname === `/businesses/${BIZ}/task-assignments/options`) return jsonResponse(200, OPTIONS);
+    if (method === "GET" && pathname === `/businesses/${BIZ}/task-assignments/options`) return jsonResponse(200, options.options ?? OPTIONS);
     const statusMatch = pathname.match(new RegExp(`^/projects/businesses/${BIZ}/tasks/([^/]+)/status$`));
     if (method === "PATCH" && statusMatch) {
       const b = body as { status: string; position?: number };
@@ -354,4 +356,124 @@ describe("the board follows the project's tasks (WPD-07)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     await waitFor(() => expect(column(container, "TODO")).toContain("Write the copy"));
   });
+});
+
+/**
+ * Review SEC-W196-1 / CR-W1. A task completed by the Projects page checkbox (PATCH {isCompleted})
+ * or by KEY's projects_complete_task keeps its old status (TODO, isCompleted true); reopened the
+ * same way it keeps DONE. The server's reorder reads ANY status sent for such a task as a status
+ * change (projects.service.ts reorderTasks: status differs, or DONE disagrees with isCompleted)
+ * and sends it through updateTask: reordering other cards reopened it (or re-completed it, with
+ * the evidence gate and project_task.completed) and wrote a feed row naming the member. Required:
+ * a reorder never carries a status for such a task; its position, when it changes, is saved alone
+ * (PATCH .../tasks/:taskId {position}), and a task whose position did not change is not written.
+ */
+describe("a reorder never writes the status of a task whose status and completion disagree (SEC-W196-1, CR-W1)", () => {
+  /** Every request body that names a task, wherever it was sent. */
+  const writesFor = (api: ReturnType<typeof stubApi>, taskId: string) =>
+    api.sent.filter((r) =>
+      r.method !== "GET" &&
+      (r.path.includes(`/tasks/${taskId}`) ||
+        JSON.stringify(r.body ?? null).includes(`"${taskId}"`)));
+
+  it("reordering To Do does not reopen a task completed by the checkbox: it shows in Done and is not sent", async () => {
+    const tasks = [
+      boardTask("t_done_by_toggle", "Completed by the checkbox", "TODO", 0, { isCompleted: true }),
+      boardTask("t_open_1", "Open one", "TODO", 1),
+      boardTask("t_open_2", "Open two", "TODO", 2),
+    ];
+    const api = stubApi(tasks);
+    const { container } = render(<Harness initial={projectWith(tasks)} />);
+    openBoard();
+    expect(column(container, "DONE")).toEqual(["Completed by the checkbox"]);
+    await drop("t_open_2", "t_open_1");
+    // To Do is [Open one @1, Open two @2]; after the drop Open two is first (0) and Open one keeps 1.
+    expect(api.reorders().map((r) => r.body)).toEqual([{ updates: [{ taskId: "t_open_2", status: "TODO", position: 0 }] }]);
+    expect(writesFor(api, "t_done_by_toggle")).toEqual([]);
+    expect(api.statusWrites()).toEqual([]);
+    await waitFor(() => expect(column(container, "TODO")).toEqual(["Open two", "Open one"]));
+  });
+
+  it("reordering Done saves the moved completed-by-checkbox task's position alone, never a status", async () => {
+    const tasks = [
+      boardTask("t_kick", "Kickoff call", "DONE", 0),
+      boardTask("t_ip_done", "Completed while in progress", "IN_PROGRESS", 1, { isCompleted: true }),
+    ];
+    const api = stubApi(tasks);
+    const { container } = render(<Harness initial={projectWith(tasks)} />);
+    openBoard();
+    expect(column(container, "DONE")).toEqual(["Kickoff call", "Completed while in progress"]);
+    await drop("t_kick", "t_ip_done");
+    expect(api.reorders().map((r) => r.body)).toEqual([{ updates: [{ taskId: "t_kick", status: "DONE", position: 1 }] }]);
+    expect(writesFor(api, "t_ip_done")).toEqual([
+      { method: "PATCH", path: `/projects/businesses/${BIZ}/tasks/t_ip_done`, body: { position: 0 } },
+    ]);
+    expect(api.statusWrites()).toEqual([]);
+    await waitFor(() => expect(column(container, "DONE")).toEqual(["Completed while in progress", "Kickoff call"]));
+  });
+
+  it("a move from another column re-sends no status for the completed card it lands above", async () => {
+    const tasks = [
+      boardTask("t_brief", "Draft the brief", "TODO", 0),
+      boardTask("t_ip_done", "Completed while in progress", "IN_PROGRESS", 0, { isCompleted: true }),
+    ];
+    const api = stubApi(tasks);
+    render(<Harness initial={projectWith(tasks)} />);
+    openBoard();
+    await drop("t_brief", "t_ip_done");
+    expect(api.statusWrites().map((r) => [r.path, r.body])).toEqual([
+      [`/projects/businesses/${BIZ}/tasks/t_brief/status`, { status: "DONE", position: 0 }],
+    ]);
+    expect(api.reorders()).toEqual([]);
+    expect(writesFor(api, "t_ip_done")).toEqual([
+      { method: "PATCH", path: `/projects/businesses/${BIZ}/tasks/t_ip_done`, body: { position: 1 } },
+    ]);
+  });
+
+  it("reordering To Do never sends DONE for a reopened task whose status was left as DONE", async () => {
+    const tasks = [
+      boardTask("t_reopened", "Reopened by the checkbox", "DONE", 0, { isCompleted: false }),
+      boardTask("t_open", "Still open", "TODO", 1),
+    ];
+    const api = stubApi(tasks);
+    const { container } = render(<Harness initial={projectWith(tasks)} />);
+    openBoard();
+    expect(column(container, "TODO")).toEqual(["Reopened by the checkbox", "Still open"]);
+    await drop("t_open", "t_reopened");
+    expect(api.reorders().map((r) => r.body)).toEqual([{ updates: [{ taskId: "t_open", status: "TODO", position: 0 }] }]);
+    expect(writesFor(api, "t_reopened")).toEqual([
+      { method: "PATCH", path: `/projects/businesses/${BIZ}/tasks/t_reopened`, body: { position: 1 } },
+    ]);
+    expect(JSON.stringify(api.sent.map((r) => r.body))).not.toContain('"DONE"');
+  });
+});
+
+/**
+ * Review SEC-W196-3: GET .../task-assignments/options names a member who has no name by their
+ * email (TaskAssignmentService.getAssignableOptions), and any member may read it, including STAFF
+ * refused the team list (team:none). The picker shows names only: an email-shaped name is shown
+ * under a neutral label. (The server half, not falling back to the email, is outside this
+ * packet's write set: see the it.todo below.)
+ */
+describe("the assignee picker shows names, not email addresses (SEC-W196-3)", () => {
+  it("a member listed by their email is offered under a neutral label", async () => {
+    stubApi(TASKS, {
+      options: [
+        { type: "User", id: "usr_ada", name: "Ada Member" },
+        { type: "User", id: "usr_noname_7f3a", name: "private.email@test.local" },
+        { type: "StaffMember", id: "stf_sam", name: "Sam Staff" },
+      ],
+    });
+    render(<Harness initial={projectWith(TASKS)} />);
+    openTasks();
+    const select = await screen.findByRole("combobox", { name: "Assign Draft the brief" });
+    await waitFor(() => expect(within(select).getAllByRole("option").length).toBeGreaterThan(3));
+    const labels = within(select).getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(labels.join(" | ")).not.toMatch(/@/);
+    expect(labels).toEqual(expect.arrayContaining(["Ada Member", "Sam Staff", "Unnamed member (…7f3a)"]));
+  });
+
+  it.todo(
+    "server: GET /businesses/:bid/task-assignments/options does not fall back to a member's email (or is gated on team:read) — task-assignment.service.ts / task-assignment.controller.ts are outside PR196-PROJECTS-WEB's write set (server follow-up)",
+  );
 });

@@ -34,6 +34,8 @@ export interface KanbanTask {
   assigneeId: string | null;
   estimatedHours: number | null;
   trackedHours: number;
+  /** The task's completion, when known. It can disagree with status: see boardStatus. */
+  isCompleted?: boolean;
 }
 
 export interface KanbanMove {
@@ -133,9 +135,29 @@ function KanbanColumn({ column, tasks }: { column: (typeof COLUMNS)[number]; tas
   );
 }
 
+/**
+ * Review SEC-W196-1 / CR-W1: the column a card shows in. A task's status and completion can
+ * disagree: the Projects page checkbox (PATCH {isCompleted}) and KEY's projects_complete_task
+ * complete a task and leave its status as it was, and reopening the same way leaves DONE. Such a
+ * card shows where its completion puts it (completed: Done; reopened: To Do), as the list does.
+ */
+function boardStatus(t: KanbanTask): string {
+  if (t.isCompleted === undefined || (t.status === "DONE") === t.isCompleted) return t.status;
+  return t.isCompleted ? "DONE" : "TODO";
+}
+
 /** A column's tasks in board order: by position, ties in the order given. */
 function columnOf(items: KanbanTask[], status: string): KanbanTask[] {
-  return items.filter((t) => t.status === status).sort((a, b) => a.position - b.position);
+  return items.filter((t) => boardStatus(t) === status).sort((a, b) => a.position - b.position);
+}
+
+/**
+ * The writes a column's new order needs: only the tasks whose position changed (CR-W1), in the
+ * new order, each under the column it shows in. A task whose position is unchanged is not sent, so
+ * nothing is written for it.
+ */
+function repositioned(ordered: KanbanTask[], status: string): KanbanMove[] {
+  return ordered.flatMap((t, i) => (t.position === i ? [] : [{ taskId: t.id, status, position: i }]));
 }
 
 async function accepted(write: () => BoardWrite): Promise<boolean> {
@@ -154,8 +176,11 @@ interface TaskKanbanProps {
    */
   onUpdate: (taskId: string, status: string, position: number) => BoardWrite;
   /**
-   * The positions of a column's tasks after a reorder (POST .../tasks/reorder). Every task of
-   * the column is sent with its new position, so the order survives a reload (WPD-06).
+   * The positions of a column's tasks after a reorder (POST .../tasks/reorder). Every task whose
+   * position changed is sent with its new position and the column it shows in, so the order
+   * survives a reload (WPD-06); a task whose position did not change is not sent (CR-W1). The
+   * writer saves the position alone for a task whose stored status is not that column, since
+   * the server reads any status it is sent for that task as a status change (SEC-W196-1).
    */
   onReorder: (updates: KanbanMove[]) => BoardWrite;
 }
@@ -193,39 +218,46 @@ export function TaskKanban({ tasks, onUpdate, onReorder }: TaskKanbanProps) {
     // means that column, at that card's place.
     const overId = String(over.id);
     const overTask = COLUMN_IDS.has(overId) ? undefined : before.find((t) => t.id === overId);
-    const targetStatus = COLUMN_IDS.has(overId) ? overId : overTask?.status;
+    const targetStatus = COLUMN_IDS.has(overId) ? overId : overTask && boardStatus(overTask);
     if (!targetStatus) return;
 
-    if (targetStatus !== activeTask.status) {
+    if (targetStatus !== boardStatus(activeTask)) {
       const target = columnOf(before, targetStatus);
       const index = overTask ? target.findIndex((t) => t.id === overTask.id) : target.length;
-      const ordered = [...target.slice(0, index), { ...activeTask, status: targetStatus }, ...target.slice(index)];
+      // The moved card takes the column's status (and the completion the server gives it for that
+      // status); the cards it lands above only move down.
+      const moved: KanbanTask = {
+        ...activeTask,
+        status: targetStatus,
+        position: index,
+        ...(activeTask.isCompleted !== undefined && { isCompleted: targetStatus === "DONE" }),
+      };
+      const ordered = [...target.slice(0, index), moved, ...target.slice(index)];
       const positions = new Map(ordered.map((t, i) => [t.id, i]));
-      setItems(before.map((t) => (positions.has(t.id) ? { ...t, status: targetStatus, position: positions.get(t.id)! } : t)));
+      setItems(before.map((t) => (t.id === moved.id ? moved : positions.has(t.id) ? { ...t, position: positions.get(t.id)! } : t)));
 
       // The status change goes through the server's status door; a refusal puts the board back.
       if (!(await accepted(() => onUpdate(activeTask.id, targetStatus, index)))) {
         setItems(before);
         return;
       }
-      // The cards the moved one landed above keep their order (positions only, no status change).
-      const shifted = target
-        .filter((t) => positions.get(t.id) !== t.position)
-        .map((t) => ({ taskId: t.id, status: targetStatus, position: positions.get(t.id)! }));
+      // The cards the moved one landed above keep their order: positions only (CR-W1).
+      const shifted = repositioned(ordered, targetStatus).filter((u) => u.taskId !== moved.id);
       if (shifted.length > 0) await accepted(() => onReorder(shifted));
       return;
     }
 
-    // WPD-06: a reorder inside the column sends every task of the column with its new position.
+    // WPD-06: a reorder inside the column sends every task whose position changed.
     if (!overTask) return;
-    const column = columnOf(before, activeTask.status);
+    const column = columnOf(before, targetStatus);
     const from = column.findIndex((t) => t.id === activeTask.id);
     const to = column.findIndex((t) => t.id === overTask.id);
     if (from === to) return;
     const reordered = arrayMove(column, from, to);
+    const updates = repositioned(reordered, targetStatus);
+    if (updates.length === 0) return;
     const positions = new Map(reordered.map((t, i) => [t.id, i]));
     setItems(before.map((t) => (positions.has(t.id) ? { ...t, position: positions.get(t.id)! } : t)));
-    const updates = reordered.map((t, i) => ({ taskId: t.id, status: t.status, position: i }));
     if (!(await accepted(() => onReorder(updates)))) setItems(before);
   }, [items, onUpdate, onReorder]);
 

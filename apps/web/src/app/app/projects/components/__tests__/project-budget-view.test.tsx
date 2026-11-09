@@ -64,7 +64,7 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
   } as unknown as Response;
 }
 
-function stubApi(budget: () => Response) {
+function stubApi(budget: () => Response, expenses: () => Response = () => jsonResponse(200, { expenses: [] })) {
   const sent: Sent[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -76,7 +76,7 @@ function stubApi(budget: () => Response) {
     }
     const { pathname } = new URL(url);
     if (pathname === BUDGET_PATH) return budget();
-    if (pathname.endsWith(`/expenses`) || pathname.includes("/expenses")) return jsonResponse(200, { expenses: [] });
+    if (pathname.endsWith(`/expenses`) || pathname.includes("/expenses")) return expenses();
     return jsonResponse(200, []);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -157,4 +157,38 @@ describe("the Revenue tab shows the project's budget (F7b)", () => {
     expect(await screen.findByText("TTD 5,000.00")).toBeInTheDocument();
     expect(api.budgetCalls().map((c) => new URL(c.url).pathname)).toContain(BUDGET_PATH);
   });
+});
+
+/**
+ * Review SEC-W196-2: GET .../projects/:pid/budget has only AuthGuard and BusinessGuard and returns
+ * expenseCost, timeCost and totalCost, while the same tab's expense list (GET .../by-project)
+ * needs expenses:read. A member with expenses:none was refused the list but shown the totals in
+ * the budget card this packet mounts. The web half: a refused budget read (403) is a denial state,
+ * and the Revenue tab shows the budget card's money only to a member the project's expense list
+ * answers; one it refuses (403) sees the denial and the budget is not requested. The server half
+ * (gating the route's cost fields on expenses/finance read) is outside this packet's write set.
+ */
+describe("a member refused the project's costs is not shown them (SEC-W196-2)", () => {
+  it("a 403 on the budget read is a denial state with no amounts, distinct from 'No budget set'", async () => {
+    stubApi(() => jsonResponse(403, { statusCode: 403, message: "Forbidden resource" }, "Forbidden"));
+    render(<ProjectBudgetView businessId={BIZ} projectId={PROJECT} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/don.t have access/i);
+    expect(screen.queryByText(/No budget set/i)).toBeNull();
+    expect(screen.queryByText(/TTD/)).toBeNull();
+  });
+
+  it("the Revenue tab does not read or show the budget's costs to a member the expense list refuses (403)", async () => {
+    const api = stubApi(
+      () => jsonResponse(200, { ...BUDGET, expenseCost: 777, totalCost: 777, timeCost: 0, remainingBudget: 4223 }),
+      () => jsonResponse(403, { statusCode: 403, message: "Forbidden resource" }, "Forbidden"),
+    );
+    render(<RevenueTab businessId={BIZ} projectId={PROJECT} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/don.t have access/i);
+    expect(api.budgetCalls()).toEqual([]);
+    expect(screen.queryByText(/777/)).toBeNull();
+  });
+
+  it.todo(
+    "server: GET /projects/businesses/:bid/projects/:pid/budget withholds expenseCost, timeCost and totalCost from a member without expenses/finance read — projects.controller.ts is outside PR196-PROJECTS-WEB's write set (server follow-up)",
+  );
 });

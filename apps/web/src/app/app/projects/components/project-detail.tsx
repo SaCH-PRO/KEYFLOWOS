@@ -34,7 +34,14 @@ import {
   updateProjectMilestone,
   deleteProjectMilestone,
 } from "@/lib/client";
-import { createProjectTaskFor, reorderProjectTasks, setProjectTaskAssignee, type TaskMove } from "@/lib/api/projects";
+import {
+  createProjectTaskFor,
+  reorderProjectTasks,
+  setProjectTaskAssignee,
+  setProjectTaskPosition,
+  type ProjectBoardTask,
+  type TaskMove,
+} from "@/lib/api/projects";
 import { toast } from "sonner";
 import { TabNav } from "@/components/ui/tab-nav";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
@@ -239,19 +246,40 @@ export function ProjectDetail({
     return true;
   }, [businessId, commitTasks]);
 
-  /** WPD-06: a column reorder saves every moved task's position (POST .../tasks/reorder). */
+  /**
+   * WPD-06: a column reorder saves every moved task's position. A reorder never changes a task's
+   * status or completion (a move to another column is the status door's). The reorder route
+   * (POST .../tasks/reorder) writes a position alone only when the status it is sent is the task's
+   * stored status and that status agrees with its completion; otherwise it sends the task through
+   * updateTask as a status change (review SEC-W196-1, CR-W1: reordering other cards reopened a task
+   * completed by the checkbox or KEY, in the member's name). Such a task's position is saved alone
+   * (PATCH .../tasks/:taskId {position}).
+   */
   const handleReorderTasks = useCallback(async (projectId: string, updates: TaskMove[]) => {
     if (!businessId || updates.length === 0) return true;
-    const res = await reorderProjectTasks(businessId, projectId, updates);
-    if (res.error) {
-      toast.error(res.error);
+    const stored = new Map((latestProject.current.tasks ?? []).map((t) => [t.id, t as ProjectBoardTask]));
+    const keepsStatus = (u: TaskMove) => {
+      const t = stored.get(u.taskId);
+      return !!t && u.status === t.status && (t.status === "DONE") === !!t.isCompleted;
+    };
+    const moves = updates.filter(keepsStatus);
+    const positionsOnly = updates.filter((u) => !keepsStatus(u));
+
+    if (moves.length > 0) {
+      const res = await reorderProjectTasks(businessId, projectId, moves);
+      if (res.error) {
+        toast.error(res.error);
+        return false;
+      }
+    }
+    const results = await Promise.all(positionsOnly.map((u) => setProjectTaskPosition(businessId, u.taskId, u.position)));
+    const refused = results.find((r) => r.error);
+    if (refused) {
+      toast.error(refused.error ?? "Failed to save the order");
       return false;
     }
-    const positions = new Map(updates.map((u) => [u.taskId, u]));
-    commitTasks((tasks) => tasks.map((t) => {
-      const u = positions.get(t.id);
-      return u ? ({ ...t, status: u.status, position: u.position } as ProjectTask) : t;
-    }));
+    const positions = new Map(updates.map((u) => [u.taskId, u.position]));
+    commitTasks((tasks) => tasks.map((t) => (positions.has(t.id) ? ({ ...t, position: positions.get(t.id)! } as ProjectTask) : t)));
     return true;
   }, [businessId, commitTasks]);
 

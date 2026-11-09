@@ -53,6 +53,16 @@ export function reorderProjectTasks(businessId: string, projectId: string, updat
   });
 }
 
+/**
+ * PATCH /projects/businesses/:bid/tasks/:taskId {position}: a task's position alone. updateTask
+ * writes it with no status or completion change, no evidence gate and no feed row (review
+ * SEC-W196-1: the reorder route reads any status it is sent for a task whose status and completion
+ * disagree as a status change, so such a task's position is saved here instead).
+ */
+export function setProjectTaskPosition(businessId: string, taskId: string, position: number) {
+  return apiPatch<ProjectBoardTask>(`/projects/businesses/${enc(businessId)}/tasks/${enc(taskId)}`, { position });
+}
+
 /** Who a project task may be given to (D-87): a member of the business or one of its booking staff. */
 export interface TaskAssigneeOption {
   type: "User" | "StaffMember";
@@ -60,21 +70,35 @@ export interface TaskAssigneeOption {
   name: string;
 }
 
+const EMAIL_SHAPED = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * GET /businesses/:bid/task-assignments/options (TaskAssignmentService.getAssignableOptions):
  * the business's members and booking staff. KEY is left out: a person may not
  * assign a task to KEY (PR196-PROJECTS-SERVER answers 404 for it).
+ *
+ * Review SEC-W196-3: the server names a member who has no name by their email, and any member may
+ * read the list (STAFF with team:none included). Screens show names only: an email-shaped name is
+ * replaced by a neutral label that tells options apart by the end of their id.
  */
 export async function fetchTaskAssigneeOptions(businessId: string) {
   const res = await apiGet<unknown>(`/businesses/${enc(businessId)}/task-assignments/options`);
   if (!Array.isArray(res.data)) return { ...res, data: null as TaskAssigneeOption[] | null };
-  const options = res.data.filter(
-    (o): o is TaskAssigneeOption =>
-      typeof o === "object" && o !== null &&
-      ((o as TaskAssigneeOption).type === "User" || (o as TaskAssigneeOption).type === "StaffMember") &&
-      typeof (o as TaskAssigneeOption).id === "string" && (o as TaskAssigneeOption).id !== "" &&
-      typeof (o as TaskAssigneeOption).name === "string",
-  );
+  const options = res.data
+    .filter(
+      (o): o is TaskAssigneeOption =>
+        typeof o === "object" && o !== null &&
+        ((o as TaskAssigneeOption).type === "User" || (o as TaskAssigneeOption).type === "StaffMember") &&
+        typeof (o as TaskAssigneeOption).id === "string" && (o as TaskAssigneeOption).id !== "" &&
+        typeof (o as TaskAssigneeOption).name === "string",
+    )
+    .map((o) => ({
+      type: o.type,
+      id: o.id,
+      name: EMAIL_SHAPED.test(o.name.trim())
+        ? `Unnamed ${o.type === "User" ? "member" : "staff member"} (…${o.id.slice(-4)})`
+        : o.name,
+    }));
   return { ...res, data: options };
 }
 

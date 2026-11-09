@@ -32,7 +32,7 @@ interface TasksTabProps {
   onAssignTask?: (projectId: string, taskId: string, assigneeId: string | null) => void;
   /** A Kanban move to another column: the server's status door. Resolves false when refused. */
   onUpdateTaskStatus?: (projectId: string, taskId: string, status: string, position: number) => Promise<boolean>;
-  /** A Kanban column reorder: every moved task's position. Resolves false when refused. */
+  /** A Kanban column reorder: the position of every task whose position changed. Resolves false when refused. */
   onReorderTasks?: (projectId: string, updates: TaskMove[]) => Promise<boolean>;
 }
 
@@ -125,6 +125,8 @@ export function TasksTab({
 
   // WPD-06: the board reads the server's status and position (the order the server keeps for the
   // Kanban), not sortOrder. Memoised on the task list so the board resyncs only when it changes.
+  // SEC-W196-1: it also gets the completion, so a task completed or reopened without its status
+  // changing shows where its completion puts it.
   const kanbanTasks = useMemo<KanbanTask[]>(() => tasks.map((t, idx) => {
     const board = t as ProjectBoardTask;
     return {
@@ -132,6 +134,7 @@ export function TasksTab({
       title: t.title,
       description: t.description ?? null,
       status: board.status || (t.isCompleted ? "DONE" : "TODO"),
+      isCompleted: !!t.isCompleted,
       position: typeof board.position === "number" ? board.position : idx,
       priority: t.priority || "NORMAL",
       dueDate: t.dueDate ?? null,

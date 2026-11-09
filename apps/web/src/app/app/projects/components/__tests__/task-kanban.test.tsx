@@ -19,7 +19,8 @@
  *
  * Required: every column is a drop target; a drop on a column or on a card of
  * another column calls onUpdate(taskId, newStatus, position); a reorder inside a
- * column calls onReorder with every task of the column and its new position;
+ * column calls onReorder with every task of the column whose position changed
+ * (review CR-W1: a task whose position did not change is not sent);
  * a refused write (false or a rejection) puts the board back; a new task list
  * from the parent shows at once.
  *
@@ -57,7 +58,7 @@ vi.mock("@dnd-kit/core", async (importOriginal) => {
 
 const COLUMN_IDS = ["TODO", "IN_PROGRESS", "REVIEW", "DONE", "BLOCKED"];
 
-function task(id: string, status: string, position: number, title = `Task ${id}`) {
+function task(id: string, status: string, position: number, title = `Task ${id}`, extra: { isCompleted?: boolean } = {}) {
   return {
     id,
     title,
@@ -69,6 +70,7 @@ function task(id: string, status: string, position: number, title = `Task ${id}`
     assigneeId: null,
     estimatedHours: null,
     trackedHours: 0,
+    ...extra,
   };
 }
 
@@ -210,5 +212,61 @@ describe("cards", () => {
     const done = screen.getByText("Kickoff call").closest("[data-column]") as HTMLElement;
     expect(done.getAttribute("data-column")).toBe("DONE");
     expect(within(done).queryByText("Draft the brief")).toBeNull();
+  });
+});
+
+/**
+ * Review SEC-W196-1 / CR-W1: a task's status and completion can disagree. The Projects page
+ * checkbox (PATCH {isCompleted}) and KEY's projects_complete_task complete a task and leave its
+ * status as it was; reopening the same way leaves DONE. The board placed such a card by status
+ * and a reorder re-sent every card of the column with the column's status, so reordering other
+ * cards reopened (or re-completed) it on the server, in the member's name. The board now places
+ * such a card by its completion, and a reorder sends only the cards whose position changed (the
+ * write layer then saves that card's position alone: see tasks-tab.test.tsx).
+ */
+describe("a task whose status and completion disagree (SEC-W196-1, CR-W1)", () => {
+  it("a completed task whose status was left as TODO shows in Done; a reopened one left as DONE shows in To Do", () => {
+    const { container } = render(
+      <TaskKanban
+        tasks={[
+          task("t_toggled", "TODO", 0, "Completed by the checkbox", { isCompleted: true }),
+          task("t_reopened", "DONE", 0, "Reopened by the checkbox", { isCompleted: false }),
+          task("t_open", "TODO", 1, "Still open", { isCompleted: false }),
+        ]}
+        onUpdate={vi.fn()}
+        onReorder={vi.fn()}
+      />,
+    );
+    expect(column(container, "DONE")).toEqual(["Completed by the checkbox"]);
+    expect(column(container, "TODO")).toEqual(["Reopened by the checkbox", "Still open"]);
+  });
+
+  it("a reorder sends only the tasks whose position changed", async () => {
+    const onReorder = vi.fn(async (_updates: unknown) => true);
+    render(<TaskKanban tasks={TASKS} onUpdate={vi.fn()} onReorder={onReorder} />);
+    await drop("t_c", "t_b");
+    expect(onReorder).toHaveBeenCalledTimes(1);
+    expect(onReorder.mock.calls[0][0]).toEqual([
+      { taskId: "t_c", status: "TODO", position: 1 },
+      { taskId: "t_b", status: "TODO", position: 2 },
+    ]);
+  });
+
+  it("dragging the completed card out of Done is a move to the target column through onUpdate", async () => {
+    const onUpdate = vi.fn(async () => true);
+    const { container } = render(
+      <TaskKanban
+        tasks={[
+          task("t_toggled", "TODO", 0, "Completed by the checkbox", { isCompleted: true }),
+          task("t_open", "TODO", 1, "Still open", { isCompleted: false }),
+        ]}
+        onUpdate={onUpdate}
+        onReorder={vi.fn(async () => true)}
+      />,
+    );
+    await drop("t_toggled", "t_open");
+    expect(onUpdate.mock.calls).toEqual([["t_toggled", "TODO", 0]]);
+    expect(column(container, "TODO")).toEqual(["Completed by the checkbox", "Still open"]);
+    expect(column(container, "DONE")).toEqual([]);
   });
 });

@@ -16,8 +16,22 @@ import { formatCurrency } from "@/lib/currency";
  */
 type BudgetState =
   | { kind: "loading" }
+  | { kind: "denied" }
   | { kind: "error"; message: string }
   | { kind: "loaded"; data: ProjectBudget };
+
+/**
+ * Review SEC-W196-2: a member refused the budget's costs sees that, not a number. The Revenue tab
+ * also shows this when the project's expense list refuses the member (the budget route returns the
+ * expense and spend totals that list guards).
+ */
+export function BudgetAccessDenied() {
+  return (
+    <div role="alert" className="p-8 text-center">
+      <p className="text-sm text-muted-foreground">You don&apos;t have access to this project&apos;s budget and costs.</p>
+    </div>
+  );
+}
 
 export function ProjectBudgetView({ businessId, projectId, currency }: { businessId: string; projectId: string; currency?: string }) {
   const [state, setState] = useState<BudgetState>({ kind: "loading" });
@@ -28,6 +42,7 @@ export function ProjectBudgetView({ businessId, projectId, currency }: { busines
     void getProjectBudget(businessId, projectId).then((res) => {
       if (cancelled) return;
       if (res.data) setState({ kind: "loaded", data: res.data });
+      else if (res.status === 403) setState({ kind: "denied" });
       else setState({ kind: "error", message: res.error ?? "Request failed" });
     });
     return () => {
@@ -36,6 +51,7 @@ export function ProjectBudgetView({ businessId, projectId, currency }: { busines
   }, [businessId, projectId]);
 
   if (state.kind === "loading") return <div className="p-8 text-center text-sm text-muted-foreground">Loading budget...</div>;
+  if (state.kind === "denied") return <BudgetAccessDenied />;
   if (state.kind === "error") {
     return (
       <div role="alert" className="p-8 text-center">
