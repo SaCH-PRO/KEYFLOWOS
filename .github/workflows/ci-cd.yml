@@ -427,12 +427,23 @@ jobs:
       # How the boot reaches exit 0 without a database: the probe written
       # below is preloaded (--require) and replaces NestFactory.create.
       # main.ts calls NestFactory.create(AppModule) only after it has imported
-      # AppModule, so the probe runs at the point where the whole module graph
-      # has loaded: it prints KEYFLOW_MODULE_GRAPH_LOADED and exits 0 before
-      # anything reaches the database (it writes with fs.writeSync, which
-      # process.exit cannot cut short on a pipe). A load error of any kind, an
-      # exit before that point, a hang (timeout), a root module other than
-      # AppModule, or a non-zero exit after the marker all fail the step.
+      # AppModule. The probe then has Nest scan the graph in preview mode,
+      # which instantiates no provider, so nothing reaches the database; the
+      # scan loads the modules reached only through forwardRef(async () =>
+      # import(...)), as notifications.module.ts reaches CommerceModule (review
+      # CR-PINR3-1). Then it yields one turn of the event loop, so Node reports
+      # a promise rejected while the graph loaded (a tsc-compiled unawaited
+      # import() of a missing or top-level-await dependency, an init promise
+      # started at load) and the boot dies of it as the real one does (review
+      # SEC-PINR3-1). Only then does it print KEYFLOW_MODULE_GRAPH_LOADED and
+      # exit 0 (it writes with fs.writeSync, which process.exit cannot cut
+      # short on a pipe). A load error, thrown or rejected by then, an exit
+      # before that point, a hang (timeout), a root module other than
+      # AppModule, or a non-zero exit after the marker all fail the step, and
+      # the step prints the whole boot output: a tail cut the error line off a
+      # dependency missing deep in a require chain (review CR-PINR3-2). Work
+      # that fails later than that turn (a timer, network I/O) is not module
+      # loading; native-dast.yml's full boot still catches it.
       #
       # This replaced a grep for a list of Node error codes, which passed
       # whatever the list did not name: an ESM-only dependency importing a
@@ -468,12 +479,15 @@ jobs:
           const path = require('node:path');
           const fromServer = { paths: [path.resolve('apps/server/dist')] };
           const { NestFactory } = require(require.resolve('@nestjs/core', fromServer));
-          NestFactory.create = async (root) => {
+          const create = NestFactory.create.bind(NestFactory);
+          NestFactory.create = async (root, options) => {
             const name = typeof root === 'function' ? root.name : typeof root;
             if (name !== 'AppModule') {
               fs.writeSync(2, 'module-load probe: NestFactory.create got ' + name + ', not AppModule\n');
               process.exit(1);
             }
+            await create(root, { ...options, preview: true, abortOnError: false, logger: ['error'] });
+            await new Promise((resolve) => setImmediate(resolve));
             fs.writeSync(1, 'KEYFLOW_MODULE_GRAPH_LOADED\n');
             process.exit(0);
           };
@@ -482,7 +496,7 @@ jobs:
           STATUS=$?
           if [ "$STATUS" -ne 0 ] || ! echo "$OUT" | grep -qxF "KEYFLOW_MODULE_GRAPH_LOADED"; then
             echo "::error::Server cannot load its module graph (exit $STATUS, or no load marker) — it cannot start"
-            echo "$OUT" | tail -n 40
+            echo "$OUT"
             exit 1
           fi
           echo "Server loaded its module graph successfully"

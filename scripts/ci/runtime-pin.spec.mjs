@@ -61,14 +61,22 @@
  *      closed (PIN-R3, reviews RC2-1 and RC2-3). It boots
  *      apps/server/dist/main.js once, under `timeout`, with a probe preloaded
  *      (--require "$PROBE") that replaces NestFactory.create. main.ts calls
- *      NestFactory.create(AppModule) only after it has imported AppModule, so
- *      the probe prints the load marker and exits 0 at the point where the
- *      whole module graph has loaded, before anything reaches the database.
+ *      NestFactory.create(AppModule) only after it has imported AppModule.
+ *      The probe then has Nest scan the graph in preview mode (no provider is
+ *      instantiated, so nothing reaches the database), which loads the modules
+ *      reached only through forwardRef(async () => import(...)), as
+ *      notifications.module.ts reaches CommerceModule (review CR-PINR3-1).
+ *      Then it yields one turn of the event loop, so Node reports a promise
+ *      rejected while the graph loaded (a tsc-compiled unawaited import(), an
+ *      init promise started at load) the way the real boot dies of it (review
+ *      SEC-PINR3-1), and only then prints the load marker and exits 0.
  *      The step passes only when the boot exits 0 AND printed the marker on a
- *      line of its own. Any other outcome fails it and prints the boot output:
- *      a load error of any kind, an exit before AppModule reaches
- *      NestFactory.create, a hang killed by the timeout, a root module other
- *      than AppModule, or the marker followed by a non-zero exit. The check
+ *      line of its own. Any other outcome fails it and prints the whole boot
+ *      output (a tail cut the error line off a deep require chain, review
+ *      CR-PINR3-2): a load error, synchronous or rejected in that turn, an
+ *      exit before AppModule reaches NestFactory.create, a hang killed by the
+ *      timeout, a root module other than AppModule, or the marker followed by
+ *      a non-zero exit. The check
  *      it replaces grepped the boot output for a list of error codes and
  *      passed whatever the list did not name: an ESM-only dependency that
  *      imports a named export its dependency lacks (SyntaxError),
@@ -172,6 +180,20 @@ const NO_REQUIRE_ESM = '--no-experimental-require-module';
 const BOOT_MARKER = 'KEYFLOW_MODULE_GRAPH_LOADED';
 /** How the probe prints it: a synchronous write, which the process.exit(0) after it cannot cut short on a pipe. */
 const PROBE_PRINTS = `fs.writeSync(1, '${BOOT_MARKER}\\n');`;
+/** The probe keeps Nest's own create, to scan the graph with. */
+const PROBE_KEEPS = 'const create = NestFactory.create.bind(NestFactory);';
+/**
+ * Two lines before the marker: Nest scans the graph in preview mode (no
+ * provider instantiated, no database), which runs the forwardRef(async
+ * import) callbacks a bare load never reaches (review CR-PINR3-1).
+ */
+const PROBE_SCANS = "await create(root, { ...options, preview: true, abortOnError: false, logger: ['error'] });";
+/**
+ * The line before the marker: one turn of the event loop, so Node reports a
+ * promise rejected while the graph loaded before the probe exits 0 (review
+ * SEC-PINR3-1).
+ */
+const PROBE_YIELDS = 'await new Promise((resolve) => setImmediate(resolve));';
 /** The one line that boots the server: under a timeout, stdout and stderr into OUT. Group 1: node's options. */
 const BOOT_LINE = /^OUT=\$\(timeout [1-9]\d* node (.+?) apps\/server\/dist\/main\.js 2>&1\)$/;
 /** node's options on the boot line: the probe, and the legacy flag while a workflow needs it. */
@@ -181,8 +203,12 @@ const BOOT_OPTIONS = [PROBE_OPTION, `${NO_REQUIRE_ESM} ${PROBE_OPTION}`];
 const BOOT_STATUS = 'STATUS=$?';
 /** The line after that: the step fails unless the boot exited 0 AND printed the marker. */
 const BOOT_DECISION = `if [ "$STATUS" -ne 0 ] || ! echo "$OUT" | grep -qxF "${BOOT_MARKER}"; then`;
-/** In the failure branch: the boot output, so the log says what the server died of. */
-const BOOT_REPORT = 'echo "$OUT" | tail -n 40';
+/**
+ * In the failure branch: the whole boot output, so the log says what the
+ * server died of. A tail cut the error line off a missing dependency deep in
+ * a require chain, whose requireStack Node prints twice (review CR-PINR3-2).
+ */
+const BOOT_REPORT = 'echo "$OUT"';
 /** The boot command as ci-cd.yml runs it, and with the legacy flag (CR-V139-2). */
 const BOOT = `timeout 45 node ${PROBE_OPTION} apps/server/dist/main.js`;
 const FLAGGED_BOOT = `timeout 45 node ${NO_REQUIRE_ESM} ${PROBE_OPTION} apps/server/dist/main.js`;
@@ -696,6 +722,18 @@ function bootStepShapeProblems(lines) {
   if (markers.length !== 2 || !markers.includes(PROBE_PRINTS)) {
     problems.push(`'${BOOT_STEP}': ${BOOT_MARKER} must appear exactly twice, printed by the probe (${PROBE_PRINTS}) and read by the decision; found ${JSON.stringify(markers)}`);
   }
+  // The probe prints the marker only once Nest has scanned the graph
+  // (forwardRef(async import) modules loaded, CR-PINR3-1) and Node has had a
+  // turn to report a promise rejected while it loaded (SEC-PINR3-1).
+  if (lines.filter((l) => l === PROBE_KEEPS).length !== 1) {
+    problems.push(`'${BOOT_STEP}': the probe must keep Nest's own create to scan the graph with (${PROBE_KEEPS})`);
+  }
+  const printed = lines.indexOf(PROBE_PRINTS);
+  if (printed < 2 || lines[printed - 2] !== PROBE_SCANS || lines[printed - 1] !== PROBE_YIELDS) {
+    problems.push(
+      `'${BOOT_STEP}': the probe must print ${BOOT_MARKER} right after Nest scans the graph in preview mode (${PROBE_SCANS}) and Node has had a turn to report a rejected load promise (${PROBE_YIELDS}); found ${JSON.stringify(printed < 0 ? [] : lines.slice(Math.max(0, printed - 2), printed))}`,
+    );
+  }
   return problems;
 }
 
@@ -767,7 +805,10 @@ function bootStep(source) {
  * exits without DATABASE_URL), then require('./app.module') inside a promise,
  * then NestFactory.create(AppModule). The @nestjs/core stand-in's create()
  * fails the way the real one does against the step's unreachable database
- * (P1001), so only the probe can make a graph pass. Every failing case names
+ * (P1001), so only the probe can make a graph pass; in preview mode it scans
+ * the graph the way Nest's DependenciesScanner does (here: each module's
+ * static `imports`, forwardRef entries resolved), so a module reached only
+ * through forwardRef(async import) loads then. Every failing case names
  * what the step's output must show. `esm` cases load an ESM-only dependency:
  * without require(esm) (--no-experimental-require-module) each dies with
  * ERR_REQUIRE_ESM instead, and the esmOnly graph, which loads with
@@ -789,7 +830,20 @@ function bootFixtures() {
   const cjs = { main: './index.js' };
   const esm = { type: 'module', exports: './index.js' };
   pkg('@nestjs/core', cjs, {
-    'index.js': "exports.NestFactory = { async create() { throw new Error(\"PrismaClientInitializationError: P1001: Can't reach database server at 127.0.0.1:1\"); } };\n",
+    'index.js': [
+      'async function scan(mod, seen) {',
+      '  if (!mod || seen.has(mod)) return;',
+      '  seen.add(mod);',
+      '  for (const entry of mod.imports || []) await scan(entry && entry.forwardRef ? await entry.forwardRef() : entry, seen);',
+      '}',
+      'exports.NestFactory = {',
+      '  async create(root, options = {}) {',
+      '    if (options.preview) return scan(root, new Set());',
+      "    throw new Error(\"PrismaClientInitializationError: P1001: Can't reach database server at 127.0.0.1:1\");",
+      '  },',
+      '};',
+      '',
+    ].join('\n'),
   });
   pkg('cjs-dep', cjs, { 'index.js': 'module.exports = { yes: 1 };\n' });
   pkg('plain-esm', esm, { 'index.js': 'export const x = 1;\n' });
@@ -806,6 +860,25 @@ function bootFixtures() {
   pkg('exit-hook', cjs, {
     'index.js': "process.on('exit', (code) => {\n  if (code === 0) {\n    require('node:fs').writeSync(2, 'module-load fixture: exit hook failed\\n');\n    process.exitCode = 1;\n  }\n});\n",
   });
+  // Rejected after require() returns, in the turn the graph loads (review
+  // SEC-PINR3-1): what tsc (module CommonJS) emits for an unawaited top-level
+  // import() of a missing or top-level-await dependency, and an init promise
+  // started at load. The real boot dies of each with exit 1.
+  pkg('async-missing', cjs, { 'index.js': "Promise.resolve().then(() => require('no-such-async-dep'));\nmodule.exports = {};\n" });
+  pkg('async-tla', cjs, { 'index.js': "Promise.resolve().then(() => require('tla-dep'));\nmodule.exports = {};\n" });
+  pkg('async-init', cjs, { 'index.js': "Promise.reject(new Error('module-load fixture: async init rejected while loading'));\nmodule.exports = {};\n" });
+  // Reached only through forwardRef(async () => (await import(...)).X), as
+  // notifications.module.ts reaches CommerceModule: Nest loads these while it
+  // scans the graph, after main.ts has imported AppModule (review CR-PINR3-1).
+  pkg('lazy-ok', cjs, { 'index.js': "require('cjs-dep');\nexports.LazyModule = class LazyModule {};\n" });
+  pkg('lazy-missing', cjs, { 'index.js': "require('no-such-lazy-dep');\nexports.LazyModule = class LazyModule {};\n" });
+  // A dependency missing at the end of a long require chain: Node prints the
+  // requireStack twice after the error line, so a tail of the output loses
+  // the line that names the module (review CR-PINR3-2).
+  const CHAIN = 24;
+  for (let i = 1; i <= CHAIN; i += 1) {
+    pkg(`chain-${i}`, cjs, { 'index.js': `require(${JSON.stringify(i < CHAIN ? `chain-${i + 1}` : 'no-such-deep-dep')});\n` });
+  }
   const MAIN = [
     "'use strict';",
     "const core_1 = require('@nestjs/core');",
@@ -821,9 +894,14 @@ function bootFixtures() {
     'bootstrap();',
     '',
   ].join('\n');
-  const graph = (dir, dep, rootName = 'AppModule') => {
+  // `lazy`: the root module also imports that package's LazyModule through
+  // forwardRef(async () => (await import(...)).LazyModule), as tsc emits it.
+  const graph = (dir, dep, { rootName = 'AppModule', lazy } = {}) => {
+    const imports = lazy
+      ? `\n  static imports = [{ forwardRef: async () => (await Promise.resolve().then(() => require(${JSON.stringify(lazy)}))).LazyModule }];\n`
+      : '';
     write(`${dir}/apps/server/dist/main.js`, MAIN);
-    write(`${dir}/apps/server/dist/app.module.js`, `'use strict';\nrequire(${JSON.stringify(dep)});\nexports.AppModule = class ${rootName} {};\n`);
+    write(`${dir}/apps/server/dist/app.module.js`, `'use strict';\nrequire(${JSON.stringify(dep)});\nexports.AppModule = class ${rootName} {${imports}};\n`);
     return path.join(root, dir);
   };
   fs.mkdirSync(path.join(root, 'tmp'));
@@ -838,7 +916,7 @@ function bootFixtures() {
   bootFixtureCache = {
     root,
     cases: [
-      { label: 'a graph that loads', dir: graph('loads', 'cjs-dep'), loads: true },
+      { label: 'a graph that loads, a forwardRef(async import) module included', dir: graph('loads', 'cjs-dep', { lazy: 'lazy-ok' }), loads: true },
       { esm: true, label: 'an ESM-only dependency', dir: graph('esm-only', 'plain-esm'), esmOnly: true, shows: 'ERR_REQUIRE_ESM' },
       { esm: true, label: 'an ESM-only dependency with top-level await', dir: graph('tla', 'tla-dep'), shows: 'ERR_REQUIRE_ASYNC_MODULE' },
       { esm: true, label: 'an ESM-only dependency in an import cycle', dir: graph('cycle', 'cycle-dep'), shows: 'ERR_REQUIRE_CYCLE_MODULE' },
@@ -850,8 +928,16 @@ function bootFixtures() {
       { esm: true, label: 'an ESM-only dependency importing a directory', dir: graph('dir-import', 'dir-import'), shows: 'ERR_UNSUPPORTED_DIR_IMPORT' },
       { label: 'a dependency that throws while it loads', dir: graph('throws', 'throws-dep'), shows: 'module-load fixture: thrown while loading' },
       { label: 'a dependency that exits 0 before AppModule reaches NestFactory.create', dir: graph('exits-early', 'exits-early'), shows: 'module-load fixture: exited before the app was created' },
-      { label: 'a root module other than AppModule', dir: graph('not-app-module', 'cjs-dep', 'StubModule'), shows: 'not AppModule' },
+      { label: 'a root module other than AppModule', dir: graph('not-app-module', 'cjs-dep', { rootName: 'StubModule' }), shows: 'not AppModule' },
       { label: 'the load marker, then a non-zero exit', dir: graph('exit-hook', 'exit-hook'), shows: 'module-load fixture: exit hook failed' },
+      // SEC-PINR3-1: rejected after require() returns, while the graph loads.
+      { label: 'a dependency that is not installed, required in a promise callback (an unawaited import())', dir: graph('async-missing', 'async-missing'), shows: "Cannot find module 'no-such-async-dep'" },
+      { esm: true, label: 'an ESM-only dependency with top-level await, required in a promise callback', dir: graph('async-tla', 'async-tla'), shows: 'ERR_REQUIRE_ASYNC_MODULE' },
+      { label: 'an init promise started at load that rejects', dir: graph('async-init', 'async-init'), shows: 'module-load fixture: async init rejected while loading' },
+      // CR-PINR3-1: loaded only when Nest scans the graph.
+      { label: 'a module reached only through forwardRef(async import) whose dependency is not installed', dir: graph('lazy-missing', 'cjs-dep', { lazy: 'lazy-missing' }), shows: "Cannot find module 'no-such-lazy-dep'" },
+      // CR-PINR3-2: the error line sits above two copies of a long requireStack.
+      { label: `a dependency that is not installed, ${CHAIN} requires deep`, dir: graph('deep-missing', 'chain-1'), shows: "Cannot find module 'no-such-deep-dep'" },
     ],
   };
   return bootFixtureCache;
@@ -998,7 +1084,10 @@ describe('V1-39 runtime pin: one declared Node runtime (D-21)', () => {
   // RC2-1 (PIN-R3): the step itself, run verbatim on the running Node (in CI,
   // the pin), against graphs that fail each way and graphs that load. The
   // grep-list check it replaces passed the named-export, exports-map,
-  // syntax-error, throw, early-exit, wrong-root and exit-hook graphs.
+  // syntax-error, throw, early-exit, wrong-root and exit-hook graphs. The
+  // first probe passed the three rejected-at-load graphs (SEC-PINR3-1) and the
+  // forwardRef(async import) one (CR-PINR3-1), and its tail -n 40 report lost
+  // the error line of the deep require chain (CR-PINR3-2).
   it('the module-loading step fails every server graph that cannot boot, prints why, and passes one that loads', () => {
     assert.deepEqual(bootBehaviourProblems(bootStep(workflow('ci-cd.yml'))), []);
   });
@@ -1205,6 +1294,10 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
     ['the probe not loaded', `node ${PROBE_OPTION} apps/server`, 'node apps/server'],
     ['the probe printing the marker as soon as it loads', `${RUN_INDENT}const path = require('node:path');\n`, `${RUN_INDENT}const path = require('node:path');\n${RUN_INDENT}${PROBE_PRINTS}\n`],
     ['the boot not under a timeout', `OUT=$(timeout 45 node ${PROBE_OPTION}`, `OUT=$(node ${PROBE_OPTION}`, 'read only'],
+    // PIN-R3 review repairs: undoing each fix fails the read and the run.
+    ['the probe printing the marker before Node can report a promise rejected while the graph loaded (SEC-PINR3-1)', `${RUN_INDENT}  ${PROBE_YIELDS}\n`, ''],
+    ['the probe printing the marker before Nest scans the graph, so forwardRef(async import) modules never load (CR-PINR3-1)', `${RUN_INDENT}  ${PROBE_SCANS}\n`, ''],
+    ['the boot output cut to its last 40 lines (CR-PINR3-2)', `${RUN_INDENT}  ${BOOT_REPORT}\n`, `${RUN_INDENT}  ${BOOT_REPORT} | tail -n 40\n`],
   ];
   for (const [name, from, to, readOnly] of bootMutations) {
     it(`module-loading check: rejects ${name}`, () => {
