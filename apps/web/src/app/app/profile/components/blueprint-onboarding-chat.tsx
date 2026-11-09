@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Send, RotateCcw, Loader2, CheckCircle2, Bot, User, ArrowRight } from "lucide-react";
-import { apiPostSimple as apiPost } from "@/lib/api";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { apiGet, apiPostSimple as apiPost } from "@/lib/api";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { useTts, SpeakButton } from "@/components/tts";
 import { toast } from "sonner";
 import type { BlueprintData, BlueprintSectionKey } from "@/lib/blueprint-types";
@@ -27,6 +27,29 @@ export interface OnboardingChatResult {
     confidence: number;
   }>;
   nextSection: BlueprintSectionKey | null;
+}
+
+/** GET /blueprint/businesses/:businessId/onboarding-history (PR196-GENOME). */
+interface OnboardingHistoryResponse {
+  /** Checked entry by entry on restore (isTranscriptEntry), not trusted as typed. */
+  messages: unknown;
+  completedSections: BlueprintSectionKey[];
+  nextSection: BlueprintSectionKey | null;
+  completeness: number;
+}
+
+/** The line the client sends to open a conversation; it is not something the member typed. */
+const OPENING_LINE = "Hi KEY, I'm ready to build my Business Genome.";
+
+/**
+ * A transcript entry this chat can show: a known role with text. Anything else
+ * the history route returns is dropped on restore rather than rendered (an
+ * object as a React child unmounts the whole chat; PR196-GENOME review CR-1).
+ */
+function isTranscriptEntry(value: unknown): value is OnboardingMessage {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as { role?: unknown; content?: unknown };
+  return (entry.role === "user" || entry.role === "assistant") && typeof entry.content === "string";
 }
 
 interface BlueprintOnboardingChatProps {
@@ -66,8 +89,24 @@ const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
   documentProfile: "Document Pack",
 };
 
+/**
+ * The business the chat is for: the prop, else the member's selected business,
+ * followed while mounted (selectBusiness announces BUSINESS_CHANGED_EVENT; a
+ * switch in another tab arrives as `storage`).
+ */
 function useBusinessId(propId?: string) {
-  return propId ?? getStoredBusinessId() ?? null;
+  const [stored, setStored] = useState<string | null>(() => getStoredBusinessId());
+  useEffect(() => {
+    if (propId) return;
+    const follow = () => setStored(getStoredBusinessId());
+    window.addEventListener(BUSINESS_CHANGED_EVENT, follow);
+    window.addEventListener("storage", follow);
+    return () => {
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, follow);
+      window.removeEventListener("storage", follow);
+    };
+  }, [propId]);
+  return propId ?? stored ?? null;
 }
 
 export function BlueprintOnboardingChat({
@@ -104,29 +143,97 @@ export function BlueprintOnboardingChat({
     return () => engine.cancel();
   }, [engine]);
 
+  /**
+   * PR196-GENOME (OK-8B-2): the transcript lives in this component's memory
+   * only, never in localStorage or sessionStorage, and belongs to one business.
+   * The business this chat currently answers for; a reply that lands after a
+   * switch is dropped instead of being shown under the next business.
+   */
+  const activeBusinessRef = useRef<string | null>(businessId);
+  useEffect(() => {
+    activeBusinessRef.current = businessId;
+  }, [businessId]);
+
+  // A business switch drops the previous business's transcript at once, even
+  // when the business came in as a prop the parent has not changed yet.
+  useEffect(() => {
+    const onSwitch = (event: Event) => {
+      const next = (event as CustomEvent<{ businessId?: string }>).detail?.businessId ?? null;
+      if (next === businessId) return;
+      activeBusinessRef.current = next;
+      setMessages([]);
+      setBlueprint(null);
+      setCompleteness(0);
+      setCurrentSection("identity");
+      setLoading(false);
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onSwitch);
+    return () => window.removeEventListener(BUSINESS_CHANGED_EVENT, onSwitch);
+  }, [businessId]);
+
+  // The transcript shown is this business's, or nothing: when the business
+  // changes, the previous one's state is dropped during this render (React's
+  // "adjust state when a prop changes"), before anything is painted for it.
+  const [transcriptBusinessId, setTranscriptBusinessId] = useState<string | null>(businessId);
+  if (transcriptBusinessId !== businessId) {
+    setTranscriptBusinessId(businessId);
+    setMessages([]);
+    setBlueprint(null);
+    setCompleteness(0);
+    setCurrentSection("identity");
+    setLoading(!!businessId);
+  }
+
   useEffect(() => {
     if (!businessId) return;
-    // Seed the conversation with a welcome message from KEY.
-    apiPost<OnboardingChatResult>(`/blueprint/businesses/${businessId}/onboarding-chat`, {
-      message: "Hi KEY, I'm ready to build my Business Genome.",
-      history: [],
-    })
-      .then(({ data, error }) => {
-        if (error || !data) {
-          toast.error(error || "Failed to start onboarding.");
-          return;
-        }
-        setMessages([
-          {
-            role: "assistant",
-            content: data.reply,
-          },
-        ]);
-        setBlueprint(data.blueprint);
-        setCompleteness(data.completeness);
-        setCurrentSection(data.nextSection);
-      })
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    const init = async () => {
+      // Resume from the server's copy (its bounded cache), so a reload or
+      // another device continues the interview without the browser keeping one.
+      const history = await apiGet<OnboardingHistoryResponse>(
+        `/blueprint/businesses/${businessId}/onboarding-history`,
+      );
+      if (cancelled) return;
+      if (history.error || !history.data) {
+        toast.error(history.error || "Failed to load your Business Genome conversation.");
+        setLoading(false);
+        return;
+      }
+      const restored = (Array.isArray(history.data.messages) ? history.data.messages : [])
+        .filter(isTranscriptEntry)
+        .filter((m, i) => !(i === 0 && m.role === "user" && m.content === OPENING_LINE));
+      if (restored.length > 0) {
+        setMessages(restored);
+        setCompleteness(history.data.completeness);
+        setCurrentSection(history.data.nextSection);
+        setLoading(false);
+        return;
+      }
+
+      // No transcript yet (or older than the server keeps): KEY opens.
+      // The server keeps the transcript (one per member); the client sends
+      // only the message, never a history (PR196-GENOME review SEC-GEN-1).
+      const { data, error } = await apiPost<OnboardingChatResult>(
+        `/blueprint/businesses/${businessId}/onboarding-chat`,
+        { message: OPENING_LINE },
+      );
+      if (cancelled) return;
+      setLoading(false);
+      if (error || !data) {
+        toast.error(error || "Failed to start onboarding.");
+        return;
+      }
+      setMessages([{ role: "assistant", content: data.reply }]);
+      setBlueprint(data.blueprint);
+      setCompleteness(data.completeness);
+      setCurrentSection(data.nextSection);
+    };
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   const handleSend = useCallback(async () => {
@@ -136,12 +243,12 @@ export function BlueprintOnboardingChat({
     setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
-    const history = messages.map((m) => m);
     const { data, error } = await apiPost<OnboardingChatResult>(
       `/blueprint/businesses/${businessId}/onboarding-chat`,
-      { message: userMsg, history },
+      { message: userMsg },
     );
 
+    if (activeBusinessRef.current !== businessId) return;
     setLoading(false);
     if (error || !data) {
       toast.error(error || "KEY had trouble thinking that through.");
@@ -156,7 +263,7 @@ export function BlueprintOnboardingChat({
     if (data.threePillarMinimumMet && onComplete) {
       onComplete();
     }
-  }, [businessId, input, loading, messages, onComplete]);
+  }, [businessId, input, loading, onComplete]);
 
   const handleReset = useCallback(async () => {
     if (!businessId) return;
@@ -168,8 +275,9 @@ export function BlueprintOnboardingChat({
     setBlueprint(null);
     const { data, error } = await apiPost<OnboardingChatResult>(
       `/blueprint/businesses/${businessId}/onboarding-chat`,
-      { message: "Hi KEY, I'm ready to build my Business Genome.", history: [] },
+      { message: OPENING_LINE },
     );
+    if (activeBusinessRef.current !== businessId) return;
     setLoading(false);
     if (error || !data) {
       toast.error(error || "Failed to restart onboarding.");

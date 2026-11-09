@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { OnboardingConciergeController } from './onboarding-concierge.controller';
 import { OnboardingConciergeService } from './onboarding-concierge.service';
 import { OnboardingStateService } from './onboarding-state.service';
+import { DemoDataSeederService } from './demo-data-seeder.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -44,12 +47,19 @@ describe('OnboardingConciergeController', () => {
     })),
   };
 
+  // PR196-SEED-DEMO-OWNER (D-84): POST seed-demo goes through the seeder's
+  // owner-only, audited door with the authenticated caller.
+  const seederMock = {
+    seedDemoDataAsOwner: vi.fn().mockResolvedValue({ contactId: 'c1', invoiceId: 'i1', invoiceNumber: 'DEMO-001', alreadySeeded: false }),
+  };
+
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [OnboardingConciergeController],
       providers: [
         { provide: OnboardingConciergeService, useValue: conciergeMock },
         { provide: OnboardingStateService, useValue: stateMock },
+        { provide: DemoDataSeederService, useValue: seederMock },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -82,10 +92,29 @@ describe('OnboardingConciergeController', () => {
     expect(result.step).toBe('genesis');
   });
 
-  it('POST seed-demo triggers demo data seeding', async () => {
-    const result = await controller.seedDemoData('biz_1');
-    expect(conciergeMock.seedDemoData).toHaveBeenCalledWith('biz_1');
+  it('POST seed-demo triggers demo data seeding, as the authenticated caller through the owner-only seeder door (D-84)', async () => {
+    const owner = { id: 'user_owner', email: 'owner@example.test', role: 'USER' };
+    const result = await controller.seedDemoData('biz_1', owner);
+    expect(seederMock.seedDemoDataAsOwner).toHaveBeenCalledWith('biz_1', owner);
+    expect(conciergeMock.seedDemoData, 'the unaudited, actor-less seed is not reachable from the route').not.toHaveBeenCalled();
     expect(result.invoiceNumber).toBe('DEMO-001');
+  });
+
+  it('POST seed-demo surfaces the owner-only refusal and returns no demo data (D-84)', async () => {
+    seederMock.seedDemoDataAsOwner.mockRejectedValueOnce(new ForbiddenException({ code: 'DEMO_SEED_OWNER_ONLY' }));
+    await expect(controller.seedDemoData('biz_1', { id: 'user_staff', role: 'USER' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(seederMock.seedDemoDataAsOwner).toHaveBeenCalledWith('biz_1', { id: 'user_staff', role: 'USER' });
+  });
+
+  it('has no separate sample-contact seeding route (D-84)', () => {
+    const proto = OnboardingConciergeController.prototype as unknown as Record<string, unknown>;
+    const paths = Object.getOwnPropertyNames(proto)
+      .filter((name) => name !== 'constructor' && typeof proto[name] === 'function')
+      .map((name) => Reflect.getMetadata(PATH_METADATA, proto[name] as object))
+      .filter((path): path is string => typeof path === 'string');
+    expect(paths, 'the route table is read').toContain('seed-demo');
+    expect(paths.filter((path) => /sample/i.test(path))).toEqual([]);
+    expect(paths.filter((path) => /seed/i.test(path))).toEqual(['seed-demo']);
   });
 
   it('POST complete marks onboarding complete and seeds demo data', async () => {
