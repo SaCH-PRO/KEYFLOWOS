@@ -182,7 +182,8 @@ export function ProjectDetail({
   const handleAddTask = useCallback(async (projectId: string, title: string, dueDate?: string, assigneeId?: string) => {
     if (!businessId || !title) return;
     try {
-      const res = await createProjectTask(businessId, projectId, { title, dueDate, assigneeId });
+      const payload = { title, dueDate, ...(assigneeId ? { assigneeId } : {}) } as Parameters<typeof createProjectTask>[2];
+      const res = await createProjectTask(businessId, projectId, payload);
       if (res.data) {
         onProjectUpdate({ ...project, tasks: [...(project.tasks || []), res.data] });
       }
@@ -215,13 +216,13 @@ export function ProjectDetail({
   const handleUpdateTask = useCallback(async (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number; assigneeId?: string | null }) => {
     if (!businessId) return;
     try {
-      const res = await updateProjectTask(businessId, taskId, data);
+      const res = await updateProjectTask(businessId, taskId, data as Parameters<typeof updateProjectTask>[2]);
       if (res.data) {
         const mapped: Partial<ProjectTask> = {};
         if (data.dueDate !== undefined) mapped.dueDate = data.dueDate ?? undefined;
         if (data.estimatedHours !== undefined) mapped.estimatedHours = data.estimatedHours;
         if (data.trackedHours !== undefined) mapped.trackedHours = data.trackedHours;
-        if (data.assigneeId !== undefined) mapped.assigneeId = data.assigneeId;
+        if (data.assigneeId !== undefined) mapped.assigneeId = data.assigneeId ?? undefined;
         onProjectUpdate({
           ...project,
           tasks: project.tasks.map((t) => (t.id === taskId ? { ...t, ...mapped } : t)),

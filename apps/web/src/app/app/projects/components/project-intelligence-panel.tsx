@@ -111,7 +111,7 @@ export function ProjectIntelligencePanel({ projects = [], businessId }: ProjectI
         });
       }
 
-      const unassignedTasks = tasks.filter((t) => !t.isCompleted && !t.assigneeStaffId);
+      const unassignedTasks = tasks.filter((t) => !t.isCompleted && !t.assigneeId);
       if (unassignedTasks.length >= 2) {
         items.push({
           id: `resource-${p.id}`,
@@ -149,12 +149,12 @@ export function ProjectIntelligencePanel({ projects = [], businessId }: ProjectI
 
     if (staffMembers.length > 0) {
       return staffMembers.map((s) => {
-        const assignedCount = openTasks.filter((t) => t.assigneeStaffId === s.id).length;
+        const assignedCount = openTasks.filter((t) => t.assigneeId === s.id).length;
         // Assume 6 concurrent open tasks = 100% nominal capacity
         const load = Math.round((assignedCount / 6) * 100);
         return {
           member: s.name,
-          role: s.role || "Team Member",
+          role: (s as StaffMember & { role?: string }).role || "Team Member",
           load,
           tasks: assignedCount,
           atRisk: load > 90,
@@ -162,7 +162,7 @@ export function ProjectIntelligencePanel({ projects = [], businessId }: ProjectI
       });
     }
 
-    const unassignedCount = openTasks.filter((t) => !t.assigneeStaffId).length;
+    const unassignedCount = openTasks.filter((t) => !t.assigneeId).length;
     if (openTasks.length > 0) {
       return [
         {

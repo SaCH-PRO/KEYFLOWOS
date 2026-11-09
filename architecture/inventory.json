@@ -46497,9 +46497,9 @@
         "react",
         "sonner"
       ],
-      "lines": 548,
+      "lines": 549,
       "path": "apps/web/src/app/app/projects/components/project-detail.tsx",
-      "size_bytes": 22162
+      "size_bytes": 22319
     },
     {
       "exports": [
@@ -46529,7 +46529,7 @@
       ],
       "lines": 296,
       "path": "apps/web/src/app/app/projects/components/project-intelligence-panel.tsx",
-      "size_bytes": 11338
+      "size_bytes": 11360
     },
     {
       "exports": [
@@ -63731,6 +63731,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3477,
     "total_files": 4472,
-    "total_lines": 1156890
+    "total_lines": 1156891
   }
 }
