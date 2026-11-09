@@ -720,31 +720,20 @@ export class CommerceService {
    * invoice create; R0-27 review (ST-27-2) for quote create, quote update and
    * quote convert, the second path by which a contact reaches an Invoice.
    *
-   * FOLLOW3-D6 (owner ruling D-64; R0-27 review ST-27-5): with a member actor,
-   * the contact must also be one that member may open, by the rule GET
-   * contacts/:id applies (resolveCrmAccess + visibilityClause), as bookings
-   * create does since V1-06. The write answers its bound contact (name,
-   * email), so a revenue:write member whose CRM view is 'owned' (or whose crm
-   * level is 'none') bound the owner's PRIVATE contact by id and read it back.
-   * A hidden contact answers exactly the 404 of an unknown one. resolveCrmAccess
-   * refuses a non-member 403 first. No actor, or KEY's system actor, keeps the
-   * tenant check alone: KEY's commerce tools stay tenant-only until D-37.
-   * The member is named today by updateInvoice, updateQuote and createInvoice
-   * (the HTTP route with an Idempotency-Key, and invoices/from-time). Quote
-   * create, quote convert and the unkeyed invoice create still check the
-   * tenant only: existing suites outside FOLLOW3-D6's write set pin their
-   * pre-D-64 answers (see commerce-contact-bind-visibility.integration.test.ts).
+   * FOLLOW3-D6 (D-64): `memberClause` (memberContactClause) narrows the lookup
+   * to the contacts the acting member may open; a hidden contact then answers
+   * exactly the 404 of an unknown one. Without it the check is the tenant's.
    */
-  private async assertContactInBusiness(contactId: unknown, businessId: string, actorUserId?: string): Promise<string> {
+  private async assertContactInBusiness(
+    contactId: unknown,
+    businessId: string,
+    memberClause?: Prisma.ContactWhereInput,
+  ): Promise<string> {
     if (typeof contactId !== 'string' || contactId.length === 0) {
       throw new BadRequestException('contactId must be a non-empty string');
     }
     const where: Prisma.ContactWhereInput = { id: contactId, businessId };
-    if (actorUserId && !isSystemActor(actorUserId)) {
-      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
-      const visClause = visibilityClause(access, actorUserId);
-      if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
-    }
+    if (memberClause) where.AND = [memberClause];
     const contact = await this.prisma.client.contact.findFirst({
       where,
       select: { id: true },
@@ -753,6 +742,30 @@ export class CommerceService {
       throw new NotFoundException('Contact not found');
     }
     return contactId;
+  }
+
+  /**
+   * FOLLOW3-D6 (owner ruling D-64; R0-27 review ST-27-5): the contacts the
+   * acting member may open, by the rule GET contacts/:id applies
+   * (resolveCrmAccess + visibilityClause), as bookings create does since V1-06.
+   * Undefined when there is no member actor (KEY's system actor included) or
+   * the member sees every contact (OWNER, SUPER_ADMIN). resolveCrmAccess refuses a
+   * non-member 403 first.
+   *
+   * Applied today by updateQuote only. Every other bind (createInvoice,
+   * createQuote, the convert re-check, updateInvoice) is also reached by a
+   * granted KEY tool whose dispatcher passes no actor (commerce_create_invoice,
+   * commerce_create_quote, commerce_convert_quote, commerce_update_invoice), so
+   * applying the clause there makes KEY bind what HTTP refuses: the K2
+   * derivation in job-role-tool-families.spec.ts (CRM_ROW_VISIBILITY_TOOLS)
+   * fails. Those binds wait for an owner decision (withhold the tools from KEY
+   * positions, or a holder-aware dispatcher), and existing suites pin their
+   * pre-D-64 answers (commerce-contact-bind-visibility.integration.test.ts).
+   */
+  private async memberContactClause(businessId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput | undefined> {
+    if (!actorUserId || isSystemActor(actorUserId)) return undefined;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return (visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null) ?? undefined;
   }
 
   /**
@@ -907,11 +920,7 @@ export class CommerceService {
     total?: number;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the invoice it created. */
     idempotencyKey?: string;
-    /**
-     * V1-45b (SEC-V45-3): the member who sent the request; part of the key's
-     * request hash. FOLLOW3-D6 (D-64): the contact must be one this member may
-     * open. Internal callers (KEY, intake, events) pass none: tenant only.
-     */
+    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
     actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
@@ -987,7 +996,7 @@ export class CommerceService {
     // echoing) bizA's contact. Every caller passes through here: the HTTP
     // route, invoice-from-time, KEY and the intake flows.
     if (input.contactId !== undefined) {
-      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, input.actorUserId);
+      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     // V1-43 (D-15): a number the caller names (document intake) is kept as
     // given; otherwise the business's next number is drawn in this create's
@@ -2878,7 +2887,11 @@ export class CommerceService {
     discountType?: 'PERCENT' | 'FIXED';
     discountValue?: number;
     notes?: string;
-    /** FOLLOW3-D6 (D-64): the member who edits; a new contactId must be one they may open. None: tenant only. */
+    /**
+     * FOLLOW3-D6 (D-64): the member who edits; a contactId other than the
+     * stored one must be one they may open (memberContactClause). None, or
+     * KEY's system actor: the tenant check alone.
+     */
     actorUserId?: string;
   }) {
     const quote = await this.prisma.client.quote.findFirst({
@@ -2901,8 +2914,16 @@ export class CommerceService {
 
     const updateData: any = {};
     // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
-    // FOLLOW3-D6 (D-64): and one the editing member may open.
-    if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, input.actorUserId);
+    if (input.contactId) {
+      // FOLLOW3-D6 (D-64): a new contact must be one the editing member may
+      // open. The stored one is not re-judged (review CR-D6-2): every web edit
+      // (Extend expiry, the composer) sends it back, and refusing it would
+      // block a notes or dates edit of a quote already bound to a contact the
+      // member cannot open, which the same PATCH without contactId allows.
+      const memberClause =
+        input.contactId === quote.contactId ? undefined : await this.memberContactClause(input.businessId, input.actorUserId);
+      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, memberClause);
+    }
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
     if (input.currency) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
     if (input.expiryDate !== undefined) {
@@ -4456,9 +4477,7 @@ export class CommerceService {
       // contact (email, phone, notes, every field). Resolve it inside the
       // caller's tenant first; a foreign, deleted or unknown id answers like
       // a missing one, and nothing is written.
-      // FOLLOW3-D6 (D-64): a human actor must also be able to open it (KEY,
-      // actorId undefined, stays tenant-only).
-      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, actorId);
+      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
     if (input.currency !== undefined) {

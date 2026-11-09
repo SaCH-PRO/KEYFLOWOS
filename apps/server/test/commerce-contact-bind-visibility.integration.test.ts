@@ -17,20 +17,39 @@
  *
  *   CB-01  STAFF (revenue:write, crm:read, crm_view:owned) on the owner's
  *          PRIVATE contact:
- *            a POST invoices (with an Idempotency-Key)
- *            b PATCH quotes/:id { contactId }
- *            c PATCH invoices/:id { contactId }
- *            d POST invoices/from-time { contactId }
- *          and, BLOCKED outside this packet's write set (it.todo, each
- *          naming the existing case that pins the pre-D-64 answer):
- *            POST invoices without an Idempotency-Key, POST quotes,
- *            POST quotes/:id/convert of an ACCEPTED quote bound to it
- *          RED-BEFORE: 201/200, the body carries the contact's firstName and
- *          email (from-time: the stored invoice is bound to it).
- *          GREEN-AFTER: 404 'Contact not found', the same body an unknown id
- *          answers; Invoice and Quote counts unchanged, a PATCH leaves the
- *          document's contactId as it was, convert leaves the quote unlinked,
- *          from-time leaves the hours unbilled; nothing names the contact.
+ *            c PATCH quotes/:id { contactId }
+ *          RED-BEFORE: 200, the body carries the contact's firstName and
+ *          email. GREEN-AFTER: 404 'Contact not found', the same body an
+ *          unknown id answers; the quote keeps its contactId; nothing names
+ *          the contact.
+ *          BLOCKED (it.todo, each with its reason; D-64 is NOT closed):
+ *            a POST invoices (with or without an Idempotency-Key),
+ *            b POST quotes, d PATCH invoices/:id, e POST quotes/:id/convert,
+ *            f POST invoices/from-time. Each bind is also reached by a granted
+ *            KEY tool whose dispatcher passes no actor (commerce_create_invoice,
+ *            commerce_create_quote, commerce_update_invoice,
+ *            commerce_convert_quote). Refusing on HTTP while KEY binds breaks
+ *            the KEY-never-exceeds-HTTP derivation that
+ *            src/modules/structure/job-role-tool-families.spec.ts asserts
+ *            (CRM_ROW_VISIBILITY_TOOLS, review CR-D6-1). It needs an owner
+ *            decision: withhold those tools from KEY positions, or a
+ *            holder-aware dispatcher. Both are outside this packet's write set,
+ *            and so are the existing cases that pin the pre-D-64 201s
+ *            (commerce-authorization.e2e CC-STRIP/CC-FORWARD/CC-BOUND,
+ *            commerce-quote-errors RR-PROJECT-CREATE, commerce-create-idempotency
+ *            H-09, quote-chain-finish QCF-07; review SEC-D6-1). Until then a
+ *            member refused on PATCH quotes can still bind the contact through
+ *            POST quotes, so the PATCH refusal alone is not a boundary.
+ *            g POST recurring-invoices: RecurringInvoiceService checks the
+ *            tenant only and answers the whole Contact row (review SEC-D6-2);
+ *            outside this packet's write set, its own packet.
+ *   CB-02  (review CR-D6-2) a PATCH that sends back the contactId the document
+ *          already holds is not re-judged: STAFF and ADMIN edit notes on a
+ *          quote, and STAFF on an invoice, already bound to the PRIVATE
+ *          contact (the web edit flows always send it back): 200, notes
+ *          written, the contact unchanged.
+ *   CB-03  (review CR-D6-3) POST invoices answers the same with and without an
+ *          Idempotency-Key: the bind does not depend on an optional header.
  *   CTL    controls, green before and after: the STAFF member's own TEAM
  *          contact and a PRIVATE contact shared with them answer 201/200 on
  *          every route; OWNER binds the PRIVATE contact with 201/200; KEY's
@@ -69,6 +88,7 @@ const CANARY = 'V84F_PRIV_';
 const ID = {
   owner: `${P}owner`, // OWNER of bizA
   staff: `${P}staff`, // STAFF of bizA: revenue write, crm read, crm_view owned
+  admin: `${P}admin`, // ADMIN of bizA, role defaults (sees TEAM and SHARED, not another member's PRIVATE)
   ownerB: `${P}ownerB`, // OWNER of bizB
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -136,11 +156,11 @@ function postQuote(actor: string, contactId: string, key?: string) {
   const req = as(actor, agent().post(`/commerce/businesses/${ID.bizA}/quotes`));
   return (key ? req.set('Idempotency-Key', key) : req).send({ contactId, items: ITEMS, notes: 'v84f quote' });
 }
-function patchQuote(actor: string, quoteId: string, contactId: string) {
-  return as(actor, agent().patch(`/commerce/businesses/${ID.bizA}/quotes/${quoteId}`)).send({ contactId });
+function patchQuote(actor: string, quoteId: string, contactId: string, extra: Record<string, unknown> = {}) {
+  return as(actor, agent().patch(`/commerce/businesses/${ID.bizA}/quotes/${quoteId}`)).send({ contactId, ...extra });
 }
-function patchInvoice(actor: string, invoiceId: string, contactId: string) {
-  return as(actor, agent().patch(`/commerce/businesses/${ID.bizA}/invoices/${invoiceId}`)).send({ contactId });
+function patchInvoice(actor: string, invoiceId: string, contactId: string, extra: Record<string, unknown> = {}) {
+  return as(actor, agent().patch(`/commerce/businesses/${ID.bizA}/invoices/${invoiceId}`)).send({ contactId, ...extra });
 }
 function convert(actor: string, quoteId: string) {
   return as(actor, agent().post(`/commerce/businesses/${ID.bizA}/quotes/${quoteId}/convert`)).send({});
@@ -338,13 +358,14 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.owner, ID.staff, ID.ownerB]) {
+  for (const id of [ID.owner, ID.staff, ID.admin, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84F Biz A', slug: ID.bizA, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
   await db.business.create({ data: { id: ID.bizB, name: 'V84F Biz B', slug: ID.bizB, ownerId: ID.ownerB, currency: 'TTD', accountingBasis: 'CASH' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.bizA, role: 'STAFF', permissionScopes: STAFF_SCOPES } });
+  await db.membership.create({ data: { id: `${P}m_admin`, userId: ID.admin, businessId: ID.bizA, role: 'ADMIN' } });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
 
   await db.contact.create({ data: { id: ID.cPriv, businessId: ID.bizA, ...PRIV, visibility: 'PRIVATE', ownerId: ID.owner } });
@@ -361,7 +382,7 @@ afterAll(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it("the STAFF member's CRM view (as GET contacts/:id decides it) opens the TEAM contact they own and the PRIVATE contact shared with them, not the owner's PRIVATE contact", async () => {
+  it("the STAFF member's CRM view (as GET contacts/:id decides it) opens the TEAM contact they own and the PRIVATE contact shared with them, not the owner's PRIVATE contact; ADMIN's opens the TEAM contact only", async () => {
     const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
     const prismaLike = { client: db } as any;
     const access = await resolveCrmAccess(prismaLike, ID.bizA, ID.staff);
@@ -371,65 +392,66 @@ describe('fixture sanity (real rows)', () => {
     expect(visible.map((c: any) => c.id).sort()).toEqual([ID.cShared, ID.cTeam].sort());
     const membership = await db.membership.findUnique({ where: { userId_businessId: { userId: ID.staff, businessId: ID.bizA } } });
     expect(membership.permissionScopes).toEqual(STAFF_SCOPES);
+    // ADMIN (role defaults: crm admin, view all) opens the TEAM contact, not another member's PRIVATE one
+    const adminAccess = await resolveCrmAccess(prismaLike, ID.bizA, ID.admin);
+    expect(adminAccess).toMatchObject({ isOwner: false, viewAll: true });
+    const adminVisible = await db.contact.findMany({
+      where: { businessId: ID.bizA, AND: [visibilityClause(adminAccess, ID.admin)!] },
+      select: { id: true },
+    });
+    expect(adminVisible.map((c: any) => c.id)).toEqual([ID.cTeam]);
   });
 });
 
+/**
+ * Why each bind other than PATCH quotes is an it.todo (review CR-D6-1, SEC-D6-1):
+ * the bind is also reached by a KEY tool a revenue:write position is granted,
+ * and the flow dispatcher (and CommerceAdapterService, CTL-04) calls it with no
+ * member actor. Applying the clause there refuses on HTTP what KEY still binds,
+ * so job-role-tool-families.spec.ts ('CRM_ROW_VISIBILITY_TOOLS is exactly the
+ * granted write tools whose service reaches the clause') fails: KEY would
+ * exceed HTTP. The way forward is an owner decision (add the tool to
+ * CRM_ROW_VISIBILITY_TOOLS, withholding it from every KEY position but the
+ * OWNER's, or a holder-aware dispatcher that passes the member), plus the
+ * existing cases that pin the pre-D-64 201s. All are outside this packet's
+ * write set. Restore each body below as an `it` with that change.
+ */
+const K2_BLOCKED =
+  'BLOCKED: a granted KEY tool reaches the same bind with no actor, so refusing it on HTTP breaks the K2 derivation ' +
+  'in src/modules/structure/job-role-tool-families.spec.ts (CRM_ROW_VISIBILITY_TOOLS; owner decision: withhold the tool from KEY ' +
+  'positions or a holder-aware dispatcher)';
+
 describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE contact: 404, nothing written, nothing disclosed (D-64)', () => {
-  // BLOCKED outside this packet's write set. CommerceService.createInvoice
-  // applies D-64 whenever it is given the member (actorUserId), and the route
-  // forwards the member only with an Idempotency-Key (createIdempotency), so
-  // CB-01a2 below is green. Forwarding it without a key is one line in
-  // CommerceController.createInvoice (`actorUserId: req.user?.id,` before
-  // `...idempotency`), and with it this case is green (verified locally), but
-  // three cases of test/commerce-authorization.e2e.test.ts (CC-STRIP,
-  // CC-FORWARD, CC-BOUND; manifests invoice-create-contract and
-  // revenue-auth-001) assert the exact object the route forwards, so they fail
-  // until their expected object gains `actorUserId: <actor>`. That file is
-  // not in this packet's write set. Restore this body as an `it` with that fix:
-  //   const unknown = await postInvoice(ID.staff, ID.unknown);
-  //   const before = await documentCounts();
-  //   const res = await postInvoice(ID.staff, ID.cPriv);
-  //   expectRefused(res, unknown, 'POST invoices');
-  //   expect(await documentCounts()).toEqual(before);
+  // KEY tool commerce_create_invoice (CommerceService.createInvoice). Also
+  // pinned: test/commerce-authorization.e2e.test.ts CC-STRIP, CC-FORWARD and
+  // CC-BOUND assert the exact object the route forwards, which forwards the
+  // member only with an Idempotency-Key (createIdempotency); the route must
+  // forward it always, so the refusal does not depend on the header (CB-03).
+  //   for (const key of [undefined, `${P}key-inv-priv`]) {
+  //     const unknown = await postInvoice(ID.staff, ID.unknown, key && `${key}-unknown`);
+  //     const before = await documentCounts();
+  //     const res = await postInvoice(ID.staff, ID.cPriv, key);
+  //     expectRefused(res, unknown, `POST invoices (key ${key ?? 'none'})`);
+  //     expect(await documentCounts()).toEqual(before);
+  //   }
   it.todo(
-    'CB-01a POST businesses/A/invoices (no Idempotency-Key): 404 Contact not found, no Invoice written ' +
-      '(BLOCKED: the route forwards the member only with a key; forwarding it always breaks the exact-forward ' +
-      'assertions CC-STRIP/CC-FORWARD/CC-BOUND in test/commerce-authorization.e2e.test.ts, outside the write set)',
+    `CB-01a POST businesses/A/invoices, with and without an Idempotency-Key: 404 Contact not found, no Invoice and no key slot written (${K2_BLOCKED}: ` +
+      'commerce_create_invoice; also commerce-authorization.e2e CC-STRIP/CC-FORWARD/CC-BOUND pin the forwarded object)',
   );
 
-  it('CB-01a2 POST businesses/A/invoices with an Idempotency-Key: 404 Contact not found, no Invoice and no key slot written', async () => {
-    const unknown = await postInvoice(ID.staff, ID.unknown, `${P}key-inv-unknown`);
-    const before = await documentCounts();
-    const res = await postInvoice(ID.staff, ID.cPriv, `${P}key-inv-priv`);
-    expectRefused(res, unknown, 'POST invoices (keyed)');
-    expect(await documentCounts()).toEqual(before);
-    const slots = await db.$queryRawUnsafe(
-      'SELECT idempotency_key FROM idempotency_keys WHERE business_id = $1 AND idempotency_key = $2',
-      ID.bizA,
-      `commerce.invoice.create:${P}key-inv-priv`,
-    );
-    expect(slots).toEqual([]);
-  });
-
-  // BLOCKED outside this packet's write set. Passing the member to
-  // assertContactInBusiness in CommerceService.createQuote (and forwarding
-  // `actorUserId: req.user?.id` from CommerceController.createQuote) makes
-  // this case green (verified locally), but two existing cases assert the
-  // pre-D-64 answer, 201 with the projected contact, for a member who cannot
-  // open the contact: test/commerce-quote-errors.integration.test.ts
-  // RR-PROJECT-CREATE (STAFF crm:none on a PRIVATE contact) and
-  // test/commerce-create-idempotency.integration.test.ts H-09 (its quote twin,
-  // keyed, after the contact is made PRIVATE). Under D-64 both become 404 (no
-  // disclosure at all), which their files must be changed to expect. Restore
-  // this body as an `it` with that change:
+  // KEY tool commerce_create_quote (CommerceService.createQuote). Also pinned:
+  // test/commerce-quote-errors.integration.test.ts RR-PROJECT-CREATE (STAFF
+  // crm:none on a PRIVATE contact) and test/commerce-create-idempotency
+  // .integration.test.ts H-09 (its quote twin) expect 201 with the projected
+  // contact; under D-64 both are 404.
   //   const unknown = await postQuote(ID.staff, ID.unknown);
   //   const before = await documentCounts();
   //   const res = await postQuote(ID.staff, ID.cPriv);
   //   expectRefused(res, unknown, 'POST quotes');
   //   expect(await documentCounts()).toEqual(before);
   it.todo(
-    'CB-01b POST businesses/A/quotes: 404 Contact not found, no Quote written (BLOCKED: ' +
-      'commerce-quote-errors RR-PROJECT-CREATE and commerce-create-idempotency H-09 pin 201 for a member who cannot open the contact)',
+    `CB-01b POST businesses/A/quotes: 404 Contact not found, no Quote written (${K2_BLOCKED}: commerce_create_quote; ` +
+      'also commerce-quote-errors RR-PROJECT-CREATE and commerce-create-idempotency H-09 pin 201)',
   );
 
   it('CB-01c PATCH businesses/A/quotes/:id { contactId: PRIVATE }: 404 Contact not found, the quote keeps its contact', async () => {
@@ -443,26 +465,24 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
     expect(JSON.parse(JSON.stringify(after))).toEqual(JSON.parse(JSON.stringify(before)));
   });
 
-  it('CB-01d PATCH businesses/A/invoices/:id { contactId: PRIVATE }: 404 Contact not found, the invoice keeps its contact', async () => {
-    const invoiceId = await seedInvoice('cb01d', ID.cTeam);
-    const unknown = await patchInvoice(ID.staff, invoiceId, ID.unknown);
-    const before = await db.invoice.findUnique({ where: { id: invoiceId } });
-    const res = await patchInvoice(ID.staff, invoiceId, ID.cPriv);
-    expectRefused(res, unknown, 'PATCH invoices/:id');
-    const after = await db.invoice.findUnique({ where: { id: invoiceId } });
-    expect(after.contactId).toBe(ID.cTeam);
-    expect(JSON.parse(JSON.stringify(after))).toEqual(JSON.parse(JSON.stringify(before)));
-  });
+  // KEY tool commerce_update_invoice (CommerceService.updateInvoice). The
+  // restated stored contact must stay allowed (CB-02).
+  //   const invoiceId = await seedInvoice('cb01d', ID.cTeam);
+  //   const unknown = await patchInvoice(ID.staff, invoiceId, ID.unknown);
+  //   const before = await db.invoice.findUnique({ where: { id: invoiceId } });
+  //   const res = await patchInvoice(ID.staff, invoiceId, ID.cPriv);
+  //   expectRefused(res, unknown, 'PATCH invoices/:id');
+  //   const after = await db.invoice.findUnique({ where: { id: invoiceId } });
+  //   expect(after.contactId).toBe(ID.cTeam);
+  //   expect(JSON.parse(JSON.stringify(after))).toEqual(JSON.parse(JSON.stringify(before)));
+  it.todo(
+    `CB-01d PATCH businesses/A/invoices/:id { contactId: PRIVATE }: 404 Contact not found, the invoice keeps its contact (${K2_BLOCKED}: commerce_update_invoice)`,
+  );
 
-  // BLOCKED outside this packet's write set. Passing the member to the
-  // convert re-check (assertContactInBusiness(quote.contactId, ...)) in
-  // CommerceService.convertQuoteToInvoice, forwarded from
-  // CommerceController.convertQuoteToInvoice, makes this case green (verified
-  // locally), but test/quote-chain-finish.integration.test.ts QCF-07 asserts
-  // the pre-D-64 answer: a revenue:write, crm:none member converting a quote on
-  // a PRIVATE contact gets 201 with the projected contact. Under D-64 it is
-  // 404, which that file must be changed to expect. Restore this body as an
-  // `it` with that change:
+  // KEY tool commerce_convert_quote (CommerceService.convertQuoteToInvoice and
+  // its re-check of the quote's stored contact). Also pinned:
+  // test/quote-chain-finish.integration.test.ts QCF-07 (a revenue:write,
+  // crm:none member converting a quote on a PRIVATE contact gets 201).
   //   const quoteId = await seedQuote('cb01e', ID.cPriv, 'ACCEPTED');
   //   const unknownQuote = await seedQuote('cb01e_unknown', ID.cTeam, 'ACCEPTED');
   //   // A stored contact outside the tenant (a legacy row) answers the convert re-check's 404 (R0-27 ST-27-2).
@@ -476,23 +496,75 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
   //   expect(quote).toMatchObject({ status: 'ACCEPTED', invoiceId: null, contactId: ID.cPriv });
   it.todo(
     'CB-01e POST businesses/A/quotes/:id/convert of an ACCEPTED quote bound to the PRIVATE contact: 404 Contact not found, ' +
-      'no Invoice, the quote stays unconverted (BLOCKED: quote-chain-finish QCF-07 pins 201 for a crm:none member)',
+      `no Invoice, the quote stays unconverted (${K2_BLOCKED}: commerce_convert_quote; also quote-chain-finish QCF-07 pins 201)`,
   );
 
-  it('CB-01f POST businesses/A/invoices/from-time { contactId: PRIVATE }: 404 Contact not found, no Invoice, the hour stays unbilled', async () => {
-    const unknownHour = await seedBillableHour('cb01f_unknown');
-    const unknown = await fromTime(ID.staff, unknownHour.projectId, ID.unknown);
-    const { projectId, entryId } = await seedBillableHour('cb01f');
-    const before = await documentCounts();
-    const res = await fromTime(ID.staff, projectId, ID.cPriv);
-    if (res.status === 201) {
-      const bound = await db.invoice.findUnique({ where: { id: res.body.invoiceId }, select: { contactId: true } });
-      expect(bound?.contactId, 'from-time bound the PRIVATE contact to the invoice').not.toBe(ID.cPriv);
+  // KEY tool commerce_create_invoice: from-time binds through
+  // CommerceService.createInvoice (TimeEntryService.invoiceUnbilledTime's
+  // createInvoice callback, which the controller must hand the member).
+  //   const unknownHour = await seedBillableHour('cb01f_unknown');
+  //   const unknown = await fromTime(ID.staff, unknownHour.projectId, ID.unknown);
+  //   const { projectId, entryId } = await seedBillableHour('cb01f');
+  //   const before = await documentCounts();
+  //   const res = await fromTime(ID.staff, projectId, ID.cPriv);
+  //   expectRefused(res, unknown, 'POST invoices/from-time');
+  //   expect(await documentCounts()).toEqual(before);
+  //   expect(await db.timeEntry.findUnique({ where: { id: entryId } })).toMatchObject({ billed: false, invoiceId: null });
+  it.todo(
+    `CB-01f POST businesses/A/invoices/from-time { contactId: PRIVATE }: 404 Contact not found, no Invoice, the hour stays unbilled (${K2_BLOCKED}: ` +
+      'commerce_create_invoice, through CommerceService.createInvoice)',
+  );
+
+  // Review SEC-D6-2: RecurringInvoiceService.createRecurringInvoice checks the
+  // contact against the tenant only (its own private assertContactInBusiness)
+  // and answers the schedule with `include: { contact: true }`, which
+  // RecurringInvoiceController returns unprojected (notesInternal, phone,
+  // ownerId, visibility, every CRM field). Every invoice the schedule issues is
+  // bound to that contact. recurring-invoice.service.ts and
+  // recurring-invoice.controller.ts are outside this packet's write set.
+  it.todo(
+    'CB-01g POST businesses/A/recurring-invoices { contactId: PRIVATE }: 404 Contact not found, no schedule written, and the ' +
+      'schedule write answers a projected contact (BLOCKED: RecurringInvoiceService/Controller outside this write set; its own packet)',
+  );
+});
+
+describe('CB-02 a PATCH that sends back the stored contactId is not re-judged (review CR-D6-2)', () => {
+  it('CB-02 STAFF and ADMIN edit notes on a quote bound to the PRIVATE contact, sending its contactId back: 200, notes written, contact unchanged; the invoice twin answers 200 too', async () => {
+    for (const actor of [ID.staff, ID.admin]) {
+      const quoteId = await seedQuote(`cb02_${actor.slice(P.length)}`, ID.cPriv);
+      const res = await patchQuote(actor, quoteId, ID.cPriv, { notes: `v84f edited by ${actor}` });
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+      const after = await db.quote.findUnique({ where: { id: quoteId } });
+      expect(after).toMatchObject({ contactId: ID.cPriv, notes: `v84f edited by ${actor}` });
+      // the answer is what the same PATCH without contactId answers: the projected contact
+      const withoutContact = await as(actor, agent().patch(`/commerce/businesses/${ID.bizA}/quotes/${quoteId}`)).send({ notes: 'v84f again' });
+      expect(withoutContact.status).toBe(200);
+      expect(res.body.contact).toEqual(withoutContact.body.contact);
     }
-    expectRefused(res, unknown, 'POST invoices/from-time');
-    expect(await documentCounts()).toEqual(before);
-    const entry = await db.timeEntry.findUnique({ where: { id: entryId } });
-    expect(entry).toMatchObject({ billed: false, invoiceId: null });
+    // web edit flows (invoices/[id]/edit, invoices-panel, revenue-composer) send the invoice's contactId back too
+    const invoiceId = await seedInvoice('cb02', ID.cPriv);
+    const res = await patchInvoice(ID.staff, invoiceId, ID.cPriv, { notes: 'v84f invoice edited' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await db.invoice.findUnique({ where: { id: invoiceId } })).toMatchObject({ contactId: ID.cPriv, notes: 'v84f invoice edited' });
+  });
+
+  it("CB-02b ADMIN (sees TEAM and SHARED, not another member's PRIVATE) binding the owner's PRIVATE contact to a quote by a new contactId: 404 Contact not found, the quote keeps its contact", async () => {
+    const quoteId = await seedQuote('cb02b', ID.cTeam);
+    const unknown = await patchQuote(ID.admin, quoteId, ID.unknown);
+    const res = await patchQuote(ID.admin, quoteId, ID.cPriv);
+    expectRefused(res, unknown, 'ADMIN PATCH quotes/:id');
+    expect((await db.quote.findUnique({ where: { id: quoteId } })).contactId).toBe(ID.cTeam);
+  });
+});
+
+describe('CB-03 POST invoices binds alike with and without an Idempotency-Key (review CR-D6-3)', () => {
+  it('CB-03 the same member and contact get the same status keyed and unkeyed, for the PRIVATE, TEAM and unknown contacts', async () => {
+    for (const contactId of [ID.cPriv, ID.cTeam, ID.unknown]) {
+      const unkeyed = await postInvoice(ID.staff, contactId);
+      const keyed = await postInvoice(ID.staff, contactId, `${P}key-cb03-${contactId.slice(P.length)}`);
+      expect(keyed.status, `${contactId}: keyed ${keyed.status}, unkeyed ${unkeyed.status}`).toBe(unkeyed.status);
+      expect(keyed.body.message, contactId).toBe(unkeyed.body.message);
+    }
   });
 });
 
