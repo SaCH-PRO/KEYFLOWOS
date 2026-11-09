@@ -47,6 +47,16 @@ const INVOICE_TRANSITIONS: Partial<Record<ContactEventType, { counter: ContactEv
   'invoice.reopened': { counter: 'invoice.paid', mark: 'reopenedAt' },
 };
 
+/**
+ * V1-55b-FEED-DEDUPE-REST (V55-07; D-08: Activity is the user-visible feed).
+ * The contact events this listener logs from a bus event whose feed row
+ * ActivityEventListener writes on the same emit: the ContactEvent is kept on
+ * the contact's timeline, and its Activity copy (an actorless second feed row
+ * for the event) is not written. invoice.paid: ActivityEventListener.onInvoicePaid
+ * writes the paid row ('Payment received').
+ */
+const FEED_ROW_BY_ACTIVITY_LISTENER: ReadonlySet<ContactEventType> = new Set<ContactEventType>(['invoice.paid']);
+
 /** A transition time (Date or its JSON string) as epoch ms, or null when absent / unreadable. */
 function transitionTime(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -466,7 +476,7 @@ export class RevenueEventListener {
         contactId,
         type,
         { ...data, dedupeKey },
-        { actorType: 'SYSTEM', source: 'event-bus' },
+        { actorType: 'SYSTEM', source: 'event-bus', ...(FEED_ROW_BY_ACTIVITY_LISTENER.has(type) ? { feedCopy: false } : {}) },
       );
       await this.insights.markStale(businessId, contactId);
     } catch (err: any) {

@@ -66,7 +66,13 @@ export class CrmTimelineService {
     contactId: string,
     type: string,
     data: any,
-    meta?: { actorType?: string; actorId?: string; source?: string },
+    /**
+     * feedCopy false (V1-55b-FEED-DEDUPE-REST; D-08: Activity is the feed):
+     * the caller knows another writer puts this event's feed row in Activity,
+     * so the ContactEvent (and its crm.contact_event.logged emit) is written
+     * and the Activity copy is not. Default: copied, as before.
+     */
+    meta?: { actorType?: string; actorId?: string; source?: string; feedCopy?: boolean },
     tx?: {
       contactEvent: { create: (args: any) => Promise<{ id: string }> };
       contact?: { update: (args: any) => Promise<unknown> };
@@ -91,7 +97,8 @@ export class CrmTimelineService {
       },
     });
 
-    // Also write to unified Activity ledger (Wave 1)
+    // Also write to unified Activity ledger (Wave 1), unless the caller says
+    // another writer puts this event's feed row there (V1-55b, meta.feedCopy).
     const categoryMap: Record<string, 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK'> = {
       communication: 'CONTACT',
       revenue: 'COMMERCE',
@@ -103,24 +110,26 @@ export class CrmTimelineService {
       task: 'TASK',
     };
     const contactEventCat = getContactEventCategory(normalized.canonical);
-    this.timeline.recordEvent({
-      businessId,
-      module: 'crm',
-      action: normalized.canonical,
-      entityType: 'contact',
-      entityId: contactId,
-      title: normalized.canonical,
-      detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
-      contactId,
-      category: (contactEventCat ? categoryMap[contactEventCat] : undefined) ?? 'CONTACT',
-      type: normalized.canonical,
-      actorType: (meta?.actorType as any) ?? 'SYSTEM',
-      actorId: meta?.actorId,
-      data: data ?? {},
-      occurredAt: new Date(),
-    }).catch((err) => {
-      this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
-    });
+    if (meta?.feedCopy !== false) {
+      this.timeline.recordEvent({
+        businessId,
+        module: 'crm',
+        action: normalized.canonical,
+        entityType: 'contact',
+        entityId: contactId,
+        title: normalized.canonical,
+        detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
+        contactId,
+        category: (contactEventCat ? categoryMap[contactEventCat] : undefined) ?? 'CONTACT',
+        type: normalized.canonical,
+        actorType: (meta?.actorType as any) ?? 'SYSTEM',
+        actorId: meta?.actorId,
+        data: data ?? {},
+        occurredAt: new Date(),
+      }).catch((err) => {
+        this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
+      });
+    }
 
     if (getContactEventCategory(normalized.canonical) === 'communication') {
       const contactClient = tx?.contact ?? this.prisma.client.contact;
