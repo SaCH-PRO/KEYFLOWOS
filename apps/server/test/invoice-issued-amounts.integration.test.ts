@@ -58,6 +58,21 @@
  *   IA-08b ten concurrent {PATCH items to 80, Send} pairs on DRAFT 100: every invoice ends SENT with its
  *          ledger AR equal to its total (80 when the edit won, 100 when the Send won and the edit got 409)
  *
+ * Owner ruling D-89 (W3-D89-OVERPAID-EDIT, the FOLLOW3-B2 residual): an invoice edit that would bring
+ * its total below the money it holds (received net of refunds, its own tenant's Payment rows only,
+ * D-75; integer cents, D-13) is refused with 409, including a DRAFT the AI undo returned from an issued
+ * state. A CASH invoice holds no invoice-sourced posting, so D-60 (holdsIssuedMoney) leaves its
+ * undone DRAFT editable; before D-89 it could be edited below the money received and left overpaid.
+ *
+ *   IA-09a RED-BEFORE a CASH invoice of 100 sent, paid 60, undone to DRAFT: PATCH items to 50, to 59.99,
+ *          or a FIXED discount of 50 -> 409 'holds TTD 60.00', nothing written, no invoice.updated;
+ *          PATCH items to 60 -> 200 (60), to 80 -> 200 (80), a FIXED discount of 20 on 80 -> 200 (60)
+ *   IA-09b RED-BEFORE paid 20 and 40, the 40 refunded (net held 20), undone to DRAFT: PATCH items to 19.99
+ *          -> 409 'holds TTD 20.00'; to 30 -> 200 and to 20 -> 200 (the refunded 40 is not held)
+ *   IA-09c RED-BEFORE paid 20, undone to DRAFT, a SUCCESSFUL row of 70 under another business on the same
+ *          invoice (M31: Payment has no FK to Business): PATCH items to 30 -> 200 (the foreign row is not
+ *          this invoice's money, D-75); to 10 -> 409 'holds TTD 20.00'
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
  * invoices), CommerceController, CommerceService, InvoiceWorkflowService,
@@ -103,6 +118,9 @@ const AMOUNTS_REFUSED = (status: string) => new RegExp(`^Cannot change the amoun
 /** The D-60 refusal of a DRAFT that holds issued money (the AI undo returned it to DRAFT). */
 const RETURNED_REFUSED = /^Cannot change the amounts of an issued invoice returned to DRAFT: /;
 const PAID_REFUSED = 'Cannot edit a paid or partially paid invoice';
+/** The D-89 refusal: the edited total would be below the money the invoice holds (`held`, e.g. '60.00'). */
+const HELD_REFUSED = (held: string) =>
+  new RegExp(`^Cannot set the total of this invoice below the money it holds: it holds TTD ${held.replace('.', '\\.')} received net of refunds`);
 
 let db: any;
 let app: any;
@@ -770,4 +788,103 @@ describe('V1-82 review repairs: an edit racing a Send cannot leave an issued tot
       ).toEqual({ status: 'SENT', total: expected, ar: expected });
     }
   }, 120_000);
+});
+
+describe('D-89: an invoice edit that would bring its total below the money it holds is refused (W3-D89-OVERPAID-EDIT; real rows)', () => {
+  /** A CASH invoice of 100 sent and paid `amounts` in turn (CASH: no invoice-sourced posting). */
+  async function paidCashInvoice(label: string, amounts: number[]) {
+    const id = await sent100(ID.cash, label);
+    const payments: string[] = [];
+    for (const amount of amounts) {
+      const res = await pay(ID.cash, id, amount);
+      payments.push(res.body.payment.id);
+    }
+    return { id, payments };
+  }
+  /** The AI undo returns it to DRAFT; nothing invoice-sourced is posted, so D-60 (holdsIssuedMoney) leaves its amounts editable. */
+  async function undo(id: string) {
+    const undone = await commerce.undoInvoice(id, ID.cash);
+    expect(undone.status).toBe('reverted_to_draft');
+    const row = await snapshot(id);
+    expect(row.status, 'the undo writes the status alone').toBe('DRAFT');
+    expect(
+      await db.financialTransaction.count({ where: { businessId: ID.cash, sourceType: 'Invoice', sourceId: id } }),
+      'CASH: no invoice-sourced posting, so D-60 does not fix its amounts',
+    ).toBe(0);
+    return row;
+  }
+  const line = (label: string, unitPrice: number) => ({ items: [{ description: `V82B ${label}`, quantity: 1, unitPrice }] });
+
+  it('IA-09a D-89 RED-BEFORE: a CASH invoice of 100 sent, paid 60 and undone to DRAFT: PATCH items to 50 or 59.99, or a FIXED discount of 50 -> 409, nothing written; items to 60 or 80 -> 200; a FIXED discount of 20 on 80 -> 200 at 60', async () => {
+    const { id } = await paidCashInvoice('IA-09a', [60]);
+    expect((await snapshot(id)).status).toBe('PARTIALLY_PAID');
+    const before = await undo(id);
+    expect(before.total).toBe(100);
+
+    for (const body of [line('IA-09a', 50), line('IA-09a', 59.99), { discountType: 'FIXED', discountValue: 50 }]) {
+      emitted.length = 0;
+      const res = await patchInvoice(ID.cash, id, body);
+      await expectRefused(res, HELD_REFUSED('60.00'), before, id, [...emitted]);
+    }
+
+    const at60 = await patchInvoice(ID.cash, id, line('IA-09a', 60));
+    expect(at60.status, JSON.stringify(at60.body)).toBe(200);
+    expect(at60.body.total, 'a total equal to the money held is allowed').toBe(60);
+    const at80 = await patchInvoice(ID.cash, id, line('IA-09a', 80));
+    expect(at80.status, JSON.stringify(at80.body)).toBe(200);
+    expect(at80.body.total).toBe(80);
+    const discounted = await patchInvoice(ID.cash, id, { discountType: 'FIXED', discountValue: 20 });
+    expect(discounted.status, JSON.stringify(discounted.body)).toBe(200);
+    expect(discounted.body.total, 'the tax/discount door is held to the same floor').toBe(60);
+    const row = await snapshot(id);
+    expect({ status: row.status, total: row.total }).toEqual({ status: 'DRAFT', total: 60 });
+  }, 60_000);
+
+  it('IA-09b D-89 RED-BEFORE: refunds net out: paid 20 and 40, the 40 refunded (net held 20), undone to DRAFT: PATCH items to 19.99 -> 409; to 30 -> 200 and to 20 -> 200', async () => {
+    const { id, payments } = await paidCashInvoice('IA-09b', [20, 40]);
+    const refund = await as(agent().post(`/commerce/businesses/${ID.cash}/payments/${payments[1]}/refund`)).send({ reason: 'V82B IA-09b' });
+    expect(refund.status, JSON.stringify(refund.body)).toBe(201);
+    expect(Number(refund.body.amount)).toBe(-40);
+    const before = await undo(id);
+
+    emitted.length = 0;
+    const short = await patchInvoice(ID.cash, id, line('IA-09b', 19.99));
+    await expectRefused(short, HELD_REFUSED('20.00'), before, id, [...emitted]);
+
+    const at30 = await patchInvoice(ID.cash, id, line('IA-09b', 30));
+    expect(at30.status, `the refunded 40 is not held: ${JSON.stringify(at30.body)}`).toBe(200);
+    expect(at30.body.total).toBe(30);
+    const at20 = await patchInvoice(ID.cash, id, line('IA-09b', 20));
+    expect(at20.status, JSON.stringify(at20.body)).toBe(200);
+    expect(at20.body.total).toBe(20);
+  }, 60_000);
+
+  it('IA-09c D-89 RED-BEFORE (M31, D-75): another tenant\'s payment row on the invoice does not count toward the money it holds: paid 20, undone, a foreign SUCCESSFUL row of 70: PATCH items to 30 -> 200; to 10 -> 409', async () => {
+    const { id } = await paidCashInvoice('IA-09c', [20]);
+    await undo(id);
+    // Payment sits outside the tenant extension and has no FK to Business (M31):
+    // a row carrying another businessId on this invoice is not its money (D-75).
+    await db.payment.create({
+      data: {
+        id: `${P}pay_foreign_09c`,
+        amount: 70,
+        currency: 'TTD',
+        status: 'SUCCESSFUL',
+        provider: 'cash',
+        method: 'cash',
+        providerPaymentId: `${P}pay_foreign_09c`,
+        businessId: ID.acc,
+        invoiceId: id,
+      },
+    });
+
+    const at30 = await patchInvoice(ID.cash, id, line('IA-09c', 30));
+    expect(at30.status, `only the invoice's own 20 is held: ${JSON.stringify(at30.body)}`).toBe(200);
+    expect(at30.body.total).toBe(30);
+
+    const before = await snapshot(id);
+    emitted.length = 0;
+    const short = await patchInvoice(ID.cash, id, line('IA-09c', 10));
+    await expectRefused(short, HELD_REFUSED('20.00'), before, id, [...emitted]);
+  }, 60_000);
 });
