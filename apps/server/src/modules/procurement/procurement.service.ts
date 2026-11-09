@@ -44,8 +44,8 @@ export class ProcurementService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
     // The app's event bus (EventBusModule, global): a committed decision's audit row is fanned out
-    // on it as BusinessEventService.emit fans out every audit row. Optional, as there.
-    @Optional() @Inject(EventEmitter2) private readonly events: EventEmitter2 | null = null,
+    // on it as BusinessEventService.emit fans out every audit row. EventEmitterModule.forRoot() provides it app-wide, so it is not @Optional() (phantom-injection spec).
+    @Inject(EventEmitter2) private readonly events: EventEmitter2 | null = null,
   ) {}
 
   /**

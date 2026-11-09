@@ -459,6 +459,16 @@ function quotePricedDiscountType(discountType: string | null | undefined): 'PERC
   return discountType === 'FIXED' ? 'FIXED' : 'PERCENT';
 }
 
+/**
+ * The recordPayment transaction re-reads the invoice under its lock, writes the
+ * payment, reconciles the status and posts to the ledger, and the first payment
+ * of a fresh tenant also seeds its chart of accounts inside it (R0-D1). That can
+ * pass Prisma's 5 s interactive-transaction default under load or against a
+ * remote database, which aborts a genuine payment ("Transaction already closed").
+ * The same bounded budget the profile patch uses, a little wider.
+ */
+const RECORD_PAYMENT_TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -3379,7 +3389,7 @@ export class CommerceService {
           eventBuffer: pendingEvents,
         });
         return { kind: 'recorded', payment: created, reconciled: r };
-      });
+      }, RECORD_PAYMENT_TX_OPTIONS);
     } catch (err: unknown) {
       // R0-D2 race: a concurrent duplicate submit won the insert between our
       // lookup and our create. Prisma raises P2002 on the unique index, the
