@@ -152,7 +152,8 @@ export class CreditNoteService {
 
     return this.prisma.client.$transaction(async (t) => {
       const tx = t as unknown as Prisma.TransactionClient;
-      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} FOR NO KEY UPDATE`;
+      // V1-44b (SEC-V44-6): only this business's invoice is locked (the lookup below refuses any other).
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
 
       const appliedAt = new Date();
       const claimed = await tx.creditNote.updateMany({
@@ -198,15 +199,22 @@ export class CreditNoteService {
 
       const totalRevenue = revEntries.reduce((sum, e) => sum.add(new D(String(e.credit))), new D(0));
 
-      // Pro-rate credit note amount across revenue accounts
+      // Pro-rate credit note amount across revenue accounts.
+      // V1-44b (CR-V44-3): each share but the last is rounded DOWN to whole
+      // cents, so the shares before the last never exceed their exact part and
+      // the last (the remainder) is always above 0 for a positive amount; a
+      // share that rounds to no cent posts no leg (validatePosting refuses a
+      // zero line, and a 0.01 credit across two splits rounded the first up
+      // to 0.01 and left the last 0).
       const postingEntries: PostingInput['entries'] = [];
       let allocated = new D(0);
       for (let i = 0; i < revEntries.length; i++) {
         const entry = revEntries[i];
         const share = i === revEntries.length - 1
           ? amount.sub(allocated) // last entry gets remainder to avoid rounding drift
-          : amount.mul(new D(String(entry.credit))).div(totalRevenue).toDecimalPlaces(2); // whole cents (D-13), so the stored entries balance
+          : amount.mul(new D(String(entry.credit))).div(totalRevenue).toDecimalPlaces(2, D.ROUND_DOWN); // whole cents (D-13), so the stored entries balance
         allocated = allocated.add(share);
+        if (!share.greaterThan(0)) continue;
         postingEntries.push({
           accountId: entry.accountId,
           debit: share,
@@ -263,7 +271,16 @@ export class CreditNoteService {
 
     return this.prisma.client.$transaction(async (t) => {
       const tx = t as unknown as Prisma.TransactionClient;
-      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} FOR NO KEY UPDATE`;
+      // V1-44b (SEC-V44-6): the note's invoice must be this business's own.
+      // The schema does not tie credit_notes.business_id to the invoice's, and
+      // reconcileFromCredits looks the invoice up by id alone, so a note whose
+      // invoiceId names another tenant's invoice (legacy or seeded rows;
+      // create() cannot make one) let this tenant's void move that invoice.
+      // The lock and the lookup carry businessId; any other invoice is
+      // refused 400 (as apply refuses it) before anything is written.
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+      const invoice = await tx.invoice.findFirst({ where: { id: cn.invoiceId, businessId }, select: { status: true } });
+      if (!invoice) throw new BadRequestException('Invoice not found');
 
       const voided = await tx.creditNote.updateMany({
         where: { id: cn.id, businessId, status: cn.status },
@@ -289,7 +306,16 @@ export class CreditNoteService {
             tx,
           );
         }
-        await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+        // V1-44b (CR-V44-4): a credit note never moves a DRAFT or VOID invoice
+        // (CREDIT_TRANSITIONS has no move out of either). An invoice the AI
+        // undo returned to DRAFT while notes were applied (UNDO_RETURNS_TO_DRAFT
+        // takes the credited states) kept its status, and with another note
+        // still applied the workflow refused DRAFT -> PARTIALLY_CREDITED 409, so
+        // no note on it could be voided. The note is voided and its posting
+        // reversed; the invoice keeps the status the undo gave it.
+        if (invoice.status !== 'DRAFT' && invoice.status !== 'VOID') {
+          await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+        }
       }
 
       return tx.creditNote.findFirst({ where: { id: cn.id, businessId } });

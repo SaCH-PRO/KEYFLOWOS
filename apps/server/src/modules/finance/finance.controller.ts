@@ -1218,6 +1218,16 @@ export class FinanceController {
   }
 
   // ---------- Credit Notes ----------
+  // V1-44b (V1-44 review SEC-V44-1, owner ruling D-57): a credit note moves
+  // money once applied (a revenue reversal, the receivable reduced, the
+  // invoice credited), so every credit-note write (create, PATCH, apply, void,
+  // DELETE) needs revenue:write, the invoice status door's gate, and the reads
+  // (list, detail: invoice total, status, contactId) need revenue:read.
+  // ModuleScopeGuard runs after the class guards and refuses before the
+  // handler, so a refused call reads and writes nothing; ensureAccess still
+  // refuses a non-member SUPER_ADMIN (D-46), whom both guards pass.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('credit-notes')
   async listCreditNotes(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1225,6 +1235,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes')
   async createCreditNote(
     @Param('businessId') businessId: string,
@@ -1235,12 +1247,16 @@ export class FinanceController {
     return this.creditNotes.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('credit-notes/:id')
   async getCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('credit-notes/:id')
   async updateCreditNote(
     @Param('businessId') businessId: string,
@@ -1252,6 +1268,8 @@ export class FinanceController {
     return this.creditNotes.update(businessId, id, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes/:id/apply')
   async applyCreditNote(
     @Param('businessId') businessId: string,
@@ -1262,12 +1280,18 @@ export class FinanceController {
     return this.creditNotes.apply(businessId, id, { userId: req.user?.id });
   }
 
+  // V1-44b (SEC-V44-5): the member who voids is recorded on the reversal
+  // posting of an APPLIED note, as apply records the member on the original.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes/:id/void')
   async voidCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.creditNotes.void(businessId, id);
+    return this.creditNotes.void(businessId, id, { userId: req.user?.id });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('credit-notes/:id')
   async deleteCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
