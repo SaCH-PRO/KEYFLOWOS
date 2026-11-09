@@ -1217,15 +1217,26 @@ export class CommerceService {
    * invoice nothing was received on as paid to the operator (paidAmount,
    * the Payment Summary the pages draw from the rows) and in every email
    * built from this read.
+   *
+   * Review SEC-OR-1 / CR-1: fails closed on an absent id. This is a findFirst,
+   * and Prisma drops an `id: undefined` key, so a missing id would read the
+   * first invoice in scope (any tenant's outside a request: the KEY
+   * get_invoice command passes `parameters.invoiceId` unchecked) where the
+   * findUnique it replaced threw. A non-string id (a filter object) is refused
+   * the same way.
    */
-  private async readOperatorInvoice(where: Prisma.InvoiceWhereInput) {
-    const invoice = await this.prisma.client.invoice.findFirst({ where, include: OPERATOR_INVOICE_INCLUDE });
+  private async readOperatorInvoice(invoiceId: string, scope: Prisma.InvoiceWhereInput = {}) {
+    if (typeof invoiceId !== 'string' || invoiceId.length === 0) return null;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { ...scope, id: invoiceId },
+      include: OPERATOR_INVOICE_INCLUDE,
+    });
     if (!invoice) return null;
     return { ...invoice, payments: ownTenantPayments(invoice) };
   }
 
   async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
-    const invoice = await this.readOperatorInvoice({ id: invoiceId });
+    const invoice = await this.readOperatorInvoice(invoiceId);
 
     if (!invoice) return null;
 
@@ -1250,7 +1261,7 @@ export class CommerceService {
    * Summary needs no second call.
    */
   async getInvoiceForBusiness(invoiceId: string, businessId: string) {
-    const invoice = await this.readOperatorInvoice({ id: invoiceId, businessId, deletedAt: null });
+    const invoice = await this.readOperatorInvoice(invoiceId, { businessId, deletedAt: null });
     if (!invoice) return null;
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
     // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
@@ -3695,7 +3706,9 @@ export class CommerceService {
       where.createdAt = createdAt;
     }
     if (filters.contactId) {
-      where.invoice = { is: { contactId: filters.contactId } };
+      // Review SEC-OR-2 (M31): the contact filter matches this business's own
+      // invoices only, so another tenant's customer id finds nothing here.
+      where.invoice = { is: { contactId: filters.contactId, businessId } };
     }
 
     const payments = await this.prisma.client.payment.findMany({
@@ -3706,6 +3719,7 @@ export class CommerceService {
         invoice: {
           select: {
             id: true,
+            businessId: true,
             invoiceNumber: true,
             status: true,
             currency: true,
@@ -3719,7 +3733,15 @@ export class CommerceService {
         },
       },
     });
-    return payments;
+    // Review SEC-OR-2 (M31, the payment side of D-75): Payment sits outside the
+    // tenant extension and has no FK to Business, so this business's row can
+    // name another business's invoice. The row is this business's and is
+    // listed; the invoice is not, so its number, total and customer (name,
+    // email) are not served with it. The relation include is not narrowed by
+    // the tenant extension, hence the check here.
+    return payments.map((payment) =>
+      payment.invoice && payment.invoice.businessId !== businessId ? { ...payment, invoice: null } : payment,
+    );
   }
 
   /**

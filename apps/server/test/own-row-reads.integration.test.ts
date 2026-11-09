@@ -44,6 +44,18 @@
  *   OR-09 CONTROL  the reads change nothing: statuses stay what A's own rows state, and the
  *                  invoice with no foreign row reads exactly as before
  *
+ * Review repairs (RED on the packet head 6f22f65a):
+ *   OR-10 RED      the bare-id operator read (getInvoiceWithBusiness) fails closed on an absent or
+ *                  non-string id (SEC-OR-1 / CR-1): readOperatorInvoice moved it from findUnique to
+ *                  findFirst, and findFirst({ where: { id: undefined } }) has no filter, so the KEY
+ *                  get_invoice command without an invoiceId returned the first invoice in the table
+ *                  (any tenant's, outside a tenant context) in the full operator shape
+ *   OR-11 RED      B's payments list (listAllPayments, also the KEY get_payment_history) serves B's
+ *                  row on A's invoice without A's invoice or A's customer (SEC-OR-2, the M31 row
+ *                  from the payment side); the contactId filter matches B's own invoices only.
+ *                  B's own invoice invB (30, B's contact) and B's own 30 through the real route
+ *                  are the control
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
  * own key namespace), CommerceController, PaymentsController, CommerceService,
@@ -87,6 +99,8 @@ const ID = {
   bizA: `${P}bizA`,
   bizB: `${P}bizB`, // the business B the foreign rows are tagged for
   contactA: `${P}contactA`,
+  contactB: `${P}contactB`,
+  invB: `${P}invB`, // B's own invoice (OR-10 / OR-11)
   invF: `${P}invF`,
   invMix: `${P}invMix`,
   invPaid: `${P}invPaid`,
@@ -100,6 +114,8 @@ const TOKEN: Record<string, string> = {};
 let db: any;
 let app: any;
 let redis: any;
+/** The real CommerceService instance the app serves (OR-10 calls it outside any request). */
+let commerce: any;
 
 const eventStub = {
   emit: () => true,
@@ -302,6 +318,7 @@ beforeAll(async () => {
       { provide: GoogleDriveService, useValue: {} },
     ],
   }).compile();
+  commerce = moduleRef.get(CommerceService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -361,6 +378,27 @@ beforeAll(async () => {
   await foreignRow(ID.invMix, 60, 'SUCCESSFUL');
   await foreignRow(ID.invPaid, -50, 'REFUNDED');
   await foreignRow(ID.invRec, 25, 'SUCCESSFUL');
+
+  // B's own invoice and B's own money on it, through the real route as B's owner (OR-10 / OR-11).
+  await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'V87d', lastName: 'CustomerB', email: `${P}contact_b@test.local` } });
+  await db.invoice.create({
+    data: {
+      id: ID.invB,
+      invoiceNumber: 'V87D-B-001',
+      status: 'SENT',
+      subtotal: 30,
+      total: 30,
+      currency: 'TTD',
+      businessId: ID.bizB,
+      contactId: ID.contactB,
+      items: { create: [{ id: `${ID.invB}_item1`, description: 'V87D B item', quantity: 1, unitPrice: 30, total: 30 }] },
+    },
+  });
+  const bOwn = await agent()
+    .post(`/commerce/businesses/${ID.bizB}/invoices/${ID.invB}/payments`)
+    .set(HEADER, ID.ownerB)
+    .send({ amount: 30, method: 'cash', reference: 'V87D-B-30' });
+  expect(bOwn.status, JSON.stringify(bOwn.body)).toBe(201);
 }, 180_000);
 
 afterAll(async () => {
@@ -572,5 +610,129 @@ describe('OR-09 CONTROL: the foreign rows change nothing', () => {
     expect({ paid: page.body.paid, remaining: page.body.remaining }).toEqual({ paid: 0, remaining: 25 });
     const status = await tokStatus(ID.invCtl);
     expect({ paid: status.body.paid, remaining: status.body.remaining, lastPaymentAt: status.body.lastPaymentAt }).toEqual({ paid: 0, remaining: 25, lastPaymentAt: null });
+  });
+});
+
+describe('OR-10 the bare-id operator read fails closed on an absent id (review SEC-OR-1 / CR-1)', () => {
+  const BAD_IDS: unknown[] = [undefined, null, '', { not: `${P}none` }];
+  const label = (bad: unknown) => JSON.stringify(bad) ?? 'undefined';
+
+  it('getInvoiceWithBusiness with no id, an empty id or a non-string id reads as absent, outside any tenant context', async () => {
+    const { getTenantContext } = await import('../src/core/tenant/tenant-context');
+    expect(getTenantContext(), 'no request, no tenant: the event / background-run path').toBeUndefined();
+    for (const bad of BAD_IDS) {
+      for (const requireShareable of [false, true]) {
+        let got: unknown;
+        let threw: string | null = null;
+        try {
+          got = await commerce.getInvoiceWithBusiness(bad, requireShareable);
+        } catch (e: any) {
+          threw = `${e?.constructor?.name}: ${String(e?.message).slice(0, 80)}`;
+        }
+        expect({ bad: label(bad), requireShareable, threw, got: (got as any)?.id ?? got }).toEqual({
+          bad: label(bad),
+          requireShareable,
+          threw: null,
+          got: null,
+        });
+      }
+    }
+  });
+
+  it('getInvoiceForBusiness with no id reads as absent, not as the business\'s first invoice', async () => {
+    for (const bad of BAD_IDS) {
+      await expect(commerce.getInvoiceForBusiness(bad, ID.bizA), label(bad)).resolves.toBeNull();
+    }
+  });
+
+  it('the KEY get_invoice command without an invoiceId answers not found, with no tenant and under B\'s tenant', async () => {
+    const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+    const { runWithTenant } = await import('../src/core/tenant/tenant-context');
+    const { NotFoundException } = await import('@nestjs/common');
+    const adapter = new CommerceAdapterService(commerce);
+    const command = { module: 'commerce', action: 'get_invoice', parameters: {}, businessId: ID.bizB, userId: ID.ownerB } as any;
+    await expect(adapter.execute(command)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(runWithTenant(ID.bizB, ID.ownerB, () => adapter.execute(command))).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('CONTROL: a real id still reads the invoice in the operator shape with A\'s own rows, outside any tenant context', async () => {
+    const inv = await commerce.getInvoiceWithBusiness(ID.invMix);
+    expect(inv?.id).toBe(ID.invMix);
+    expect(inv.contact?.email).toBe(`${P}contact_a@test.local`);
+    expect(businessesOf(inv.payments)).toEqual([ID.bizA]);
+    const detail = await commerce.getInvoiceForBusiness(ID.invMix, ID.bizA);
+    expect({ id: detail?.id, paidAmount: detail?.paidAmount, remaining: detail?.remaining }).toEqual({ id: ID.invMix, paidAmount: 40, remaining: 60 });
+  });
+});
+
+describe('OR-11 B\'s payments list does not carry A\'s invoice (review SEC-OR-2, listAllPayments)', () => {
+  const A_INVOICES = [ID.invF, ID.invMix, ID.invPaid, ID.invRec];
+  const bList = (query = '') => agent().get(`/commerce/businesses/${ID.bizB}/payments${query}`).set(HEADER, ID.ownerB);
+
+  it('B\'s row on A\'s invoice is listed as B\'s row, with no invoice: no A invoice number, total or customer', async () => {
+    const res = await bList();
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    const onA = res.body.filter((r: any) => A_INVOICES.includes(r.invoiceId));
+    expect(onA.map((r: any) => r.id).sort()).toEqual(A_INVOICES.map((inv) => `${P}foreign_${inv.slice(P.length)}`).sort());
+    for (const row of onA) {
+      expect({ id: row.id, businessId: row.businessId, invoice: row.invoice }).toEqual({ id: row.id, businessId: ID.bizB, invoice: null });
+    }
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain(`${P}contact_a@test.local`);
+    expect(body).not.toMatch(/V87D-00\d/);
+  });
+
+  it('CONTROL: B\'s own row on B\'s own invoice keeps its invoice and customer', async () => {
+    const res = await bList();
+    expect(res.status).toBe(200);
+    const own = res.body.filter((r: any) => r.invoiceId === ID.invB);
+    expect(own).toHaveLength(1);
+    expect(own[0].invoice).toMatchObject({
+      id: ID.invB,
+      invoiceNumber: 'V87D-B-001',
+      total: 30,
+      contact: { id: ID.contactB, firstName: 'V87d', lastName: 'CustomerB', email: `${P}contact_b@test.local` },
+    });
+  });
+
+  it('the contactId filter matches B\'s own invoices only: A\'s customer finds none of B\'s rows', async () => {
+    const byA = await bList(`?contactId=${ID.contactA}`);
+    expect(byA.status, JSON.stringify(byA.body)).toBe(200);
+    expect(byA.body).toEqual([]);
+    const byB = await bList(`?contactId=${ID.contactB}`);
+    expect(byB.status).toBe(200);
+    expect(byB.body.map((r: any) => r.invoiceId)).toEqual([ID.invB]);
+  });
+
+  it('the KEY get_payment_history command serves the same rows: no A invoice on B\'s history', async () => {
+    const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+    const adapter = new CommerceAdapterService(commerce);
+    const result = await adapter.execute({
+      module: 'commerce',
+      action: 'get_payment_history',
+      parameters: { limit: 500 },
+      businessId: ID.bizB,
+      userId: ID.ownerB,
+    } as any);
+    expect(result.success).toBe(true);
+    const rows = result.data as any[];
+    expect(rows.filter((r) => A_INVOICES.includes(r.invoiceId)).map((r) => r.invoice)).toEqual([null, null, null, null]);
+    expect(JSON.stringify(rows)).not.toContain(`${P}contact_a@test.local`);
+  });
+
+  it('CONTROL: A\'s list serves A\'s rows only, each with its own invoice and customer', async () => {
+    const res = await agent().get(`/commerce/businesses/${ID.bizA}/payments`).set(HEADER, ID.ownerA);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const mine = res.body.filter((r: any) => typeof r.invoiceId === 'string' && r.invoiceId.startsWith(P));
+    expect(mine.length).toBeGreaterThan(0);
+    expect(businessesOf(mine)).toEqual([ID.bizA]);
+    for (const row of mine) {
+      expect({ id: row.id, invoiceId: row.invoice?.id, email: row.invoice?.contact?.email }).toEqual({
+        id: row.id,
+        invoiceId: row.invoiceId,
+        email: `${P}contact_a@test.local`,
+      });
+    }
   });
 });
