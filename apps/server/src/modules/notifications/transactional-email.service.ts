@@ -132,14 +132,102 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   quote_sent: true,
 };
 
+/**
+ * Log lines name no recipient address and no message content (SEC-C2-1,
+ * W3-C2b-EMAIL-LOG-LEAK; IA-044, CF-029). main.ts creates the app with no
+ * `logger` option, so every level reaches the default ConsoleLogger.
+ *
+ * The recipient is named by contact id, as the playbook executor's lines do
+ * since FOLLOW3-C2; a send with no contact (an owner or seller notice, or a
+ * queued row without one) names no recipient at all.
+ */
+function recipientForLog(contactId?: string | null): string {
+  return contactId ? `contact ${contactId}` : 'a recipient with no contact';
+}
+
+/** Anything shaped like an email address: the pattern SystemEmailService redacts (9B-D2). */
+const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
+
+/**
+ * Error text from Gmail, a template or a lookup, for a log line: the message's
+ * subject (when given) and every address-shaped token are replaced, so an
+ * error that quotes the message cannot put its recipient or content in the
+ * logs. The rest of the text stays: it is what an operator needs.
+ *
+ * Any value is read as text first (CR-1, W3-C2b review): a thrown value's
+ * message need not be a string, and a log line must never turn a failed send
+ * into a TypeError that skips its FAILED result and notification row.
+ */
+function redactForLog(text: unknown, subject?: string): string {
+  const asText = typeof text === 'string' ? text : String(text);
+  const withoutSubject = subject ? asText.split(subject).join('<subject>') : asText;
+  return withoutSubject.replace(ADDRESS_PATTERN, '<address>');
+}
+
+/**
+ * A failed notification-log write, for a log line: the error class and the
+ * Prisma code only. A Prisma validation error quotes its whole argument (the
+ * recipient, the subject, the template data).
+ */
+function errorClassForLog(err: unknown): string {
+  const name = err instanceof Error ? err.name : typeof err;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? `${name} ${code}` : name;
+}
+
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
 const QUEUE_DRAIN_BATCH_SIZE = 20;
 const QUEUE_MAX_AGE_HOURS = 48;
+
+/**
+ * W3-D17b-REVIEW-SOLICIT-DEDUPE (V1-89): a keyed send claims its dedupe key
+ * before any effect, on the existing idempotency_keys table (unique on business
+ * and key; no migration) under this namespaced slot, as V1-45 and V1-31b claim
+ * theirs. The claim is a mutex, not the record: it is given back once the
+ * send's outcome row is written, and customer_notification_logs stays what a
+ * later send is deduped against (SENT, QUEUED or DRAINED blocks; FAILED does
+ * not).
+ */
+const DEDUPE_CLAIM_PREFIX = 'transactional-email.dedupe:';
+/**
+ * A claim older than this belongs to a send that died between its claim and its
+ * release (a crash or a lost connection): it is taken over by a compare-and-set
+ * delete on the version read. A live send (three attempts, 1 s and 2 s apart)
+ * finishes well inside it.
+ */
+const DEDUPE_CLAIM_STALE_MS = 15 * 60 * 1000;
+/**
+ * W3-D17b-REVIEW-SOLICIT-DEDUPE repair (SEC-D17b-1, CR-D17b-2): how long a keyed
+ * send that meets a live claim waits for the holder's outcome, re-reading every
+ * DEDUPE_CLAIM_POLL_MS. A live holder (three attempts, 1 s and 2 s apart)
+ * normally finishes well inside it.
+ */
+const DEDUPE_CLAIM_WAIT_MS = 30 * 1000;
+const DEDUPE_CLAIM_POLL_MS = 200;
+
+export interface TransactionalSendParams {
+  businessId: string;
+  type: NotificationType;
+  recipientEmail: string;
+  recipientName: string;
+  contactId?: string;
+  templateData: Record<string, any>;
+  dedupeKey?: string;
+}
+
+type TransactionalSendResult = { status: 'SENT' | 'FAILED' | 'QUEUED'; messageId?: string };
+
+type BusinessContext = TemplateContext & { id: string; preferences: NotificationPreferences };
 
 @Injectable()
 export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TransactionalEmailService.name);
   private drainInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * The bound a keyed send waits on a live dedupe claim (SEC-D17b-1). An
+   * instance field so the real-DB suite can shorten it to exercise the bound.
+   */
+  private dedupeClaimWaitMs = DEDUPE_CLAIM_WAIT_MS;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -153,7 +241,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     }
     this.drainInterval = setInterval(() => {
       this.drainQueue().catch((e) =>
-        this.logger.error(`Queue drain failed: ${(e as Error).message}`),
+        this.logger.error(`Queue drain failed: ${redactForLog(String((e as Error)?.message ?? e))}`),
       );
     }, QUEUE_DRAIN_INTERVAL_MS);
     this.logger.log('Notification queue drain scheduler started (5min interval)');
@@ -221,6 +309,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     businessId: string,
     recipientEmail: string,
     templateData: Record<string, any>,
+    contactId?: string,
   ): Promise<boolean> {
     if (!recipientEmail) return false;
     if (templateData.referUrl) return false;
@@ -259,7 +348,10 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       templateData.referUrl = url;
       return true;
     } catch (err: any) {
-      this.logger.warn(`Referral CTA injection skipped for ${businessId}/${recipientEmail}: ${(err as Error).message}`);
+      // SEC-C2-1: the contact by id; a lookup error that quotes the marker key is redacted.
+      this.logger.warn(
+        `Referral CTA injection skipped for ${recipientForLog(contactId)} in business ${businessId}: ${redactForLog(String((err as Error)?.message ?? err))}`,
+      );
       return false;
     }
   }
@@ -293,19 +385,14 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
         },
       });
     } catch (err: any) {
-      this.logger.error(`Failed to log notification: ${(err as Error).message}`);
+      // SEC-C2-1: the error class only; a Prisma validation error quotes the row.
+      this.logger.error(
+        `Failed to log notification (${params.status} ${params.type} to ${recipientForLog(params.contactId)}): ${errorClassForLog(err)}`,
+      );
     }
   }
 
-  async send(params: {
-    businessId: string;
-    type: NotificationType;
-    recipientEmail: string;
-    recipientName: string;
-    contactId?: string;
-    templateData: Record<string, any>;
-    dedupeKey?: string;
-  }): Promise<{ status: 'SENT' | 'FAILED' | 'QUEUED'; messageId?: string }> {
+  async send(params: TransactionalSendParams): Promise<TransactionalSendResult> {
     const ctx = await this.getBusinessContext(params.businessId);
     if (!ctx) {
       this.logger.warn(`Business not found: ${params.businessId}`);
@@ -348,23 +435,150 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       }
     }
 
-    if (params.dedupeKey) {
-      const existing = await this.prisma.client.customerNotificationLog.findFirst({
-        where: {
-          businessId: params.businessId,
-          messageId: params.dedupeKey,
-          status: { in: ['SENT', 'QUEUED', 'DRAINED'] },
-        },
-        select: { id: true, status: true, messageId: true },
-      });
-      if (existing) {
-        this.logger.debug(
-          `Skipping duplicate ${params.type} for ${params.recipientEmail} (dedupeKey=${params.dedupeKey})`,
-        );
-        return { status: existing.status as 'SENT' | 'QUEUED', messageId: existing.messageId ?? undefined };
-      }
+    if (!params.dedupeKey) return this.deliver(params, ctx);
+    const dedupeKey = params.dedupeKey;
+
+    const sent = await this.dedupedSend(params.businessId, dedupeKey);
+    if (sent) {
+      this.logger.debug(
+        `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(dedupeKey)})`,
+      );
+      return sent;
     }
 
+    // W3-D17b-REVIEW-SOLICIT-DEDUPE: the read above is check-then-act; two
+    // concurrent sends with one key both passed it and both reached the
+    // provider. The claim makes the dedupe atomic: only one send holds the key
+    // until its outcome row is written.
+    let claimId = await this.claimDedupeKey(params.businessId, dedupeKey);
+    if (!claimId) {
+      // W3-D17b repair (SEC-D17b-1, CR-D17b-2): a concurrent send holds the
+      // key. Nothing is queued for this call, so it must not answer QUEUED
+      // (callers such as KEY's invoice_sent tool read QUEUED as "will be
+      // delivered"): it waits, bounded, for the holder's outcome.
+      const waited = await this.awaitDedupeHolder(params, dedupeKey);
+      if ('result' in waited) return waited.result;
+      claimId = waited.claimId;
+    }
+    try {
+      // Read again under the claim: a holder that wrote its row and gave the
+      // key back between the read above and this claim is seen here.
+      const settled = await this.dedupedSend(params.businessId, dedupeKey);
+      if (settled) {
+        this.logger.debug(
+          `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(dedupeKey)})`,
+        );
+        return settled;
+      }
+      return await this.deliver(params, ctx);
+    } finally {
+      await this.releaseDedupeClaim(params.businessId, claimId);
+    }
+  }
+
+  /** The send already made under a dedupe key (SENT, QUEUED or DRAINED), as a result; null when there is none. */
+  private async dedupedSend(businessId: string, dedupeKey: string): Promise<TransactionalSendResult | null> {
+    const existing = await this.prisma.client.customerNotificationLog.findFirst({
+      where: {
+        businessId,
+        messageId: dedupeKey,
+        status: { in: ['SENT', 'QUEUED', 'DRAINED'] },
+      },
+      select: { id: true, status: true, messageId: true },
+    });
+    return existing ? { status: existing.status as 'SENT' | 'QUEUED', messageId: existing.messageId ?? undefined } : null;
+  }
+
+  /**
+   * W3-D17b-REVIEW-SOLICIT-DEDUPE: insert-first claim of a dedupe key. Returns
+   * the claim row's id, or null when another send holds the key (the unique
+   * index refused the insert). A holder older than DEDUPE_CLAIM_STALE_MS is
+   * taken over once, by deleting exactly the version read, so of two senders
+   * that find the same dead claim one at most proceeds.
+   */
+  private async claimDedupeKey(businessId: string, dedupeKey: string): Promise<string | null> {
+    const idempotencyKey = `${DEDUPE_CLAIM_PREFIX}${dedupeKey}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const claim = await this.prisma.client.idempotencyKey.create({
+          data: { businessId, idempotencyKey, status: 'claimed', response: { kind: 'transactional_email_dedupe' } },
+          select: { id: true },
+        });
+        return claim.id;
+      } catch (err: unknown) {
+        if ((err as { code?: string })?.code !== 'P2002') throw err;
+      }
+      if (attempt > 0) return null;
+      const holder = await this.prisma.client.idempotencyKey.findUnique({
+        where: { businessId_idempotencyKey: { businessId, idempotencyKey } },
+        select: { id: true, updatedAt: true },
+      });
+      if (holder) {
+        if (Date.now() - holder.updatedAt.getTime() < DEDUPE_CLAIM_STALE_MS) return null;
+        const { count } = await this.prisma.client.idempotencyKey.deleteMany({
+          where: { id: holder.id, businessId, idempotencyKey, updatedAt: holder.updatedAt },
+        });
+        if (count !== 1) return null;
+        this.logger.warn(`Took over a stale dedupe claim in business ${businessId} (dedupeKey=${redactForLog(dedupeKey)})`);
+      }
+      // The holder is gone (given back, or taken over just now): claim again once.
+    }
+    return null;
+  }
+
+  /**
+   * W3-D17b-REVIEW-SOLICIT-DEDUPE repair (SEC-D17b-1, CR-D17b-2): a keyed send
+   * that met a live claim waits for the holder's outcome, re-reading every
+   * DEDUPE_CLAIM_POLL_MS up to dedupeClaimWaitMs. The holder's SENT, QUEUED or
+   * DRAINED row is the answer (the send was made, or is queued for the drain).
+   * When the holder gave the key back with no such row (its send FAILED), this
+   * send claims the key and goes itself, as it would have on its own. A claim
+   * still held at the bound answers FAILED: this call sent nothing and cannot
+   * vouch for the holder, so callers keep treating it as not sent.
+   */
+  private async awaitDedupeHolder(
+    params: TransactionalSendParams,
+    dedupeKey: string,
+  ): Promise<{ result: TransactionalSendResult } | { claimId: string }> {
+    const { businessId } = params;
+    const idempotencyKey = `${DEDUPE_CLAIM_PREFIX}${dedupeKey}`;
+    const deadline = Date.now() + this.dedupeClaimWaitMs;
+    for (;;) {
+      const settled = await this.dedupedSend(businessId, dedupeKey);
+      if (settled) {
+        this.logger.debug(
+          `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(dedupeKey)}): answered from the concurrent send's row`,
+        );
+        return { result: settled };
+      }
+      const held = await this.prisma.client.idempotencyKey.findUnique({
+        where: { businessId_idempotencyKey: { businessId, idempotencyKey } },
+        select: { id: true },
+      });
+      if (!held) {
+        const claimId = await this.claimDedupeKey(businessId, dedupeKey);
+        if (claimId) return { claimId };
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise((r) => setTimeout(r, DEDUPE_CLAIM_POLL_MS));
+    }
+    this.logger.warn(
+      `${params.type} for ${recipientForLog(params.contactId)} not sent: a concurrent send still holds its dedupe key after ${this.dedupeClaimWaitMs} ms (dedupeKey=${redactForLog(dedupeKey)})`,
+    );
+    return { result: { status: 'FAILED' } };
+  }
+
+  /** Gives a dedupe claim back, fenced to this claim's own row. A failed release leaves a claim that goes stale. */
+  private async releaseDedupeClaim(businessId: string, claimId: string): Promise<void> {
+    try {
+      await this.prisma.client.idempotencyKey.deleteMany({ where: { id: claimId, businessId } });
+    } catch (err: unknown) {
+      this.logger.warn(`Dedupe claim ${claimId} in business ${businessId} not given back: ${errorClassForLog(err)}`);
+    }
+  }
+
+  /** The send itself, once it may go (business found, type enabled, contact may be contacted, not a duplicate). */
+  private async deliver(params: TransactionalSendParams, ctx: BusinessContext): Promise<TransactionalSendResult> {
     const gmailStatus = await this.gmail.getGmailStatus(params.businessId);
     if (!gmailStatus.connected) {
       this.logger.debug(`Gmail not connected for business ${params.businessId}, queuing notification`);
@@ -394,6 +608,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
         params.businessId,
         params.recipientEmail,
         data,
+        params.contactId,
       );
     }
 
@@ -707,7 +922,9 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           return { status: 'FAILED' };
       }
     } catch (err: any) {
-      this.logger.error(`Template rendering failed for ${params.type}: ${(err as Error).message}`);
+      this.logger.error(
+        `Template rendering failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String((err as Error)?.message ?? err))}`,
+      );
       await this.logNotification({
         businessId: params.businessId,
         contactId: params.contactId,
@@ -757,18 +974,23 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           });
         }
 
-        this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
+        // SEC-C2-1: the contact by id, never the address (IA-044, CF-029).
+        this.logger.log(`Sent ${params.type} to ${recipientForLog(params.contactId)} for business ${params.businessId}`);
         return { status: 'SENT', messageId: result.messageId };
       } catch (err: any) {
         lastError = err as Error;
-        this.logger.warn(`Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${params.recipientEmail}: ${lastError.message}`);
+        this.logger.warn(
+          `Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String(lastError?.message ?? err), rendered.subject)}`,
+        );
         if (attempt < MAX_RETRIES) {
           await new Promise((r) => setTimeout(r, attempt * 1000));
         }
       }
     }
 
-    this.logger.error(`All ${MAX_RETRIES} attempts failed for ${params.type} to ${params.recipientEmail}: ${lastError?.message}`);
+    this.logger.error(
+      `All ${MAX_RETRIES} attempts failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String(lastError?.message ?? 'unknown error'), rendered.subject)}`,
+    );
     await this.logNotification({
       businessId: params.businessId,
       contactId: params.contactId,
@@ -854,7 +1076,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           sent++;
         }
       } catch (err: any) {
-        this.logger.error(`Queue drain failed for entry ${entry.id}: ${(err as Error).message}`);
+        this.logger.error(`Queue drain failed for entry ${entry.id}: ${redactForLog(String((err as Error)?.message ?? err))}`);
       }
     }
 

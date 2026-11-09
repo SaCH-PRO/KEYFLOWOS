@@ -58,14 +58,43 @@
  * qualification config. A new case asserts the data first and that the
  * concurrent write waited last, so a RED run names the lost write.
  *
+ * W3-D13b-META-WRITERS (MW-03h; cases MW-16..MW-19 and MW-C04, values tagged
+ * `v84l_d13b_`) proves the same for the last four writers the census
+ * allow-listed (SalesTeamService.setCommissionRate, CrmAiService.saveGuidelines,
+ * GamificationService.awardXp and updateStreak): each, stopped after its read,
+ * does not undo the owner's PATCH that clears stripeSecretKey and changes the
+ * bank name (other metaData keys), and the PATCH waits for its row lock.
+ *
+ * W3-D12b-SEO-SECRET-MASK (FOLLOW3-D12 review D12-ST-2; cases MW-20..MW-23,
+ * values tagged `v84l_d12b_`): the GA4 and Search Console entries the SEO
+ * services keep in metaData (ga4, gsc) hold the Google OAuth tokens. Every
+ * Business read sanitizeBusiness builds (GET /identity/businesses/:id, GET
+ * /identity/businesses, the PATCH response, the POST /identity/bootstrap
+ * business, IdentityService.getBusinessBySlug and the getBusiness the KEY
+ * settings adapter answers) answers each entry only as {configured:true}, to
+ * the OWNER, an ADMIN and a STAFF member alike (the suite adds the two
+ * members for these cases), while the SEO services keep reading their own
+ * entries, tokens included, straight from Prisma (MW-23).
+ *
+ * W3-D12b review repairs (values tagged `v84l_d12b_`, `v84l_d12b_r_`): the
+ * owner's profile PATCH refuses metaData.ga4 and metaData.gsc (400
+ * BUSINESS_METADATA_KEY_RESERVED, as for metaData.whatsapp), so echoing the
+ * masked read back cannot replace a stored connection (MW-24; CR-D12b-1,
+ * D12b-ST-1). Through the real SeoController (D12b-ST-2), a connection save
+ * keeps the stored entry, tokens included, only for the same property id or
+ * site URL, so a member who sends only another target no longer points the
+ * stored Google tokens at it (MW-25, MW-26); who may save, sync or disconnect
+ * is open (MW-27, it.todo).
+ *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
- * written here (User.email, User.referralCode) contains it, and every row is
+ * written here (User.email, User.referralCode, Business.slug) contains it, and every row is
  * hard-deleted with LIKE ${sqlLikePrefix(P)} in beforeAll and afterAll. No
  * $transaction wrapping.
  */
 import 'reflect-metadata';
 import path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -109,6 +138,11 @@ let qualification: any;
 let SeoGa4: any;
 let SeoGsc: any;
 const D13 = `${P}f3d13_`; // FOLLOW3-D13 values carry this tag inside the suite's prefix
+// W3-D13b-META-WRITERS writers, over the pausing PrismaService.
+let salesTeam: any;
+let crmAi: any;
+let gamificationSvc: any;
+const D13B = `${P}d13b_`; // W3-D13b-META-WRITERS values carry this tag inside the suite's prefix
 
 async function cleanup() {
   for (const sql of [
@@ -324,12 +358,33 @@ beforeAll(async () => {
   const { QualificationService } = await import('../src/modules/site/qualification.service');
   ({ SeoGoogleAnalyticsService: SeoGa4 } = await import('../src/modules/seo/seo-ga4.service'));
   ({ SeoGoogleSearchConsoleService: SeoGsc } = await import('../src/modules/seo/seo-gsc.service'));
+  const { SalesTeamService } = await import('../src/modules/conversion/sales-team.service');
+  const { CrmAiService } = await import('../src/modules/crm/crm-ai.service');
+  const { GamificationService } = await import('../src/modules/gamification/gamification.service');
+  const { SeoController } = await import('../src/modules/seo/seo.controller');
+  const { SeoAdminGuard } = await import('../src/modules/seo/seo-admin.guard');
+  const { SeoService } = await import('../src/modules/seo/seo.service');
+  const { SeoContentService } = await import('../src/modules/seo/seo-content.service');
+  const { FeatureFlagsService } = await import('../src/modules/feature-flags/feature-flags.service');
 
   // The owner's PATCH: the real IdentityController, IdentityService, guards and
   // PrismaService (as test/payment-secrets-write-only composes it).
   const moduleRef = await Test.createTestingModule({
-    controllers: [IdentityController],
+    controllers: [IdentityController, SeoController],
     providers: [
+      // W3-D12b review repair (D12b-ST-2; MW-25, MW-26): the SEO connector
+      // routes through the real SeoController, its guards (AuthGuard,
+      // SeoAdminGuard, BusinessGuard) and the real GA4 and Search Console
+      // services over the real PrismaService. The SEO module flag row is
+      // absent (SeoAdminGuard open, as in production with no flag row);
+      // ingestion is a stub, and the cases that sync stub Google on these
+      // services and make global fetch a failing recorder (no Google traffic).
+      SeoAdminGuard,
+      SeoGa4,
+      SeoGsc,
+      { provide: FeatureFlagsService, useValue: { hasBypass: async () => ({ exists: false, comingSoon: false, bypass: false }) } },
+      { provide: SeoService, useValue: { ingestAnalyticsData: async () => ({ updated: 0 }), ingestSearchConsoleData: async () => ({ updated: 0 }) } },
+      { provide: SeoContentService, useValue: {} },
       PrismaService,
       AuthGuard,
       BusinessGuard,
@@ -379,6 +434,11 @@ beforeAll(async () => {
   caseStudy = new CaseStudyService(prisma);
   plainCaseStudy = new CaseStudyService({ client: db } as any);
   qualification = new QualificationService(prisma, {} as any, {} as any);
+  // W3-D13b-META-WRITERS writers. CrmAiService's other collaborators (AI
+  // usage, sequences, lists, timeline) are not on saveGuidelines' path.
+  salesTeam = new SalesTeamService(prisma);
+  crmAi = new CrmAiService(prisma, {} as any, {} as any, {} as any, {} as any);
+  gamificationSvc = new GamificationService(prisma);
 
   await cleanup(); // in case a prior run aborted
 
@@ -847,4 +907,542 @@ describe('FOLLOW3-D13 controls (unchanged behaviour)', () => {
       await reset();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D13b-META-WRITERS (MW-03h; values tagged `v84l_d13b_`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner's PATCH writes that a writer's stale copy undid: the bank name it
+ * changed and the stripeSecretKey it cleared (other metaData keys than the
+ * writer's own).
+ */
+function patchWritesLost(meta: Record<string, any>, bank: string): string[] {
+  const lost: string[] = [];
+  if (meta.bankName !== bank) lost.push('PATCH bankName');
+  if (has(meta, 'stripeSecretKey')) lost.push('PATCH clear (stripeSecretKey stored again)');
+  return lost;
+}
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+describe('W3-D13b-META-WRITERS the last four allow-listed metaData writers read and write under the business row lock (MW-03h)', () => {
+  it('[MW-16] RED-BEFORE (W3-D13b-META-WRITERS): a commission rate save (SalesTeamService.setCommissionRate) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the new rate all persist, and the stored rates and sales settings are kept', async () => {
+    const salesConfig = { commissionRates: { [`${D13B}staff_a`]: 0.1 }, payoutDay: `${D13B}friday` };
+    await reset({ ...SEEDED_META, salesConfig });
+    const BANK = `${D13B}Scotiabank`;
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => salesTeam.setCommissionRate(ID.biz, `${D13B}staff_b`, 0.25),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBeUndefined();
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.salesConfig?.commissionRates?.[`${D13B}staff_b`] !== 0.25) lost.push('commission rate (metaData.salesConfig)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.salesConfig).toEqual({ commissionRates: { [`${D13B}staff_a`]: 0.1, [`${D13B}staff_b`]: 0.25 }, payoutDay: `${D13B}friday` });
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the commission rate save\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-17] RED-BEFORE (W3-D13b-META-WRITERS): a CRM AI guidelines save (CrmAiService.saveGuidelines) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the guidelines all persist', async () => {
+    await reset();
+    const BANK = `${D13B}RBC`;
+    const GUIDELINES = [`${D13B}follow up within 48 hours`, `${D13B}offer a quote after the second visit`];
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => crmAi.saveGuidelines(ID.biz, GUIDELINES),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBeUndefined();
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (JSON.stringify(meta.aiGuidelines?.guidelines) !== JSON.stringify(GUIDELINES)) lost.push('CRM AI guidelines (metaData.aiGuidelines)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.aiGuidelines).toEqual({ guidelines: GUIDELINES, generatedAt: expect.any(String) });
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the guidelines save\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-18] RED-BEFORE (W3-D13b-META-WRITERS): an XP award (GamificationService.awardXp) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the XP gain all persist, newest first over the stored gains', async () => {
+    const SEEDED_GAIN = { action: `${D13B}seeded`, xp: 5, timestamp: '2026-11-01T00:00:00.000Z' };
+    await reset({ ...SEEDED_META, recentXpGains: [SEEDED_GAIN] });
+    const BANK = `${D13B}FirstCitizens`;
+    try {
+      const { concurrentResult: patched, order } = await interleave(
+        () => gamificationSvc.awardXp(ID.biz, `${D13B}first-invoice`, 75),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.recentXpGains?.[0]?.action !== `${D13B}first-invoice`) lost.push('XP gain (metaData.recentXpGains)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.recentXpGains).toEqual([{ action: `${D13B}first-invoice`, xp: 75, timestamp: expect.any(String) }, SEEDED_GAIN]);
+      expect(typeof meta.lastActivityAt).toBe('string');
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the XP award\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-19] RED-BEFORE (W3-D13b-META-WRITERS): a streak update (GamificationService.updateStreak) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the streak all persist', async () => {
+    // Last active three days ago: the streak restarts at 1 (a write, whatever the time zone).
+    const LAST_ACTIVE = daysAgo(3);
+    await reset({ ...SEEDED_META, streakDays: 6, lastActivityAt: LAST_ACTIVE });
+    const BANK = `${D13B}Republic`;
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => gamificationSvc.updateStreak(ID.biz),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBe(1);
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.streakDays !== 1 || meta.lastActivityAt === LAST_ACTIVE) lost.push('streak (metaData.streakDays, lastActivityAt)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the streak update\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+});
+
+describe('W3-D13b-META-WRITERS controls (unchanged behaviour)', () => {
+  it('[MW-C04] CONTROL (W3-D13b-META-WRITERS): each converted writer on its own writes its key and keeps every other metaData key; a second streak update the same day writes nothing; an unknown business answers as before, with nothing written', async () => {
+    await reset();
+    try {
+      expect(await gamificationSvc.updateStreak(ID.biz)).toBe(1);
+      const afterStreak = JSON.stringify(await storedMeta());
+      expect(await gamificationSvc.updateStreak(ID.biz), 'same day: the streak stands').toBe(1);
+      expect(JSON.stringify(await storedMeta()), 'a same-day streak update writes nothing').toBe(afterStreak);
+      await gamificationSvc.awardXp(ID.biz, `${D13B}first-quote`, 50);
+      await salesTeam.setCommissionRate(ID.biz, `${D13B}staff_c`, 0.15);
+      const GUIDELINES = [`${D13B}reply the same day`];
+      await crmAi.saveGuidelines(ID.biz, GUIDELINES);
+      expect(await crmAi.getGuidelines(ID.biz)).toEqual({ guidelines: GUIDELINES, generatedAt: expect.any(String) });
+
+      const meta = await storedMeta();
+      for (const [k, v] of Object.entries(SEEDED_META)) expect(meta[k], `metaData.${k} kept`).toEqual(v);
+      expect(meta).toMatchObject({
+        streakDays: 1,
+        lastActivityAt: expect.any(String),
+        recentXpGains: [{ action: `${D13B}first-quote`, xp: 50, timestamp: expect.any(String) }],
+        salesConfig: { commissionRates: { [`${D13B}staff_c`]: 0.15 } },
+        aiGuidelines: { guidelines: GUIDELINES, generatedAt: expect.any(String) },
+      });
+
+      // An unknown business: the XP award and the streak write nothing; the
+      // rate and guidelines saves fail as before (no row to update).
+      const NO = `${P}no-such-business`;
+      await expect(gamificationSvc.awardXp(NO, `${D13B}nothing`, 10)).resolves.toBeUndefined();
+      await expect(gamificationSvc.updateStreak(NO)).resolves.toBe(0);
+      await expect(salesTeam.setCommissionRate(NO, `${D13B}staff_c`, 0.15)).rejects.toMatchObject({ code: 'P2025' });
+      await expect(crmAi.saveGuidelines(NO, GUIDELINES)).rejects.toMatchObject({ code: 'P2025' });
+      expect(await db.business.count({ where: { id: NO } })).toBe(0);
+    } finally {
+      await reset();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D12b-SEO-SECRET-MASK (FOLLOW3-D12 review D12-ST-2; values tagged `v84l_d12b_`)
+// ---------------------------------------------------------------------------
+
+const D12B = `${P}d12b_`; // W3-D12b-SEO-SECRET-MASK values carry this tag inside the suite's prefix
+const SEO_READER = { admin: `${D12B}admin`, staff: `${D12B}staff` };
+/** The GA4 and Search Console entries as the SEO services store them (saveConnection, then a sync's lastSync stamp). */
+const SEO_GA4 = {
+  propertyId: `${D12B}property`,
+  accessToken: `${D12B}ga4_ACCESS_ya29`,
+  refreshToken: `${D12B}ga4_REFRESH_1g`,
+  connectedAt: '2026-11-01T00:00:00.000Z',
+  lastSync: '2026-11-02T00:00:00.000Z',
+};
+const SEO_GSC = {
+  siteUrl: `https://${D12B}site.test.local/`,
+  accessToken: `${D12B}gsc_ACCESS_ya29`,
+  refreshToken: `${D12B}gsc_REFRESH_1g`,
+  connectedAt: '2026-11-01T00:00:00.000Z',
+};
+const SEO_META = { ...SEEDED_META, ga4: SEO_GA4, gsc: SEO_GSC };
+const SEO_TOKENS = [SEO_GA4.accessToken, SEO_GA4.refreshToken, SEO_GSC.accessToken, SEO_GSC.refreshToken];
+const CONFIGURED = { configured: true };
+const SEO_SLUG = `${D12B}slug`;
+
+/** The stored GA4 / Search Console OAuth token values a response body carries. */
+const seoTokensIn = (body: unknown): string[] => {
+  const text = JSON.stringify(body ?? null);
+  return SEO_TOKENS.filter((token) => text.includes(token));
+};
+
+/** The checks every masked Business read passes: ga4 and gsc as {configured:true} only, the other keys as before. */
+function expectSeoMasked(business: any, label: string) {
+  expect(seoTokensIn(business), `${label}: GA4/GSC token values in the body`).toEqual([]);
+  expect(business?.metaData?.ga4, `${label}: metaData.ga4`).toEqual(CONFIGURED);
+  expect(business?.metaData?.gsc, `${label}: metaData.gsc`).toEqual(CONFIGURED);
+  expect(business?.metaData?.stripeSecretKey, `${label}: metaData.stripeSecretKey (R0-SEC2c)`).toEqual(CONFIGURED);
+  for (const k of ['stripePublishableKey', 'otherKey'] as const) expect(business?.metaData?.[k], `${label}: metaData.${k} kept`).toBe(SEEDED_META[k]);
+}
+
+const getAs = (actor: string, url: string) => request(app.getHttpServer()).get(url).set('x-test-user', actor);
+
+describe('W3-D12b-SEO-SECRET-MASK Business reads never serve the GA4 or Search Console OAuth tokens (review D12-ST-2)', () => {
+  let identity: any;
+  const READERS = [ID.owner, SEO_READER.admin, SEO_READER.staff];
+
+  beforeAll(async () => {
+    const { IdentityService } = await import('../src/modules/identity/identity.service');
+    identity = app.get(IdentityService);
+    for (const [id, role] of [[SEO_READER.admin, 'ADMIN'], [SEO_READER.staff, 'STAFF']] as const) {
+      await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
+      await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_biz`, userId: id, businessId: ID.biz, role } });
+    }
+  });
+
+  it('[MW-20] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): GET /identity/businesses/:businessId answers metaData.ga4 and metaData.gsc as {configured:true} only, to the OWNER, an ADMIN and a STAFF member: no GA4 or Search Console OAuth token (accessToken, refreshToken) in the body, the other metaData keys as before', async () => {
+    await reset(SEO_META);
+    try {
+      // The census: which reader received which token.
+      const census: Record<string, string[]> = {};
+      const bodies: Record<string, any> = {};
+      for (const actor of READERS) {
+        const res = await getAs(actor, `/identity/businesses/${ID.biz}`);
+        expect(res.status, `${actor} GET: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        const leaked = seoTokensIn(res.body);
+        if (leaked.length > 0) census[actor.slice(P.length)] = leaked.map((t) => t.slice(D12B.length));
+        bodies[actor] = res.body;
+      }
+      expect(census, 'reader -> GA4/GSC token values received').toEqual({});
+      for (const actor of READERS) expectSeoMasked(bodies[actor], `${actor} GET /identity/businesses/${ID.biz}`);
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-21] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): the other sanitized Business reads carry no GA4 or Search Console token either: GET /identity/businesses (the workspace list) for the OWNER, ADMIN and STAFF, the owner\'s PATCH /identity/businesses/:businessId response, POST /identity/bootstrap (the owner\'s sign-in answer), IdentityService.getBusinessBySlug and the IdentityService.getBusiness the KEY settings adapter answers', async () => {
+    await reset(SEO_META);
+    await db.$executeRawUnsafe('UPDATE businesses SET slug = $2 WHERE id = $1', ID.biz, SEO_SLUG);
+    try {
+      const census: Record<string, string[]> = {};
+      const note = (read: string, body: unknown) => {
+        const leaked = seoTokensIn(body);
+        if (leaked.length > 0) census[read] = leaked.map((t) => t.slice(D12B.length));
+      };
+      const lists: Record<string, any> = {};
+      for (const actor of READERS) {
+        const res = await getAs(actor, '/identity/businesses');
+        expect(res.status, `${actor} list`).toBe(200);
+        note(`GET /identity/businesses as ${actor.slice(P.length)}`, res.body);
+        lists[actor] = res.body.find((b: any) => b.id === ID.biz);
+      }
+      const BANK = `${D12B}Republic Bank`;
+      const patched = await patchBusiness({ metaData: { bankName: BANK } });
+      expect(patched.status, JSON.stringify(patched.body).slice(0, 300)).toBe(200);
+      note('PATCH /identity/businesses/:id response', patched.body);
+      const boot = await request(app.getHttpServer()).post('/identity/bootstrap').set('x-test-user', ID.owner).send({});
+      expect(boot.status, JSON.stringify(boot.body).slice(0, 300)).toBe(201);
+      expect(boot.body.business?.id).toBe(ID.biz);
+      note('POST /identity/bootstrap', boot.body);
+      const bySlug = await identity.getBusinessBySlug(SEO_SLUG);
+      note('IdentityService.getBusinessBySlug', bySlug);
+      const keyRead = await identity.getBusiness(ID.biz);
+      note('IdentityService.getBusiness (KEY settings adapter)', keyRead);
+      expect(census, 'read -> GA4/GSC token values received').toEqual({});
+
+      for (const actor of READERS) expectSeoMasked(lists[actor], `${actor} GET /identity/businesses`);
+      expect(patched.body.metaData.bankName).toBe(BANK);
+      expectSeoMasked(patched.body, 'PATCH response');
+      expectSeoMasked(boot.body.business, 'POST /identity/bootstrap business');
+      expectSeoMasked(bySlug, 'getBusinessBySlug');
+      expectSeoMasked(keyRead, 'getBusiness');
+      // The PATCH that changed the bank name left the stored connections whole.
+      const stored = await storedMeta();
+      expect(stored.ga4).toEqual(SEO_GA4);
+      expect(stored.gsc).toEqual(SEO_GSC);
+    } finally {
+      await db.$executeRawUnsafe('UPDATE businesses SET slug = NULL WHERE id = $1', ID.biz);
+      await reset();
+    }
+  });
+
+  it('[MW-22] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): a stored entry is masked whatever it holds: an entry with no token (a site URL only) and a bare string read as {configured:true}; a null or blank entry reads as absent (not connected), never as the stored value', async () => {
+    const BARE = `${D12B}bare-token-string`;
+    await reset({ ...SEEDED_META, ga4: BARE, gsc: { siteUrl: SEO_GSC.siteUrl } });
+    try {
+      const res = await getAs(SEO_READER.staff, `/identity/businesses/${ID.biz}`);
+      expect(res.status).toBe(200);
+      expect(JSON.stringify(res.body).includes(BARE), 'the bare string in the body').toBe(false);
+      expect(res.body.metaData.ga4, 'metaData.ga4 (a bare string stored)').toEqual(CONFIGURED);
+      expect(res.body.metaData.gsc, 'metaData.gsc (a site URL only stored)').toEqual(CONFIGURED);
+
+      await reset({ ...SEEDED_META, ga4: null, gsc: '  ' });
+      const empty = await getAs(ID.owner, `/identity/businesses/${ID.biz}`);
+      expect(empty.status).toBe(200);
+      expect(empty.body.metaData, 'metaData.ga4 (null stored)').not.toHaveProperty('ga4');
+      expect(empty.body.metaData, 'metaData.gsc (blank stored)').not.toHaveProperty('gsc');
+      expect(empty.body.metaData.otherKey).toBe(SEEDED_META.otherKey);
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-23] CONTROL (W3-D12b-SEO-SECRET-MASK): a read never changes the stored row, and the SEO services keep reading their own entries server side: after the masked reads the stored ga4 and gsc entries still hold their tokens; getConnectionStatus answers connected with the property id or site URL and no token; each sync hands the (stubbed) Google fetch the stored access token and stamps lastSync', async () => {
+    await reset(SEO_META);
+    try {
+      const before = JSON.stringify(await storedMeta());
+      for (const actor of READERS) await getAs(actor, `/identity/businesses/${ID.biz}`);
+      await getAs(SEO_READER.staff, '/identity/businesses');
+      expect(JSON.stringify(await storedMeta()), 'the stored metaData after the reads').toBe(before);
+
+      const ingest = async () => ({ updated: 0 });
+      const ga4 = new SeoGa4({ client: db }, { ingestAnalyticsData: ingest });
+      const gsc = new SeoGsc({ client: db }, { ingestSearchConsoleData: ingest });
+      const ga4Status = await ga4.getConnectionStatus(ID.biz);
+      const gscStatus = await gsc.getConnectionStatus(ID.biz);
+      expect(ga4Status).toEqual({ connected: true, propertyId: SEO_GA4.propertyId, lastSync: SEO_GA4.lastSync });
+      expect(gscStatus).toEqual({ connected: true, siteUrl: SEO_GSC.siteUrl, lastSync: null });
+      expect(seoTokensIn([ga4Status, gscStatus]), 'connector status carries no token').toEqual([]);
+
+      // Google is a stub (no Google traffic): it records the token it is handed.
+      const handed: string[] = [];
+      ga4.fetchAnalyticsData = async (token: string, propertyId: string) => { handed.push(`ga4 ${token} ${propertyId}`); return []; };
+      gsc.fetchSearchAnalytics = async (token: string, siteUrl: string, dimension: string) => { handed.push(`gsc ${token} ${siteUrl} ${dimension}`); return []; };
+      expect(await ga4.syncAnalyticsData(ID.biz)).toEqual({ synced: true, pagesUpdated: 0 });
+      expect(await gsc.syncSearchData(ID.biz)).toEqual({ synced: true, queriesUpdated: 0, pagesUpdated: 0 });
+      expect(handed).toEqual([
+        `ga4 ${SEO_GA4.accessToken} ${SEO_GA4.propertyId}`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} query`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
+      ]);
+      const after = await storedMeta();
+      expect(after.ga4).toEqual({ ...SEO_GA4, lastSync: expect.any(String) });
+      expect(after.ga4.lastSync).not.toBe(SEO_GA4.lastSync);
+      expect(after.gsc).toEqual({ ...SEO_GSC, lastSync: expect.any(String) });
+    } finally {
+      await reset();
+    }
+  });
+
+  // W3-D12b review repair (CR-D12b-1, D12b-ST-1). The mask made an echo of the
+  // read destructive: a client that PATCHes the read metaData back sends
+  // ga4/gsc as {configured:true}, and the profile PATCH merges the caller's
+  // bag over the stored one, so the marker replaced the stored connection
+  // (tokens gone, both SEO connectors disconnected, while the read went on
+  // answering {configured:true}). No web client echoes it today (the payments
+  // tab sends only the keys it edits; the KEY onboarding card selects no
+  // metaData). PROFILE_PATCH_RESERVED_META_KEYS now lists ga4 and gsc beside
+  // whatsapp (R0-SEC2b): the SEO connector routes are their only writers.
+  it('[MW-24] RED-BEFORE (W3-D12b review CR-D12b-1 / D12b-ST-1): PATCH /identity/businesses/:businessId refuses metaData.ga4 and metaData.gsc as it refuses metaData.whatsapp (400 BUSINESS_METADATA_KEY_RESERVED, nothing written): the owner echoing the masked read back, the {configured} marker alone, a token-bearing entry and null, alone or beside a profile field and another metaData key; the stored connections keep their tokens, both SEO connectors stay connected, and a PATCH naming neither key still writes', async () => {
+    await reset(SEO_META);
+    const NAME = `${ID.biz}-name`;
+    try {
+      const read = await getAs(ID.owner, `/identity/businesses/${ID.biz}`);
+      expect(read.status).toBe(200);
+      expectSeoMasked(read.body, 'the owner\'s read');
+      const before = JSON.stringify(await storedMeta());
+      const FORGED = { accessToken: `${D12B}forged_ACCESS`, refreshToken: `${D12B}forged_REFRESH` };
+      const bodies: Array<[string, Record<string, unknown>]> = [
+        ['the masked read echoed back (bank name changed)', { metaData: { ...read.body.metaData, bankName: `${D12B}echo-bank` } }],
+        ['ga4 as the {configured} marker', { metaData: { ga4: CONFIGURED } }],
+        ['gsc as the {configured} marker, with the name and another key', { name: `${D12B}renamed`, metaData: { gsc: CONFIGURED, bankName: `${D12B}other-bank` } }],
+        ['a token-bearing ga4 entry', { metaData: { ga4: { propertyId: `${D12B}forged-prop`, ...FORGED } } }],
+        ['a token-bearing gsc entry', { metaData: { gsc: { siteUrl: `https://${D12B}forged.test.local/`, ...FORGED } } }],
+        ['ga4 null', { metaData: { ga4: null } }],
+        ['gsc null, with the name', { name: `${D12B}renamed`, metaData: { gsc: null } }],
+      ];
+      const answered: Record<string, string> = {};
+      for (const [label, body] of bodies) {
+        const res = await patchBusiness(body);
+        answered[label] = `${res.status} ${res.body?.code ?? JSON.stringify(res.body).slice(0, 80)}`;
+      }
+      // The data first, so a RED run names the lost connection.
+      const after = await storedMeta();
+      const lost: string[] = [];
+      for (const [key, stored] of [['ga4', SEO_GA4], ['gsc', SEO_GSC]] as const) {
+        if (!isDeepStrictEqual(after[key], stored)) lost.push(`metaData.${key} now ${JSON.stringify(after[key])}`);
+      }
+      expect(lost, 'stored SEO connections replaced by the profile PATCH').toEqual([]);
+      expect(JSON.stringify(after), 'the stored metaData after the refused PATCHes').toBe(before);
+      const row = await db.business.findUnique({ where: { id: ID.biz }, select: { name: true } });
+      expect(row.name, 'Business.name (sent beside a reserved key)').toBe(NAME);
+      expect(answered).toEqual(Object.fromEntries(bodies.map(([label]) => [label, '400 BUSINESS_METADATA_KEY_RESERVED'])));
+
+      const ga4 = new SeoGa4({ client: db }, {});
+      const gsc = new SeoGsc({ client: db }, {});
+      expect(await ga4.getConnectionStatus(ID.biz)).toEqual({ connected: true, propertyId: SEO_GA4.propertyId, lastSync: SEO_GA4.lastSync });
+      expect(await gsc.getConnectionStatus(ID.biz)).toEqual({ connected: true, siteUrl: SEO_GSC.siteUrl, lastSync: null });
+
+      // A PATCH that names neither key writes as before and leaves the connections whole.
+      const BANK = `${D12B}kept-bank`;
+      const ok = await patchBusiness({ metaData: { bankName: BANK } });
+      expect(ok.status, JSON.stringify(ok.body).slice(0, 300)).toBe(200);
+      expectSeoMasked(ok.body, 'PATCH response');
+      const written = await storedMeta();
+      expect(written.bankName).toBe(BANK);
+      expect(written.ga4).toEqual(SEO_GA4);
+      expect(written.gsc).toEqual(SEO_GSC);
+      expect(written.stripeSecretKey).toBe(STRIPE_SECRET);
+    } finally {
+      await db.$executeRawUnsafe('UPDATE businesses SET name = $2 WHERE id = $1', ID.biz, NAME);
+      await reset();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D12b review repair D12b-ST-2 (values tagged `v84l_d12b_r_`): the SEO
+// connector routes (SeoController: AuthGuard, SeoAdminGuard, BusinessGuard, no
+// role or module scope) let any member save a connection, and saveConnection
+// kept the stored tokens when only the property id or site URL was sent. A
+// STAFF member could point the owner's Google tokens at a property or site of
+// their choosing and sync it (the owner's access token sent for it, the data
+// readable on the SEO pages). A connection save now keeps the stored entry
+// only for the same property id or site URL; a new target stores only what
+// the request sends. Who may save, sync or disconnect is open (MW-27).
+// ---------------------------------------------------------------------------
+
+describe('W3-D12b review repair: a connection save never points the stored Google tokens at another property or site (D12b-ST-2)', () => {
+  const R = `${D12B}r_`;
+  const STAFF = `${R}staff`;
+  let ga4Svc: any;
+  let gscSvc: any;
+
+  beforeAll(async () => {
+    await db.user.create({ data: { id: STAFF, email: emailOf(STAFF), name: STAFF, role: 'USER', referralCode: `${STAFF}_ref` } });
+    await db.membership.create({ data: { id: `${P}m_${STAFF.slice(P.length)}_biz`, userId: STAFF, businessId: ID.biz, role: 'STAFF' } });
+    ga4Svc = app.get(SeoGa4);
+    gscSvc = app.get(SeoGsc);
+  });
+
+  const postAs = (actor: string, url: string, body: Record<string, unknown> = {}) =>
+    request(app.getHttpServer()).post(url).set('x-test-user', actor).send(body);
+  const route = (suffix: string) => `/seo/businesses/${ID.biz}/connectors/${suffix}`;
+
+  /**
+   * Stub Google on the route's GA4 and Search Console services: each records
+   * the token and target it is handed. Global fetch is a failing recorder, so
+   * nothing leaves the machine.
+   */
+  function stubGoogle() {
+    const handed: string[] = [];
+    const saved = { ga4: ga4Svc.fetchAnalyticsData, gsc: gscSvc.fetchSearchAnalytics, fetch: globalThis.fetch };
+    ga4Svc.fetchAnalyticsData = async (token: string, propertyId: string) => { handed.push(`ga4 ${token} ${propertyId}`); return []; };
+    gscSvc.fetchSearchAnalytics = async (token: string, siteUrl: string, dimension: string) => { handed.push(`gsc ${token} ${siteUrl} ${dimension}`); return []; };
+    globalThis.fetch = (async (input: unknown) => { handed.push(`fetch ${String(input)}`); throw new Error('no network in this suite'); }) as typeof fetch;
+    return {
+      handed,
+      restore() {
+        ga4Svc.fetchAnalyticsData = saved.ga4;
+        gscSvc.fetchSearchAnalytics = saved.gsc;
+        globalThis.fetch = saved.fetch;
+      },
+    };
+  }
+
+  it('[MW-25] RED-BEFORE (W3-D12b review D12b-ST-2): a STAFF member who sends only another property id to POST /seo/businesses/:businessId/connectors/ga4, or only another site URL to .../gsc, no longer points the stored Google tokens at it: the saved entry keeps nothing of the old connection (no token, no lastSync), both connectors read not connected, and the STAFF member\'s syncs hand Google no token', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    try {
+      const OTHER_PROPERTY = `${R}victim-other-property-999`;
+      const OTHER_SITE = `https://${R}another-site-the-owner-verified.test.local/`;
+      const saves = [
+        await postAs(STAFF, route('ga4'), { propertyId: OTHER_PROPERTY }),
+        await postAs(STAFF, route('gsc'), { siteUrl: OTHER_SITE }),
+      ];
+      const syncs = [await postAs(STAFF, route('ga4/sync')), await postAs(STAFF, route('gsc/sync'))];
+      // The data first, so a RED run names what the owner's tokens were used for.
+      expect(google.handed, 'Google calls (token, target) the STAFF member\'s syncs made').toEqual([]);
+      const meta = await storedMeta();
+      expect(seoTokensIn(meta), 'the owner\'s GA4/GSC tokens stored beside the STAFF member\'s property or site').toEqual([]);
+      expect(meta.ga4).toEqual({ propertyId: OTHER_PROPERTY, connectedAt: expect.any(String) });
+      expect(meta.gsc).toEqual({ siteUrl: OTHER_SITE, connectedAt: expect.any(String) });
+      // Still admitted (who may save is open: MW-27); the syncs report not connected.
+      expect(saves.map((r) => r.status), JSON.stringify(saves.map((r) => r.body))).toEqual([201, 201]);
+      expect(syncs.map((r) => r.status)).toEqual([201, 201]);
+      expect(syncs.map((r) => r.body.synced)).toEqual([false, false]);
+      const status = [await getAs(STAFF, route('ga4')), await getAs(STAFF, route('gsc'))];
+      expect(status.map((r) => r.body)).toEqual([
+        { connected: false, propertyId: OTHER_PROPERTY, lastSync: null },
+        { connected: false, siteUrl: OTHER_SITE, lastSync: null },
+      ]);
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(meta.bankName).toBe(SEEDED_META.bankName);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  it('[MW-26] RED-BEFORE (W3-D12b review D12b-ST-2): a connection save keeps the stored entry only for the same property id or site URL: the owner re-saving the connected property and site with no token stays connected with the stored tokens and lastSync; a new property or site sent with a new access token only stores that token alone (the old refresh token is not carried over: not connected); one sent with both new tokens connects with exactly those, and its sync hands Google the new access token', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    try {
+      const resaved = [
+        await postAs(ID.owner, route('ga4'), { propertyId: SEO_GA4.propertyId }),
+        await postAs(ID.owner, route('gsc'), { siteUrl: SEO_GSC.siteUrl }),
+      ];
+      expect(resaved.map((r) => r.status)).toEqual([201, 201]);
+      let meta = await storedMeta();
+      expect(meta.ga4, 'the same property re-saved').toEqual({ ...SEO_GA4, connectedAt: expect.any(String) });
+      expect(meta.gsc, 'the same site re-saved').toEqual({ ...SEO_GSC, connectedAt: expect.any(String) });
+
+      const GA4_2 = { propertyId: `${R}property-2`, accessToken: `${R}ga4_ACCESS_2` };
+      const GSC_2 = { siteUrl: `https://${R}site-2.test.local/`, accessToken: `${R}gsc_ACCESS_2` };
+      await postAs(ID.owner, route('ga4'), GA4_2);
+      await postAs(ID.owner, route('gsc'), GSC_2);
+      meta = await storedMeta();
+      expect(meta.ga4, 'a new property with a new access token only').toEqual({ ...GA4_2, connectedAt: expect.any(String) });
+      expect(meta.gsc, 'a new site with a new access token only').toEqual({ ...GSC_2, connectedAt: expect.any(String) });
+      expect((await getAs(ID.owner, route('ga4'))).body.connected).toBe(false);
+      expect((await getAs(ID.owner, route('gsc'))).body.connected).toBe(false);
+
+      const GA4_3 = { propertyId: `${R}property-3`, accessToken: `${R}ga4_ACCESS_3`, refreshToken: `${R}ga4_REFRESH_3` };
+      const GSC_3 = { siteUrl: `https://${R}site-3.test.local/`, accessToken: `${R}gsc_ACCESS_3`, refreshToken: `${R}gsc_REFRESH_3` };
+      await postAs(ID.owner, route('ga4'), GA4_3);
+      await postAs(ID.owner, route('gsc'), GSC_3);
+      meta = await storedMeta();
+      expect(meta.ga4).toEqual({ ...GA4_3, connectedAt: expect.any(String) });
+      expect(meta.gsc).toEqual({ ...GSC_3, connectedAt: expect.any(String) });
+      expect((await getAs(ID.owner, route('ga4'))).body).toEqual({ connected: true, propertyId: GA4_3.propertyId, lastSync: null });
+      expect((await getAs(ID.owner, route('gsc'))).body).toEqual({ connected: true, siteUrl: GSC_3.siteUrl, lastSync: null });
+      expect((await postAs(ID.owner, route('ga4/sync'))).body).toEqual({ synced: true, pagesUpdated: 0 });
+      expect((await postAs(ID.owner, route('gsc/sync'))).body).toEqual({ synced: true, queriesUpdated: 0, pagesUpdated: 0 });
+      expect(google.handed).toEqual([
+        `ga4 ${GA4_3.accessToken} ${GA4_3.propertyId}`,
+        `gsc ${GSC_3.accessToken} ${GSC_3.siteUrl} query`,
+        `gsc ${GSC_3.accessToken} ${GSC_3.siteUrl} page`,
+      ]);
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  // Review D12b-ST-2, the authority half: SeoController guards its connector
+  // routes with AuthGuard, SeoAdminGuard and BusinessGuard only, so any member
+  // (STAFF included) can still replace the stored connection with their own
+  // tokens, sync it or disconnect it. Which role or scope may (OWNER, OWNER and
+  // ADMIN, or a connect/seo write scope) is an authority decision no owner
+  // ruling covers, and seo.controller.ts is outside the W3-D12b write set.
+  it.todo('[MW-27] OPEN (W3-D12b review D12b-ST-2 follow-up: needs an owner ruling on who may connect, sync or disconnect the SEO connectors; seo.controller.ts is outside the W3-D12b write set): POST and DELETE /seo/businesses/:businessId/connectors/ga4 and .../gsc, and their /sync, are refused to a member without that authority, with the stored connection unchanged');
 });

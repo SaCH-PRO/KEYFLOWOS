@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmListsService } from './crm-lists.service';
@@ -233,25 +234,30 @@ Respond in valid JSON with this exact structure:
     };
   }
 
+  /**
+   * W3-D13b-META-WRITERS (MW-03h): metaData is read and written under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (the owner's PATCH clearing a payment secret) is not undone by
+   * this one's copy (RED-before MW-17: the cleared secret was stored again).
+   */
   async saveGuidelines(businessId: string, guidelines: string[]): Promise<void> {
-    const business = await this.db.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.db.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const existing = (business?.metaData as Record<string, unknown>) ?? {};
+      const existing = (business?.metaData as Record<string, unknown>) ?? {};
 
-    await this.db.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...existing,
-          aiGuidelines: {
-            guidelines,
-            generatedAt: new Date().toISOString(),
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...existing,
+            aiGuidelines: {
+              guidelines,
+              generatedAt: new Date().toISOString(),
+            },
           },
         },
-      },
+      });
     });
   }
 

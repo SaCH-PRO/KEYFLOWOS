@@ -108,6 +108,7 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
       if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
       try {
         const p = job.payload as Record<string, any>;
+        const dedupeKey = await this.reviewDedupeKey(job.businessId, job.entityId, p.entityType);
         await this.transactionalEmail.send({
           businessId: job.businessId,
           type: 'review_request',
@@ -118,6 +119,7 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
             orderNumber: p.entityType === 'invoice' ? job.entityId.slice(-8).toUpperCase() : undefined,
             productNames: p.entityType === 'booking' ? ['your service'] : undefined,
           },
+          dedupeKey,
         });
       } catch (e) {
         this.logger.error(`Review solicitation failed for job ${job.id}: ${(e as Error).message}`);
@@ -131,5 +133,34 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
         }
       }
     }
+  }
+
+  /**
+   * W3-D17b-REVIEW-SOLICIT-DEDUPE (V1-89): the review request's dedupe key is
+   * the booking it asks about plus the purpose. A booking is solicited by its
+   * own completion (booking.completed) and by the payment of its final or
+   * deposit invoice (invoice.paid): two jobs, one visit, so an invoice job
+   * resolves the booking that invoice belongs to (as flow.listener's
+   * confirmBookingForPaidInvoice does, in the job's business). An invoice of no
+   * booking keeps its own key, so a contact's other purchases are each still
+   * solicited. TransactionalEmailService claims the key before any effect, so
+   * the two jobs reach the provider once even when two ticks run them at once.
+   *
+   * Review repair CR-D17b-1: an invoice job takes the booking key only when that
+   * booking's visit has happened (the booking is COMPLETED when the job runs).
+   * A deposit, or a final invoice drawn up and paid ahead, is usually solicited
+   * before the visit (its job is due 3 days after payment); under the booking
+   * key it took the slot of the post-visit request, which then never went out.
+   * Before the visit it keeps its own invoice key, as every job sent on base.
+   */
+  private async reviewDedupeKey(businessId: string, entityId: string, entityType: unknown): Promise<string> {
+    if (entityType === 'invoice') {
+      const booking = await this.prisma.client.booking.findFirst({
+        where: { businessId, status: 'COMPLETED', OR: [{ invoiceId: entityId }, { depositInvoiceId: entityId }] },
+        select: { id: true },
+      });
+      return booking ? `review-solicitation:booking:${booking.id}` : `review-solicitation:invoice:${entityId}`;
+    }
+    return `review-solicitation:booking:${entityId}`;
   }
 }

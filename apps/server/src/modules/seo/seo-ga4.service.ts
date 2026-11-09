@@ -13,6 +13,13 @@ export class SeoGoogleAnalyticsService {
     @Inject(SeoService) private readonly seo: SeoService,
   ) {}
 
+  /**
+   * W3-D12b-SEO-SECRET-MASK (review D12-ST-2): metaData.ga4 holds the Google
+   * OAuth tokens, so every Business read (sanitizeBusiness) answers it only as
+   * {configured:true}. This service reads its entry server side, straight from
+   * Prisma; this status is the connection state a client reads, and it
+   * carries no token.
+   */
   async getConnectionStatus(businessId: string) {
     const business = await this.prisma.client.business.findFirst({
       where: { id: businessId, deletedAt: null },
@@ -45,8 +52,15 @@ export class SeoGoogleAnalyticsService {
       if (!business) throw new Error('Business not found');
 
       const meta = (business.metaData as Record<string, any>) ?? {};
+      // W3-D12b review repair (D12b-ST-2): the stored entry (its tokens and
+      // lastSync) carries over only when the same property is saved again. A
+      // save that names another property stores only what it sends, so a
+      // member who sends just a property id cannot point the stored Google
+      // tokens at a property of their choosing and sync it with them.
+      const stored = meta.ga4;
+      const sameProperty = Boolean(stored) && typeof stored === 'object' && stored.propertyId === data.propertyId;
       const ga4 = {
-        ...(meta.ga4 ?? {}),
+        ...(sameProperty ? stored : {}),
         propertyId: data.propertyId,
         ...(data.accessToken ? { accessToken: data.accessToken } : {}),
         ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),

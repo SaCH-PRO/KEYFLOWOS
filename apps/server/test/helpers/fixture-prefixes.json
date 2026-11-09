@@ -743,6 +743,11 @@
       "packet": "V1-89 (W3-KEY-CRM-VISIBILITY)"
     },
     {
+      "prefix": "v89q_",
+      "owner": "apps/server/test/review-solicitation-dedupe.integration.test.ts",
+      "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
