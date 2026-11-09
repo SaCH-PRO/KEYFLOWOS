@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v87b_",
+      "owner": "apps/server/test/key-plan-authority.integration.test.ts",
+      "packet": "V1-87 (KEY-R3b-PLAN-AUTHORITY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
