@@ -60,17 +60,33 @@
  *                   refused 'Contact not found' and writes nothing (RED-BEFORE:
  *                   it bound the contact); their own TEAM contact still binds.
  *            KEY-02 the same commands for the OWNER succeed.
- *            KEY-03 a run with no member (the plan queue, surface PLAN_QUEUE
- *                   with no principal; a KEY-cortex plan no member created,
- *                   SYSTEM_PLAN_ACTOR) uses the OWNER's view and succeeds, as
- *                   KEY's contact reads do since KEY-R3b.
+ *          Review repairs (SEC-W3D64-1/-3/-4, CR-D64C-2): every surface that
+ *          runs a KEY command for a member with no principal hands the
+ *          dispatcher that member (FlowOrchestratorService.contactBindMember):
+ *            KEY-03 the plan queue (PLAN_QUEUE, no principal) runs a stored
+ *                   plan's step for the plan's member (D-73): the STAFF
+ *                   member's own plan, which the approve and queue gates let
+ *                   through, is refused on the PRIVATE contact (RED-BEFORE: it
+ *                   bound it); the OWNER's plan binds it.
+ *            KEY-03b a run with no member: a plan with no member never reaches
+ *                   these binds (noMemberToolRefusal, D-73); a KEY-cortex plan
+ *                   no member created (SYSTEM_PLAN_ACTOR) keeps the OWNER's view.
+ *            KEY-04 an approved proposal (PROPOSAL) runs for its executor, else
+ *                   its approver, else its requester.
+ *            KEY-05 an execute_custom_logic snippet's api.callTool (CUSTOM_LOGIC)
+ *                   runs for the member whose turn ran the snippet.
+ *            KEY-06 a KEY-cortex turn's bridged flow tool (CORTEX_BRIDGE) runs
+ *                   for the turn's member.
+ *          Not covered (open, outside this packet): the staff bridge runs a
+ *          position's turn with a job-role envelope and no member, so the
+ *          OWNER's view applies there.
  *   CTL    controls, green before and after: the STAFF member's own TEAM
  *          contact and a PRIVATE contact shared with them answer 201/200 on
- *          every route; OWNER binds the PRIVATE contact with 201/200; KEY's
- *          commerce tools with no member (CommerceAdapterService with no
- *          command member, and CommerceService with no actor) keep the
- *          OWNER's view (D-88) and bind the PRIVATE contact; an unknown id and
- *          another tenant's contact keep their 404.
+ *          every route; OWNER binds the PRIVATE contact with 201/200; the
+ *          service contract under KEY (CommerceAdapterService with no command
+ *          member, and CommerceService with no actor, as intake and events
+ *          call them) keeps the OWNER's view (D-88) and binds the PRIVATE
+ *          contact; an unknown id and another tenant's contact keep their 404.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard, TeamAuditInterceptor, the controller's
@@ -131,6 +147,18 @@ let redis: any;
 let commerce: any;
 let keyAdapter: any;
 let dispatcher: any;
+let proposalExecutor: any;
+let efferentBridge: any;
+/**
+ * The E2B sandbox stand-in (CodeExecutorService.execute): it runs the snippet `api.callTool(name,
+ * args)` as the real sandbox does, through the innerToolExecutor the dispatcher hands it.
+ */
+let snippetCall: { name: string; args: Record<string, unknown> } = { name: '', args: {} };
+const snippetSandbox = {
+  execute: async (opts: { businessId: string; innerToolExecutor: (biz: string, name: string, args: Record<string, unknown>) => Promise<unknown> }) => ({
+    result: await opts.innerToolExecutor(opts.businessId, snippetCall.name, snippetCall.args),
+  }),
+};
 
 const eventStub = {
   emit: () => true,
@@ -144,6 +172,8 @@ const eventStub = {
 async function cleanup() {
   for (const sql of [
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plan_steps WHERE plan_id IN (SELECT id FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -329,6 +359,9 @@ beforeAll(async () => {
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
   const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { CodeExecutorService } = await import('../src/modules/ai/code-executor.service');
+  const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
+  const { KeyCortexEfferentBridgeService } = await import('../src/modules/key-cortex/key-cortex-efferent-bridge.service');
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -373,11 +406,18 @@ beforeAll(async () => {
   // the graph cache executeTool touches are stubs off the boundary.
   dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     prisma: moduleRef.get(PrismaService),
-    moduleRef: { get: (token: unknown) => (token === CommerceService ? commerce : {}) },
+    // Review SEC-W3D64-3b: the E2B sandbox is the one stand-in on the execute_custom_logic path;
+    // it makes the snippet's api.callTool through the dispatcher's own innerToolExecutor.
+    moduleRef: { get: (token: unknown) => (token === CommerceService ? commerce : token === CodeExecutorService ? snippetSandbox : {}) },
     governance: { getToolTier: () => 'MEDIUM' },
     executionLog: { logToolExecution: async () => null },
     businessGraph: { invalidateCache: () => undefined },
   });
+  // Review SEC-W3D64-3a / CR-D64C-2: the real approved-proposal executor and efferent bridge over
+  // the same dispatcher (resolved through ModuleRef, as both resolve FlowOrchestratorService).
+  const dispatcherRef = { get: () => dispatcher };
+  proposalExecutor = new KeyCortexActionExecutorPlugin({ register: () => undefined } as any, {} as any, dispatcherRef as any);
+  efferentBridge = new KeyCortexEfferentBridgeService({ register: () => undefined } as any, dispatcherRef as any);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -601,8 +641,50 @@ describe('CB-03 POST invoices binds alike with and without an Idempotency-Key (r
 const KEY_ITEMS = [{ description: 'V84F KEY line', quantity: 1, unitPrice: 10 }];
 /** A member's own KEY turn: the surface established the member as the principal. */
 const memberTurn = (userId: string) => ({ surface: 'CHAT', principalUserId: userId });
-/** The plan queue worker: a business and no principal (ActionDispatcher.dispatch). */
-const PLAN_QUEUE = { surface: 'PLAN_QUEUE', planId: null, planStepId: null };
+
+type PlanStep = { id: string; tool: string; args: Record<string, unknown> };
+/** A stored ai plan of bizA proposed by `userId`, approved, one pending step per [tool, args]. */
+async function seedPlan(tag: string, userId: string | null, steps: Array<[string, Record<string, unknown>]>): Promise<{ planId: string; steps: PlanStep[] }> {
+  const planId = `${P}plan_${tag}`;
+  const rows = steps.map(([tool, args], i) => ({ id: `${planId}_s${i + 1}`, tool, args }));
+  await db.aiPlan.create({
+    data: {
+      id: planId,
+      businessId: ID.bizA,
+      userId,
+      status: 'approved',
+      objective: `v84f ${tag}`,
+      steps: { create: rows.map((s, i) => ({ id: s.id, order: i + 1, toolName: s.tool, action: s.tool, inputPayload: s.args })) },
+    },
+  });
+  return { planId, steps: rows };
+}
+
+/**
+ * The plan queue worker's dispatch of a stored step, exactly as ActionDispatcher.dispatch makes it:
+ * the plan context, and the surface with the plan and step ids and no principal.
+ */
+async function queueStep(planId: string, step: PlanStep) {
+  try {
+    const result = await dispatcher.executeToolDirectly(ID.bizA, step.tool, step.args, { planId, planStepId: step.id }, { surface: 'PLAN_QUEUE', planId, planStepId: step.id });
+    return { result, error: null as Error | null };
+  } catch (error) {
+    return { result: null, error: error as Error };
+  }
+}
+
+/** An approved EXECUTE_TOOL proposal of bizA as KeyActionProposalService hands it to the executor. */
+function proposal(tag: string, toolName: string, inputPayload: Record<string, unknown>, who: { userId?: string; approvedBy?: string }) {
+  return {
+    id: `${P}prop_${tag}`,
+    businessId: ID.bizA,
+    userId: who.userId ?? null,
+    approvedBy: who.approvedBy ?? null,
+    status: 'EXECUTING',
+    actionType: 'EXECUTE_TOOL',
+    payload: { toolName, inputPayload },
+  };
+}
 
 async function keyTool(tool: string, args: Record<string, unknown>, action: Record<string, unknown>) {
   try {
@@ -670,23 +752,109 @@ describe('KEY acts as the member (D-88): KEY commerce commands apply D-64 to the
     }
   });
 
-  it("KEY-03 (D-88) a run with no member uses the OWNER's view: the plan queue (PLAN_QUEUE, no principal) creates an invoice and a quote on the PRIVATE contact and converts a quote bound to it; so does a KEY-cortex plan no member created (SYSTEM_PLAN_ACTOR)", async () => {
-    const { SYSTEM_PLAN_ACTOR } = await import('../src/modules/key-cortex/key-cortex-planner.service');
-    const accepted = await seedQuote('key03_convert', ID.cPriv, 'ACCEPTED');
-    const invoice = await keyTool('commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }, PLAN_QUEUE);
-    expect(invoice.error, invoice.error?.message).toBeNull();
+  it("KEY-03 (D-88, D-73; review SEC-W3D64-1, SEC-W3D64-4) the plan queue runs a stored plan's step for the plan's member: the STAFF member's own plan, which the approve and queue gates let through, is refused 'Contact not found' on the PRIVATE contact and writes nothing, and still binds their TEAM contact; the OWNER's plan binds the PRIVATE contact", async () => {
+    const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
+    const { assertMayRunGraphAction, PLAN_APPROVER_ROLES } = await import('../src/modules/ai/graph-actions.controller');
+    const staffAccepted = await seedQuote('key03_staff_convert', ID.cPriv, 'ACCEPTED');
+    const staffPlan = await seedPlan('key03_staff', ID.staff, [
+      ['commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }],
+      ['commerce_create_quote', { contactId: ID.cPriv, items: KEY_ITEMS }],
+      ['commerce_convert_quote', { quoteId: staffAccepted }],
+      ['commerce_create_invoice', { contactId: ID.cTeam, items: KEY_ITEMS }],
+    ]);
+    // The gates a real run passes: POST ai/plans/:planId/approve (the proposer approves their own
+    // plan) and QueueService.processPlanStep (planStepRunRefusal). Both need revenue write only, so
+    // the bind itself must judge the contact by the plan's member.
+    for (const tool of ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote']) {
+      await expect(
+        assertMayRunGraphAction(dispatcher.prisma, ID.bizA, { id: ID.staff, role: 'USER' }, tool, ID.staff, { proposerOverrideRoles: PLAN_APPROVER_ROLES, noPrincipal: true }),
+      ).resolves.toBeUndefined();
+      expect(await planStepRunRefusal(dispatcher.prisma, ID.bizA, staffPlan.planId, tool), tool).toBeNull();
+    }
+    const before = await documentCounts();
+    for (const step of staffPlan.steps.slice(0, 3)) {
+      const out = await queueStep(staffPlan.planId, step);
+      expect(out.error?.message, `${step.tool} answered ${JSON.stringify(out.result)}`).toBe('Contact not found');
+    }
+    expect(await documentCounts()).toEqual(before);
+    expect(await db.quote.findUnique({ where: { id: staffAccepted } })).toMatchObject({ status: 'ACCEPTED', invoiceId: null });
+    const own = await queueStep(staffPlan.planId, staffPlan.steps[3]);
+    expect(own.error, own.error?.message).toBeNull();
+    expect((await db.invoice.findUnique({ where: { id: (own.result as any).id } })).contactId).toBe(ID.cTeam);
+
+    const ownerAccepted = await seedQuote('key03_owner_convert', ID.cPriv, 'ACCEPTED');
+    const ownerPlan = await seedPlan('key03_owner', ID.owner, [
+      ['commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }],
+      ['commerce_create_quote', { contactId: ID.cPriv, items: KEY_ITEMS }],
+      ['commerce_convert_quote', { quoteId: ownerAccepted }],
+    ]);
+    const [invoice, quote, converted] = [
+      await queueStep(ownerPlan.planId, ownerPlan.steps[0]),
+      await queueStep(ownerPlan.planId, ownerPlan.steps[1]),
+      await queueStep(ownerPlan.planId, ownerPlan.steps[2]),
+    ];
+    for (const out of [invoice, quote, converted]) expect(out.error, out.error?.message).toBeNull();
     expect((await db.invoice.findUnique({ where: { id: (invoice.result as any).id } })).contactId).toBe(ID.cPriv);
-    const quote = await keyTool('commerce_create_quote', { contactId: ID.cPriv, items: KEY_ITEMS }, PLAN_QUEUE);
-    expect(quote.error, quote.error?.message).toBeNull();
     expect((await db.quote.findUnique({ where: { id: (quote.result as any).id } })).contactId).toBe(ID.cPriv);
-    const converted = await keyTool('commerce_convert_quote', { quoteId: accepted }, PLAN_QUEUE);
-    expect(converted.error, converted.error?.message).toBeNull();
     expect((await db.invoice.findUnique({ where: { id: (converted.result as any).invoiceId } })).contactId).toBe(ID.cPriv);
+  });
+
+  it("KEY-03b (D-88, D-73; review SEC-W3D64-4) a run with no member keeps the OWNER's view where one can run: a plan with no member is refused all four tools before dispatch (noMemberToolRefusal), and a KEY-cortex plan no member created (SYSTEM_PLAN_ACTOR) binds through the adapter", async () => {
+    const { noMemberToolRefusal } = await import('../src/modules/ai/plan-step-authority');
+    const { SYSTEM_PLAN_ACTOR } = await import('../src/modules/key-cortex/key-cortex-planner.service');
+    for (const tool of ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice']) {
+      expect(noMemberToolRefusal(tool), tool).toMatch(/revenue write\), and a KEY plan or monitor with no member principal writes neither \(D-73\)/);
+    }
     for (const action of ['create_invoice', 'create_quote']) {
       const out = await keyCommand(action, { contactId: ID.cPriv, items: KEY_ITEMS }, SYSTEM_PLAN_ACTOR);
       expect(out.error, `${action}: ${out.error?.message}`).toBeNull();
       expect((out.result as any).data.contactId, action).toBe(ID.cPriv);
     }
+  });
+
+  it("KEY-04 (D-88; review SEC-W3D64-3a) an approved KEY proposal runs for the member who executes it, else who approved it, else who asked: the ADMIN's and the STAFF requester's are refused 'Contact not found' and write nothing; the OWNER's binds the PRIVATE contact", async () => {
+    const accepted = await seedQuote('key04_convert', ID.cPriv, 'ACCEPTED');
+    const before = await documentCounts();
+    const refused: Array<[string, Record<string, unknown>, string | undefined]> = [
+      ['executed by the ADMIN', proposal('key04_admin', 'commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }, { approvedBy: ID.admin }), ID.admin],
+      // KeyCortexApprovalOrchestratorService.executeApproved with no user executes as KEY: the approver judges
+      ['approved by the ADMIN, executed by KEY', proposal('key04_key', 'commerce_create_quote', { contactId: ID.cPriv, items: KEY_ITEMS }, { approvedBy: ID.admin }), 'key_ai'],
+      ['asked by the STAFF member', proposal('key04_staff', 'commerce_convert_quote', { quoteId: accepted }, { userId: ID.staff }), undefined],
+    ];
+    for (const [label, row, executedBy] of refused) {
+      const outcome = await proposalExecutor.execute(ID.bizA, row, executedBy);
+      expect(outcome, label).toMatchObject({ success: false, error: 'Contact not found' });
+    }
+    expect(await documentCounts()).toEqual(before);
+
+    const owner = await proposalExecutor.execute(ID.bizA, proposal('key04_owner', 'commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }, { approvedBy: ID.owner }), ID.owner);
+    expect(owner.success, owner.error).toBe(true);
+    expect((await db.invoice.findUnique({ where: { id: (owner.result as any).id } })).contactId).toBe(ID.cPriv);
+  });
+
+  it("KEY-05 (D-88; review SEC-W3D64-3b) an execute_custom_logic snippet's api.callTool binds for the member whose chat turn ran it: the STAFF member's inner commerce_create_quote and commerce_create_invoice on the PRIVATE contact are refused 'Contact not found'; the OWNER's bind it", async () => {
+    const before = await documentCounts();
+    for (const name of ['commerce_create_quote', 'commerce_create_invoice']) {
+      snippetCall = { name, args: { contactId: ID.cPriv, items: KEY_ITEMS } };
+      const out = await keyTool('execute_custom_logic', { code: '/* api.callTool */', inputs: {} }, memberTurn(ID.staff));
+      expect(out.error?.message, `${name} answered ${JSON.stringify(out.result)}`).toBe('Contact not found');
+    }
+    expect(await documentCounts()).toEqual(before);
+
+    snippetCall = { name: 'commerce_create_quote', args: { contactId: ID.cPriv, items: KEY_ITEMS } };
+    const owner = await keyTool('execute_custom_logic', { code: '/* api.callTool */', inputs: {} }, memberTurn(ID.owner));
+    expect(owner.error, owner.error?.message).toBeNull();
+    expect((await db.quote.findUnique({ where: { id: (owner.result as any).result.id } })).contactId).toBe(ID.cPriv);
+  });
+
+  it("KEY-06 (D-88; review CR-D64C-2) a member's KEY-cortex turn reaching a bridged flow tool binds for that member: the STAFF member's commerce_create_invoice on the PRIVATE contact is refused 'Contact not found'; the OWNER's binds it", async () => {
+    const before = await documentCounts();
+    const staff = await efferentBridge.dispatch('commerce_create_invoice', { businessId: ID.bizA, userId: ID.staff }, { contactId: ID.cPriv, items: KEY_ITEMS });
+    expect(staff).toMatchObject({ success: false, error: 'Contact not found' });
+    expect(await documentCounts()).toEqual(before);
+    const owner = await efferentBridge.dispatch('commerce_create_invoice', { businessId: ID.bizA, userId: ID.owner }, { contactId: ID.cPriv, items: KEY_ITEMS });
+    expect(owner.success, owner.error).toBe(true);
+    expect((await db.invoice.findUnique({ where: { id: owner.data.id } })).contactId).toBe(ID.cPriv);
   });
 });
 
@@ -757,8 +925,10 @@ describe('CTL controls (pass before and after)', () => {
     expect((await db.invoice.findUnique({ where: { id: billed.body.invoiceId } })).contactId).toBe(ID.cPriv);
   });
 
-  // D-88: with no member, KEY keeps the OWNER's view (the tenant), so these bind the PRIVATE contact.
-  it('CTL-04 KEY commerce tools (no member actor) stay tenant-only: the adapter creates an invoice and a quote on the PRIVATE contact; CommerceService update and convert with no actor bind it', async () => {
+  // D-88: a call that names no member (document intake, events, a KEY system actor) keeps the
+  // OWNER's view (the tenant), so these bind the PRIVATE contact. Every KEY surface that runs for a
+  // member names it (KEY-01, KEY-03..KEY-06); this is the service contract below them, not a KEY run.
+  it('CTL-04 (D-88) the commerce service and the KEY-cortex adapter called with no member stay tenant-only: the adapter creates an invoice and a quote on the PRIVATE contact; CommerceService update and convert with no actor bind it', async () => {
     const invoice = await keyAdapter.createInvoice({ businessId: ID.bizA, contactId: ID.cPriv, items: ITEMS });
     expect(invoice.contactId).toBe(ID.cPriv);
     const quote = await keyAdapter.createQuote({ businessId: ID.bizA, contactId: ID.cPriv, items: ITEMS });

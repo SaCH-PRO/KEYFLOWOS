@@ -769,10 +769,20 @@ export class CommerceService {
    * quote's stored contact). KEY acts as the member (D-88): the flow dispatcher
    * hands commerce_create_invoice, commerce_create_quote, commerce_convert_quote
    * and commerce_update_invoice the member its command runs for, and the
-   * KEY-cortex commerce adapter the command's member, so KEY binds no contact
-   * the member cannot open over HTTP. A run with no member (the plan queue, a
-   * KEY-cortex plan no member created) gets undefined here: the OWNER's view,
-   * as KEY's contact reads have since KEY-R3b.
+   * KEY-cortex commerce adapter the command's member.
+   *
+   * Review SEC-W3D64-1/-3, CR-D64C-2: "the member its command runs for" is
+   * FlowOrchestratorService.contactBindMember: the surface's principal; else
+   * the member a principal-less surface runs for (an approved proposal's
+   * executor, a KEY-cortex turn's member on the efferent bridge, an
+   * execute_custom_logic snippet's caller); else, on the plan queue, the
+   * stored plan's member (D-73). Undefined here, the OWNER's view, only for a
+   * run with no member: an inbound conversation, a KEY-cortex plan no member
+   * created (SYSTEM_PLAN_ACTOR), document intake and events. NOT covered: the
+   * staff bridge (a position's WhatsApp/SMS turn) runs the dispatcher with a
+   * job-role envelope and no member, so it binds with the OWNER's view (open,
+   * outside this packet: withhold the tools from positions or carry the
+   * position's member).
    */
   private async memberContactClause(businessId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput | undefined> {
     if (!actorUserId || isSystemActor(actorUserId)) return undefined;

@@ -1915,9 +1915,23 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       expect(update).toMatch(/tx\.contact\.findFirst\(\{\s*where: reachableWhere,/);
     });
 
+    /**
+     * Owner ruling D-88 (W3-D64-COMMERCE-CREATE; review SEC-W3D64-2, CR-D64C-1): KEY's commerce
+     * tools follow D-64 by acting as the member. Their services reach the clause through
+     * CommerceService.memberContactClause, and the dispatcher hands each of them the member the
+     * command runs for (FlowOrchestratorService.contactBindMember), so the clause runs on the KEY
+     * path for that member: holder-aware, not withheld. Asserted below, with every surface that runs
+     * them for a member without a principal (review SEC-W3D64-1/-3).
+     */
+    const HOLDER_AWARE = ['commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_update_invoice'];
+    const withheld = writes.filter((t) => !HOLDER_AWARE.includes(t));
+
     it('CRM_ROW_VISIBILITY_TOOLS is exactly the granted write tools whose service reaches the clause', () => {
-      expect(writes).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
-      expect([...ROW].sort()).toEqual(writes);
+      // D-88: the derivation still finds the holder-aware commerce tools (their services reach the
+      // clause); they are the ones asserted holder-aware below, and every other one is withheld.
+      expect(writes.filter((t) => HOLDER_AWARE.includes(t))).toEqual(HOLDER_AWARE);
+      expect(withheld).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
+      expect([...ROW].sort()).toEqual(withheld);
     });
 
     it('the read tools it bounds are the accepted read follow-up (KEY CRM / calendar reads apply no row visibility)', () => {
@@ -1928,10 +1942,54 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     });
 
     it('the dispatcher passes them no actor, so the clause never runs on the KEY path', () => {
-      for (const t of writes) {
+      for (const t of withheld) {
         expect(cases.get(t), t).toBeDefined();
         expect(cases.get(t), t).not.toMatch(/actorUserId|actorId|userId/);
       }
+    });
+
+    it('D-88 (review SEC-W3D64-2): the holder-aware commerce tools hand the service the member the command runs for (contactBindMember), never a model value', () => {
+      for (const t of HOLDER_AWARE) {
+        const body = cases.get(t);
+        expect(body, t).toBeDefined();
+        expect(body, t).toContain('const bindMember = await this.contactBindMember(businessId, action);');
+        expect(body, t).toMatch(/actorUserId: bindMember,/);
+        expect(body, t).not.toMatch(/actorUserId: (args|action\?\.principalUserId)/);
+      }
+      // KEY's invoice edit forwards no contact, so it binds none: the stored one is never re-judged
+      expect(cases.get('commerce_update_invoice')).not.toMatch(/contactId/);
+    });
+
+    it('D-88 (review SEC-W3D64-1/-3, CR-D64C-2): contactBindMember answers the member on every surface that runs for one, and the OWNER view only with no member', () => {
+      const orchestrator = read(ORCHESTRATOR);
+      const helper = memberBody(orchestrator, 'contactBindMember')!;
+      expect(helper).toBeTruthy();
+      // the surface's principal, then the member a principal-less surface runs for, then (the plan
+      // queue dispatches with no principal) the stored plan's member, read in this business (D-73)
+      const order = [
+        'if (action?.principalUserId) return action.principalUserId;',
+        'if (action?.onBehalfOfUserId) return action.onBehalfOfUserId;',
+        "if (action?.surface === 'PLAN_QUEUE' && action.planId) {",
+        'this.prisma.client.aiPlan.findFirst({ where: { id: action.planId, businessId }, select: { userId: true } });',
+        'return undefined;',
+      ].map((s) => helper.indexOf(s));
+      expect(order.every((i) => i >= 0), JSON.stringify(order)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(helper).not.toMatch(/args\b/);
+      // execute_custom_logic: each inner call carries the outer call's member, never as its principal
+      const custom = cases.get('execute_custom_logic')!;
+      expect(custom).toContain('const onBehalfOfUserId = (await this.contactBindMember(businessId, action)) ?? null;');
+      expect(custom).toMatch(/innerToolExecutor: [^\n]*\{ surface: 'CUSTOM_LOGIC', onBehalfOfUserId \}/);
+      expect(custom).not.toMatch(/surface: 'CUSTOM_LOGIC', principalUserId/);
+      // an approved proposal: the member who runs it, else who approved it, else who asked
+      const plugin = read('modules/key-cortex/key-cortex-action-executor.plugin.ts');
+      expect(plugin).toMatch(
+        /surface: 'PROPOSAL',\s*actionId: proposal\.id,\s*onBehalfOfUserId: \[executedBy, proposal\.approvedBy, proposal\.userId\]\.find\(\(id\): id is string => !!id && !isSystemActor\(id\)\) \?\? null,/,
+      );
+      // the efferent bridge: the KEY-cortex turn's member
+      const bridge = read('modules/key-cortex/key-cortex-efferent-bridge.service.ts');
+      expect(bridge).toContain("ctx.userId ? { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ctx.userId } : { surface: 'CORTEX_BRIDGE' },");
+      expect(bridge).not.toMatch(/surface: 'CORTEX_BRIDGE', principalUserId/);
     });
 
     it('ERROR_ONLY is what it says: the clause names the 409 holder only, and KEY returns error.message alone', () => {

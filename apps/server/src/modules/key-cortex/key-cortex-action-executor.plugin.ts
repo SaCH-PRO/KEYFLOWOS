@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import type {
   ExecutionOutcome,
@@ -95,7 +96,20 @@ export class KeyCortexActionExecutorPlugin
           // KF-EXEC-ACTION-001: the proposal is the action record. A capability
           // the action boundary has adopted is admitted by this id, against
           // the envelope sealed on the proposal, never by these arguments.
-          { surface: 'PROPOSAL', actionId: proposal.id },
+          //
+          // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3a; D-64, D-88): the
+          // member who runs the approved action (else who approved it, else
+          // who asked, as the cortex branch below runs as the executor, else
+          // the requester) rides beside it, not as a principal: KEY's
+          // commerce writes judge the contact they bind by that member's CRM
+          // view, so an approver binds no contact they may not open. KEY's
+          // own ids (executeApproved with no user runs as 'key_ai') are no
+          // member.
+          {
+            surface: 'PROPOSAL',
+            actionId: proposal.id,
+            onBehalfOfUserId: [executedBy, proposal.approvedBy, proposal.userId].find((id): id is string => !!id && !isSystemActor(id)) ?? null,
+          },
         );
 
         return { success: true, result: result as Record<string, unknown> | undefined };
