@@ -253,7 +253,9 @@ export class CommerceController {
    * changed: that would rewrite RA-G4-13's guard half and QS-07, and refuse
    * SUPER_ADMIN on every other module. d46-write-routes.spec.ts lists every
    * revenue:write handler as calling this, exempt (with the reason) or
-   * service-refused.
+   * service-refused; a service-refused (bare-id) route's service applies this
+   * same rule to its actor, membership and revenue:write both (review
+   * SEC-A1-1, CommerceService.assertActorMayWriteRevenue).
    */
   private async assertSuperAdminMayWriteRevenue(
     req: { user?: { id?: string; role?: string } } | undefined,

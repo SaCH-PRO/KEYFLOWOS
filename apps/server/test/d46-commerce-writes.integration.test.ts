@@ -30,6 +30,19 @@
  *                 access to this business' from BusinessGuard; a SUPER_ADMIN
  *                 whose membership holds only revenue:read (STAFF default) gets
  *                 the guard's 'Insufficient permissions' 403 (FOLLOW3-A2 rule).
+ *   D46-R01..R04  review repair SEC-A1-1: the four bare-id routes the census
+ *                 lists as SERVICE_REFUSED (mark-paid, payment-failed, invoice
+ *                 status, quote status). A SUPER_ADMIN member of A whose
+ *                 revenue level is read (STAFF default) or an explicit none
+ *                 RED-BEFORE: 200 and the write done (a payment, its posting
+ *                 and PAID; FAILED; VOID; SENT with a view token).
+ *                 GREEN-AFTER: the guard's 403 'Insufficient permissions ...
+ *                 (you have read|none)', as a regular revenue:read member
+ *                 gets, A byte-identical; the service each route calls (and
+ *                 ai-execute's mark_paid / void_invoice / send_quote reach)
+ *                 refuses the same actors itself. Controls: the SUPER_ADMIN
+ *                 ADMIN member and owner A are admitted; the non-member
+ *                 SUPER_ADMIN keeps 'Not authorized to update this ...'.
  *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
@@ -93,6 +106,8 @@ const ID = {
   saNon: `${P}saNon`, // SUPER_ADMIN, member of no business
   saAdminA: `${P}saAdminA`, // SUPER_ADMIN, ADMIN member of A (revenue:admin by default)
   saStaffA: `${P}saStaffA`, // SUPER_ADMIN, STAFF member of A (revenue:read by default)
+  saNoneA: `${P}saNoneA`, // SUPER_ADMIN, ADMIN member of A with an explicit { revenue: 'none' } map
+  staffReadA: `${P}staffReadA`, // USER, STAFF member of A (revenue:read by default)
   ownerB: `${P}ownerB`,
   ownerC: `${P}ownerC`,
   bizA: `${P}bizA`,
@@ -109,6 +124,7 @@ let db: any;
 let app: any;
 let redis: any;
 let paymentsSvc: any;
+let commerceSvc: any;
 let keyAdapter: any;
 let keyActorId: string;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
@@ -205,15 +221,15 @@ async function makeInvoice(biz: string, tag: string, status: string, total = TOT
   return id;
 }
 
-/** An ACCEPTED quote of `biz` (convertible). */
-async function makeQuote(biz: string, tag: string): Promise<string> {
+/** A quote of `biz` in `status` (ACCEPTED, the default, is convertible). */
+async function makeQuote(biz: string, tag: string, status = 'ACCEPTED'): Promise<string> {
   docSeq += 1;
   const id = `${P}q_${tag}`;
   await db.quote.create({
     data: {
       id,
       quoteNumber: `V81A-Q${String(docSeq).padStart(4, '0')}`,
-      status: 'ACCEPTED',
+      status,
       subtotal: TOTAL,
       total: TOTAL,
       currency: 'TTD',
@@ -419,6 +435,7 @@ beforeAll(async () => {
     ],
   }).compile();
   const commerce = moduleRef.get(CommerceService);
+  commerceSvc = commerce;
   paymentsSvc = new PaymentsService(
     moduleRef.get(PrismaService),
     commerce,
@@ -448,6 +465,7 @@ beforeAll(async () => {
   for (const [id, role] of [
     [ID.ownerA, 'USER'], [ID.ownerB, 'USER'], [ID.ownerC, 'USER'],
     [ID.saNon, 'SUPER_ADMIN'], [ID.saAdminA, 'SUPER_ADMIN'], [ID.saStaffA, 'SUPER_ADMIN'],
+    [ID.saNoneA, 'SUPER_ADMIN'], [ID.staffReadA, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, name: id, role } });
   }
@@ -463,6 +481,10 @@ beforeAll(async () => {
   }
   await db.membership.create({ data: { id: `${ID.saAdminA}_m`, userId: ID.saAdminA, businessId: ID.bizA, role: 'ADMIN' } });
   await db.membership.create({ data: { id: `${ID.saStaffA}_m`, userId: ID.saStaffA, businessId: ID.bizA, role: 'STAFF' } });
+  await db.membership.create({
+    data: { id: `${ID.saNoneA}_m`, userId: ID.saNoneA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { revenue: 'none', crm: 'write' } },
+  });
+  await db.membership.create({ data: { id: `${ID.staffReadA}_m`, userId: ID.staffReadA, businessId: ID.bizA, role: 'STAFF' } });
 }, 180_000);
 
 afterAll(async () => {
@@ -639,6 +661,144 @@ describe('Item 1 controls (green before and after)', () => {
       const res = await c.call(ID.ownerB, fx);
       expect(res.status, JSON.stringify(res.body)).toBe(403);
       expect(res.body.message).toBe('No access to this business');
+      expect(await stateOf(ID.bizA)).toEqual(before);
+    });
+  }
+});
+
+/**
+ * Review repair SEC-A1-1: the four bare-id revenue:write routes (the census's
+ * SERVICE_REFUSED) carry no :businessId, so the controller helper does not run
+ * on them, and ModuleScopeGuard admits SUPER_ADMIN without a scope. Their
+ * services checked only that a Membership existed, so a SUPER_ADMIN member of
+ * A whose revenue level is read or none marked A's invoices paid (a payment,
+ * its posting, PAID), failed and voided them and sent its quotes, where the
+ * guarded twins refused it. The service now applies the rest of the rule
+ * (scope map, else role defaults, revenue >= write) to every human actor. The
+ * same service is what POST businesses/:b/ai-execute's mark_paid,
+ * void_invoice, convert_quote and send_quote reach.
+ */
+interface BareIdCase {
+  id: string;
+  what: string;
+  subject: 'invoice' | 'quote';
+  prepare: (tag: string) => Promise<string>;
+  http: (actor: string, doc: string) => any;
+  service: (actor: string, doc: string) => Promise<unknown>;
+  admitted: (doc: string) => Promise<void>;
+}
+
+const BARE_ID: BareIdCase[] = [
+  {
+    id: 'D46-R01',
+    what: 'PATCH invoices/:id/paid?businessId=A (CommerceService.markInvoicePaid)',
+    subject: 'invoice',
+    prepare: (tag) => makeInvoice(ID.bizA, `r01_${tag}`, 'SENT'),
+    http: (actor, inv) => as(actor, agent().patch(`/commerce/invoices/${inv}/paid?businessId=${ID.bizA}`)).send({}),
+    service: (actor, inv) => commerceSvc.markInvoicePaid(inv, actor, ID.bizA),
+    admitted: async (inv) => {
+      expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe('PAID');
+      const rows = await paymentsOf(inv);
+      expect(rows.map((r) => `${r.status}:${Number(r.amount)}`)).toEqual(['SUCCESSFUL:100']);
+      expect(await postingsOf(rows[0].id)).toEqual(['INCOME:POSTED:100']);
+    },
+  },
+  {
+    id: 'D46-R02',
+    what: 'PATCH invoices/:id/payment-failed?businessId=A (CommerceService.markInvoicePaymentFailed)',
+    subject: 'invoice',
+    prepare: (tag) => makeInvoice(ID.bizA, `r02_${tag}`, 'SENT'),
+    http: (actor, inv) => as(actor, agent().patch(`/commerce/invoices/${inv}/payment-failed?businessId=${ID.bizA}`)).send({ reason: 'v81a' }),
+    service: (actor, inv) => commerceSvc.markInvoicePaymentFailed(inv, actor, 'v81a', ID.bizA),
+    admitted: async (inv) => {
+      expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe('FAILED');
+    },
+  },
+  {
+    id: 'D46-R03',
+    what: "PATCH invoices/:id/status/void {status:'VOID', businessId:A} (CommerceService.updateInvoiceStatus)",
+    subject: 'invoice',
+    prepare: (tag) => makeInvoice(ID.bizA, `r03_${tag}`, 'SENT'),
+    http: (actor, inv) => as(actor, agent().patch(`/commerce/invoices/${inv}/status/void`)).send({ status: 'VOID', businessId: ID.bizA }),
+    service: (actor, inv) => commerceSvc.updateInvoiceStatus({ invoiceId: inv, status: 'VOID', actorId: actor, businessId: ID.bizA }),
+    admitted: async (inv) => {
+      expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe('VOID');
+    },
+  },
+  {
+    id: 'D46-R04',
+    what: 'PATCH quotes/:id/status/sent {businessId:A} on a DRAFT quote (CommerceService.updateQuoteStatus)',
+    subject: 'quote',
+    prepare: (tag) => makeQuote(ID.bizA, `r04_${tag}`, 'DRAFT'),
+    http: (actor, q) => as(actor, agent().patch(`/commerce/quotes/${q}/status/sent`)).send({ businessId: ID.bizA }),
+    service: (actor, q) => commerceSvc.updateQuoteStatus({ quoteId: q, status: 'SENT', actorId: actor, businessId: ID.bizA }),
+    admitted: async (q) => {
+      const quote = await db.quote.findUnique({ where: { id: q } });
+      expect(quote.status).toBe('SENT');
+      expect(typeof quote.viewToken).toBe('string');
+    },
+  },
+];
+
+async function rejectionOf(p: Promise<unknown>): Promise<any> {
+  try {
+    await p;
+  } catch (err) {
+    return err;
+  }
+  return null;
+}
+
+const BELOW_WRITE: Array<[actor: string, level: string]> = [
+  [ID.saStaffA, 'read'], // SUPER_ADMIN, STAFF member (role defaults)
+  [ID.saNoneA, 'none'], // SUPER_ADMIN, ADMIN member with an explicit { revenue: 'none' }
+];
+
+describe('Review repair SEC-A1-1: the four service-refused bare-id writes hold FOLLOW3-A2\'s whole rule (a Membership holding revenue:write), not a Membership alone', () => {
+  for (const c of BARE_ID) {
+    it(`${c.id}: ${c.what} by a SUPER_ADMIN member of A below revenue:write (STAFF default read; explicit none) answers the guard's 403 'Insufficient permissions', as a regular revenue:read member does; A is byte-identical`, async () => {
+      for (const [actor, level] of [...BELOW_WRITE, [ID.staffReadA, 'read'] as [string, string]]) {
+        const doc = await c.prepare(actor.slice(P.length));
+        const before = await stateOf(ID.bizA);
+        const jobsBefore = auditJobs.length;
+        const res = await c.http(actor, doc);
+        // RED-BEFORE (SUPER_ADMIN members): 200, and the write done.
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body.message, actor).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+        expect(await stateOf(ID.bizA), actor).toEqual(before);
+        expect(auditJobs.slice(jobsBefore), actor).toEqual([]);
+      }
+    });
+
+    it(`${c.id} (service half, what ai-execute reaches): the service refuses the same actors, and a regular revenue:read member, with ForbiddenException 'Insufficient permissions' before anything is written`, async () => {
+      for (const [actor, level] of [...BELOW_WRITE, [ID.staffReadA, 'read'] as [string, string]]) {
+        const doc = await c.prepare(`svc_${actor.slice(P.length)}`);
+        const before = await stateOf(ID.bizA);
+        const err = await rejectionOf(c.service(actor, doc));
+        expect(err?.getStatus?.(), `${actor}: ${String(err)}`).toBe(403);
+        expect(err.message, actor).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+        expect(await stateOf(ID.bizA), actor).toEqual(before);
+      }
+    });
+
+    it(`${c.id} control: a SUPER_ADMIN that is an ADMIN member of A and owner A are admitted (200) and the write is done`, async () => {
+      for (const actor of [ID.saAdminA, ID.ownerA]) {
+        const doc = await c.prepare(`ok_${actor.slice(P.length)}`);
+        const res = await c.http(actor, doc);
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+        await c.admitted(doc);
+      }
+    });
+
+    it(`${c.id} control: the non-member SUPER_ADMIN still answers 403 'Not authorized to update this ${c.subject}' (route and service); A is byte-identical`, async () => {
+      const doc = await c.prepare('saNon');
+      const before = await stateOf(ID.bizA);
+      const res = await c.http(ID.saNon, doc);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.message).toBe(`Not authorized to update this ${c.subject}`);
+      const err = await rejectionOf(c.service(ID.saNon, doc));
+      expect(err?.getStatus?.(), String(err)).toBe(403);
+      expect(err.message).toBe(`Not authorized to update this ${c.subject}`);
       expect(await stateOf(ID.bizA)).toEqual(before);
     });
   }

@@ -1373,6 +1373,41 @@ export class CommerceService {
   }
 
   /**
+   * FOLLOW3-A1-D46-COMMERCE-WRITES review (SEC-A1-1): the authority check of a
+   * human actor on the bare-id writes (markInvoicePaid,
+   * markInvoicePaymentFailed, updateInvoiceStatus, updateQuoteStatus). Their
+   * routes carry no :businessId and ModuleScopeGuard admits SUPER_ADMIN without
+   * a scope, so this is that role's only barrier there and on ai-execute. It
+   * used to require only that a Membership exist, so a SUPER_ADMIN member whose
+   * revenue level was read or none marked invoices paid, voided them and moved
+   * quote status, where every guarded twin refused it (FOLLOW3-A2: a membership
+   * alone is not enough). It is now ModuleScopeGuard's legacy rule, restated as
+   * payment-evidence.service.ts and CommerceController do: the Membership in
+   * `businessId` (the document's own) whose scope map, or without one the role
+   * defaults, holds revenue:write. No membership keeps its answer ('Not
+   * authorized to update this invoice' / '... quote'); one below write gets the
+   * guard's message. Every other human caller already passed the guard's
+   * revenue:write check on the same business, so its outcome is unchanged.
+   * The lookup stays findFirst on (businessId, userId), as before.
+   */
+  private async assertActorMayWriteRevenue(businessId: string, actorId: string, subject: 'invoice' | 'quote'): Promise<void> {
+    const membership = await this.prisma.client.membership.findFirst({
+      where: { businessId, userId: actorId },
+    });
+    if (!membership) {
+      throw new ForbiddenException(`Not authorized to update this ${subject}`);
+    }
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
+  }
+
+  /**
    * KF-REVENUE-AUTH-PROJECTION-001 (G5) — the public, unauthenticated view of
    * an invoice for the id-based pay page (`GET /commerce/invoices/:id`).
    *
@@ -1545,12 +1580,8 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, actorId, 'invoice');
     }
     const reload = () =>
       this.prisma.client.invoice.findUnique({
@@ -1687,12 +1718,8 @@ export class CommerceService {
       throw new NotFoundException('Invoice not found');
     }
     if (actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, actorId, 'invoice');
     }
     // V1-42 review (CR-V42-1): a failed attempt on an invoice that is already
     // FAILED (a second attempt failed, or a concurrent report of a failure won
@@ -1791,12 +1818,8 @@ export class CommerceService {
       throw new NotFoundException('Quote not found');
     }
     if (params.actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingQuote.businessId, userId: params.actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this quote');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingQuote.businessId, params.actorId, 'quote');
     }
     const now = new Date();
     // R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): the status route, send-email and
@@ -2275,12 +2298,8 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (params.actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: params.actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, params.actorId, 'invoice');
     }
     // V1-42-DM-LIFECYCLE-OWNER-CAS: asking for the status the invoice already
     // holds is answered idempotently (the send-email of a DRAFT that another

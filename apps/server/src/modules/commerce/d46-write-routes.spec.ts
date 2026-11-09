@@ -29,11 +29,19 @@
  *            explicit write) is admitted: the lookup, then the handler goes on.
  *   D46-S05  a regular member (role USER) costs no extra query: the helper
  *            never reads Membership unless role === 'SUPER_ADMIN'.
+ *   D46-S06  (review SEC-A1-2) the same census over every controller in the
+ *            commerce module: each revenue:write handler outside
+ *            CommerceController is SERVICE_REFUSED, EXEMPT with a reason, or
+ *            OPEN (a known, unruled gap naming its follow-up packet). The OPEN
+ *            set is pinned (D46-S06b) and its behaviour is an it.todo (D46-S07,
+ *            D46-S08), so the gap shows rather than reading as covered.
  */
 import 'reflect-metadata';
+import { readdirSync } from 'fs';
+import { join } from 'path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ForbiddenException } from '@nestjs/common';
-import { PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { CONTROLLER_WATERMARK, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
 
@@ -86,12 +94,58 @@ const EXEMPT: Record<string, string> = {
     'PINNED, not ruled here: commerce-authorization.e2e.test.ts CC-FORWARD forwards a non-member SUPER_ADMIN\'s invoice create (201), and that suite must stay green (outside this write set). It creates a DRAFT and moves no money; extending D-46 to it needs that control changed (follow-up).',
 };
 
-/** Bare-id revenue:write handlers: the service refuses an actor with no Membership in the document's business. */
+/**
+ * Bare-id revenue:write handlers: the service refuses a human actor unless its
+ * Membership in the document's business holds revenue:write (scope map, else
+ * role defaults), ModuleScopeGuard's rule restated, so a SUPER_ADMIN the guard
+ * waves through is held to it too (review SEC-A1-1; d46-commerce-writes
+ * D46-R01..R04).
+ */
 const SERVICE_REFUSED: Record<string, string> = {
-  markInvoicePaid: 'CommerceService.markInvoicePaid: Membership of the actor in the invoice\'s business (RR-R002-01; RA-G4-13 pins the guard half)',
-  markInvoicePaymentFailed: 'CommerceService.markInvoicePaymentFailed: Membership of the actor (RR-R002-02)',
-  updateInvoiceStatus: 'CommerceService.updateInvoiceStatus: Membership of the actor (RR-R002-03)',
-  updateQuoteStatus: 'CommerceService.updateQuoteStatus: Membership of the actor (QS-07)',
+  markInvoicePaid: 'CommerceService.markInvoicePaid: the actor\'s Membership in the invoice\'s business holding revenue:write (RR-R002-01, D46-R01; RA-G4-13 pins the guard half)',
+  markInvoicePaymentFailed: 'CommerceService.markInvoicePaymentFailed: the actor\'s Membership holding revenue:write (RR-R002-02, D46-R02)',
+  updateInvoiceStatus: 'CommerceService.updateInvoiceStatus: the actor\'s Membership holding revenue:write (RR-R002-03, D46-R03)',
+  updateQuoteStatus: 'CommerceService.updateQuoteStatus: the actor\'s Membership holding revenue:write (QS-07, D46-R04)',
+};
+
+type OtherKind = 'SERVICE_REFUSED' | 'EXEMPT' | 'OPEN';
+
+const LEVERAGE_ATTRIBUTION = 'revenue attribution override (which source, campaign or staff member earned a booking or invoice): reporting metadata, not an invoice, quote or payment write';
+const LEVERAGE_TIME = 'time-cost entries (minutes and cost rate logged against a reference): margin reporting, not an invoice, quote or payment write';
+const RECURRING_OPEN =
+  'OPEN (review SEC-A1-2, unruled): an invoice schedule the scheduler turns into real invoices. Neither RecurringInvoiceController nor ' +
+  'RecurringInvoiceService checks a SUPER_ADMIN\'s Membership, so a non-member SUPER_ADMIN creates an ACTIVE schedule in any tenant. ' +
+  'recurring-invoice.controller.ts and recurring-invoice.service.ts are outside this packet\'s write set: needs a D-46 ruling and a follow-up packet';
+
+/**
+ * Review repair SEC-A1-2: the census covers every revenue:write handler of
+ * every controller in the commerce module, not only CommerceController, so a
+ * gap shows here by name. OPEN entries are known gaps waiting on a ruling and
+ * a follow-up packet (see the it.todo below), never a claim of coverage.
+ */
+const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: string }>> = {
+  CommerceAiController: {
+    aiExecute: {
+      kind: 'SERVICE_REFUSED',
+      why:
+        'ai-execute: mark_paid, void_invoice, convert_quote and send_quote run CommerceService.markInvoicePaid / updateInvoiceStatus / ' +
+        'updateQuoteStatus as req.user, which require that actor\'s Membership holding revenue:write (SEC-A1-1); the product actions are ' +
+        'catalog writes (D-46 is ruled for invoice writes)',
+    },
+  },
+  LeverageController: {
+    updateAttribution: { kind: 'EXEMPT', why: LEVERAGE_ATTRIBUTION },
+    create: { kind: 'EXEMPT', why: LEVERAGE_TIME },
+    update: { kind: 'EXEMPT', why: LEVERAGE_TIME },
+    remove: { kind: 'EXEMPT', why: LEVERAGE_TIME },
+  },
+  RecurringInvoiceController: {
+    create: { kind: 'OPEN', why: RECURRING_OPEN },
+    update: { kind: 'OPEN', why: RECURRING_OPEN },
+    pause: { kind: 'OPEN', why: RECURRING_OPEN },
+    resume: { kind: 'OPEN', why: RECURRING_OPEN },
+    cancel: { kind: 'OPEN', why: RECURRING_OPEN },
+  },
 };
 
 const BIZ = 'biz_d46';
@@ -154,16 +208,31 @@ function pathOf(handler: string): string {
   return Reflect.getMetadata(PATH_METADATA, Controller.prototype[handler]) ?? '';
 }
 
-function revenueWriteHandlers(): string[] {
-  return Object.getOwnPropertyNames(Controller.prototype).filter((name) => {
-    if (name === 'constructor' || typeof Controller.prototype[name] !== 'function') return false;
-    const scope = scopeOf(name);
+function revenueWriteHandlersOf(cls: any): string[] {
+  return Object.getOwnPropertyNames(cls.prototype).filter((name) => {
+    if (name === 'constructor' || typeof cls.prototype[name] !== 'function') return false;
+    const scope: { module: string; minLevel: string } | undefined = Reflect.getMetadata(MODULE_SCOPE_KEY, cls.prototype[name]);
     return scope?.module === 'revenue' && scope.minLevel === 'write';
   });
 }
 
+function revenueWriteHandlers(): string[] {
+  return revenueWriteHandlersOf(Controller);
+}
+
+/** Every Nest controller class the commerce module's *.controller.ts files export, by class name. */
+const moduleControllers = new Map<string, any>();
+
 beforeAll(async () => {
   ({ CommerceController: Controller } = await import('./commerce.controller'));
+  const files = readdirSync(__dirname).filter((f) => f.endsWith('.controller.ts')).sort();
+  for (const file of files) {
+    const target = join(__dirname, file);
+    const mod: Record<string, unknown> = await import(target);
+    for (const [name, value] of Object.entries(mod)) {
+      if (typeof value === 'function' && Reflect.getMetadata(CONTROLLER_WATERMARK, value)) moduleControllers.set(name, value);
+    }
+  }
 }, 120_000);
 
 describe('D-46 write-route census (FOLLOW3-A1)', () => {
@@ -218,4 +287,45 @@ describe('D-46 write-route census (FOLLOW3-A1)', () => {
       expect(calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
     });
   }
+});
+
+describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)', () => {
+  it('D46-S06: every revenue:write handler of every controller in src/modules/commerce is classified, exactly once: CommerceController by D46-S01\'s lists, every other controller in OTHER_CONTROLLERS (SERVICE_REFUSED, EXEMPT with a reason, or OPEN naming its follow-up); a new controller or handler fails here', () => {
+    expect(moduleControllers.get('CommerceController'), 'the loader found CommerceController').toBe(Controller);
+    const found: Record<string, string[]> = {};
+    for (const [name, cls] of moduleControllers) {
+      if (name === 'CommerceController') continue;
+      const handlers = revenueWriteHandlersOf(cls).sort();
+      if (handlers.length > 0) found[name] = handlers;
+    }
+    const listed = Object.fromEntries(Object.entries(OTHER_CONTROLLERS).map(([name, handlers]) => [name, Object.keys(handlers).sort()]));
+    expect(found, 'classify the new revenue:write controller or handler in OTHER_CONTROLLERS').toEqual(listed);
+    for (const [name, handlers] of Object.entries(OTHER_CONTROLLERS)) {
+      for (const [handler, { kind, why }] of Object.entries(handlers)) {
+        expect(why.trim().length, `${name}.${handler} has no reason`).toBeGreaterThan(20);
+        if (kind === 'OPEN') expect(why, `${name}.${handler}: an OPEN entry names its follow-up`).toMatch(/follow-up packet/);
+      }
+    }
+  });
+
+  it('D46-S06b: the OPEN entries are exactly the RecurringInvoiceController writes (the known SEC-A1-2 gap), so a new gap cannot hide among them', () => {
+    const open = Object.entries(OTHER_CONTROLLERS).flatMap(([name, handlers]) =>
+      Object.entries(handlers).filter(([, v]) => v.kind === 'OPEN').map(([h]) => `${name}.${h}`),
+    );
+    expect(open.sort()).toEqual(
+      ['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`),
+    );
+  });
+
+  it.todo(
+    'D46-S07 (SEC-A1-2, needs a ruling and a follow-up packet): a SUPER_ADMIN with no Membership in :businessId, or one below revenue:write, ' +
+      'is refused on POST/PATCH/pause/resume/DELETE commerce/businesses/:businessId/recurring-invoices and no recurring_invoices row is written. ' +
+      'Not implementable here: recurring-invoice.controller.ts and recurring-invoice.service.ts are outside the FOLLOW3-A1 write set.',
+  );
+
+  it.todo(
+    'D46-S08 (SEC-A1-2 / builder deviation, needs a ruling): POST commerce/businesses/:businessId/invoices refuses a non-member SUPER_ADMIN. ' +
+      'Not implementable here: commerce-authorization.e2e.test.ts CC-FORWARD pins a non-member SUPER_ADMIN\'s invoice create as 201, ' +
+      'and changing that control is outside the FOLLOW3-A1 write set.',
+  );
 });
