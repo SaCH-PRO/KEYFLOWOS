@@ -1053,7 +1053,7 @@ describe('CRM e2e', () => {
   // contact-scoped routes still take no caller and check the tenant only (or,
   // for audit, not even the contact); each needs the same gate in its own
   // controller.
-  it.todo("contact-scoped reads outside crm.controller.ts apply the caller's CRM record visibility: insight-card and its recompute (crm-ai.controller.ts, also BestChannelService.explain, open task titles, LTV, AI call), ai-insight (crm-ai.controller.ts, AI call, no ModuleScopeGuard), contacts/:contactId/audit (privacy/contact-privacy.controller.ts), deals (crm-deals.controller.ts), account-suggestion (crm-accounts.controller.ts), custom-field-values (crm-custom-fields.controller.ts), order-history (marketplace.controller.ts), referral-stats (conversion.controller.ts), people-flow contacts/:contactId/health and momentum contacts/:contactId[/history] (review ST-4, follow-up packet)");
+  // Done in FOLLOW3-D3 (crm-ai, privacy audit, deals, account-suggestion, custom-field values: test/crm-sibling-controllers-visibility.integration.test.ts) and FOLLOW3-D5 (order-history, referral-stats, people-flow health, momentum: test/contact-reads-noncrm-visibility.integration.test.ts), V1-84. This it.todo was review ST-4's follow-up.
   // Done in FOLLOW3-D2 (V1-84): the remaining contact-scoped routes of crm.controller.ts apply CRM record visibility, proven on a real database in test/crm-contact-routes-visibility.integration.test.ts (prefix v84b_). This it.todo was review ST-4's follow-up.
   // Done in FOLLOW3-D2 (V1-84): DELETE relationships/:relationshipId refuses an edge with a hidden end (404 like an unknown id), test/crm-contact-routes-visibility.integration.test.ts.
 });
