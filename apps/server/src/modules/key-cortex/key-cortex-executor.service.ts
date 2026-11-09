@@ -219,6 +219,10 @@ export class KeyCortexExecutorService {
   // ════════════════════════════════════════════════════════════════════════════
   /**
    * Execute a single ConnectorCommand with full lifecycle management:
+   *   0. Ask the autonomy authority once (fail closed: a throw, a deny or an
+   *      unusable verdict refuses, audited; FOLLOW3-D14 applies V1-02
+   *      isUsableAutonomyVerdict). A verdict that asks for approval or whose
+   *      tier is manual sends the command to approval.
    *   1. Resolve the approval policy for this business + user.
    *   2. If approval required → delegate to executeWithApproval().
    *   3. Otherwise → call connector.execute() with timeout & error wrapping.
@@ -263,6 +267,10 @@ export class KeyCortexExecutorService {
     }
 
     // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
+    // FOLLOW3-D14 (V1-31c CX-09): set when a usable verdict asks for approval
+    // or its tier is manual; the command then goes to approval whatever the
+    // caller's skipApproval or the business policy says.
+    let verdictRequiresApproval = false;
     try {
       if (this.autonomyOrchestrator) {
         const verdict = await this.autonomyOrchestrator.evaluateAction(
@@ -271,6 +279,37 @@ export class KeyCortexExecutorService {
           command.parameters,
           { proposedBy: command.userId },
         );
+
+        // FOLLOW3-D14 (V1-02 isUsableAutonomyVerdict, as the legacy gate, the
+        // query pipeline and flows/:id/execute apply it): a verdict that does
+        // not state a boolean allowed, a boolean requiresApproval and a known
+        // tier is not an answer, so the command fails closed, audited. This is
+        // the same single evaluation; nothing asks the authority twice.
+        // (Imported at call time: key-cortex-actions.service reaches this file
+        // again through ai/key-tool-registry -> ... -> flow-orchestrator ->
+        // key-cortex-planner, and a load-time import changes the module order
+        // so the built server fails to boot: ActionDispatcherService's
+        // AiOversightService is undefined when its metadata is emitted.)
+        const { isUsableAutonomyVerdict } = await import('./key-cortex-actions.service');
+        if (!isUsableAutonomyVerdict(verdict)) {
+          const reason = `Unusable autonomy verdict for ${command.module}.${command.action}; execution blocked for safety.`;
+          this.logger.error(`[execute] ${reason}`);
+          return this.audited({
+            id: randomUUID(),
+            command,
+            result: {
+              success: false,
+              error: reason,
+              executionTimeMs: 0,
+              command,
+            },
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 0,
+            traceId,
+            rolledBack: false,
+          });
+        }
 
         if (!verdict.allowed) {
           const reason = verdict.reason || 'Blocked by autonomy orchestrator';
@@ -292,8 +331,10 @@ export class KeyCortexExecutorService {
           });
         }
 
-        if (verdict.requiresApproval && options.skipApproval) {
-          options = { ...options, skipApproval: false };
+        // FOLLOW3-D14: the verdict's approval answer is read as every other
+        // V1-02 gate reads it (requiresApproval, or a manual tier).
+        if (verdict.requiresApproval || verdict.tier === 'manual') {
+          verdictRequiresApproval = true;
         }
       } else {
         // Legacy fallback: KEY Genome autonomy gate
@@ -362,9 +403,10 @@ export class KeyCortexExecutorService {
     }
 
     // ── 1. Approval check ────────────────────────────────────────────────────
-    const needsApproval = options.skipApproval
-      ? false
-      : await this.requiresApproval(command);
+    // A verdict that asks for approval, or whose tier is manual, is never
+    // skipped (FOLLOW3-D14); otherwise the business policy decides.
+    const needsApproval = verdictRequiresApproval
+      || (options.skipApproval ? false : await this.requiresApproval(command));
 
     if (needsApproval) {
       this.logger.log(

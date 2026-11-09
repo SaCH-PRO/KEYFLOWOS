@@ -216,7 +216,7 @@ beforeAll(async () => {
       return { success: true, data: { done: c?.parameters?.marker ?? null }, executionTimeMs: 1, command: c };
     },
   };
-  const autonomy = { evaluateAction: async () => ({ allowed: true, requiresApproval: false }) };
+  const autonomy = { evaluateAction: async () => ({ allowed: true, requiresApproval: false, tier: 'full' }) };
   const legacyGateOff = { checkGate: async () => { throw new Error('v87b: the legacy autonomy gate is off this path'); } };
   executor = new KeyCortexExecutorService(connector as any, prisma, events as any, legacyGateOff as any, autonomy as any, undefined, undefined);
   const saga = new KeyCortexSagaService(prisma);

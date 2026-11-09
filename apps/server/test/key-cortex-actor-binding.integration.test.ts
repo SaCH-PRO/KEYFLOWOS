@@ -345,8 +345,9 @@ beforeAll(async () => {
       autonomyCalls.push({ businessId, actionType, proposedBy: opts?.proposedBy });
       // R0-09e repair: a case may make the verdict a deny or a gate error (see autonomyVerdict).
       if (autonomyVerdict === 'throw') throw new Error('k34c: the autonomy orchestrator is down');
-      if (autonomyVerdict) return { allowed: false, requiresApproval: false, reason: autonomyVerdict.reason };
-      return { allowed: true, requiresApproval: false };
+      // The real AutonomyOrchestratorService's shape: a deny is tier manual, an allow states its tier (FOLLOW3-D14).
+      if (autonomyVerdict) return { allowed: false, requiresApproval: true, tier: 'manual', reason: autonomyVerdict.reason };
+      return { allowed: true, requiresApproval: false, tier: 'full' };
     },
   };
   const legacyGateOff = { checkGate: async () => { throw new Error('k34c: the legacy autonomy gate is off this path'); } };

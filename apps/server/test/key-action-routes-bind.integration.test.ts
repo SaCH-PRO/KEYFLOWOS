@@ -2396,7 +2396,7 @@ const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bound' | 'bounded'; reason: 
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.executeCommand': {
     kind: 'bounded',
     reason:
-      "V1-31c: POST api/v1/cortex/execute is a member-initiated direct command (structured, or parsed from the member's words). Before the executor every command passes cortexCommandRequirement for the member CortexMemberAuthorityGuard loaded in the guarded tenant: the registry must list the action and the module must map to a canonical module scope held at write (deny by default; crm OWNER only; settings enforced by its adapter on the actor); a refusal is 403 with an ai_execution_logs row naming the member (CX-01..CX-08). The executor runs the autonomy gate and audits the rest (CX-09: not yet V1-02-strict).",
+      "V1-31c: POST api/v1/cortex/execute is a member-initiated direct command (structured, or parsed from the member's words). Before the executor every command passes cortexCommandRequirement for the member CortexMemberAuthorityGuard loaded in the guarded tenant: the registry must list the action and the module must map to a canonical module scope held at write (deny by default; crm OWNER only; settings enforced by its adapter on the actor); a refusal is 403 with an ai_execution_logs row naming the member (CX-01..CX-08). The executor runs the autonomy gate (V1-02 isUsableAutonomyVerdict, fail closed; approval when the verdict asks for it or its tier is manual: CX-09, FOLLOW3-D14) and audits the rest.",
   },
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.executeBatch': {
     kind: 'bounded',

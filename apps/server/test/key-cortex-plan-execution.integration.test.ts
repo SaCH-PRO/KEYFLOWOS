@@ -209,7 +209,7 @@ beforeAll(async () => {
       return { success: true, data: { done: c?.parameters?.marker ?? null }, executionTimeMs: CONNECTOR_DELAY_MS, command: c };
     },
   };
-  const autonomy = { evaluateAction: async () => ({ allowed: true, requiresApproval: false }) };
+  const autonomy = { evaluateAction: async () => ({ allowed: true, requiresApproval: false, tier: 'full' }) };
   const legacyGateOff = { checkGate: async () => { throw new Error('v10a: the legacy autonomy gate is off this path'); } };
   const events = { emit: () => true };
 

@@ -79,7 +79,7 @@ function build(create: (args: any) => Promise<unknown>, users: string[] = [HUMAN
     execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: { id: 'row_1' }, executionTimeMs: 1, command: c })),
     getAllCapabilities: () => [],
   };
-  const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+  const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false, tier: 'full' })) };
   executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, {} as any, orchestrator as any);
   return { prisma, connector };
 }
@@ -182,7 +182,7 @@ describe('KeyCortexExecutorService.execute — a refused execute writes its ai_e
     };
     const orchestrator = 'orchestrator' in opts
       ? opts.orchestrator
-      : { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+      : { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false, tier: 'full' })) };
     executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, (opts.gate ?? {}) as any, orchestrator);
     return { prisma, connector };
   }
@@ -203,7 +203,7 @@ describe('KeyCortexExecutorService.execute — a refused execute writes its ai_e
   });
 
   it('RED-BEFORE: an autonomy-orchestrator deny writes one row with the reason; the connector is not called', async () => {
-    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => ({ allowed: false, reason: 'tier 4 is locked' })) } });
+    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => ({ allowed: false, requiresApproval: true, tier: 'manual', reason: 'tier 4 is locked' })) } });
     const rec = await executor.execute(command(), { skipApproval: true });
     expect(rec.result).toMatchObject({ success: false, error: 'tier 4 is locked' });
     expect(connector.execute).not.toHaveBeenCalled();
