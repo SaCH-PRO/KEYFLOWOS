@@ -1,7 +1,53 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { WorkloadAggregatorService } from './workload-aggregator.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
+
+/**
+ * The call logs among `calls` whose caller may open them (W9-CALL-LOG-DEADEND, review CR-2
+ * dead-end under the CR-2 ruling of V1-84 / FOLLOW3-D4-CALL-LOG-VIS). Being a call log's caller
+ * grants no visibility of its contact: every call-log route answers a member 404 for a call log on
+ * a contact they may not open (V1-08 rule through CallLog.contactId, CallLogService
+ * getVisibleCallLog / visibleCallLogsWhere), so a prompt telling the caller to log its outcome is
+ * a dead-end. The rule here is that one, for the caller instead of a session member: their CRM
+ * access from resolveCrmAccess (the role read from their User row, as CallLogService.assertCaller
+ * reads it for a callerId another writer chose) and contactVisibilityFilter over the call logs'
+ * contacts, one contact lookup per restricted caller. A caller with the whole book (OWNER,
+ * SUPER_ADMIN) keeps every call log, as the routes keep them; a call log with no contact is the
+ * business's and is kept; a caller who is no longer a member opens no contact. Lives here rather
+ * than in call-log.service.ts because that file is outside this packet's write set;
+ * ChaserService uses it too.
+ */
+export async function callLogsTheirCallerMayOpen<T extends { callerId: string; contactId: string | null }>(
+  prisma: PrismaService,
+  businessId: string,
+  calls: T[],
+): Promise<T[]> {
+  const contactIdsByCaller = new Map<string, string[]>();
+  for (const call of calls) {
+    if (!call.contactId) continue;
+    const ids = contactIdsByCaller.get(call.callerId) ?? [];
+    ids.push(call.contactId);
+    contactIdsByCaller.set(call.callerId, ids);
+  }
+  const mayOpen = new Map<string, ((contactId: string) => boolean) | null>();
+  for (const [callerId, contactIds] of contactIdsByCaller) {
+    try {
+      const access = await resolveCrmAccess(prisma, businessId, callerId);
+      mayOpen.set(callerId, await contactVisibilityFilter(prisma, businessId, access, callerId, contactIds));
+    } catch (err) {
+      // Not a member of the business (or no such user): they open no contact here.
+      if (!(err instanceof ForbiddenException)) throw err;
+      mayOpen.set(callerId, () => false);
+    }
+  }
+  return calls.filter((call) => {
+    if (!call.contactId) return true;
+    const canOpen = mayOpen.get(call.callerId);
+    return !canOpen || canOpen(call.contactId);
+  });
+}
 
 export interface CapacityAlert {
   type: 'overload' | 'bottleneck' | 'stalled_content' | 'approval_backlog' | 'missing_evidence' | 'unlogged_calls';
@@ -148,16 +194,21 @@ export class CapacityInsightService {
       }
     }
 
-    // 6. Unlogged call outcomes (>24h after scheduled time)
+    // 6. Unlogged call outcomes (>24h after scheduled time). A call log whose contact its caller
+    // may not open is left out (W9-CALL-LOG-DEADEND, review CR-2): the caller cannot log it.
     const callCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const unloggedCalls = await this.prisma.client.callLog.findMany({
-      where: {
-        businessId,
-        completedAt: null,
-        scheduledAt: { lt: callCutoff },
-      },
-      select: { id: true, callerId: true },
-    });
+    const unloggedCalls = await callLogsTheirCallerMayOpen(
+      this.prisma,
+      businessId,
+      await this.prisma.client.callLog.findMany({
+        where: {
+          businessId,
+          completedAt: null,
+          scheduledAt: { lt: callCutoff },
+        },
+        select: { id: true, callerId: true, contactId: true },
+      }),
+    );
     for (const call of unloggedCalls) {
       alerts.push({
         type: 'unlogged_calls',
