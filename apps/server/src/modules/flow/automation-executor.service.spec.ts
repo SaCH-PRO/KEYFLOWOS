@@ -37,6 +37,13 @@
  *   AE-09 booking.confirmed stays deduped: the executor's removed row was
  *     'Booking confirmed' with no detail, so the listener's row carries all it
  *     did (title, booking, contact) and no start time is lost
+ *   AE-10 (W9-CRM-RESIDUALS L-13, owner ruling D-81): the contact.updated of a
+ *     D-81 move (the contact's latest status.changed entry is the
+ *     lifecycle-automation one) does not run the built-in stage-change rule (no
+ *     second follow-up task, no tags update); a member's move still does, and the
+ *     stage flows still dispatch for both
+ *   AE-11 (W9-CRM-RESIDUALS L-12): the commerce paid row names the payload's
+ *     contact only when that contact is in the payload's business
  *
  * Pure: Prisma, CRM, e-mail and the flow runner are mocks; ActivityService is a
  * recorder shared by both listeners.
@@ -105,7 +112,7 @@ const FLOW_EVENTS = [
   'invoice.overdue',
 ];
 
-function harness(opts: { playbooks?: unknown[] } = {}) {
+function harness(opts: { playbooks?: unknown[]; lastStatusEvent?: { source: string; data: Record<string, unknown> } | null; contactInBusiness?: boolean } = {}) {
   const feed: FeedRow[] = [];
   const activity = { log: vi.fn(async (row: FeedRow) => { feed.push(row); return row; }) };
   const prisma = {
@@ -126,6 +133,10 @@ function harness(opts: { playbooks?: unknown[] } = {}) {
       invoiceItem: { findMany: vi.fn(async () => []) },
       projectTemplate: { findMany: vi.fn(async () => []) },
       booking: { count: vi.fn(async () => 1) },
+      // W9-CRM-RESIDUALS: the contact's latest status.changed entry (L-13) and whether the
+      // payload's contact is in the payload's business (L-12).
+      contactEvent: { findFirst: vi.fn(async () => opts.lastStatusEvent ?? null) },
+      contact: { aggregate: vi.fn(async () => ({ _count: { _all: opts.contactInBusiness === false ? 0 : 1 } })) },
     },
   };
   const crm = {
@@ -136,7 +147,7 @@ function harness(opts: { playbooks?: unknown[] } = {}) {
   };
   const flowRunner = { runFlow: vi.fn(async () => ({})) };
   const executor = new AutomationExecutorService(prisma as never, activity as never, crm as never, {} as never, null, flowRunner as never);
-  const listener = new ActivityEventListener(activity as never);
+  const listener = new ActivityEventListener(activity as never, prisma as never);
 
   /** Deliver `payload` to every handler the full app registers for `event` on these two classes. */
   async function emit(event: string, payload: unknown) {
@@ -315,5 +326,37 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
       'automation:executed:playbook:pb_v155',
       `commerce:paid:invoice:${INVOICE.id}`,
     ]);
+  });
+});
+
+describe('W9-CRM-RESIDUALS: the D-81 move and the commerce paid row', () => {
+  const MOVE = { businessId: BIZ, contact: CONTACT, fromStatus: 'LEAD', toStatus: 'CLIENT' };
+
+  it("AE-10 (W9-CRM-RESIDUALS L-13, D-81): the D-81 move's contact.updated runs no built-in stage-change rule (no 'Follow up after stage change' task, no tags update); the stage flows still dispatch", async () => {
+    const h = harness({ lastStatusEvent: { source: 'lifecycle-automation', data: { from: 'LEAD', to: 'CLIENT', trigger: 'invoice.paid' } } });
+    await h.emit('contact.updated', MOVE);
+    expect(h.crm.addTask).not.toHaveBeenCalled();
+    expect(h.crm.updateContact).not.toHaveBeenCalled();
+    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => c[1])).toEqual(expect.arrayContaining([flowFor('contact.updated'), flowFor('contact.stage_changed')]));
+  });
+
+  it("AE-10b (W9-CRM-RESIDUALS L-13, D-81): a member's move to CLIENT (its latest status.changed entry is the crm one) still gets the built-in follow-up and tag", async () => {
+    const h = harness({ lastStatusEvent: { source: 'crm', data: { from: 'LEAD', to: 'CLIENT' } } });
+    await h.emit('contact.updated', MOVE);
+    expect(h.crm.addTask).toHaveBeenCalledWith(expect.objectContaining({ businessId: BIZ, contactId: CONTACT.id, title: 'Follow up after stage change', source: 'autopilot' }));
+    expect(h.crm.updateContact).toHaveBeenCalledWith({ businessId: BIZ, contactId: CONTACT.id, tags: ['stage-changed'] });
+  });
+
+  it("AE-11 (W9-CRM-RESIDUALS L-12): the commerce paid row names the payload's contact only when it is a contact of the payload's business", async () => {
+    const paid = DEDUPED.find((d) => d.event === 'invoice.paid')!.payload;
+    const own = harness();
+    await own.emit('invoice.paid', paid);
+    expect(own.feed.find((r) => r.module === 'commerce' && r.action === 'paid')?.contactId).toBe(CONTACT.id);
+
+    const foreign = harness({ contactInBusiness: false });
+    await foreign.emit('invoice.paid', paid);
+    const row = foreign.feed.find((r) => r.module === 'commerce' && r.action === 'paid');
+    expect(row, 'the paid row is still written').toBeDefined();
+    expect(row?.contactId, 'without the foreign contact').toBeUndefined();
   });
 });
