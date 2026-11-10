@@ -153,15 +153,45 @@ item 3 is open.
      4. In one database transaction, in a window when the user is signed out:
         free the address on the old row (set a placeholder email), create the
         new row under the new `sub` with the old row's fields (role included),
-        re-point every column that holds the old id, then delete the old row.
-        Do not rely on `reconcileUserId`'s list of references. It re-points
-        memberships, sessions, the AI log, approval and plan rows,
-        `businesses.owner_id` and `team_activity_logs.user_id`. It misses
-        `user_identities`, `contact_shares` and `push_subscriptions` (deleted
-        with the old row by cascade), `support_tickets.assigned_to_id` and
-        `users.referred_by_user_id` (set to null), and user-id columns that
-        have no foreign key. Find them in `packages/db/prisma/schema.prisma`
-        before the run.
+        re-point every reference to the old id (every column that holds it,
+        and the trigger creator below), then delete the old row.
+        `reconcileUserId` (`S/modules/identity/identity.service.ts`) does
+        these steps for an invitation placeholder. Do not rely on its list of
+        references alone:
+        - It re-points the columns `memberships.user_id`, `sessions.user_id`,
+          `ai_execution_logs.user_id`, `ai_approval_items.user_id`,
+          `ai_approval_items.resolved_by_user_id`, `ai_plans.user_id`,
+          `businesses.owner_id` and `team_activity_logs.user_id`.
+        - It re-points the trigger creator (owner ruling D-73,
+          W6-IDENTITY-REKEY-CREATOR): the member a rule records under the key
+          `$createdBy` in `agent_triggers.condition` and
+          `key_cortex_trigger_rules.filter_json`, in every business. The
+          schema does not show it, because the key is inside a JSON column.
+          Run the two statements `reconcileUserId` runs, with the old and the
+          new id in place of `<old id>` and `<new id>`:
+
+          ```sql
+          UPDATE agent_triggers
+            SET condition = jsonb_set(condition, ARRAY['$createdBy'::text], to_jsonb('<new id>'::text))
+            WHERE condition ->> '$createdBy'::text = '<old id>'::text;
+          UPDATE key_cortex_trigger_rules
+            SET filter_json = jsonb_set(filter_json, ARRAY['$createdBy'::text], to_jsonb('<new id>'::text))
+            WHERE filter_json ->> '$createdBy'::text = '<old id>'::text;
+          ```
+
+          Each changes only that key and leaves the rule's own filter as it
+          is. Skip them and the member's rules keep the deleted id: every
+          plan they fire fails on the `ai_plans` user foreign key, and a
+          member who does not own the business gets 403
+          `AGENT_TRIGGER_CREATOR_ONLY` when they switch or edit their own
+          agent trigger. `T/identity-rekey-creator.integration.test.ts`
+          (RK-03) holds this step to `reconcileUserId` and runs these
+          statements, as written, against Postgres.
+        - It misses `user_identities.user_id`, `contact_shares.user_id` and
+          `push_subscriptions.user_id` (deleted with the old row by cascade),
+          `support_tickets.assigned_to_id` and `users.referred_by_user_id`
+          (set to null), and user-id columns that have no foreign key. Find
+          them in `packages/db/prisma/schema.prisma` before the run.
      5. Have the user sign in. Bootstrap then finds the row by id and answers
         201 with their existing business.
    - The stop condition this defect set (Release 0 sign-in does not open,
