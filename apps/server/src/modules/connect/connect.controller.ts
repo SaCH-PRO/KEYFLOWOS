@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
@@ -67,9 +68,15 @@ export class ConnectController {
    * W7-RECENT-CONTACTS-VISIBILITY (the residual W6-CONNECT-TAG-MERGE recorded;
    * CONTACTS-v1 RECORD VISIBILITY, the clause D-37 and D-64 apply): the recent
    * Google and Outlook contacts lists name CRM contacts (name, email, phone,
-   * company, status, tags), so each keeps only the contacts the caller may
-   * open by the rule GET contacts/:contactId applies (resolveCrmAccess +
-   * visibilityClause, through contactVisibilityFilter): a view-all member sees
+   * company, status, tags), so each follows the rule GET contacts/:contactId
+   * applies. First its crm read gate: both routes carry ModuleScopeGuard +
+   * RequireModuleScope('crm', 'read') as that route does (review SEC-W7RCV-1),
+   * so a member whose scope map has no crm key or crm none is refused 403
+   * before the list is read; resolveCrmAccess alone would read an absent key
+   * as read (view-all) for STAFF, and crm none as "my book", and list them
+   * contacts. Then its visibility: each list keeps only the contacts the
+   * caller may open (resolveCrmAccess + visibilityClause, through
+   * contactVisibilityFilter): a view-all member sees
    * TEAM and SHARED contacts, their own and those shared with them; a member
    * without view-all (crm_view owned) only their own and those shared with
    * them. The owner and a SUPER_ADMIN (no filter) get the list exactly as
@@ -262,7 +269,10 @@ export class ConnectController {
     return this.contacts.getStatus(businessId);
   }
 
-  // W7-RECENT-CONTACTS-VISIBILITY: only the linked contacts the caller may open.
+  // W7-RECENT-CONTACTS-VISIBILITY: only the linked contacts the caller may open,
+  // behind GET contacts/:contactId's crm read gate (review SEC-W7RCV-1).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @Get('businesses/:businessId/contacts/recent')
   getContactsRecent(
     @Param('businessId') businessId: string,
@@ -302,7 +312,10 @@ export class ConnectController {
     return this.outlook.getStatus(businessId);
   }
 
-  // W7-RECENT-CONTACTS-VISIBILITY: as the Google Contacts list above.
+  // W7-RECENT-CONTACTS-VISIBILITY: as the Google Contacts list above (crm read
+  // gate, review SEC-W7RCV-1).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @Get('businesses/:businessId/outlook-contacts/recent')
   getOutlookRecent(
     @Param('businessId') businessId: string,

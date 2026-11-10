@@ -1,7 +1,9 @@
 /**
  * W7-RECENT-CONTACTS-VISIBILITY (REAL database): the recently synced Google and
- * Outlook contacts lists follow the CRM visibility clause, and the Google Suite
- * auth URL follows the business owner rule (owner ruling D-94).
+ * Outlook contacts lists follow the rule GET contacts/:contactId applies (the
+ * crm read gate, then the CRM visibility clause). The Google Suite auth URL
+ * keeps the Gmail owner rule of R0-CMF5 (D-11); making every Google consent
+ * the owner's waits on an owner ruling (review CR-RCV-1, [V93E-B01] todo).
  *
  * The defects (residuals W6-CONNECT-TAG-MERGE recorded):
  *   - GET /connect/businesses/:b/contacts/recent and .../outlook-contacts/recent
@@ -13,27 +15,39 @@
  *     list hide from them (CONTACTS-v1 RECORD VISIBILITY: PRIVATE and
  *     staff-owned records obey the member's CRM visibility on every read path;
  *     the clause D-37 and D-64 apply to KEY and to commerce);
- *   - POST /connect/google-suite/businesses/:b/auth-url applied the Gmail owner
- *     rule (GMAIL_OWNER_ONLY, D-11) only when the consent asked for gmail, so
- *     any member could start a Google connection for the business's calendar,
- *     drive, forms, contacts or business profile. D-94 makes connecting the
- *     business's Google integrations the owner's alone (as Gmail): anyone else
- *     gets 403.
+ *   - POST /connect/google-suite/businesses/:b/auth-url applies the Gmail owner
+ *     rule (GMAIL_OWNER_ONLY, D-11) only when the consent asks for gmail, so
+ *     any member may start a Google connection for the business's calendar,
+ *     drive, forms, contacts or business profile. The packet asked for the
+ *     owner rule on every consent; review CR-RCV-1 found that recorded D-94
+ *     names Google Analytics and Search Console only, that R0-CMF5 review 2
+ *     (CMF5R-2) deliberately lets a non-owner connect every service but gmail
+ *     (the web key-connect sign-in retries without gmail on GMAIL_OWNER_ONLY),
+ *     and SEC-W7RCV-2 / CR-RCV-2 that GET /bookings/businesses/:b/calendar/
+ *     auth-url and GET /drive/businesses/:b/auth-url give any member a Google
+ *     consent URL anyway. So that change is held for an owner ruling and lands
+ *     with the web follow-up and those two doors ([V93E-B01] stays it.todo).
  *
  * The contract proven here:
- *   - each recent list holds only the linked contacts the caller may open by the
- *     rule GET contacts/:contactId applies (resolveCrmAccess + visibilityClause:
- *     a view-all member sees TEAM and SHARED contacts, their own and those
- *     shared with them; a member without view-all, crm_view owned, only their
- *     own and those shared with them); the owner and a SUPER_ADMIN see every
- *     linked contact, as before;
- *   - the Google Suite auth URL, for any set of services, is refused to anyone
- *     but the business owner (OWNER membership, Business.ownerId) or a
- *     SUPER_ADMIN: 403 GMAIL_OWNER_ONLY, no Google URL.
+ *   - each recent list is refused (403) to a member GET contacts/:contactId
+ *     refuses by its crm read gate (ModuleScopeGuard + RequireModuleScope('crm',
+ *     'read'): a scope map with no crm key, or crm none, even with a contact
+ *     shared to them; review SEC-W7RCV-1), and otherwise holds only the linked
+ *     contacts the caller may open by that route's visibility rule
+ *     (resolveCrmAccess + visibilityClause: a view-all member sees TEAM and
+ *     SHARED contacts, their own and those shared with them; a member without
+ *     view-all, crm_view owned, only their own and those shared with them); the
+ *     owner and a SUPER_ADMIN see every linked contact, as before;
+ *   - the Google Suite auth URL refuses a consent with gmail (or the default
+ *     set) to anyone but the business owner (OWNER membership,
+ *     Business.ownerId) or a SUPER_ADMIN: 403 GMAIL_OWNER_ONLY, no Google URL;
+ *     the owner, the distinguished owner and a SUPER_ADMIN get a consent
+ *     without gmail.
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership, contact, share and external mapping rows,
- * AuthGuard, BusinessGuard, ConnectController, GoogleContactsSyncService and
+ * AuthGuard, BusinessGuard, ModuleScopeGuard, ConnectController,
+ * GoogleContactsSyncService and
  * OutlookContactsSyncService (getRecent), GoogleSuiteController,
  * GoogleSuiteService (buildAuthUrl, with a fake OAuth client id and state
  * secret) and the commerce GmailService (the owner rule) are real against
@@ -66,6 +80,8 @@ const ID = {
   staff: `${P}staff`, // STAFF, crm write (view-all): opens TEAM contacts, not the owner's PRIVATE ones
   admin: `${P}admin`, // ADMIN, role defaults (crm admin, view-all), not the owner
   mybook: `${P}mybook`, // STAFF, crm write with crm_view owned: their own book only
+  nocrm: `${P}nocrm`, // STAFF, an explicit scope map with no crm key (bookings write): no CRM access (SEC-W7RCV-1)
+  crmnone: `${P}crmnone`, // STAFF, crm none, with the owner's PRIVATE c_shared shared to them (SEC-W7RCV-1)
   superAdmin: `${P}super`, // SUPER_ADMIN, no membership
   distOwner: `${P}distowner`, // Business.ownerId of bizDist, no membership row
   stranger: `${P}stranger`, // no membership anywhere
@@ -77,12 +93,18 @@ const ID = {
 const C = {
   priv: `${P}c_priv`, // the owner's PRIVATE contact, shared with nobody
   team: `${P}c_team`, // the owner's TEAM contact
-  shared: `${P}c_shared`, // the owner's PRIVATE contact, shared with mybook
+  shared: `${P}c_shared`, // the owner's PRIVATE contact, shared with mybook and with crmnone
   mine: `${P}c_mine`, // mybook's own PRIVATE contact
 };
 const ALL_LINKED = [C.mine, C.priv, C.shared, C.team].sort();
 
-const USERS = [ID.owner, ID.staff, ID.admin, ID.mybook, ID.superAdmin, ID.distOwner, ID.stranger];
+const USERS = [ID.owner, ID.staff, ID.admin, ID.mybook, ID.nocrm, ID.crmnone, ID.superAdmin, ID.distOwner, ID.stranger];
+
+/** The members of biz and the SUPER_ADMIN: each meets GET contacts/:contactId's crm read gate (A06). */
+const GATED = [ID.owner, ID.staff, ID.admin, ID.mybook, ID.nocrm, ID.crmnone, ID.superAdmin];
+
+/** The ConnectController handler of each recent list. */
+const RECENT_HANDLER: Record<string, string> = { contacts: 'getContactsRecent', 'outlook-contacts': 'getOutlookRecent' };
 
 // Obviously fake OAuth configuration (no real client id or secret).
 const OAUTH_ENV: Record<string, string> = {
@@ -96,6 +118,13 @@ const savedEnv: Record<string, string | undefined> = {};
 
 let db: any;
 let app: any;
+let prismaService: any;
+let ConnectControllerClass: any;
+let CrmControllerClass: any;
+let ModuleScopeGuardClass: any;
+let ReflectorClass: any;
+let GUARDS_METADATA_KEY: string;
+let MODULE_SCOPE_METADATA_KEY: string;
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
@@ -125,7 +154,18 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard, MODULE_SCOPE_KEY } = await import('../src/core/auth/module-scope.guard');
+  const { Reflector } = await import('@nestjs/core');
+  const { GUARDS_METADATA } = await import('@nestjs/common/constants');
   const { ConnectController } = await import('../src/modules/connect/connect.controller');
+  // Imported for its handler metadata only (the crm read gate of GET contacts/:contactId).
+  const { CrmController } = await import('../src/modules/crm/crm.controller');
+  ConnectControllerClass = ConnectController;
+  CrmControllerClass = CrmController;
+  ModuleScopeGuardClass = ModuleScopeGuard;
+  ReflectorClass = Reflector;
+  GUARDS_METADATA_KEY = GUARDS_METADATA;
+  MODULE_SCOPE_METADATA_KEY = MODULE_SCOPE_KEY;
   const { GoogleContactsSyncService } = await import('../src/modules/connect/google-contacts-sync.service');
   const { OutlookContactsSyncService } = await import('../src/modules/connect/outlook-contacts-sync.service');
   const { ConnectorFormMappingService } = await import('../src/modules/connect/connector-form-mapping.service');
@@ -148,6 +188,7 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       // The two sync services over the real PrismaService (getRecent reads
       // through it only); their CRM and audit collaborators are never reached.
       {
@@ -178,6 +219,7 @@ beforeAll(async () => {
   }).compile();
 
   app = moduleRef.createNestApplication();
+  prismaService = moduleRef.get(PrismaService);
   // Identity attachment only, for seeded v93e_ users. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers['x-test-user'];
@@ -206,6 +248,8 @@ beforeAll(async () => {
     [ID.staff, 'STAFF', { crm: 'write' }],
     [ID.admin, 'ADMIN', null],
     [ID.mybook, 'STAFF', { crm: 'write', crm_view: 'owned' }],
+    [ID.nocrm, 'STAFF', { bookings: 'write' }],
+    [ID.crmnone, 'STAFF', { crm: 'none' }],
   ];
   for (const [userId, role, permissionScopes] of memberships) {
     await db.membership.create({
@@ -233,6 +277,9 @@ beforeAll(async () => {
   await db.contactShare.create({
     data: { id: `${P}share_${C.shared}`, businessId: ID.biz, contactId: C.shared, userId: ID.mybook, createdBy: ID.owner },
   });
+  await db.contactShare.create({
+    data: { id: `${P}share_crmnone_${C.shared}`, businessId: ID.biz, contactId: C.shared, userId: ID.crmnone, createdBy: ID.owner },
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -255,6 +302,28 @@ async function recentIds(route: string, actor: string | undefined): Promise<{ st
   const res = await as(agent().get(`/connect/businesses/${ID.biz}/${route}/recent`), actor);
   const ids = Array.isArray(res.body) ? res.body.map((row: { id: string }) => row.id).sort() : [];
   return { status: res.status, ids, body: res.body };
+}
+
+/**
+ * Whether the real ModuleScopeGuard admits `actor` to GET
+ * /crm/businesses/:b/contacts/:contactId: the guard evaluated on
+ * CrmController.getContactDetail's own handler metadata (its
+ * RequireModuleScope), for the request that route would get.
+ */
+async function contactDetailGateAdmits(actor: string): Promise<boolean> {
+  const user = await db.user.findUnique({ where: { id: actor }, select: { id: true, email: true, role: true } });
+  const req = { user: { id: user.id, email: user.email, role: user.role }, params: { businessId: ID.biz, contactId: C.team }, query: {}, body: {} };
+  const context = {
+    getHandler: () => CrmControllerClass.prototype.getContactDetail,
+    getClass: () => CrmControllerClass,
+    switchToHttp: () => ({ getRequest: () => req }),
+  };
+  const guard = new ModuleScopeGuardClass(prismaService, new ReflectorClass());
+  try {
+    return (await guard.canActivate(context)) === true;
+  } catch {
+    return false;
+  }
 }
 
 function suiteAuthUrl(businessId: string, actor: string | undefined, body: Record<string, unknown>) {
@@ -281,10 +350,10 @@ function expectAuthUrl(res: { status: number; body: any }, businessId: string, u
 const NON_GMAIL_CONSENTS: string[][] = [['calendar'], ['contacts'], ['drive', 'forms', 'business_profile']];
 
 describe('W7-RECENT-CONTACTS-VISIBILITY fixture sanity (real rows)', () => {
-  it('[V93E-X01] seeded one business with an owner, a view-all STAFF member, an ADMIN and a STAFF member without view-all, and four contacts each linked to Google and Outlook Contacts; by the GET contacts/:contactId rule the STAFF member and the ADMIN cannot open the owner\'s PRIVATE contacts, and the member without view-all opens only their own and the one shared with them', async () => {
+  it('[V93E-X01] seeded one business with an owner, a view-all STAFF member, an ADMIN, a STAFF member without view-all and two STAFF members without CRM access (a scope map with no crm key; crm none with a contact shared to them), and four contacts each linked to Google and Outlook Contacts; by the GET contacts/:contactId visibility rule the STAFF member and the ADMIN cannot open the owner\'s PRIVATE contacts and the member without view-all opens only their own and the one shared with them; the two members without CRM access pass that visibility rule for the TEAM contact or the one shared with them, but the route\'s crm read gate (ModuleScopeGuard) refuses them (SEC-W7RCV-1)', async () => {
     const { assertContactVisible } = await import('../src/modules/crm/crm-permissions.helper');
     const prisma = { client: db } as any;
-    expect(await db.membership.count({ where: { businessId: ID.biz } })).toBe(4);
+    expect(await db.membership.count({ where: { businessId: ID.biz } })).toBe(6);
     for (const source of ['google_contacts', 'outlook_contacts']) {
       expect(await db.contactExternalMapping.count({ where: { businessId: ID.biz, source } })).toBe(4);
     }
@@ -299,6 +368,14 @@ describe('W7-RECENT-CONTACTS-VISIBILITY fixture sanity (real rows)', () => {
     expect(await opens(ID.staff)).toEqual([C.team]);
     expect(await opens(ID.admin)).toEqual([C.team]);
     expect(await opens(ID.mybook)).toEqual([C.mine, C.shared].sort());
+    // resolveCrmAccess reads an absent crm key as read (view-all) for STAFF,
+    // and crm none as "my book": the visibility rule alone would list these.
+    expect(await opens(ID.nocrm)).toEqual([C.team]);
+    expect(await opens(ID.crmnone)).toEqual([C.shared]);
+    // GET contacts/:contactId's gate reads both maps as crm none: refused.
+    expect(Reflect.getMetadata(MODULE_SCOPE_METADATA_KEY, CrmControllerClass.prototype.getContactDetail)).toEqual({ module: 'crm', minLevel: 'read' });
+    for (const member of [ID.nocrm, ID.crmnone]) expect(await contactDetailGateAdmits(member), member).toBe(false);
+    for (const member of [ID.owner, ID.staff, ID.admin, ID.mybook, ID.superAdmin]) expect(await contactDetailGateAdmits(member), member).toBe(true);
   });
 });
 
@@ -342,16 +419,40 @@ describe.each([
     expect(anonymous.status, JSON.stringify(anonymous.body)).toBe(401);
     expect(anonymous.ids).toEqual([]);
   });
-});
 
-describe('W7-RECENT-CONTACTS-VISIBILITY (D-94): starting a Google Suite connection is OWNER only, whatever services it asks for', () => {
-  it('[V93E-B01] RED-BEFORE: a crm write STAFF member and an ADMIN asking for a consent without gmail (calendar; contacts; drive, forms and business profile) are refused 403 GMAIL_OWNER_ONLY, no Google URL', async () => {
-    for (const member of [ID.staff, ID.admin]) {
-      for (const services of NON_GMAIL_CONSENTS) {
-        expectOwnerOnly(await suiteAuthUrl(ID.biz, member, { services }));
-      }
+  it('[V93E-A05] RED-BEFORE (SEC-W7RCV-1): a STAFF member whose scope map has no crm key (bookings write only) and a STAFF member with crm none (the owner\'s PRIVATE contact shared with them) are refused the list 403 by the crm read gate GET contacts/:contactId applies (ModuleScopeGuard, crm read); no contact is listed', async () => {
+    for (const member of [ID.nocrm, ID.crmnone]) {
+      const res = await recentIds(route, member);
+      expect(res.status, `${member} ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.ids).toEqual([]);
+      for (const id of ALL_LINKED) expect(JSON.stringify(res.body)).not.toContain(id);
     }
   });
+
+  it('[V93E-A06] RED-BEFORE (SEC-W7RCV-1) parity: the list carries GET contacts/:contactId\'s crm read gate (ModuleScopeGuard with the same RequireModuleScope on the handler), and for every member and the SUPER_ADMIN it answers 200 exactly when the real ModuleScopeGuard admits them to GET /crm/businesses/:b/contacts/:contactId and 403 exactly when it refuses them', async () => {
+    const handler = ConnectControllerClass.prototype[RECENT_HANDLER[route]];
+    expect(Reflect.getMetadata(GUARDS_METADATA_KEY, handler) ?? []).toContain(ModuleScopeGuardClass);
+    expect(Reflect.getMetadata(MODULE_SCOPE_METADATA_KEY, handler)).toEqual(
+      Reflect.getMetadata(MODULE_SCOPE_METADATA_KEY, CrmControllerClass.prototype.getContactDetail),
+    );
+    for (const member of GATED) {
+      const admits = await contactDetailGateAdmits(member);
+      const res = await recentIds(route, member);
+      expect(res.status, `${member} ${JSON.stringify(res.body)}`).toBe(admits ? 200 : 403);
+    }
+  });
+});
+
+describe('W7-RECENT-CONTACTS-VISIBILITY: starting a Google Suite connection keeps the Gmail owner rule (R0-CMF5, D-11); the owner rule for every service waits on an owner ruling (CR-RCV-1)', () => {
+  // Review CR-RCV-1, SEC-W7RCV-2 and CR-RCV-2: held, not dropped. Recorded D-94
+  // names Google Analytics and Search Console only; R0-CMF5 review 2 (CMF5R-2)
+  // lets a non-owner connect every Google service but gmail, and the web
+  // key-connect sign-in (core-channels-section.tsx) retries without gmail on
+  // GMAIL_OWNER_ONLY, so refusing that retry needs the web follow-up in the
+  // same change; and GET /bookings/businesses/:b/calendar/auth-url and GET
+  // /drive/businesses/:b/auth-url still give any member a Google consent URL,
+  // so a refusal on this door alone would not deny the capability.
+  it.todo('[V93E-B01] needs an owner ruling (CR-RCV-1): a crm write STAFF member and an ADMIN asking for a consent without gmail (calendar; contacts; drive, forms and business profile) are refused 403 GMAIL_OWNER_ONLY, no Google URL; lands with the web key-connect follow-up and the owner rule on the bookings calendar and drive auth-url routes (SEC-W7RCV-2, CR-RCV-2)');
 
   it('[V93E-B02] control: a consent with gmail, or the default set (which includes gmail), is refused to the same members the same way (R0-CMF5, D-11)', async () => {
     for (const member of [ID.staff, ID.admin]) {
