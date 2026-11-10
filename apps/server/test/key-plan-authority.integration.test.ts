@@ -705,7 +705,8 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
       refusals.push({ planId: `${P}qw07_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, error: /Only a member of this business/ });
       refusals.push({ planId: `${P}qw07_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, error: /Only a member of this business/ });
       for (const r of refusals) {
-        const args = { contactId: r.contactId, notes: `v87b qw07 ${r.planId}` };
+        // callerId is the tool contract's (validateToolInput requires it); the dispatcher ignores it (D-88).
+        const args = { contactId: r.contactId, callerId: ID.owner, notes: `v87b qw07 ${r.planId}` };
         const stepId = await seedQueuePlan(r.planId, r.userId, 'call_create_task', args, r.businessId);
         // It passes the gate before dispatch (the refusal is the tool's, inside dispatch).
         expect(await planStepRunRefusal(prisma, r.businessId, r.planId, 'call_create_task'), r.planId).toBeNull();
@@ -726,7 +727,7 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
 
       // bizB's OWNER still runs call_create_task: dispatched once, completed, the call log recorded.
       const planB = `${P}qw07_bizb`;
-      const argsB = { contactId: cB, notes: 'v87b qw07 bizb owner' };
+      const argsB = { contactId: cB, callerId: ID.owner, notes: 'v87b qw07 bizb owner' };
       const stepB = await seedQueuePlan(planB, ID.outsider, 'call_create_task', argsB, ID.bizB);
       const ranB = await runQueueStep(planB, 'call_create_task', argsB, ID.bizB);
       expect(ranB, JSON.stringify(ranB)).toMatchObject({ ok: true });
@@ -736,7 +737,7 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
 
       // Regression control: biz's OWNER still runs it in biz too.
       const planA = `${P}qw07_owner`;
-      const argsA = { contactId: ID.cTeam, notes: 'v87b qw07 biz owner' };
+      const argsA = { contactId: ID.cTeam, callerId: ID.staff, notes: 'v87b qw07 biz owner' };
       await seedQueuePlan(planA, ID.owner, 'call_create_task', argsA);
       expect(await runQueueStep(planA, 'call_create_task', argsA)).toMatchObject({ ok: true });
       expect((await planRow(planA)).steps[0].status).toBe('completed');
