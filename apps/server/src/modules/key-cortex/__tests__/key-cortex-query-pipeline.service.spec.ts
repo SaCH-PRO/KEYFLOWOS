@@ -1383,7 +1383,9 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
   });
 
   it('V1-02-BR06 processQuery does not invent results for commands a stopped batch never attempted', async () => {
-    const createTask = { ...createInvoice, module: 'crm', action: 'create_task' };
+    // W10-CORTEX-CHAT-SCOPE: a crm action the KEY capability registry lists (it has add_task, not
+    // create_task, which cortexCommandRefusal now refuses before the batch).
+    const createTask = { ...createInvoice, module: 'crm', action: 'add_task' };
     const t = setup({ intents: [createInvoice, createTask] });
     t.executorService.executeBatch.mockImplementation(async (commands: any[]) =>
       batchResult([executionRecord(commands[0], { success: false, error: 'denied' })], commands.length),

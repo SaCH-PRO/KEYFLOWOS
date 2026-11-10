@@ -59,7 +59,10 @@ import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
-import { KeyCortexPromptContextService } from './key-cortex-prompt-context.service';
+import { KeyCortexPromptContextService, isToolCallRecord } from './key-cortex-prompt-context.service';
+import { userCanAccessBusiness } from '../../core/auth/business.guard';
+import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
+import type { CortexMemberAuthority } from './key-cortex.controller';
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
 import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
@@ -86,6 +89,9 @@ type ParsedCommandDecision<C> = {
   disposition: 'executable' | 'approval_required' | 'denied' | 'failed_closed';
   reason: string;
 };
+
+/** How many memory fragments a chat turn's system prompt carries (processQuery and its stream path). */
+const CHAT_MEMORY_FRAGMENTS = 10;
 
 /**
  * KeyCortexQueryPipelineService
@@ -321,10 +327,7 @@ export class KeyCortexQueryPipelineService {
       let memoryFragments: MemoryFragment[] = [];
       if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
         try {
-          memoryFragments = await this.memoryRetrieval.retrieveContext(
-            query.businessId,
-            { query: query.text, limit: 10 },
-          );
+          memoryFragments = await this.chatMemoryFragments(query);
           this.logger.log(
             `[processQuery][${correlationId}] Loaded ${memoryFragments.length} memory fragment(s)`,
           );
@@ -1246,10 +1249,7 @@ export class KeyCortexQueryPipelineService {
       let streamMemoryFragments: MemoryFragment[] = [];
       if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
         try {
-          streamMemoryFragments = await this.memoryRetrieval.retrieveContext(
-            query.businessId,
-            { query: query.text, limit: 10 },
-          );
+          streamMemoryFragments = await this.chatMemoryFragments(query);
         } catch {
           // Non-critical
         }
@@ -1788,10 +1788,31 @@ export class KeyCortexQueryPipelineService {
           });
         }
 
-        executable = approvedCommands;
+        // W10-CORTEX-CHAT-SCOPE (review SEC-W9MRK-3, owner ruling D-57): a command the authority
+        // would run, or put up for approval, runs only for a member who may run it as a direct
+        // command (memberCommandRefusals). A refused one is settled as 'denied' with its refusal,
+        // before anything executes or is proposed. A member that cannot be read throws here, and
+        // the whole batch fails closed in the catch below.
+        const refusals = await this.memberCommandRefusals(
+          evaluated
+            .filter((decision) => decision.disposition !== 'denied')
+            .map((decision) => decision.command),
+          query,
+        );
+        for (const decision of evaluated) {
+          const refusal = refusals.get(decision.command);
+          if (refusal === undefined) continue;
+          decision.disposition = 'denied';
+          decision.reason = refusal;
+          this.logger.warn(
+            `[${path}][${correlationId}] Action ${decision.command.module}.${decision.command.action} refused for this member: ${refusal}`,
+          );
+        }
+
+        executable = approvedCommands.filter((cmd) => !refusals.has(cmd));
         decisions = evaluated;
         this.logger.log(
-          `[${path}][${correlationId}] Autonomy check: ${approvedCommands.length}/${commands.length} commands approved`,
+          `[${path}][${correlationId}] Autonomy check: ${executable.length}/${commands.length} commands approved`,
         );
       } catch (err: unknown) {
         // The batch is atomic: commands approved before the failure are not
@@ -1810,6 +1831,108 @@ export class KeyCortexQueryPipelineService {
     }
 
     return { executable, decisions, results, error };
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE (review SEC-W9MRK-3; owner ruling D-57): why each of `commands` may not
+   * run for the member the chat runs for, by the rule POST cortex/execute holds a direct command to
+   * (cortexCommandRefusal: the action's own module write scope, the crm owner-only rule, a money
+   * report's revenue:read, and deny by default for a module or an action the KEY capability registry
+   * does not map or list). A parsed chat command, and a stream's detected action, run through the
+   * same executor as a direct command (executeBatch); they ran after the autonomy authority alone, so
+   * a member with revenue 'none' had finance.generate_pnl run and its P&L returned, and any member's
+   * command ran whatever their module scopes.
+   *
+   * The member is read as CortexMemberAuthorityGuard reads it for that route (memberAuthority).
+   * A requester with no membership in the business, who is no platform SUPER_ADMIN, has every
+   * command refused (the guard refuses such a request: D-104, membership is the single rule). A read
+   * that fails throws, so the caller fails the batch closed. No command, no read.
+   */
+  private async memberCommandRefusals<C extends { module: string; action: string }>(
+    commands: C[],
+    query: CortexQuery,
+  ): Promise<Map<C, string>> {
+    const refusals = new Map<C, string>();
+    if (commands.length === 0) return refusals;
+    // Loaded on use: the controller module imports this service's own consumers (the
+    // reasoning service), so a top-level import would be a cycle.
+    const { cortexCommandRefusal } = await import('./key-cortex.controller');
+    const authority = await this.memberAuthority(query.businessId, query.userId);
+    for (const command of commands) {
+      const refusal = authority
+        ? cortexCommandRefusal(authority, command.module, command.action)
+        : `Not a member of this business: "${command.module}.${command.action}" runs only for a member of the business (D-104)`;
+      if (refusal) refusals.set(command, refusal);
+    }
+    return refusals;
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE: the member a chat turn acts for, as CortexMemberAuthorityGuard loads it
+   * for POST cortex/execute: a platform SUPER_ADMIN (its User role) keeps the bypass, a member only
+   * of the businesses it holds a membership in (D-46); anyone else is its membership's role and
+   * scopes, the explicit scope map or else the role's defaults (as ModuleScopeGuard computes them),
+   * or null when it holds no membership. The chat routes run no such guard, so it is read here.
+   */
+  private async memberAuthority(businessId: string, userId: string | undefined): Promise<CortexMemberAuthority | null> {
+    if (!userId) return null;
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    ]);
+    if (user?.role === 'SUPER_ADMIN') {
+      return { userId, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {}, member: !!membership };
+    }
+    if (!membership) return null;
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return { userId, businessId, role: membership.role, superAdmin: false, scopes, member: true };
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE (W9-KEY-CORTEX-AUDIT residual; review SEC-W9KCA-2, CR-W9KCA-4): the memory
+   * fragments a chat turn renders into its system prompt (processQuery and its stream path), read by
+   * the rule KeyCortexPromptContextService.buildMemoryContext applies to the same prompt. The episodic
+   * stores (AiExecutionLog and CortexActionLog: what someone asked KEY to do, tool answers included)
+   * are the requesting member's own (MemoryRetrievalOptions.userId); a requester who is no member of
+   * the business reads none (fail closed); and no KEY tool call's record is taken from the
+   * business-wide stores (isToolCallRecord: another member's tool answer and typed input). The
+   * business-wide stores are otherwise not narrowed. Both calls read every member's episodes before.
+   */
+  private async chatMemoryFragments(query: CortexQuery): Promise<MemoryFragment[]> {
+    if (!this.memoryRetrieval) return [];
+    const reader = await this.episodicMemoryReader(query.businessId, query.userId);
+    const fragments = await this.memoryRetrieval.retrieveContext(query.businessId, {
+      query: query.text,
+      limit: CHAT_MEMORY_FRAGMENTS,
+      ...(reader ? { userId: reader } : { includeEpisodic: false }),
+    });
+    return fragments.filter((fragment) => !isToolCallRecord(fragment));
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE: the member whose episodic memory a chat prompt may read, by
+   * buildMemoryContext's own predicate (BusinessGuard's userCanAccessBusiness): the requester when
+   * they own the business or hold a membership in it, else nobody. No requester, a requester who is
+   * no member (a platform SUPER_ADMIN passes BusinessGuard without one), or a check that cannot be
+   * made: nobody, so no episodic memory is read.
+   */
+  private async episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {
+    if (!userId) return null;
+    try {
+      return (await userCanAccessBusiness(this.prisma, userId, businessId)) ? userId : null;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[chatMemory][${businessId}] membership check failed, no episodic memory read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   /**
