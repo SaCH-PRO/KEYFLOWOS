@@ -36,6 +36,16 @@ export class DriveIntakeController {
     return { success: true, ...result };
   }
 
+  /**
+   * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-3: the list carries every
+   * intake's extractedData and proposedActions (payment amounts, invoice ids,
+   * contact details), so it needs revenue:read, as GET .../invoices does; a
+   * member with no revenue access is refused 403 there and here. `limit` is
+   * clamped to 1..100 (default 50, as the web asks) instead of handing Prisma
+   * any number, or NaN, as `take`.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('intake')
   async listIntake(
     @Param('businessId') businessId: string,
@@ -44,7 +54,8 @@ export class DriveIntakeController {
   ) {
     const where: Record<string, unknown> = { businessId };
     if (status) where.status = status;
-    const take = limit ? parseInt(limit, 10) : 50;
+    const asked = limit ? parseInt(limit, 10) : NaN;
+    const take = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), 100) : 50;
     const items = await this.prisma.client.driveIntakeFile.findMany({
       where,
       orderBy: { modifiedTime: 'desc' },
@@ -63,6 +74,9 @@ export class DriveIntakeController {
    * orchestrator claims the intake, so nothing is written and the plan stays
    * approvable by a member who may. The approver is still the recorder
    * (R0-CMF2, PA-18a): the orchestrator is handed req.user, never the plan.
+   * Review repair SEC-W7DI-1: DriveIntakeOrchestrator.executePlan applies the
+   * same rule itself (assertApproverMayRunPlan), so the data-inbox approve
+   * route, which runs the same plan, is held to it too.
    */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
@@ -78,12 +92,25 @@ export class DriveIntakeController {
     return this.orchestrator.executePlan(businessId, intakeFileId, userId);
   }
 
+  /**
+   * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2 (D-46): rejecting a plan
+   * decides its money as approving it does (a rejected plan can no longer be
+   * approved), so reject needs what approve needs: revenue:write, and, as a
+   * revenue:write handler of the commerce module, a SUPER_ADMIN's Membership
+   * holding it (d46-write-routes.spec.ts lists reject GUARDED). Behind
+   * AuthGuard and BusinessGuard alone, a member refused approve (crm:read only)
+   * rejected a pending plan, and the member who may then got 400. The
+   * orchestrator refuses an already approved intake (rejectIntakeFile).
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intake/:intakeFileId/reject')
   async reject(
     @Param('businessId') businessId: string,
     @Param('intakeFileId') intakeFileId: string,
     @Req() req: AuthenticatedRequest,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const userId = req.user?.id;
     if (!userId) throw new BadRequestException('Authenticated user required');
     await this.orchestrator.rejectIntakeFile(businessId, intakeFileId, userId);
@@ -103,7 +130,7 @@ export class DriveIntakeController {
    * invoice'; a membership below revenue:write answers the guard's message.
    * Refused before any read or write. Every other caller is unchanged and costs
    * no query (the guards already applied this rule to it). d46-write-routes.spec.ts
-   * lists approve as GUARDED.
+   * lists approve as GUARDED, and (review repair SEC-W7DI-2) reject.
    */
   private async assertSuperAdminMayWriteRevenue(req: AuthenticatedRequest | undefined, businessId: string): Promise<void> {
     const user = req?.user;

@@ -1,6 +1,7 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { CrmService } from '../crm/crm.service';
 import { CrmCommunicationService } from '../crm/crm-communication.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -70,6 +71,43 @@ export class DriveIntakeOrchestrator {
 
   private static approverActorId(userId: string | null | undefined): string | null {
     return userId && !DriveIntakeOrchestrator.NO_HUMAN_APPROVER_IDS.has(userId) ? userId : null;
+  }
+
+  /**
+   * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (R0-CMF2 review SEC-CMF2-3;
+   * the R0-02 rule; owner ruling D-46): a person approving a plan needs a
+   * Membership in the business whose scope map (or, without one, the role
+   * defaults) holds revenue:write, because the plan's steps create and
+   * finalize invoices, record payments and apply credit notes. The drive
+   * approve route's guards were the only check, so the second door to the same
+   * plan, POST data-inbox/.../items/:id/approve (operations:write only, which
+   * hands the IngestionItem's plan to executePlan), let a member with
+   * revenue:read, and a SUPER_ADMIN who is not a member (ModuleScopeGuard waves
+   * that role through), run it. The check lives here, so every caller is held
+   * to it, as assertMemberMayApply holds every caller of a credit step.
+   * No Membership answers 403 'Not authorized to update this invoice' (D-46, as
+   * the commerce invoice writes answer); below revenue:write, the guard's
+   * message. The placeholders that name no person ('system' from the ingestion
+   * auto-execute the owner switched on, 'user' from the data-inbox fallback)
+   * are not looked up: PA-18b's auto-execute is unchanged, and a credit step
+   * still refuses them (assertMemberMayApply).
+   */
+  async assertApproverMayRunPlan(businessId: string, userId: string | null | undefined): Promise<void> {
+    const approver = DriveIntakeOrchestrator.approverActorId(userId);
+    if (!approver) return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: approver, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not authorized to update this invoice');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
   }
 
   /**
@@ -278,6 +316,11 @@ export class DriveIntakeOrchestrator {
     userId: string,
     planOverride?: DriveIntakePlan,
   ): Promise<{ success: boolean; results: ActionResult[] }> {
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (D-46): the approver is
+    // checked first, before the intake is read or claimed, so a refused
+    // approval writes nothing and the plan stays approvable by a member who may.
+    await this.assertApproverMayRunPlan(businessId, userId);
+
     const intake = await this.prisma.client.driveIntakeFile.findFirst({
       where: { id: intakeFileId, businessId },
     });
@@ -574,10 +617,18 @@ export class DriveIntakeOrchestrator {
       where: { id: intakeFileId, businessId },
     });
     if (!intake) throw new NotFoundException('Drive intake file not found');
-    await this.prisma.client.driveIntakeFile.update({
-      where: { id: intakeFileId },
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2: an approved intake (its
+    // plan claimed, so being run or already run: its payment, invoice or credit
+    // note exists) is never relabelled 'rejected', or the intake record would
+    // no longer match the money written. Compare-and-set, as the approval's
+    // claim is: a reject that loses the race to a claim is refused too.
+    const rejected = await this.prisma.client.driveIntakeFile.updateMany({
+      where: { id: intakeFileId, businessId, status: { not: 'approved' } },
       data: { status: 'rejected', processedAt: new Date() },
     });
+    if (rejected.count !== 1) {
+      throw new BadRequestException('This intake plan has already been executed; it cannot be rejected');
+    }
     if (userId) {
       await this.resolvePendingApproval(businessId, intakeFileId, 'rejected', userId).catch((err) => {
         this.logger.warn(`Failed to resolve approval on reject: ${err instanceof Error ? err.message : String(err)}`);

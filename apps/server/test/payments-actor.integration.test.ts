@@ -71,7 +71,12 @@
  *         PA-18e..f below (a member below revenue:write is refused 403 as the
  *         manual payment route refuses them, and, owner ruling D-46, so is a
  *         non-member SUPER_ADMIN; nothing is written and the plan stays
- *         approvable by a member who may).
+ *         approvable by a member who may). Its review repairs PA-18g..i:
+ *         the data-inbox approve route, which runs the same plan, is held to
+ *         the same rule (SEC-W7DI-1; executePlan checks the approver itself),
+ *         reject needs revenue:write and never relabels an approved intake
+ *         (SEC-W7DI-2), and the intake list needs revenue:read with a
+ *         clamped limit (SEC-W7DI-3).
  *
  * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
  *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
@@ -200,6 +205,11 @@ const ID = {
   userDriveSuper: `${P}userDriveSuper`,
   invDriveScope: `${P}invDriveScope`,
   invDriveSuper: `${P}invDriveSuper`,
+  // W7-DRIVE-INTAKE-SCOPE review repairs: PA-18g..i (SEC-W7DI-1..3). The
+  // operations:write member is seeded by that describe block.
+  userDriveOps: `${P}userDriveOps`,
+  invDriveInbox: `${P}invDriveInbox`,
+  invDriveReject: `${P}invDriveReject`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -252,6 +262,8 @@ async function cleanup() {
   const like = sqlLikePrefix(P);
   for (const sql of [
     `DELETE FROM activities WHERE business_id LIKE ${like}`,
+    // W7-DRIVE-INTAKE-SCOPE review repairs (PA-18g): the data-inbox items.
+    `DELETE FROM ingestion_items WHERE business_id LIKE ${like}`,
     `DELETE FROM drive_intake_files WHERE business_id LIKE ${like}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${like}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${like}`,
@@ -417,6 +429,15 @@ beforeAll(async () => {
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
   const { CreditNoteService } = await import('../src/modules/finance/credit-note.service');
+  // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (PA-18g): the data-inbox
+  // approve route over the real DataInboxService and IngestionOrchestrator,
+  // which hand a google_drive item's plan to the same DriveIntakeOrchestrator.
+  const { DataInboxController } = await import('../src/modules/ingestion/data-inbox.controller');
+  const { DataInboxService } = await import('../src/modules/ingestion/data-inbox.service');
+  const { IngestionOrchestrator } = await import('../src/modules/ingestion/ingestion-orchestrator.service');
+  const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+  const { KeyInboxService } = await import('../src/modules/key-inbox/key-inbox.service');
+  const { KeyInboxActionExecutorService } = await import('../src/modules/key-inbox/key-inbox-action-executor.service');
 
   systemActorId = KEY_SYSTEM_ACTOR_ID;
 
@@ -431,7 +452,7 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController, DriveIntakeController],
+    controllers: [CommerceController, DriveIntakeController, DataInboxController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -485,6 +506,15 @@ beforeAll(async () => {
       { provide: TransactionalEmailService, useValue: {} },
       { provide: AiOversightService, useValue: { resolveApproval: async () => undefined } },
       { provide: CreditNoteService, useValue: {} },
+      // W7-DRIVE-INTAKE-SCOPE review repair (PA-18g): the real data-inbox
+      // service and ingestion orchestrator; the items seeded here are
+      // google_drive items with a plan already built, so entity resolution and
+      // the Key Inbox (message sources only) are stubs off the boundary.
+      DataInboxService,
+      IngestionOrchestrator,
+      { provide: EntityResolutionService, useValue: {} },
+      { provide: KeyInboxService, useValue: {} },
+      { provide: KeyInboxActionExecutorService, useValue: {} },
     ],
   }).compile();
   commerce = moduleRef.get(CommerceService);
@@ -1704,8 +1734,8 @@ describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoic
 // handler of the commerce module, owner ruling D-46 (a platform SUPER_ADMIN
 // who is not a member stays refused on tenant invoice writes;
 // d46-write-routes.spec.ts lists it GUARDED). The approver is still the
-// recorder (PA-18a). Still open, outside that write set: the data-inbox approve
-// route (operations:write, and correctItem rewrites proposedActions).
+// recorder (PA-18a). The data-inbox approve route (operations:write), which
+// runs the same plan, is closed by the review repair below (PA-18g).
 describe('W7-DRIVE-INTAKE-SCOPE: approving a drive intake plan needs revenue:write (PA-18e, SEC-CMF2-3; D-46)', () => {
   beforeAll(async () => {
     // Two members below revenue:write (an explicit revenue:read, and a scope
@@ -1769,6 +1799,192 @@ describe('W7-DRIVE-INTAKE-SCOPE: approving a drive intake plan needs revenue:wri
     expect(await paymentsOf(ID.invDriveSuper)).toEqual([]);
     expect(await contactEventsFor(ID.invDriveSuper)).toHaveLength(0);
     expect(await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).toMatchObject({ status: 'reviewing', processedAt: null });
+  });
+});
+
+// W7-DRIVE-INTAKE-SCOPE review repairs (SEC-W7DI-1..3; the R0-02 rule; owner
+// ruling D-46). SEC-W7DI-1: POST data-inbox/businesses/:b/items/:id/approve
+// (operations:write) handed a google_drive item's plan to the same
+// DriveIntakeOrchestrator.executePlan, so the members the drive route refuses
+// (operations:write with revenue:read; a SUPER_ADMIN who is not a member)
+// recorded payments and created and finalized invoices through it: executePlan
+// now checks the approver itself (assertApproverMayRunPlan) and the ingestion
+// orchestrator asks it before touching anything. SEC-W7DI-2: the reject route
+// beside approve needs what approve needs, and an approved intake is never
+// relabelled rejected. SEC-W7DI-3: the intake list (amounts, invoice ids)
+// needs revenue:read, as the invoice list does, and its limit is clamped.
+
+/** Seed a google_drive IngestionItem for intake `intakeId` (its driveFileId) carrying `plan`. */
+async function seedDriveItem(itemId: string, intakeId: string, plan: Record<string, unknown>) {
+  await db.ingestionItem.create({
+    data: {
+      id: itemId,
+      businessId: ID.biz,
+      sourceType: 'google_drive',
+      sourceConnectorType: 'google_drive',
+      status: 'reviewing',
+      rawPayload: { driveFileId: `${intakeId}_file` },
+      proposedActions: plan,
+    },
+  });
+}
+
+function approveItemAs(user: string, itemId: string) {
+  return agent().post(`/data-inbox/businesses/${ID.biz}/items/${itemId}/approve`).set(HEADER, user).send({});
+}
+
+function rejectIntakeAs(user: string, intakeId: string) {
+  return agent().post(`/drive/businesses/${ID.biz}/intake/${intakeId}/reject`).set(HEADER, user).send({});
+}
+
+describe('W7-DRIVE-INTAKE-SCOPE review repairs: every door to a drive intake plan needs revenue (PA-18g..i, SEC-W7DI-1..3; D-46)', () => {
+  beforeAll(async () => {
+    // A member who may approve data-inbox items (operations:write) but holds
+    // only revenue:read. userDriveReader, userDriveCrm and the non-member
+    // SUPER_ADMIN userDriveSuper are seeded by the PA-18e..f block above.
+    await db.user.create({ data: { id: ID.userDriveOps, email: `${ID.userDriveOps}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_userDriveOps`, userId: ID.userDriveOps, businessId: ID.biz, role: 'STAFF', permissionScopes: { operations: 'write', revenue: 'read' } },
+    });
+  });
+
+  it('PA-18g (SEC-W7DI-1, D-46): POST /data-inbox/businesses/:b/items/:id/approve on a google_drive item whose plan records a payment -> 403 for a member with operations:write and revenue:read (the drive route\'s message) and for a non-member SUPER_ADMIN (\'Not authorized to update this invoice\'); no payment, the intake and the item stay reviewing; U (OWNER) then approves the same item through that route and is the recorder', async () => {
+    const intakeId = `${P}drive_inbox`;
+    await seedDriveIntake(intakeId, ID.invDriveInbox, { amount: 15, method: 'cash', reference: 'PYA-DRV-INBOX' });
+    const plan = (await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).proposedActions;
+    const itemId = `${P}item_inbox`;
+    await seedDriveItem(itemId, intakeId, plan);
+
+    for (const [user, message] of [
+      [ID.userDriveOps, 'Insufficient permissions: revenue requires write access (you have read)'],
+      [ID.userDriveSuper, 'Not authorized to update this invoice'],
+    ] as const) {
+      // The control: the drive route refuses this caller the same way.
+      const drive = await approveIntakeAs(user, intakeId);
+      expect(drive.status, `${user}: ${JSON.stringify(drive.body)}`).toBe(403);
+      expect(drive.body.message).toBe(message);
+      const res = await approveItemAs(user, itemId);
+      // RED-BEFORE (W7-DRIVE-INTAKE-SCOPE head): 201, a PENDING payment of 15 recorded by this caller, the intake 'approved'.
+      expect(res.status, `${user}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message).toBe(message);
+    }
+    expect(await paymentsOf(ID.invDriveInbox)).toEqual([]);
+    expect(await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).toMatchObject({ status: 'reviewing', processedAt: null });
+    expect(await db.ingestionItem.findUnique({ where: { id: itemId } })).toMatchObject({ status: 'reviewing', errorMessage: null });
+
+    // U (OWNER: operations and revenue on role defaults) approves the same item through the data-inbox route.
+    const approved = await approveItemAs(ID.userU, itemId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    expect(approved.body.status).toBe('approved');
+    const rows = await paymentsOf(ID.invDriveInbox);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount: 15, status: 'PENDING', reference: 'PYA-DRV-INBOX', recordedBy: ID.userU });
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('approved');
+  });
+
+  it('PA-18g (SEC-W7DI-1, D-46): the same route on a google_drive item whose plan creates an invoice -> 403 for the operations:write / revenue:read member and for the non-member SUPER_ADMIN; no invoice is created or finalized and the intake stays reviewing', async () => {
+    const intakeId = `${P}drive_inbox_ci`;
+    const plan = {
+      intakeFileId: intakeId,
+      documentType: 'invoice',
+      summary: 'pya drive invoice',
+      contactId: ID.contact,
+      actions: [{ type: 'create_invoice', payload: { items: [{ description: 'PYA drive inbox invoice', quantity: 1, unitPrice: 250 }], currency: 'TTD' } }],
+    };
+    await db.driveIntakeFile.create({
+      data: {
+        id: intakeId,
+        businessId: ID.biz,
+        driveFileId: `${intakeId}_file`,
+        name: `${intakeId}.pdf`,
+        mimeType: 'application/pdf',
+        modifiedTime: new Date(),
+        status: 'reviewing',
+        documentType: 'invoice',
+        proposedActions: plan,
+      },
+    });
+    const itemId = `${P}item_inbox_ci`;
+    await seedDriveItem(itemId, intakeId, plan);
+    const invoicesBefore = await db.invoice.count({ where: { businessId: ID.biz } });
+
+    for (const [user, message] of [
+      [ID.userDriveOps, 'Insufficient permissions: revenue requires write access (you have read)'],
+      [ID.userDriveSuper, 'Not authorized to update this invoice'],
+    ] as const) {
+      const res = await approveItemAs(user, itemId);
+      // RED-BEFORE: 201 and a new SENT invoice of 250 created by the plan.
+      expect(res.status, `${user}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message).toBe(message);
+    }
+    expect(await db.invoice.count({ where: { businessId: ID.biz } })).toBe(invoicesBefore);
+    expect(await db.invoiceItem.count({ where: { description: 'PYA drive inbox invoice' } })).toBe(0);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('reviewing');
+    expect((await db.ingestionItem.findUnique({ where: { id: itemId } })).status).toBe('reviewing');
+  });
+
+  it('PA-18h (SEC-W7DI-2, D-46): POST /drive/businesses/:b/intake/:id/reject needs revenue:write like approve -> 403 for crm:read only, for revenue:read and for a non-member SUPER_ADMIN, the plan stays reviewing and V approves it; V\'s reject of that approved intake is refused 400 and it stays approved with its payment; V rejects a reviewing plan (201)', async () => {
+    const intakeId = `${P}drive_reject`;
+    await seedDriveIntake(intakeId, ID.invDriveReject, { amount: 12, method: 'cash', reference: 'PYA-DRV-REJECT' });
+
+    for (const [user, message] of [
+      [ID.userDriveCrm, 'Insufficient permissions: revenue requires write access (you have none)'],
+      [ID.userDriveReader, 'Insufficient permissions: revenue requires write access (you have read)'],
+      [ID.userDriveSuper, 'Not authorized to update this invoice'],
+    ] as const) {
+      const res = await rejectIntakeAs(user, intakeId);
+      // RED-BEFORE (W7-DRIVE-INTAKE-SCOPE head): 201 {success:true}, the intake 'rejected' and V's approval then 400.
+      expect(res.status, `${user}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message).toBe(message);
+    }
+    expect(await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).toMatchObject({ status: 'reviewing', processedAt: null });
+
+    const approved = await approveIntakeAs(ID.userV, intakeId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    expect(await paymentsOf(ID.invDriveReject)).toHaveLength(1);
+
+    const late = await rejectIntakeAs(ID.userV, intakeId);
+    // RED-BEFORE: 201 and the approved intake relabelled 'rejected' while its payment stayed.
+    expect(late.status, JSON.stringify(late.body)).toBe(400);
+    expect(late.body.message).toBe('This intake plan has already been executed; it cannot be rejected');
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('approved');
+    expect(await paymentsOf(ID.invDriveReject)).toHaveLength(1);
+
+    const other = `${P}drive_reject_ok`;
+    await seedDriveIntake(other, ID.invDriveReject, { amount: 7, method: 'cash', reference: 'PYA-DRV-REJECT-OK' });
+    const ok = await rejectIntakeAs(ID.userV, other);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toEqual({ success: true });
+    expect((await db.driveIntakeFile.findUnique({ where: { id: other } })).status).toBe('rejected');
+    expect(await paymentsOf(ID.invDriveReject)).toHaveLength(1);
+  });
+
+  it('PA-18i (SEC-W7DI-3): GET /drive/businesses/:b/intake (extractedData, proposedActions: amounts and invoice ids) needs revenue:read like GET .../invoices -> 403 for a member with no revenue access; a revenue:read member lists them; limit is clamped to 1..100 (a non-number is the default 50)', async () => {
+    const list = (user: string, query = '') => agent().get(`/drive/businesses/${ID.biz}/intake${query}`).set(HEADER, user);
+
+    const refused = await list(ID.userDriveCrm);
+    // RED-BEFORE: 200 with every intake's proposedActions (payment amounts, invoice ids).
+    expect(refused.status, JSON.stringify(refused.body).slice(0, 300)).toBe(403);
+    expect(refused.body.message).toBe('Insufficient permissions: revenue requires read access (you have none)');
+    const invoices = await agent().get(`/commerce/businesses/${ID.biz}/invoices`).set(HEADER, ID.userDriveCrm);
+    expect(invoices.status).toBe(403);
+    expect(invoices.body.message).toBe(refused.body.message);
+
+    const all = await list(ID.userDriveReader);
+    expect(all.status, JSON.stringify(all.body).slice(0, 300)).toBe(200);
+    expect(all.body.items.length).toBeGreaterThanOrEqual(2);
+    expect(all.body.items.every((i: any) => i.businessId === ID.biz)).toBe(true);
+    // RED-BEFORE: 'abc' was handed to Prisma as take NaN.
+    const nan = await list(ID.userDriveReader, '?limit=abc');
+    expect(nan.status, JSON.stringify(nan.body).slice(0, 300)).toBe(200);
+    expect(nan.body.items).toHaveLength(all.body.items.length);
+    for (const limit of ['1', '0', '-3']) {
+      const one = await list(ID.userDriveReader, `?limit=${limit}`);
+      // RED-BEFORE: take 0 answered no rows and take -3 paged backwards.
+      expect(one.status, limit).toBe(200);
+      expect(one.body.items, limit).toHaveLength(1);
+    }
   });
 });
 

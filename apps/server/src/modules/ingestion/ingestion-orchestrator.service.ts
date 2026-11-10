@@ -162,6 +162,18 @@ export class IngestionOrchestrator {
     const plan = item.proposedActions as Record<string, unknown> | null;
     if (!plan) throw new BadRequestException('No action plan found');
 
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (the R0-02 rule; D-46):
+    // a google_drive item's plan is a Drive intake plan (invoices, payments,
+    // credit notes), so the person approving it through the data-inbox route
+    // (operations:write) needs revenue:write too, and a SUPER_ADMIN a
+    // Membership holding it, exactly as POST drive/.../intake/:id/approve
+    // requires. Checked here, before the legacy intake is read or created and
+    // outside the try below, so a refusal is answered 403 and writes nothing:
+    // the item stays as it was, not 'error'. executePlan checks again.
+    if (item.sourceType === 'google_drive') {
+      await this.driveOrchestrator.assertApproverMayRunPlan(item.businessId, userId);
+    }
+
     try {
       let results: Record<string, unknown> = {};
       if (item.sourceType === 'google_drive') {

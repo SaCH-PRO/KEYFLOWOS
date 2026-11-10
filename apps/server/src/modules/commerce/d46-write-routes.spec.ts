@@ -93,7 +93,9 @@
  * DriveIntakeController.approve joins the census as GUARDED: an approved plan
  * creates invoices, records payments and applies credit notes, so D-46 refuses
  * a non-member SUPER_ADMIN there too. The HTTP half is
- * test/payments-actor.integration.test.ts PA-18e..f.
+ * test/payments-actor.integration.test.ts PA-18e..f. Its review repair
+ * SEC-W7DI-2 adds DriveIntakeController.reject (revenue:write, GUARDED): a
+ * rejected plan can no longer be approved (HTTP half PA-18h).
  */
 import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'fs';
@@ -185,6 +187,14 @@ const RECURRING_GUARDED =
 const DRIVE_INTAKE_GUARDED =
   'GUARDED (W7-DRIVE-INTAKE-SCOPE, D-46): approving a drive intake plan runs its create_invoice, record_payment and apply_credit_note steps. ' +
   'DriveIntakeController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
+/**
+ * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2 (D-46): rejecting a drive
+ * intake plan decides its money as approving it does, so reject needs
+ * revenue:write and joins approve as GUARDED.
+ */
+const DRIVE_INTAKE_REJECT_GUARDED =
+  'GUARDED (W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2, D-46): rejecting a drive intake plan stops its create_invoice, record_payment and apply_credit_note steps from ever running. ' +
+  'DriveIntakeController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
 
 /**
  * Review repair SEC-A1-2: the census covers every revenue:write handler of
@@ -218,6 +228,9 @@ const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: s
   },
   DriveIntakeController: {
     approve: { kind: 'GUARDED', why: DRIVE_INTAKE_GUARDED },
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2 (D-46): reject became a
+    // revenue:write handler too (a rejected plan can no longer be approved).
+    reject: { kind: 'GUARDED', why: DRIVE_INTAKE_REJECT_GUARDED },
   },
 };
 
@@ -398,9 +411,14 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
         Object.entries(handlers).filter(([, v]) => v.kind === kind).map(([h]) => `${name}.${h}`),
       );
     expect(ofKind('OPEN')).toEqual([]);
-    // W7-DRIVE-INTAKE-SCOPE (D-46): DriveIntakeController.approve joins them.
+    // W7-DRIVE-INTAKE-SCOPE (D-46): DriveIntakeController.approve joins them;
+    // its review repair SEC-W7DI-2: and DriveIntakeController.reject.
     expect(ofKind('GUARDED').sort()).toEqual(
-      ['DriveIntakeController.approve', ...['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`)],
+      [
+        'DriveIntakeController.approve',
+        'DriveIntakeController.reject',
+        ...['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`),
+      ],
     );
   });
 
