@@ -28,6 +28,7 @@ describe('BookingsAdapterService', () => {
       updateBookingStatus: vi.fn(),
       rescheduleBooking: vi.fn(),
       confirmBooking: vi.fn(),
+      getAvailableSlots: vi.fn(),
     } as unknown as BookingsService;
 
     catalog = {
@@ -127,10 +128,15 @@ describe('BookingsAdapterService', () => {
     (prisma.client.staffMember.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{
       id: 'staff1',
       name: 'Dr. Smith',
-      availabilities: [{ dayOfWeek: 2, startTime: '09:00', endTime: '10:00' }],
     }]);
-    (prisma.client.booking.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (prisma.client.calendarEvent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    // W9-KEY-AVAILABILITY-TZ (CR-V16-1): the slots are BookingsService.getAvailableSlots'
+    // answer (the public picker's, on the business's clock); booking-concurrency.
+    // integration.test.ts proves that answer against a real database.
+    (bookings.getAvailableSlots as ReturnType<typeof vi.fn>).mockResolvedValue({
+      date: '2026-07-07',
+      slots: ['2026-07-07T13:00:00.000Z'],
+    });
+    (prisma.client.calendarEvent.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     const result = await service.execute(mkCmd('get_availability', {
       serviceId: 's1',
@@ -142,6 +148,14 @@ describe('BookingsAdapterService', () => {
     expect(Array.isArray(result.data)).toBe(true);
     expect((result.data as any[]).length).toBeGreaterThan(0);
     expect((result.data as any[])[0]).toMatchObject({ staffId: 'staff1', staffName: 'Dr. Smith' });
+    expect(result.data).toEqual([
+      { startTime: '2026-07-07T13:00:00.000Z', endTime: '2026-07-07T14:00:00.000Z', staffId: 'staff1', staffName: 'Dr. Smith' },
+    ]);
+    // One call for the one staff member and the one calendar day asked for.
+    expect(bookings.getAvailableSlots).toHaveBeenCalledTimes(1);
+    const [call] = (bookings.getAvailableSlots as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call).toMatchObject({ businessId: 'biz_123', serviceId: 's1', staffId: 'staff1' });
+    expect([call.date.getFullYear(), call.date.getMonth(), call.date.getDate()]).toEqual([2026, 6, 7]);
   });
 
   it('returns connectorFail for unknown action', async () => {
