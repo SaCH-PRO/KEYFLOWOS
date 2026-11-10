@@ -147,6 +147,7 @@ import {
   rankOf,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
+import type { ModuleScopeRequirement } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
@@ -237,7 +238,9 @@ function requestActorId(user: AuthenticatedUser | undefined): string {
  *     which writes that refusal's audit row (R0-09e).
  *
  * Every action of a mapped module needs write: a registry action mutates state
- * (ModuleAction); reads go through POST query.
+ * (ModuleAction); reads go through POST query. The actions that read a money
+ * report also need revenue:read, as the REST money reports do
+ * (CORTEX_MONEY_REPORT_ACTIONS: W9-MONEY-REPORTS-KEY, A7-SEC-2, D-57).
  */
 type CortexModuleRule =
   | { scope: CanonicalModule; ownerOnly?: string }
@@ -289,8 +292,25 @@ const CORTEX_REGISTRY_QUERIES: ReadonlyMap<string, ReadonlySet<string>> = new Ma
 const CRM_READ_OWNER_ONLY =
   'the crm adapter reads contacts with no actor, so row visibility (a private contact stays its owner\'s) cannot be applied';
 
+/**
+ * W9-MONEY-REPORTS-KEY (review A7-SEC-2, owner ruling D-57): the registry actions that read a money
+ * report through LedgerReportingService: finance.generate_pnl (the P&L) and analytics.create_report /
+ * export_report (the P&L, cash flow, balance sheet, tax summary and revenue by customer, CSV
+ * included). D-57 puts every money report behind revenue:read (GET reports/* and the commerce
+ * revenue reports declare it for ModuleScopeGuard), so such a direct command also needs it, on top
+ * of its module's own write scope: it runs only for a member who could read the same report over
+ * HTTP. The rule is per action (the refusal sees no parameters), so a create_report of a type that
+ * carries no revenue figures is held to it too (deny by default).
+ */
+const MONEY_REPORT_READ: ModuleScopeRequirement = { module: 'revenue', minLevel: 'read' };
+
+const CORTEX_MONEY_REPORT_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['finance', new Set(['generate_pnl'])],
+  ['analytics', new Set(['create_report', 'export_report'])],
+]);
+
 export type CortexCommandRequirement =
-  | { scope: CanonicalModule; ownerOnly?: string }
+  | { scope: CanonicalModule; ownerOnly?: string; alsoRequires?: ModuleScopeRequirement }
   | { adapterEnforced: string }
   | { executorRefused: string }
   | { refused: string };
@@ -308,6 +328,10 @@ export function cortexCommandRequirement(module: unknown, action: unknown): Cort
   if ('refused' in rule) return { refused: `Module "${module}" is not run as a direct command: ${rule.refused}` };
   if (!CORTEX_REGISTRY_ACTIONS.get(module)?.has(action)) {
     return { refused: `"${module}.${action}" is not an action the KEY capability registry lists, so it is not run` };
+  }
+  // W9-MONEY-REPORTS-KEY (A7-SEC-2, D-57): a money report also needs what its REST route needs.
+  if ('scope' in rule && CORTEX_MONEY_REPORT_ACTIONS.get(module)?.has(action)) {
+    return { ...rule, alsoRequires: { ...MONEY_REPORT_READ } };
   }
   return rule;
 }
@@ -348,6 +372,14 @@ export function cortexCommandRefusal(authority: CortexMemberAuthority, module: u
   const level = authority.scopes[requirement.scope] || 'none';
   if (rankOf(level) < LEVEL_RANK.write) {
     return `Insufficient permissions: ${requirement.scope} requires write access (you have ${level})`;
+  }
+  if (requirement.alsoRequires) {
+    // W9-MONEY-REPORTS-KEY (A7-SEC-2, D-57): the refusal ModuleScopeGuard gives on the REST money reports.
+    const { module: also, minLevel } = requirement.alsoRequires;
+    const held = authority.scopes[also] || 'none';
+    if (rankOf(held) < LEVEL_RANK[minLevel]) {
+      return `Insufficient permissions: ${also} requires ${minLevel} access (you have ${held})`;
+    }
   }
   return null;
 }

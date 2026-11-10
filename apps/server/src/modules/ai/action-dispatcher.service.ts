@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional, forwardRef, Inject } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, Optional, forwardRef, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FeedbackLoopService } from './feedback-loop.service';
@@ -40,9 +40,42 @@ interface CircuitState {
   open: boolean;
 }
 
+/**
+ * W9-DISPATCH-CIRCUIT (review SEC-W8CTNM-1, owner ruling D-73): the circuit a dispatch counts toward
+ * is one business's circuit for one tool. Keyed by tool name alone, five failures in one business
+ * (five refusals of one member's plans) stopped the tool for every business for CIRCUIT_TIMEOUT_MS.
+ */
+function circuitKey(businessId: string, toolName: string): string {
+  return JSON.stringify([businessId, toolName]);
+}
+
+/**
+ * W9-DISPATCH-CIRCUIT (review SEC-W8CTNM-1, D-73): the tool refused this request with a 4xx answer of
+ * its own (an HttpException: a contact the member may not open, 404; a principal who is no member of
+ * the business, 403; an argument it does not take, 400). Asking again gets the same answer, and the
+ * refusal is the tool working, not failing, so it is neither retried nor counted toward the circuit.
+ * 408 Request Timeout and 429 Too Many Requests ask the caller to try again later: those stay failures.
+ *
+ * Review SEC-W9DC-1 (open, outside this packet's write set): the dispatcher reaches a tool only through
+ * FlowOrchestratorService.executeToolDirectly (its production caller is the plan queue), whose
+ * executeTool catches the tool's HttpException and rethrows it as a plain Error (the status is lost). So in
+ * production this is false for a tool's refusal today: a member's 404/403 is still retried and counted
+ * toward that business's own circuit for the tool (five of a STAFF member's refused plans hold the
+ * OWNER's for CIRCUIT_TIMEOUT_MS). Another business's circuit is never touched (circuitKey; QW-07c).
+ * The fix is for executeToolDirectly to carry the refusal's status (QW-07b, it.todo).
+ */
+function isToolRefusal(err: unknown): boolean {
+  if (!(err instanceof HttpException)) return false;
+  const status = err.getStatus();
+  return (
+    status >= 400 && status < 500 && status !== HttpStatus.REQUEST_TIMEOUT && status !== HttpStatus.TOO_MANY_REQUESTS
+  );
+}
+
 @Injectable()
 export class ActionDispatcherService {
   private readonly logger = new Logger(ActionDispatcherService.name);
+  /** One circuit per business and tool (circuitKey; W9-DISPATCH-CIRCUIT). */
   private readonly circuits = new Map<string, CircuitState>();
   private readonly CIRCUIT_THRESHOLD = 5;
   private readonly CIRCUIT_TIMEOUT_MS = 60_000;
@@ -69,8 +102,8 @@ export class ActionDispatcherService {
     const dispatchId = ctx.idempotencyKey ?? `disp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const startTime = Date.now();
 
-    // Check circuit breaker
-    if (this.isCircuitOpen(ctx.toolName)) {
+    // Check circuit breaker (this business's, for this tool: W9-DISPATCH-CIRCUIT)
+    if (this.isCircuitOpen(ctx.businessId, ctx.toolName)) {
       const msg = `Circuit breaker open for tool "${ctx.toolName}"`;
       this.logger.warn(msg);
       return { success: false, error: msg, dispatchId, durationMs: Date.now() - startTime };
@@ -88,7 +121,7 @@ export class ActionDispatcherService {
     // Governance check
     const decision = await this.governance.evaluate(ctx.businessId, ctx.toolName);
     if (!decision.allowed) {
-      this.recordFailure(ctx.toolName);
+      this.recordFailure(ctx.businessId, ctx.toolName);
       return {
         success: false,
         error: decision.reason,
@@ -100,6 +133,7 @@ export class ActionDispatcherService {
     // Execute with retries
     let lastError: string | undefined;
     let boundaryAnswer: { actionId?: string | null; disposition?: string } | undefined;
+    let refused = false;
     const retries = ctx.retryCount ?? this.MAX_RETRIES;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -120,7 +154,7 @@ export class ActionDispatcherService {
         );
 
         const durationMs = Date.now() - startTime;
-        this.recordSuccess(ctx.toolName);
+        this.recordSuccess(ctx.businessId, ctx.toolName);
 
         await this.executionLog.logToolExecution(
           ctx.businessId,
@@ -173,14 +207,23 @@ export class ActionDispatcherService {
           boundaryAnswer = err as { actionId?: string | null; disposition?: string };
           break;
         }
+        // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): the tool's own 4xx refusal is final too, when it
+        // reaches here as an HttpException (not yet through executeToolDirectly: SEC-W9DC-1, isToolRefusal).
+        if (isToolRefusal(err)) {
+          refused = true;
+          break;
+        }
       }
     }
 
     const durationMs = Date.now() - startTime;
     // A refusal by the boundary is the boundary working, not the tool failing.
     // Counting it would open this tool's circuit after five proposals and stop
-    // the sixth from being filed at all.
-    if (!boundaryAnswer) this.recordFailure(ctx.toolName);
+    // the sixth from being filed at all. W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1,
+    // D-73): so is the tool's own 4xx refusal (five of one member's refused
+    // plans stopped call_create_task for every business), and what is counted
+    // is counted toward this business's circuit for the tool only.
+    if (!boundaryAnswer && !refused) this.recordFailure(ctx.businessId, ctx.toolName);
     const awaitingApproval = boundaryAnswer?.disposition?.startsWith('AWAITING')
       ? { actionId: boundaryAnswer.actionId ?? null }
       : undefined;
@@ -268,47 +311,67 @@ export class ActionDispatcherService {
     return Promise.all(ctxs.map((ctx) => this.dispatch(ctx)));
   }
 
-  getCircuitStatus(toolName: string): { open: boolean; failures: number; lastFailure: number | null } {
-    const state = this.circuits.get(toolName);
+  /**
+   * `businessId`'s circuit for `toolName` (W9-DISPATCH-CIRCUIT). Without a business, the tool's
+   * circuits in every business read as one: open when any is open, their failures summed, the
+   * latest failure.
+   */
+  getCircuitStatus(toolName: string, businessId?: string): { open: boolean; failures: number; lastFailure: number | null } {
+    const states =
+      businessId !== undefined
+        ? [this.circuits.get(circuitKey(businessId, toolName))].filter((s): s is CircuitState => !!s)
+        : [...this.circuits.entries()].filter(([key]) => (JSON.parse(key) as string[])[1] === toolName).map(([, s]) => s);
     return {
-      open: state?.open ?? false,
-      failures: state?.failures ?? 0,
-      lastFailure: state?.lastFailure ?? null,
+      open: states.some((s) => s.open),
+      failures: states.reduce((sum, s) => sum + s.failures, 0),
+      lastFailure: states.length ? Math.max(...states.map((s) => s.lastFailure)) : null,
     };
   }
 
-  resetCircuit(toolName: string): void {
-    this.circuits.delete(toolName);
+  /** Closes `businessId`'s circuit for `toolName`, or without a business the tool's circuit in every business. */
+  resetCircuit(toolName: string, businessId?: string): void {
+    if (businessId !== undefined) {
+      this.circuits.delete(circuitKey(businessId, toolName));
+      return;
+    }
+    for (const key of [...this.circuits.keys()]) {
+      if ((JSON.parse(key) as string[])[1] === toolName) this.circuits.delete(key);
+    }
   }
 
-  private isCircuitOpen(toolName: string): boolean {
-    const state = this.circuits.get(toolName);
+  private isCircuitOpen(businessId: string, toolName: string): boolean {
+    const key = circuitKey(businessId, toolName);
+    const state = this.circuits.get(key);
     if (!state || !state.open) return false;
     if (Date.now() - state.lastFailure > this.CIRCUIT_TIMEOUT_MS) {
-      state.open = false;
-      state.failures = 0;
+      // Closed and forgotten: the map holds only circuits with failures to remember.
+      this.circuits.delete(key);
       return false;
     }
     return true;
   }
 
-  private recordSuccess(toolName: string): void {
-    const state = this.circuits.get(toolName);
+  private recordSuccess(businessId: string, toolName: string): void {
+    const key = circuitKey(businessId, toolName);
+    const state = this.circuits.get(key);
     if (state) {
       state.failures = Math.max(0, state.failures - 1);
-      if (state.failures === 0) state.open = false;
+      if (state.failures === 0) this.circuits.delete(key);
     }
   }
 
-  private recordFailure(toolName: string): void {
-    const state = this.circuits.get(toolName) ?? { failures: 0, lastFailure: 0, open: false };
+  private recordFailure(businessId: string, toolName: string): void {
+    const key = circuitKey(businessId, toolName);
+    const state = this.circuits.get(key) ?? { failures: 0, lastFailure: 0, open: false };
     state.failures++;
     state.lastFailure = Date.now();
     if (state.failures >= this.CIRCUIT_THRESHOLD) {
       state.open = true;
-      this.logger.warn(`Circuit breaker opened for tool "${toolName}" after ${state.failures} failures`);
+      this.logger.warn(
+        `Circuit breaker opened for tool "${toolName}" in business ${businessId} after ${state.failures} failures`,
+      );
     }
-    this.circuits.set(toolName, state);
+    this.circuits.set(key, state);
   }
 
   private inferEntityType(toolName: string): string | null {

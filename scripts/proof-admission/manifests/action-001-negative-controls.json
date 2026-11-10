@@ -711,8 +711,8 @@
       "claim": "A boundary refusal does not count towards the dispatcher circuit breaker.",
       "mutation": {
         "file": "apps/server/src/modules/ai/action-dispatcher.service.ts",
-        "find": "    if (!boundaryAnswer) this.recordFailure(ctx.toolName);",
-        "replace": "    this.recordFailure(ctx.toolName);"
+        "find": "    if (!boundaryAnswer && !refused) this.recordFailure(ctx.businessId, ctx.toolName);",
+        "replace": "    this.recordFailure(ctx.businessId, ctx.toolName);"
       },
       "mustFail": {
         "surfaces": [

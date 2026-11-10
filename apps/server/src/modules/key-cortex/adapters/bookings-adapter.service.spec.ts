@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BookingsAdapterService } from './bookings-adapter.service';
+import { BookingsAdapterService, KEY_AVAILABILITY_MAX_DAYS } from './bookings-adapter.service';
 import { BookingsService } from '../../bookings/bookings.service';
 import { CatalogService } from '../../catalog/catalog.service';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -28,6 +28,7 @@ describe('BookingsAdapterService', () => {
       updateBookingStatus: vi.fn(),
       rescheduleBooking: vi.fn(),
       confirmBooking: vi.fn(),
+      getAvailableSlots: vi.fn(),
     } as unknown as BookingsService;
 
     catalog = {
@@ -40,6 +41,7 @@ describe('BookingsAdapterService', () => {
       client: {
         service: { findFirst: vi.fn() },
         staffMember: { findMany: vi.fn() },
+        business: { findUnique: vi.fn() },
         booking: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
         calendarEvent: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
         availability: { findMany: vi.fn(), create: vi.fn() },
@@ -127,21 +129,82 @@ describe('BookingsAdapterService', () => {
     (prisma.client.staffMember.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{
       id: 'staff1',
       name: 'Dr. Smith',
-      availabilities: [{ dayOfWeek: 2, startTime: '09:00', endTime: '10:00' }],
+      availabilities: [{ dayOfWeek: 2 }],
     }]);
-    (prisma.client.booking.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (prisma.client.calendarEvent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (prisma.client.business.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      businessHours: null,
+      timezone: 'America/Port_of_Spain',
+    });
+    // W9-KEY-AVAILABILITY-TZ (CR-V16-1): the slots are BookingsService.getAvailableSlots'
+    // answer (the public picker's, on the business's clock); booking-concurrency.
+    // integration.test.ts proves that answer against a real database. The day is a
+    // Tuesday the staff member works, still to come (SEC-KAT-1: past days are not asked about).
+    (bookings.getAvailableSlots as ReturnType<typeof vi.fn>).mockResolvedValue({
+      date: '2030-07-09',
+      slots: ['2030-07-09T13:00:00.000Z'],
+    });
+    (prisma.client.calendarEvent.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     const result = await service.execute(mkCmd('get_availability', {
       serviceId: 's1',
-      from: '2026-07-07T00:00:00.000Z',
-      to: '2026-07-07T23:59:59.999Z',
+      from: '2030-07-09T00:00:00.000Z',
+      to: '2030-07-09T23:59:59.999Z',
     }));
 
     expect(result.success).toBe(true);
     expect(Array.isArray(result.data)).toBe(true);
     expect((result.data as any[]).length).toBeGreaterThan(0);
     expect((result.data as any[])[0]).toMatchObject({ staffId: 'staff1', staffName: 'Dr. Smith' });
+    expect(result.data).toEqual([
+      { startTime: '2030-07-09T13:00:00.000Z', endTime: '2030-07-09T14:00:00.000Z', staffId: 'staff1', staffName: 'Dr. Smith' },
+    ]);
+    // One call for the one staff member and the one calendar day asked for.
+    expect(bookings.getAvailableSlots).toHaveBeenCalledTimes(1);
+    const [call] = (bookings.getAvailableSlots as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call).toMatchObject({ businessId: 'biz_123', serviceId: 's1', staffId: 'staff1' });
+    expect([call.date.getFullYear(), call.date.getMonth(), call.date.getDate()]).toEqual([2030, 6, 9]);
+  });
+
+  it('get_availability refuses a range over KEY_AVAILABILITY_MAX_DAYS days before reading staff or asking about a day (SEC-KAT-1)', async () => {
+    (prisma.client.service.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ duration: 60 });
+    await expect(service.execute(mkCmd('get_availability', {
+      serviceId: 's1',
+      from: '2030-01-01',
+      to: '2030-03-04',
+    }))).rejects.toThrow(`at most ${KEY_AVAILABILITY_MAX_DAYS} days`);
+    expect(KEY_AVAILABILITY_MAX_DAYS).toBe(62);
+    expect(prisma.client.staffMember.findMany).not.toHaveBeenCalled();
+    expect(bookings.getAvailableSlots).not.toHaveBeenCalled();
+  });
+
+  it('get_availability leaves out a business-hours start whose buffer runs past closing, as KEY create_booking refuses it (CR-W9KAT-1)', async () => {
+    (prisma.client.service.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ duration: 60, bufferMins: 15 });
+    (prisma.client.staffMember.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'staff1', name: 'Own Hours', availabilities: [{ dayOfWeek: 1 }] },
+      { id: 'staff2', name: 'Business Hours', availabilities: [] },
+    ]);
+    // Port_of_Spain (UTC-4) opens Mondays 09:00-12:00: 13:00Z-16:00Z.
+    (prisma.client.business.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      businessHours: { mon: { open: '09:00', close: '12:00', closed: false } },
+      timezone: 'America/Port_of_Spain',
+    });
+    (bookings.getAvailableSlots as ReturnType<typeof vi.fn>).mockImplementation(async ({ staffId }: { staffId: string }) => ({
+      date: '2030-01-28',
+      slots: staffId === 'staff1'
+        ? ['2030-01-28T14:00:00.000Z', '2030-01-28T15:00:00.000Z']
+        : ['2030-01-28T14:30:00.000Z', '2030-01-28T15:00:00.000Z'],
+    }));
+    (prisma.client.calendarEvent.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const result = await service.execute(mkCmd('get_availability', { serviceId: 's1', from: '2030-01-28', to: '2030-01-28' }));
+
+    expect(result.success).toBe(true);
+    // staff2's 15:00Z (11:00 local) ends its buffer at 12:15: left out; staff1's own hours are read without it.
+    expect((result.data as any[]).map((s) => `${s.staffId} ${s.startTime}`)).toEqual([
+      'staff1 2030-01-28T14:00:00.000Z',
+      'staff1 2030-01-28T15:00:00.000Z',
+      'staff2 2030-01-28T14:30:00.000Z',
+    ]);
   });
 
   it('returns connectorFail for unknown action', async () => {
