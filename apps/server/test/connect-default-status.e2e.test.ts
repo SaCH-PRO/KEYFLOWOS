@@ -45,6 +45,19 @@
  *   - CR-D92R-1: the web Contact sync settings still offer ACTIVE, INACTIVE and
  *     ARCHIVED; the web file is outside this packet's write set (it.todo).
  *
+ * W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up; owner rulings D-93, D-46): the
+ * Google Forms backfill and process-new routes carry AuthGuard and
+ * BusinessGuard only, and the quote a response creates is written with
+ * prisma.quote.create, outside CommerceService.createQuote (POST quotes:
+ * revenue:write). A run now creates quotes only for a member whose Membership
+ * holds revenue:write: the route's caller, and for the scheduled poller
+ * (connector.synced), which no member starts, the business owner (D-93). A run
+ * whose member may not (revenue read or none, or no Membership at all, a
+ * platform SUPER_ADMIN included, D-46) applies no response of a mapping that
+ * creates quotes: each stays pending for a run by a member with revenue:write,
+ * and the run result says why (opportunityRefusal). CR-D92R-1's web companion
+ * is proven in the web suite named at the end of this file.
+ *
  * Mocked HTTP: the real ConnectController and the real connect services over
  * an in-memory Prisma stand-in; AuthGuard and BusinessGuard are overridden
  * (route-level authority on these routes is not this packet's; the in-service
@@ -594,13 +607,16 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
 
     it('D-92 control: the Google Forms mapping writes no Contact.status: the contact it creates names no status (LEAD)', async () => {
       const businessId = 'biz-gforms';
-      db.business.insert({ id: businessId });
+      // W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up): the run's member, the
+      // owner, holds revenue write, so the mapping creates its quote.
+      db.business.insert({ id: businessId, ownerId: 'u-owner' });
+      seedMembers(businessId);
       const saved = await agent()
         .post(gformsUrl(businessId))
         .send({ formTitle: 'Quote request', fieldMappings: gformFieldMappings, opportunityDefaults: { enabled: true, defaultStatus: 'DRAFT' } });
       expect(saved.status).toBe(201);
       respond('resp-1', 'form.person@example.test');
-      const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`);
+      const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`).set('x-test-user', 'u-owner');
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       expect(res.body).toEqual(expect.objectContaining({ contactsCreated: 1, opportunitiesCreated: 1 }));
       expect(crmCreated).toHaveLength(1);
@@ -632,7 +648,9 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       for (const legacy of ['PAID', 'ACCEPTED', 'CONVERTED', 'SENT']) {
         resetDb();
         const businessId = 'biz-gforms-legacy';
-        db.business.insert({ id: businessId });
+        // W9-FORMS-QUOTE-GATE: the run's member (the owner) holds revenue write.
+        db.business.insert({ id: businessId, ownerId: 'u-owner' });
+        seedMembers(businessId);
         db.googleFormMapping.insert({
           businessId,
           formId: 'gform-1',
@@ -646,7 +664,7 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         const read = await agent().get(gformsUrl(businessId));
         expect(read.body.opportunityDefaults.defaultStatus, legacy).toBe('DRAFT');
         respond(`resp-${legacy}`, `${legacy.toLowerCase()}.person@example.test`);
-        const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`);
+        const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`).set('x-test-user', 'u-owner');
         expect(res.status, `${legacy}: ${JSON.stringify(res.body)}`).toBe(201);
         expect(res.body.opportunitiesCreated, legacy).toBe(1);
         expect(db.quote.rows.map((r) => [r.status, r.total]), legacy).toEqual([['DRAFT', 5000]]);
@@ -654,12 +672,118 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       }
     });
 
-    it.todo(
-      'SEC-D92R-1 follow-up: a Google Forms backfill or process-new run by a member without revenue:write creates no quote (the forms routes carry AuthGuard and BusinessGuard only, and the quote is written with prisma.quote.create, outside CommerceService.createQuote); which member a form-created quote needs, and what the scheduled poller runs as, is an authority decision outside W5-D92-RESIDUALS',
-    );
+    /** The mapping row of `businessId` (one per test). */
+    const storedMapping = (businessId: string) => db.googleFormMapping.rows.find((r) => r.businessId === businessId)!;
+
+    it('SEC-D92R-1 follow-up: a Google Forms backfill or process-new run by a member without revenue:write creates no quote (W9-FORMS-QUOTE-GATE, was it.todo; D-46): a run by a member with revenue read or none, by a user with no Membership, or with no caller applies no response of a mapping that creates quotes (no quote, no contact), each stays pending and the run result says why; a member with revenue:write then creates the contacts and their DRAFT quotes', async () => {
+      const businessId = 'biz-gforms-gate';
+      db.business.insert({ id: businessId, ownerId: 'u-owner' });
+      seedMembers(businessId); // u-staff and u-rep: STAFF with { crm: 'write' }, so revenue none
+      db.user.insert({ id: 'u-reader', role: 'USER' });
+      db.membership.insert({ userId: 'u-reader', businessId, role: 'STAFF', permissionScopes: null }); // STAFF defaults: revenue read
+      db.user.insert({ id: 'u-biller', role: 'USER' });
+      db.membership.insert({ userId: 'u-biller', businessId, role: 'STAFF', permissionScopes: { crm: 'write', revenue: 'write' } });
+      await agent()
+        .post(gformsUrl(businessId))
+        .send({ formTitle: 'Quote request', fieldMappings: gformFieldMappings, opportunityDefaults: { enabled: true, defaultBudget: 5000 } })
+        .expect(201);
+      respond('resp-a', 'a.person@example.test');
+      respond('resp-b', 'b.person@example.test');
+
+      // u-other-tenant has no Membership here (BusinessGuard is overridden; in
+      // production only a platform SUPER_ADMIN reaches the route so, D-46).
+      const REFUSED_RUNS: Array<[string | null, string]> = [
+        ['u-staff', 'none'],
+        ['u-reader', 'read'],
+        ['u-other-tenant', 'none'],
+        [null, 'none'],
+      ];
+      for (const [actor, level] of REFUSED_RUNS) {
+        for (const route of ['backfill', 'process-new']) {
+          const label = `${actor ?? 'no caller'} ${route}`;
+          const call = agent().post(`/connect/businesses/${businessId}/forms/gform-1/${route}`);
+          const res = actor ? await call.set('x-test-user', actor) : await call;
+          expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+          expect(res.body, label).toEqual(
+            expect.objectContaining({ responsesProcessed: 0, responsesSkipped: 2, contactsCreated: 0, opportunitiesCreated: 0, errors: [] }),
+          );
+          expect(res.body.opportunityRefusal, label).toContain(`revenue requires write access (you have ${level})`);
+          expect(db.quote.rows, label).toHaveLength(0);
+          expect(db.contact.rows, label).toHaveLength(0);
+          expect(storedMapping(businessId).processedResponseIds, label).toEqual([]);
+        }
+      }
+      expect(crm.createContact).not.toHaveBeenCalled();
+
+      // A member with revenue:write runs the pending responses: each creates its contact and a DRAFT quote.
+      const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`).set('x-test-user', 'u-biller');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toEqual(
+        expect.objectContaining({ responsesProcessed: 2, responsesSkipped: 0, contactsCreated: 2, opportunitiesCreated: 2, opportunityRefusal: null }),
+      );
+      expect(db.quote.rows.map((r) => [r.status, r.total])).toEqual([['DRAFT', 5000], ['DRAFT', 5000]]);
+      expect(storedMapping(businessId).processedResponseIds).toEqual(['resp-a', 'resp-b']);
+
+      // The owner's later run finds nothing left to apply.
+      const again = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/process-new`).set('x-test-user', 'u-owner');
+      expect(again.body).toEqual(expect.objectContaining({ responsesProcessed: 0, responsesSkipped: 2, opportunitiesCreated: 0, opportunityRefusal: null }));
+      expect(db.quote.rows).toHaveLength(2);
+    });
+
+    it('SEC-D92R-1 follow-up control (W9-FORMS-QUOTE-GATE): a mapping that creates no quote runs for a member without revenue:write as before: the contact is created and no refusal is reported', async () => {
+      const businessId = 'biz-gforms-gate-control';
+      for (const opportunityDefaults of [null, { enabled: false, defaultBudget: 5000 }]) {
+        resetDb();
+        db.business.insert({ id: businessId, ownerId: 'u-owner' });
+        seedMembers(businessId);
+        await agent().post(gformsUrl(businessId)).send({ fieldMappings: gformFieldMappings, opportunityDefaults }).expect(201);
+        respond('resp-c', 'c.person@example.test');
+        const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`).set('x-test-user', 'u-staff');
+        const label = JSON.stringify(opportunityDefaults);
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+        expect(res.body, label).toEqual(expect.objectContaining({ responsesProcessed: 1, contactsCreated: 1, opportunitiesCreated: 0 }));
+        expect(res.body.opportunityRefusal ?? null, label).toBeNull();
+        expect(db.contact.rows, label).toHaveLength(1);
+        expect(db.quote.rows, label).toHaveLength(0);
+        formResponses.length = 0;
+      }
+    });
+
+    it('SEC-D92R-1 follow-up (D-93, W9-FORMS-QUOTE-GATE): the scheduled poller (connector.synced), which no member starts, runs each form as the business owner: it creates the DRAFT quote while the owner\'s Membership holds revenue write, and none (the response stays pending) when the business owner is not a member', async () => {
+      const OWNERS: Array<[string, boolean]> = [
+        ['u-owner', true],
+        ['u-former-owner', false],
+      ];
+      for (const [ownerId, quoted] of OWNERS) {
+        resetDb();
+        formResponses.length = 0;
+        const businessId = 'biz-gforms-poller';
+        db.business.insert({ id: businessId, ownerId });
+        seedMembers(businessId);
+        db.googleFormMapping.insert({
+          businessId,
+          formId: 'gform-1',
+          formTitle: 'Quote request',
+          fieldMappings: gformFieldMappings,
+          opportunityDefaults: { enabled: true, defaultStatus: 'DRAFT', defaultBudget: 700 },
+          autoCreate: true,
+          lastSeenResponseTime: null,
+          processedResponseIds: [],
+        });
+        respond('resp-p', 'poller.person@example.test');
+        await formsMapping.onConnectorSynced({ connectorType: 'google_forms', businessId });
+        expect(db.quote.rows.map((r) => [r.status, r.total]), ownerId).toEqual(quoted ? [['DRAFT', 700]] : []);
+        expect(db.contact.rows, ownerId).toHaveLength(quoted ? 1 : 0);
+        expect(storedMapping(businessId).processedResponseIds, ownerId).toEqual(quoted ? ['resp-p'] : []);
+      }
+    });
   });
 
-  it.todo(
-    'CR-D92R-1 (web companion): the Contact sync settings status select (apps/web/src/app/app/key-connect/components/contact-sync-settings.tsx STATUS_OPTIONS) offers exactly CONTACT_STATUSES; it offers ACTIVE, INACTIVE and ARCHIVED, which the setting now answers 400 for, and no CLIENT or LOST. The web file is outside the W5-D92-RESIDUALS write set',
-  );
+  // CR-D92R-1 (web companion; D-92): the Contact sync settings status select
+  // (apps/web/src/app/app/key-connect/components/contact-sync-settings.tsx,
+  // STATUS_OPTIONS) offers exactly CONTACT_STATUSES (LEAD, PROSPECT, CLIENT,
+  // LOST), not ACTIVE, INACTIVE or ARCHIVED, which the setting answers 400 for.
+  // W6-WEB-STATUS-OPTIONS made it so; the proof is the web suite
+  // apps/web/src/app/app/key-connect/components/__tests__/contact-sync-settings-status-options.test.tsx.
+  // W9-FORMS-QUOTE-GATE: the it.todo that stood here is this pointer.
 });
