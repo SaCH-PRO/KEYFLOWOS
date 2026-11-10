@@ -937,25 +937,29 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
       bannedAt: null,
       metaData: {},
     };
-    const prisma = {
-      client: {
-        riscEvent: { findUnique: vi.fn(async () => null), create: riscCreate },
-        userIdentity: { findUnique: vi.fn(async () => ({ userId: USER })) },
-        session: {
-          deleteMany: vi.fn(async () => {
-            order.push('local session deleteMany');
-            return { count: 2 };
-          }),
-        },
-        user: {
-          findUnique: vi.fn(async () => ({ ...userRow, metaData: { ...userRow.metaData } })),
-          update: vi.fn(async (args: { data: { metaData?: Record<string, unknown> } }) => {
-            if (args.data.metaData) userRow.metaData = { ...args.data.metaData };
-            return undefined;
-          }),
-        },
+    const client = {
+      riscEvent: { findUnique: vi.fn(async () => null), create: riscCreate },
+      userIdentity: { findUnique: vi.fn(async () => ({ userId: USER })) },
+      session: {
+        deleteMany: vi.fn(async () => {
+          order.push('local session deleteMany');
+          return { count: 2 };
+        }),
       },
+      user: {
+        findUnique: vi.fn(async () => ({ ...userRow, metaData: { ...userRow.metaData } })),
+        update: vi.fn(async (args: { data: { metaData?: Record<string, unknown> } }) => {
+          if (args.data.metaData) userRow.metaData = { ...args.data.metaData };
+          return undefined;
+        }),
+      },
+      // D-97 review SEC-W8RSC-1: RiscService changes User.metaData in a
+      // transaction that first takes the User row lock; the one in-memory row
+      // needs no lock, so the callback runs on this same client.
+      $queryRaw: vi.fn(async () => []),
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(client)),
     };
+    const prisma = { client };
     const audit = vi.fn(async (_entry: unknown) => undefined);
     const risc = new RiscService(
       prisma as never,

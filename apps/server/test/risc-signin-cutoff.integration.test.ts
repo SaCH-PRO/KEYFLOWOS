@@ -83,12 +83,21 @@ const ID = {
   attacker: `${P}u_attacker`,
   hijacked: `${P}u_hijacked`,
   calm: `${P}u_calm`,
+  // D-97 review repairs (SEC-W8RSC-1..3, CR-W8RSC-1).
+  raceFlag: `${P}u_race_flag`,
+  raceEnable: `${P}u_race_enable`,
+  flaky: `${P}u_flaky`,
+  legacy: `${P}u_legacy`,
 };
 const EMAIL = {
   victim: `${P}victim@test.local`,
   attacker: `${P}attacker@test.local`,
   hijacked: `${P}hijacked@test.local`,
   calm: `${P}calm@test.local`,
+  raceFlag: `${P}race-flag@test.local`,
+  raceEnable: `${P}race-enable@test.local`,
+  flaky: `${P}flaky@test.local`,
+  legacy: `${P}legacy@test.local`,
 };
 /** The Google subs GoTrue holds for each user (its verified google identity). */
 const GSUB = {
@@ -96,6 +105,10 @@ const GSUB = {
   attacker: `${P}gsub-attacker`,
   hijacked: `${P}gsub-hijacked`,
   calm: `${P}gsub-calm`,
+  raceFlag: `${P}gsub-race-flag`,
+  raceEnable: `${P}gsub-race-enable`,
+  flaky: `${P}gsub-flaky`,
+  legacy: `${P}gsub-legacy`,
 };
 type Who = keyof typeof ID;
 const WHO = Object.keys(ID) as Who[];
@@ -106,6 +119,9 @@ const FORGED_SUB = `${P}gsub-forged`;
 let db: any;
 let app: any;
 let risc: any;
+let prismaService: any;
+let RiscServiceCtor: any;
+const quietLogger = { warn: () => undefined, log: () => undefined, debug: () => undefined, error: () => undefined };
 let keyPair: Awaited<ReturnType<typeof generateKeyPair>>;
 let jtiSeq = 0;
 
@@ -193,7 +209,8 @@ async function accessToken(user: Who, signedInAt: number, iat = Math.floor(Date.
     .sign(new TextEncoder().encode(JWT_SECRET));
 }
 
-async function riscEvent(googleSub: string, eventType: string, reason?: string) {
+/** A Google-signed (test key) RISC security event token. */
+async function signRisc(googleSub: string, eventType: string, reason?: string) {
   const details: Record<string, unknown> = { subject: { subject_type: 'iss-sub', iss: GOOGLE_ISSUER, sub: googleSub } };
   if (reason) details.reason = reason;
   const jti = `${P}jti-${++jtiSeq}-${Date.now()}`;
@@ -203,9 +220,49 @@ async function riscEvent(googleSub: string, eventType: string, reason?: string) 
     .setAudience(GOOGLE_CLIENT)
     .setIssuedAt()
     .sign(keyPair.privateKey);
+  return { jti, token };
+}
+
+async function riscEvent(googleSub: string, eventType: string, reason?: string) {
+  const { jti, token } = await signRisc(googleSub, eventType, reason);
   const result = await risc.receiveEvent(token);
   const row = await db.riscEvent.findUnique({ where: { jti } });
   return { result, row };
+}
+
+/** A RiscService like `risc`, over another Prisma stand-in (to inject a database failure). */
+function riscOn(prisma: unknown) {
+  const svc = new RiscServiceCtor(
+    prisma as never,
+    supabaseAdminStub as never,
+    { audit: async () => undefined } as never,
+    { on: () => undefined, emit: () => true } as never,
+    redis as never,
+  );
+  (svc as { logger: unknown }).logger = quietLogger;
+  return svc;
+}
+
+/**
+ * Wait until `n` backends of this database wait on a lock (pg_stat_activity),
+ * so a test knows both RISC deliveries reached the User row before it lets
+ * them through.
+ */
+async function waitForLockWaiters(n: number) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [{ waiting }] = await db.$queryRaw`
+      SELECT count(*)::int AS waiting FROM pg_stat_activity
+       WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`;
+    if (waiting >= n) return;
+    if (Date.now() > deadline) throw new Error(`only ${waiting} of ${n} backends reached the row lock`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+async function metaOf(id: string): Promise<Record<string, unknown>> {
+  const row = await db.user.findUnique({ where: { id }, select: { metaData: true } });
+  return (row?.metaData ?? {}) as Record<string, unknown>;
 }
 
 const me = (bearer: string) => request(app.getHttpServer()).get('/identity/me').set('Authorization', `Bearer ${bearer}`);
@@ -261,6 +318,7 @@ beforeAll(async () => {
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
   const { RiscService } = await import('../src/modules/risc/risc.service');
+  RiscServiceCtor = RiscService;
   ({ RISC_EVENT_TYPES } = await import('../src/modules/risc/risc.types'));
 
   const moduleRef = await Test.createTestingModule({
@@ -290,14 +348,8 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
 
-  risc = new RiscService(
-    moduleRef.get(PrismaService) as never,
-    supabaseAdminStub as never,
-    { audit: async () => undefined } as never,
-    { on: () => undefined, emit: () => true } as never,
-    redis as never,
-  );
-  (risc as { logger: unknown }).logger = { warn: () => undefined, log: () => undefined, debug: () => undefined, error: () => undefined };
+  prismaService = moduleRef.get(PrismaService);
+  risc = riscOn(prismaService);
 
   await cleanup(); // in case a prior run aborted
 });
@@ -396,5 +448,152 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     await riscEvent(GSUB.hijacked, RISC_EVENT_TYPES.ACCOUNT_ENABLED);
     expect(await cutoffOf(ID.hijacked)).toBe(hijackedCutoff);
     expect((await me(await accessToken('hijacked', (hijackedCutoff as number) - 60))).status).toBe(401);
+  });
+  /**
+   * D-97 review SEC-W8RSC-1 / CR-W8RSC-1: the durable cutoff and the
+   * googleSignInDisabled flag share User.metaData, and each writer read the
+   * bag and wrote it back whole. Here both deliveries reach the User row while
+   * another transaction holds its lock, so both have read before either
+   * writes: unlocked, the flag write (whichever lands last) carried the stale
+   * bag back and erased signInCutoffAt, while the event row still said
+   * sessions_terminated. Each writer now takes the row lock before it reads,
+   * so the second reads the first's committed result.
+   */
+  it.each([
+    ['account-disabled/bulk-account', 'raceFlag', 'ACCOUNT_DISABLED', 'bulk-account', true, 'account_disabled_flagged'],
+    ['account-enabled', 'raceEnable', 'ACCOUNT_ENABLED', undefined, false, 'account_enabled'],
+  ] as Array<[string, Who, string, string | undefined, boolean, string]>)(
+    'D-97 review SEC-W8RSC-1 / CR-W8RSC-1: %s (flag writer) delivered together with sessions-revoked (cutoff writer) for the same user keeps both keys — the durable cutoff is not lost, and once the 24h cutoff lapses a refreshed pre-event token is still refused',
+    async (_name, who, flagEvent, reason, flag, flagAction) => {
+      expect((await bootstrap(who)).status).toBe(201);
+      const signedIn = Math.floor(Date.now() / 1000) - 3600;
+      expect((await me(await accessToken(who, signedIn))).status).toBe(200);
+
+      let release!: () => void;
+      const released = new Promise<void>((r) => (release = r));
+      let held!: () => void;
+      const lockHeld = new Promise<void>((r) => (held = r));
+      const holder = db.$transaction(
+        async (tx: any) => {
+          await tx.$queryRaw`SELECT id FROM users WHERE id = ${ID[who]} FOR UPDATE`;
+          held();
+          await released;
+        },
+        { timeout: 20_000 },
+      );
+      await lockHeld;
+      const both = Promise.all([
+        riscEvent(GSUB[who], RISC_EVENT_TYPES[flagEvent], reason),
+        riscEvent(GSUB[who], RISC_EVENT_TYPES.SESSIONS_REVOKED),
+      ]);
+      await waitForLockWaiters(2);
+      release();
+      await holder;
+      const [flagged, revoked] = await both;
+
+      expect(flagged.row).toMatchObject({ userId: ID[who], actionTaken: flagAction });
+      expect(revoked.row).toMatchObject({ userId: ID[who], actionTaken: 'sessions_terminated' });
+      const meta = await metaOf(ID[who]);
+      expect(meta.googleSignInDisabled).toBe(flag);
+      expect(typeof meta.signInCutoffAt).toBe('number');
+
+      redisStore.delete(logoutRevocationKey(ID[who]));
+      redisStore.delete(`admin:user:${ID[who]}:revokedAt`);
+      const refreshed = await accessToken(who, signedIn, Math.floor(Date.now() / 1000));
+      expect((await me(refreshed)).status).toBe(401);
+    },
+  );
+
+  it('D-97 review SEC-W8RSC-1: the same pair delivered together with no lock held, 8 rounds — the durable cutoff survives every round', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      const id = `${P}u_round_${i}`;
+      await db.user.create({ data: { id, email: `${P}round-${i}@test.local`, name: `${P}round ${i}`, role: 'USER' } });
+      await db.userIdentity.create({ data: { userId: id, provider: 'google', providerSubject: `${P}gsub-round-${i}` } });
+      ids.push(id);
+    }
+    for (let i = 0; i < ids.length; i++) {
+      await Promise.all([
+        riscEvent(`${P}gsub-round-${i}`, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'),
+        riscEvent(`${P}gsub-round-${i}`, RISC_EVENT_TYPES.SESSIONS_REVOKED),
+      ]);
+    }
+    for (const id of ids) {
+      const meta = await metaOf(id);
+      expect(meta).toMatchObject({ googleSignInDisabled: true });
+      expect(typeof meta.signInCutoffAt).toBe('number');
+    }
+  });
+
+  it('D-97 review SEC-W8RSC-2: when the durable cutoff write fails the event is answered 503 (not 202), the row names signin_cutoff, and Google\'s redelivery of the same token is processed again — it records the cutoff, so a refreshed pre-event token stays refused once the 24h cutoff lapses', async () => {
+    expect((await bootstrap('flaky')).status).toBe(201);
+    const signedIn = Math.floor(Date.now() / 1000) - 3600;
+
+    // The first User.metaData transaction (the cutoff: it runs before the
+    // flag) fails once, as a transient database error would.
+    let failNext = true;
+    const client = prismaService.client;
+    const flakyClient = new Proxy(client, {
+      get(target: any, prop: string | symbol) {
+        if (prop === '$transaction' && failNext) {
+          failNext = false;
+          return async () => {
+            throw new Error('simulated transient database error');
+          };
+        }
+        const value = target[prop];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const flaky = riscOn({ client: flakyClient });
+
+    const { jti, token } = await signRisc(GSUB.flaky, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const first = await flaky.receiveEvent(token).catch((err: unknown) => err);
+    const { ServiceUnavailableException } = await import('@nestjs/common');
+    expect(first).toBeInstanceOf(ServiceUnavailableException);
+    expect((first as InstanceType<typeof ServiceUnavailableException>).getStatus()).toBe(503);
+    expect(await db.riscEvent.findUnique({ where: { jti } })).toMatchObject({
+      userId: ID.flaky,
+      actionTaken: 'account_disabled_hijacking:revocation_incomplete:signin_cutoff',
+    });
+    expect(await cutoffOf(ID.flaky)).toBeUndefined();
+
+    // Google delivers the same token again: processed, not deduplicated.
+    const before = Math.floor(Date.now() / 1000);
+    await expect(flaky.receiveEvent(token)).resolves.toEqual({ status: 202, processed: true });
+    expect(await db.riscEvent.findUnique({ where: { jti } })).toMatchObject({ userId: ID.flaky, actionTaken: 'account_disabled_hijacking' });
+    expect(await db.riscEvent.count({ where: { jti } })).toBe(1);
+    const cutoff = await cutoffOf(ID.flaky);
+    expect(typeof cutoff).toBe('number');
+    expect(cutoff as number).toBeGreaterThanOrEqual(before);
+    expect(await metaOf(ID.flaky)).toMatchObject({ googleSignInDisabled: true });
+
+    // A third delivery is a duplicate now.
+    await expect(flaky.receiveEvent(token)).resolves.toEqual({ status: 202, processed: false });
+
+    redisStore.delete(logoutRevocationKey(ID.flaky));
+    redisStore.delete(`admin:user:${ID.flaky}:revokedAt`);
+    expect((await me(await accessToken('flaky', signedIn, Math.floor(Date.now() / 1000)))).status).toBe(401);
+  });
+
+  it('D-97 review SEC-W8RSC-3 (documented residual): an account with no UserIdentity row (last signed in before W8-RISC-SIGNIN-CUTOFF) is not reached by a hijacking event — no cutoff, no 24h cutoff, logged for the operator with the Google sub — until its owner signs in again and bootstrap writes the row', async () => {
+    await db.user.create({ data: { id: ID.legacy, email: EMAIL.legacy, name: `${P}legacy`, role: 'USER' } });
+    const warn = vi.fn();
+    (risc as { logger: unknown }).logger = { ...quietLogger, warn };
+    try {
+      const unmatched = await riscEvent(GSUB.legacy, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+      expect(unmatched.row).toMatchObject({ userId: null, actionTaken: 'no_matching_user' });
+      expect(await cutoffOf(ID.legacy)).toBeUndefined();
+      expect(redisStore.has(logoutRevocationKey(ID.legacy))).toBe(false);
+      expect(warn.mock.calls.some((c) => String(c[0]).includes(GSUB.legacy) && String(c[0]).includes('matched no user'))).toBe(true);
+    } finally {
+      (risc as { logger: unknown }).logger = quietLogger;
+    }
+
+    // The owner signs in with Google again: bootstrap writes the row, and the next event reaches the account.
+    expect((await bootstrap('legacy')).status).toBe(201);
+    const reached = await riscEvent(GSUB.legacy, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    expect(reached.row).toMatchObject({ userId: ID.legacy, actionTaken: 'account_disabled_hijacking' });
+    expect(typeof (await cutoffOf(ID.legacy))).toBe('number');
   });
 });

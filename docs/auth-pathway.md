@@ -936,8 +936,38 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   stays empty (R0-SEC-02). `account-enabled`,
   `account-credential-change-required`, `verification` and
   `account-disabled` for any other reason record no cutoff.
+- The cutoff and the `googleSignInDisabled` flag share `users.meta_data`;
+  each RISC write takes the User row lock before it reads the bag, so two
+  events for the same user handled together never write back each other's
+  stale copy (D-97 review SEC-W8RSC-1 / CR-W8RSC-1).
 - Every event is deduplicated by `jti` and written to `risc_events`
-  and `auth_audit_logs`.
+  and `auth_audit_logs`. When the durable cutoff's write fails, the event
+  is answered 503, not 202, and its row names `signin_cutoff`; Google's
+  redelivery of that `jti` is processed again (every leg; the cutoff is then
+  the redelivery time) instead of being dropped as a duplicate (D-97 review
+  SEC-W8RSC-2).
+- Residuals of D-97, not closed by W8-RISC-SIGNIN-CUTOFF:
+  - **Accounts with no `UserIdentity` row** (SEC-W8RSC-3). Nothing wrote
+    that table before this packet and there is no backfill, so an account
+    last signed in with Google before the deploy is not reached by any RISC
+    event (`no_matching_user`: no cutoff, no 24h cutoff, no ban) until its
+    owner signs in again and bootstrap writes the row. Such an event is logged
+    (`SECURITY: RISC ... matched no user`) with the Google sub, so the
+    operator can find the account in GoTrue and act on it (dashboard ban,
+    password reset). A backfill from GoTrue's admin user list (identities,
+    never the user-editable `user_metadata`) is a separate operator task.
+  - **A pre-event GoTrue session can mint a post-cutoff sign-in**
+    (SEC-W8RSC-4, owner ruling needed; not reproduced: needs a real GoTrue).
+    D-97 leaves the pre-event refresh token alive at GoTrue. With it a
+    hijacker can set a password (`PUT /auth/v1/user`, when secure password
+    change is off or the session is under 24h old) and then open a new
+    password session, whose `amr` is after the cutoff and is admitted. For
+    hijacking this works once the 65-minute ban lapses; sessions-revoked,
+    tokens-revoked and token-revoked set no ban. GoTrue's admin password
+    update ends every session of the user with the service-role key alone
+    (see `identity-password.service.ts`), so a provider-wide logout may not
+    need `SUPABASE_JWT_SECRET` after all; whether to use it (it replaces the
+    user's password) is for the owner (D-39/D-97).
 
 See `docs/development/risc-setup.md` for GCP configuration and the
 `pnpm configure:risc` registration script.
