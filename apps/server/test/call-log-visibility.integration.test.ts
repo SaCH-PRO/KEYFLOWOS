@@ -72,7 +72,8 @@ let db: any;
 let app: any;
 let redis: any;
 let callLogs: any; // the module's real CallLogService
-let prismaSvc: any; // the module's real PrismaService (the KEY dispatcher's, CL-06)
+let prismaSvc: any; // the module's real PrismaService (the KEY dispatcher's, CL-05, CL-06)
+let scriptsStub: any; // the CallScriptService recorder (the KEY dispatcher's too, CL-05)
 const emitted: Array<[string, any]> = [];
 const scriptCalls: Array<[string, string, string]> = [];
 
@@ -173,6 +174,7 @@ beforeAll(async () => {
 
   callLogs = moduleRef.get(CallLogService);
   prismaSvc = moduleRef.get(PrismaService);
+  scriptsStub = scripts;
   const controller = moduleRef.get(CallTaskController) as any;
   controller.callLogs = callLogs;
   controller.callScripts = scripts;
@@ -490,15 +492,126 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
   it.todo('chaser.service.ts and capacity-insight.service.ts tell a caller to log the outcome of a call log whose contact they can no longer open (review CR-2 dead-end; those services are outside FOLLOW3-D4-CALL-LOG-VIS\'s write set, follow-up packet)');
 });
 
-// Review ST-2 (residual, not fixed here): the KEY write tools reach the call logs and contacts the
-// HTTP routes now hide. call_log_outcome (completeCall), call_schedule_followup
-// (createFollowUpTask), call_generate_script and call_create_task run with no acting member, and
-// JobRolePolicyService grants them to non-OWNER crm:write holders (crm_view 'owned' included) while
-// it withholds crm_update_contact from the same holders. The fix is in job-role-policy.service.ts
-// (CRM_ROW_VISIBILITY_TOOLS) or a dispatcher that passes the actor (flow-orchestrator.service.ts),
-// both outside this packet's write set.
-describe('CL-05 KEY call-log write tools (review ST-2, follow-up packet)', () => {
-  it.todo("KEY call_log_outcome, call_schedule_followup, call_generate_script and call_create_task apply the acting member's CRM record visibility, or are withheld from members whose visibility is restricted (job-role-policy.service.ts / flow-orchestrator.service.ts)");
+// Review ST-2 (residual of V1-84): the KEY write tools reached the call logs and contacts the HTTP
+// routes hide. call_log_outcome (completeCall), call_schedule_followup (createFollowUpTask) and
+// call_generate_script ran with no acting member, and JobRolePolicyService grants them to non-OWNER
+// crm:write holders (crm_view 'owned' included) while it withholds crm_update_contact from the same
+// holders. W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88: KEY acts as the member the command
+// runs for): the dispatcher hands the call-log service that member as the viewer the routes take from
+// the session, so a call log or contact the member may not open answers as an unknown one, exactly as
+// the call-log routes answer that member. call_create_task already did (W7-CALL-TASK-CALLER, CL-06).
+// A run with no member reads the business's call logs as before (no new authority rule here).
+
+/** KEY's dispatcher (FlowOrchestratorService.executeToolAction) over this suite's real PrismaService and CallLogService and the script recorder. */
+async function keyDispatch(tool: string, args: Record<string, unknown>, action: Record<string, unknown>) {
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { CallLogService } = await import('../src/modules/call-tasks/call-log.service');
+  const { CallScriptService } = await import('../src/modules/call-tasks/call-script.service');
+  const dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    prisma: prismaSvc,
+    moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : token === CallScriptService ? scriptsStub : undefined) },
+  });
+  return dispatcher.executeToolAction(ID.bizA, tool, args, action);
+}
+
+/** A KEY call's refusal as { status, message }, or null when the call resolved. */
+const keyRefusal = (p: Promise<unknown>) =>
+  p.then(
+    () => null,
+    (err: any) => ({ status: typeof err?.getStatus === 'function' ? err.getStatus() : undefined, message: err?.message }),
+  );
+
+describe('CL-05 KEY call-log write tools (review ST-2, W9-KEY-OBLIGATIONS-CALLS)', () => {
+  const unknownLog = `${P}noSuchCall`;
+  const unknownContact = `${P}noSuchContact`;
+
+  it("CL-05a KEY call_log_outcome, call_schedule_followup, call_generate_script and call_create_task apply the acting member's CRM record visibility: a call log or contact the member may not open answers exactly as an unknown one and as the call-log route answers that member, and nothing is written (D-64, D-88) (W9-KEY-OBLIGATIONS-CALLS, was it.todo)", async () => {
+    const marker = `${P}key_cl05`;
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      // crm_view 'owned': the owner's PRIVATE and TEAM contacts are outside their book
+      [ID.staffOwned, { surface: 'CHAT', principalUserId: ID.staffOwned }, ID.cPriv],
+      [ID.staffOwned, { surface: 'CHAT', principalUserId: ID.staffOwned }, ID.cTeam],
+      // view-all: another member's PRIVATE contact, also on a surface with no principal run for them
+      [ID.staffAll, { surface: 'PROPOSAL', onBehalfOfUserId: ID.staffAll }, ID.cPriv],
+      [ID.staffAll, { surface: 'CHAT', principalUserId: ID.staffAll }, ID.cShared],
+    ];
+    let n = 0;
+    for (const [actor, action, contactId] of cases) {
+      n += 1;
+      const label = `${actor} ${String(action.surface)} ${contactId}`;
+      const row = await freshCall(`k5_${n}`, contactId);
+      const before = await db.callLog.findUnique({ where: { id: row.id } });
+
+      // the call log's own tools: the hidden call log answers as an unknown call log, and as the route
+      const onLog: Array<[string, Record<string, unknown>, (id: string) => Promise<any>]> = [
+        ['call_log_outcome', { outcome: 'reached', notes: marker }, (id) => as(actor).post(`${calls}/${id}/complete`, { outcome: 'reached', notes: marker })],
+        ['call_schedule_followup', { title: marker }, (id) => as(actor).post(`${calls}/${id}/follow-up`, { title: marker })],
+        // cMine is a contact both members may open (staffOwned's own TEAM contact)
+        ['call_generate_script', { contactId: ID.cMine }, (id) => as(actor).post(`${calls}/${id}/generate-script`)],
+      ];
+      for (const [tool, args, rest] of onLog) {
+        const hidden = await keyRefusal(keyDispatch(tool, { ...args, callLogId: row.id }, action));
+        const unknown = await keyRefusal(keyDispatch(tool, { ...args, callLogId: unknownLog }, action));
+        expect(hidden, `${tool} ${label}`).toEqual({ status: 404, message: 'Call log not found' });
+        expect(unknown, `${tool} ${label}`).toEqual(hidden);
+        const res = await rest(row.id);
+        expect([res.status, res.body.message], `${tool} ${label} route`).toEqual([hidden!.status, hidden!.message]);
+      }
+
+      // a script on a call log the member may open, for a contact they may not: as an unknown contact
+      const hiddenContact = await keyRefusal(keyDispatch('call_generate_script', { callLogId: ID.clNone, contactId }, action));
+      const unknownScript = await keyRefusal(keyDispatch('call_generate_script', { callLogId: ID.clNone, contactId: unknownContact }, action));
+      expect(hiddenContact, `call_generate_script contact ${label}`).toEqual({ status: 404, message: 'Contact not found' });
+      expect(unknownScript, `call_generate_script contact ${label}`).toEqual(hiddenContact);
+
+      // call_create_task on the hidden contact: as an unknown contact (W7-CALL-TASK-CALLER, pinned here too)
+      const create = await keyRefusal(keyDispatch('call_create_task', { contactId, notes: marker }, action));
+      const createUnknown = await keyRefusal(keyDispatch('call_create_task', { contactId: unknownContact, notes: marker }, action));
+      expect(create, `call_create_task ${label}`).toEqual({ status: 404, message: 'Contact not found' });
+      expect(createUnknown, `call_create_task ${label}`).toEqual(create);
+
+      expect(await db.callLog.findUnique({ where: { id: row.id } }), label).toEqual(before);
+      expect(await db.contactTask.count({ where: { callLogId: row.id } }), label).toBe(0);
+    }
+    expect(await db.callLog.count({ where: { businessId: ID.bizA, notes: marker } })).toBe(0);
+    expect(await db.contactTask.count({ where: { businessId: ID.bizA, title: marker } })).toBe(0);
+    expect(scriptCalls).toEqual([]);
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-05b CONTROL: on call logs and contacts the member may open the KEY call-log tools complete, follow up and script as before, and the OWNER acts on a PRIVATE contact\'s call log (W9-KEY-OBLIGATIONS-CALLS)', async () => {
+    const owned = { surface: 'CHAT', principalUserId: ID.staffOwned };
+    const mine = await freshCall('k5_mine', ID.cMine);
+    const shared = await freshCall('k5_shared', ID.cShared);
+    const none = await freshCall('k5_none', null);
+    const team = await freshCall('k5_team', ID.cTeam);
+    const priv = await freshCall('k5_priv', ID.cPriv);
+
+    const outcome = await keyDispatch('call_log_outcome', { callLogId: mine.id, outcome: 'reached' }, owned);
+    expect(outcome).toMatchObject({ callLogId: mine.id, outcome: 'reached' });
+    expect(await keyDispatch('call_log_outcome', { callLogId: none.id, outcome: 'no_answer' }, owned)).toMatchObject({ callLogId: none.id, outcome: 'no_answer' });
+    const followUp = await keyDispatch('call_schedule_followup', { callLogId: shared.id, title: 'v84d key shared follow up' }, owned);
+    expect(await db.contactTask.findUnique({ where: { id: followUp.taskId } })).toMatchObject({ contactId: ID.cShared, callLogId: shared.id });
+    const script = await keyDispatch('call_generate_script', { callLogId: mine.id, contactId: ID.cMine }, owned);
+    expect(script).toMatchObject({ callLogId: mine.id, greeting: 'v84d-script' });
+
+    // a view-all member run for on a surface with no principal: the TEAM contact's call log
+    const teamFollowUp = await keyDispatch('call_schedule_followup', { callLogId: team.id, title: 'v84d key team follow up' }, { surface: 'PROPOSAL', onBehalfOfUserId: ID.staffAll });
+    expect(await db.contactTask.findUnique({ where: { id: teamFollowUp.taskId } })).toMatchObject({ contactId: ID.cTeam, callLogId: team.id });
+
+    // the OWNER opens every contact
+    expect(await keyDispatch('call_log_outcome', { callLogId: priv.id, outcome: 'reached' }, { surface: 'CHAT', principalUserId: ID.owner })).toMatchObject({ callLogId: priv.id, outcome: 'reached' });
+
+    expect(scriptCalls).toEqual([[ID.bizA, mine.id, ID.cMine]]);
+    expect(emitted.map(([name]) => name)).toEqual([
+      'call_log.completed',
+      'call_log.completed',
+      'call_log.follow_up_created',
+      'call_log.follow_up_created',
+      'call_log.completed',
+    ]);
+    for (const id of [mine.id, none.id, priv.id]) expect((await db.callLog.findUnique({ where: { id } }))?.completedAt, id).not.toBeNull();
+  });
 });
 
 /**

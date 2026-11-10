@@ -109,6 +109,7 @@ const scheduler = { async getLastScanTime() { return null; }, async shouldAutoSc
 let db: any;
 let app: any;
 let commandService: any;
+let prismaSvc: any; // the module's real PrismaService (the KEY dispatcher's, KEY-01)
 let CONTACT_ITEM_LABEL: string;
 
 async function cleanup() {
@@ -270,6 +271,7 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
   commandService = moduleRef.get(CommandService);
+  prismaSvc = moduleRef.get(PrismaService);
 
   await cleanup(); // in case a prior run aborted
 
@@ -786,8 +788,83 @@ describe('CI-05 (review ST-D10-1): the business-wide channels carry neither the 
   });
 });
 
-describe("KEY path (review ST-D10-3, CR-2): outside this packet's write set", () => {
-  it.todo(
-    '[KEY-01] command_list_due_obligations and command_discharge_obligation (flow-orchestrator.service.ts:5697, :5713) call findDue and discharge without the requesting member, so through KEY a crm_view owned member lists and discharges obligations these routes refuse them. Closing it needs the dispatcher to pass the member (flow-orchestrator.service.ts) or both tools in CRM_ROW_VISIBILITY_TOOLS (job-role-policy.service.ts) with the DRV-1 pins (job-role-tool-families.spec.ts), all outside FOLLOW3-D10: a follow-up packet',
-  );
+/**
+ * KEY path (review ST-D10-3, CR-2), closed by W9-KEY-OBLIGATIONS-CALLS (owner ruling D-88: KEY acts
+ * as the member the command runs for). command_list_due_obligations and command_discharge_obligation
+ * called findDue and discharge without the requesting member, so through KEY a crm_view 'owned' member
+ * listed and discharged the obligations GET items/due and POST items/:id/discharge withhold from them.
+ * The dispatcher now hands CommandService the member (the surface's principal, or the member a surface
+ * with no principal runs for), so the FOLLOW3-D10 rule applies to them as on the routes. The real
+ * FlowOrchestratorService dispatcher (executeToolAction) runs over this suite's real PrismaService and
+ * CommandService.
+ */
+describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () => {
+  async function keyRun(tool: string, args: Record<string, unknown>, action: Record<string, unknown>) {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { CommandService } = await import('../src/modules/command/command.service');
+    const dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma: prismaSvc,
+      moduleRef: { get: (token: unknown) => (token === CommandService ? commandService : undefined) },
+    });
+    return dispatcher.executeToolAction(ID.bizA, tool, args, action);
+  }
+
+  /** A KEY call's refusal as { status, message }, or null when the call resolved. */
+  const keyRefusal = (p: Promise<unknown>) =>
+    p.then(
+      () => null,
+      (err: any) => ({ status: typeof err?.getStatus === 'function' ? err.getStatus() : undefined, message: err?.message }),
+    );
+
+  const chat = (member: string) => ({ surface: 'CHAT', principalUserId: member });
+  const runFor = (member: string) => ({ surface: 'PROPOSAL', onBehalfOfUserId: member });
+
+  it("[KEY-01] command_list_due_obligations and command_discharge_obligation act with the requesting member's CRM visibility: through KEY a crm_view owned member's due list leaves out the obligation of a contact they cannot open, exactly as GET items/due does, and discharging it answers as an unknown id with the row unchanged and nothing recorded (D-88) (W9-KEY-OBLIGATIONS-CALLS, was it.todo)", async () => {
+    // the due list, for each restricted member, on a member's chat and on a surface run for them
+    for (const member of [ID.staffOwned, ID.writerOwned, ID.staffAll]) {
+      for (const action of [chat(member), runFor(member)]) {
+        const label = `${member} ${action.surface}`;
+        const key = await keyRun('command_list_due_obligations', { limit: 500 }, action);
+        const rest = await send('get', `${cmd}/items/due?limit=500`, member);
+        expect(rest.status, label).toBe(200);
+        expect(listIds(key), label).not.toContain(ID.iPriv);
+        expect(listIds(key), label).toEqual(listIds(rest.body));
+        expect(key.total, label).toBe(rest.body.total);
+        expect(key.overdueCount, label).toBe(rest.body.overdueCount);
+        expect(JSON.stringify(key), label).not.toContain(PRIVATE_NAME);
+      }
+    }
+
+    // discharge: the member who may write operations, on both surfaces
+    for (const action of [chat(ID.writerOwned), runFor(ID.writerOwned)]) {
+      const label = String(action.surface);
+      const item = await seedItem('priv');
+      const before = await rowOf(item.id);
+      const rec = recorded();
+      const hidden = await keyRefusal(keyRun('command_discharge_obligation', { obligationId: item.id, dischargeRef: `${P}key` }, action));
+      const unknown = await keyRefusal(keyRun('command_discharge_obligation', { obligationId: ID.unknown, dischargeRef: `${P}key` }, action));
+      expect(hidden, label).toEqual({ status: 404, message: 'Command item not found' });
+      expect(unknown, label).toEqual(hidden);
+      // POST items/:id/discharge answers the same member the same way
+      const rest = await send('post', `${cmd}/items/${item.id}/discharge`, ID.writerOwned, { dischargeRef: `${P}paid` });
+      expect([rest.status, rest.body.message], label).toEqual([hidden!.status, hidden!.message]);
+      expect(await rowOf(item.id), label).toBe(before);
+      expect(recorded(), label).toEqual(rec);
+    }
+  });
+
+  it('[KEY-01b] CONTROL: through KEY the OWNER and the member the contact is shared with list and discharge that obligation, and a restricted member discharges one that names no contact (W9-KEY-OBLIGATIONS-CALLS)', async () => {
+    for (const member of [ID.owner, ID.writerShared]) {
+      const due = await keyRun('command_list_due_obligations', { limit: 500 }, chat(member));
+      expect(listIds(due), member).toContain(ID.iPriv);
+      const item = await seedItem('priv');
+      const out = await keyRun('command_discharge_obligation', { obligationId: item.id, dischargeRef: `${P}key` }, chat(member));
+      expect(out, member).toMatchObject({ id: item.id, alreadyDischarged: false });
+      expect((await db.commandItem.findUnique({ where: { id: item.id } })).dischargeRef, member).toBe(`${P}key`);
+    }
+    const plain = await seedItem('none');
+    const out = await keyRun('command_discharge_obligation', { obligationId: plain.id }, runFor(ID.writerOwned));
+    expect(out).toMatchObject({ id: plain.id, alreadyDischarged: false });
+    expect((await db.commandItem.findUnique({ where: { id: plain.id } })).dischargedAt).not.toBeNull();
+  });
 });
