@@ -4,6 +4,7 @@ import {
   PnlReport,
   CashflowReport,
   BalanceSheetReport,
+  BalanceSheetCurrencySheet,
   TaxSummaryReport,
   DimensionRow,
 } from './ledger-reporting.service';
@@ -67,22 +68,57 @@ export function cashflowToCsv(r: CashflowReport): string {
   return toCsv(rows);
 }
 
+/*
+ * RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT; owner ruling D-13): the balance sheet
+ * is the business currency's sheet at the top level plus one sheet per currency
+ * the books hold under `byCurrency` (V1-37b, RV37-02). The CSV and PDF exports
+ * read the top level only and dropped every other currency. They now carry the
+ * business currency's sheet first and then each other currency's sheet on its
+ * own (sorted by code), as the Books view shows them; every amount is labelled
+ * with its currency and nothing is converted or added across currencies.
+ */
+
+/** The other currencies' sheets of a balance sheet, by code, each labelled with its code (RV37b-CR-03, D-13). */
+function otherCurrencySheets(r: BalanceSheetReport): BalanceSheetCurrencySheet[] {
+  return Object.entries(r.byCurrency ?? {})
+    .filter(([code]) => code !== r.currency)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, sheet]) => ({ ...sheet, currency: code }));
+}
+
+const otherCurrenciesNote = (currency: string): string =>
+  `Balances in other currencies are shown on their own; they are not converted or added to the ${currency} figures above.`;
+
+const balanceSheetEquityTotal = (s: BalanceSheetCurrencySheet): number => +(s.equity.total + s.netEquityFromIncome).toFixed(2);
+
+/** One currency's sheet as CSV rows: every amount row names that currency (RV37b-CR-03, D-13). */
+function balanceSheetCsvRows(s: BalanceSheetCurrencySheet): Array<Array<string | number>> {
+  const c = s.currency;
+  const rows: Array<Array<string | number>> = [['Section', 'Account', 'Amount', 'Currency']];
+  for (const a of s.assets.lines) rows.push(['Asset', a.name, a.amount, c]);
+  rows.push(['Assets Total', '', s.assets.total, c]);
+  for (const a of s.liabilities.lines) rows.push(['Liability', a.name, a.amount, c]);
+  rows.push(['Liabilities Total', '', s.liabilities.total, c]);
+  for (const a of s.equity.lines) rows.push(['Equity', a.name, a.amount, c]);
+  rows.push(['Retained Earnings (period income)', '', s.netEquityFromIncome, c]);
+  rows.push(['Equity Total', '', balanceSheetEquityTotal(s), c]);
+  rows.push(['Identity holds (A = L + E)', s.identityHolds ? 'YES' : 'NO', s.identityDelta, c]);
+  return rows;
+}
+
 export function balanceSheetToCsv(r: BalanceSheetReport): string {
   const rows: Array<Array<string | number>> = [
     ['Balance Sheet'],
     ['Currency', r.currency],
     ['As of', r.asOf],
     [],
-    ['Section', 'Account', 'Amount'],
+    ...balanceSheetCsvRows(r),
   ];
-  for (const a of r.assets.lines) rows.push(['Asset', a.name, a.amount]);
-  rows.push(['Assets Total', '', r.assets.total]);
-  for (const a of r.liabilities.lines) rows.push(['Liability', a.name, a.amount]);
-  rows.push(['Liabilities Total', '', r.liabilities.total]);
-  for (const a of r.equity.lines) rows.push(['Equity', a.name, a.amount]);
-  rows.push(['Retained Earnings (period income)', '', r.netEquityFromIncome]);
-  rows.push(['Equity Total', '', r.equity.total + r.netEquityFromIncome]);
-  rows.push(['Identity holds (A = L + E)', r.identityHolds ? 'YES' : 'NO', r.identityDelta]);
+  const others = otherCurrencySheets(r);
+  if (others.length) rows.push([], [otherCurrenciesNote(r.currency)]);
+  for (const s of others) {
+    rows.push([], [`${s.currency} balances`], ['Currency', s.currency], ['As of', s.asOf], [], ...balanceSheetCsvRows(s));
+  }
   return toCsv(rows);
 }
 
@@ -386,22 +422,34 @@ export async function cashflowToPdf(r: CashflowReport): Promise<Buffer> {
   return renderPdf('cashflow', 'Cashflow', `${r.period.from} → ${r.period.to} · ${r.basis} basis · ${r.currency}`, sections);
 }
 
-export async function balanceSheetToPdf(r: BalanceSheetReport): Promise<Buffer> {
-  return renderPdf('balance-sheet', 'Balance Sheet', `As of ${r.asOf} · ${r.currency}`, [
-    { heading: 'Assets', rows: r.assets.lines.map((a) => [a.name, fmt(a.amount, r.currency)]) },
-    { rows: [['Total Assets', fmt(r.assets.total, r.currency)]], emphasis: true },
-    { heading: 'Liabilities', rows: r.liabilities.lines.map((a) => [a.name, fmt(a.amount, r.currency)]) },
-    { rows: [['Total Liabilities', fmt(r.liabilities.total, r.currency)]], emphasis: true },
+/** One currency's sheet as PDF sections: every amount in that currency (RV37b-CR-03, D-13). */
+function balanceSheetPdfSections(s: BalanceSheetCurrencySheet): PdfSection[] {
+  const c = s.currency;
+  return [
+    { heading: 'Assets', rows: s.assets.lines.map((a) => [a.name, fmt(a.amount, c)]) },
+    { rows: [['Total Assets', fmt(s.assets.total, c)]], emphasis: true },
+    { heading: 'Liabilities', rows: s.liabilities.lines.map((a) => [a.name, fmt(a.amount, c)]) },
+    { rows: [['Total Liabilities', fmt(s.liabilities.total, c)]], emphasis: true },
     {
       heading: 'Equity',
       rows: [
-        ...r.equity.lines.map((a) => [a.name, fmt(a.amount, r.currency)] as [string, string]),
-        ['Retained earnings (period)', fmt(r.netEquityFromIncome, r.currency)],
+        ...s.equity.lines.map((a) => [a.name, fmt(a.amount, c)] as [string, string]),
+        ['Retained earnings (period)', fmt(s.netEquityFromIncome, c)],
       ],
     },
-    { rows: [['Total Equity', fmt(r.equity.total + r.netEquityFromIncome, r.currency)]], emphasis: true },
-    { rows: [['Identity (A − L − E)', `${fmt(r.identityDelta, r.currency)} ${r.identityHolds ? 'OK' : 'OUT OF BALANCE'}`]] },
-  ]);
+    { rows: [['Total Equity', fmt(balanceSheetEquityTotal(s), c)]], emphasis: true },
+    // ASCII minus: the standard PDF font has no U+2212 and drew it as '"'.
+    { rows: [['Identity (A - L - E)', `${fmt(s.identityDelta, c)} ${s.identityHolds ? 'OK' : 'OUT OF BALANCE'}`]] },
+  ];
+}
+
+export async function balanceSheetToPdf(r: BalanceSheetReport): Promise<Buffer> {
+  const others = otherCurrencySheets(r);
+  const meta = `As of ${r.asOf} · ${r.currency}`
+    + (others.length ? ` · other currencies on their own, not converted or added: ${others.map((s) => s.currency).join(', ')}` : '');
+  const sections = balanceSheetPdfSections(r);
+  for (const s of others) sections.push({ heading: `${s.currency} balances`, rows: [] }, ...balanceSheetPdfSections(s));
+  return renderPdf('balance-sheet', 'Balance Sheet', meta, sections);
 }
 
 export async function taxSummaryToPdf(r: TaxSummaryReport): Promise<Buffer> {
