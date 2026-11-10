@@ -14,6 +14,7 @@ import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
 import { auditErrorText, auditResultText } from './key-cortex-tool-registry.service';
+import { getToolByName } from '../ai/flow-tool-registry';
 import {
   CortexSession,
   CortexSessionStatus,
@@ -43,26 +44,36 @@ export interface StartTurnInput {
 }
 
 /**
- * W9-KEY-CORTEX-AUDIT: a tool call's input or answer as an ai_execution_logs Json column stores it,
- * bounded as AiExecutionLogService.sanitizePayload bounds its copy (and KeyCortexExecutor's auditJson):
- * a JSON copy, { _truncated, _size, _preview } past 5000 characters (the first 500 kept), or a marker
- * when it has no JSON form, so an odd payload never costs the call its row. Undefined when empty: the
- * column is left unset (NULL), as before.
+ * W9-KEY-CORTEX-AUDIT: a tool call's input or answer as the lifecycle's ai_execution_logs row stores it.
+ *
+ * Review SEC-W9KCA-1: the treatment the call's CortexActionLog row gets (auditResultText, V1-19c
+ * SEC-V19c-1): every value of the call's input taken out (the record ids it names kept), bounded as
+ * AiExecutionLogService.sanitizePayload bounds its copy ({ _truncated, _size, _preview } past 5000
+ * characters, the first 500 kept). These rows are read into prompts, business-wide where the caller
+ * names no member (UnifiedMemoryRetrievalService), so the row holds nothing of a member's typed input,
+ * and nothing its CortexActionLog row does not. Undefined (the column is left NULL) when the value is
+ * empty or has no JSON form, so an odd payload never costs the call its row.
  */
-const EXECUTION_LOG_STORED_WHOLE_MAX = 5000;
-const EXECUTION_LOG_PREVIEW_CHARS = 500;
-function executionLogJson(value: unknown): Prisma.InputJsonValue | undefined {
-  if (value === undefined || value === null) return undefined;
-  try {
-    const text = JSON.stringify(value);
-    if (text === undefined) return undefined;
-    if (text.length > EXECUTION_LOG_STORED_WHOLE_MAX) {
-      return { _truncated: true, _size: text.length, _preview: text.slice(0, EXECUTION_LOG_PREVIEW_CHARS) };
-    }
-    return JSON.parse(text) as Prisma.InputJsonValue;
-  } catch {
-    return { _error: 'Could not serialize payload' };
-  }
+function executionLogJson(value: unknown, input: unknown): Prisma.InputJsonValue | undefined {
+  const text = auditResultText(value, input);
+  return text === null ? undefined : (JSON.parse(text) as Prisma.InputJsonValue);
+}
+
+/**
+ * W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): whether a tool call's AiExecutionLog row is
+ * FlowOrchestratorService.executeTool's to write. A flow tool reaches the cortex registry through the
+ * efferent bridge (KeyCortexEfferentBridgeService mirrors FLOW_TOOLS under their own names), which runs
+ * it through executeTool, and executeTool writes that call's row (actor 'flow') for an answer and for a
+ * failure. A second row here counted one call twice in every reader of the table: the hourly
+ * auto-execution cap (KeyCortexExecutorService.fetchApprovalPolicy counts every success row), the
+ * execution-log stats, the morning briefing's failed count and GET ai/execution-logs. A flow-named
+ * call the registry answered without running it (refused, sent for approval), or one an organ
+ * registered under a flow name (the bridge then leaves it to the organ), has no AiExecutionLog row,
+ * as before this packet, when every recordExecution row was refused; its CortexActionLog row is
+ * still written.
+ */
+function executionLoggedByFlow(toolName: string): boolean {
+  return getToolByName(toolName) !== undefined;
 }
 
 export interface RecordExecutionInput {
@@ -362,28 +373,32 @@ export class KeyCortexLifecycleService {
     // W9-KEY-CORTEX-AUDIT: only columns AiExecutionLog has. The write named startedAt, which the model
     // does not have, so Prisma refused every row, recordExecution rejected and cortex.action_executed
     // was never emitted. The call's timing is durationMs here (and startedAt/completedAt on its
-    // CortexActionLog row). The payloads are bounded as AiExecutionLogService bounds its own copy.
-    const executionLogPromise = (this.prisma.client as any).aiExecutionLog.create({
-      data: {
-        businessId: identity.businessId,
-        userId: identity.userId ?? null,
-        sessionId: identity.sessionId,
-        commandId: identity.commandId,
-        correlationId: identity.correlationId,
-        action: input.toolName,
-        toolName: input.toolName,
-        module: input.module,
-        riskTier: input.riskTier,
-        success: input.success,
-        errorMessage: input.error,
-        inputSummary: executionLogJson(input.input),
-        outputSummary: executionLogJson(input.output),
-        durationMs: input.durationMs,
-        planId: input.planId ?? null,
-        planStepId: input.planStepId ?? null,
-        actor: 'key_cortex',
-      },
-    });
+    // CortexActionLog row). Review SEC-W9KCA-1: the input, answer and error are stored as the call's
+    // CortexActionLog row stores them (the input's values taken out, bounded). Review CR-W9KCA-1: a
+    // bridged flow tool's row is FlowOrchestratorService.executeTool's, so none is written here.
+    const executionLogPromise = executionLoggedByFlow(input.toolName)
+      ? Promise.resolve()
+      : (this.prisma.client as any).aiExecutionLog.create({
+          data: {
+            businessId: identity.businessId,
+            userId: identity.userId ?? null,
+            sessionId: identity.sessionId,
+            commandId: identity.commandId,
+            correlationId: identity.correlationId,
+            action: input.toolName,
+            toolName: input.toolName,
+            module: input.module,
+            riskTier: input.riskTier,
+            success: input.success,
+            errorMessage: auditErrorText(input.error, input.input) ?? undefined,
+            inputSummary: executionLogJson(input.input, input.input),
+            outputSummary: executionLogJson(input.output, input.input),
+            durationMs: input.durationMs,
+            planId: input.planId ?? null,
+            planStepId: input.planStepId ?? null,
+            actor: 'key_cortex',
+          },
+        });
 
     const actionLogPromise = this.recordActionLog(input, now);
 
@@ -408,7 +423,9 @@ export class KeyCortexLifecycleService {
         riskTier: input.riskTier,
         durationMs: input.durationMs,
         success: input.success,
-        error: input.error,
+        // Review SEC-W9KCA-1: the bus persists this payload to business_events and cognitive_events, both
+        // read into prompts business-wide: the error as the rows store it, the input's values taken out.
+        error: auditErrorText(input.error, input.input) ?? undefined,
       },
       metadata: {
         correlationId: identity.correlationId,

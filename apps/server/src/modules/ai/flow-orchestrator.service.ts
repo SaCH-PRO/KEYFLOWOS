@@ -7440,10 +7440,11 @@ ${triage.standingContext}`;
    * It does NOT bypass KeyAutonomySafetyService: the kill switch, the daily
    * action cap and the spend cap are checked before this and still apply.
    *
-   * W9-KEY-CORTEX-AUDIT: the call names its actor and command thread from
-   * the dispatch's `action`, so the organ tool's CortexActionLog row is
-   * attributed on every surface, a job or queue worker with no request
-   * context included (V1-19c's auditActor reads the request only).
+   * W9-KEY-CORTEX-AUDIT: the call names its principal and command thread
+   * from the dispatch's `action`, so the organ tool's CortexActionLog row is
+   * attributed outside a request too (V1-19c's auditActor reads the request
+   * only). Review SEC-W9KCA-4: a surface with no principal names nobody; the
+   * member it runs for is not handed on (see below).
    */
   private async executeBridgedCortexTool(
     businessId: string,
@@ -7467,19 +7468,27 @@ ${triage.standingContext}`;
       throw new Error(`${toolName} is unavailable: no organ has registered ${cortexName}`);
     }
 
-    // W9-KEY-CORTEX-AUDIT: who the call runs for and the thread it belongs to, as the dispatch knows
-    // them. Attribution only: the registry decides nothing from them (the action boundary and
-    // memberScopeRefusal already ran on this dispatch). A member's chat turn or plan run names its
-    // principal; a surface with none (an approved proposal, a KEY-cortex turn's bridged call, an inner
-    // custom-logic call, the Pro Auto monitor) the member it runs for. An approved proposal's action id
-    // is the proposal the call executes.
-    const actorId = action?.principalUserId || action?.onBehalfOfUserId || undefined;
+    // W9-KEY-CORTEX-AUDIT: who authenticated the call and the thread it belongs to, as the dispatch
+    // knows them (the action boundary and memberScopeRefusal already ran on this dispatch). An approved
+    // proposal's action id is the proposal the call executes.
+    //
+    // Review SEC-W9KCA-4: only a principal (the member who authenticated this call: their chat turn,
+    // PLAN_HTTP, GRAPH_ACTION) is the registry's acting user. The registry has one actor field,
+    // ctx.userId: it records a call that names one as that human's action on the business-event ledger
+    // (actorType 'human'), and hands it to the organ handler as the acting user (an inbox reply's
+    // author, the safe database's caller). onBehalfOfUserId is never a principal (KeyDispatchAction),
+    // and the plan queue, the Pro Auto monitor, an inner custom-logic call, an approved proposal and a
+    // KEY-cortex turn's bridged call authenticate nobody, so none is passed there: the call stays KEY's
+    // own ('ai'), as before this packet, and its CortexActionLog row names the request's member when it
+    // runs in one (auditActor). Naming the member on that row alone needs an audit-only actor in the
+    // registry (it.todo in key-cortex-action-audit.integration.test.ts; SEC-W9KCA-3, CR-W9KCA-2).
+    const principalUserId = action?.principalUserId || undefined;
     const result = await registry.execute(
       cortexName,
       {
         businessId,
         preApproved: true,
-        ...(actorId ? { userId: actorId } : {}),
+        ...(principalUserId ? { userId: principalUserId } : {}),
         ...(action?.sessionId ? { sessionId: action.sessionId } : {}),
         ...(action?.correlationId ? { correlationId: action.correlationId } : {}),
         ...(action?.surface === 'PROPOSAL' && action.actionId ? { proposalId: action.actionId } : {}),

@@ -72,10 +72,11 @@
  *     actor, so that case is a live regression pin with no source change;
  *   - the callers name their actor and command thread: the chat's bridged
  *     organ tools (flow-orchestrator executeBridgedCortexTool) pass the
- *     dispatch's member, session and correlation (and an approved proposal's
- *     id), and cortex.execute_tool (handleExecuteTool) passes its own call's
- *     actor and thread to the tool it runs, so a call outside a request is
- *     attributed too;
+ *     dispatch's principal, session and correlation (and an approved
+ *     proposal's id; review SEC-W9KCA-4: not a member a surface with no
+ *     principal runs for), and cortex.execute_tool (handleExecuteTool) passes
+ *     its own call's actor and thread to the tool it runs, so a call outside a
+ *     request is attributed too;
  *   - POST /cortex/chat reads episodic memory as the requesting member may
  *     (buildMemoryContext): the member's own AiExecutionLog and CortexActionLog
  *     rows (MemoryRetrievalOptions.userId), and none at all when the session
@@ -83,6 +84,29 @@
  *   - lifecycle.recordExecution's AiExecutionLog row names only columns the
  *     model has (no startedAt), so it is written and cortex.action_executed is
  *     emitted; its payloads are bounded as AiExecutionLogService bounds its own.
+ *
+ * W9-KEY-CORTEX-AUDIT review repairs (pinned below):
+ *   - SEC-W9KCA-1: the lifecycle's AiExecutionLog row (and its
+ *     cortex.action_* event) gets its CortexActionLog row's treatment: every
+ *     value of the call's input taken out of the stored input, answer and
+ *     error (record ids kept), so a business-wide memory read renders none of
+ *     a member's typed input;
+ *   - CR-W9KCA-1: a KEY-cortex call of a bridged flow tool has one
+ *     AiExecutionLog row, FlowOrchestratorService.executeTool's, not a second
+ *     lifecycle row (the hourly auto-execution cap counted the call twice);
+ *   - SEC-W9KCA-4: a bridged organ call on a surface with no principal (the
+ *     Pro Auto monitor, an inner custom-logic call, a KEY-cortex turn's bridged
+ *     call, an approved proposal, the plan queue) does not make the member it
+ *     runs for the registry's acting user: the business-event ledger records
+ *     the AI, as before the packet. Only a principal is passed;
+ *   - SEC-W9KCA-2 / CR-W9KCA-4: buildMemoryContext leaves KEY tool-call records
+ *     out of the business-wide stores it renders (business_event and
+ *     cognitive_event rows of a tool execution: another member's input and
+ *     answer); the member's own calls stay, on their own CortexActionLog rows;
+ *   - CR-W9KCA-3: the KEY-cortex bridged case runs the real efferent bridge
+ *     chain; the organ row's missing actor and thread on surfaces with no
+ *     principal (SEC-W9KCA-3, CR-W9KCA-2) is an it.todo (outside the write
+ *     set: the registry and the efferent bridge).
  *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
@@ -113,6 +137,8 @@ const ID = {
   member: `${P}member`,
   /** W9-KEY-CORTEX-AUDIT: a user with no membership in ID.memBiz (and not its owner). */
   outsider: `${P}outsider`,
+  /** W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): a business whose AiExecutionLog rows one bridged flow call writes. */
+  flowBiz: `${P}biz_flow`,
 };
 
 const TOOL_OK = 'v19c.create_ticket';
@@ -135,6 +161,13 @@ const TOOL_NOTURN_TWICE = 'v19c.no_turn_twice';
 const TOOL_ORGAN_THREAD = 'key_inbox.get_thread';
 /** W9-KEY-CORTEX-AUDIT: the tool cortex.execute_tool runs by name. */
 const TOOL_EXEC_INNER = 'v19c.exec_inner_ticket';
+/** W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): a flow tool the efferent bridge exposes in the cortex registry. */
+const TOOL_FLOW_BRIDGED = 'crm_list_contacts';
+/** W9-KEY-CORTEX-AUDIT review (SEC-W9KCA-2): what the owner's inbox thread says, and what the owner typed. */
+const OWNER_THREAD_SECRET = 'V19C-OWNER-ONLY-SECRET-THREAD-BODY';
+const OWNER_INPUT_SECRET = 'V19C-OWNER-TYPED-PRIVATE-NOTE';
+/** What stands in a stored payload where a value of the call's input was (the registry's AUDIT_INPUT_REDACTION). */
+const REDACTED_INPUT = '[redacted:input]';
 
 /** Personal data a tool call carries in its input; no audit column may hold it. */
 const PII_EMAIL = `${P}person@example.test`;
@@ -149,11 +182,23 @@ let lifecycle: any;
 /** W9-KEY-CORTEX-AUDIT: the legacy facade, its cortex.* tools registered into `registry`. */
 let actions: any;
 let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
+/**
+ * W9-KEY-CORTEX-AUDIT review: a second registry with the app's real ledger sinks (KeyCortexAuditService
+ * over BusinessEventService, and KeyCortexEventBusService with the cognitive store), the efferent bridge's
+ * flow tools registered into it, and `chain`, a FlowOrchestratorService behind both (real executeTool,
+ * executeToolAction and executeBridgedCortexTool; the real AiExecutionLogService).
+ */
+let auditedRegistry: any;
+let chain: any;
+/** The context every call of a key_inbox.get_thread stand-in was handed (SEC-W9KCA-4). */
+const organCalls: any[] = [];
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM cortex_action_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM cognitive_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tool_outcome_scores WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -247,8 +292,52 @@ beforeAll(async () => {
   registry.register(toolDef(TOOL_NOTURN, async () => ({ success: true, data: { ticketId: 'T-9' } })));
   registry.register(toolDef(TOOL_NOTURN_TWICE, async () => ({ success: true, data: { ticketId: 'T-10' } })));
   // W9-KEY-CORTEX-AUDIT: a stand-in for the inbox organ's tool, under the name the chat's bridge dispatches to.
-  registry.register(toolDef(TOOL_ORGAN_THREAD, thread_));
+  // Review SEC-W9KCA-4: it keeps the context it was handed (the organ's acting user is ctx.userId).
+  const organThread = async (ctx: any) => {
+    organCalls.push(ctx);
+    return { success: true, data: { thread: { body: OWNER_THREAD_SECRET } } };
+  };
+  registry.register(toolDef(TOOL_ORGAN_THREAD, organThread));
   registry.register(toolDef(TOOL_EXEC_INNER, async () => ({ success: true, data: { ticketId: 'T-12' } })));
+
+  // W9-KEY-CORTEX-AUDIT review: the registry as the app wires it to its ledgers. Positionally, as Nest constructs
+  // it: prisma, safety, idempotency, saga, learning, audit service, event bus, proposals.
+  const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+  const { KeyCortexAuditService } = await import('../src/modules/key-cortex/key-cortex-audit.service');
+  const { KeyCortexEventBusService } = await import('../src/modules/key-cortex/key-cortex-event-bus.service');
+  const { CognitiveEventBusService } = await import('../src/modules/key-cortex/cognitive-event-bus.service');
+  auditedRegistry = new KeyCortexToolRegistryService(
+    prisma,
+    safety as any,
+    {} as any,
+    saga as any,
+    undefined,
+    new KeyCortexAuditService(new BusinessEventService(prisma)),
+    new KeyCortexEventBusService(prisma, new CognitiveEventBusService(prisma)),
+    undefined,
+  );
+  auditedRegistry.register(toolDef(TOOL_ORGAN_THREAD, organThread));
+  // The dispatcher behind the efferent bridge: FlowOrchestratorService's own executeTool, executeToolAction
+  // and executeBridgedCortexTool, its real AiExecutionLogService; stand-ins for the member-scope check (no
+  // member is narrowed here), governance's tier and the graph cache, and for the CRM read itself.
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+  const { KeyCortexEfferentBridgeService } = await import('../src/modules/key-cortex/key-cortex-efferent-bridge.service');
+  const quiet = { log: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
+  chain = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    moduleRef: { get: () => auditedRegistry },
+    logger: quiet,
+    prisma,
+    executionLog: new AiExecutionLogService(prisma),
+    governance: { getToolTier: () => 1 },
+    businessGraph: { invalidateCache: () => undefined },
+  });
+  chain.memberScopeRefusal = async () => null;
+  const realToolAction = FlowOrchestratorService.prototype['executeToolAction' as keyof typeof FlowOrchestratorService.prototype] as any;
+  chain.executeToolAction = function (businessId: string, toolName: string, args: any, action: any) {
+    return toolName === TOOL_FLOW_BRIDGED ? Promise.resolve({ contacts: [] }) : realToolAction.call(this, businessId, toolName, args, action);
+  };
+  new KeyCortexEfferentBridgeService(auditedRegistry, { get: () => chain } as any).onModuleInit();
 
   // W9-KEY-CORTEX-AUDIT: the legacy facade registers its cortex.* tools (cortex.execute_tool among
   // them) into the same registry, as onModuleInit does in the app. Positionally, as Nest constructs
@@ -266,6 +355,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'V19C Biz', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.biz2, name: 'V19C Biz 2', ownerId: ID.owner } });
+  await db.business.create({ data: { id: ID.flowBiz, name: 'V19C Flow Biz', ownerId: ID.owner } });
 
   // W9-KEY-CORTEX-AUDIT: episodic memory of three people in one business, and one business-wide fact.
   await db.user.create({ data: { id: ID.member, email: `${P}member@test.local`, role: 'USER' } });
@@ -760,7 +850,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(rows[0].userId).toBe(named);
   });
 
-  it('the callers name their actor and command thread: flow-orchestrator.service.ts executeBridgedCortexTool, outside any request, names the dispatch\'s member, session, correlation and approved proposal on the row (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
+  it('the callers name their actor and command thread: flow-orchestrator.service.ts executeBridgedCortexTool, outside any request, names the dispatch\'s principal, session, correlation and approved proposal on the row (W9-KEY-CORTEX-AUDIT, was it.todo; review CR-W9KCA-3: only threads a real dispatcher builds)', async () => {
     const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
     // The dispatcher with the real registry behind its module ref, as cortex-tool-bridge.spec.ts builds it.
     const orchestrator: any = Object.assign(Object.create(FlowOrchestratorService.prototype), {
@@ -769,13 +859,14 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     const readThread = (action: Record<string, unknown>) =>
       orchestrator.executeToolAction(ID.biz, 'inbox_read_thread', { threadId: `${P}thread_w9` }, action);
 
-    // A member's own chat turn: its principal and the chat session (the chat sets no correlation id).
+    // A member's own chat turn, as flow-orchestrator's chat builds it: its principal and the chat session
+    // (the chat sets no correlation id).
     const chatSession = `${P}sess_chat_bridge_${++seq}`;
     await readThread({ surface: 'CHAT', principalUserId: ID.owner, sessionId: chatSession, sourceId: `${P}tc_1` });
-    // A KEY-cortex turn's bridged call: the member the turn runs for, and the turn's thread.
-    const t = thread('bridge');
-    await readThread({ surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.member, sessionId: t.sessionId, correlationId: t.correlationId });
-    // An approved proposal: the member it runs for, and the proposal it executes.
+    // A member's plan run over HTTP, as executePlanSteps builds it (PLAN_HTTP: principal, plan and step).
+    const planId = `${P}plan_http_${++seq}`;
+    await readThread({ surface: 'PLAN_HTTP', principalUserId: ID.member, planId, planStepId: `${planId}_step` });
+    // An approved proposal, as KeyCortexActionExecutorPlugin builds it: the proposal it executes.
     const proposalId = `${P}proposal_bridge_${++seq}`;
     await readThread({ surface: 'PROPOSAL', actionId: proposalId, onBehalfOfUserId: ID.owner });
 
@@ -783,18 +874,87 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(chatRows).toHaveLength(1);
     expect(chatRows[0]).toMatchObject({ userId: ID.owner, sessionId: chatSession, status: 'success' });
 
-    const turnRows = await rowsFor(t.correlationId);
-    expect(turnRows).toHaveLength(1);
-    expect(turnRows[0]).toMatchObject({ actionType: TOOL_ORGAN_THREAD, userId: ID.member, sessionId: t.sessionId, correlationId: t.correlationId });
+    const planRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, userId: ID.member } });
+    expect(planRows).toHaveLength(1);
+    expect(planRows[0]).toMatchObject({ status: 'success' });
 
     const proposalRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, proposalId } });
     expect(proposalRows).toHaveLength(1);
-    expect(proposalRows[0]).toMatchObject({ userId: ID.owner, proposalId });
-
-    // No row of these calls is left unattributed.
-    const unattributed = await db.cortexActionLog.count({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, userId: null } });
-    expect(unattributed).toBe(0);
+    expect(proposalRows[0]).toMatchObject({ proposalId, status: 'success' });
   });
+
+  it("W9-KEY-CORTEX-AUDIT review SEC-W9KCA-4: a bridged organ call on a surface with no principal stays KEY's own: the member it runs for is not the organ's acting user, and the business-event ledger records the AI, not that member (a principal's call is the member's)", async () => {
+    const ledgerOfOrgan = { businessId: ID.biz2, eventType: 'ACTION_EXECUTED', action: TOOL_ORGAN_THREAD };
+    const readThread = async (action: Record<string, unknown>) => {
+      organCalls.length = 0;
+      await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1 AND action = $2', ID.biz2, TOOL_ORGAN_THREAD);
+      await chain.executeToolAction(ID.biz2, 'inbox_read_thread', { threadId: `${P}thread_sec4` }, action);
+      expect(organCalls).toHaveLength(1);
+      // The registry awaits its ledger write before it answers: this call's row, and only it.
+      const ledger = await db.businessEvent.findMany({ where: ledgerOfOrgan });
+      expect(ledger).toHaveLength(1);
+      return { organCtx: organCalls[0], ledger: ledger[0] };
+    };
+
+    const planId = `${P}plan_queue_${++seq}`;
+    for (const action of [
+      { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: ID.owner },
+      { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.owner },
+      { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.owner },
+      { surface: 'PROPOSAL', actionId: `${P}proposal_sec4_${++seq}`, onBehalfOfUserId: ID.owner },
+      { surface: 'PLAN_QUEUE', planId, planStepId: `${planId}_step` },
+    ]) {
+      const { organCtx, ledger } = await readThread(action);
+      expect(organCtx.userId, action.surface).toBeUndefined();
+      expect(ledger, action.surface).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
+    }
+
+    // CONTROL: a member's own chat turn is that member's action.
+    const { organCtx, ledger } = await readThread({ surface: 'CHAT', principalUserId: ID.owner, sessionId: `${P}sess_sec4_${++seq}` });
+    expect(organCtx.userId).toBe(ID.owner);
+    expect(ledger).toMatchObject({ actorType: 'human', actorId: ID.owner });
+  });
+
+  it("W9-KEY-CORTEX-AUDIT review CR-W9KCA-3: a KEY-cortex turn's inbox call through the real efferent bridge, in the member's request (POST /cortex/chat): the turn's own row carries the member and the turn's thread; the organ row names the request's member; the organ's ledger row records the AI", async () => {
+    const t = thread('realbridge');
+    organCalls.length = 0;
+    await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1 AND action = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    const result = await runWithTenant(ID.biz2, ID.member, () =>
+      auditedRegistry.execute('inbox_read_thread', { businessId: ID.biz2, userId: ID.member, autonomyLevel: 2, ...t }, { threadId: `${P}thread_real` }),
+    );
+    expect(result.success).toBe(true);
+    // The bridge sends what it builds: { surface: 'CORTEX_BRIDGE', onBehalfOfUserId }, no principal.
+    expect(organCalls).toHaveLength(1);
+    expect(organCalls[0].userId).toBeUndefined();
+
+    const turnRows = await rowsFor(t.correlationId, ID.biz2);
+    expect(turnRows).toHaveLength(1);
+    expect(turnRows[0]).toMatchObject({ actionType: 'inbox_read_thread', userId: ID.member, sessionId: t.sessionId, commandId: t.commandId });
+
+    const organRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz2, actionType: TOOL_ORGAN_THREAD } });
+    expect(organRows).toHaveLength(1);
+    expect(organRows[0]).toMatchObject({ userId: ID.member, status: 'success' });
+    const organLedger = await db.businessEvent.findMany({
+      where: { businessId: ID.biz2, eventType: 'ACTION_EXECUTED', action: TOOL_ORGAN_THREAD },
+    });
+    expect(organLedger).toHaveLength(1);
+    expect(organLedger[0]).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
+  });
+
+  it.todo(
+    'W9-KEY-CORTEX-AUDIT residual (review SEC-W9KCA-3, CR-W9KCA-2, CR-W9KCA-3): a bridged organ call on a surface ' +
+      'with no principal names nobody on its CortexActionLog row outside a request, and a KEY-cortex turn\'s bridged ' +
+      "call is not on the turn's thread: the plan queue (action-dispatcher.service.ts dispatches { surface: " +
+      "'PLAN_QUEUE', planId, planStepId }, though contactBindMember resolves the plan's member), the Pro Auto monitor, " +
+      'an inner execute_custom_logic call, an approved proposal, and the efferent bridge, which sends only ' +
+      "{ surface: 'CORTEX_BRIDGE', onBehalfOfUserId } (key-cortex-efferent-bridge.service.ts), not ctx.sessionId, " +
+      "ctx.commandId or ctx.correlationId, so the organ row has sessionId 'unknown' and correlationId null. The " +
+      "registry's one actor field, ctx.userId, also makes its business event a human action and the organ " +
+      "handler's acting user (SEC-W9KCA-4), so naming the member these surfaces run for on the row alone needs an " +
+      'audit-only actor in key-cortex-tool-registry.service.ts, and the thread belongs in the efferent bridge: both ' +
+      'outside the W9-KEY-CORTEX-AUDIT write set.',
+  );
 
   it('the callers name their actor and command thread: key-cortex-actions.service.ts handleExecuteTool (cortex.execute_tool), outside any request, passes its own call\'s actor and thread to the tool it runs (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
     const t = thread('exectool');
@@ -861,13 +1021,48 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     }
   });
 
+  it("W9-KEY-CORTEX-AUDIT review SEC-W9KCA-2 / CR-W9KCA-4: buildMemoryContext keeps another member's real tool call (its answer and its input) out of a member's prompt through the business-wide stores too: the registry's ledger business events and the bus's tool events; the owner still gets their own call, on its CortexActionLog row", async () => {
+    const t = thread('memledger');
+    const result = await auditedRegistry.execute(
+      TOOL_ORGAN_THREAD,
+      { businessId: ID.memBiz, userId: ID.owner, autonomyLevel: 2, ...t },
+      { threadId: `${P}thread_owner`, note: OWNER_INPUT_SECRET },
+    );
+    expect(result).toMatchObject({ success: true, data: { thread: { body: OWNER_THREAD_SECRET } } });
+    // The registry awaits its ACTION_EXECUTED ledger row; the bus persists tool.executed (business_events and
+    // cognitive_events) without being awaited.
+    await vi.waitFor(
+      async () => {
+        expect(await db.businessEvent.count({ where: { businessId: ID.memBiz, subjectType: 'tool_execution' } })).toBe(2);
+        expect(await db.cognitiveEvent.count({ where: { businessId: ID.memBiz, eventType: 'tool.executed' } })).toBe(1);
+      },
+      { timeout: 10_000, interval: 100 },
+    );
+
+    for (const userId of [ID.member, ID.outsider, undefined]) {
+      const memory = await memoryFor(userId);
+      expect(memory, String(userId)).not.toContain(OWNER_THREAD_SECRET);
+      expect(memory, String(userId)).not.toContain(OWNER_INPUT_SECRET);
+      // Business-wide memory is not narrowed.
+      expect(memory, String(userId)).toContain('v19c memory: a business-wide fact');
+    }
+
+    const owner = await memoryFor(ID.owner);
+    const lines = owner.split('\n').filter((l) => l.includes(OWNER_THREAD_SECRET));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^\d+\. \[cortex_action_log\] key_inbox\.get_thread: /);
+    expect(owner).not.toContain(OWNER_INPUT_SECRET);
+  });
+
   it.todo(
     'W9-KEY-CORTEX-AUDIT residual: POST /cortex/chat also reads episodic memory business-wide outside buildMemoryContext: ' +
       'key-cortex-query-pipeline.service.ts processQuery (and its stream path) calls memoryRetrieval.retrieveContext ' +
       'with { query, limit: 10 } and no userId when the route decision includes memory context, and renders the ' +
       "fragments into the system prompt (formatMemoryContextBlock), so another member's CortexActionLog and " +
-      'AiExecutionLog rows can still reach a prompt there. Outside the W9-KEY-CORTEX-AUDIT write set: the same rule ' +
-      "(the session's member's own episodes, none for a non-member) belongs on those two calls.",
+      'AiExecutionLog rows, and the business_event and cognitive_event rows of their tool calls (review SEC-W9KCA-2, ' +
+      'CR-W9KCA-4), can still reach a prompt there. Outside the W9-KEY-CORTEX-AUDIT write set: the same rule ' +
+      "(the session's member's own episodes, none for a non-member, no tool-call records from the business-wide " +
+      'stores) belongs on those two calls.',
   );
 });
 
@@ -999,7 +1194,7 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
           module: 'v19c',
           riskTier: 1,
           requiresApproval: false,
-          input: { ticketRef: `${P}ticket_1` },
+          input: { ticketId: `${P}ticket_1`, note: 'v19c: call the client back' },
           output: { ticketId: 'T-11' },
           success: true,
           durationMs: 7,
@@ -1022,7 +1217,8 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
         success: true,
         durationMs: 7,
         actor: 'key_cortex',
-        inputSummary: { ticketRef: `${P}ticket_1` },
+        // Review SEC-W9KCA-1: the input as its CortexActionLog row would hold it (values out, record ids kept).
+        inputSummary: { ticketId: `${P}ticket_1`, note: REDACTED_INPUT },
         outputSummary: { ticketId: 'T-11' },
       });
       const events = emitSpy.mock.calls.map((c: any[]) => c[0]);
@@ -1041,7 +1237,8 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
       module: 'v19c',
       riskTier: 1,
       requiresApproval: false,
-      input: { note: 'z'.repeat(6000) },
+      // Record ids stay on the row (review SEC-W9KCA-1), so 400 of them are over the bound.
+      input: { note: 'z'.repeat(6000), contactIds: Array.from({ length: 400 }, (_, i) => `${P}contact_${i}`) },
       output: { blob: 'y'.repeat(200_000) },
       success: true,
       durationMs: 3,
@@ -1052,6 +1249,119 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
     expect(row.outputSummary).toEqual({ _truncated: true, _size: 200_011, _preview: expect.any(String) });
     expect(row.outputSummary._preview).toHaveLength(500);
     expect(row.inputSummary).toMatchObject({ _truncated: true, _size: expect.any(Number) });
+    expect(row.inputSummary._preview).toHaveLength(500);
+    expect(JSON.stringify(row.inputSummary)).not.toContain('zzzzzz');
+  });
+
+  it("W9-KEY-CORTEX-AUDIT review SEC-W9KCA-1: the lifecycle's AiExecutionLog row holds no value of the call's input: its input, answer and error get its CortexActionLog row's treatment (record ids kept), and so does its cortex.action_* event; a business-wide memory read (processQuery's) renders none of it", async () => {
+    const ok = thread('aiexecpii_ok');
+    const failed = thread('aiexecpii_failed');
+    const input = { email: PII_EMAIL, phone: PII_PHONE, note: PII_NOTE, contactId: `${P}contact_ref` };
+    const emitSpy = vi.spyOn(lifecycle.eventBus, 'emit');
+    try {
+      const now = Date.now();
+      const record = (t: ReturnType<typeof thread>, toolName: string, outcome: Record<string, unknown>) =>
+        lifecycle.recordExecution({
+          identity: { ...t, businessId: ID.biz, userId: ID.owner },
+          toolName,
+          module: 'v19c',
+          riskTier: 1,
+          requiresApproval: false,
+          input,
+          durationMs: 2,
+          startedAt: new Date(now - 2),
+          completedAt: new Date(now),
+          ...outcome,
+        });
+      await record(ok, 'v19c.lifecycle_pii_ok', {
+        success: true,
+        output: { contact: { id: `${P}contact_1`, ...input }, message: `Created contact for ${PII_EMAIL} (${PII_PHONE})` },
+      });
+      await record(failed, 'v19c.lifecycle_pii_failed', {
+        success: false,
+        error: `A contact with email ${PII_EMAIL} already exists`,
+      });
+
+      const [okRow] = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz, correlationId: ok.correlationId } });
+      const [failedRow] = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz, correlationId: failed.correlationId } });
+      for (const row of [okRow, failedRow]) {
+        const stored = JSON.stringify(row);
+        expect(stored).not.toContain(PII_EMAIL);
+        expect(stored).not.toContain(PII_PHONE);
+        expect(stored).not.toContain('Sentinel Road');
+        expect(row.inputSummary).toEqual({
+          email: REDACTED_INPUT,
+          phone: REDACTED_INPUT,
+          note: REDACTED_INPUT,
+          contactId: `${P}contact_ref`,
+        });
+      }
+      expect(okRow.outputSummary.contact).toMatchObject({ id: `${P}contact_1`, contactId: `${P}contact_ref` });
+      expect(okRow.outputSummary.message).toMatch(/^Created contact for \S/);
+      expect(failedRow.errorMessage).toMatch(/^A contact with email \S+ already exists$/);
+
+      // The event (persisted by the bus to business_events and cognitive_events) quotes no input either.
+      const events = emitSpy.mock.calls
+        .map((c: any[]) => c[0])
+        .filter((e: any) => [ok.correlationId, failed.correlationId].includes(e.payload?.correlationId));
+      expect(events.map((e: any) => e.type).sort()).toEqual(['cortex.action_executed', 'cortex.action_failed']);
+      expect(JSON.stringify(events)).not.toContain(PII_EMAIL);
+    } finally {
+      emitSpy.mockRestore();
+    }
+
+    // processQuery reads episodic memory with no userId (its residual it.todo): every ai_execution_log fragment
+    // of the business, these two included, renders none of the input.
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const fragments = await new UnifiedMemoryRetrievalService(prisma, {} as any).retrieveContext(ID.biz, { limit: 500 });
+    const execFragments = fragments.filter((f: any) => f.sourceType === 'ai_execution_log');
+    const toolNames = execFragments.map((f: any) => f.metadata?.toolName);
+    expect(toolNames).toEqual(expect.arrayContaining(['v19c.lifecycle_pii_ok', 'v19c.lifecycle_pii_failed']));
+    const rendered = JSON.stringify(execFragments);
+    expect(rendered).not.toContain(PII_EMAIL);
+    expect(rendered).not.toContain(PII_PHONE);
+  });
+
+  it('W9-KEY-CORTEX-AUDIT review CR-W9KCA-1: a KEY-cortex tool-loop call of a bridged flow tool leaves one AiExecutionLog row, FlowOrchestratorService.executeTool\'s, not a second lifecycle row: the hourly auto-execution cap counts it once', async () => {
+    // As KeyCortexToolLoopService runs it: registry.execute (efferent bridge, then the real executeTool), then
+    // lifecycle.recordExecution for the same call.
+    const t = thread('flowdup');
+    const startedAt = Date.now();
+    const result = await auditedRegistry.execute(
+      TOOL_FLOW_BRIDGED,
+      { businessId: ID.flowBiz, userId: ID.owner, autonomyLevel: 2, ...t },
+      {},
+    );
+    expect(result).toMatchObject({ success: true });
+    await lifecycle.recordExecution({
+      identity: { ...t, businessId: ID.flowBiz, userId: ID.owner },
+      toolName: TOOL_FLOW_BRIDGED,
+      module: auditedRegistry.getTool(TOOL_FLOW_BRIDGED)?.module ?? 'unknown',
+      riskTier: 1,
+      requiresApproval: false,
+      input: {},
+      output: result.data,
+      success: result.success,
+      error: result.error,
+      durationMs: Date.now() - startedAt,
+      startedAt: new Date(startedAt),
+      completedAt: new Date(),
+    });
+    // executeTool does not wait for its own row (no confirming member): wait for it.
+    await vi.waitFor(
+      async () => {
+        expect(await db.aiExecutionLog.count({ where: { businessId: ID.flowBiz, actor: 'flow' } })).toBe(1);
+      },
+      { timeout: 10_000, interval: 100 },
+    );
+    const rows = await db.aiExecutionLog.findMany({ where: { businessId: ID.flowBiz } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ actor: 'flow', toolName: TOOL_FLOW_BRIDGED, success: true });
+    // KeyCortexExecutorService.fetchApprovalPolicy's hourly count (every success row of the business).
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    expect(await db.aiExecutionLog.count({ where: { businessId: ID.flowBiz, success: true, createdAt: { gte: oneHourAgo } } })).toBe(1);
+    // The call is still on the record once: the registry's CortexActionLog row (the lifecycle adds none).
+    expect(await rowsFor(t.correlationId, ID.flowBiz)).toHaveLength(1);
   });
 });
 
