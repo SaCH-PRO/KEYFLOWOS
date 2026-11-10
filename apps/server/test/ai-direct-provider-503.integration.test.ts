@@ -20,9 +20,9 @@
  *   POST /crm/businesses/:b/import/scan                 trackVision, error passed through   -> proven here
  *   POST /voice/businesses/:b/tts                       trackAudio via OpenAiVoiceProvider   -> proven here (R0-34b: code kept)
  *   POST /keyflow/businesses/:b/voice/tts|transcribe    trackAudio via KeyflowVoiceService   -> proven here (R0-34b: code kept)
- *   POST /commerce/businesses/:b/products/import/scan   trackVision via CommerceVisionService (swallowed: 2xx with no products)
+ *   POST /commerce/businesses/:b/products/import/scan   trackVision via CommerceVisionService      -> proven here (W7-AI-SERVICES-503)
  *   GET  /ai/businesses/:b/agent/memory/search, POST .../agent/memory/backfill
- *                                                       trackEmbedding via SemanticMemoryService (swallowed: 200, empty)
+ *                                                       trackEmbedding via SemanticMemoryService   -> proven here (W7-AI-SERVICES-503)
  *   POST /api/v1/cortex/voice/speak, /voice/listen      KeyCortexVoiceService                -> proven here (R0-34b: code kept)
  *   KeyCortexPhoneService (Twilio call flows)           KeyCortexVoiceService                (Twilio itself is off in Release 0)
  *
@@ -42,6 +42,15 @@
  * says this deployment has no AI key. Review nit CR-N1: a case that checks for
  * traces makes its own call instead of reading the previous case's.
  *
+ * W7-AI-SERVICES-503 (Release 0 exit; COST-LEDGER-001 section 7 item 7, last
+ * two bullets) closed the suite's last two it.todo cases under the R0-07a rule:
+ * CommerceVisionService.extractProductsFromImage caught every error and
+ * returned no products (a keyless scan answered 201 {extracted: [], count: 0}),
+ * and SemanticMemoryService.search / backfillFromAiMemory logged the error and
+ * answered an empty 200 / {backfilled: 0}. They now rethrow the provider 503
+ * (provider_not_configured or provider_unavailable) unchanged; every other
+ * error keeps its old mapping (no products, empty results, the memory skipped).
+ *
  * and nothing is billed: no AiUsageLog row, no contact or import trace. With a
  * key configured (the SDK transport stubbed) import/scan is unchanged: 201,
  * the extracted contact, one AiUsageLog row.
@@ -51,6 +60,12 @@
  * The handlers used to read the query, not the tenant the guard checked, so a
  * JSON body businessId split the two (COST-LEDGER-001 section 7 item 9; fixed
  * by R0-34b, proven below and in key-cortex-tenant-binding.integration.test.ts).
+ *
+ * RED-BEFORE for W7-AI-SERVICES-503 (recorded in its tests-first commit): on
+ * pkt/W7-KEY-CONNECTOR-TENANT-repair the product scan answered 201
+ * {extracted: [], count: 0}, memory search 200 {results: []} and memory
+ * backfill 201 {backfilled: 0} with no OpenAI key, and backfill tried every
+ * memory.
  *
  * RED-BEFORE (recorded in the tests-first commit): on the unmodified code
  * import/scan answers 500 INTERNAL_SERVER_ERROR (the SDK constructor's
@@ -64,7 +79,9 @@
  * CrmController, CrmImportService, CrmService, EntityResolutionService,
  * CrmStatsService, CrmTimelineService, ContactAuditService, AiUsageService,
  * VoiceController, VoiceService, OpenAiVoiceProvider, KeyflowCommandController,
- * KeyflowVoiceService, KeyCortexController and KeyCortexVoiceService, and the
+ * KeyflowVoiceService, KeyCortexController and KeyCortexVoiceService,
+ * CommerceController and CommerceVisionService, AgentController and
+ * SemanticMemoryService (W7-AI-SERVICES-503), and the
  * OpenAI SDK itself (constructor, request
  * building, error handling). Stand-ins: identity attachment (a test middleware
  * reads `x-k07c-user` and attaches the seeded user row, as the Supabase
@@ -75,7 +92,8 @@
  * the CRM side channels as in contacts-import-write-scope; the collaborators
  * KeyflowCommandController and KeyCortexController hold for their other routes
  * (empty stand-ins, and an allow-listed mocker; any other missing token fails
- * the compile); and, in the cases that say so, a spy that makes one call fail
+ * the compile; CommerceController's and AgentController's collaborators for
+ * their other routes likewise); and, in the cases that say so, a spy that makes one call fail
  * with a provider error. Vitest's
  * esbuild transform emits no constructor parameter types, so the suite writes
  * the ones tsc emits for VoiceController and KeyCortexController, as
@@ -94,6 +112,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -166,6 +185,18 @@ const CORTEX_CONTROLLER_OFF_BOUNDARY = new Set([
   'KeyCortexConsciousnessService', 'KeyCortexSessionService', 'KeyCortexAwarenessService',
 ]);
 
+/**
+ * W7-AI-SERVICES-503: CommerceController's and AgentController's collaborators
+ * for their other routes; products/import/scan reaches only CommerceVisionService,
+ * agent/memory/search and /backfill only SemanticMemoryService.
+ */
+const COMMERCE_AND_AGENT_OFF_BOUNDARY = new Set([
+  'CommerceService', 'TimeEntryService', 'InvoiceReceiptBuilderService', 'GmailService', 'StoreReadinessService',
+  'PaymentEvidenceService', 'FinanceSettingsService',
+  'AgentStateMachineService', 'AgentBusService', 'PatternDetectorService', 'UndoService', 'CalendarIntelligenceService',
+  'DocumentIntelligenceService',
+]);
+
 let db: any;
 let app: any;
 let aiUsage: any;
@@ -191,6 +222,8 @@ async function cleanup() {
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_usage_alerts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_usage_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_memory_embeddings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -243,6 +276,34 @@ function listen(user: string | undefined, businessId: string, field?: string) {
   if (user) req = req.set(HEADER, user);
   if (field) req = req.field('businessId', field);
   return req.attach('audio', Buffer.from(`${P}audio`, 'utf8'), { filename: `${P}utterance.webm`, contentType: 'audio/webm' });
+}
+
+/** POST /commerce/businesses/:b/products/import/scan (CommerceVisionService.extractProductsFromImage). */
+function productScan(user?: string) {
+  const req = agent().post(`/commerce/businesses/${ID.biz}/products/import/scan`);
+  return (user ? req.set(HEADER, user) : req)
+    .attach('image', Buffer.from(`${P}not-really-a-menu`, 'utf8'), { filename: `${P}menu.jpg`, contentType: 'image/jpeg' });
+}
+
+/** GET /ai/businesses/:b/agent/memory/search (SemanticMemoryService.search). */
+function memorySearch(user?: string) {
+  const req = agent().get(`/ai/businesses/${ID.biz}/agent/memory/search`).query({ q: 'k07c opening hours' });
+  return user ? req.set(HEADER, user) : req;
+}
+
+/** POST /ai/businesses/:b/agent/memory/backfill (SemanticMemoryService.backfillFromAiMemory). */
+function memoryBackfill(user?: string) {
+  const req = agent().post(`/ai/businesses/${ID.biz}/agent/memory/backfill`);
+  return user ? req.set(HEADER, user) : req;
+}
+
+/** Semantic memory embeddings stored for the business (a raw table: the vector column is Unsupported in Prisma). */
+async function embeddingRows(): Promise<number> {
+  const rows: Array<{ n: bigint | number }> = await db.$queryRawUnsafe(
+    `SELECT COUNT(*) AS n FROM ai_memory_embeddings WHERE business_id = $1`,
+    ID.biz,
+  );
+  return Number(rows[0]?.n ?? 0);
 }
 
 /** The 503 a voice wrapper answers for a provider error that is not a missing or unavailable provider. */
@@ -356,6 +417,11 @@ beforeAll(async () => {
   const { KeyflowCommandService } = await import('../src/modules/keyflow-command/keyflow-command.service');
   const { KeyflowNotesService } = await import('../src/modules/keyflow-command/keyflow-notes.service');
   const { KeyflowVoiceService } = await import('../src/modules/keyflow-command/keyflow-voice.service');
+  const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
+  const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
+  const { AgentController } = await import('../src/modules/ai/agent.controller');
+  const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
+  const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
 
   // The production build (tsc, emitDecoratorMetadata) records each class's
   // constructor parameter types, and Nest injects by them. Vitest's esbuild
@@ -405,7 +471,7 @@ beforeAll(async () => {
   const gatewayOff = {};
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController, VoiceController, KeyflowCommandController, KeyCortexController],
+    controllers: [CrmController, VoiceController, KeyflowCommandController, KeyCortexController, CommerceController, AgentController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -441,6 +507,11 @@ beforeAll(async () => {
         useFactory: (usage: any) => new KeyflowVoiceService(usage),
         inject: [AiUsageService],
       },
+      // W7-AI-SERVICES-503: the services behind products/import/scan and agent/memory/*, real.
+      CommerceVisionService,
+      SemanticMemoryService,
+      // CommerceController's public routes carry PublicRateLimitGuard (Redis); products/import/scan does not.
+      { provide: REDIS_CLIENT, useValue: {} },
       // KeyflowCommandController's other routes (events, notes) are off the boundary.
       { provide: KeyflowCommandService, useValue: {} },
       { provide: KeyflowNotesService, useValue: {} },
@@ -471,7 +542,7 @@ beforeAll(async () => {
   })
     .useMocker((token: any) => {
       const name = typeof token === 'function' ? token.name : String(token);
-      return CORTEX_CONTROLLER_OFF_BOUNDARY.has(name) ? {} : undefined;
+      return CORTEX_CONTROLLER_OFF_BOUNDARY.has(name) || COMMERCE_AND_AGENT_OFF_BOUNDARY.has(name) ? {} : undefined;
     })
     .compile();
   aiUsage = moduleRef.get(AiUsageService);
@@ -505,6 +576,9 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizOther, name: 'K07C Other Biz', ownerId: ID.outsider, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_outsider`, userId: ID.outsider, businessId: ID.bizOther, role: 'OWNER' } });
   await db.user.create({ data: { id: ID.nomember, email: `${P}nomember@test.local`, role: 'USER' } });
+  // W7-AI-SERVICES-503: two memories, so a backfill has something to embed (and the refusal stops at the first).
+  await db.aiMemory.create({ data: { id: `${P}mem_hours`, businessId: ID.biz, category: 'business', key: 'opening_hours', value: '9-5' } });
+  await db.aiMemory.create({ data: { id: `${P}mem_tone`, businessId: ID.biz, category: 'preference', key: 'tone', value: 'warm' } });
 
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -592,14 +666,100 @@ describe('AiUsageService: a direct OpenAI helper answers 503 provider_not_config
     }
     expect(await traces()).toEqual(NO_TRACES);
   });
-  it.todo(
-    'POST /commerce/businesses/:b/products/import/scan answers 503 provider_not_configured instead of 2xx with no products - ' +
-      'CommerceVisionService.extractProductsFromImage catches every error and returns []; outside the R0-07a write set',
-  );
-  it.todo(
-    'GET /ai/businesses/:b/agent/memory/search and POST .../agent/memory/backfill report that embeddings are not configured instead of an empty 200 - ' +
-      'SemanticMemoryService.search and backfillFromAiMemory swallow the error; outside the R0-07a write set',
-  );
+
+  // W7-AI-SERVICES-503 (R0-07a rule): the suite's last two it.todo cases, live.
+  it('POST /commerce/businesses/:b/products/import/scan answers 503 provider_not_configured instead of 2xx with no products, before any OpenAI client or usage row (W7-AI-SERVICES-503, R0-07a)', async () => {
+    // CommerceVisionService.extractProductsFromImage caught every error and returned [],
+    // so a keyless scan answered 201 {extracted: [], count: 0}: an image with nothing in it.
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+    const res = await productScan(ID.owner);
+    expectNotConfigured(res);
+    expect(res.body.extracted).toBeUndefined();
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('GET /ai/businesses/:b/agent/memory/search and POST .../agent/memory/backfill answer 503 provider_not_configured instead of an empty 200; backfill stops at the first memory and stores no embedding (W7-AI-SERVICES-503, R0-07a)', async () => {
+    // SemanticMemoryService.search and backfillFromAiMemory logged the error and answered
+    // {results: []} and {backfilled: 0}: nothing told the user search is not configured.
+    expect(await db.aiMemory.count({ where: { businessId: ID.biz } })).toBe(2);
+    const attemptsBefore = sdk.attempts.length;
+    const requestsBefore = sdk.requests.length;
+    const embed = vi.spyOn(aiUsage, 'trackEmbedding');
+    try {
+      const search = await memorySearch(ID.owner);
+      expectNotConfigured(search);
+      expect(search.body.results).toBeUndefined();
+      expect(embed).toHaveBeenCalledTimes(1);
+
+      const backfill = await memoryBackfill(ID.owner);
+      expectNotConfigured(backfill);
+      expect(backfill.body.backfilled).toBeUndefined();
+      // The refusal is the same for every memory: the loop stops at the first instead of trying all of them.
+      expect(embed).toHaveBeenCalledTimes(2);
+    } finally {
+      embed.mockRestore();
+    }
+    expect(await embeddingRows()).toBe(0);
+    expect(sdk.attempts.slice(attemptsBefore)).toEqual([]);
+    expect(sdk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('a provider_unavailable 503 (every credential circuit open) passes through products/import/scan and agent/memory/search and /backfill with its code (W7-AI-SERVICES-503, R0-07a)', async () => {
+    const unavailable = () => Promise.reject(new ServiceUnavailableException({
+      code: 'provider_unavailable',
+      service: 'ai',
+      message: 'k07c: every AI credential circuit is open',
+      error: 'Service Unavailable',
+    }));
+    const vision = vi.spyOn(aiUsage, 'trackVision').mockImplementation(unavailable);
+    const embed = vi.spyOn(aiUsage, 'trackEmbedding').mockImplementation(unavailable);
+    try {
+      for (const res of [await productScan(ID.owner), await memorySearch(ID.owner), await memoryBackfill(ID.owner)]) {
+        expect(res.status, JSON.stringify(res.body)).toBe(503);
+        expect(res.body.code).toBe('provider_unavailable');
+        expect(res.body.details?.service).toBe('ai');
+      }
+      expect(vision).toHaveBeenCalledTimes(1);
+      expect(embed).toHaveBeenCalledTimes(2);
+    } finally {
+      vision.mockRestore();
+      embed.mockRestore();
+    }
+    expect(await embeddingRows()).toBe(0);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
+
+  it('a provider error that is not a missing or unavailable provider keeps its mapping: no products on products/import/scan, empty results and skipped memories on agent/memory/search and /backfill (W7-AI-SERVICES-503)', async () => {
+    const providerError = () => Promise.reject(new Error('k07c: provider exploded'));
+    const vision = vi.spyOn(aiUsage, 'trackVision').mockImplementation(providerError);
+    const embed = vi.spyOn(aiUsage, 'trackEmbedding').mockImplementation(providerError);
+    try {
+      const scanRes = await productScan(ID.owner);
+      expect(scanRes.status, JSON.stringify(scanRes.body)).toBe(201);
+      expect(scanRes.body).toEqual({ extracted: [], count: 0 });
+
+      const searchRes = await memorySearch(ID.owner);
+      expect(searchRes.status, JSON.stringify(searchRes.body)).toBe(200);
+      expect(searchRes.body).toEqual({ results: [] });
+
+      const backfillRes = await memoryBackfill(ID.owner);
+      expect(backfillRes.status, JSON.stringify(backfillRes.body)).toBe(201);
+      expect(backfillRes.body).toEqual({ backfilled: 0 });
+
+      expect(vision).toHaveBeenCalledTimes(1);
+      // One for the search, then one per memory: a plain failure skips that memory and the backfill goes on.
+      expect(embed).toHaveBeenCalledTimes(3);
+    } finally {
+      vision.mockRestore();
+      embed.mockRestore();
+    }
+    expect(await embeddingRows()).toBe(0);
+    expect(await traces()).toEqual(NO_TRACES);
+  });
 });
 
 describe('KeyCortexVoiceService: KEY voice refuses before any provider call when no OpenAI key is configured', () => {
@@ -751,6 +911,10 @@ describe('a caller the guards refuse gets 401/403 on every direct-AI route, neve
     { name: 'POST /keyflow/businesses/:b/voice/transcribe', send: () => keyflowTranscribe(user) },
     { name: 'POST /api/v1/cortex/voice/speak', send: () => speak(user, ID.biz) },
     { name: 'POST /api/v1/cortex/voice/listen', send: () => listen(user, ID.biz) },
+    // W7-AI-SERVICES-503: the routes that answer the 503 since that packet.
+    { name: 'POST /commerce/businesses/:b/products/import/scan', send: () => productScan(user) },
+    { name: 'GET /ai/businesses/:b/agent/memory/search', send: () => memorySearch(user) },
+    { name: 'POST /ai/businesses/:b/agent/memory/backfill', send: () => memoryBackfill(user) },
   ];
 
   const expectRefusedBeforeAi = async (user: string | undefined, status: number) => {

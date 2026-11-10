@@ -42,10 +42,18 @@ describe('KeyConnectorController — guard wiring', () => {
   it('every route takes businessId where BusinessGuard can resolve it', () => {
     // BusinessGuard reads req.params / req.body / req.query. A route that takes
     // businessId nowhere would be rejected by the guard on every request.
+    //
+    // W7-KEY-CONNECTOR-TENANT (the R0-34b pattern): every route takes it
+    // through @GuardedBusinessId(), the resolver the guard ran (params, then
+    // body, then query), never @Query('businessId'), which a request naming
+    // its tenant in the body as well split from the tenant the guard checked.
+    // key-cortex-tenant-binding.spec.ts proves the split over real routes.
     const routes = SOURCE.match(/@(Get|Post|Delete|Patch|Put)\(/g) ?? [];
-    const queryParams = SOURCE.match(/@Query\('businessId'\)/g) ?? [];
+    const guardedParams = SOURCE.match(/@GuardedBusinessId\(\)\s+\w+/g) ?? [];
+    const queryParams = SOURCE.match(/@Query\('businessId'\)\s+\w+/g) ?? [];
     expect(routes.length).toBeGreaterThan(0);
-    expect(queryParams.length).toBe(routes.length);
+    expect(guardedParams.length).toBe(routes.length);
+    expect(queryParams).toEqual([]);
   });
 
   it('exposes the expected route surface', () => {

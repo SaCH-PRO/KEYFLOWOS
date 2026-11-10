@@ -1,5 +1,21 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { AiUsageService } from '../ai/ai-usage.service';
+
+/**
+ * W7-AI-SERVICES-503 (the R0-07a rule; COST-LEDGER-001 section 7 item 7): the
+ * structured 503 AiUsageService answers when no OpenAI key is configured
+ * (provider_not_configured, also KEY_DISABLED) or the gateway when every
+ * credential's circuit is open (provider_unavailable). It is rethrown unchanged
+ * so the scan answers the same 503 and code as the other AI routes, instead of
+ * an image with nothing in it; every other failure keeps its old mapping (no
+ * products). The same predicate as OpenAiVoiceProvider's (R0-34b).
+ */
+function isAiProviderUnavailable(err: unknown): err is HttpException {
+  if (!(err instanceof HttpException) || err.getStatus() !== HttpStatus.SERVICE_UNAVAILABLE) return false;
+  const body = err.getResponse();
+  const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined;
+  return code === 'provider_not_configured' || code === 'provider_unavailable';
+}
 
 export interface ExtractedProduct {
   name?: string;
@@ -96,6 +112,8 @@ Only return the JSON array, no markdown or explanation.`,
         sku: item.sku || undefined,
       })).filter(item => item.name);
     } catch (error: any) {
+      // W7-AI-SERVICES-503 (R0-07a rule): a missing or unavailable AI provider fails visibly.
+      if (isAiProviderUnavailable(error)) throw error;
       this.logger.error('Failed to extract products from image', error);
       return [];
     }

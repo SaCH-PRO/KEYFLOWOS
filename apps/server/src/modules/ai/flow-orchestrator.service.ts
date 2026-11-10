@@ -1840,6 +1840,39 @@ export class FlowOrchestratorService {
     yield { type: 'done', sessionId };
   }
 
+  /**
+   * The "RELEVANT CONTEXT FROM MEMORY" section of a KEY chat turn: optional
+   * enrichment, so any failure of the semantic search leaves it out and the turn
+   * goes on.
+   *
+   * W7-AI-SERVICES-503 review repair (SEC503-1 / CR-503-1; the R0-07a rule,
+   * COST-LEDGER-001 section 7 item 7). Since W7-AI-SERVICES-503,
+   * SemanticMemoryService.search rethrows the provider 503 (no platform OpenAI
+   * key for embeddings: provider_not_configured, or the gateway's
+   * provider_unavailable) so GET .../agent/memory/search fails visibly. A chat
+   * turn whose own chat provider is configured (another env provider, or the
+   * business's BYOK key through the gateway) still answers, without this
+   * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
+   * do. Only the memory lookup is caught: a missing chat provider still fails
+   * the turn from the gateway dispatch with its own 503.
+   */
+  private async buildSemanticMemorySection(businessId: string, query: string): Promise<string> {
+    try {
+      const relevant = await this.semanticMemory.search({
+        businessId,
+        query,
+        limit: 5,
+        minSimilarity: 0.65,
+      });
+      if (relevant.length === 0) return '';
+      return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
+        relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
+    } catch (err: unknown) {
+      this.logger.warn(`Semantic memory left out of the turn: ${err instanceof Error ? err.message : String(err)}`);
+      return '';
+    }
+  }
+
   async chat(
     businessId: string,
     message: string,
@@ -1891,21 +1924,12 @@ export class FlowOrchestratorService {
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
-    // Semantic memory search based on last user message
+    // Semantic memory search based on last user message (optional enrichment:
+    // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
-    let semanticMemorySection = '';
-    if (lastUserMessage?.content) {
-      const relevant = await this.semanticMemory.search({
-        businessId,
-        query: lastUserMessage.content,
-        limit: 5,
-        minSimilarity: 0.65,
-      });
-      if (relevant.length > 0) {
-        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
-          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
-      }
-    }
+    const semanticMemorySection = lastUserMessage?.content
+      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content)
+      : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
@@ -2343,20 +2367,11 @@ ${triage.standingContext}`;
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
-    // Semantic memory search based on current message
-    let semanticMemorySection = '';
-    if (enrichedMessage) {
-      const relevant = await this.semanticMemory.search({
-        businessId,
-        query: enrichedMessage,
-        limit: 5,
-        minSimilarity: 0.65,
-      });
-      if (relevant.length > 0) {
-        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
-          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
-      }
-    }
+    // Semantic memory search based on current message (optional enrichment:
+    // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
+    const semanticMemorySection = enrichedMessage
+      ? await this.buildSemanticMemorySection(businessId, enrichedMessage)
+      : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);

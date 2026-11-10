@@ -758,6 +758,11 @@
       "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
     },
     {
+      "prefix": "v93a_",
+      "owner": "apps/server/test/key-connector-authority.integration.test.ts",
+      "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
