@@ -112,12 +112,40 @@ function toActionItem(a: RevenueAction): FinanceOverviewActionItem {
 
 /**
  * W9-FINANCE-OVERVIEW (CP-17, D-13): the overview's cash labels, from the cash position read fresh
- * on every call. The 60s cache is checked against cashBalance (the business currency's figure)
- * only, so these are applied to a cached overview too: other-currency cash that moved, or a
- * business currency stored un-normalized ('ttd'), is never served stale.
+ * on every call, applied to a cached overview too, so a business currency stored un-normalized
+ * ('ttd') is never served stale. (W10-LOW-RUNWAY, D-107: the cache is now also checked against the
+ * other-currency cash, which the LOW_RUNWAY action's text lists; see sameOtherCurrencyCash.)
  */
 function cashLabels(position: CashPosition): Pick<FinanceOverview, 'cashCurrency' | 'otherCurrencyCash' | 'currency'> {
   return { cashCurrency: position.currency, otherCurrencyCash: otherCurrencyCash(position), currency: position.currency };
+}
+
+/**
+ * W10-LOW-RUNWAY (owner ruling D-107; review CR-37c-01, CP-18): whether a cached overview's
+ * other-currency cash is the cash position's now. The LOW_RUNWAY action's text lists that cash, so a
+ * cached overview whose other-currency figures moved is recomputed (the action upserted with them),
+ * as one whose business-currency cash moved is; an entry cached without them is recomputed too.
+ */
+function sameOtherCurrencyCash(cached: OtherCurrencyCash[] | undefined, now: OtherCurrencyCash[]): boolean {
+  return Array.isArray(cached)
+    && cached.length === now.length
+    && cached.every((o, i) => o?.currency === now[i].currency && o?.amount === now[i].amount);
+}
+
+/**
+ * W10-LOW-RUNWAY (owner ruling D-107; review CR-37c-01, CP-18): the LOW_RUNWAY action's text. The
+ * runway stays computed from the business currency's cash alone (cashBalance, `cashCurrency`); cash
+ * held in another currency is never added to it nor converted (no exchange rate, D-13), and the
+ * alarm is never silent beside it: the text lists each other currency's cash, unconverted, in code
+ * order. With no other-currency cash the text is as it was. The action is served only to revenue
+ * readers (the overview and GET revenue-actions need revenue read: D-63, D-100), who are served that
+ * cash on the overview and safe-to-spend too, so no viewer it reaches has the figures withheld.
+ */
+function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
+  const runway = `~${runwayMonths.toFixed(1)} months at current burn`;
+  if (other.length === 0) return runway;
+  const held = other.map((o) => `${o.currency} ${o.amount.toFixed(2)}`).join(', ');
+  return `${runway}, from ${cashCurrency} cash only. Cash in other currencies, not included and not converted: ${held}.`;
 }
 
 /**
@@ -213,10 +241,18 @@ export class FinanceOverviewService {
     // the ledger's now; otherwise it is recomputed (cash, runway and the
     // low-runway action together) and re-cached. Safe-to-spend, the OS command
     // center and this overview therefore never serve different cash.
+    // W10-LOW-RUNWAY (D-107, CP-18): nor while other-currency cash moved, which the low-runway
+    // action's text lists (sameOtherCurrencyCash).
     const cashPosition = await this.cashPosition.getCashPosition(businessId);
+    const otherCash = otherCurrencyCash(cashPosition);
     if (this.redis) {
       const cached = await this.redis.getJson<FinanceOverview>(cacheKey).catch(() => null);
-      if (cached && cached.cashBasis === cashPosition.basis && cached.cashBalance === cashPosition.cashBalance) {
+      if (
+        cached
+        && cached.cashBasis === cashPosition.basis
+        && cached.cashBalance === cashPosition.cashBalance
+        && sameOtherCurrencyCash(cached.otherCurrencyCash, otherCash)
+      ) {
         return { ...cached, ...cashLabels(cashPosition) };
       }
     }
@@ -400,13 +436,15 @@ export class FinanceOverviewService {
         priority: 2,
       })),
     ];
+    // W10-LOW-RUNWAY (D-107, CP-18): computed from business-currency cash; the text lists the cash
+    // held in every other currency, unconverted (lowRunwayDetail).
     if (cashRunwayMonths != null && cashRunwayMonths < 2) {
       specs.push({
         type: 'LOW_RUNWAY',
         relatedType: 'business',
         relatedId: businessId,
         title: 'Low cash runway',
-        detail: `~${cashRunwayMonths.toFixed(1)} months at current burn`,
+        detail: lowRunwayDetail(cashRunwayMonths, cashPosition.currency, otherCash),
         amountAtRisk: cashBalance,
         priority: 1,
       });

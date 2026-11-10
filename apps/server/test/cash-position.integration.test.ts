@@ -1312,8 +1312,10 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
   // otherCurrencyCash key, the `currency` label read raw from
   // Business.currency. W9-FINANCE-OVERVIEW (D-13; was it.todo CP-17): the
   // overview reports the other currencies apart, from the same cash position
-  // it reads its cashBalance from, on every read (its 60s cache is checked
-  // against the business currency's figure only).
+  // it reads its cashBalance from, on every read (its 60s cache was checked
+  // against the business currency's figure only; W10-LOW-RUNWAY, D-107,
+  // checks the other currencies' figures too, which the LOW_RUNWAY text
+  // lists: CP-18).
   it('CP-17 (W9-FINANCE-OVERVIEW, was it.todo) (review CR-37c-01, D-13): the Finance overview reports other-currency cash apart (cashCurrency, otherCurrencyCash) as safe-to-spend and the OS command center do, and labels cashBalance with the normalized business currency, on a computed and on a cached read', async () => {
     // I holds TTD 150 beside USD 620 (CP-14, CP-15). A computed read.
     await redis.del(overviewKey(ID.bizI));
