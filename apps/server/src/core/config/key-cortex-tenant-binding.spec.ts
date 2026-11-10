@@ -378,16 +378,23 @@ const KC_B_MARKER = 'k34b-kc-tenant-B-row';
 const KC_A_MARKER = 'k34b-kc-tenant-A-row';
 const KC_PROVIDER = 'k34b-kc-provider';
 
-interface KcRow { id: string; businessId: string | undefined; kind: 'connection' | 'sync' | 'audit'; providerKey: string; marker: string }
+/**
+ * A stand-in row. `displayName` repeats the marker: the controller answers a
+ * connection through an allow-list projection without its credentials (review
+ * SEC-W7KC-1) that keeps displayName, so the marker survives into every
+ * response that carries a row and "no response carries a row of B" stays a
+ * real check.
+ */
+interface KcRow { id: string; businessId: string | undefined; kind: 'connection' | 'sync' | 'audit'; providerKey: string; marker: string; displayName: string }
 
-const kcSeed = (): KcRow[] => [
+const kcSeed = (): KcRow[] => ([
   { id: KC.connA, businessId: KC.bizA, kind: 'connection', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
   { id: KC.connB, businessId: KC.bizB, kind: 'connection', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
   { id: 'k34b_kc_sync_a', businessId: KC.bizA, kind: 'sync', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
   { id: 'k34b_kc_sync_b', businessId: KC.bizB, kind: 'sync', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
   { id: 'k34b_kc_audit_a', businessId: KC.bizA, kind: 'audit', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
   { id: 'k34b_kc_audit_b', businessId: KC.bizB, kind: 'audit', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
-];
+] as Array<Omit<KcRow, 'displayName'>>).map((r) => ({ ...r, displayName: r.marker }));
 
 /**
  * KeyConnectorService stand-in: records the tenant each call is handed and
@@ -430,12 +437,14 @@ class RecordingKeyConnectorService {
 
   async connectProvider(businessId: unknown, _userId: string, providerKey: string) {
     this.note('connectProvider', businessId);
+    const marker = businessId === KC.bizB ? KC_B_MARKER : 'k34b-kc-new-row';
     const row: KcRow = {
       id: `k34b_kc_conn_new_${this.rows.length}`,
       businessId: businessId as string | undefined,
       kind: 'connection',
       providerKey,
-      marker: businessId === KC.bizB ? KC_B_MARKER : 'k34b-kc-new-row',
+      marker,
+      displayName: marker,
     };
     this.rows.push(row);
     return row;
@@ -484,11 +493,20 @@ class RecordingKeyConnectorService {
 const kcMembershipPrisma = {
   client: {
     business: {
-      findFirst: async ({ where }: { where: { id?: unknown; OR?: Array<{ ownerId?: unknown; members?: { some?: { userId?: unknown } } }> } }) => {
-        const userId = where.OR?.find((o) => o.ownerId !== undefined)?.ownerId ?? where.OR?.find((o) => o.members)?.members?.some?.userId;
+      // BusinessGuard asks { id, OR: [{ ownerId }, { members }] }; the
+      // controller's writer check (review SEC-W7KC-2) asks { id, ownerId }.
+      findFirst: async ({ where }: { where: { id?: unknown; ownerId?: unknown; OR?: Array<{ ownerId?: unknown; members?: { some?: { userId?: unknown } } }> } }) => {
+        const userId = where.ownerId ?? where.OR?.find((o) => o.ownerId !== undefined)?.ownerId ?? where.OR?.find((o) => o.members)?.members?.some?.userId;
         const id = typeof where.id === 'string' ? where.id : undefined;
         return id && KC_OWNERS[id] !== undefined && KC_OWNERS[id] === userId ? { id, ownerId: userId } : null;
       },
+    },
+    // The owners here hold no Membership row: the writer check (review
+    // SEC-W7KC-2) admits each as its business's distinguished owner, the arm
+    // BusinessGuard admits them by. test/key-connector-authority.integration.test.ts
+    // proves the role arm (OWNER, ADMIN admitted; STAFF refused) on real rows.
+    membership: {
+      findUnique: async () => null,
     },
   },
 };
@@ -535,7 +553,7 @@ describe('KeyConnectorController binds the tenant BusinessGuard checked (W7-KEY-
     // controller's constructor parameter type and Nest injects by it; vitest's
     // esbuild transform emits no metadata, so this writes what tsc emits.
     if (!Reflect.getMetadata('design:paramtypes', KeyConnectorController)) {
-      Reflect.defineMetadata('design:paramtypes', [KeyConnectorService], KeyConnectorController);
+      Reflect.defineMetadata('design:paramtypes', [KeyConnectorService, PrismaService], KeyConnectorController);
     }
     const moduleRef = await Test.createTestingModule({
       controllers: [KeyConnectorController],
