@@ -57,9 +57,11 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     const req = makeReq({ headers: { authorization: 'Bearer real-jwt-here' } });
     await mw.use(req, res, next);
     expect(supabaseAuth.getUserFromToken).toHaveBeenCalledWith('real-jwt-here');
+    // D-97 (W8-RISC-SIGNIN-CUTOFF): the Supabase branch also reads metaData,
+    // where a RISC event records the durable sign-in cutoff.
     expect(prisma.client.user.findUnique).toHaveBeenCalledWith({
       where: { id: 'user_real' },
-      select: { role: true, deletedAt: true, bannedAt: true },
+      select: { role: true, deletedAt: true, bannedAt: true, metaData: true },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
     expect((req as any).user).toEqual({
@@ -974,5 +976,106 @@ describe('ST-4 — logout revocation is an issue-time cutoff, not a per-user fla
         expect(await attached(mw, after), 'post-logout admin token after the next login').toBeTruthy();
       });
     });
+  });
+});
+
+/**
+ * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39): a RISC
+ * session-ending event records a durable per-user sign-in cutoff on the User
+ * row (User.metaData.signInCutoffAt, epoch seconds; risc.service.ts). The
+ * middleware refuses every Supabase token whose ORIGINAL sign-in — the
+ * session's amr timestamps, which a refresh carries over — is at or before it,
+ * with or without the 24h Redis logout marker, and attaches a session that
+ * signed in after it: the real user simply signs in again.
+ */
+describe('D-97 — the durable RISC sign-in cutoff on the User row', () => {
+  const USER = 'user_d97';
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const NOW = Math.floor(Date.now() / 1000);
+  const CUTOFF = NOW - 600;
+  const token = (claims: Record<string, unknown>) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, role: 'authenticated', ...claims })}.c2ln`;
+  const session = (signedInAt: number, iat: number) =>
+    token({ session_id: 's-d97', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: signedInAt }] });
+
+  function middleware(metaData: unknown, opts: { marker?: string | null } = {}) {
+    const supabaseAuth = { getUserFromToken: vi.fn().mockResolvedValue({ id: USER, email: 'd97@example.com' }) };
+    const prisma = {
+      client: { user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER', deletedAt: null, bannedAt: null, metaData }) } },
+    };
+    const redis = { get: vi.fn(async () => opts.marker ?? null), pttl: vi.fn(async () => -2), set: vi.fn(async () => 'OK') };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test doubles
+    const mw = new AuthMiddleware(supabaseAuth as any, prisma as any, redis as any);
+    return async (bearer: string) => {
+      const req = makeReq({ headers: { authorization: `Bearer ${bearer}` } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      return ((req as any).user?.id as string | undefined) ?? null;
+    };
+  }
+
+  it('D-97: refuses a token minted after the cutoff (a refresh) whose session signed in before it, with no Redis logout marker at all', async () => {
+    const attached = middleware({ signInCutoffAt: CUTOFF });
+    expect(await attached(session(CUTOFF - 3600, NOW))).toBeNull();
+  });
+
+  it('D-97: refuses a session that signed in exactly at the cutoff second (at or before, as the logout marker)', async () => {
+    const attached = middleware({ signInCutoffAt: CUTOFF });
+    expect(await attached(session(CUTOFF, NOW))).toBeNull();
+  });
+
+  it('D-97: attaches a session that signed in after the cutoff — the real user signing in again', async () => {
+    const attached = middleware({ signInCutoffAt: CUTOFF, googleSignInDisabled: true });
+    expect(await attached(session(CUTOFF + 1, NOW))).toBe(USER);
+  });
+
+  it('D-97: refuses, while a cutoff is set, a session token that cannot say when it signed in (session_id, no usable amr); the same token is attached when no cutoff is set', async () => {
+    const noAmr = token({ session_id: 's-d97', iat: NOW, exp: NOW + 3600 });
+    expect(await middleware({ signInCutoffAt: CUTOFF })(noAmr)).toBeNull();
+    expect(await middleware({})(noAmr)).toBe(USER);
+  });
+
+  it('D-97: the durable cutoff holds on its own once the 24h Redis marker has lapsed, and with a marker older than it the later of the two decides', async () => {
+    const older = String(CUTOFF - 7200);
+    const attached = middleware({ signInCutoffAt: CUTOFF }, { marker: older });
+    // After the old marker, before the durable cutoff: refused by the cutoff.
+    expect(await attached(session(CUTOFF - 3600, NOW))).toBeNull();
+    expect(await attached(session(CUTOFF + 1, NOW))).toBe(USER);
+  });
+
+  it.each([
+    ['no metaData', null],
+    ['metaData without a cutoff', { googleSignInDisabled: false }],
+    ['a cutoff that is not a number', { signInCutoffAt: 'yesterday' }],
+    ['metaData that is not an object', ['signInCutoffAt', CUTOFF]],
+  ] as Array<[string, unknown]>)('D-97: a user row with %s is unaffected: a long-lived session is attached', async (_name, metaData) => {
+    expect(await middleware(metaData)(session(CUTOFF - 3600, NOW))).toBe(USER);
+  });
+
+  it('D-97: the admin-token branch is not judged by the Supabase sign-in cutoff (its own 24h admin:user:<id>:revokedAt cutoff covers an admin token for its whole life)', async () => {
+    const prevSecret = process.env.ADMIN_JWT_SECRET;
+    process.env.ADMIN_JWT_SECRET = 'd97-admin-secret-not-real';
+    try {
+      const supabaseAuth = { getUserFromToken: vi.fn().mockResolvedValue(null) };
+      const prisma = {
+        client: {
+          user: {
+            findUnique: vi.fn().mockResolvedValue({ role: 'SUPER_ADMIN', deletedAt: null, bannedAt: null, metaData: { signInCutoffAt: NOW + 3600 } }),
+          },
+        },
+      };
+      const redis = { get: vi.fn(async () => null), set: vi.fn(async () => 'OK') };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test doubles
+      const mw = new AuthMiddleware(supabaseAuth as any, prisma as any, redis as any);
+      const admin = buildAdminToken({ id: USER, email: 'd97@example.com', role: 'SUPER_ADMIN' }, 'd97-admin-secret-not-real');
+      const req = makeReq({ headers: { authorization: `Bearer ${admin}` } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      expect((req as any).user).toEqual({ id: USER, email: 'd97@example.com', role: 'SUPER_ADMIN' });
+      expect(prisma.client.user.findUnique).toHaveBeenCalledWith({ where: { id: USER }, select: { role: true, deletedAt: true, bannedAt: true } });
+    } finally {
+      if (prevSecret === undefined) delete process.env.ADMIN_JWT_SECRET;
+      else process.env.ADMIN_JWT_SECRET = prevSecret;
+    }
   });
 });

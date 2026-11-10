@@ -1316,6 +1316,13 @@ export class IdentityService {
     avatarUrl?: string;
     company?: string;
     referralCode?: string;
+    /**
+     * D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: the
+     * VERIFIED provider record's identities only (IdentityController reads
+     * them from GoTrue's admin user record for the token's subject), never a
+     * request body's: persistUserIdentities upserts each Google sub onto this
+     * user, and a RISC event for that sub then revokes this user's sessions.
+     */
     identities?: UserIdentityDataDto[];
   }, options: {
     /**
@@ -1687,6 +1694,8 @@ export class IdentityService {
    * Only `provider` + `providerSubject` (the IdP's stable user id, e.g.
    * Google's `sub`) are required. This mapping is what lets Cross-Account
    * Protection (RISC) security events resolve to a KeyFlowOS account.
+   * `identities` must come from the verified provider record of `userId`
+   * (D-97, SEC-W7RR-1; see bootstrapUser), never from client input.
    */
   private async persistUserIdentities(
     userId: string,
