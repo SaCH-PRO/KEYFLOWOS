@@ -36,6 +36,8 @@
  * FlowOrchestratorService.executeToolAction with the real ProjectsService, CallLogService,
  * CallScriptService, BookingsService and CommerceService. Stubbed: what the path does not decide
  * (event emitters, timeline, CRM activity log, KEY's LLM chat, the model gateway, customer intake).
+ * The CR-W7CTC-2 cases replace that chat stub with the real FlowOrchestratorService.chat over a
+ * stubbed model gateway (realKeyChat; review SEC-W9KDI-1 / CR-W9KDI-1).
  * WhatsApp sends go through the 'mock' provider: no provider traffic. No tenant context is ever
  * installed, as on the bridge.
  *
@@ -137,6 +139,8 @@ async function cleanup() {
     byBiz('webhook_events'),
     byBiz('team_activity_logs'),
     byBiz('ai_approval_items'),
+    // CR-W7CTC-2 (SEC-W9KDI-2): the auto-approving tier-2 policy that case gives A, should it be left behind
+    byBiz('autopilot_settings'),
     byBiz('bookings'),
     byBiz('contact_tasks'),
     byBiz('call_logs'),
@@ -724,28 +728,94 @@ describe("TD9-2 — a call log names only the business's own contact, and B's sc
   // named. A contact-only position has no member: its envelope does not offer the tool, and a call
   // that reached the dispatcher anyway is refused before anything is written (as above).
   //
-  // HOW: a real signed Twilio delivery (and an SMS turn) reaches the real bridge; KEY's LLM turn is
-  // the stub, which here does what chat() does with a model's call_create_task: the real
-  // AiOversightService.evaluate under the envelope the bridge passed, then the real dispatcher with
-  // the context chatToolAction builds from the bridge's server-only argument.
-  it("CR-W7CTC-2 (W9-KEY-DISPATCH-INCLUDES, was it.todo; D-73, D-88): a staff position backed by a membership creates call tasks over WhatsApp/SMS as its holder (assignment.userId as onBehalfOfUserId), and a contact-only position is refused or not offered call_create_task (staff-chat-bridge.service.ts, job-role-policy.service.ts)", async () => {
-    const flow: Record<string, any> = await import('../src/modules/ai/flow-orchestrator.service');
-    const turns: Array<{ allowed: boolean; reason?: string; out?: { id: string; callerId: string }; error?: string }> = [];
-    orchestratorChat.chat.mockImplementation(
-      async (businessId: string, _m: string, _h: unknown, _p: unknown, _ctx: unknown, _r: unknown, _a: unknown, sessionId: string | undefined, userId: string | undefined, server: any) => {
-        const decision = await oversight.evaluate(businessId, 'call_create_task', undefined, [], server?.jobRoleEnvelope);
-        const turn: (typeof turns)[number] = { allowed: decision.allowed, reason: decision.reason };
-        try {
-          const base = { surface: 'CHAT', principalUserId: userId ?? null, crew: [], sourceId: 'v21b_tc_ctc2', sessionId: sessionId ?? null };
-          // the model names A's owner as the caller; the dispatcher never reads it
-          turn.out = await run(businessId, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA }, flow.chatToolAction(base, 'call_create_task', server));
-        } catch (err) {
-          turn.error = err instanceof Error ? err.message : String(err);
-        }
-        turns.push(turn);
-        return { reply: 'stub KEY reply', sessionId: null };
-      },
+  // HOW (review SEC-W9KDI-1 / CR-W9KDI-1, SEC-W9KDI-2 / CR-W9KDI-2): a real signed Twilio delivery
+  // (and an SMS turn) reaches the real bridge, and KEY's turn is the REAL FlowOrchestratorService.chat
+  // (realKeyChat): the real tool menu under the envelope the bridge passed, the real
+  // AiOversightService.evaluate over this database with the real RoleEngineService, governToolCall,
+  // chatToolAction, the quick-confirm path and executeTool into the real dispatcher. So the line in
+  // chat() that hands the holder to the dispatcher is what these cases prove (without it, the holder's
+  // call is refused as a run with no member and nothing is written), and a call the policy holds for a
+  // quick confirmation is not run. The case asserting the call logs runs under a business policy that
+  // runs tier 2 without a confirmation; under the default policy see the case after it.
+  async function realKeyChat() {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { RoleEngineService } = await import('../src/modules/ai/role-engine.service');
+    const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+    const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
+    const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
+    const { CallLogService } = await import('../src/modules/call-tasks/call-log.service');
+    const prisma = dispatcher.prisma;
+    const roleEngine = new RoleEngineService({} as never, {} as never, {} as never);
+    const governance = new AiOversightService(
+      prisma,
+      { log: vi.fn(async () => undefined) } as any,
+      { recordApprovalSignal: vi.fn(async () => undefined) } as any,
+      roleEngine,
+      stub(),
+      policy,
     );
+    const turns: Array<{ menu: string[]; decision?: any; result?: any }> = [];
+    const evaluate = governance.evaluate.bind(governance);
+    vi.spyOn(governance, 'evaluate').mockImplementation(async (...args: any[]) => {
+      const decision = await (evaluate as any)(...args);
+      if (args[1] === 'call_create_task') turns[turns.length - 1].decision = decision;
+      return decision;
+    });
+    // The model: offered a menu, it proposes call_create_task naming A's owner as the caller (the
+    // dispatcher never reads it), whether or not the menu offered it; its follow-up is plain text.
+    const usage = { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 };
+    const call = { id: 'v21b_tc_ctc2', type: 'function', function: { name: 'call_create_task', arguments: JSON.stringify({ contactId: ID.contactA, callerId: ID.ownerA }) } };
+    const aiUsage = {
+      checkRateLimit() {},
+      checkCredits: async () => ({ allowed: true }),
+      trackAndComplete: vi.fn(async (_b: string, _u: unknown, _f: string, req: { tools?: Array<{ function: { name: string } }> }) => {
+        if (!req.tools) return { content: 'stub follow-up', toolCalls: [], usage };
+        turns.push({ menu: req.tools.map((t) => t.function.name) });
+        return { content: '', toolCalls: [call], usage };
+      }),
+    };
+    const boundary = { adopts: (name: string) => KeyActionBoundaryService.prototype.adopts.call(undefined, name) };
+    const services = new Map<unknown, unknown>([
+      [JobRolePolicyService, policy],
+      [KeyActionBoundaryService, boundary],
+      [CallLogService, callLogs],
+    ]);
+    const key = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      logger: { log() {}, warn() {}, error() {}, debug() {} },
+      prisma,
+      governance,
+      roleEngine,
+      aiUsage,
+      moduleRef: { get: (token: unknown) => services.get(token) },
+      executionLog: { log: async () => undefined, logToolExecution: async () => undefined },
+      businessGraph: { invalidateCache() {}, getSnapshot: async () => ({ business: { name: 'A' } }), buildContextString: () => '' },
+      memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
+      buildAttachmentContext: async () => '',
+      buildBlueprintSection: async () => '',
+      buildOnboardingDirective: async () => '',
+      buildPerceptionSection: async () => '',
+      saveConversationHistory: async () => undefined,
+      enforceDoNotSay: async () => undefined,
+    });
+    const chat = async (...args: any[]) => {
+      const result = await key.chat(...args);
+      turns[turns.length - 1].result = result;
+      return result;
+    };
+    return { chat, turns };
+  }
+  const NO_MEMBER = 'call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)';
+  /** The bridge records the session chat() answered on the position; put the positions back. */
+  const resetSessions = () =>
+    db.orgAssignment.updateMany({ where: { id: { in: [ID.posCtl, ID.posFull, ID.posBanned] } }, data: { activeFlowSessionId: null } });
+
+  it("CR-W7CTC-2 (W9-KEY-DISPATCH-INCLUDES, was it.todo; D-73, D-88): a staff position backed by a membership creates call tasks over WhatsApp/SMS as its holder (assignment.userId as onBehalfOfUserId), and a contact-only position is refused or not offered call_create_task (staff-chat-bridge.service.ts, job-role-policy.service.ts)", async () => {
+    const key = await realKeyChat();
+    const { turns } = key;
+    orchestratorChat.chat.mockImplementation(key.chat);
+    // Review SEC-W9KDI-2 / CR-W9KDI-2: A runs this tool at tier 2 without a confirmation (its
+    // approved-tools list), the only kind of policy under which a bridge turn runs a tier-2 call.
+    await db.autopilotSettings.create({ data: { businessId: ID.bizA, autonomyLevel: 1, approvedTools: ['call_create_task'] } });
     try {
       const before = await db.callLog.count({ where: { businessId: ID.bizA } });
 
@@ -753,33 +823,84 @@ describe("TD9-2 — a call log names only the business's own contact, and B's sc
       const ctl = await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.ctl}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2ctl' });
       expect(ctl.status).toBe(201);
       expect(turns).toHaveLength(1);
-      expect(turns[0], 'contact-only: call_create_task is not offered').toMatchObject({ allowed: false });
-      expect(turns[0].error).toBe('call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)');
+      expect(turns[0].menu, 'contact-only: call_create_task is not offered').not.toContain('call_create_task');
+      expect(turns[0].menu.length, 'the menu is the position scope, not empty').toBeGreaterThan(0);
+      expect(turns[0].decision, 'contact-only: refused').toMatchObject({ allowed: false });
+      expect(turns[0].result.toolResults).toBeUndefined();
       expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before);
 
-      // a membership-backed position (posFull, held by an ADMIN of A): offered, and the call log names its holder
+      // a membership-backed position (posFull, held by an ADMIN of A): offered, run by chat(), and the call log names its holder
       const full = await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.full}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2full' });
       expect(full.status).toBe(201);
       expect(turns).toHaveLength(2);
-      expect(turns[1], JSON.stringify(turns[1])).toMatchObject({ allowed: true, out: { callerId: ID.full } });
-      expect(await db.callLog.findUnique({ where: { id: turns[1].out!.id } })).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA, callerId: ID.full });
+      expect(turns[1].menu).toContain('call_create_task');
+      expect(turns[1].decision).toMatchObject({ allowed: true, requiresQuickConfirm: false, requiresFormalApproval: false });
+      const viaWhatsApp = turns[1].result.toolResults?.[0];
+      expect(viaWhatsApp, JSON.stringify(turns[1].result)).toMatchObject({ name: 'call_create_task', success: true, result: { callerId: ID.full } });
+      expect(await db.callLog.findUnique({ where: { id: viaWhatsApp.result.id } })).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA, callerId: ID.full });
 
       // over SMS too (InboundCommunicationsService hands the bridge channel 'sms')
       expect(await bridge.routeInboundMessage(ID.bizA, PHONE.full, 'Call Alpha tomorrow', 'sms', 'SMv21bctc2sms')).toMatchObject({ handled: true });
       expect(turns).toHaveLength(3);
-      expect(turns[2], JSON.stringify(turns[2])).toMatchObject({ allowed: true, out: { callerId: ID.full } });
+      const viaSms = turns[2].result.toolResults?.[0];
+      expect(viaSms, JSON.stringify(turns[2].result)).toMatchObject({ name: 'call_create_task', success: true, result: { callerId: ID.full } });
 
       // control: a holder HTTP refuses (banned) keeps the baseline envelope: not offered, and nothing is written as anyone
       await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.banned}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2banned' });
       expect(turns).toHaveLength(4);
-      expect(turns[3]).toMatchObject({ allowed: false });
-      expect(turns[3].out).toBeUndefined();
+      expect(turns[3].menu).not.toContain('call_create_task');
+      expect(turns[3].decision).toMatchObject({ allowed: false });
+      expect(turns[3].result.toolResults).toBeUndefined();
       expect(await db.callLog.count({ where: { businessId: ID.bizA, callerId: ID.banned } })).toBe(0);
       // the only call logs this case wrote are the holder's two (WhatsApp and SMS)
       expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before + 2);
-      expect(await db.callLog.count({ where: { id: { in: [turns[1].out!.id, turns[2].out!.id] }, callerId: ID.full } })).toBe(2);
+      expect(await db.callLog.count({ where: { id: { in: [viaWhatsApp.result.id, viaSms.result.id] }, callerId: ID.full } })).toBe(2);
+
+      // and the contact-only position has no holder, so its call, had it reached the dispatcher, is refused
+      const flow: Record<string, any> = await import('../src/modules/ai/flow-orchestrator.service');
+      const ctlHolder = policy.holderForPosition(await structure.resolveStaffByPhone(ID.bizA, PHONE.ctl));
+      expect(ctlHolder).toBeNull();
+      const ctlTurn = { surface: 'CHAT', principalUserId: null, crew: [], sourceId: 'v21b_tc_ctc2', sessionId: null };
+      await expect(
+        run(ID.bizA, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA }, flow.chatToolAction(ctlTurn, 'call_create_task', { positionHolderUserId: ctlHolder })),
+      ).rejects.toThrow(NO_MEMBER);
+      expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before + 2);
     } finally {
       orchestratorChat.chat.mockImplementation(async () => ({ reply: 'stub KEY reply', sessionId: null }));
+      await db.autopilotSettings.deleteMany({ where: { businessId: ID.bizA } });
+      await resetSessions();
+    }
+  });
+
+  // Review SEC-W9KDI-2 / CR-W9KDI-2 (W9-KEY-DISPATCH-INCLUDES; D-73, D-88): under A's default policy
+  // (no AutopilotSettings: tier 2 needs a quick confirmation) the holder's call_create_task is
+  // allowed but held for a confirmation, and chat() runs nothing. A confirmation is bound to the
+  // member it was issued to (bindFlowConfirmation), and the bridge's turn names none, so none is
+  // bound and nobody can confirm it over WhatsApp/SMS. Known limitation, recorded for follow-up
+  // (bridge confirmations): on such a business the holder is offered a call the bridge never runs.
+  // Pinned so the call logs above are never read as the default.
+  it("SEC-W9KDI-2 / CR-W9KDI-2 (W9-KEY-DISPATCH-INCLUDES; D-73, D-88): under the default policy the holder's call_create_task over WhatsApp waits for a quick confirmation that no bridge turn can give (none is bound), and nothing is written (known limitation: bridge confirmations are a follow-up)", async () => {
+    const key = await realKeyChat();
+    const { turns } = key;
+    orchestratorChat.chat.mockImplementation(key.chat);
+    expect(await db.autopilotSettings.count({ where: { businessId: ID.bizA } })).toBe(0);
+    try {
+      const before = await db.callLog.count({ where: { businessId: ID.bizA } });
+      const keysBefore = await db.idempotencyKey.count({ where: { businessId: ID.bizA } });
+      const res = await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.full}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2dflt' });
+      expect(res.status).toBe(201);
+      expect(turns).toHaveLength(1);
+      expect(turns[0].menu).toContain('call_create_task');
+      expect(turns[0].decision).toMatchObject({ allowed: true, requiresQuickConfirm: true, tier: 2, reason: 'Tier 2 action requires quick confirmation before execution' });
+      expect(turns[0].result).toMatchObject({ requiresConfirmation: true });
+      expect(turns[0].result.toolResults).toBeUndefined();
+      expect(turns[0].result.pendingConfirmations).toHaveLength(1);
+      expect(turns[0].result.pendingConfirmations[0], 'no confirmation is bound for a turn with no member').not.toHaveProperty('confirmationId');
+      expect(await db.idempotencyKey.count({ where: { businessId: ID.bizA } })).toBe(keysBefore);
+      expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before);
+    } finally {
+      orchestratorChat.chat.mockImplementation(async () => ({ reply: 'stub KEY reply', sessionId: null }));
+      await resetSessions();
     }
   });
 

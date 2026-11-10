@@ -318,7 +318,11 @@ export interface FlowServerContext {
  * the member the command runs for as the caller (contactBindMember), so on WhatsApp/SMS it now runs
  * as the holder, never as the member the model names; a contact-only position has no holder and is
  * refused before anything is written, as before. Every other tool, and a turn with a principal,
- * keeps `base` unchanged: the holder is never a principal and grants nothing.
+ * keeps `base` unchanged: the holder is never a principal and grants nothing. Governance still decides
+ * whether the call runs: a call it holds for a quick confirmation is not run on a turn with no
+ * member, since no confirmation is bound for one (review SEC-W9KDI-2 / CR-W9KDI-2, a known limitation).
+ * Pinned through the real chat() in test/staff-bridge-boundary.integration.test.ts (CR-W7CTC-2,
+ * SEC-W9KDI-1) and by flow-chat-tool-action.spec.ts.
  */
 export function chatToolAction(base: ActionContext, toolName: string, server?: FlowServerContext): KeyDispatchAction {
   const holder = server?.positionHolderUserId;

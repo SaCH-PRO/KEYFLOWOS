@@ -153,6 +153,10 @@ export class StaffChatBridgeService {
     // runs for the holder of a membership-backed position (assignment.userId, when HTTP lets that
     // member in here): chat() dispatches it with them as onBehalfOfUserId. A contact-only position
     // has none, is not offered the tool (envelopeForPosition), and is refused it at dispatch.
+    // Review SEC-W9KDI-2 / CR-W9KDI-2 (D-73, D-88): chat() runs it only where the business runs
+    // call_create_task (tier 2) without a quick confirmation. A confirmation is bound to the member
+    // it is issued to (bindFlowConfirmation) and this turn has none, so under a policy that asks for
+    // one the call is proposed and never run. Known limitation; bridge confirmations are a follow-up.
     const holderUserId = policy.holderForPosition(assignment);
 
     const hints = [
