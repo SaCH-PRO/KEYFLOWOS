@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency.service';
+import { KeyIdempotencyService, fingerprintToolRequest, KEY_IDEMPOTENCY_CLAIM_LEASE_MS } from './key-idempotency.service';
 
 /**
  * An in-memory idempotency_keys table that keeps the constraints the service
@@ -12,11 +12,12 @@ import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency
  */
 function createMockClient() {
   const rows: any[] = [];
+  const logs: any[] = [];
   let seq = 0;
   const sameKey = (r: any, k: { businessId: string; idempotencyKey: string }) =>
     r.businessId === k.businessId && r.idempotencyKey === k.idempotencyKey;
   const prismaError = (code: string, message: string) => Object.assign(new Error(message), { code });
-  return {
+  const client = {
     rows,
     idempotencyKey: {
       findUnique: vi.fn(async ({ where }: any) => rows.find((r) => sameKey(r, where.businessId_idempotencyKey)) ?? null),
@@ -48,8 +49,29 @@ function createMockClient() {
         rows.splice(i, 1);
         return { count: 1 };
       }),
+      // W10-CLAIM-LEASE (D-103): the conditional update a takeover is. Every
+      // field of the where must match (updatedAt as { lte }), as on the table.
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const matches = rows.filter((r) =>
+          Object.entries(where).every(([field, cond]: [string, any]) =>
+            cond && typeof cond === 'object' && 'lte' in cond ? r[field] <= cond.lte : r[field] === cond,
+          ),
+        );
+        for (const r of matches) Object.assign(r, data);
+        return { count: matches.length };
+      }),
     },
+    cortexActionLog: {
+      create: vi.fn(async ({ data }: any) => {
+        logs.push(data);
+        return data;
+      }),
+    },
+    logs,
+    // An interactive transaction on the one in-memory table.
+    $transaction: vi.fn(async (fn: (tx: any) => Promise<unknown>) => fn(client)),
   };
+  return client;
 }
 
 describe('KeyIdempotencyService', () => {
@@ -139,6 +161,106 @@ describe('KeyIdempotencyService', () => {
     await service.check({ businessId: 'biz_1', idempotencyKey: 'req_2' });
     await service.fail({ businessId: 'biz_1', idempotencyKey: 'req_2' }, 'Bad request');
     expect(await service.check({ businessId: 'biz_1', idempotencyKey: 'req_2' })).toStrictEqual({ status: 'failed', error: 'Bad request' });
+  });
+});
+
+/**
+ * W10-CLAIM-LEASE (owner ruling D-103, closing V1-19 review CR-V19-2): a claim
+ * still open 15 minutes after it was taken (its claimant crashed before its
+ * settle) is taken over by the next check() for the same request, under a new
+ * claimId, and the takeover is logged; a finished claim is never run again.
+ * The real-DB proof (two concurrent retries, one takeover) is
+ * test/key-idempotency-claim.integration.test.ts.
+ */
+describe('KeyIdempotencyService: the claim lease (D-103, W10-CLAIM-LEASE)', () => {
+  const MIN = 60_000;
+  let service: KeyIdempotencyService;
+  let client: ReturnType<typeof createMockClient>;
+  const k = (extra: Record<string, unknown> = {}) => ({ businessId: 'biz_1', idempotencyKey: 'req_1', requestHash: 'h1', ...extra });
+  /** Make the open claim look taken `minutes` ago. */
+  const age = (minutes: number) => {
+    const at = new Date(Date.now() - minutes * MIN);
+    Object.assign(client.rows[0], { createdAt: at, updatedAt: at });
+  };
+
+  beforeEach(() => {
+    client = createMockClient();
+    service = new KeyIdempotencyService({ client } as any);
+  });
+
+  it('D-103: the lease is a named constant of 15 minutes', () => {
+    expect(KEY_IDEMPOTENCY_CLAIM_LEASE_MS).toBe(15 * MIN);
+  });
+
+  it('D-103: a claim open 16 minutes is taken over by the next check(): a new claimId, the row kept for the same request, and one log entry naming the old claim and its age', async () => {
+    const stranded = await service.check(k());
+    age(16);
+
+    const taker = await service.check(k());
+    expect(taker).toEqual({ status: 'new', claimId: expect.any(String) });
+    expect(taker.claimId).not.toBe(stranded.claimId);
+    expect(client.rows).toHaveLength(1);
+    expect(client.rows[0]).toMatchObject({ id: taker.claimId, status: 'pending', requestHash: 'h1' });
+    // The new claim's lease starts now: the next retry is held off.
+    expect((await service.check(k())).status).toBe('pending');
+
+    expect(client.logs).toHaveLength(1);
+    const [log] = client.logs;
+    expect(log).toMatchObject({ businessId: 'biz_1', actionType: 'idempotency.claim_takeover', status: 'success' });
+    expect(log.description).toContain(stranded.claimId);
+    expect(log.description).toContain('16 min');
+    expect(JSON.parse(log.result)).toMatchObject({
+      idempotencyKey: 'req_1',
+      staleClaimId: stranded.claimId,
+      newClaimId: taker.claimId,
+      leaseMs: 15 * MIN,
+      ruling: 'D-103',
+    });
+  });
+
+  it('D-103: a claim open 14 minutes is not taken over', async () => {
+    const holder = await service.check(k());
+    age(14);
+
+    expect(await service.check(k())).toEqual({ status: 'pending', error: expect.any(String) });
+    expect(client.rows[0].id).toBe(holder.claimId);
+    expect(client.logs).toEqual([]);
+  });
+
+  it('D-103: a completed or failed claim, however old, is never re-run: check() answers its stored outcome', async () => {
+    const done = await service.check(k());
+    await service.complete(k({ claimId: done.claimId }), { id: 'c1' });
+    age(60);
+    expect(await service.check(k())).toEqual({ status: 'completed', response: { id: 'c1' } });
+
+    const failed = await service.check(k({ idempotencyKey: 'req_2' }));
+    await service.fail(k({ idempotencyKey: 'req_2', claimId: failed.claimId }), 'Bad request');
+    Object.assign(client.rows[1], { updatedAt: new Date(Date.now() - 60 * MIN) });
+    expect(await service.check(k({ idempotencyKey: 'req_2' }))).toEqual({ status: 'failed', error: 'Bad request' });
+    expect(client.logs).toEqual([]);
+  });
+
+  it("D-103: a stranded claim presented with another request hash is a 'conflict', not taken over", async () => {
+    const stranded = await service.check(k());
+    age(16);
+
+    expect((await service.check(k({ requestHash: 'h2' }))).status).toBe('conflict');
+    expect(client.rows[0].id).toBe(stranded.claimId);
+    expect(client.logs).toEqual([]);
+  });
+
+  it("D-103: after a takeover the stranded holder's complete(), fail() and release() bind nothing and answer false; the taker settles", async () => {
+    const stranded = await service.check(k());
+    age(16);
+    const taker = await service.check(k());
+
+    expect(await service.complete(k({ claimId: stranded.claimId }), { by: 'stranded' })).toBe(false);
+    expect(await service.fail(k({ claimId: stranded.claimId }), 'stranded error')).toBe(false);
+    expect(await service.release(k({ claimId: stranded.claimId! }) as any)).toBe(false);
+    expect(client.rows[0]).toMatchObject({ status: 'pending', response: null, error: null });
+
+    expect(await service.complete(k({ claimId: taker.claimId }), { by: 'taker' })).toBe(true);
+    expect(await service.check(k())).toEqual({ status: 'completed', response: { by: 'taker' } });
   });
 });
 
