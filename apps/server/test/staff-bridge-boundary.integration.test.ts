@@ -292,8 +292,8 @@ async function repliesTo(businessId: string, phone: string): Promise<string[]> {
   return rows.filter((r: any) => r.whatsappContact.phoneNumber.replace(/\D/g, '') === digits).map((r: any) => r.body as string);
 }
 
-function run(businessId: string, tool: string, args: Record<string, unknown>) {
-  return dispatcher.executeToolAction(businessId, tool, args);
+function run(businessId: string, tool: string, args: Record<string, unknown>, action?: Record<string, unknown>) {
+  return dispatcher.executeToolAction(businessId, tool, args, action);
 }
 
 beforeAll(async () => {
@@ -673,14 +673,19 @@ describe("TD9-1 — projects_create_task writes only into the business's own pro
 });
 
 describe("TD9-2 — a call log names only the business's own contact, and B's script reads only B's tasks", () => {
+  // W7-CALL-TASK-CALLER (D-73, D-88): call_create_task records the member the command runs for and
+  // refuses a run with no member, so these dispatches name the member they run for (A's owner, the
+  // caller they named before) as a member's chat turn does; the contact checks below are unchanged.
+  const forOwnerA = () => ({ surface: 'CHAT', principalUserId: ID.ownerA });
+
   it("call_create_task refuses another business's contact, and no call log in A names it", async () => {
-    await expect(run(ID.bizA, 'call_create_task', { contactId: ID.contactB, callerId: ID.ownerA })).rejects.toThrow(/Contact not found/);
+    await expect(run(ID.bizA, 'call_create_task', { contactId: ID.contactB, callerId: ID.ownerA }, forOwnerA())).rejects.toThrow(/Contact not found/);
     expect(await db.callLog.count({ where: { businessId: ID.bizA, contactId: ID.contactB } })).toBe(0);
     expect(await db.contactTask.count({ where: { businessId: ID.bizA, contactId: ID.contactB } })).toBe(0);
   });
 
   it("updateCallLog (PATCH .../calls/:id) refuses another business's contact on A's own call log", async () => {
-    const own = await run(ID.bizA, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA });
+    const own = await run(ID.bizA, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA }, forOwnerA());
     await expect(callLogs.updateCallLog(ID.bizA, own.id, { contactId: ID.contactB })).rejects.toThrow(/Contact not found/);
     expect((await db.callLog.findUnique({ where: { id: own.id } })).contactId).toBe(ID.contactA);
     // control: the follow-up on its own log lands on its own contact

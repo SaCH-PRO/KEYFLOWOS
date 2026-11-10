@@ -1354,7 +1354,7 @@ describe('call logs take the caller from the session (V1-54)', () => {
       const out = await keyCallCreateTask(c.action, { contactId: 'contact_1', callerId: c.modelCallerId });
       expect(prisma.callLogs, `${c.action.surface} #${i}`).toHaveLength(i + 1);
       expect(prisma.callLogs[i], `${c.action.surface} #${i}`).toMatchObject({ businessId: 'biz_1', contactId: 'contact_1', callerId: c.recorded });
-      expect(out, `${c.action.surface} #${i}`).toMatchObject({ id: prisma.callLogs[i].id, contactId: 'contact_1' });
+      expect(out, `${c.action.surface} #${i}`).toMatchObject({ id: prisma.callLogs[i].id, contactId: 'contact_1', callerId: c.recorded });
       expect(emitter.emit).toHaveBeenLastCalledWith(
         'call_log.created',
         expect.objectContaining({ businessId: 'biz_1', callLogId: prisma.callLogs[i].id, callerId: c.recorded }),

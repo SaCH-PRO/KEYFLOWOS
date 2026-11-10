@@ -5743,15 +5743,30 @@ ${triage.standingContext}`;
         return { items: result.items, total: result.total };
       }
       case 'call_create_task': {
+        // W7-CALL-TASK-CALLER (review ST-4; owner rulings D-73, D-88): the caller is the member the
+        // command runs for, as POST calls takes it from the session (V1-54): the surface's principal,
+        // the member a surface with no principal runs for, or the queued plan's member
+        // (contactBindMember, never a value from the arguments). args.callerId, which the model
+        // chooses, is ignored. A run with no member (an inbound conversation, the staff bridge's
+        // chat, a monitor run for no one, a plan id that names no plan here) is refused before
+        // anything is written. CallLogService.assertCaller still holds that member to the caller
+        // rule: a member of the business who may open the contact.
+        const callerId = await this.contactBindMember(businessId, action);
+        if (!callerId) {
+          throw new Error(
+            'call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)',
+          );
+        }
         const log = await this.getCallLog().createCallLog({
           businessId,
           contactId: args.contactId,
-          callerId: args.callerId,
+          callerId,
           scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
           script: args.script ?? null,
           notes: args.notes ?? null,
         });
-        return { id: log.id, contactId: args.contactId };
+        // The recorded caller is answered, so KEY does not report the member the model named.
+        return { id: log.id, contactId: args.contactId, callerId: log.callerId };
       }
       case 'call_log_outcome': {
         // `completed` used to be assigned and dropped, and the return echoed the
