@@ -1741,6 +1741,19 @@ describe('Review repairs (R0-SEC3): the record-payment route projects the invoic
   // (as test/key-dispatcher-tenant.integration.test.ts composes it) with the
   // collaborators off the path recorded: the execution log keeps the
   // envelope it was handed, no row is written.
+  //
+  // What the case does not prove (W7-KEY-MARK-PAID-PROJECTION review
+  // SEC-W7KMP-1, SEC-W7KMP-2; both reproduced, both outside this packet's
+  // write set, kept as it.todo W7KMP-01 and W7KMP-02 in
+  // test/key-dispatcher-tenant.integration.test.ts):
+  // - the member's { revenue: 'write' } is PATCH .../paid's precondition,
+  //   mirrored so the two answers compare like for like. The KEY path does not
+  //   check it: on member chat the dispatcher gates the operations module only
+  //   (D-40), so a revenue:none member gets the same write and the same
+  //   projection (a revenue gate there needs an owner ruling);
+  // - markInvoicePaid takes no initiatedBy, so this tool's payment entries
+  //   name KEY alone, where commerce_update_invoice {status: 'PAID'} keeps the
+  //   member beside KEY (SEC-W7IAR-2, D-90).
   describe('W7-KEY-MARK-PAID-PROJECTION: the KEY tool answers the write projection (SEC3-ST-2)', () => {
     let keyDispatcher: any;
     const loggedEnvelopes: any[] = [];
