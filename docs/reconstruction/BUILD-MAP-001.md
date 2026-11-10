@@ -1072,6 +1072,21 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-100 | A member without revenue read sees no money signals at all: revenue sorts and filters on the contact list are ignored, and the payment-health ratio is withheld, as amounts are (D-63, D-90). | W8 money-signal packet (CR-W7CMV-2, SEC-W7CMV-3, SEC-W7CMV-1). |
 | D-101 | After a D-97 sign-in cutoff, the account accepts only a new sign-in with Google or an emailed link (methods the attacker cannot produce from a stolen refresh token); a password sign-in made after the cutoff is refused until the real user has signed in once with Google or the emailed link, which clears the restriction. | W9 RISC password-route packet (SEC-W8RSC-4). |
 
+### Owner rulings, 2026-11-10 (wave-9 decision residuals)
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-102 | When a paid invoice is reopened (refund or reversal), its money effects are undone: the referral reward credit and the referrer's lead-score bump are reversed, linked projects step back to the status they left, the margin snapshot is marked reversed, and a review request not yet sent is cancelled. Messages already sent, attribution history and the business's first-sale flag stay. The reopen messages no one. | W10 reopen reversals (VR-05 census in invoice-status-events). |
+| D-103 | A KEY idempotency claim still unfinished 15 minutes after it was taken can be taken over by a retry; the takeover is audited, and a finished claim is never run again. | W10 claim lease (CR-V19-2). |
+| D-104 | Membership is the single rule for business access: an owner recorded only as Business.ownerId, with no Membership row, is refused everywhere (as D-73 and the module-scope guard already do); an operator script, dry-run by default, creates the missing OWNER membership for such owners, and the guards that admit them today are aligned. | W10 owner membership (BRS-12). |
+| D-105 | WiPay checkout is offered only to a business that has connected its own WiPay key; tenants no longer share the platform's WiPay account. | W10 WiPay key binding (PC-11b, SEC-V33-2). |
+| D-106 | PayPal is not offered for an invoice or order in a currency PayPal does not support (TTD, JMD, BBD, GYD, XCD and any other it does not list); the payer sees which methods can pay it, and payment settings say why PayPal is missing. | W10 PayPal currency (PC-08b). |
+| D-107 | The low-runway warning stays, computed from business-currency cash, and states when other-currency cash exists, listing each currency's amount unconverted (or saying it is withheld from this viewer); never a silent alarm. | W10 low runway (CP-18). |
+| D-108 | D-97 confirmed as built: an account-disabled event sets the sign-in cutoff only when its reason is hijacking; other reasons (bulk-account and so on) are logged and end no session. | None (as built, W8). |
+| D-109 | D-95 confirmed as built: staff records map to Team write, and community posts and landing pages to Content write. | None (as built, W6). |
+| D-110 | A platform SUPER_ADMIN who is not a member of a business is refused every trash restore and permanent delete in it, as on revenue writes (D-46); support work uses the admin tools. | None (as built, W6). |
+| D-111 | Managing KEY connectors (connect, change, remove) is limited to OWNER and ADMIN members; staff may use them. Google connections stay owner-only (D-99). | None (as built). |
+
 ---
 
 ## (h) Judge dispositions
