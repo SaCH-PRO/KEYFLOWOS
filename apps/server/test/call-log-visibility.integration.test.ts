@@ -487,7 +487,130 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
     await as(ID.owner).post(`${calls}/${clFlip.id}/complete`, { outcome: 'reached' }).expect(201);
   });
 
-  it.todo('chaser.service.ts and capacity-insight.service.ts tell a caller to log the outcome of a call log whose contact they can no longer open (review CR-2 dead-end; those services are outside FOLLOW3-D4-CALL-LOG-VIS\'s write set, follow-up packet)');
+  /**
+   * W9-CALL-LOG-DEADEND (review CR-2 dead-end, under the CR-2 ruling above): ChaserService's
+   * 'unlogged_call' notice and CapacityInsightService's 'unlogged_calls' alert told a caller to log
+   * the outcome of a call log whose contact they can no longer open, a call log every call-log route
+   * answers them 404 for (CL-04d). Both now leave out the call logs whose contact the caller may not
+   * open by the V1-08 rule the call-log routes apply through CallLog.contactId (a caller who is no
+   * longer a member opens no contact). A contactless call log stays the business's, as on the routes.
+   * The real services run over this suite's real PrismaService; the event emitter is a recorder and
+   * the workload aggregator reports nobody overloaded.
+   */
+  const staleAt = () => new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // >24h ago: unlogged
+  const STALE = {
+    // a contact the caller may not open
+    privAll: `${P}stale_privAll`, // owner's PRIVATE contact, view-all caller
+    teamOwned: `${P}stale_teamOwned`, // owner's TEAM contact, crm_view 'owned' caller
+    sharedAll: `${P}stale_sharedAll`, // PRIVATE shared with staffOwned only, view-all caller
+    gone: `${P}stale_gone`, // TEAM contact, caller no longer a member of bizA (bizB's owner)
+    // a contact the caller may open (CONTROL)
+    privOwner: `${P}stale_privOwner`,
+    mineOwned: `${P}stale_mineOwned`,
+    sharedOwned: `${P}stale_sharedOwned`,
+    teamAll: `${P}stale_teamAll`,
+    noneAll: `${P}stale_noneAll`,
+  };
+  const HIDDEN_FROM_CALLER = [STALE.privAll, STALE.teamOwned, STALE.sharedAll, STALE.gone];
+  const OPEN_TO_CALLER: Array<[string, string]> = [
+    [STALE.privOwner, ID.owner],
+    [STALE.mineOwned, ID.staffOwned],
+    [STALE.sharedOwned, ID.staffOwned],
+    [STALE.teamAll, ID.staffAll],
+    [STALE.noneAll, ID.staffAll],
+  ];
+  let staleSeeded = false;
+
+  async function seedStale() {
+    if (staleSeeded) return;
+    const rows: Array<[string, string | null, string]> = [
+      [STALE.privAll, ID.cPriv, ID.staffAll],
+      [STALE.teamOwned, ID.cTeam, ID.staffOwned],
+      [STALE.sharedAll, ID.cShared, ID.staffAll],
+      [STALE.gone, ID.cTeam, ID.ownerB],
+      [STALE.privOwner, ID.cPriv, ID.owner],
+      [STALE.mineOwned, ID.cMine, ID.staffOwned],
+      [STALE.sharedOwned, ID.cShared, ID.staffOwned],
+      [STALE.teamAll, ID.cTeam, ID.staffAll],
+      [STALE.noneAll, null, ID.staffAll],
+    ];
+    // Written directly: these are rows assigned before the contact was hidden from the caller (or
+    // before the caller left), which the writers' caller check (CL-04a/b) no longer lets in.
+    for (const [id, contactId, callerId] of rows) {
+      await db.callLog.create({ data: { id, businessId: ID.bizA, contactId, callerId, scheduledAt: staleAt(), notes: 'unlogged', evidenceIds: [] } });
+    }
+    staleSeeded = true;
+  }
+
+  async function chaser() {
+    const { ChaserService } = await import('../src/modules/ai/chaser.service');
+    const events: Array<[string, any]> = [];
+    const svc = new ChaserService(prismaSvc, { emit: (name: string, payload: any) => { events.push([name, payload]); return true; } } as any);
+    return { svc, events };
+  }
+
+  async function capacity() {
+    const { CapacityInsightService } = await import('../src/modules/ai/capacity-insight.service');
+    const events: Array<[string, any]> = [];
+    const workload = { getWorkloadForBusiness: async () => ({ overloaded: [] }) };
+    const svc = new CapacityInsightService(
+      prismaSvc,
+      workload as any,
+      { emit: (name: string, payload: any) => { events.push([name, payload]); return true; } } as any,
+    );
+    return { svc, events };
+  }
+
+  const ours = (ids: string[]) => ids.filter((id) => id.startsWith(`${P}stale_`));
+
+  it("CL-04e chaser.service.ts no longer tells a caller to log the outcome of a call log whose contact they can no longer open (review CR-2 dead-end; W9-CALL-LOG-DEADEND, was it.todo)", async () => {
+    await seedStale();
+    const { svc, events } = await chaser();
+    const notices = (await svc.chaseBusiness(ID.bizA)).filter((n: any) => n.type === 'unlogged_call');
+    const chased = notices.filter((n: any) => ours([n.entityId]).length > 0);
+    for (const hidden of HIDDEN_FROM_CALLER) {
+      expect(chased.map((n: any) => n.entityId), hidden).not.toContain(hidden);
+    }
+    // CONTROL: the calls whose contact the caller may open are chased, to that caller
+    expect(chased.map((n: any) => [n.entityId, n.recipientUserId]).sort()).toEqual([...OPEN_TO_CALLER].sort());
+    const emittedIds = events.filter(([name, n]) => name === 'manager.chase_notice' && n.type === 'unlogged_call').map(([, n]) => n.entityId);
+    for (const hidden of HIDDEN_FROM_CALLER) expect(emittedIds, hidden).not.toContain(hidden);
+  });
+
+  it("CL-04f capacity-insight.service.ts no longer counts or tells anyone to remind a caller to log the outcome of a call log whose contact the caller can no longer open (review CR-2 dead-end; W9-CALL-LOG-DEADEND, was it.todo)", async () => {
+    await seedStale();
+    const { svc } = await capacity();
+    const alerts = (await svc.scanBusiness(ID.bizA)).filter((a: any) => a.type === 'unlogged_calls');
+    const flagged = alerts.filter((a: any) => ours(a.affectedEntityIds).length > 0);
+    const flaggedIds = flagged.flatMap((a: any) => a.affectedEntityIds);
+    for (const hidden of HIDDEN_FROM_CALLER) expect(flaggedIds, hidden).not.toContain(hidden);
+    // CONTROL: the calls whose contact the caller may open are still flagged, naming that caller
+    expect(flagged.map((a: any) => [a.affectedEntityIds[0], a.affectedUserIds[0]]).sort()).toEqual([...OPEN_TO_CALLER].sort());
+  });
+
+  it('CL-04g RULING (review CR-2): a call whose contact is made PRIVATE after it was assigned stops being chased and flagged for its caller; while the caller may open it, it is chased (W9-CALL-LOG-DEADEND)', async () => {
+    const cFlip = `${P}cFlip2`;
+    const clFlip = `${P}flip2_call`;
+    await db.contact.create({ data: { id: cFlip, businessId: ID.bizA, firstName: 'V84D', lastName: 'flip2', visibility: 'TEAM', ownerId: ID.owner } });
+    await db.callLog.create({
+      data: { id: clFlip, businessId: ID.bizA, contactId: cFlip, callerId: ID.staffAll, scheduledAt: staleAt(), notes: 'assigned', evidenceIds: [] },
+    });
+    const chasedIds = async () => ((await (await chaser()).svc.chaseBusiness(ID.bizA)) as any[])
+      .filter((n) => n.type === 'unlogged_call' && n.entityId === clFlip)
+      .map((n) => n.recipientUserId);
+    const flaggedIds = async () => ((await (await capacity()).svc.scanBusiness(ID.bizA)) as any[])
+      .filter((a) => a.type === 'unlogged_calls' && a.affectedEntityIds.includes(clFlip))
+      .map((a) => a.affectedUserIds[0]);
+
+    expect(await chasedIds()).toEqual([ID.staffAll]);
+    expect(await flaggedIds()).toEqual([ID.staffAll]);
+
+    await db.contact.update({ where: { id: cFlip }, data: { visibility: 'PRIVATE' } });
+    await as(ID.staffAll).get(`${calls}/${clFlip}`).expect(404); // the dead-end the prompt pointed at
+
+    expect(await chasedIds()).toEqual([]);
+    expect(await flaggedIds()).toEqual([]);
+  });
 });
 
 // Review ST-2 (residual, not fixed here): the KEY write tools reach the call logs and contacts the
