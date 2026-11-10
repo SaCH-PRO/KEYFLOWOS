@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 import { isHrefAvailable, probeOperationsAccess, type OperationsAccess } from "@/lib/module-access";
 import type { NavItem, NavSection } from "@/lib/nav-config";
@@ -13,47 +13,63 @@ import type { NavItem, NavSection } from "@/lib/nav-config";
  * member whose scope map grants none is refused on every call /app/procurement
  * makes; the nav must not offer them the door. The web cannot read a STAFF
  * member's own scope map, so the level comes from the server's answer, read the
- * way lib/module-access.ts already decides it (GET procurement stats: 403 is
- * none, success is read or more, anything else is unknown and keeps the entry).
- * The cockpit is not gated: it stays every member's home, each tile filtered by
- * the member's own permissions (D-96).
+ * way lib/module-access.ts decides it (GET procurement stats: ModuleScopeGuard's
+ * refusal naming no operations access is none; success is read or more; any
+ * other answer, every other 403 included, is unknown and keeps the entry; review
+ * WOS-R1). The cockpit is not gated: it stays every member's home, each tile
+ * filtered by the member's own permissions (D-96).
  *
  * The desktop sidebar, the mobile drawer and the bottom nav's module launcher
  * each call the hook; their probes go out together on mount and apiGet shares
  * one in-flight request between them.
+ *
+ * An answer belongs to the business it was probed for (review SEC-WOS-1 and
+ * WOS-R2): the hook keeps {businessId, access} and applies it only while that
+ * business is still the selected one, so one tenant's answer never stands for
+ * another's. The selected business is followed the way contact-custom-fields'
+ * useSelectedBusinessId follows it: read again at every render (so
+ * refreshWorkspace's unannounced correction of a stale id, which use-app-layout
+ * runs on every mount, is picked up when the shell renders again once it has
+ * landed), on BUSINESS_CHANGED_EVENT (selectBusiness) and on `storage` (a
+ * switch made in another tab). A probe whose business was replaced while it was
+ * in flight is followed by a probe of the new one.
  */
 
-/** The signed-in member's operations access in the selected business, as the server last answered it; re-read when the business changes. */
+function subscribeToSelectedBusiness(onChange: () => void) {
+  window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** The server renders no selection; the client reads it once hydrated. */
+const NO_SELECTION_ON_SERVER = () => null;
+
+/** The signed-in member's operations access in the selected business, as the server answered it for that business; "unknown" until it has. */
 export function useOperationsAccess(): OperationsAccess {
-  const [access, setAccess] = useState<OperationsAccess>("unknown");
+  const businessId = useSyncExternalStore(subscribeToSelectedBusiness, getStoredBusinessId, NO_SELECTION_ON_SERVER);
+  const [answered, setAnswered] = useState<{ businessId: string; access: OperationsAccess } | null>(null);
 
   useEffect(() => {
+    if (!businessId) return;
     let disposed = false;
-    let generation = 0;
-    const probe = () => {
-      const mine = ++generation;
-      const businessId = getStoredBusinessId();
-      if (!businessId) return;
-      void probeOperationsAccess(businessId).then((answer) => {
-        // A later business (or an unmounted nav) owns the answer now.
-        if (disposed || mine !== generation || getStoredBusinessId() !== businessId) return;
-        setAccess(answer);
-      });
-    };
-    // Another business: the previous one's answer says nothing about it, so the entry shows until the new answer lands.
-    const onBusinessChanged = () => {
-      setAccess("unknown");
-      probe();
-    };
-    probe();
-    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
+    void probeOperationsAccess(businessId).then((access) => {
+      // The nav unmounted, or it has moved to another business and probes that one.
+      if (disposed) return;
+      // Recorded for the business it answers for. When the stored business moved while this was in
+      // flight without announcing it (refreshWorkspace), the render this causes reads the new one,
+      // which this answer does not match, and probes it.
+      setAnswered({ businessId, access });
+    });
     return () => {
       disposed = true;
-      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     };
-  }, []);
+  }, [businessId]);
 
-  return access;
+  // Another business's answer says nothing about this one: the entry shows until this one's answer lands.
+  return answered !== null && answered.businessId === businessId ? answered.access : "unknown";
 }
 
 // Both return their input unchanged (the same array) unless an entry is hidden, so the

@@ -6,44 +6,26 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui-v2/button";
 import type { CommandItem } from "@/lib/api/command";
+import { commandActionsDisabledReason, type OperationsLevel } from "@/lib/module-access";
 import { CommandCardV2 } from "./command-card-v2";
 
 /**
- * W7-WEB-OPS-SCOPE (owner rulings D-40 and D-96; OPS-T02): the member's
- * 'operations' level in this business, as the server last stated it.
+ * W7-WEB-OPS-SCOPE (owner rulings D-40 and D-96; OPS-T02): the queue follows the
+ * member's 'operations' level in this business, as the server last stated it.
  *
  * Every command-item route needs operations (R0-13g, D-40): read to list, write
  * for every action (complete, approve, dismiss, execute, assign, snooze,
  * reopen). The web cannot read a STAFF member's own scope map, so the level is
  * read the way the other module gates read scope, from the server's answer:
  * ModuleScopeGuard refuses with 403 "Insufficient permissions: operations
- * requires <level> access (you have <level>)". The list read cannot tell read
- * from write, so until a refusal names the level it is "unknown" and the
- * actions are offered (D-85's pattern: learn from the 403, then withdraw them).
- * The cockpit around the queue stays open to every member, each tile filtered
- * by the member's own permissions (D-96).
+ * requires <level> access (you have <level>)" (lib/module-access.ts
+ * operationsLevelFromAnswer, shared with the nav, the due-obligations panel and
+ * the item's detail page). The list read cannot tell read from write, so until
+ * a refusal names the level it is "unknown" and the actions are offered (D-85's
+ * pattern: learn from the 403, then withdraw them). The cockpit around the
+ * queue stays open to every member, each tile filtered by the member's own
+ * permissions (D-96).
  */
-export type OperationsLevel = "none" | "read" | "write" | "admin" | "unknown";
-
-const OPERATIONS_REFUSAL = /\boperations requires (?:none|read|write|admin) access \(you have (none|read|write|admin)\)/;
-
-/**
- * The operations level a refused request names, or null when the answer is not ModuleScopeGuard's
- * operations refusal (success, another 403 such as BusinessGuard's "Unable to verify business
- * access", a 5xx): those say nothing about the member's level.
- */
-export function operationsLevelFromAnswer(res: { error?: string | null; status?: number } | null | undefined): OperationsLevel | null {
-  if (!res || res.status !== 403) return null;
-  const named = OPERATIONS_REFUSAL.exec(res.error ?? "");
-  return named ? (named[1] as OperationsLevel) : null;
-}
-
-/** Why a member at `level` cannot act on command items, or null when the actions are offered. */
-export function commandActionsDisabledReason(level: OperationsLevel | undefined): string | null {
-  if (level === "none") return "No operations access in this business: command items can't be viewed or acted on.";
-  if (level === "read") return "View only: completing, approving or dismissing needs operations write access.";
-  return null;
-}
 
 interface CommandQueueProps {
   items: CommandItem[];

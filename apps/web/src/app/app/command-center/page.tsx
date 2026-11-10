@@ -58,7 +58,8 @@ import {
 } from "@/lib/api/command";
 import { DueObligationsPanel } from "./components/due-obligations-panel";
 import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
-import { CommandQueueV2, operationsLevelFromAnswer, type OperationsLevel } from "@/components/command/command-queue-v2";
+import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
 import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
 import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
 import { BusinessPulseCardV2 } from "./components-v2/business-pulse-card-v2";
@@ -333,7 +334,9 @@ export default function CommandCenterPage() {
 
   const handleDischarge = async (id: string) => {
     if (!businessId) return;
-    await dischargeObligation(businessId, id, "manual");
+    // W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): discharge is an item action too (operations write);
+    // its refusal names the level like the queue's actions do.
+    noteActionAnswer(await dischargeObligation(businessId, id, "manual"));
     // The queue reads the same table, so a discharged obligation has to leave
     // both lists — refreshing only the panel would show it gone in one place
     // and present in the other.
@@ -412,7 +415,11 @@ export default function CommandCenterPage() {
             priority and answers "what should I look at"; this sorts by date and
             answers "what do I owe". Different questions, same table. */}
         <CommandSection icon={CalendarClock} title="Due this week">
-          <DueObligationsPanel businessId={businessId} onDischarge={handleDischarge} />
+          <DueObligationsPanel
+            businessId={businessId}
+            onDischarge={handleDischarge}
+            dischargeDisabledReason={commandActionsDisabledReason(operationsLevel)}
+          />
         </CommandSection>
 
         {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps

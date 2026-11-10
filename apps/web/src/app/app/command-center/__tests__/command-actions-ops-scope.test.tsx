@@ -31,7 +31,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
 import { GenomeProvider } from "@/contexts/genome-context";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
-import type { CommandItem } from "@/lib/api/command";
+import type { CommandItem, DueObligation } from "@/lib/api/command";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -139,11 +139,20 @@ function jsonResponse(status: number, body: unknown): Response {
 
 const ITEM_ACTION = new RegExp(`/command/businesses/${BIZ}/items/([^/]+)/(complete|approve|dismiss|execute|assign|snooze|reopen)$`);
 
+/** POST items/:id/discharge: an obligation recorded as met (operations write, like every item action). */
+const DISCHARGE = new RegExp(`/command/businesses/${BIZ}/items/([^/]+)/discharge$`);
+
 /**
  * Serve the cockpit snapshot, the queue read (GET command items) and the item actions. `action`
- * answers every item action; every other request (the side panels) answers 503.
+ * answers every item action; `due` answers the due-obligations read (GET items/due) and
+ * `discharge` its Done (both 503 when not given); every other request (the side panels) answers 503.
  */
-function serve({ items, action }: { items: (path: string) => Answer; action: (path: string) => Answer }) {
+function serve({ items, action, due, discharge }: {
+  items: (path: string) => Answer;
+  action: (path: string) => Answer;
+  due?: () => Answer;
+  discharge?: (path: string) => Answer;
+}) {
   const sent: Sent[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -161,12 +170,21 @@ function serve({ items, action }: { items: (path: string) => Answer; action: (pa
       const answer = action(pathname);
       return jsonResponse(answer.status, answer.body);
     }
+    if (due && method === "GET" && pathname.endsWith(`/command/businesses/${BIZ}/items/due`)) {
+      const answer = due();
+      return jsonResponse(answer.status, answer.body);
+    }
+    if (discharge && method === "POST" && DISCHARGE.test(pathname)) {
+      const answer = discharge(pathname);
+      return jsonResponse(answer.status, answer.body);
+    }
     return jsonResponse(503, { message: "Service Unavailable" });
   }));
   return {
     sent,
     queueReads: () => sent.filter((r) => r.method === "GET" && r.path.endsWith(`/command/businesses/${BIZ}/items`)),
     actions: () => sent.filter((r) => r.method === "POST" && ITEM_ACTION.test(r.path)),
+    discharges: () => sent.filter((r) => r.method === "POST" && DISCHARGE.test(r.path)),
   };
 }
 
@@ -315,4 +333,103 @@ describe("W7-WEB-OPS-SCOPE (D-40, D-96): the command queue's actions follow the 
       for (const button of actionButtons(title)) expect(button.disabled).toBe(false);
     }
   });
+});
+
+/** An obligation due this week (the "Due this week" panel above the queue reads it from GET items/due). */
+const RETURN_DUE: DueObligation = {
+  ...commandItem("ci_w7wos_ob1", "File the quarterly return", false),
+  kind: "OBLIGATION",
+  owedToType: null,
+  owedToId: null,
+  owedToLabel: "Tax office",
+  seriesId: null,
+  dischargedAt: null,
+  dischargeRef: null,
+  overdue: false,
+  daysUntilDue: 2,
+};
+
+const dueThisWeek = (items: DueObligation[]): Answer => ({
+  status: 200,
+  body: { window: { from: NOW, to: NOW, days: 7 }, total: items.length, overdueCount: 0, items },
+});
+
+/** The obligation's Done: the button in the row that shows `title`. */
+function obligationDone(title: string): HTMLButtonElement {
+  let node: HTMLElement | null = screen.getByText(title);
+  while (node && !within(node).queryByRole("button", { name: "Done" })) node = node.parentElement;
+  if (!node) throw new Error(`no obligation row for ${title}`);
+  return within(node).getByRole("button", { name: "Done" }) as HTMLButtonElement;
+}
+
+describe("W7-WEB-OPS-SCOPE review repairs (D-40, D-96): an obligation's Done (POST items/:id/discharge, operations write) follows the same level as the queue's actions", () => {
+  it("[WOS-C05] SEC-WOS-2: once the queue has learned the member holds operations read, the due obligation's Done is disabled with the reason and a click sends no discharge", async () => {
+    const api = serve({
+      items: () => listed(ITEMS),
+      action: (path) => forbidden(path, "write", "read"),
+      due: () => dueThisWeek([RETURN_DUE]),
+      discharge: (path) => forbidden(path, "write", "read"),
+    });
+    await renderCommandCenter();
+    await screen.findByText(RETURN_DUE.title, {}, { timeout: 10_000 });
+    await screen.findByText(CHASE.title, {}, { timeout: 10_000 });
+    expect(obligationDone(RETURN_DUE.title).disabled).toBe(false);
+
+    fireEvent.click(within(card(CHASE.title)).getByRole("button", { name: "Done" }));
+    const reason = await screen.findByTestId("command-actions-withheld");
+    expect(reason.textContent).toMatch(/write access/i);
+
+    await waitFor(() => expect(obligationDone(RETURN_DUE.title).disabled).toBe(true));
+    expect(obligationDone(RETURN_DUE.title).getAttribute("title")).toBe(reason.textContent);
+    fireEvent.click(obligationDone(RETURN_DUE.title));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.discharges()).toHaveLength(0);
+  }, PAGE_CASE_MS);
+
+  it("[WOS-C06] SEC-WOS-2: a refused discharge (403, you have read) is read like a refused queue action: the reason is shown, the obligation's Done and every queue action are disabled, and a further click sends nothing", async () => {
+    const api = serve({
+      items: () => listed(ITEMS),
+      action: (path) => forbidden(path, "write", "read"),
+      due: () => dueThisWeek([RETURN_DUE]),
+      discharge: (path) => forbidden(path, "write", "read"),
+    });
+    await renderCommandCenter();
+    await screen.findByText(RETURN_DUE.title, {}, { timeout: 10_000 });
+    await screen.findByText(CHASE.title, {}, { timeout: 10_000 });
+
+    fireEvent.click(obligationDone(RETURN_DUE.title));
+    await waitFor(() => expect(api.discharges()).toHaveLength(1));
+
+    const reason = await screen.findByTestId("command-actions-withheld");
+    expect(reason.textContent).toMatch(/write access/i);
+    await waitFor(() => expect(obligationDone(RETURN_DUE.title).disabled).toBe(true));
+    for (const button of actionButtons(CHASE.title)) expect(button.disabled).toBe(true);
+
+    fireEvent.click(obligationDone(RETURN_DUE.title));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(api.discharges()).toHaveLength(1);
+    expect(api.actions()).toHaveLength(0);
+  }, PAGE_CASE_MS);
+
+  it("[WOS-C07] a member with operations write: the obligation's Done is enabled, the discharge is sent once, and no reason is shown", async () => {
+    let due = [RETURN_DUE];
+    const api = serve({
+      items: () => listed(ITEMS),
+      action: () => ({ status: 500, body: { message: "unexpected" } }),
+      due: () => dueThisWeek(due),
+      discharge: () => {
+        due = [];
+        return { status: 201, body: { ...RETURN_DUE, status: "COMPLETED", dischargedAt: NOW } };
+      },
+    });
+    await renderCommandCenter();
+    await screen.findByText(RETURN_DUE.title, {}, { timeout: 10_000 });
+    expect(obligationDone(RETURN_DUE.title).disabled).toBe(false);
+
+    fireEvent.click(obligationDone(RETURN_DUE.title));
+    await waitFor(() => expect(api.discharges()).toEqual([{ method: "POST", path: `/command/businesses/${BIZ}/items/${RETURN_DUE.id}/discharge` }]));
+    await waitFor(() => expect(screen.queryByText(RETURN_DUE.title)).toBeNull());
+    expect(screen.queryByTestId("command-actions-withheld")).toBeNull();
+    for (const button of actionButtons(CHASE.title)) expect(button.disabled).toBe(false);
+  }, PAGE_CASE_MS);
 });

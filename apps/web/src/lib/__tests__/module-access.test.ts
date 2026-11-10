@@ -16,10 +16,12 @@ vi.mock("../client", () => ({ fetchProcurementStats }));
 import {
   OPERATIONS_GATED_HREFS,
   canOfferOperationsActions,
+  commandActionsDisabledReason,
   filterByOperationsAccess,
   isHrefAvailable,
   isOperationsGatedHref,
   operationsAccessFromResponse,
+  operationsLevelFromAnswer,
   probeOperationsAccess,
 } from "../module-access";
 
@@ -28,7 +30,7 @@ beforeEach(() => {
 });
 
 describe("operations access from the server's answer", () => {
-  it("success is granted, 403 is denied, anything else is unknown", () => {
+  it("success is granted, the operations refusal (403, you have none) is denied, anything else is unknown", () => {
     expect(operationsAccessFromResponse({ error: null })).toBe("granted");
     expect(operationsAccessFromResponse({ error: "Insufficient permissions: operations requires read access (you have none)", status: 403 })).toBe("denied");
     for (const res of [{ error: "Unauthorized", status: 401 }, { error: "Internal server error", status: 500 }, { error: "Network error" }, null, undefined]) {
@@ -41,11 +43,43 @@ describe("operations access from the server's answer", () => {
     await expect(probeOperationsAccess("biz_1")).resolves.toBe("granted");
     expect(fetchProcurementStats).toHaveBeenCalledWith("biz_1");
 
-    fetchProcurementStats.mockResolvedValueOnce({ data: null, error: "Insufficient permissions", status: 403 });
+    // ModuleScopeGuard's refusal as the client hands it over (W7-WEB-OPS-SCOPE review WOS-R1: only this refusal is denied).
+    fetchProcurementStats.mockResolvedValueOnce({ data: null, error: "Insufficient permissions: operations requires read access (you have none)", status: 403 });
     await expect(probeOperationsAccess("biz_1")).resolves.toBe("denied");
+
+    fetchProcurementStats.mockResolvedValueOnce({ data: null, error: "Unable to verify business access", status: 403 });
+    await expect(probeOperationsAccess("biz_1")).resolves.toBe("unknown");
 
     fetchProcurementStats.mockRejectedValueOnce(new Error("offline"));
     await expect(probeOperationsAccess("biz_1")).resolves.toBe("unknown");
+  });
+});
+
+describe("W7-WEB-OPS-SCOPE review WOS-R1 (D-40): only ModuleScopeGuard's operations refusal speaks for the member's level", () => {
+  it("[WOS-R1] a 403 that is not the operations refusal naming none is unknown, never denied: BusinessGuard's transient and membership refusals, ModuleScopeGuard's other refusals, another module's refusal, a bare 'Insufficient permissions'", () => {
+    for (const error of [
+      "Unable to verify business access",
+      "Service unavailable",
+      "No access to this business",
+      "Not a member of this business",
+      "Insufficient permissions: revenue requires read access (you have none)",
+      "Insufficient permissions",
+    ]) {
+      expect(operationsAccessFromResponse({ error, status: 403 }), error).toBe("unknown");
+    }
+    expect(operationsAccessFromResponse({ error: "Insufficient permissions: operations requires read access (you have none)", status: 403 })).toBe("denied");
+  });
+
+  it("[WOS-R1] operationsLevelFromAnswer reads the level the operations refusal names, and nothing from any other answer", () => {
+    expect(operationsLevelFromAnswer({ error: "Insufficient permissions: operations requires write access (you have read)", status: 403 })).toBe("read");
+    expect(operationsLevelFromAnswer({ error: "Insufficient permissions: operations requires read access (you have none)", status: 403 })).toBe("none");
+    expect(operationsLevelFromAnswer({ error: "Insufficient permissions: operations requires read access (you have none)", status: 500 })).toBeNull();
+    expect(operationsLevelFromAnswer({ error: "No access to this business", status: 403 })).toBeNull();
+    expect(operationsLevelFromAnswer({ error: null })).toBeNull();
+    expect(operationsLevelFromAnswer(null)).toBeNull();
+    expect(commandActionsDisabledReason("read")).toMatch(/write access/);
+    expect(commandActionsDisabledReason("none")).toMatch(/operations access/);
+    for (const level of ["write", "admin", "unknown", undefined] as const) expect(commandActionsDisabledReason(level), String(level)).toBeNull();
   });
 });
 
