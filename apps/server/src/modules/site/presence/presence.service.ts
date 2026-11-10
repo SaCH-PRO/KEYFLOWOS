@@ -210,6 +210,31 @@ function sanitizePayload(input: unknown): PresencePayload {
   return cleaned;
 }
 
+/**
+ * W7-SLUG-PRESENCE-DRAFT (owner ruling D-11, review CR-1): the stored draft
+ * payload once the owner's PATCH /identity/businesses/:businessId has moved
+ * Business.slug to `businessSlug` (IdentityService.updateBusiness writes it in
+ * the PATCH's transaction). The draft cannot tell a stale slug (the address
+ * before the PATCH) from a pending one (saved by the owner, not yet published),
+ * and the PATCH is the owner's latest word on the address, so a draft carrying
+ * either takes the PATCHed slug: the owner's next publish cannot put an older
+ * address back on Business.slug. A slug the presence payload cannot carry
+ * (presenceSchema.slug) leaves the draft without one, so the publish keeps the
+ * PATCHed Business.slug. Only the slug key changes; the rest of the stored
+ * payload stays as stored. Undefined when there is nothing to write: the draft
+ * carries no slug, or already carries this one.
+ */
+export function draftPayloadFollowingBusinessSlug(
+  stored: Prisma.JsonValue | null | undefined,
+  businessSlug: string,
+): Prisma.InputJsonObject | undefined {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return undefined;
+  const { slug: draftSlug, ...rest } = stored as Prisma.JsonObject;
+  if (typeof draftSlug !== 'string' || draftSlug === businessSlug) return undefined;
+  const carried = presenceSchema.shape.slug.safeParse(businessSlug).success;
+  return (carried ? { ...rest, slug: businessSlug } : rest) as Prisma.InputJsonObject;
+}
+
 /** The authenticated caller of a presence write, as AuthMiddleware attaches it (req.user). */
 export type PresenceActor = { id: string; role?: string };
 
@@ -392,6 +417,11 @@ export class PresenceService {
    * after the draft was seeded; the draft cannot tell the two apart, and
    * neither may block a non-owner's content publish (review CR-1). A publish
    * that leaves the slug as it is does not rewrite the Business row.
+   * W7-SLUG-PRESENCE-DRAFT (D-11, review CR-1): the PATCH now carries the
+   * draft's slug along in its transaction (draftPayloadFollowingBusinessSlug),
+   * so the owner's publish no longer puts a slug the PATCH replaced back; a
+   * stale slug can only remain in a draft saved and left over from before
+   * that change.
    */
   async publish(businessId: string, actor?: PresenceActor) {
     const userId = actor?.id;
