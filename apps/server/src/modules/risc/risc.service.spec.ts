@@ -110,9 +110,10 @@ describe('RiscService', () => {
       getClient: vi.fn().mockReturnValue(client),
       // The SupabaseAdminService wrapper (CR-2), which takes an access JWT.
       signOut: vi.fn().mockResolvedValue(false),
-      // W7-RISC-REVOKE: the by-user-id global sign-out (the unruled
-      // provider-global-logout option of D-39, review CR-W7RR-2). The service
-      // mints the user JWT itself; the RISC handler never holds one.
+      // A tripwire: the by-user-id global sign-out W7-RISC-REVOKE added, which
+      // D-97 (W8-RISC-SIGNIN-CUTOFF) removed from SupabaseAdminService (it
+      // needed SUPABASE_JWT_SECRET; R0-SEC-02 keeps it empty). Nothing may call
+      // it; the cases below assert that.
       revokeAllSessions: vi.fn(async (_uid: string): Promise<boolean> => true),
       admin: client.auth.admin,
     };
@@ -552,67 +553,118 @@ describe('RiscService', () => {
     });
 
     /**
-     * W7-RISC-REVOKE, toward R0-ID-F7 review F7-SEC-2: the ban only pauses
-     * the provider session, so account-disabled/hijacking also asks for every
-     * Supabase session of the user (and with them every refresh token) to be
-     * revoked through SupabaseAdminService.revokeAllSessions(userId), which
-     * mints the user JWT GoTrue's POST /logout needs. That is the
-     * provider-global-logout option of D-39, which BUILD-MAP-001 section (g)
-     * still lists as an OPEN owner decision (review CR-W7RR-2). It does not
-     * close F7-SEC-2: under the Release 0 rule SUPABASE_JWT_SECRET is empty
-     * and the sign-out never runs (review SEC-W7RR-1 / CR-W7RR-1; the OPEN
-     * it.todo cases in test/supabase-admin.service.test.ts). The other
-     * session-ending events keep no provider traffic (F7-CR-1).
+     * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39), closing
+     * R0-ID-F7 review F7-SEC-2: the ban only pauses the provider session and
+     * the 24h logout cutoff lapses, so every session-ending event
+     * (sessions-revoked, tokens-revoked, token-revoked,
+     * account-disabled/hijacking) also records a DURABLE per-user sign-in
+     * cutoff on the User row, User.metaData.signInCutoffAt (epoch seconds),
+     * which AuthMiddleware compares with the ORIGINAL sign-in of every Supabase
+     * token's session (auth.middleware.spec.ts, test/supabase-admin.service.test.ts).
+     * It is merged into the metaData already there and never lowered. The
+     * provider global logout W7-RISC-REVOKE added
+     * (SupabaseAdminService.revokeAllSessions, which needed
+     * SUPABASE_JWT_SECRET) is gone: R0-SEC-02 keeps that secret empty. The
+     * events that end no session record no cutoff (SEC-W7RR-2).
      */
-    describe('W7-RISC-REVOKE (the provider-global-logout option of D-39, an open owner decision) — account-disabled/hijacking asks for every provider session to be revoked by user id', () => {
-      it('asks SupabaseAdminService.revokeAllSessions(userId) after the local legs and BEFORE the ban is read; never the JWT-taking signOut', async () => {
-        supabaseAdmin.revokeAllSessions.mockImplementationOnce(async () => {
-          order.push('provider revokeAllSessions');
-          return true;
+    describe('D-97 (W8-RISC-SIGNIN-CUTOFF) — a session-ending event records a durable sign-in cutoff on the User row; no provider global logout', () => {
+      const cutoffWrites = () =>
+        prisma.client.user.update.mock.calls
+          .map((c) => c[0] as { where: { id: string }; data: { metaData?: Record<string, unknown> } })
+          .filter((a) => a.data.metaData && 'signInCutoffAt' in a.data.metaData);
+
+      it.each(ending)(
+        '%s: writes User.metaData.signInCutoffAt (the event time, epoch seconds) for the resolved user, merged into the metaData already there',
+        async (_name, eventType, reason) => {
+          prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+          prisma.client.user.findUnique.mockResolvedValue({ metaData: { keep: 'me', googleSignInDisabled: false } });
+          const before = Math.floor(Date.now() / 1000);
+          await expect(
+            service.receiveEvent(await makeToken(makeRiscPayload(eventType, { sub: 'google-sub-f7' }, reason))),
+          ).resolves.toEqual({ status: 202, processed: true });
+          const after = Math.floor(Date.now() / 1000);
+
+          const writes = cutoffWrites();
+          expect(writes).toHaveLength(1);
+          expect(writes[0].where).toEqual({ id: USER });
+          expect(writes[0].data.metaData).toMatchObject({ keep: 'me' });
+          const at = writes[0].data.metaData?.signInCutoffAt as number;
+          expect(Number.isSafeInteger(at)).toBe(true);
+          expect(at).toBeGreaterThanOrEqual(before);
+          expect(at).toBeLessThanOrEqual(after);
+          expect(persisted()?.actionTaken).not.toContain('revocation_incomplete');
+        },
+      );
+
+      it('the cutoff is never lowered: a later one already recorded stays', async () => {
+        const later = Math.floor(Date.now() / 1000) + 3600;
+        prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+        prisma.client.user.findUnique.mockResolvedValue({ metaData: { signInCutoffAt: later } });
+        await service.receiveEvent(await makeToken(makeRiscPayload(RISC_EVENT_TYPES.SESSIONS_REVOKED, { sub: 'google-sub-f7' })));
+        for (const w of cutoffWrites()) expect(w.data.metaData?.signInCutoffAt).toBe(later);
+        expect(persisted()?.actionTaken).toBe('sessions_terminated');
+      });
+
+      it('it is recorded before the provider is asked (hijacking)', async () => {
+        prisma.client.user.update.mockImplementation(async (args: { data: { metaData?: Record<string, unknown> } }) => {
+          if (args.data.metaData && 'signInCutoffAt' in args.data.metaData) order.push('user signInCutoffAt');
+          return undefined;
         });
-        await expect(deliverHijacking()).resolves.toEqual({ status: 202, processed: true });
-        expect(supabaseAdmin.revokeAllSessions).toHaveBeenCalledTimes(1);
-        expect(supabaseAdmin.revokeAllSessions).toHaveBeenCalledWith(USER);
-        expect(order).toEqual([
-          `setex ${logoutRevocationKey(USER)}`,
-          `set ${ADMIN_CUTOFF}`,
-          'provider revokeAllSessions',
-          'provider getUserById',
-          'provider updateUserById',
-        ]);
-        expect(supabaseAdmin.signOut).not.toHaveBeenCalled();
-        expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
-        expect(persisted()?.actionTaken).toBe('account_disabled_hijacking');
+        await deliverHijacking();
+        expect(order.indexOf('user signInCutoffAt')).toBeGreaterThanOrEqual(0);
+        expect(order.indexOf('user signInCutoffAt')).toBeLessThan(order.indexOf('provider getUserById'));
       });
 
       it.each([
-        ['reports false', () => supabaseAdmin.revokeAllSessions.mockResolvedValueOnce(false)],
-        ['throws', () => supabaseAdmin.revokeAllSessions.mockRejectedValueOnce(new Error('gotrue logout down'))],
+        ['the write fails', () => prisma.client.user.update.mockRejectedValueOnce(new Error('db down'))],
+        ['the user row is missing', () => prisma.client.user.findUnique.mockResolvedValueOnce(null)],
       ] as Array<[string, () => void]>)(
-        'a sign-out that %s is logged with the user id, named provider_signout, and does not skip the cutoff or the ban',
+        'a cutoff that is not recorded (%s) is logged, named signin_cutoff on actionTaken and in the audit, whose outcome is error, and skips no other leg',
         async (_name, arrange) => {
           const logger = stubLogger();
+          prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+          prisma.client.user.findUnique.mockResolvedValue({ metaData: {} });
           arrange();
-          await expect(deliverHijacking()).resolves.toEqual({ status: 202, processed: true });
+          await service.receiveEvent(await makeToken(makeRiscPayload(RISC_EVENT_TYPES.SESSIONS_REVOKED, { sub: 'google-sub-f7' })));
           expect(redis.store.get(logoutRevocationKey(USER))?.value).toMatch(/^\d+$/);
-          expect(supabaseAdmin.admin.updateUserById).toHaveBeenCalledTimes(1);
-          expect(logger.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
-          expect(persisted()?.actionTaken).toBe('account_disabled_hijacking:revocation_incomplete:provider_signout');
+          expect(prisma.client.session.deleteMany).toHaveBeenCalledWith({ where: { userId: USER } });
+          expect(persisted()?.actionTaken).toBe('sessions_terminated:revocation_incomplete:signin_cutoff');
           expect(audited()).toMatchObject({
-            outcome: 'success',
-            reason: `risc:${RISC_EVENT_TYPES.ACCOUNT_DISABLED}; revocation_incomplete: provider_signout`,
+            outcome: 'error',
+            reason: `risc:${RISC_EVENT_TYPES.SESSIONS_REVOKED}; revocation_incomplete: signin_cutoff`,
           });
+          expect(logger.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
         },
       );
 
       it.each([
-        ...endingWithoutBan,
         ['verification', RISC_EVENT_TYPES.VERIFICATION, undefined],
+        ['account-enabled', RISC_EVENT_TYPES.ACCOUNT_ENABLED, undefined],
         ['account-disabled/bulk-account', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'],
-      ] as Array<[string, string, string | undefined]>)('%s: no provider sign-out (F7-CR-1)', async (_name, eventType, reason) => {
-        await deliver(eventType, reason);
-        expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
-      });
+        ['account-credential-change-required', RISC_EVENT_TYPES.ACCOUNT_CREDENTIAL_CHANGE_REQUIRED, undefined],
+      ] as Array<[string, string, string | undefined]>)(
+        'SEC-W7RR-2 negative control: %s records no sign-in cutoff',
+        async (_name, eventType, reason) => {
+          await deliver(eventType, reason);
+          expect(cutoffWrites()).toEqual([]);
+        },
+      );
+
+      it.each([
+        ...ending,
+        ['verification', RISC_EVENT_TYPES.VERIFICATION, undefined],
+        ['account-enabled', RISC_EVENT_TYPES.ACCOUNT_ENABLED, undefined],
+        ['account-disabled/bulk-account', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'],
+      ] as Array<[string, string, string | undefined]>)(
+        '%s: no provider global logout (R0-SEC-02 stands): never revokeAllSessions, never a signOut',
+        async (_name, eventType, reason) => {
+          await deliver(eventType, reason);
+          expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
+          expect(supabaseAdmin.signOut).not.toHaveBeenCalled();
+          expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
+          expect(persisted()?.actionTaken ?? '').not.toContain('provider_signout');
+        },
+      );
     });
 
     it.each([
@@ -627,9 +679,9 @@ describe('RiscService', () => {
       expect(supabaseAdmin.admin.getUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.updateUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
-      // W7-RISC-REVOKE (negative control): nor the by-user-id global
-      // sign-out. account-enabled restores a recovered user; signing that user
-      // out everywhere would undo the recovery.
+      // Negative control (SEC-W7RR-2, D-97): nor any global sign-out.
+      // account-enabled restores a recovered user; signing that user out
+      // everywhere would undo the recovery.
       expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
       expect(supabaseAdmin.signOut).not.toHaveBeenCalled();
       expect(persisted()?.actionTaken).not.toContain('revocation_incomplete');

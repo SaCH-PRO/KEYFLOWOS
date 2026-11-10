@@ -768,6 +768,11 @@
       "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
     },
     {
+      "prefix": "v94a_",
+      "owner": "apps/server/test/risc-signin-cutoff.integration.test.ts",
+      "packet": "V1-94 (W8-RISC-SIGNIN-CUTOFF)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Request } from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { exportJWK, generateKeyPair, jwtVerify, SignJWT, type JWTPayload } from 'jose';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 import { AuthMiddleware, LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationKey } from '../src/core/auth/auth.middleware';
 import { buildAdminToken, verifyAdminToken } from '../src/core/auth/admin-token.util';
@@ -694,27 +694,33 @@ describe('R0-ID-F4 review F4-A — password flows against GoTrue session semanti
  *   3. names every leg that did not hold on RiscEvent.actionTaken and in the
  *      audit (F7-SEC-3).
  * The ban PAUSES the provider session; it does not revoke it (F7-SEC-2).
- * W7-RISC-REVOKE (the provider-global-logout option of D-39, which
- * BUILD-MAP-001 section (g) still lists as an OPEN owner decision: no ruling,
- * review CR-W7RR-2): before the ban, account-disabled/hijacking also asks
- * GoTrue for POST /logout?scope=global
- * under a short-lived user JWT the server mints with the project's JWT secret
- * (sub = the user, NO session_id claim), which GoTrue's Logout handler answers
- * by deleting every session of the user and with them every refresh token. A
- * live case shows it where SUPABASE_JWT_SECRET holds that secret. F7-SEC-2 is
- * NOT closed end to end (W7-RISC-REVOKE review): under the Release 0 rule the
- * secret is empty and the sign-out never runs (SEC-W7RR-1, CR-W7RR-1);
- * sessions-revoked, tokens-revoked and token-revoked revoke nothing at the
- * provider (SEC-W7RR-2); and no deployment writes the UserIdentity row a RISC
- * event resolves its user by. Each is an OPEN it.todo at the end of this
- * describe, under the prefix release0-index.json explains F7-SEC-2 by.
+ *
+ * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39) closes F7-SEC-2
+ * at this API instead: every session-ending event (account-disabled/hijacking,
+ * sessions-revoked, tokens-revoked, token-revoked) also records a DURABLE
+ * per-user sign-in cutoff on the User row (User.metaData.signInCutoffAt, the
+ * event time in epoch seconds, never lowered), and the real AuthMiddleware
+ * refuses every Supabase token whose ORIGINAL sign-in (the session's amr
+ * timestamps, which a refresh carries over unchanged) is not after it, however
+ * long ago the 65-minute ban and the 24h auth:revoked:user cutoff lapsed. The
+ * hijacker's pre-event refresh token may still mint access tokens at GoTrue;
+ * none of them is admitted here. The real user simply signs in again. The
+ * provider global logout W7-RISC-REVOKE added (POST /logout under a user JWT
+ * minted with SUPABASE_JWT_SECRET) is gone: R0-SEC-02 keeps that secret empty,
+ * and D-97 says the provider global logout is not used. The UserIdentity row
+ * an event resolves its user by is written at POST /identity/bootstrap from
+ * the VERIFIED provider record, never from the request body (SEC-W7RR-1; end
+ * to end against Postgres in test/risc-signin-cutoff.integration.test.ts).
  *
  * The real RiscService (signed RISC token, real jose verification against a
  * stubbed Google JWKS), the real SupabaseAdminService, the installed auth-js
  * client on a recording fetch, and the real AuthMiddleware and admin-token
- * verifier reading the cutoffs. GoTrue's ban semantics (Ban(): banned_until =
- * now + duration, overwriting; banned_until omitted when unset) are modelled
- * from its source, not observed. Nothing leaves the process.
+ * verifier reading the cutoffs; one in-memory User row is what RiscService
+ * writes and AuthMiddleware reads. GoTrue's ban semantics (Ban(): banned_until
+ * = now + duration, overwriting; banned_until omitted when unset) and its
+ * refresh (amr carried over to every access token a session's refresh token
+ * mints) are modelled from its source, not observed. Nothing leaves the
+ * process.
  */
 describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions locally and, on hijacking, pauses them at the provider, with call shapes the installed auth-js accepts', () => {
   const USER = '6f1c1d36-5d7e-4c38-9a3f-0b7a3b0e2c11';
@@ -723,10 +729,11 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   const CLIENT_ID = 'f7-client.apps.googleusercontent.com';
   const JWKS_URI = 'https://risc.f7.test/certs';
   const ADMIN_CUTOFF = `admin:user:${USER}:revokedAt`;
-  // W7-RISC-REVOKE: the project's JWT secret, as GoTrue holds it and as the
-  // server reads it from SUPABASE_JWT_SECRET. Obviously fake.
-  const PROJECT_JWT_SECRET = 'w7-gotrue-project-jwt-secret-not-a-real-one';
+  // The Google sub GoTrue holds for USER (its google identity), and the one a
+  // RISC event names.
+  const GOOGLE_SUB = 'google-sub-f7';
   const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const claimsOf = (jwt: string) => JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
 
   let keyPair: Awaited<ReturnType<typeof generateKeyPair>>;
   const savedEnv = { ...process.env };
@@ -755,38 +762,48 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
 
   type Call = { call: string; authorization: string | null; body: unknown };
   type GoTrueMode = 'up' | 'admin_500' | 'read_500' | 'network_down';
+  type GoTrueState = {
+    bannedUntil: number | null;
+    refreshTokens: Set<string>;
+    /** When the session behind each live refresh token signed in (epoch seconds). */
+    signedInAt: Map<string, number>;
+  };
 
   /**
    * GoTrue at fetch level, for the calls in question:
-   *   - GET /admin/users/:id (the service-role key as bearer) returns the user;
+   *   - GET /admin/users/:id (the service-role key as bearer) returns the user,
+   *     with its identities (the google one: provider id GOOGLE_SUB);
    *     banned_until is omitted while unset (models/user.go: omitempty).
    *   - PUT /admin/users/:id applies the attributes; ban_duration sets
    *     banned_until = now + duration, OVERWRITING whatever was there
    *     (models/user.go Ban()).
    *   - POST /logout takes the bearer as the user's JWT; a value that is not
-   *     one is refused (bad_jwt) — the CR-2 refusal. W7-RISC-REVOKE: the JWT
-   *     is verified as GoTrue verifies an HS256 token without a kid (against
-   *     the project's JWT secret; bad_jwt otherwise), its sub must be a user
-   *     (user_not_found), and a session_id claim must name a live session
-   *     (session_not_found). With no session_id claim the Logout handler
-   *     deletes every session of the user and so every refresh token
-   *     (models.Logout), whatever the scope. A ban does not stand in its way.
+   *     one is refused (bad_jwt) — the CR-2 refusal. D-97: nothing sends it
+   *     on a RISC event any more; the cases assert it is never called.
    *   - POST /token?grant_type=refresh_token refuses while the user is banned
    *     (user_banned) and refuses a refresh token that is not live
    *     (refresh_token_not_found); otherwise it rotates the token and returns a
-   *     new session. A ban keeps the refresh tokens (F7-SEC-2).
+   *     new session whose access token carries the session's ORIGINAL sign-in
+   *     in amr (a refresh carries amr over unchanged) and a fresh iat. A ban
+   *     keeps the refresh tokens (F7-SEC-2).
    */
-  function fakeGoTrue(
-    order: string[],
-    state: { bannedUntil: number | null; refreshTokens: Set<string> },
-    mode: GoTrueMode = 'up',
-  ) {
+  function fakeGoTrue(order: string[], state: GoTrueState, mode: GoTrueMode = 'up') {
     const calls: Call[] = [];
     const json = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     const userBody = (id: string) => ({
       id,
       aud: 'authenticated',
+      email: 'f7@example.com',
+      identities: [
+        {
+          identity_id: '0b0d1a5e-7c1f-4f7e-9a51-2b7d3c4e5f60',
+          id: GOOGLE_SUB,
+          user_id: id,
+          provider: 'google',
+          identity_data: { sub: GOOGLE_SUB, email: 'f7@example.com', email_verified: true },
+        },
+      ],
       ...(state.bannedUntil !== null ? { banned_until: new Date(state.bannedUntil).toISOString() } : {}),
     });
     const fetchImpl = async (input: unknown, init?: { method?: string; headers?: unknown; body?: unknown }) => {
@@ -814,18 +831,6 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
         if (bearer.split('.').length !== 3) {
           return json(403, { code: 403, error_code: 'bad_jwt', msg: 'invalid JWT: token contains an invalid number of segments' });
         }
-        let claims: JWTPayload;
-        try {
-          ({ payload: claims } = await jwtVerify(bearer, new TextEncoder().encode(PROJECT_JWT_SECRET), { algorithms: ['HS256'] }));
-        } catch {
-          return json(403, { code: 403, error_code: 'bad_jwt', msg: 'invalid JWT: unable to parse or verify signature' });
-        }
-        if (claims.sub !== USER) {
-          return json(403, { code: 403, error_code: 'user_not_found', msg: 'User from sub claim in JWT does not exist' });
-        }
-        if (claims.session_id) {
-          return json(403, { code: 403, error_code: 'session_not_found', msg: 'Session from session_id claim in JWT does not exist' });
-        }
         state.refreshTokens.clear();
         return new Response(null, { status: 204 });
       }
@@ -837,12 +842,15 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
         if (!state.refreshTokens.has(presented)) {
           return json(400, { code: 400, error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token: Refresh Token Not Found' });
         }
+        const signedInAt = state.signedInAt.get(presented) ?? Math.floor(Date.now() / 1000);
         state.refreshTokens.delete(presented);
+        state.signedInAt.delete(presented);
         const rotated = `${presented}-r`;
         state.refreshTokens.add(rotated);
+        state.signedInAt.set(rotated, signedInAt);
         const iat = Math.floor(Date.now() / 1000);
         return json(200, {
-          access_token: `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-hijacker', role: 'authenticated', iat, exp: iat + 3600 })}.c2ln`,
+          access_token: `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: 's-hijacker', role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: signedInAt }] })}.c2ln`,
           token_type: 'bearer',
           expires_in: 3600,
           expires_at: iat + 3600,
@@ -891,17 +899,22 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
       bannedUntil?: number | null;
       /**
        * SUPABASE_JWT_SECRET as the server holds it; null leaves it unset.
-       * Default: the project's, so the cases above see the sign-out run. That
-       * is NOT the Release 0 configuration, which leaves the secret empty
-       * (review SEC-W7RR-1 / CR-W7RR-1): the cases that pass null or '' show
-       * that configuration, and the OPEN it.todo cases below its residual.
+       * Default: empty, the Release 0 rule (R0-SEC-02). D-97: nothing on the
+       * RISC path reads it any more, whatever it holds.
        */
       serverJwtSecret?: string | null;
       refreshTokens?: string[];
+      /** When the sessions behind `refreshTokens` signed in (epoch seconds); default two hours ago. */
+      signedInAt?: number;
     } = {},
   ) {
     const order: string[] = [];
-    const state = { bannedUntil: opts.bannedUntil ?? null, refreshTokens: new Set(opts.refreshTokens ?? []) };
+    const signedInAt = opts.signedInAt ?? Math.floor(Date.now() / 1000) - 2 * 3600;
+    const state: GoTrueState = {
+      bannedUntil: opts.bannedUntil ?? null,
+      refreshTokens: new Set(opts.refreshTokens ?? []),
+      signedInAt: new Map((opts.refreshTokens ?? []).map((t) => [t, signedInAt])),
+    };
     const gt = fakeGoTrue(order, state, opts.mode);
     const admin = new SupabaseAdminService();
     (admin as unknown as { client: unknown }).client = createClient('http://gotrue.f7.test', SERVICE_KEY, {
@@ -911,11 +924,19 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     // isConfigured reads the environment; the client itself is the injected one.
     process.env.SUPABASE_URL = 'http://gotrue.f7.test';
     process.env.SUPABASE_SERVICE_ROLE_KEY = SERVICE_KEY;
-    const serverJwtSecret = opts.serverJwtSecret === undefined ? PROJECT_JWT_SECRET : opts.serverJwtSecret;
+    const serverJwtSecret = opts.serverJwtSecret === undefined ? '' : opts.serverJwtSecret;
     if (serverJwtSecret === null) delete process.env.SUPABASE_JWT_SECRET;
     else process.env.SUPABASE_JWT_SECRET = serverJwtSecret;
     const redis = memoryRedis(order, { down: opts.redisDown });
     const riscCreate = vi.fn(async (_args: unknown) => undefined);
+    // The one User row: RiscService writes its metaData (the D-97 sign-in
+    // cutoff, the googleSignInDisabled flag), AuthMiddleware reads it.
+    const userRow: { role: string; deletedAt: Date | null; bannedAt: Date | null; metaData: Record<string, unknown> } = {
+      role: 'USER',
+      deletedAt: null,
+      bannedAt: null,
+      metaData: {},
+    };
     const prisma = {
       client: {
         riscEvent: { findUnique: vi.fn(async () => null), create: riscCreate },
@@ -926,7 +947,13 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
             return { count: 2 };
           }),
         },
-        user: { findUnique: vi.fn(async () => ({ metaData: {} })), update: vi.fn(async () => undefined) },
+        user: {
+          findUnique: vi.fn(async () => ({ ...userRow, metaData: { ...userRow.metaData } })),
+          update: vi.fn(async (args: { data: { metaData?: Record<string, unknown> } }) => {
+            if (args.data.metaData) userRow.metaData = { ...args.data.metaData };
+            return undefined;
+          }),
+        },
       },
     };
     const audit = vi.fn(async (_entry: unknown) => undefined);
@@ -941,11 +968,31 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     (risc as unknown as { logger: unknown }).logger = { warn, debug: vi.fn(), log: vi.fn(), error: vi.fn() };
     const actionTaken = () => (riscCreate.mock.calls[0]?.[0] as { data: { actionTaken: string } } | undefined)?.data.actionTaken;
     const audited = () => audit.mock.calls[0]?.[0] as { outcome: string; reason: string; metadata: Record<string, unknown> } | undefined;
-    return { risc, admin, gt, state, redis, order, warn, prisma, actionTaken, audited };
+    return { risc, admin, gt, state, redis, order, warn, prisma, userRow, actionTaken, audited };
   }
 
+  /**
+   * The real AuthMiddleware over the harness's Redis and User row. Token
+   * verification is the stand-in (the fake GoTrue signs nothing): whatever is
+   * presented verifies as USER, so what is under test is the middleware's
+   * decision after verification — the cutoffs.
+   */
+  function realMiddleware(h: ReturnType<typeof build>) {
+    const supabaseAuth = { getUserFromToken: vi.fn(async () => ({ id: USER, email: 'f7@example.com' })) };
+    const mw = new AuthMiddleware(supabaseAuth as never, h.prisma as never, h.redis as never);
+    return async (token: string) => {
+      const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request & { user?: { id: string } };
+      await mw.use(req, {} as never, () => undefined);
+      return req.user?.id ?? null;
+    };
+  }
+
+  /** An access token of a session that signed in at `authenticatedAt`, minted at `iat`. */
+  const sessionToken = (authenticatedAt: number, iat: number, sessionId = 's-f7') =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: authenticatedAt }] })}.c2ln`;
+
   async function riscToken(eventType: string, reason?: string) {
-    const details: Record<string, unknown> = { subject: { subject_type: 'iss-sub', iss: GOOGLE_ISSUER, sub: 'google-sub-f7' } };
+    const details: Record<string, unknown> = { subject: { subject_type: 'iss-sub', iss: GOOGLE_ISSUER, sub: GOOGLE_SUB } };
     if (reason) details.reason = reason;
     return new SignJWT({ jti: `f7-${Math.random().toString(36).slice(2)}`, events: { [eventType]: details } })
       .setProtectedHeader({ alg: 'RS256', kid: 'f7-key', typ: 'JWT' })
@@ -958,19 +1005,16 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
 
   const readCall = `GET /auth/v1/admin/users/${USER}`;
   const banCall = `PUT /auth/v1/admin/users/${USER}`;
-  // W7-RISC-REVOKE: the global sign-out under the server-minted user JWT.
-  const logoutCall = 'POST /auth/v1/logout?scope=global';
-  const JWT_BEARER = /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+  const logoutCalls = (h: ReturnType<typeof build>) => h.gt.calls.filter((c) => c.call.startsWith('POST /auth/v1/logout'));
 
   it('account-disabled/hijacking: GoTrue is read, then receives the admin ban by user id under the service-role key, never POST /logout with the user id as its bearer', async () => {
     const h = build();
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
 
-    // W7-RISC-REVOKE: the one POST /logout is the global sign-out, and
-    // its bearer is a user JWT; never the user id (the CR-2 shape).
-    expect(h.gt.calls.filter((c) => c.call.startsWith('POST /auth/v1/logout') && c.authorization === `Bearer ${USER}`)).toEqual([]);
+    // D-97: no POST /logout at all — neither the CR-2 shape (the user id as
+    // bearer) nor W7-RISC-REVOKE's server-minted user JWT.
+    expect(logoutCalls(h)).toEqual([]);
     expect(h.gt.calls).toEqual([
-      { call: logoutCall, authorization: expect.stringMatching(JWT_BEARER), body: undefined },
       { call: readCall, authorization: `Bearer ${SERVICE_KEY}`, body: undefined },
       { call: banCall, authorization: `Bearer ${SERVICE_KEY}`, body: { ban_duration: expect.stringMatching(/^\d+s$/) } },
     ]);
@@ -1006,8 +1050,7 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
       `setex ${logoutRevocationKey(USER)}`,
       `set ${ADMIN_CUTOFF}`,
       'local session deleteMany',
-      // W7-RISC-REVOKE: the global sign-out, before the ban is read.
-      `provider ${logoutCall}`,
+      // D-97: no global sign-out before the ban is read.
       `provider ${readCall}`,
       `provider ${banCall}`,
     ]);
@@ -1083,8 +1126,7 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     const indefinite = Date.now() + 100 * 365 * 24 * 3600 * 1000; // the dashboard's "permanent" ban
     const h = build({ bannedUntil: indefinite });
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
-    // W7-RISC-REVOKE: the global sign-out runs whatever ban is on the account.
-    expect(h.gt.calls.map((c) => c.call)).toEqual([logoutCall, readCall]);
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall]);
     expect(h.state.bannedUntil).toBe(indefinite);
     expect(h.actionTaken()).toBe('account_disabled_hijacking');
   });
@@ -1092,16 +1134,14 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   it('a ban that would lapse sooner than the RISC ban is extended to it', async () => {
     const h = build({ bannedUntil: Date.now() + 5 * 60 * 1000 });
     await h.risc.receiveEvent(await hijacking());
-    expect(h.gt.calls.map((c) => c.call)).toEqual([logoutCall, readCall, banCall]);
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
     expect(h.state.bannedUntil).toBeGreaterThan(Date.now() + 3600 * 1000);
   });
 
   it.each([
-    // W7-RISC-REVOKE: the global sign-out comes first; it holds while
-    // only the admin API fails, and fails with the network.
-    ['GoTrue answers 500 to the ban', 'admin_500', [logoutCall, readCall, banCall], 'provider_ban'],
-    ['GoTrue answers 500 to the read (nothing is written blind)', 'read_500', [logoutCall, readCall], 'provider_ban'],
-    ['the network is down', 'network_down', [logoutCall, readCall], 'provider_signout,provider_ban'],
+    ['GoTrue answers 500 to the ban', 'admin_500', [readCall, banCall], 'provider_ban'],
+    ['GoTrue answers 500 to the read (nothing is written blind)', 'read_500', [readCall], 'provider_ban'],
+    ['the network is down', 'network_down', [readCall], 'provider_ban'],
   ] as Array<[string, GoTrueMode, string[], string]>)(
     'a provider failure (%s) is logged, named on actionTaken, does not skip the local cutoff, and the event is still accepted',
     async (_name, mode, expectedCalls, failedLegs) => {
@@ -1119,7 +1159,7 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   it('a Redis failure is logged and does not skip the provider ban', async () => {
     const h = build({ redisDown: true });
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
-    expect(h.gt.calls.map((c) => c.call)).toEqual([logoutCall, readCall, banCall]);
+    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
     expect(JSON.stringify(h.warn.mock.calls)).toContain('redis down');
   });
 
@@ -1144,175 +1184,232 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   });
 
   /**
-   * R0-ID-F7 review F7-SEC-2, W7-RISC-REVOKE (the provider-global-logout
-   * option of D-39, not a schema cutoff; D-39 is an OPEN owner decision, no
-   * ruling: review CR-W7RR-2), where SUPABASE_JWT_SECRET holds the project's
-   * JWT secret. Before: a ban PAUSES the pre-event session — GoTrue
-   * refuses a refresh while the user is banned but keeps the refresh token, and
-   * a ban does not log the user out — so once the 65-minute ban and the 24h
-   * auth:revoked:user cutoff lapsed, the hijacker's refresh token minted
-   * sessions again with no new login. Now the handler also sends
-   * POST /logout?scope=global under a short-lived user JWT minted with that
-   * secret (no session_id claim), and GoTrue deletes every session and refresh
-   * token of the user. This does NOT close F7-SEC-2 (review SEC-W7RR-1,
-   * CR-W7RR-1): a Release 0 server leaves the secret empty, and there the
-   * residual stands (the it.todo cases below). sessions-revoked/tokens-revoked/
-   * token-revoked keep no provider traffic (F7-CR-1, pinned above; SEC-W7RR-2
-   * below).
+   * R0-ID-F7 review F7-SEC-2, closed by D-97 (W8-RISC-SIGNIN-CUTOFF). Before:
+   * the ban PAUSED the pre-event session — GoTrue refuses a refresh while the
+   * user is banned but keeps the refresh token — so once the 65-minute ban and
+   * the 24h auth:revoked:user cutoff lapsed, the hijacker's refresh token
+   * minted access tokens again and this API attached them with no new login
+   * (W7-RISC-REVOKE's provider global logout never ran under the Release 0
+   * rule: SUPABASE_JWT_SECRET empty). Now the event records a durable sign-in
+   * cutoff on the User row, and the middleware compares it with the session's
+   * ORIGINAL sign-in (amr, carried over by every refresh), not with the iat a
+   * refresh renews.
    */
-  it("R0-ID-F7 review F7-SEC-2, W7-RISC-REVOKE (D-39 open: its provider-global-logout option, not ruled), only where SUPABASE_JWT_SECRET is set (not the Release 0 configuration): account-disabled/hijacking REVOKES the pre-event Supabase session instead of only pausing it — once the 65-minute ban and the 24h auth:revoked:user cutoff lapse, the hijacker's refresh token is refused by GoTrue (refresh_token_not_found) and mints no session", async () => {
-    const h = build({ refreshTokens: ['w7-hijacker-rt'] });
+  it("R0-ID-F7 review F7-SEC-2, closed by D-97 (W8-RISC-SIGNIN-CUTOFF) in the Release 0 configuration (SUPABASE_JWT_SECRET empty): after account-disabled/hijacking, once the 65-minute ban and the 24h auth:revoked:user cutoff lapse, the hijacker's pre-event refresh token still mints access tokens at GoTrue and the real AuthMiddleware refuses every one of them by the durable sign-in cutoff on the User row; a fresh sign-in after the event is admitted", async () => {
+    const h = build({ refreshTokens: ['w8-hijacker-rt'] });
     const hijacker = hijackerAuth(h.gt.fetchImpl);
+    const attached = realMiddleware(h);
 
-    // Before the event the hijacker's refresh token mints sessions (and rotates).
-    const beforeEvent = await hijacker.refreshSession({ refresh_token: 'w7-hijacker-rt' });
+    // Before the event the hijacker's refreshed session is admitted here.
+    const beforeEvent = await hijacker.refreshSession({ refresh_token: 'w8-hijacker-rt' });
     expect(beforeEvent.error).toBeNull();
-    const held = beforeEvent.data.session?.refresh_token ?? '';
-    expect(held).toBe('w7-hijacker-rt-r');
+    expect(await attached(beforeEvent.data.session?.access_token ?? '')).toBe(USER);
 
+    const eventAt = Math.floor(Date.now() / 1000);
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
     expect(h.actionTaken()).toBe('account_disabled_hijacking');
-    expect(h.state.refreshTokens.size).toBe(0);
+    expect(logoutCalls(h)).toEqual([]);
+    const cutoff = h.userRow.metaData.signInCutoffAt;
+    expect(cutoff).toBeGreaterThanOrEqual(eventAt);
+    expect(cutoff).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
 
-    // Both locks run out: the provider ban lapses and the local cutoffs expire.
+    // Both temporary locks run out: the provider ban lapses, the Redis cutoffs expire.
     h.state.bannedUntil = Date.now() - 1000;
     h.redis.store.delete(logoutRevocationKey(USER));
     h.redis.store.delete(ADMIN_CUTOFF);
 
-    const afterLapse = await hijacker.refreshSession({ refresh_token: held });
-    expect(afterLapse.data.session).toBeNull();
-    expect(afterLapse.error?.code).toBe('refresh_token_not_found');
-  });
+    // GoTrue still honours the pre-event refresh token (D-97 revokes nothing there) ...
+    const afterLapse = await hijacker.refreshSession({ refresh_token: beforeEvent.data.session?.refresh_token ?? '' });
+    expect(afterLapse.error).toBeNull();
+    const minted = afterLapse.data.session?.access_token ?? '';
+    expect(claimsOf(minted).iat).toBeGreaterThanOrEqual(cutoff as number);
+    // ... and every access token it mints is refused here: its session signed in before the event.
+    expect(await attached(minted)).toBeNull();
 
-  it('W7-RISC-REVOKE (D-39 open): the global sign-out bearer is a user JWT the project secret signs (HS256 without kid, sub the user, role and aud authenticated, no session_id, expiring within two minutes), never the user id or the service-role key', async () => {
-    const h = build();
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    await h.risc.receiveEvent(await hijacking());
-
-    const logout = h.gt.calls.find((c) => c.call === logoutCall);
-    expect(logout?.authorization).toMatch(JWT_BEARER);
-    expect(logout?.authorization).not.toBe(`Bearer ${USER}`);
-    expect(logout?.authorization).not.toBe(`Bearer ${SERVICE_KEY}`);
-    const bearer = (logout?.authorization ?? '').replace('Bearer ', '');
-    const { payload, protectedHeader } = await jwtVerify(bearer, new TextEncoder().encode(PROJECT_JWT_SECRET), {
-      algorithms: ['HS256'],
-      audience: 'authenticated',
-      issuer: 'http://gotrue.f7.test/auth/v1',
-    });
-    expect(protectedHeader.kid).toBeUndefined();
-    expect(payload).toMatchObject({ sub: USER, role: 'authenticated', aud: 'authenticated' });
-    expect(payload.session_id).toBeUndefined();
-    expect(payload.iat).toBeGreaterThanOrEqual(nowSeconds - 1);
-    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBeGreaterThan(0);
-    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBeLessThanOrEqual(120);
+    // The real user signs in again: a session authenticated after the event is admitted.
+    const now = Math.floor(Date.now() / 1000);
+    expect(await attached(sessionToken(now + 2, now + 2, 's-fresh'))).toBe(USER);
   });
 
   it.each([
+    ['sessions-revoked', RISC_EVENT_TYPES.SESSIONS_REVOKED],
+    ['tokens-revoked', RISC_EVENT_TYPES.TOKENS_REVOKED],
+    ['token-revoked', RISC_EVENT_TYPES.TOKEN_REVOKED],
+  ])(
+    "R0-ID-F7 review F7-SEC-2 / W7-RISC-REVOKE review SEC-W7RR-2, closed by D-97: %s sends GoTrue nothing (F7-CR-1) and records the durable sign-in cutoff too, so once the 24h auth:revoked:user cutoff lapses a token the pre-event refresh token mints is still refused, and a fresh sign-in is admitted",
+    async (_name, eventType) => {
+      const h = build({ refreshTokens: ['w8-user-rt'] });
+      const holder = hijackerAuth(h.gt.fetchImpl);
+      const attached = realMiddleware(h);
+
+      await expect(h.risc.receiveEvent(await riscToken(eventType))).resolves.toEqual({ status: 202, processed: true });
+      expect(h.gt.calls).toEqual([]);
+      expect(h.actionTaken()).not.toContain('revocation_incomplete');
+      expect(typeof h.userRow.metaData.signInCutoffAt).toBe('number');
+
+      h.redis.store.delete(logoutRevocationKey(USER));
+      h.redis.store.delete(ADMIN_CUTOFF);
+      const refreshed = await holder.refreshSession({ refresh_token: 'w8-user-rt' });
+      expect(refreshed.error).toBeNull();
+      expect(await attached(refreshed.data.session?.access_token ?? '')).toBeNull();
+
+      const now = Math.floor(Date.now() / 1000);
+      expect(await attached(sessionToken(now + 2, now + 2, 's-fresh'))).toBe(USER);
+    },
+  );
+
+  it('D-97: the durable sign-in cutoff is never lowered — a later event keeps the later time, an earlier time already recorded is raised to the event', async () => {
+    const h = build();
+    const later = Math.floor(Date.now() / 1000) + 3600;
+    h.userRow.metaData = { signInCutoffAt: later, other: 'kept' };
+    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
+    expect(h.userRow.metaData).toMatchObject({ signInCutoffAt: later, other: 'kept' });
+
+    const h2 = build();
+    h2.userRow.metaData = { signInCutoffAt: 1_000_000_000 };
+    const eventAt = Math.floor(Date.now() / 1000);
+    await h2.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.TOKEN_REVOKED));
+    expect(h2.userRow.metaData.signInCutoffAt).toBeGreaterThanOrEqual(eventAt);
+  });
+
+  /**
+   * W7-RISC-REVOKE review SEC-W7RR-1, closed by D-97 (W8-RISC-SIGNIN-CUTOFF):
+   * RiscService.resolveUser maps the Google sub through UserIdentity, whose
+   * only writer runs at POST /identity/bootstrap, and the handler never handed
+   * it any identity, so in a deployment every event resolved to
+   * no_matching_user. The handler now reads the identities of the VERIFIED
+   * provider record (GoTrue's admin user record for the token's own subject,
+   * under the service-role key) and never body.identities, whose upsert would
+   * let a signed-in user claim another person's Google sub and redirect that
+   * person's hijacking revocation. That the row then lets a RISC event resolve
+   * the user is proven against Postgres in
+   * test/risc-signin-cutoff.integration.test.ts.
+   */
+  it("R0-ID-F7 review F7-SEC-2 / W7-RISC-REVOKE review SEC-W7RR-1, closed by D-97: the real POST /identity/bootstrap handler, through the real SupabaseAdminService on GoTrue's admin API, hands bootstrapUser the identities of the verified provider record (the Google sub GoTrue holds for the token's user) and never body.identities", async () => {
+    const h = build();
+    const bootstrapUser = vi.fn(async (_input: Record<string, unknown>, _opts?: unknown) => ({ user: { id: USER }, business: { id: 'biz-f7' }, isNewBusiness: false }));
+    const unused = {} as never;
+    const ctrl = new IdentityController(
+      { bootstrapUser } as never,
+      unused,
+      unused,
+      unused,
+      unused,
+      unused,
+      { client: {} } as never,
+      h.admin,
+      h.redis as never,
+    );
+    const forged = 'google-sub-of-someone-else';
+    await ctrl.bootstrap(
+      { company: 'F7 Co', identities: [{ provider: 'google', id: forged, identity_data: { sub: forged } }] } as never,
+      { id: USER, email: 'f7@example.com' } as never,
+    );
+
+    expect(h.gt.calls).toEqual([{ call: readCall, authorization: `Bearer ${SERVICE_KEY}`, body: undefined }]);
+    expect(bootstrapUser).toHaveBeenCalledTimes(1);
+    const [input] = bootstrapUser.mock.calls[0];
+    expect(input.identities).toEqual([
+      expect.objectContaining({ provider: 'google', id: GOOGLE_SUB, identity_data: expect.objectContaining({ sub: GOOGLE_SUB }) }),
+    ]);
+    expect(JSON.stringify(bootstrapUser.mock.calls)).not.toContain(forged);
+  });
+
+  it.each([
+    ['GoTrue answers 500', 'read_500' as GoTrueMode],
+    ['the network is down', 'network_down' as GoTrueMode],
+  ])('SEC-W7RR-1 (D-97): when the verified record cannot be read (%s) bootstrap still runs, with no identity at all — never the body one', async (_name, mode) => {
+    const h = build({ mode });
+    const bootstrapUser = vi.fn(async (_input: Record<string, unknown>, _opts?: unknown) => ({ user: { id: USER }, business: { id: 'biz-f7' }, isNewBusiness: false }));
+    const unused = {} as never;
+    const ctrl = new IdentityController({ bootstrapUser } as never, unused, unused, unused, unused, unused, { client: {} } as never, h.admin, h.redis as never);
+    await ctrl.bootstrap(
+      { identities: [{ provider: 'google', id: 'google-sub-forged-f7', identity_data: { sub: 'google-sub-forged-f7' } }] } as never,
+      { id: USER, email: 'f7@example.com' } as never,
+    );
+    expect(bootstrapUser).toHaveBeenCalledTimes(1);
+    expect(bootstrapUser.mock.calls[0][0].identities ?? []).toEqual([]);
+    expect(JSON.stringify(bootstrapUser.mock.calls)).not.toContain('google-sub-forged-f7');
+  });
+
+  // D-97 (R0-SEC-02 stands): the provider global logout W7-RISC-REVOKE added
+  // is not used, whatever SUPABASE_JWT_SECRET holds.
+  it.each([
     ['unset', null],
-    // W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1: the Release 0 rule (DEPLOYMENT.md, docs/auth-pathway.md).
     ['empty (the Release 0 rule)', ''],
-  ] as Array<[string, string | null]>)('W7-RISC-REVOKE (D-39 open): with SUPABASE_JWT_SECRET %s no user JWT can be minted — no POST /logout is sent, the ban still applies, and provider_signout is named on actionTaken and in the audit', async (_name, serverJwtSecret) => {
-    const h = build({ serverJwtSecret, refreshTokens: ['w7-hijacker-rt'] });
-    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
-    expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
-    expect(h.state.bannedUntil).toBeGreaterThan(Date.now() + 3600 * 1000);
-    expect(h.state.refreshTokens.has('w7-hijacker-rt')).toBe(true);
-    expect(h.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
-    expect(h.actionTaken()).toBe('account_disabled_hijacking:revocation_incomplete:provider_signout');
-    expect(h.audited()).toMatchObject({
-      outcome: 'success',
-      reason: `risc:${RISC_EVENT_TYPES.ACCOUNT_DISABLED}; revocation_incomplete: provider_signout`,
-      metadata: { revocationIncomplete: ['provider_signout'] },
-    });
-  });
+    ['set (not the Release 0 configuration)', 'w8-a-secret-the-risc-path-must-not-use'],
+  ] as Array<[string, string | null]>)(
+    'D-97 (R0-SEC-02 stands): with SUPABASE_JWT_SECRET %s, account-disabled/hijacking sends GoTrue no POST /logout and mints no user JWT — it reads and bans, records the durable sign-in cutoff, and names no failed leg',
+    async (_name, serverJwtSecret) => {
+      const h = build({ serverJwtSecret, refreshTokens: ['w8-hijacker-rt'] });
+      await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+      expect(h.gt.calls.map((c) => c.call)).toEqual([readCall, banCall]);
+      expect(h.state.bannedUntil).toBeGreaterThan(Date.now() + 3600 * 1000);
+      // GoTrue keeps the refresh token; this API refuses what it mints (above).
+      expect(h.state.refreshTokens.has('w8-hijacker-rt')).toBe(true);
+      expect(typeof h.userRow.metaData.signInCutoffAt).toBe('number');
+      expect(h.actionTaken()).toBe('account_disabled_hijacking');
+      expect(h.audited()?.outcome).toBe('success');
+      expect(h.audited()?.metadata.revocationIncomplete).toBeUndefined();
+      expect('revokeAllSessions' in h.admin).toBe(false);
+    },
+  );
 
-  it('W7-RISC-REVOKE (D-39 open): GoTrue refusing the minted JWT (SUPABASE_JWT_SECRET is not the project secret) is logged without the token, named provider_signout, and does not skip the ban', async () => {
-    const h = build({ serverJwtSecret: 'w7-another-projects-jwt-secret-not-real-either', refreshTokens: ['w7-hijacker-rt'] });
-    const adminWarn = vi.fn();
-    (h.admin as unknown as { logger: unknown }).logger = { warn: adminWarn, debug: vi.fn(), log: vi.fn(), error: vi.fn() };
-    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
-
-    expect(h.gt.calls.map((c) => c.call)).toEqual([logoutCall, readCall, banCall]);
-    expect(h.state.refreshTokens.has('w7-hijacker-rt')).toBe(true);
-    expect(h.state.bannedUntil).toBeGreaterThan(Date.now() + 3600 * 1000);
-    expect(h.actionTaken()).toBe('account_disabled_hijacking:revocation_incomplete:provider_signout');
-    expect(adminWarn).toHaveBeenCalled();
-    const bearer = (h.gt.calls.find((c) => c.call === logoutCall)?.authorization ?? '').replace('Bearer ', '');
-    expect(bearer.length).toBeGreaterThan(20);
-    expect(JSON.stringify([adminWarn.mock.calls, h.warn.mock.calls])).not.toContain(bearer);
-  });
-
-  it('W7-RISC-REVOKE (D-39 open): with the Supabase admin client not configured neither the sign-out nor the ban is sent, and both are named on actionTaken', async () => {
-    const h = build({ refreshTokens: ['w7-hijacker-rt'] });
+  it('D-97: with the Supabase admin client not configured the ban is not sent and is named, while the durable sign-in cutoff and the local cutoff still hold', async () => {
+    const h = build({ refreshTokens: ['w8-hijacker-rt'] });
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
     expect(h.gt.calls).toEqual([]);
     expect(h.redis.store.get(logoutRevocationKey(USER))?.value).toMatch(/^\d+$/);
-    expect(h.actionTaken()).toBe('account_disabled_hijacking:revocation_incomplete:provider_signout,provider_ban');
+    expect(typeof h.userRow.metaData.signInCutoffAt).toBe('number');
+    expect(h.actionTaken()).toBe('account_disabled_hijacking:revocation_incomplete:provider_ban');
   });
 
-  // W7-RISC-REVOKE negative control: the events that end no session
-  // send nothing to GoTrue either, with the secret that lets the sign-out run.
-  // account-enabled restores a recovered user: a global sign-out there would
-  // log that user out everywhere.
+  // W7-RISC-REVOKE review SEC-W7RR-2 negative control (D-97): the events
+  // that end no session send GoTrue nothing and record no cutoff at all,
+  // neither the 24h one nor the durable sign-in cutoff. account-enabled
+  // restores a recovered user: a cutoff there would sign that user out.
   it.each([
     ['account-enabled', RISC_EVENT_TYPES.ACCOUNT_ENABLED, undefined],
     ['account-credential-change-required', RISC_EVENT_TYPES.ACCOUNT_CREDENTIAL_CHANGE_REQUIRED, undefined],
     ['verification', RISC_EVENT_TYPES.VERIFICATION, undefined],
     ['account-disabled/bulk-account', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'],
   ] as Array<[string, string, string | undefined]>)(
-    'W7-RISC-REVOKE negative control (D-39 open): %s sends GoTrue nothing — no global sign-out, no ban, no read — and the refresh tokens stay',
+    'D-97 negative control (SEC-W7RR-2): %s sends GoTrue nothing, the refresh tokens stay, no cutoff is recorded (neither the 24h one nor the durable sign-in cutoff), and the user stays signed in',
     async (_name, eventType, reason) => {
       const h = build({ refreshTokens: ['w7-user-rt'] });
+      const attached = realMiddleware(h);
       await expect(h.risc.receiveEvent(await riscToken(eventType, reason))).resolves.toEqual({ status: 202, processed: true });
       expect(h.gt.calls).toEqual([]);
       expect(h.state.refreshTokens.has('w7-user-rt')).toBe(true);
       expect(h.redis.store.size).toBe(0);
+      expect(h.userRow.metaData.signInCutoffAt).toBeUndefined();
       expect(h.actionTaken()).not.toContain('revocation_incomplete');
+      const now = Math.floor(Date.now() / 1000);
+      expect(await attached(sessionToken(now - 3600, now))).toBe(USER);
     },
   );
 
-  // W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1: a server that can accept a RISC
-  // event but cannot revoke at the provider says so at boot.
-  it.each([
-    ['unset', null],
-    ['empty (the Release 0 rule)', ''],
-  ] as Array<[string, string | null]>)(
-    'W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1 (D-39 open): with SUPABASE_JWT_SECRET %s and a Google client id set, boot warns that a hijacking event cannot revoke the Supabase sessions',
-    async (_name, serverJwtSecret) => {
-      const h = build({ serverJwtSecret });
-      h.risc.onApplicationBootstrap();
-      const said = h.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('RISC: '));
-      expect(said).toHaveLength(1);
-      expect(said[0]).toContain('SUPABASE_JWT_SECRET is empty');
-      expect(said[0]).toContain('cannot revoke');
-      expect(said[0]).toContain('F7-SEC-2');
-      expect(h.gt.calls).toEqual([]);
-    },
-  );
+  it('D-97 negative control (SEC-W7RR-2): account-enabled after a hijacking leaves the durable sign-in cutoff where it was — the pre-event session stays refused, the sign-in after the event stays admitted', async () => {
+    const h = build();
+    const attached = realMiddleware(h);
+    await h.risc.receiveEvent(await hijacking());
+    const cutoff = h.userRow.metaData.signInCutoffAt;
+    expect(typeof cutoff).toBe('number');
+    h.redis.store.clear();
 
-  it('W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1 (D-39 open): no boot warning where the sign-out can run, nor where RISC accepts no event (no Google client id)', async () => {
-    const withSecret = build();
-    withSecret.risc.onApplicationBootstrap();
-    expect(withSecret.warn.mock.calls.filter((c) => String(c[0]).startsWith('RISC: '))).toEqual([]);
-
-    const noRisc = build({ serverJwtSecret: '' });
-    process.env.GOOGLE_CLIENT_ID = '';
-    process.env.GOOGLE_CLIENT_IDS = '';
-    noRisc.risc.onApplicationBootstrap();
-    expect(noRisc.warn.mock.calls.filter((c) => String(c[0]).startsWith('RISC: '))).toEqual([]);
+    await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.ACCOUNT_ENABLED));
+    expect(h.userRow.metaData.signInCutoffAt).toBe(cutoff);
+    expect(h.userRow.metaData.googleSignInDisabled).toBe(false);
+    const now = Math.floor(Date.now() / 1000);
+    expect(await attached(sessionToken(now - 3600, now))).toBeNull();
+    expect(await attached(sessionToken(now + 2, now + 2, 's-fresh'))).toBe(USER);
   });
 
-  // The residuals of R0-ID-F7 review F7-SEC-2 that W7-RISC-REVOKE leaves open,
-  // found by its review. Each keeps the prefix release0-index.json explains
-  // F7-SEC-2 under (status OPEN), so the Release 0 item is not counted closed.
-  it.todo(
-    "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet; W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1, D-39 has no recorded owner ruling): under the Release 0 rule SUPABASE_JWT_SECRET is EMPTY (docs/auth-pathway.md, DEPLOYMENT.md, env.spec.ts), so SupabaseAdminService.revokeAllSessions mints no user JWT and sends no POST /logout: on account-disabled/hijacking only the 65-minute ban and the 24h auth:revoked:user cutoff hold, and once both lapse the hijacker's pre-event refresh token mints sessions again (reproduced on this harness with serverJwtSecret null and ''). The live W7-RISC-REVOKE case above holds only where the secret is set. Fix: an owner ruling on D-39 that amends the Release 0 rule for this secret, or a revocation by user id that needs no server-held HS256 secret.",
-  );
-  it.todo(
-    "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet; W7-RISC-REVOKE review SEC-W7RR-2, needs a ruling): sessions-revoked, tokens-revoked and token-revoked send nothing to the provider (F7-CR-1 forbids the ban, and the required cases above pin no provider traffic), so the pre-event refresh token stays live at GoTrue and only the 24h auth:revoked:user cutoff refuses its sessions; once it lapses that token's sessions are attached again with no new login, while RiscEvent.actionTaken records a clean sessions_terminated. Fix: a ruling extending the provider global sign-out (which signs the user out but does not lock them out) to these events, or a durable cutoff.",
-  );
-  it.todo(
-    "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet; found by the W7-RISC-REVOKE review, outside its write set): in a deployment no RISC event reaches a user, so no revocation leg runs. RiscService.resolveUser maps the Google sub through UserIdentity, whose only writer (IdentityService.persistUserIdentities) runs only when bootstrapUser is handed identities, and POST /identity/bootstrap has never forwarded body.identities (since adcb2aeb; the web callback sends them): every event resolves to no_matching_user. Fix in identity: read the identities on the server from GoTrue (admin.getUserById(user.id).identities), never from the request body, whose upsert would let a signed-in user claim another person's Google sub and redirect that person's hijacking revocation.",
-  );
+  it('D-97: boot says nothing about a provider sign-out RISC cannot make — there is none to miss, with SUPABASE_JWT_SECRET empty (the Release 0 rule) and a Google client id set', async () => {
+    const h = build({ serverJwtSecret: '' });
+    h.risc.onApplicationBootstrap();
+    expect(h.warn.mock.calls.filter((c) => String(c[0]).startsWith('RISC: '))).toEqual([]);
+    expect(h.gt.calls).toEqual([]);
+  });
 });
