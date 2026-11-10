@@ -24,6 +24,51 @@ function calendarDay(value: string, name: string): number {
   return day;
 }
 
+/**
+ * W9-KEY-AVAILABILITY-TZ review repair (SEC-KAT-1): the most calendar days one
+ * get_availability answers for, counted from the first day that can still
+ * hold a start. Each day asks BookingsService.getAvailableSlots once per staff
+ * member, one after another, so an unbounded from..to (any member with
+ * bookings read, or a KEY plan, can send one) ran millions of queries on one
+ * pool connection. Two months covers "next month" asked on any day.
+ */
+export const KEY_AVAILABILITY_MAX_DAYS = 62;
+
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/**
+ * The opening hours a business day row sets, in minutes past midnight, or
+ * null when the row sets none (missing, closed, or without open/close times):
+ * the rows getAvailableSlots offers nothing on and createBooking refuses or
+ * leaves unchecked.
+ */
+function openHours(hours: unknown, weekday: number): { openMin: number; closeMin: number } | null {
+  const day = (hours as Record<string, { open?: string; close?: string; closed?: boolean } | undefined> | null)?.[DAY_KEYS[weekday]];
+  if (!day || day.closed || !day.open || !day.close) return null;
+  const [oh, om] = day.open.split(':').map(Number);
+  const [ch, cm] = day.close.split(':').map(Number);
+  return { openMin: oh * 60 + om, closeMin: ch * 60 + cm };
+}
+
+/**
+ * W9-KEY-AVAILABILITY-TZ review repair (CR-W9KAT-1): minutes past midnight
+ * `instant` reads on the business's clock, as BookingsService's create
+ * validator reads a start (Business.timezone; the server's clock for no zone
+ * or one this runtime cannot read, as BookingsService falls back).
+ */
+function minutesOnClock(instant: Date, timeZone: string | null | undefined): number {
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', hour: 'numeric', minute: 'numeric' }).formatToParts(instant);
+      const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+      return (part('hour') % 24) * 60 + part('minute');
+    } catch {
+      // RangeError: a zone this runtime does not know; the server's clock below.
+    }
+  }
+  return instant.getHours() * 60 + instant.getMinutes();
+}
+
 const DAY_TO_INDEX: Record<string, number> = {
   sun: 0,
   mon: 1,
@@ -214,6 +259,25 @@ export class BookingsAdapterService {
    *
    * `from` and `to` are the tool's "date" parameters: calendar days, both
    * included (calendarDay).
+   *
+   * Review repairs:
+   * - SEC-KAT-1: days before yesterday (UTC) are not asked about: on any
+   *   business's clock every start on them is past, and getAvailableSlots
+   *   leaves past starts out. What remains may span at most
+   *   KEY_AVAILABILITY_MAX_DAYS days; a longer range is refused before any
+   *   day is asked about. A day the staff member does not work (their own
+   *   hours name no such weekday, or, for one with none, the business's hours
+   *   set none that day) is not asked about either: getAvailableSlots answers
+   *   it with no slots, after three reads.
+   * - CR-W9KAT-1: getAvailableSlots fits a start in the business's hours by
+   *   the service's duration, while createBooking (KEY create_booking) also
+   *   counts the service's buffer before closing. For a staff member on the
+   *   business's hours the starts whose buffer runs past closing were offered
+   *   and then refused, so they are left out here. Both sides read a staff
+   *   member's own hours without the buffer, and rescheduleBooking adds it to
+   *   neither kind of hours, so what is offered stays bookable on both KEY
+   *   write paths. The picker itself (BookingsService, also behind the public
+   *   slots route) is outside this packet.
    */
   async getAvailability(input: {
     businessId: string;
@@ -229,8 +293,19 @@ export class BookingsAdapterService {
       throw new Error(`Service ${input.serviceId} not found`);
     }
     const durationMins = service.duration ?? 60;
-    const firstDay = calendarDay(input.from, 'from');
+    const bufferMins = service.bufferMins ?? 0;
+    const now = new Date();
+    const yesterday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - DAY_MS;
+    const firstDay = Math.max(calendarDay(input.from, 'from'), yesterday);
     const lastDay = calendarDay(input.to, 'to');
+    const dayCount = Math.floor((lastDay - firstDay) / DAY_MS) + 1;
+    if (dayCount > KEY_AVAILABILITY_MAX_DAYS) {
+      const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+      throw new Error(
+        `get_availability answers for at most ${KEY_AVAILABILITY_MAX_DAYS} days at a time; ` +
+          `the range asked covers ${dayCount} (${ymd(firstDay)} to ${ymd(lastDay)}). Ask for a shorter range.`,
+      );
+    }
 
     const staffWhere: any = {
       businessId: input.businessId,
@@ -239,14 +314,27 @@ export class BookingsAdapterService {
     };
     const staff = await this.prisma.client.staffMember.findMany({
       where: staffWhere,
-      select: { id: true, name: true },
+      select: { id: true, name: true, availabilities: { select: { dayOfWeek: true } } },
     });
+    const business = staff.length
+      ? await this.prisma.client.business.findUnique({
+          where: { id: input.businessId },
+          select: { businessHours: true, timezone: true },
+        })
+      : null;
 
     const slots: Array<{ startTime: string; endTime: string; staffId: string; staffName?: string | null }> = [];
     for (const s of staff) {
+      // getAvailableSlots' choice of window: the staff member's own hours when
+      // they have any, else the business's (SEC-KAT-1, CR-W9KAT-1).
+      const ownWeekdays = new Set((s.availabilities ?? []).map((a) => a.dayOfWeek));
+      const onBusinessHours = ownWeekdays.size === 0;
       const offered: Array<{ start: Date; end: Date }> = [];
       for (let day = firstDay; day <= lastDay; day += DAY_MS) {
         const d = new Date(day);
+        const weekday = d.getUTCDay();
+        const businessDay = onBusinessHours ? openHours(business?.businessHours, weekday) : null;
+        if (onBusinessHours ? !businessDay : !ownWeekdays.has(weekday)) continue;
         // Handed over as the public slots route hands it: that calendar day's
         // midnight on the server's clock, which getAvailableSlots reads back.
         const { slots: starts } = await this.bookings.getAvailableSlots({
@@ -257,6 +345,14 @@ export class BookingsAdapterService {
         });
         for (const iso of starts) {
           const start = new Date(iso);
+          // CR-W9KAT-1: createBooking's business-hours check, buffer included.
+          if (
+            businessDay &&
+            bufferMins > 0 &&
+            minutesOnClock(start, business?.timezone) + durationMins + bufferMins > businessDay.closeMin
+          ) {
+            continue;
+          }
           offered.push({ start, end: new Date(start.getTime() + durationMins * 60000) });
         }
       }

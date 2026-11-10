@@ -34,7 +34,12 @@
  *   CR-V16-1 (was an it.todo here; W9-KEY-AVAILABILITY-TZ): KEY's
  *   get_availability read staff hours in UTC, so it offered a Port_of_Spain
  *   staff member's slots four hours early and KEY's own create_booking and
- *   reschedule_booking refused them; see the last describe.
+ *   reschedule_booking refused them; see the last describe. Its review
+ *   repairs (W9-KEY-AVAILABILITY-TZ): SEC-KAT-1, KEY get_availability answers
+ *   for at most 62 days still to come and asks nothing about past days or days
+ *   the staff member does not work; CR-W9KAT-1, with a buffered service it
+ *   leaves out the business-hours starts whose buffer runs past closing, which
+ *   KEY create_booking refuses.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
@@ -59,7 +64,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -639,7 +644,8 @@ describe('V1-16 a status write that brings a booking back claims its slot (SEC-V
  * dispatches to, over the real BookingsService, CatalogService and database.
  * bizK: Port_of_Spain, open Mondays 09:00-12:00 local (13:00Z-16:00Z) only.
  * staffK1 works Mondays 10:00-12:00 local (14:00Z-16:00Z); staffK2 has no
- * hours of their own, so the business's apply. svcK takes 60 minutes.
+ * hours of their own, so the business's apply. svcK takes 60 minutes; svcKB
+ * takes 60 minutes with a 15-minute buffer (CR-W9KAT-1).
  */
 describe('V1-16 consumers of the business clock outside this packet (review CR-V16-1)', () => {
   const K = {
@@ -648,6 +654,7 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
     staff1: `${P}staffK1`,
     staff2: `${P}staffK2`,
     svc: `${P}svcK`,
+    svcBuffered: `${P}svcKB`,
   };
   const NAME = { [`${P}staffK1`]: 'Staff K One', [`${P}staffK2`]: 'Staff K Two' } as Record<string, string>;
 
@@ -695,6 +702,7 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
     await db.availability.create({ data: { staffId: K.staff1, dayOfWeek: 1, startTime: '10:00', endTime: '12:00' } });
     await db.staffMember.create({ data: { id: K.staff2, businessId: K.biz, name: NAME[K.staff2] } });
     await db.service.create({ data: { id: K.svc, businessId: K.biz, name: 'svcK', duration: 60, price: 0 } });
+    await db.service.create({ data: { id: K.svcBuffered, businessId: K.biz, name: 'svcKB', duration: 60, bufferMins: 15, price: 0 } });
   });
 
   // One Monday per server zone, so the booking the first run leaves behind is
@@ -758,5 +766,106 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
       !(utc(s.startTime).getTime() < blockEnd && utc(s.endTime).getTime() > blockStart);
     const picker = [...(await pickerSlots(K.staff1, day)), ...(await pickerSlots(K.staff2, day)).filter(outsideBlock)];
     expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(picker));
+  });
+
+  /** The calendar day (UTC midnight) a getAvailableSlots call was asked about, read back as the route hands it. */
+  const askedDay = (call: any[]) => {
+    const date = call[0].date as Date;
+    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  };
+  const DAY = 24 * 60 * 60 * 1000;
+  const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+  it('SEC-KAT-1: KEY get_availability answers for at most 62 days and refuses a longer range before asking about any day (W9-KEY-AVAILABILITY-TZ review repair)', async () => {
+    const asked = vi.spyOn(bookingsService, 'getAvailableSlots');
+    try {
+      // 63 days, 2030-01-01..2030-03-04 both included: refused, nothing asked.
+      await expect(keyCommand('get_availability', { serviceId: K.svc, from: '2030-01-01', to: '2030-03-04' })).rejects.toThrow(/at most 62 days/);
+      expect(asked).not.toHaveBeenCalled();
+      // The finding's two-year probe and an unbounded one: refused at once.
+      await expect(keyCommand('get_availability', { serviceId: K.svc, from: '2030-01-01', to: '2031-12-31' })).rejects.toThrow(/at most 62 days/);
+      await expect(keyCommand('get_availability', { serviceId: K.svc, from: '1970-01-01', to: '2100-12-31' })).rejects.toThrow(/at most 62 days/);
+      expect(asked).not.toHaveBeenCalled();
+
+      // 62 days, 2030-01-01..2030-03-03: answered, the Mondays only (bizK opens on Mondays).
+      const offered = await keyCommand('get_availability', { serviceId: K.svc, from: '2030-01-01', to: '2030-03-03' });
+      expect(offered.success, offered.error).toBe(true);
+      expect((offered.data as any[]).length).toBeGreaterThan(0);
+      const mondays = ['2030-01-07', '2030-01-14', '2030-01-21', '2030-01-28', '2030-02-04', '2030-02-11', '2030-02-18', '2030-02-25'];
+      expect(new Set(asked.mock.calls.map((c) => ymd(askedDay(c))))).toEqual(new Set(mondays));
+      expect(asked).toHaveBeenCalledTimes(mondays.length * 2); // two staff members
+    } finally {
+      asked.mockRestore();
+    }
+  }, 60_000);
+
+  it('SEC-KAT-1: KEY get_availability asks nothing about days already past, nor about days the staff member does not work, and its answer is unchanged (W9-KEY-AVAILABILITY-TZ review repair)', async () => {
+    const asked = vi.spyOn(bookingsService, 'getAvailableSlots');
+    try {
+      // A week, Monday 2030-02-04 to Sunday 2030-02-10, for every staff member:
+      // bizK and staffK1 work Mondays only, so the Monday is asked about, once each.
+      const week = await keyCommand('get_availability', { serviceId: K.svc, from: '2030-02-04', to: '2030-02-10' });
+      expect(week.success, week.error).toBe(true);
+      expect(asked.mock.calls.map((c) => [c[0].staffId, ymd(askedDay(c))]).sort()).toEqual([
+        [K.staff1, '2030-02-04'],
+        [K.staff2, '2030-02-04'],
+      ]);
+      const monday = await keyCommand('get_availability', { serviceId: K.svc, from: '2030-02-04', to: '2030-02-04' });
+      expect(byStaffThenStart(week.data as any[])).toEqual(byStaffThenStart(monday.data as any[]));
+      expect(byStaffThenStart(week.data as any[])).toEqual(
+        byStaffThenStart([...(await pickerSlots(K.staff1, '2030-02-04')), ...(await pickerSlots(K.staff2, '2030-02-04'))]),
+      );
+
+      // Thirty days back to six ahead: no day before yesterday (UTC) is asked
+      // about; such a day has no start left in any zone.
+      asked.mockClear();
+      const now = Date.now();
+      const yesterday = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate()) - DAY;
+      const recent = await keyCommand('get_availability', { serviceId: K.svc, from: ymd(now - 30 * DAY), to: ymd(now + 6 * DAY) });
+      expect(recent.success, recent.error).toBe(true);
+      const days = asked.mock.calls.map(askedDay);
+      expect(days.filter((d) => d < yesterday).map(ymd)).toEqual([]);
+      for (const s of recent.data as Array<{ startTime: string }>) expect(utc(s.startTime).getTime()).toBeGreaterThan(now);
+    } finally {
+      asked.mockRestore();
+    }
+  }, 60_000);
+
+  it('CR-W9KAT-1: with a buffered service KEY get_availability leaves out the business-hours starts whose buffer runs past closing, which KEY create_booking refuses, and offers a staff member\'s own hours as the validator reads them (W9-KEY-AVAILABILITY-TZ review repair)', async () => {
+    const day = '2030-01-28'; // a Monday
+    const offered = await keyCommand('get_availability', { serviceId: K.svcBuffered, from: day, to: day });
+    expect(offered.success, offered.error).toBe(true);
+
+    const at = (staffId: string, times: string[]) => times.map((t) => slot(staffId, `${day}T${t}:00.000Z`));
+    // staffK1 keeps their own 10:00-12:00 local, which the validator reads without the buffer.
+    // staffK2 is on the business's 09:00-12:00 local, which KEY create_booking reads with it:
+    // an 11:00 local (15:00Z) start ends its buffer at 12:15, after closing.
+    const expected = [...at(K.staff1, ['14:00', '14:30', '15:00']), ...at(K.staff2, ['13:00', '13:30', '14:00', '14:30'])];
+    expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(expected));
+
+    // KEY offers the picker's slots less the business-hours starts whose buffer runs past 16:00Z (12:00 local).
+    const close = utc(`${day}T16:00:00.000Z`).getTime();
+    const bufferFits = (s: { endTime: string }) => utc(s.endTime).getTime() + 15 * 60_000 <= close;
+    const pickerFor = async (staffId: string) => {
+      const res = await agent().get(`/bookings/public/businesses/${K.biz}/slots`).query({ serviceId: K.svcBuffered, date: day, staffId });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return (res.body.slots as string[]).map((startTime) => slot(staffId, startTime));
+    };
+    expect(byStaffThenStart(offered.data as any[])).toEqual(
+      byStaffThenStart([...(await pickerFor(K.staff1)), ...(await pickerFor(K.staff2)).filter(bufferFits)]),
+    );
+
+    // The start left out is one KEY create_booking refuses ...
+    await expect(
+      keyCommand('create_booking', { contactId: K.contact, serviceId: K.svcBuffered, staffId: K.staff2, startTime: `${day}T15:00:00.000Z` }),
+    ).rejects.toThrow('The selected time is outside business hours.');
+    // ... and the last start offered to each staff member is one it accepts.
+    for (const staffId of [K.staff2, K.staff1]) {
+      const last = (offered.data as any[]).filter((s) => s.staffId === staffId).map((s) => s.startTime).sort().pop();
+      const booked = await keyCommand('create_booking', { contactId: K.contact, serviceId: K.svcBuffered, staffId, startTime: last });
+      expect(booked.success, booked.error).toBe(true);
+      const row = await db.booking.findUnique({ where: { id: booked.data.id } });
+      expect([row.staffId, row.startTime.toISOString()]).toEqual([staffId, last]);
+    }
   });
 });
