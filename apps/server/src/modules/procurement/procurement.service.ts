@@ -19,6 +19,15 @@ import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dt
 /** The statuses only approve and reject may set: they are decisions, and a decision is audited. */
 const DECISION_STATUSES = new Set(['APPROVED', 'REJECTED']);
 
+/**
+ * W7-OPS-AUDIT-ACTOR (review SEC-R013g-4, D-40): the member who moved a request, on the feed row the
+ * move records. The vendor transitions recorded no actor at all; a caller that names no member (the
+ * KEY dispatcher) still writes none, rather than a USER row that names no one.
+ */
+function actedBy(userId?: string): { actorType?: 'USER'; actorId?: string } {
+  return userId ? { actorType: 'USER', actorId: userId } : {};
+}
+
 /** What writeRequest writes through: the app's client, or a transaction's. */
 type RequestWriter = Pick<PrismaService['client'], 'procurementRequest'>;
 
@@ -160,7 +169,7 @@ export class ProcurementService {
     });
   }
 
-  async submitForReview(businessId: string, id: string) {
+  async submitForReview(businessId: string, id: string, userId?: string) {
     const req = await this.get(businessId, id);
     const brief = this.generateBrief(req);
     const updated = await this.writeRequest(businessId, id, {
@@ -180,6 +189,7 @@ export class ProcurementService {
       detail: `Status: SUBMITTED · ${req.userPrompt.slice(0, 150)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: userId, // W7-OPS-AUDIT-ACTOR: the member who submitted it
       status: 'COMPLETED',
       data: { brief },
       occurredAt: new Date(),
@@ -331,7 +341,7 @@ export class ProcurementService {
     return { ...updated, purchaseOrder: po };
   }
 
-  async acknowledgeVendor(businessId: string, id: string) {
+  async acknowledgeVendor(businessId: string, id: string, userId?: string) {
     const updated = await this.writeRequest(businessId, id, { status: 'VENDOR_ACKNOWLEDGED', vendorAcknowledgedAt: new Date() });
     this.timeline.recordEvent({
       businessId,
@@ -340,12 +350,13 @@ export class ProcurementService {
       entityType: 'procurement_request',
       entityId: id,
       title: 'Vendor acknowledged PO',
+      ...actedBy(userId),
       occurredAt: new Date(),
     }).catch(() => {});
     return updated;
   }
 
-  async markFulfilled(businessId: string, id: string) {
+  async markFulfilled(businessId: string, id: string, userId?: string) {
     const updated = await this.writeRequest(businessId, id, { status: 'FULFILLED', fulfilledAt: new Date() });
     this.timeline.recordEvent({
       businessId,
@@ -354,12 +365,13 @@ export class ProcurementService {
       entityType: 'procurement_request',
       entityId: id,
       title: 'Order fulfilled',
+      ...actedBy(userId),
       occurredAt: new Date(),
     }).catch(() => {});
     return updated;
   }
 
-  async markInvoiced(businessId: string, id: string) {
+  async markInvoiced(businessId: string, id: string, userId?: string) {
     const updated = await this.writeRequest(businessId, id, { status: 'INVOICED', invoicedAt: new Date() });
     this.timeline.recordEvent({
       businessId,
@@ -368,6 +380,7 @@ export class ProcurementService {
       entityType: 'procurement_request',
       entityId: id,
       title: 'Supplier invoice received',
+      ...actedBy(userId),
       occurredAt: new Date(),
     }).catch(() => {});
     return updated;

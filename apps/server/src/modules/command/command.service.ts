@@ -90,6 +90,12 @@ function channelDetail(item: ContactNamingItem & { description: string | null })
 /** A Date as the UTC wall time Prisma stores in a TIMESTAMP(3) column, for raw SQL. */
 const utc = (d: Date) => Prisma.sql`(${d.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
 
+/**
+ * Command-centre items. W7-OPS-AUDIT-ACTOR (review SEC-R013g-4, D-40): actorUserId, the member the
+ * controller hands every write, also names that member on the feed row the write records (actorId
+ * beside actorType); before, approve, complete, dismiss and the rest recorded USER with no one. An
+ * internal caller that passes no member (KEY compensation's delete) writes the row as before.
+ */
 @Injectable()
 export class CommandService {
   constructor(
@@ -99,7 +105,12 @@ export class CommandService {
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
   ) {}
 
-  async create(businessId: string, dto: CreateCommandItemDto) {
+  /**
+   * actorUserId: the member who files the item (the POST items route, W7-OPS-AUDIT-ACTOR), named on
+   * its feed row; the internal writers (the generator, message intake, KEY tools, devices) pass none
+   * and the row stays a SYSTEM one, as before.
+   */
+  async create(businessId: string, dto: CreateCommandItemDto, actorUserId?: string) {
     const item = await this.prisma.client.commandItem.create({
       data: {
         businessId,
@@ -142,7 +153,8 @@ export class CommandService {
       title: shown,
       detail: channelDetail(item),
       category: 'SYSTEM',
-      actorType: 'SYSTEM',
+      actorType: actorUserId ? 'USER' : 'SYSTEM',
+      actorId: actorUserId,
       data: { category: dto.category, actionType: dto.actionType, priority: dto.priority },
     });
     this.realtime.emit({
@@ -492,6 +504,7 @@ export class CommandService {
       title: `Updated: ${channelTitle(existing, item)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { changedFields: Object.keys(dto) },
     });
     return item;
@@ -512,6 +525,7 @@ export class CommandService {
       title: `Dismissed: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { previousStatus: existing.status },
     });
     return item;
@@ -535,6 +549,7 @@ export class CommandService {
       title: `Snoozed: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { until: until.toISOString(), previousStatus: existing.status },
     });
     return item;
@@ -555,6 +570,7 @@ export class CommandService {
       title: `Completed: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { previousStatus: existing.status },
     });
     this.realtime.emit({
@@ -580,6 +596,7 @@ export class CommandService {
       title: `Assigned: ${channelTitle(existing, item)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { ownerType, ownerId, previousOwnerType: existing.ownerType, previousOwnerId: existing.ownerId },
     });
     this.realtime.emit({
@@ -605,6 +622,7 @@ export class CommandService {
       title: `Reopened: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { previousStatus: existing.status },
     });
     return item;
@@ -625,6 +643,7 @@ export class CommandService {
       title: `Approved: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
       data: { previousStatus: existing.status },
     });
     return item;
@@ -649,6 +668,7 @@ export class CommandService {
       title: `Executed: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: existing.executableByKey ? 'AI' : 'USER',
+      actorId: actorUserId,
       data: { result },
     });
     return item;
@@ -666,6 +686,7 @@ export class CommandService {
       title: `Deleted: ${channelTitle(existing)}`,
       category: 'SYSTEM',
       actorType: 'USER',
+      actorId: actorUserId,
     });
     return existing;
   }
@@ -694,6 +715,7 @@ export class CommandService {
           title: `Completed: ${channelTitle(item)}`,
           category: 'SYSTEM',
           actorType: 'USER',
+          actorId: actorUserId,
           data: { previousStatus: item.status },
         }),
       ),
@@ -730,6 +752,7 @@ export class CommandService {
           title: `Dismissed: ${channelTitle(item)}`,
           category: 'SYSTEM',
           actorType: 'USER',
+          actorId: actorUserId,
           data: { previousStatus: item.status },
         }),
       ),
@@ -765,6 +788,7 @@ export class CommandService {
           title: `Deleted: ${channelTitle(item)}`,
           category: 'SYSTEM',
           actorType: 'USER',
+          actorId: actorUserId,
         }),
       ),
     );

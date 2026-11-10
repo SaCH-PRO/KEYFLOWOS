@@ -116,8 +116,10 @@ export class CommandController {
   async create(
     @Param('businessId') businessId: string,
     @Body() dto: CreateCommandItemDto,
+    @Req() req: ActorRequest,
   ) {
-    return this.commandService.create(businessId, dto);
+    // W7-OPS-AUDIT-ACTOR: the member who files the item is named on its feed row
+    return this.commandService.create(businessId, dto, actorOf(req));
   }
 
   @RequireModuleScope('operations', 'write')

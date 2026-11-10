@@ -7,6 +7,9 @@ import { ProcurementService } from './procurement.service';
 import { CreateProcurementRequestDto } from './dto/create-procurement-request.dto';
 import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dto';
 
+/** The authenticated member AuthGuard attached: who moved the request (W7-OPS-AUDIT-ACTOR). */
+type ActorRequest = { user?: { id?: string } };
+
 /**
  * Procurement requests. Every route requires the 'operations' module scope
  * (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT), checked after
@@ -85,8 +88,8 @@ export class ProcurementController {
   @Post('businesses/:businessId/:id/submit')
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
-  async submit(@Param('businessId') businessId: string, @Param('id') id: string) {
-    return this.service.submitForReview(businessId, id);
+  async submit(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: ActorRequest) {
+    return this.service.submitForReview(businessId, id, req.user?.id);
   }
 
   @RequireModuleScope('operations', 'write')
@@ -126,32 +129,33 @@ export class ProcurementController {
    * markInvoiced update the request by its bare id, so each route first finds the request in the
    * path business (get, 404 otherwise), as submit, vendor and issue-po do inside the service.
    * Without it only the ambient Prisma tenant kept a member of one business off another's
-   * request, and the miss surfaced as 500 (review SEC-R013g-2).
+   * request, and the miss surfaced as 500 (review SEC-R013g-2). Each names the member who moved the
+   * request on its feed row (W7-OPS-AUDIT-ACTOR, review SEC-R013g-4).
    */
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/:id/acknowledge')
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
-  async acknowledgeVendor(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async acknowledgeVendor(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: ActorRequest) {
     await this.service.get(businessId, id);
-    return this.service.acknowledgeVendor(businessId, id);
+    return this.service.acknowledgeVendor(businessId, id, req.user?.id);
   }
 
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/:id/fulfill')
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
-  async markFulfilled(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async markFulfilled(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: ActorRequest) {
     await this.service.get(businessId, id);
-    return this.service.markFulfilled(businessId, id);
+    return this.service.markFulfilled(businessId, id, req.user?.id);
   }
 
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/:id/invoice')
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
-  async markInvoiced(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async markInvoiced(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: ActorRequest) {
     await this.service.get(businessId, id);
-    return this.service.markInvoiced(businessId, id);
+    return this.service.markInvoiced(businessId, id, req.user?.id);
   }
 }
