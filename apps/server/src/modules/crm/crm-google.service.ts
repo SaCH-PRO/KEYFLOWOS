@@ -210,12 +210,28 @@ export class CrmGoogleService {
     return response.json();
   }
 
+  /**
+   * W7-GOOGLE-IMPORT-SCOPE (review finding ST-1): `actorUserId` is the
+   * requesting member (POST google/import passes it). With it, a member who may
+   * not create contacts (CrmService.assertCanCreateContacts: crm_edit 'none')
+   * is refused 403 before Google is called, as the CSV import is since R0-13,
+   * and every person goes through findOrCreateContact with that actor: it is
+   * merged only into a contact the member may edit (visible to them and inside
+   * their edit scope, the door W6-CONNECT-TAG-MERGE applies to a sync's
+   * existing contacts), a person matching one they may not edit is skipped and
+   * that contact left as it was, and every contact write records the member
+   * (contact.created event, created and updated audit entries). Without it
+   * (the OAuth callback, which carries no member) the import runs in system
+   * context, as before.
+   */
   async importGoogleContacts(params: {
     businessId: string;
     accessToken: string;
     refreshToken?: string;
+    actorUserId?: string;
   }) {
-    const { businessId, accessToken } = params;
+    const { businessId, accessToken, actorUserId } = params;
+    if (actorUserId) await this.crm.assertCanCreateContacts(businessId, actorUserId);
     let allContacts: GooglePerson[] = [];
     let pageToken: string | undefined;
 
@@ -252,7 +268,7 @@ export class CrmGoogleService {
           companyName: org?.name ?? undefined,
           source: 'google_contacts',
           sourceDetail: person.resourceName,
-        });
+        }, actorUserId);
         imported++;
       } catch (err: any) {
         this.logger.warn(`Failed to import contact: ${(err as Error).message}`);
