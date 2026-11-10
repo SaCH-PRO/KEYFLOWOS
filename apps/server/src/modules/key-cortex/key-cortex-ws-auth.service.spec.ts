@@ -168,8 +168,9 @@ describe('KeyCortexWsAuthService', () => {
     it('queries membership with the string id unchanged', async () => {
       prisma.client.business.findFirst.mockResolvedValue({ id: 'b1' });
       await expect(service.verifyBusinessMembership('u1', 'USER', 'b1')).resolves.toBe(true);
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one rule.
       expect(prisma.client.business.findFirst).toHaveBeenCalledWith({
-        where: { id: 'b1', OR: [{ ownerId: 'u1' }, { members: { some: { userId: 'u1' } } }] },
+        where: { id: 'b1', members: { some: { userId: 'u1' } } },
         select: { id: true },
       });
     });

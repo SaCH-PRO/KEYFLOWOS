@@ -17,19 +17,18 @@ export interface BusinessGuardedRequest extends TenantBearingRequest {
 }
 
 /**
- * BusinessGuard's access predicate, the one place it is written: `userId` owns
- * `businessId` or holds a Membership in it. Throws only when the lookup itself
- * fails; callers decide how to refuse.
+ * BusinessGuard's access predicate, the one place it is written: `userId` holds
+ * a Membership in `businessId`. Owner ruling D-104 (W10-OWNER-MEMBERSHIP):
+ * membership is the single rule for business access; an owner recorded only as
+ * Business.ownerId, with no Membership row, is refused, as ModuleScopeGuard and
+ * D-73 already refused them. scripts/backfill-owner-memberships.ts (operator,
+ * dry run by default) writes the missing OWNER rows. Throws only when the
+ * lookup itself fails; callers decide how to refuse.
  */
 export async function userCanAccessBusiness(prisma: PrismaService, userId: string, businessId: string): Promise<boolean> {
   const business = await prisma.client.business.findFirst({
-    where: {
-      id: businessId,
-      OR: [
-        { ownerId: userId },
-        { members: { some: { userId } } },
-      ],
-    },
+    where: { id: businessId, members: { some: { userId } } },
+    select: { id: true },
   });
   return !!business;
 }

@@ -159,10 +159,8 @@ export class KeyCortexWsAuthService {
 
     try {
       const business = await this.prisma.client.business.findFirst({
-        where: {
-          id,
-          OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-        },
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+        where: { id, members: { some: { userId } } },
         select: { id: true },
       });
       return !!business;

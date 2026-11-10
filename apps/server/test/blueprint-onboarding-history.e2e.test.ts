@@ -76,12 +76,14 @@ const users: Record<string, { id: string; role: string }> = {
 const prismaMock = {
   client: {
     business: {
+      // { id, members: { some: { userId } } }: owner ruling D-104
+      // (W10-OWNER-MEMBERSHIP), a Membership is the one access rule.
       findFirst: vi.fn(async ({ where }: any) => {
-        const userId = where?.OR?.[0]?.ownerId;
+        const userId = where?.members?.some?.userId;
         const biz = businesses.find((b) => b.id === where.id);
         if (!biz) return null;
         const member = memberships.some((m) => m.businessId === biz.id && m.userId === userId);
-        return biz.ownerId === userId || member ? biz : null;
+        return member ? biz : null;
       }),
     },
   },

@@ -174,7 +174,8 @@ export class DemoDataSeederService {
     const actorId = actor?.id;
     if (actorId) {
       const [owned, membership] = await Promise.all([
-        this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId }, select: { id: true } }),
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+        this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId } } }, select: { id: true } }),
         this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: actorId, businessId } },
           select: { role: true },

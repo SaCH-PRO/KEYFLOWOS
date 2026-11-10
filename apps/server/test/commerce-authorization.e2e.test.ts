@@ -99,14 +99,14 @@ class GuardPrismaMock {
     const self = this;
     self.client = {
       business: {
-        // BusinessGuard: findFirst({ where: { id, OR: [{ ownerId }, { members: { some: { userId } } }] } })
+        // BusinessGuard: findFirst({ where: { id, members: { some: { userId } } } })
+        // (owner ruling D-104, W10-OWNER-MEMBERSHIP: a Membership is the one rule).
         findFirst: vi.fn(({ where }: any) => {
           const biz = self.businesses.find((b) => b.id === where.id);
           if (!biz) return Promise.resolve(null);
-          const userId = where.OR?.[0]?.ownerId ?? where.OR?.[1]?.members?.some?.userId;
-          const isOwner = biz.ownerId === userId;
+          const userId = where.members?.some?.userId;
           const isMember = self.memberships.some((m) => m.businessId === biz.id && m.userId === userId);
-          return Promise.resolve(isOwner || isMember ? biz : null);
+          return Promise.resolve(isMember ? biz : null);
         }),
         findUnique: vi.fn(() => Promise.resolve(null)),
       },

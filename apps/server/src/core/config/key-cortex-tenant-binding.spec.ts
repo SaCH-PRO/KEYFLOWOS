@@ -493,20 +493,25 @@ class RecordingKeyConnectorService {
 const kcMembershipPrisma = {
   client: {
     business: {
-      // BusinessGuard asks { id, OR: [{ ownerId }, { members }] }; the
-      // controller's writer check (review SEC-W7KC-2) asks { id, ownerId }.
-      findFirst: async ({ where }: { where: { id?: unknown; ownerId?: unknown; OR?: Array<{ ownerId?: unknown; members?: { some?: { userId?: unknown } } }> } }) => {
-        const userId = where.ownerId ?? where.OR?.find((o) => o.ownerId !== undefined)?.ownerId ?? where.OR?.find((o) => o.members)?.members?.some?.userId;
+      // BusinessGuard asks { id, members: { some: { userId } } } (owner ruling
+      // D-104: a Membership is the one rule).
+      findFirst: async ({ where }: { where: { id?: unknown; ownerId?: unknown; members?: { some?: { userId?: unknown } } } }) => {
+        const userId = where.members?.some?.userId ?? where.ownerId;
         const id = typeof where.id === 'string' ? where.id : undefined;
         return id && KC_OWNERS[id] !== undefined && KC_OWNERS[id] === userId ? { id, ownerId: userId } : null;
       },
     },
-    // The owners here hold no Membership row: the writer check (review
-    // SEC-W7KC-2) admits each as its business's distinguished owner, the arm
-    // BusinessGuard admits them by. test/key-connector-authority.integration.test.ts
+    // Each owner holds its business's OWNER Membership (W10-OWNER-MEMBERSHIP,
+    // D-104: fixture change; an owner recorded only as Business.ownerId is
+    // refused everywhere): BusinessGuard and the writer check (review
+    // SEC-W7KC-2) admit it by that row. test/key-connector-authority.integration.test.ts
     // proves the role arm (OWNER, ADMIN admitted; STAFF refused) on real rows.
     membership: {
-      findUnique: async () => null,
+      findUnique: async ({ where }: { where: { userId_businessId?: { userId?: unknown; businessId?: unknown } } }) => {
+        const key = where.userId_businessId;
+        const id = typeof key?.businessId === 'string' ? key.businessId : undefined;
+        return id && KC_OWNERS[id] !== undefined && KC_OWNERS[id] === key?.userId ? { role: 'OWNER', maxApprovalTier: 0, permissionScopes: null } : null;
+      },
     },
   },
 };

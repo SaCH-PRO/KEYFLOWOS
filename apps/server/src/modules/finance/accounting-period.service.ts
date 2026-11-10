@@ -440,7 +440,8 @@ export class AccountingPeriodService {
       });
       if (membership && PERIOD_GATE_ROLES.has(membership.role)) return actorId;
       const owned = await this.prisma.client.business.findFirst({
-        where: { id: businessId, ownerId: actorId },
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+        where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId } } },
         select: { id: true },
       });
       if (owned) return actorId;

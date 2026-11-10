@@ -34,7 +34,8 @@ export class CommunityController {
     const userId = req?.user?.id;
     if (!userId) return [];
     const businesses = await this.prisma.client.business.findMany({
-      where: { OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+      where: { members: { some: { userId } } },
       select: { id: true },
     });
     return businesses.map((b) => b.id);

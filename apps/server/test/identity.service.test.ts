@@ -23,6 +23,10 @@ class PrismaMock implements Partial<PrismaService> {
   private matches(business: any, where: any): boolean {
     if (where?.deletedAt === null && business.deletedAt !== null) return false;
     if (where?.ownerId) return business.ownerId === where.ownerId;
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): discovery is Membership only.
+    if (where?.members?.some?.userId) {
+      return this.memberships.some((m) => m.businessId === business.id && m.userId === where.members.some.userId);
+    }
     if (Array.isArray(where?.OR)) {
       return where.OR.some((clause: any) => {
         if (clause.ownerId) return business.ownerId === clause.ownerId;
