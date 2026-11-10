@@ -1175,7 +1175,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     // Staff working hours win over business hours when the staff member has
     // any configured, exactly as the booking validator decides it.
-    let windows: Array<{ openMin: number; closeMin: number }> = [];
+    //
+    // W10-BOOKING-BUFFER (CR-W9KAT-1): `bufferMins` is how much of the
+    // service's buffer must also end by the window's close, as
+    // assertWithinSchedule reads it for both create paths and rescheduleBooking
+    // now does too: the whole buffer on the business's hours, none on a staff
+    // member's own. The picker fitted the appointment alone, so it offered a
+    // start whose buffer ran past closing that every write path then refused.
+    let windows: Array<{ openMin: number; closeMin: number; bufferMins: number }> = [];
     if (staffId) {
       const availability = await this.prisma.client.availability.findMany({
         where: { staffId, staff: { businessId, deletedAt: null } },
@@ -1186,7 +1193,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           .map((a) => {
             const [sh, sm] = a.startTime.split(':').map(Number);
             const [eh, em] = a.endTime.split(':').map(Number);
-            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em };
+            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em, bufferMins: 0 };
           });
         // Configured, but not for this day: the staff member does not work today.
         if (windows.length === 0) return { date, slots: [] };
@@ -1201,7 +1208,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
       const [oh, om] = dayHours.open.split(':').map(Number);
       const [ch, cm] = dayHours.close.split(':').map(Number);
-      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm }];
+      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm, bufferMins: service.bufferMins || 0 }];
     }
 
     const earliest = service.leadTimeMins && service.leadTimeMins > 0
@@ -1210,7 +1217,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     const slots: string[] = [];
     for (const w of windows) {
-      for (let m = w.openMin; m + service.duration <= w.closeMin; m += interval) {
+      for (let m = w.openMin; m + service.duration + w.bufferMins <= w.closeMin; m += interval) {
         const start = zonedInstant(year, month, dayOfMonth, m, zone);
         // A time the clocks skip that day (DST) is not a time anyone can book.
         if (wallClock(start, zone).minutes !== m) continue;
@@ -1592,7 +1599,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           const openMin = oh * 60 + om;
           const closeMin = ch * 60 + cm;
           const bookingStartMin = startClock.minutes;
-          const bookingEndMin = endClock.minutes || 1440;
+          // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
+          // both create paths (assertWithinSchedule) and the picker read it; a
+          // staff member's own hours above are read without it, as there.
+          const bookingEndMin = (endClock.minutes || 1440) + (service?.bufferMins || 0);
           if (bookingStartMin < openMin || bookingEndMin > closeMin) {
             throw new BadRequestException(
               `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
