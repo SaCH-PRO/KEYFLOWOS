@@ -783,6 +783,11 @@
       "packet": "V1-94 (W8-MONEY-SIGNALS)"
     },
     {
+      "prefix": "v95r_",
+      "owner": "apps/server/test/projects-budget-assignee-scope.integration.test.ts",
+      "packet": "V1-95 (W9-PROJECTS-SERVER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
