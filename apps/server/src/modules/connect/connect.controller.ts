@@ -174,20 +174,28 @@ export class ConnectController {
     return this.formsMapping.deleteMapping(businessId, formId);
   }
 
+  /**
+   * W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up; D-46): a run creates the quotes
+   * its mapping asks for only as a member with revenue:write, so both routes
+   * pass their caller (AuthGuard's user); a run whose caller may not applies
+   * no response of such a mapping and says why (opportunityRefusal).
+   */
   @Post('businesses/:businessId/forms/:formId/backfill')
   backfillFormResponses(
     @Param('businessId') businessId: string,
     @Param('formId') formId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.formsMapping.backfill(businessId, formId);
+    return this.formsMapping.backfill(businessId, formId, req.user?.id ?? null);
   }
 
   @Post('businesses/:businessId/forms/:formId/process-new')
   processNewFormResponses(
     @Param('businessId') businessId: string,
     @Param('formId') formId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.formsMapping.processNewResponses(businessId, formId);
+    return this.formsMapping.processNewResponses(businessId, formId, req.user?.id ?? null);
   }
 
   // ----- Connector Forms (Typeform / Jotform / Webhook) -----
