@@ -255,8 +255,10 @@ beforeAll(async () => {
   });
   const realExecuteToolAction = FlowOrchestratorService.prototype['executeToolAction' as keyof typeof FlowOrchestratorService.prototype] as any;
   // Contact reads run the orchestrator's own query (crm_list_contacts with contactReadAccess;
-  // segment_contacts, which applies no member's visibility at all).
-  const REAL_TOOLS = new Set(['crm_list_contacts', 'segment_contacts']);
+  // segment_contacts, which applies no member's visibility at all). W8-CALL-TASK-NO-MEMBER (D-73):
+  // call_create_task runs the orchestrator's own case, which refuses a run with no member before it
+  // writes anything (QW-06 runs it only for plans with no member).
+  const REAL_TOOLS = new Set(['crm_list_contacts', 'segment_contacts', 'call_create_task']);
   flow.executeToolAction = async (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) => {
     monitorCalls.push({ toolName, action });
     if (REAL_TOOLS.has(toolName)) return realExecuteToolAction.call(flow, businessId, toolName, args, action);
@@ -629,7 +631,36 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // and executeToolAction). The refusal is permanent, so it belongs in the pre-dispatch gate the queue,
   // the Pro Auto monitor and the proposal executor read (noMemberToolRefusal, plan-step-authority.ts),
   // outside W7-CALL-TASK-CALLER's write set (the call_create_task case only).
-  it.todo('QW-06 a plan with no member with call_create_task: refused before dispatch and recorded on the step, nothing dispatched, the job completes, and no refusal counts toward the tool\'s circuit breaker (review CR-W7CTC-1; plan-step-authority.ts noMemberToolRefusal)');
+  // W8-CALL-TASK-NO-MEMBER (D-73): call_create_task names a contact and records a caller, so a plan
+  // with no member is refused it before dispatch, as it is refused a contact read or a money write.
+  // The dispatcher here is the real ActionDispatcherService and call_create_task runs the
+  // orchestrator's own case (REAL_TOOLS), so a step that got through would reach the real refusal
+  // and count it; CIRCUIT_THRESHOLD (5) such steps opened the tool's circuit for every business.
+  it('QW-06 W8-CALL-TASK-NO-MEMBER (D-73): a plan with no member with call_create_task: refused before dispatch and recorded on the step, nothing dispatched, the job completes, and no refusal counts toward the tool\'s circuit breaker (review CR-W7CTC-1; plan-step-authority.ts noMemberToolRefusal)', async () => {
+    const circuit = () => queue.actionDispatcher.getCircuitStatus('call_create_task');
+    expect(circuit()).toMatchObject({ open: false, failures: 0 });
+    for (let i = 1; i <= 5; i++) {
+      const planId = `${P}qw06_${i}`;
+      const args = { contactId: ID.cTeam, callerId: ID.owner, notes: `v87b qw06 ${i}` };
+      const stepId = await seedQueuePlan(planId, null, 'call_create_task', args);
+      const result = await runQueueStep(planId, 'call_create_task', args);
+      expect(dispatchedFor(stepId), planId).toEqual([]);
+      expect(result, planId).toMatchObject({ ok: true, value: { refused: expect.stringMatching(/call_create_task.*no member/) } });
+      const row = await planRow(planId);
+      expect(row.steps[0].status, planId).toBe('failed');
+      expect(String(row.steps[0].errorMessage), planId).toMatch(/^Refused: .*no member principal/);
+    }
+    expect(circuit()).toEqual({ open: false, failures: 0, lastFailure: null });
+    expect(noMemberToolRefusal('call_create_task')).toMatch(/no member principal/);
+    // Regression control: the gate is the no-member one only. The OWNER's plan, and the daily
+    // briefing (stored with no member, run as the business owner: D-93), still pass it.
+    const own = `${P}qw06_owner`;
+    await seedQueuePlan(own, ID.owner, 'call_create_task', { contactId: ID.cTeam });
+    expect(await planStepRunRefusal(prisma, ID.biz, own, 'call_create_task')).toBeNull();
+    const brief = `${P}qw06_brief`;
+    await seedBriefingPlan(brief, null, 'call_create_task', { contactId: ID.cTeam });
+    expect(await planStepRunRefusal(prisma, ID.biz, brief, 'call_create_task')).toBeNull();
+  });
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */
