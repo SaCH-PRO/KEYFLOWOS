@@ -25,6 +25,8 @@
  * PlannerService does, no steps), the KEY cortex event bus (hands the trigger service its subscriber),
  * the oversight service, execution log and journey orchestrator AgentTriggerService calls (no-op), and
  * KeyCortexPlannerService.executePlan (records the plan id: running the plan is not this packet's).
+ * RK-03 (W7-AUTH-DOCS-REKEY, D-73) reads docs/auth-pathway.md, identity.service.ts and schema.prisma
+ * from the repository and runs the doc's statements, as written, against the real database.
  *
  * Fixtures: prefix `v92d_` (registered in test/helpers/fixture-prefixes.json), hard-deleted by raw SQL
  * with sqlLikePrefix() in beforeAll and afterAll. No $transaction wrapping. Cases tagged RED-BEFORE fail
@@ -32,6 +34,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { readFileSync } from 'node:fs';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
@@ -231,16 +234,125 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     expect((await cortexPlansOfRule(RULE.cortexLegacy)).plans.map((p: any) => p.userId)).toEqual([null]);
   });
 
-  // Review SEC-RKC-1 / RK-CR-1. In production the re-key above runs only for a never-signed-in invite
-  // placeholder (adoptInvitePlaceholder), which no rule writer can record as a creator. A real member
-  // moves to a new subject only by the manual operator step in docs/auth-pathway.md ("Fixed by
-  // R0-SEC-01", step 4). That step re-points "every column that holds the old id", found in
-  // schema.prisma, and repeats reconcileUserId's list. '$createdBy' is a JSON key, not a column, so it
-  // is found in neither place. An operator who follows the step leaves the member's rules on the deleted
-  // id, which is the failure RK-01 and RK-02 show RED on the base. docs/ is outside the
-  // W6-IDENTITY-REKEY-CREATOR write set, so this stays a todo until a docs follow-up fixes it. The live
-  // case reads that step and expects it to name agent_triggers.condition and
-  // key_cortex_trigger_rules.filter_json with the '$createdBy' jsonb_set statement, and expects
-  // reconcileUserId's list there to include the trigger creator.
-  it.todo("RK-03 (W6-IDENTITY-REKEY-CREATOR; D-73; review SEC-RKC-1, RK-CR-1): the manual operator re-key in docs/auth-pathway.md (step 4) re-points $createdBy in agent_triggers.condition and key_cortex_trigger_rules.filter_json with the same jsonb_set statements reconcileUserId runs (follow-up: docs/ is outside this packet's write set)");
+  // Review SEC-RKC-1 / RK-CR-1, closed by W7-AUTH-DOCS-REKEY (D-73). In production the re-key above runs
+  // only for a never-signed-in invite placeholder (adoptInvitePlaceholder), which no rule writer can
+  // record as a creator. A real member moves to a new subject only by the manual operator step in
+  // docs/auth-pathway.md ("Fixed by R0-SEC-01", step 4). That step re-pointed "every column that holds
+  // the old id", found in schema.prisma, and repeated reconcileUserId's list without the trigger
+  // creator. '$createdBy' is a JSON key, not a column, so it was found in neither place, and an operator
+  // who followed the step left the member's rules on the deleted id (the failure RK-01 and RK-02 show
+  // RED on the W6 base). This case holds step 4 to reconcileUserId as the code has it:
+  //  - the step carries reconcileUserId's '$createdBy' jsonb_set statements verbatim in a sql block (the
+  //    code's parameters written as '$createdBy', '<new id>' and '<old id>');
+  //  - it names, as table.column, every column reconcileUserId's updateMany calls re-point and every
+  //    foreign key to User in schema.prisma that reconcileUserId leaves (cascade or set null);
+  //  - its statements, run as written against this database, re-point a rule's creator in both stores
+  //    and leave every other rule as it was.
+  // Every $executeRaw and updateMany in reconcileUserId has to be parsed, so a re-point added there
+  // without a line in the doc fails here.
+  it("RK-03 RED-BEFORE (W7-AUTH-DOCS-REKEY; D-73; review SEC-RKC-1, RK-CR-1): the manual operator re-key in docs/auth-pathway.md (step 4) re-points $createdBy in agent_triggers.condition and key_cortex_trigger_rules.filter_json with the same jsonb_set statements reconcileUserId runs, names every column reconcileUserId re-points and every User foreign key it leaves, and its statements run as written re-point a rule's creator in both stores and leave the other rules alone", async () => {
+    const REPO = path.resolve(__dirname, '../../..');
+    const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+    // reconcileUserId as the code has it: from its signature to the next class member.
+    const service = readFileSync(path.join(REPO, 'apps/server/src/modules/identity/identity.service.ts'), 'utf8');
+    const creatorKey = /const TRIGGER_CREATOR_KEY = '([^']+)';/.exec(service)?.[1];
+    expect(creatorKey).toBe('$createdBy');
+    const start = service.indexOf('private async reconcileUserId(');
+    expect(start).toBeGreaterThan(0);
+    const next = service.slice(start + 1).search(/\n {2}(?:private |protected |public |async |static |get |set )/);
+    expect(next).toBeGreaterThan(0);
+    const reconcile = service.slice(start, start + 1 + next);
+
+    const raw = [...reconcile.matchAll(/\$executeRaw`([\s\S]*?)`/g)];
+    expect(raw.length, 'every $executeRaw in reconcileUserId is parsed').toBe(reconcile.split('$executeRaw').length - 1);
+    const codeStatements = raw.map((m) =>
+      squash(m[1]
+        .replace(/\$\{TRIGGER_CREATOR_KEY\}/g, () => `'${creatorKey}'`)
+        .replace(/\$\{newId\}/g, () => "'<new id>'")
+        .replace(/\$\{oldId\}/g, () => "'<old id>'")),
+    );
+    expect(codeStatements).toHaveLength(2);
+    for (const s of codeStatements) expect(s, 'every parameter of the statement is known').not.toContain('${');
+    const jsonColumns = codeStatements.map((s) => {
+      const m = /^UPDATE (\w+) SET (\w+) = jsonb_set\(\2, ARRAY\['\$createdBy'::text\], to_jsonb\('<new id>'::text\)\) WHERE \2 ->> '\$createdBy'::text = '<old id>'::text$/.exec(s);
+      expect(m, s).not.toBeNull();
+      return `${m![1]}.${m![2]}`;
+    });
+    expect(jsonColumns).toEqual(['agent_triggers.condition', 'key_cortex_trigger_rules.filter_json']);
+
+    // The columns reconcileUserId's updateMany calls re-point, and the foreign keys to User it leaves, as
+    // table.column (schema.prisma @@map / @map).
+    const schema = readFileSync(path.join(REPO, 'packages/db/prisma/schema.prisma'), 'utf8');
+    const column = (model: string, field: string) => {
+      const block = new RegExp(`^model ${model} \\{([\\s\\S]*?)^\\}`, 'm').exec(schema)?.[1];
+      expect(block, `model ${model} in schema.prisma`).toBeDefined();
+      const table = /@@map\("([^"]+)"\)/.exec(block!)?.[1] ?? model;
+      const line = block!.split('\n').find((l) => new RegExp(`^\\s*${field}\\s`).test(l));
+      expect(line, `${model}.${field} in schema.prisma`).toBeDefined();
+      return `${table}.${/@map\("([^"]+)"\)/.exec(line!)?.[1] ?? field}`;
+    };
+    const updates = [...reconcile.matchAll(/tx\.(\w+)\.updateMany\(\s*(?:skipTenantIsolation\(\s*)?\{\s*where:\s*\{\s*(\w+):\s*oldId\s*\}/g)];
+    expect(updates.length, 'every updateMany in reconcileUserId is parsed').toBe(reconcile.split('.updateMany(').length - 1);
+    const repointed = updates.map((m) => column(m[1][0].toUpperCase() + m[1].slice(1), m[2]));
+    expect(repointed).toEqual(expect.arrayContaining(['memberships.user_id', 'businesses.owner_id']));
+    const userForeignKeys = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)].flatMap(([, model, body]) =>
+      [...body.matchAll(/^\s*\w+\s+User\??\s+@relation\([^)]*fields:\s*\[(\w+)\][^)]*\)/gm)].map((r) => column(model, r[1])));
+    expect(userForeignKeys).toContain('memberships.user_id');
+    const leftByReconcile = userForeignKeys.filter((c) => !repointed.includes(c));
+    expect(leftByReconcile.length).toBeGreaterThan(0);
+
+    // Step 4 of the manual operator re-key, as the doc has it.
+    const doc = readFileSync(path.join(REPO, 'docs/auth-pathway.md'), 'utf8');
+    const heading = doc.indexOf('**Moving an account to a new subject is now a manual operator step.**');
+    expect(heading).toBeGreaterThan(0);
+    const section = doc.slice(heading);
+    const step4At = section.search(/^\s+4\. /m);
+    const step5At = section.search(/^\s+5\. /m);
+    expect(step4At).toBeGreaterThan(0);
+    expect(step5At).toBeGreaterThan(step4At);
+    const step4 = section.slice(step4At, step5At);
+
+    for (const col of repointed) expect(step4, `step 4 names \`${col}\` (reconcileUserId re-points it)`).toContain(`\`${col}\``);
+    for (const col of jsonColumns) expect(step4, `step 4 names \`${col}\` (the trigger creator)`).toContain(`\`${col}\``);
+    for (const col of leftByReconcile) expect(step4, `step 4 names \`${col}\` (a User foreign key reconcileUserId leaves)`).toContain(`\`${col}\``);
+    expect(step4).toContain(`\`${creatorKey}\``);
+    const sql = /```sql\n([\s\S]*?)```/.exec(step4)?.[1];
+    expect(sql, 'step 4 carries a ```sql block').toBeDefined();
+    const docStatements = sql!.split(';').map(squash).filter(Boolean);
+    expect(docStatements).toEqual(codeStatements);
+
+    // The doc's statements, run as written (old and new id filled in), on a rule of each store whose
+    // creator is DOC_OLD: that key moves to DOC_NEW and the rule's own filter stays; every other rule
+    // (another member's, one with no creator) is left as it was.
+    const DOC_OLD = `${P}doc_old`;
+    const DOC_NEW = `${P}doc_new`;
+    const DOC_EVENT = 'v92d.rekey.doc';
+    const agentDoc = await db.agentTrigger.create({
+      data: { businessId: ID.biz2, name: 'v92d doc rule', eventPattern: DOC_EVENT, condition: { kind: 'v92d', $createdBy: DOC_OLD }, objective: 'v92d doc rule' },
+    });
+    const cortexDoc = await db.keyCortexTriggerRule.create({
+      data: { businessId: ID.biz2, eventType: DOC_EVENT, filterJson: { kind: 'v92d', $createdBy: DOC_OLD }, goalTemplateId: `${P}tpl`, cooldownMinutes: 0 },
+    });
+    for (const statement of docStatements) {
+      await db.$executeRawUnsafe(statement.split("'<old id>'").join(`'${DOC_OLD}'`).split("'<new id>'").join(`'${DOC_NEW}'`));
+    }
+    expect((await db.agentTrigger.findUnique({ where: { id: agentDoc.id } })).condition).toEqual({ kind: 'v92d', $createdBy: DOC_NEW });
+    expect((await db.keyCortexTriggerRule.findUnique({ where: { id: cortexDoc.id } })).filterJson).toEqual({ kind: 'v92d', $createdBy: DOC_NEW });
+    expect({
+      agentMember: (await db.agentTrigger.findUnique({ where: { id: RULE.agentMember } })).condition,
+      agentOther: (await db.agentTrigger.findUnique({ where: { id: RULE.agentOther } })).condition,
+      agentLegacy: (await db.agentTrigger.findUnique({ where: { id: RULE.agentLegacy } })).condition,
+      cortexMember: (await db.keyCortexTriggerRule.findUnique({ where: { id: RULE.cortexMember } })).filterJson,
+      cortexOther: (await db.keyCortexTriggerRule.findUnique({ where: { id: RULE.cortexOther } })).filterJson,
+      cortexLegacy: (await db.keyCortexTriggerRule.findUnique({ where: { id: RULE.cortexLegacy } })).filterJson,
+    }).toEqual({
+      agentMember: { kind: 'v92d', $createdBy: ID.memberNew },
+      agentOther: { kind: 'v92d', $createdBy: ID.other },
+      agentLegacy: { kind: 'v92d' },
+      cortexMember: { kind: 'v92d', $createdBy: ID.memberNew },
+      cortexOther: { kind: 'v92d', $createdBy: ID.other },
+      cortexLegacy: { kind: 'v92d' },
+    });
+  });
 });
