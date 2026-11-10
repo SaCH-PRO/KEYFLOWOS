@@ -1991,13 +1991,31 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         expect(body, t).not.toMatch(/viewer = [^;]*args\./);
       }
       // the call log is looked up for that member before anything is written or read into a script
-      expect(cases.get('call_log_outcome')).toMatch(/if \(viewer\) await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, args\.callLogId, viewer\);\s*const completed = /);
-      expect(cases.get('call_generate_script')).toMatch(
-        /if \(viewer\) \{\s*await this\.getCallLog\(\)\.assertContactVisibleTo\(businessId, args\.contactId, viewer\);\s*await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, args\.callLogId, viewer\);\s*\}\s*const script = /,
+      // (reviewed pin change, review SEC-W9KOC-1/-2: the ids are refused unless they are strings
+      // (assertCallLogToolIds) before they are read from args, and the row written or scripted is the
+      // row checked)
+      expect(cases.get('call_log_outcome')).toMatch(
+        /this\.assertCallLogToolIds\('call_log_outcome', args, \['callLogId'\]\);\s*const callLogId: string = args\.callLogId;\s*const viewer = await this\.callLogViewer\(businessId, action\);\s*const checkedId = viewer \? \(await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, callLogId, viewer\)\)\.id : callLogId;\s*const completed = await this\.getCallLog\(\)\.completeCall\(businessId, checkedId, /,
       );
-      expect(cases.get('call_schedule_followup')).toMatch(/createFollowUpTask\(businessId, args\.callLogId, \{[\s\S]*?\}, 'key_ai', viewer\);/);
+      expect(cases.get('call_generate_script')).toMatch(
+        /this\.assertCallLogToolIds\('call_generate_script', args, \['callLogId', 'contactId'\]\);\s*const callLogId: string = args\.callLogId;\s*const contactId: string = args\.contactId;\s*const viewer = await this\.callLogViewer\(businessId, action\);\s*let checkedId = callLogId;\s*if \(viewer\) \{\s*await this\.getCallLog\(\)\.assertContactVisibleTo\(businessId, contactId, viewer\);\s*checkedId = \(await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, callLogId, viewer\)\)\.id;\s*\}\s*const script = await this\.getCallScript\(\)\.generateScript\(businessId, checkedId, contactId\);/,
+      );
+      expect(cases.get('call_schedule_followup')).toMatch(
+        /this\.assertCallLogToolIds\('call_schedule_followup', args, \['callLogId'\]\);\s*const callLogId: string = args\.callLogId;\s*const viewer = await this\.callLogViewer\(businessId, action\);\s*const task = await this\.getCallLog\(\)\.createFollowUpTask\(businessId, callLogId, \{[\s\S]*?\}, 'key_ai', viewer\);/,
+      );
+      // each id is read from args once, after the check, and nowhere else in the case
+      for (const [t, fields] of [['call_log_outcome', ['callLogId']], ['call_generate_script', ['callLogId', 'contactId']], ['call_schedule_followup', ['callLogId']]] as const) {
+        for (const f of fields) expect(cases.get(t)!.match(new RegExp(`args\\.${f}\\b`, 'g')), `${t} ${f}`).toHaveLength(1);
+      }
+      const ids = memberBody(read(ORCHESTRATOR), 'assertCallLogToolIds')!;
+      expect(ids).toBeTruthy();
+      expect(ids).toContain('throw new Error(`Missing required fields for ${toolName}: ${missing.join(\', \')}`);');
+      expect(ids).toContain("if (typeof args[field] !== 'string') throw new Error(`Field \"${field}\" for ${toolName} must be a string`);");
       const followUp = serviceMethod('CallLogService.createFollowUpTask')!.body;
       expect(followUp).toMatch(/const callLog = viewer\s*\? await this\.getVisibleCallLog\(businessId, callLogId, viewer\)\s*: await this\.getCallLog\(businessId, callLogId\);/);
+      // and writes the row it looked up
+      expect(followUp).toContain('callLogId: callLog.id,');
+      expect(followUp).toMatch(/callLog\.update\(\{\s*where: \{ id: callLog\.id \}/);
     });
 
     it('D-88 (review SEC-W3D64-1/-3, CR-D64C-2): contactBindMember answers the member on every surface that runs for one, and the OWNER view only with no member', () => {
@@ -2369,9 +2387,26 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
     it('the call tools hand CallLogService / CallScriptService the business, and both look the rows up within it', () => {
       const cases = dispatcherCases();
-      expect(cases.get('call_log_outcome')).toMatch(/this\.getCallLog\(\)\.completeCall\(businessId, args\.callLogId, \{/);
-      expect(cases.get('call_schedule_followup')).toMatch(/this\.getCallLog\(\)\.createFollowUpTask\(businessId, args\.callLogId, \{/);
-      expect(cases.get('call_generate_script')).toMatch(/this\.getCallScript\(\)\.generateScript\(businessId, args\.callLogId, args\.contactId\)/);
+      // W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-1/-2), reviewed pin change: the ids reach the
+      // services as locals read from args after assertCallLogToolIds (and, for a member, the id of the
+      // row getVisibleCallLog checked); the business is still the first argument. The DD8-1 analysis
+      // still follows those locals as the model's (asserted below through DISPATCHER_TOUCHES).
+      expect(cases.get('call_log_outcome')).toMatch(/this\.getCallLog\(\)\.completeCall\(businessId, checkedId, \{/);
+      expect(cases.get('call_schedule_followup')).toMatch(/this\.getCallLog\(\)\.createFollowUpTask\(businessId, callLogId, \{/);
+      expect(cases.get('call_generate_script')).toMatch(/this\.getCallScript\(\)\.generateScript\(businessId, checkedId, contactId\)/);
+      for (const [t, via] of [
+        ['call_log_outcome', 'CallLogService.completeCall'],
+        ['call_schedule_followup', 'CallLogService.createFollowUpTask'],
+        ['call_generate_script', 'CallScriptService.generateScript'],
+      ] as const) {
+        // the call still reaches its rows by the model's id (the analysis is not blind to it), and the
+        // first where on each model names the business (ambientCalls' rule)
+        const touches = (DISPATCHER_TOUCHES.get(t) ?? []).filter((x) => x.via === via);
+        expect(touches.length, `${t} ${via}`).toBeGreaterThan(0);
+        const first = new Map<string, Touch>();
+        for (const x of touches) if (!first.has(x.model)) first.set(x.model, x);
+        expect([...first.values()].every((x) => x.bound), `${t} ${via}`).toBe(true);
+      }
       const callLog = read('modules/call-tasks/call-log.service.ts');
       expect(memberBody(callLog, 'getCallLog')).toMatch(/this\.prisma\.client\.callLog\.findFirst\(\{\s*where: \{ id, businessId \},/);
       expect(memberBody(callLog, 'completeCall')).toMatch(/await this\.getCallLog\(businessId, id\);/);

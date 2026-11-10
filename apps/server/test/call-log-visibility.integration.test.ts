@@ -502,14 +502,17 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
 // the call-log routes answer that member. call_create_task already did (W7-CALL-TASK-CALLER, CL-06).
 // A run with no member reads the business's call logs as before (no new authority rule here).
 
-/** KEY's dispatcher (FlowOrchestratorService.executeToolAction) over this suite's real PrismaService and CallLogService and the script recorder. */
-async function keyDispatch(tool: string, args: Record<string, unknown>, action: Record<string, unknown>) {
+/**
+ * KEY's dispatcher (FlowOrchestratorService.executeToolAction) over this suite's real PrismaService and CallLogService and the script recorder
+ * (or `scripts`, a CallScriptService a case hands it: CL-05c's real one).
+ */
+async function keyDispatch(tool: string, args: Record<string, unknown>, action: Record<string, unknown>, scripts: unknown = scriptsStub) {
   const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
   const { CallLogService } = await import('../src/modules/call-tasks/call-log.service');
   const { CallScriptService } = await import('../src/modules/call-tasks/call-script.service');
   const dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     prisma: prismaSvc,
-    moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : token === CallScriptService ? scriptsStub : undefined) },
+    moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : token === CallScriptService ? scripts : undefined) },
   });
   return dispatcher.executeToolAction(ID.bizA, tool, args, action);
 }
@@ -611,6 +614,92 @@ describe('CL-05 KEY call-log write tools (review ST-2, W9-KEY-OBLIGATIONS-CALLS)
       'call_log.completed',
     ]);
     for (const id of [mine.id, none.id, priv.id]) expect((await db.callLog.findUnique({ where: { id } }))?.completedAt, id).not.toBeNull();
+  });
+
+  // Review SEC-W9KOC-1, SEC-W9KOC-2: an execute_custom_logic inner call reaches the dispatcher through
+  // executeToolByName, which skips validateToolInput, so a snippet could leave contactId out or hand
+  // a Prisma filter as callLogId / contactId. The member's check then passed on one row (a missing
+  // contact is no check; findFirst answers the visible row a filter matches) while the service read or
+  // wrote another (contact.findFirst with id undefined; completeCall's updateMany over the filter).
+  it("CL-05c KEY call-log tools refuse a callLogId or contactId that is missing or not a string, before any lookup and in the chat path's validateToolInput words, so an execute_custom_logic inner call cannot pass the member's check on one row and script or complete another (review SEC-W9KOC-1, SEC-W9KOC-2; D-64, D-88) (W9-KEY-OBLIGATIONS-CALLS)", async () => {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { CallScriptService } = await import('../src/modules/call-tasks/call-script.service');
+    // the real CallScriptService over a model gateway that records each prompt, so a contact that
+    // reached a prompt is seen (the recorder stands in for the service, not for its contact read)
+    const prompts: string[] = [];
+    const gateway = {
+      complete: async (req: any) => {
+        prompts.push(String(req.messages?.[1]?.content ?? ''));
+        return { content: JSON.stringify({ greeting: 'v84d-real-script', talkingPoints: ['x'], ask: 'a', close: 'c', durationEstimate: 1 }) };
+      },
+    };
+    const realScripts = new CallScriptService(prismaSvc, gateway as any);
+    const marker = `${P}key_cl05c`;
+    const visible = await freshCall('k5c_visible', ID.cMine); // staffOwned's own contact
+    const hidden = await freshCall('k5c_hidden', ID.cPriv); // the owner's PRIVATE contact
+    const none = await freshCall('k5c_none', null);
+    const rows = [visible.id, hidden.id, none.id];
+    const snapshot = () => db.callLog.findMany({ where: { id: { in: rows } }, orderBy: { id: 'asc' } });
+    const before = await snapshot();
+
+    /** What the chat path answers the same arguments (validateToolInput runs before executeToolAction there). */
+    const chatAnswer = (tool: string, args: Record<string, unknown>) => {
+      try {
+        (Object.create(FlowOrchestratorService.prototype) as any).validateToolInput(tool, { ...args });
+        return null;
+      } catch (err: any) {
+        return { status: undefined, message: err?.message };
+      }
+    };
+
+    const filter = { in: [visible.id, hidden.id] };
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      // SEC-W9KOC-1: no contactId was no contact check, and contact.findFirst({ id: undefined }) read any contact
+      ['call_generate_script', { callLogId: none.id }, 'Missing required fields for call_generate_script: contactId'],
+      // SEC-W9KOC-1: the visible contact passed the check, the hidden one reached the prompt
+      ['call_generate_script', { callLogId: none.id, contactId: { in: [ID.cPriv, ID.cMine] } }, 'Field "contactId" for call_generate_script must be a string'],
+      ['call_generate_script', { callLogId: filter, contactId: ID.cMine }, 'Field "callLogId" for call_generate_script must be a string'],
+      // SEC-W9KOC-2: the visible call log passed the check, updateMany completed the hidden one too
+      ['call_log_outcome', { callLogId: filter, outcome: 'reached', notes: marker }, 'Field "callLogId" for call_log_outcome must be a string'],
+      ['call_log_outcome', { callLogId: { not: '' }, outcome: 'reached', notes: marker }, 'Field "callLogId" for call_log_outcome must be a string'],
+      ['call_log_outcome', { outcome: 'reached', notes: marker }, 'Missing required fields for call_log_outcome: callLogId'],
+      ['call_schedule_followup', { callLogId: filter, title: marker }, 'Field "callLogId" for call_schedule_followup must be a string'],
+      ['call_schedule_followup', { title: marker }, 'Missing required fields for call_schedule_followup: callLogId'],
+    ];
+    const runs: Array<Record<string, unknown>> = [
+      { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.staffOwned }, // staffOwned's snippet (crm_view 'owned'): the review's case
+      { surface: 'CHAT', principalUserId: ID.staffOwned },
+      { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: null }, // a run with no member: the arguments are malformed there too
+    ];
+    for (const action of runs) {
+      for (const [tool, args, message] of cases) {
+        const label = `${tool} ${JSON.stringify(args)} ${JSON.stringify(action)}`;
+        const refusal = await keyRefusal(keyDispatch(tool, args, action, realScripts));
+        expect(refusal, label).toEqual({ status: undefined, message });
+        expect(refusal, `${label} as the chat path`).toEqual(chatAnswer(tool, args));
+      }
+    }
+
+    // nothing was scripted, completed or followed up, and no contact reached a model prompt
+    expect(prompts).toEqual([]);
+    expect(await snapshot()).toEqual(before);
+    expect(await db.contactTask.count({ where: { callLogId: { in: rows } } })).toBe(0);
+    expect(await db.callLog.count({ where: { businessId: ID.bizA, notes: marker } })).toBe(0);
+    expect(emitted).toEqual([]);
+
+    // CONTROL: string ids of rows the member may open run as before on the inner-call surface, and only
+    // those rows: the script names the member's own contact, and the outcome completes that call log alone
+    const snippet = { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.staffOwned };
+    expect(await keyDispatch('call_generate_script', { callLogId: none.id, contactId: ID.cMine }, snippet, realScripts))
+      .toMatchObject({ callLogId: none.id, greeting: 'v84d-real-script' });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('V84D cMine');
+    expect(prompts[0]).not.toContain('cPriv');
+    expect(await keyDispatch('call_log_outcome', { callLogId: visible.id, outcome: 'reached', notes: marker }, snippet))
+      .toMatchObject({ callLogId: visible.id, outcome: 'reached' });
+    expect((await db.callLog.findUnique({ where: { id: visible.id } }))?.completedAt).not.toBeNull();
+    expect(await db.callLog.findUnique({ where: { id: hidden.id } })).toEqual(before.find((r: any) => r.id === hidden.id));
+    expect(await db.callLog.count({ where: { businessId: ID.bizA, notes: marker } })).toBe(1);
   });
 });
 

@@ -3551,6 +3551,26 @@ ${triage.standingContext}`;
   }
 
   /**
+   * W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-1, SEC-W9KOC-2; owner rulings D-64, D-88). Refuses the
+   * call unless the row ids a call-log tool names (`fields` of `args`) are what its schema declares:
+   * present, non-empty strings. The chat path checks them in validateToolInput before dispatch, but an
+   * execute_custom_logic inner call reaches the dispatcher through executeToolByName, which does not:
+   * a missing contactId was no contact check while contact.findFirst({ id: undefined }) read any
+   * contact of the business into the script's prompt, and a Prisma filter passed the member's check
+   * on the visible row it matched first while the service read or wrote every row it matched
+   * (completeCall's updateMany). Refused before any lookup, in validateToolInput's words, so the inner
+   * call answers as the chat call does. The cases then read the ids from `args`, so the tool-family
+   * analysis still follows them as the model's (job-role-tool-families.spec.ts, DD8-1).
+   */
+  private assertCallLogToolIds(toolName: string, args: Record<string, unknown>, fields: string[]): void {
+    const missing = fields.filter((field) => args[field] === undefined || args[field] === null || args[field] === '');
+    if (missing.length > 0) throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+    for (const field of fields) {
+      if (typeof args[field] !== 'string') throw new Error(`Field "${field}" for ${toolName} must be a string`);
+    }
+  }
+
+  /**
    * V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3). The clause a member's calendar read ANDs onto `where`
    * so no event on a contact their CRM view does not open is answered (contactVisibilityFilter, the
    * GET contacts/:id rule; GET calendar events and GET calendar conflicts apply the same cascade
@@ -5902,9 +5922,13 @@ ${triage.standingContext}`;
         // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): KEY acts as the member the command runs for, so a
         // call log on a contact that member may not open answers 404 'Call log not found', exactly as
         // an unknown id and as POST calls/:id/complete answers them (getVisibleCallLog). No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), and the row completed is the
+        // row checked, so no filter passes the check on one call log and completes others.
+        this.assertCallLogToolIds('call_log_outcome', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
         const viewer = await this.callLogViewer(businessId, action);
-        if (viewer) await this.getCallLog().getVisibleCallLog(businessId, args.callLogId, viewer);
-        const completed = await this.getCallLog().completeCall(businessId, args.callLogId, {
+        const checkedId = viewer ? (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id : callLogId;
+        const completed = await this.getCallLog().completeCall(businessId, checkedId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
@@ -5922,14 +5946,21 @@ ${triage.standingContext}`;
         // hidden row answers as an unknown one, in the order CallScriptService looks them up (the
         // contact, then the call log), so no answer tells a hidden row from a missing one. No member:
         // as before.
+        // Review SEC-W9KOC-1: both ids are strings (assertCallLogToolIds), so a missing contact is no
+        // longer no check while the script reads any contact, and no filter passes the check on a
+        // visible contact while the script reads a hidden one. The script is made for the call log checked.
+        this.assertCallLogToolIds('call_generate_script', args, ['callLogId', 'contactId']);
+        const callLogId: string = args.callLogId;
+        const contactId: string = args.contactId;
         const viewer = await this.callLogViewer(businessId, action);
+        let checkedId = callLogId;
         if (viewer) {
-          await this.getCallLog().assertContactVisibleTo(businessId, args.contactId, viewer);
-          await this.getCallLog().getVisibleCallLog(businessId, args.callLogId, viewer);
+          await this.getCallLog().assertContactVisibleTo(businessId, contactId, viewer);
+          checkedId = (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id;
         }
-        const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
+        const script = await this.getCallScript().generateScript(businessId, checkedId, contactId);
         return {
-          callLogId: args.callLogId,
+          callLogId: checkedId,
           greeting: script.greeting,
           talkingPoints: script.talkingPoints,
           ask: script.ask,
@@ -5942,8 +5973,11 @@ ${triage.standingContext}`;
         // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): and on a call log the member the command runs for may
         // open, as POST calls/:id/follow-up requires: handed that member, createFollowUpTask looks the
         // call log up with getVisibleCallLog in place of its own lookup. No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), as for call_log_outcome.
+        this.assertCallLogToolIds('call_schedule_followup', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
         const viewer = await this.callLogViewer(businessId, action);
-        const task = await this.getCallLog().createFollowUpTask(businessId, args.callLogId, {
+        const task = await this.getCallLog().createFollowUpTask(businessId, callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',

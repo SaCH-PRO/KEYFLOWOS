@@ -486,18 +486,20 @@ export class CallLogService {
         priority: input.priority ?? 'NORMAL',
         source: 'call_follow_up',
         assigneeId: input.assigneeId ?? callLog.callerId,
-        callLogId,
+        // W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-2): the row looked up (and, with a viewer,
+        // checked) is the row written, never the argument it was found by.
+        callLogId: callLog.id,
       },
     });
 
     await this.prisma.client.callLog.update({
-      where: { id: callLogId },
+      where: { id: callLog.id },
       data: { followUpTaskId: task.id },
     });
 
     this.emitter.emit('call_log.follow_up_created', {
       businessId: callLog.businessId,
-      callLogId,
+      callLogId: callLog.id,
       taskId: task.id,
       contactId: callLog.contactId,
       createdBy,
