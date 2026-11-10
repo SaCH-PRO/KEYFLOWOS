@@ -130,7 +130,9 @@ export class ProcurementController {
    * path business (get, 404 otherwise), as submit, vendor and issue-po do inside the service.
    * Without it only the ambient Prisma tenant kept a member of one business off another's
    * request, and the miss surfaced as 500 (review SEC-R013g-2). Each names the member who moved the
-   * request on its feed row (W7-OPS-AUDIT-ACTOR, review SEC-R013g-4).
+   * request on its feed row (W7-OPS-AUDIT-ACTOR, review SEC-R013g-4), and moves it only from the step
+   * before (acknowledge from PO_ISSUED, fulfill from VENDOR_ACKNOWLEDGED, invoice from FULFILLED),
+   * once: any other status answers 409 and writes nothing (review SEC-W7OAA-1, D-40).
    */
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/:id/acknowledge')

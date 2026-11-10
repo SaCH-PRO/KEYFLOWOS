@@ -5,7 +5,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -28,6 +27,25 @@ function actedBy(userId?: string): { actorType?: 'USER'; actorId?: string } {
   return userId ? { actorType: 'USER', actorId: userId } : {};
 }
 
+/**
+ * W7-OPS-AUDIT-ACTOR review SEC-W7OAA-1 (D-40): the vendor side of a request's life, in the order the
+ * request page offers it (PO_ISSUED -> acknowledge -> VENDOR_ACKNOWLEDGED -> fulfill -> FULFILLED ->
+ * invoice -> INVOICED). Each transition moves a request only from the step before it, once: a DRAFT
+ * request cannot be invoiced, a replay is refused rather than writing a second feed row, and an
+ * acknowledge after the invoice cannot move the request back.
+ */
+const VENDOR_STEPS = {
+  acknowledge: { from: 'PO_ISSUED', to: 'VENDOR_ACKNOWLEDGED', done: 'acknowledged by the vendor' },
+  fulfill: { from: 'VENDOR_ACKNOWLEDGED', to: 'FULFILLED', done: 'marked fulfilled' },
+  invoice: { from: 'FULFILLED', to: 'INVOICED', done: 'marked invoiced' },
+} as const;
+type VendorStep = (typeof VENDOR_STEPS)[keyof typeof VENDOR_STEPS];
+
+/** What a vendor transition answers (409) when another move landed between its read and its write. */
+function movedDuring(step: VendorStep): string {
+  return `The request changed while it was being ${step.done}; reload it and try again`;
+}
+
 /** What writeRequest writes through: the app's client, or a transaction's. */
 type RequestWriter = Pick<PrismaService['client'], 'procurementRequest'>;
 
@@ -43,7 +61,8 @@ type RequestWriter = Pick<PrismaService['client'], 'procurementRequest'>;
  * naming the member who decided (D-08: BusinessEvent is the audit trail, Activity the feed),
  * written in the same transaction as the status, so a decision never stands without its row
  * (review SEC-D15-4), and only from the status the decider read (SEC-D15-2). PATCH cannot set a
- * decision status (SEC-D15-3).
+ * decision status (SEC-D15-3). Acknowledge, fulfill and invoice move a request only from the step
+ * before each, by the same compare-and-set (SEC-W7OAA-1, D-40: VENDOR_STEPS).
  */
 @Injectable()
 export class ProcurementService {
@@ -62,14 +81,15 @@ export class ProcurementService {
    * unless exactly one row moved, and answered with the row as it now is.
    *
    * fromStatus makes the write a compare-and-set: it moves the request only while its status is
-   * still the one the caller read, and answers 409 when the request is there but has moved.
-   * client is the transaction to write in (updateStatus), the app's client otherwise.
+   * still the one the caller read, and answers 409 (conflict, when given, says why) when the request
+   * is there but has moved. client is the transaction to write in (updateStatus), the app's client
+   * otherwise.
    */
   private async writeRequest(
     businessId: string,
     id: string,
     data: Prisma.ProcurementRequestUpdateManyMutationInput,
-    { fromStatus, client = this.prisma.client }: { fromStatus?: string; client?: RequestWriter } = {},
+    { fromStatus, client = this.prisma.client, conflict }: { fromStatus?: string; client?: RequestWriter; conflict?: string } = {},
   ) {
     // Nothing to write (PATCH {}, a body the whitelist strips, a KEY update naming no field):
     // Prisma answers count 0 for empty data without running SQL, which is not "missing" (review
@@ -79,7 +99,7 @@ export class ProcurementService {
       where: { id, businessId, status: fromStatus },
       data,
     });
-    if (count !== 1 && fromStatus !== undefined) await this.refuseIfMoved(client, businessId, id);
+    if (count !== 1 && fromStatus !== undefined) await this.refuseIfMoved(client, businessId, id, conflict);
     if (count !== 1) throw new NotFoundException('Request not found');
     const row = await client.procurementRequest.findFirst({ where: { id, businessId } });
     if (!row) throw new NotFoundException('Request not found');
@@ -87,9 +107,22 @@ export class ProcurementService {
   }
 
   /** A compare-and-set that moved nothing: 409 when the request is still in this business. */
-  private async refuseIfMoved(client: RequestWriter, businessId: string, id: string) {
+  private async refuseIfMoved(client: RequestWriter, businessId: string, id: string, conflict?: string) {
     if ((await client.procurementRequest.count({ where: { id, businessId } })) > 0) {
-      throw new ConflictException('The request changed while it was being decided; reload it and decide again');
+      throw new ConflictException(conflict ?? 'The request changed while it was being decided; reload it and decide again');
+    }
+  }
+
+  /**
+   * A vendor transition's precondition (review SEC-W7OAA-1, D-40): the request, found in this business
+   * (404 otherwise), must stand at the step before the transition; anything else is 409 and nothing is
+   * written. The write that follows is a compare-and-set on that same step (as a decision is, SEC-D15-2),
+   * so a transition that lands between this read and that write refuses the later one too.
+   */
+  private async requireStep(businessId: string, id: string, step: VendorStep) {
+    const req = await this.get(businessId, id);
+    if (req.status !== step.from) {
+      throw new ConflictException(`A request is ${step.done} only once it is ${step.from}; this one is ${req.status}`);
     }
   }
 
@@ -341,8 +374,21 @@ export class ProcurementService {
     return { ...updated, purchaseOrder: po };
   }
 
+  /**
+   * The three vendor transitions (acknowledge, fulfill, invoice). Each moves the request only from the
+   * step before it and only once: requireStep refuses any other status (409) and the write is a
+   * compare-and-set on that step (review SEC-W7OAA-1, D-40), so the feed row each writes records a move
+   * that happened, and names the member who made it (W7-OPS-AUDIT-ACTOR, SEC-R013g-4).
+   */
   async acknowledgeVendor(businessId: string, id: string, userId?: string) {
-    const updated = await this.writeRequest(businessId, id, { status: 'VENDOR_ACKNOWLEDGED', vendorAcknowledgedAt: new Date() });
+    const step = VENDOR_STEPS.acknowledge;
+    await this.requireStep(businessId, id, step);
+    const updated = await this.writeRequest(
+      businessId,
+      id,
+      { status: step.to, vendorAcknowledgedAt: new Date() },
+      { fromStatus: step.from, conflict: movedDuring(step) },
+    );
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
@@ -357,7 +403,14 @@ export class ProcurementService {
   }
 
   async markFulfilled(businessId: string, id: string, userId?: string) {
-    const updated = await this.writeRequest(businessId, id, { status: 'FULFILLED', fulfilledAt: new Date() });
+    const step = VENDOR_STEPS.fulfill;
+    await this.requireStep(businessId, id, step);
+    const updated = await this.writeRequest(
+      businessId,
+      id,
+      { status: step.to, fulfilledAt: new Date() },
+      { fromStatus: step.from, conflict: movedDuring(step) },
+    );
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
@@ -372,7 +425,14 @@ export class ProcurementService {
   }
 
   async markInvoiced(businessId: string, id: string, userId?: string) {
-    const updated = await this.writeRequest(businessId, id, { status: 'INVOICED', invoicedAt: new Date() });
+    const step = VENDOR_STEPS.invoice;
+    await this.requireStep(businessId, id, step);
+    const updated = await this.writeRequest(
+      businessId,
+      id,
+      { status: step.to, invoicedAt: new Date() },
+      { fromStatus: step.from, conflict: movedDuring(step) },
+    );
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
