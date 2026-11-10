@@ -823,8 +823,10 @@ describe('W9-TEXT-ONLY-CONTACT-WRITERS (D-63): rows that name a contact only in 
     const rows = Object.values(ROW).filter(Boolean);
     if (rows.length) await db.activity.deleteMany({ where: { id: { in: rows } } });
     await db.messageIntake.deleteMany({ where: { id: { in: Object.values(INTAKE) } } });
-    await db.invoice.deleteMany({ where: { id: { in: Object.values(INV) } } });
-    await db.contact.deleteMany({ where: { id: { in: Object.values(C) } } });
+    // Raw SQL: Invoice and Contact are soft-deleted models, so deleteMany would only stamp
+    // deletedAt and leave the rows (fixture-cleanup-integrity.spec.ts).
+    await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id = ANY($1::text[])`, Object.values(INV));
+    await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id = ANY($1::text[])`, Object.values(C));
   });
 
   it("TS-13a (W9-TEXT-ONLY-CONTACT-WRITERS, review ST-2, D-63; was it.todo TS-13): KEY send_invoice's row 'Invoice <n> sent to <name>' carries the invoice's contactId, so a view-all ADMIN, a crm 'none' revenue reader and a crm_view 'owned' revenue reader, who may not open the owner's PRIVATE contact, are not served it (nor the name) on /events, the day's summary or the legacy route; ADMIN is served the TEAM contact's row, and OWNER both", async () => {
