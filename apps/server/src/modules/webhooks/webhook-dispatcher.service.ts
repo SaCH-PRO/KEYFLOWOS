@@ -220,6 +220,12 @@ export class WebhookDispatcherService {
    * stored UNPAID, and a queued or forged copy can name an unpaid order or
    * another business's order; each went to the business's endpoints as a paid
    * order. Nothing is sent otherwise.
+   *
+   * Still open (it.todo in storefront-paid-event.integration.test.ts): the
+   * stored PAID read here is itself written with no payment and no revenue
+   * write by PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+   * on a STANDARD order (V18-T2c, review STL-SEC-1: needs an owner ruling); the
+   * other store_order.paid listeners do not read it (V18-T2b).
    */
   @OnEvent('store_order.paid')
   async onStoreOrderPaid(payload: StoreOrderPaidPayload) {

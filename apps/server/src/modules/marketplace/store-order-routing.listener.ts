@@ -26,6 +26,12 @@ type FulfillmentRoute = { strategy?: string };
  * business's order: routing reserved stock, moved the order to routed and
  * told CRM it was fulfilled (or, for another business, that routing failed).
  * Nothing is routed or emitted otherwise.
+ *
+ * Still open (it.todo in storefront-paid-event.integration.test.ts): the
+ * stored PAID read here is itself written with no payment and no revenue
+ * write by PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+ * on a STANDARD order (V18-T2c, review STL-SEC-1: needs an owner ruling); the
+ * other store_order.paid listeners do not read it (V18-T2b).
  */
 @Injectable()
 export class StoreOrderRoutingListener {

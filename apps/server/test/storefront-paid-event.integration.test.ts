@@ -103,19 +103,37 @@
  *
  * W9-STORE-PAID-LISTENERS (FOLLOW10; D-18, SEC-V18-3), the former it.todo cases:
  *
- *   V18-T2  the store_order.paid listeners that did not read the stored payment
- *           status (WebhookDispatcherService: the outbound webhook;
- *           RevenueEventListener: the paid timeline entry;
+ *   V18-T2  three store_order.paid listeners that did not read the stored
+ *           payment status (WebhookDispatcherService: the outbound webhook;
+ *           RevenueEventListener: its paid timeline entry;
  *           StoreOrderRoutingListener: fulfilment routing) act only on an order
  *           stored PAID in the event's business. A STANDARD order set 'paid' by
- *           PATCH .../status without a payment (the emission still open after
- *           V18-10), an UNPAID storefront order (a queued or forged event) and an
- *           event naming another business get no webhook delivery, no paid
- *           timeline entry and no routing. Controls: a STANDARD order stored PAID
- *           and a checked-out storefront order get all three. The listeners run
- *           on their own bus in this case (so the other cases' event lists are
+ *           PATCH .../status without a payment and stored UNPAID (the emission
+ *           still open after V18-10), an UNPAID storefront order (a queued or
+ *           forged event) and an event naming another business get no webhook
+ *           delivery, no RevenueEventListener timeline entry and no routing from
+ *           these three. Controls: a STANDARD order stored PAID and a
+ *           checked-out storefront order get all three. The listeners run on
+ *           their own bus in this case (so the other cases' event lists are
  *           unchanged); the payloads are the ones the real emitters put on the
  *           suite's bus
+ *
+ *           Not closed by V18-T2 (review STL-SEC-1, STL-SEC-2 / CR-W9SPL-1;
+ *           it.todo, outside this packet's write set):
+ *   V18-T2b the other store_order.paid listeners still act on that STANDARD
+ *           order stored UNPAID: on the suite's bus
+ *           CommerceIntegrationService.handleOrderPaid writes a store_order.paid
+ *           contact timeline event, an "Order Payment Received" notification
+ *           and a raw PAID INV-ORD-<n> invoice with no payment; ai.listener,
+ *           journey-listener.service and calendar orders.listener do not read
+ *           the stored payment status either
+ *   V18-T2c the stored PAID these three listeners trust is written without a
+ *           payment and without revenue write: PATCH .../status with
+ *           paymentStatus PAID (AuthGuard, BusinessGuard and the rate limit
+ *           only, so a revenue:read STAFF member) and the fulfil 'mark_paid'
+ *           action set a STANDARD order not created paid to PAID, and the
+ *           webhook, the paid timeline entry and the routing follow (V18-T2
+ *           control 4 is that order). Needs an owner ruling
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -881,7 +899,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(await counts(), 'no invoice, payment or posting').toEqual(before);
   });
 
-  it('V18-T2 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, SEC-V18-3) the store_order.paid listeners that did not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts) act only on an order stored PAID in the event\'s business: a STANDARD order set paid by PATCH .../status without a payment, an UNPAID storefront order and an event naming another business get no webhook delivery, no paid timeline entry and no fulfilment routing; controls: a STANDARD order stored PAID and a checked-out storefront order get all three', async () => {
+  it('V18-T2 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, SEC-V18-3) three store_order.paid listeners that did not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts) act only on an order stored PAID in the event\'s business: a STANDARD order set paid by PATCH .../status without a payment and stored UNPAID, an UNPAID storefront order and an event naming another business get from these three no webhook delivery, no RevenueEventListener timeline entry and no fulfilment routing; controls: a STANDARD order stored PAID and a checked-out storefront order get all three (the other listeners: V18-T2b; a stored PAID written without a payment: V18-T2c)', async () => {
     const { Test } = await import('@nestjs/testing');
     const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
@@ -999,7 +1017,9 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
 
     try {
       // (1) A STANDARD order set 'paid' by PATCH .../status with no payment: the real route emits store_order.paid
-      // for an order stored UNPAID (SEC-V18-3). At the base all three listeners acted on it.
+      // for an order stored UNPAID (SEC-V18-3). At the base all three listeners acted on it. Only these three are
+      // asserted here: on the suite's bus CommerceIntegrationService still logs a store_order.paid timeline event,
+      // notifies 'Order Payment Received' and writes a PAID INV-ORD invoice for this order (V18-T2b, open).
       const unpaidStandard = await standardOrder('unpaid');
       seen = [];
       const patched = await market.updateOrderStatus(ID.biz, unpaidStandard.id, 'paid', { status: 'paid' });
@@ -1008,7 +1028,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       const [patchedEvent] = emittedPaid(unpaidStandard.id);
       expect(patchedEvent, 'the route emitted store_order.paid').toBeTruthy();
       await deliver(patchedEvent);
-      expect(await traces(unpaidStandard.id), 'STANDARD order stored UNPAID: no webhook, no paid timeline entry, no routing').toEqual(NOTHING);
+      expect(await traces(unpaidStandard.id), 'STANDARD order stored UNPAID: from these three listeners no webhook, no RevenueEventListener timeline entry, no routing').toEqual(NOTHING);
       expect((await db.marketplaceOrder.findUnique({ where: { id: unpaidStandard.id } })).status, 'not routed').toBe('paid');
 
       // (2) An UNPAID storefront order's paid event (a queued or forged copy, as V18-05).
@@ -1019,7 +1039,8 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expect(await traces(unpaidStorefront.id), 'storefront order stored UNPAID: nothing').toEqual(NOTHING);
 
       // (3) A STANDARD order of A stored PAID (PATCH with paymentStatus PAID), its event naming business B:
-      // B holds no such order, so B's webhook, B's contact (same email) and B's routing see nothing.
+      // B holds no such order, so B's webhook, B's contact (same email) and B's routing see nothing. This stored
+      // PAID is itself written with no payment, by any member (STL-SEC-1): what the gate trusts is V18-T2c (open).
       const paidStandard = await standardOrder('paid');
       seen = [];
       await market.updateOrderStatus(ID.biz, paidStandard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' });
@@ -1056,6 +1077,14 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       await listenerApp.close();
     }
   });
+
+  // W9-STORE-PAID-LISTENERS review (D-18): what V18-T2 does not close, outside this packet's write set (the three listeners).
+  it.todo(
+    'V18-T2b (W9-STORE-PAID-LISTENERS review STL-SEC-2 / CR-W9SPL-1; D-18, SEC-V18-3) the other store_order.paid listeners do not read the stored paymentStatus of a STANDARD order: for a STANDARD order set paid by PATCH .../status without a payment and stored UNPAID, CommerceIntegrationService.handleOrderPaid (commerce-integration.service.ts, its STANDARD branch) still writes a store_order.paid contact timeline event, an "Order Payment Received" notification and a raw PAID INV-ORD-<n> invoice with no payment, and ai.listener, journey-listener.service (order_paid touchpoint) and calendar orders.listener act on it too; follow-up packet',
+  );
+  it.todo(
+    'V18-T2c (W9-STORE-PAID-LISTENERS review STL-SEC-1; D-18, SEC-V18-3) the stored PAID the V18-T2 listeners trust is written with no payment and no revenue write: PATCH /marketplace/businesses/:businessId/orders/:orderId/status with paymentStatus PAID (marketplace.service.ts updateOrderStatus; AuthGuard, BusinessGuard and the rate limit only, so a revenue:read STAFF member) and the fulfil mark_paid action set a STANDARD order not created paid to paid/PAID, and the webhook, the paid timeline entry and the routing follow (V18-T2 control 4 is that order); needs an owner ruling (refuse a PAID write without revenue write, or take it through the paid door as D-77 does for an order created paid)',
+  );
 
   it('V18-T3 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, V1-33) live pin: CASH and MANUAL storefront orders reach PAID through POST /site/businesses/:businessId/orders/:orderId/complete-offline (revenue write, the signed-in member records it) with one invoice, one payment and one posting, a second completion writes nothing, and the store fulfillment panel\'s Complete offline action posts to that route (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04)', async () => {
     const fs = await import('fs');

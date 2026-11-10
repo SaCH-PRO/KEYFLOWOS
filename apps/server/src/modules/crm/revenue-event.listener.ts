@@ -366,12 +366,20 @@ export class RevenueEventListener {
 
   // ---- store_order.* ----
   /**
-   * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): the paid timeline entry
-   * is written only for an order stored PAID in the event's business. PATCH
-   * .../orders/:id/status 'paid' with no payment emits store_order.paid for a
-   * STANDARD order stored UNPAID, and a queued or forged copy can name an
-   * unpaid order or another business's order (whose contact may share the
-   * email); each put a paid order on the contact's timeline. Nothing otherwise.
+   * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): this listener's paid
+   * timeline entry is written only for an order stored PAID in the event's
+   * business. PATCH .../orders/:id/status 'paid' with no payment emits
+   * store_order.paid for a STANDARD order stored UNPAID, and a queued or forged
+   * copy can name an unpaid order or another business's order (whose contact
+   * may share the email); each put a paid order on the contact's timeline.
+   * Nothing from this listener otherwise.
+   *
+   * Still open (it.todo in storefront-paid-event.integration.test.ts):
+   * CommerceIntegrationService.handleOrderPaid logs its own store_order.paid
+   * timeline event for a STANDARD order stored UNPAID (V18-T2b), and the stored
+   * PAID read here is itself written with no payment and no revenue write by
+   * PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+   * (V18-T2c, review STL-SEC-1: needs an owner ruling).
    */
   @OnEvent('store_order.paid', { async: true })
   async onStoreOrderPaid(p: StoreOrderPaidPayload) {
@@ -420,7 +428,11 @@ export class RevenueEventListener {
     });
   }
 
-  /** W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order, read in the event's business, is stored PAID. */
+  /**
+   * W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order, read in the event's
+   * business, is stored PAID. For a STANDARD order a stored PAID is not proof
+   * of a payment (V18-T2c, open).
+   */
   private async isStoredOrderPaid(businessId: string, orderId: string): Promise<boolean> {
     if (!businessId || typeof orderId !== 'string') return false;
     try {
