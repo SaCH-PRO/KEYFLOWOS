@@ -50,6 +50,13 @@
  * address and a pending draft slug waits for the owner's publish (cases S02,
  * S09; review CR-1: a draft slug left behind by the owner's PATCH must not
  * block a content publish).
+ * W7-SLUG-PRESENCE-DRAFT (cases S10-S12; D-11, review CR-1): the owner's
+ * PATCH /identity/businesses/:id that moves Business.slug carries the new slug
+ * into the presence draft in the same transaction (a draft with no slug stays
+ * without one; a slug the presence payload cannot carry takes the slug out of
+ * the draft), so a draft saved before the PATCH, whether it carried the old
+ * slug or a slug the owner had not published yet, cannot put an older address
+ * back on Business.slug at the owner's next publish.
  * Every auto-configure call writes the business's setup configuration into
  * Business.metaData (conciergeTemplateId, conciergeSetupAt, the setup
  * milestone; paymentMethodsConfigured and paymentRecommendations by default),
@@ -86,7 +93,9 @@
  * case D11-X01 has counted the shared fixtures.
  *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
- * the real PresenceController, PresenceService, OnboardingConciergeController,
+ * the real PresenceController, PresenceService, IdentityController and
+ * IdentityService (PATCH /identity/businesses/:id, cases S10-S12; their
+ * collaborators off that route are stubs), OnboardingConciergeController,
  * OnboardingConciergeService, CatalogService (it creates the template's
  * products), CommerceController (its document-templates routes; the
  * collaborators those routes never call are stubs) with the real
@@ -292,6 +301,14 @@ function publish(actor: string, businessId: string) {
   return request(app.getHttpServer()).post(`/site/presence/businesses/${businessId}/publish`).set('x-test-user', actor);
 }
 
+/** PATCH /identity/businesses/:businessId, the owner-only profile write (R0-09, D-11). */
+function patchBusiness(actor: string, businessId: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .patch(`/identity/businesses/${businessId}`)
+    .set('x-test-user', actor)
+    .send(body);
+}
+
 function autoConfigure(actor: string, businessId: string, body: Record<string, unknown>) {
   return request(app.getHttpServer())
     .post(`/onboarding-concierge/businesses/${businessId}/auto-configure`)
@@ -425,15 +442,27 @@ beforeAll(async () => {
   const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
   const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
   const { FinanceSettingsService } = await import('../src/modules/finance/finance-settings.service');
+  // W7-SLUG-PRESENCE-DRAFT (D-11, review CR-1): the owner-only PATCH /identity/businesses/:businessId,
+  // real controller and service; its collaborators off the PATCH path are stubs.
+  const { OptionalAuthGuard } = await import('../src/core/auth/optional-auth.guard');
+  const { SupabaseAdminService } = await import('../src/core/auth/supabase-admin.service');
+  const { IdentityController } = await import('../src/modules/identity/identity.controller');
+  const { IdentityService } = await import('../src/modules/identity/identity.service');
+  const { IdentitySignupService } = await import('../src/modules/identity/identity-signup.service');
+  const { BusinessContextService } = await import('../src/modules/identity/business-context.service');
+  const { AuthSecurityService } = await import('../src/modules/identity/auth-security.service');
+  const { IdentityPasswordService } = await import('../src/modules/identity/identity-password.service');
+  const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
   templateHours = getTemplateById(TEMPLATE)?.businessHours;
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [PresenceController, OnboardingConciergeController, CommerceController],
+    controllers: [PresenceController, OnboardingConciergeController, CommerceController, IdentityController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
+      OptionalAuthGuard,
       PublicRateLimitGuard,
       PlanLimitGuard,
       TeamAuditInterceptor,
@@ -467,6 +496,15 @@ beforeAll(async () => {
       { provide: OnboardingStateService, useValue: {} },
       { provide: DemoDataSeederService, useValue: {} },
       { provide: REDIS_CLIENT, useValue: {} },
+      // W7-SLUG-PRESENCE-DRAFT: the real IdentityService behind PATCH /identity/businesses/:businessId
+      // (it mirrors changed fields through the BlueprintService recorder above). Not on the PATCH path:
+      { provide: DefaultTriggersService, useValue: {} },
+      { provide: IdentitySignupService, useValue: {} },
+      { provide: BusinessContextService, useValue: {} },
+      { provide: AuthSecurityService, useValue: {} },
+      { provide: IdentityPasswordService, useValue: {} },
+      { provide: SupabaseAdminService, useValue: {} },
+      IdentityService,
     ],
   }).compile();
 
@@ -654,11 +692,63 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(JSON.stringify(page)).toContain('k09b staff content edit');
   });
 
-  it.todo(
-    'REQUIRED (follow-up; identity.service.ts updateBusiness — outside the R0-09b write set; review CR-1, already true before R0-09b): ' +
-      'when the OWNER moves Business.slug through PATCH /identity/businesses/:id, a draft still carrying the old slug follows it, so the ' +
-      "owner's next presence publish does not put the old slug back on Business.slug (the draft cannot tell a stale slug from a pending one)",
-  );
+  it("[D11-S10] W7-SLUG-PRESENCE-DRAFT (D-11, review CR-1): when the OWNER moves Business.slug through PATCH /identity/businesses/:id (200), a draft still carrying the old slug follows it, so the owner's next presence publish (201) does not put the old slug back on Business.slug: the page goes live at the owner's new address with the draft's content", async () => {
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
+    const patch = await patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') });
+    expect(patch.status, JSON.stringify(patch.body)).toBe(200);
+    expect((await businessRow(ID.bizP))?.slug, 'the PATCH moved Business.slug').toBe(slugOf('owner-patched'));
+    const draftAfterPatch = await draftPayload(ID.bizP);
+
+    const pub = await publish(ID.owner, ID.bizP);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug, "the owner's publish does not put the old slug back").toBe(slugOf('owner-patched'));
+    const page = await publishedPayload(ID.bizP);
+    expect(page?.slug, "the page is live at the owner's new address").toBe(slugOf('owner-patched'));
+    expect(JSON.stringify(page)).toContain('k09b before the rename');
+    expect(draftAfterPatch?.slug, 'the draft followed the PATCH').toBe(slugOf('owner-patched'));
+    expect(JSON.stringify(draftAfterPatch), 'only the slug moved: the draft keeps its content').toContain('k09b before the rename');
+  });
+
+  it("[D11-S11] W7-SLUG-PRESENCE-DRAFT (D-11): the owner's PATCH of Business.slug is the latest word on the address: a draft slug saved earlier and not yet published follows the PATCH too (the owner's next publish, 201, keeps the PATCHed address), a draft with no slug stays without one, and a PATCH that leaves the slug as it is does not touch the draft", async () => {
+    await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug'), headline: 'k09b pending before the rename' }));
+    const patch = await patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') });
+    expect(patch.status, JSON.stringify(patch.body)).toBe(200);
+    const draftAfterPatch = await draftPayload(ID.bizP);
+    const pub = await publish(ID.owner, ID.bizP);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug, 'an older pending draft slug does not undo the PATCH').toBe(slugOf('owner-patched'));
+    expect((await publishedPayload(ID.bizP))?.slug).toBe(slugOf('owner-patched'));
+    expect(draftAfterPatch?.slug, 'the pending draft slug followed the PATCH').toBe(slugOf('owner-patched'));
+
+    // A draft with no slug: the PATCH adds none.
+    await resetPresence(ID.bizP, payload({ headline: 'k09b slug-less draft' }));
+    const noSlug = await patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') });
+    expect(noSlug.status, JSON.stringify(noSlug.body)).toBe(200);
+    expect(await draftPayload(ID.bizP), 'a slug-less draft stays slug-less').not.toHaveProperty('slug');
+
+    // A PATCH that keeps the slug (or carries none) leaves the draft row byte-identical.
+    await resetPresence(ID.bizP, payload({ slug: slugOf('pending-slug') }));
+    const draftBefore = await draftRowText(ID.bizP);
+    const same = await patchBusiness(ID.owner, ID.bizP, { slug: LIVE[ID.bizP], tagline: 'k09b tagline' });
+    expect(same.status, JSON.stringify(same.body)).toBe(200);
+    const other = await patchBusiness(ID.owner, ID.bizP, { tagline: 'k09b another tagline' });
+    expect(other.status, JSON.stringify(other.body)).toBe(200);
+    expect(await draftRowText(ID.bizP), 'the draft row is byte-identical').toBe(draftBefore);
+  });
+
+  it("[D11-S12] W7-SLUG-PRESENCE-DRAFT (D-11): a PATCHed slug the presence payload cannot carry (longer than 64 characters) takes the slug out of the draft instead of leaving the replaced one there: the draft keeps its content and the owner's next publish (201) leaves the PATCHed Business.slug as it is", async () => {
+    const longSlug = `${slugOf('long')}-${'a'.repeat(64)}`;
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b content before a long slug' }));
+    const patch = await patchBusiness(ID.owner, ID.bizP, { slug: longSlug });
+    expect(patch.status, JSON.stringify(patch.body)).toBe(200);
+    const draftAfterPatch = await draftPayload(ID.bizP);
+    const pub = await publish(ID.owner, ID.bizP);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug, "the owner's publish does not put the old slug back").toBe(longSlug);
+    expect(JSON.stringify(await publishedPayload(ID.bizP)), 'the published page carries the content').toContain('k09b content before a long slug');
+    expect(draftAfterPatch, 'the replaced slug left the draft').not.toHaveProperty('slug');
+    expect(JSON.stringify(draftAfterPatch), 'the draft keeps its content').toContain('k09b content before a long slug');
+  });
 });
 
 describe('R0-09b onboarding concierge auto-configure cannot change the business profile for a non-owner (D-11, review R09-ST-3)', () => {
