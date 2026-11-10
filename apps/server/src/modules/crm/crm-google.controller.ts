@@ -21,19 +21,24 @@ export class CrmGoogleController {
   // and CR-W7G-1: it is issued only to a member the import admits
   // (CrmGoogleService.assertCanImport, so crm_edit 'none' is refused 403 here
   // too), and its signed state names that member, whom the callback imports as.
+  // W8-GOOGLE-CONSENT-OWNER (owner ruling D-99): starting the Google Contacts
+  // consent is the business owner's, so past the crm write gate and the import
+  // door the member must also be the owner (CrmGoogleService.getAuthUrl: 403
+  // GOOGLE_CONNECT_OWNER_ONLY otherwise). The import itself stays under the
+  // CRM write door (the callback below and POST google/import).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/google/auth-url')
   async getGoogleAuthUrl(
     @Param('businessId') businessId: string,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
     const memberId = req?.user?.id;
     if (!memberId) {
       throw new UnauthorizedException('Authentication required');
     }
-    const url = await this.google.getAuthUrl(businessId, memberId);
+    const url = await this.google.getAuthUrl(businessId, memberId, req.user?.role);
     return { url };
   }
 

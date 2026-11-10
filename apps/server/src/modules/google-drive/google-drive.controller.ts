@@ -6,6 +6,7 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
 
 @Controller('drive')
 export class GoogleDriveController {
@@ -16,9 +17,20 @@ export class GoogleDriveController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  /**
+   * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99; W7 review SEC-W7RCV-2,
+   * CR-RCV-2): the Google Drive connection is the business owner's to start
+   * and to disconnect (assertGoogleConnectOwner: OWNER membership,
+   * Business.ownerId or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY,
+   * first). The status read and the file routes stay open to members.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/auth-url')
-  getAuthUrl(@Param('businessId') businessId: string) {
+  async getAuthUrl(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     const url = this.driveService.getAuthUrl(businessId);
     return { url };
   }
@@ -59,9 +71,14 @@ export class GoogleDriveController {
     return this.driveService.getConnectionStatus(businessId);
   }
 
+  // W8-GOOGLE-CONSENT-OWNER (D-99): disconnecting is the owner's, as starting is.
   @UseGuards(AuthGuard, BusinessGuard)
   @Delete('businesses/:businessId/disconnect')
-  disconnect(@Param('businessId') businessId: string) {
+  async disconnect(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.driveService.disconnect(businessId);
   }
 

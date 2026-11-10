@@ -22,6 +22,7 @@ import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-
 import { CatalogService, PUBLIC_SERVICE_SELECT, PUBLIC_STAFF_SELECT } from '../catalog/catalog.service';
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitizeRequired, sanitizeString } from '../../core/utils/sanitize';
+import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
 
 @Controller('bookings')
 export class BookingsController {
@@ -495,9 +496,20 @@ export class BookingsController {
     );
   }
 
+  /**
+   * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99; W7 review SEC-W7RCV-2): the
+   * Google Calendar connection is the business owner's to start and to
+   * disconnect (assertGoogleConnectOwner: OWNER membership, Business.ownerId
+   * or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY, first). The status
+   * read and the event routes stay open to members.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/auth-url')
-  getCalendarAuthUrl(@Param('businessId') businessId: string) {
+  async getCalendarAuthUrl(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     const url = this.calendar.getAuthUrl(businessId);
     return { url };
   }
@@ -531,9 +543,14 @@ export class BookingsController {
     return this.calendar.getCalendarStatus(businessId);
   }
 
+  // W8-GOOGLE-CONSENT-OWNER (D-99): disconnecting is the owner's, as starting is.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/calendar/disconnect')
-  async disconnectCalendar(@Param('businessId') businessId: string) {
+  async disconnectCalendar(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     await this.calendar.disconnectCalendar(businessId);
     return { success: true };
   }

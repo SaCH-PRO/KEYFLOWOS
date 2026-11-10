@@ -7,6 +7,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from './crm.service';
 import { oauthRedirect } from '../../core/config/runtime-urls';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 
 interface GoogleToken {
   access_token: string;
@@ -165,9 +166,20 @@ export class CrmGoogleService {
    * issued only to a member the import would admit (assertCanImport: crm write
    * and allowed to create contacts), and its signed state names that member and
    * the CRM flow, so the OAuth callback imports as them.
+   *
+   * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99): starting a Google connection,
+   * Contacts included, is the business owner's, so the member must then also
+   * pass the owner rule (assertGoogleConnectOwner: OWNER membership,
+   * Business.ownerId or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY). The
+   * import door keeps its order (crm write, then create contacts, then the
+   * owner) and the state still names the member, so the callback imports as
+   * them under the CRM write door (assertCanImport, re-checked when it lands).
+   * `memberRole` is the caller's platform role (req.user.role), for the
+   * SUPER_ADMIN arm.
    */
-  async getAuthUrl(businessId: string, memberId: string) {
+  async getAuthUrl(businessId: string, memberId: string, memberRole?: string) {
     await this.assertCanImport(businessId, memberId);
+    await assertGoogleConnectOwner(this.prisma, businessId, { id: memberId, role: memberRole });
     if (!this.clientId || !this.clientSecret || !this.redirectUri) {
       throw new BadRequestException('Google OAuth not configured: missing GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URI');
     }
