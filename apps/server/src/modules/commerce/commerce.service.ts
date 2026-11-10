@@ -45,7 +45,7 @@ import {
 } from './quote-workflow';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
-import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
 import { depositPosition, type SettlementInvoice } from '../bookings/booking-payment-status.listener';
@@ -2689,6 +2689,9 @@ export class CommerceService {
       invoice = await this.invoiceWorkflow.transition(params.invoiceId, params.status, {
         sentAt: params.sentAt ? new Date(params.sentAt) : undefined,
         dueDate: params.dueDate ? new Date(params.dueDate) : undefined,
+        // W7-INVOICE-ACTOR-RULES (SEC-CMF1-5, D-88): who sends or voids is
+        // recorded on the ACCRUAL invoice_finalized posting and its reversal.
+        actorId: params.actorId ?? null,
       });
     } catch (err) {
       // V1-42 review (CR-V42-2): the check above reads the status outside the
@@ -4818,11 +4821,18 @@ export class CommerceService {
    *   createdById and the timeline actor, and checked by markInvoicePaid /
    *   updateInvoiceStatus exactly as on their own routes (a human needs a
    *   Membership; KEY needs the tenant, which `input.businessId` is). The HTTP
-   *   PATCH passes the authenticated user. Omitted means KEY: the one caller
-   *   that omits it is KEY's flow tool executor (`commerce_update_invoice` in
-   *   ai/flow-orchestrator.service.ts), and a human caller must always pass it.
-   *   It used to be hard-coded to KEY_SYSTEM_ACTOR_ID for every caller, so a
-   *   person's PATCH {status:'PAID'} was recorded as KEY's payment.
+   *   PATCH passes the authenticated user; KEY's flow tool executor
+   *   (`commerce_update_invoice` in ai/flow-orchestrator.service.ts) passes
+   *   KEY_SYSTEM_ACTOR_ID. It used to be hard-coded to KEY_SYSTEM_ACTOR_ID for
+   *   every caller, so a person's PATCH {status:'PAID'} was recorded as KEY's
+   *   payment.
+   *   W7-INVOICE-ACTOR-RULES (R0-CMF1 review SEC-CMF1-3, owner ruling D-88):
+   *   an omitted actor then still meant KEY. D-88 gave KEY's tool its member,
+   *   so every caller has an actor to pass, and a status change with none
+   *   (omitted, null or empty) is refused 403 before anything is read or
+   *   written. An edit that changes no status records no actor and still
+   *   needs none (D-88: a call naming no member keeps the OWNER's view of a
+   *   new contactId).
    */
   async updateInvoice(input: {
     invoiceId: string;
@@ -4857,6 +4867,13 @@ export class CommerceService {
     ) {
       throw new BadRequestException(`status must be one of the following values: ${PATCHABLE_INVOICE_STATUSES.join(', ')}`);
     }
+    // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): a status change names who
+    // makes it. With no actor it is refused here, before anything is read or
+    // written, as an empty actor already was; it is never recorded as KEY.
+    const statusActor = input.status !== undefined && input.status !== null ? actorId : undefined;
+    if (input.status !== undefined && input.status !== null && !statusActor) {
+      throw new ForbiddenException('Not authorized to update this invoice');
+    }
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId },
     });
@@ -4880,8 +4897,9 @@ export class CommerceService {
       // this caller had established it and thrown it away.
       //
       // R0-CMF1: the actor is the caller's, never assumed (see @param actorId).
-      // An empty actor is refused rather than written as no one.
-      const actor = actorId === undefined ? KEY_SYSTEM_ACTOR_ID : actorId;
+      // W7-INVOICE-ACTOR-RULES (D-88): an omitted one no longer means KEY; a
+      // missing actor was refused above, before the read.
+      const actor = statusActor;
       if (!actor) {
         throw new ForbiddenException('Not authorized to update this invoice');
       }

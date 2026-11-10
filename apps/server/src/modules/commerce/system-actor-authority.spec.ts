@@ -198,7 +198,9 @@ describe('updateInvoice passes the scope it already had', () => {
       logger: { log: vi.fn(), warn: vi.fn() },
     });
 
-    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'PAID' });
+    // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): KEY's commerce_update_invoice names
+    // KEY_SYSTEM_ACTOR_ID explicitly; an omitted actor is refused (payments-actor PA-16n).
+    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'PAID' }, KEY_SYSTEM_ACTOR_ID);
 
     expect(markInvoicePaid).toHaveBeenCalledWith('inv_1', KEY_SYSTEM_ACTOR_ID, MINE);
   });
@@ -216,7 +218,8 @@ describe('updateInvoice passes the scope it already had', () => {
       logger: { log: vi.fn(), warn: vi.fn() },
     });
 
-    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'SENT' });
+    // W7-INVOICE-ACTOR-RULES (D-88): KEY's tool call shape (KEY named explicitly).
+    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'SENT' }, KEY_SYSTEM_ACTOR_ID);
 
     expect(updateInvoiceStatus.mock.calls[0][0]).toMatchObject({
       actorId: KEY_SYSTEM_ACTOR_ID,

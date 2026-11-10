@@ -810,6 +810,14 @@ export class InvoiceWorkflowService {
        * uncommitted state on rollback.
        */
       eventBuffer?: Array<{ name: string; payload: unknown }>;
+      /**
+       * W7-INVOICE-ACTOR-RULES (R0-CMF1 review SEC-CMF1-5, owner ruling D-88):
+       * who makes the move (a member, or KEY_SYSTEM_ACTOR_ID). Recorded as
+       * createdById on the ACCRUAL invoice_finalized posting a Send writes and
+       * on the reversal a Void writes; they named no one. Omitted: null, as
+       * before. Audit only: the caller has already checked the actor's authority.
+       */
+      actorId?: string | null;
     } = {},
   ) {
     // Wrap in $transaction when caller did not provide one so the FIN2
@@ -860,10 +868,13 @@ export class InvoiceWorkflowService {
       // SENT (or PENDING, which is the awaiting-confirmation flavour of
       // SENT for offline payments), and reverse the recognition when
       // voided. Cash-basis businesses no-op inside the posting service.
+      // W7-INVOICE-ACTOR-RULES (SEC-CMF1-5, D-88): each names the actor when
+      // the caller gave one (with none the posting records null, as before).
+      const postingOpts = extra.actorId ? { tx: db, createdById: extra.actorId } : { tx: db };
       if (to === 'SENT' || to === 'PENDING') {
-        await this.revenuePosting.onInvoiceFinalized(invoiceId, { tx: db });
+        await this.revenuePosting.onInvoiceFinalized(invoiceId, postingOpts);
       } else if (to === 'VOID') {
-        await this.revenuePosting.onInvoiceVoided(invoiceId, { tx: db });
+        await this.revenuePosting.onInvoiceVoided(invoiceId, postingOpts);
       }
 
       return updated;

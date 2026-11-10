@@ -6961,17 +6961,22 @@ ${triage.standingContext}`;
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
         // W3-D64-COMMERCE-CREATE (D-88): the member the command runs for judges any new contact
-        // (D-64); a status change stays KEY's (no actorId, R0-CMF1). This tool forwards no contact,
-        // so KEY's invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        // (D-64); a status change stays KEY's (R0-CMF1). This tool forwards no contact, so KEY's
+        // invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): KEY is named explicitly; updateInvoice
+        // refuses a status change with no actor rather than reading the omission as KEY.
         const bindMember = await this.contactBindMember(businessId, action);
-        const invoice = await this.getCommerce().updateInvoice({
-          invoiceId: args.invoiceId,
-          businessId,
-          status: args.status,
-          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
-          notes: args.notes ?? undefined,
-          actorUserId: bindMember,
-        });
+        const invoice = await this.getCommerce().updateInvoice(
+          {
+            invoiceId: args.invoiceId,
+            businessId,
+            status: args.status,
+            dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+            notes: args.notes ?? undefined,
+            actorUserId: bindMember,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+        );
         return { id: invoice.id, status: invoice.status };
       }
       case 'commerce_update_product': {
