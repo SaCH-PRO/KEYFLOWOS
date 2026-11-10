@@ -3,7 +3,6 @@ import { createPublicKey, KeyObject } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { jwtVerify } from 'jose';
 import { Redis } from 'ioredis';
-import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
 import {
@@ -13,6 +12,7 @@ import {
   SIGN_IN_CUTOFF_META_KEY,
   signInCutoffOf,
 } from '../../core/auth/auth.middleware';
+import { SIGN_IN_CUTOFF_CLEARED_META_KEY, updateUserMetaLocked } from '../../core/auth/sign-in-cutoff';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { AuthSecurityService } from '../identity/auth-security.service';
 import {
@@ -484,7 +484,10 @@ export class RiscService {
    *      nothing this API accepts once 1 lapses (F7-SEC-2, SEC-W7RR-2).
    *      Written under the User row lock (updateUserMeta: SEC-W8RSC-1); when
    *      it does not hold, receiveEvent answers 503 so that Google delivers
-   *      the event again (SEC-W8RSC-2).
+   *      the event again (SEC-W8RSC-2). D-101 (W9-RISC-PASSWORD-CUTOFF): the
+   *      same write removes signInCutoffClearedAt, so after every such event
+   *      only a Google or emailed-link sign-in is admitted until one clears
+   *      the restriction again.
    *   4. The local Session rows.
    *   5. With `providerBan` only: the ban at Supabase (banAtProvider), which
    *      refuses to renew the user's sessions while it lasts (see
@@ -543,8 +546,15 @@ export class RiscService {
    * writes. Returns whether the cutoff holds when it returns ('held'), the
    * user row is gone ('no_user'), or the write failed ('failed', which a
    * redelivery of the event can repair: SEC-W8RSC-2); every failure is
-   * logged with the user id. Nothing clears it: account-enabled restores a
+   * logged with the user id. Nothing lowers it: account-enabled restores a
    * recovered user, whose sign-in after the event passes it.
+   *
+   * D-101 (W9-RISC-PASSWORD-CUTOFF): after the cutoff only a Google or
+   * emailed-link sign-in is admitted until one such session clears the
+   * restriction (AuthMiddleware records User.metaData.signInCutoffClearedAt).
+   * Every session-ending event sets the restriction again: this write removes
+   * the cleared marker, in the same locked read-modify-write, even when a
+   * later cutoff already recorded stays.
    *
    * Through updateUserMeta (D-97 review SEC-W8RSC-1 / CR-W8RSC-1): two events
    * for the same user handled together no longer write back each other's
@@ -554,8 +564,12 @@ export class RiscService {
     try {
       const found = await this.updateUserMeta(userId, (meta) => {
         const recorded = signInCutoffOf(meta);
-        if (recorded !== null && recorded >= cutoff) return null;
-        return { ...meta, [SIGN_IN_CUTOFF_META_KEY]: cutoff };
+        const cleared = SIGN_IN_CUTOFF_CLEARED_META_KEY in meta;
+        if (recorded !== null && recorded >= cutoff && !cleared) return null;
+        // D-101: the cleared marker goes (the restriction holds again); the cutoff is never lowered.
+        const kept: Record<string, unknown> = { ...meta };
+        delete kept[SIGN_IN_CUTOFF_CLEARED_META_KEY];
+        return { ...kept, [SIGN_IN_CUTOFF_META_KEY]: recorded !== null && recorded > cutoff ? recorded : cutoff };
       });
       if (!found) {
         this.logger.warn(`Sign-in cutoff not recorded for ${userId}: no User row`);
@@ -569,25 +583,25 @@ export class RiscService {
   }
 
   /**
-   * D-97 review SEC-W8RSC-1 / CR-W8RSC-1: the one door through which
-   * RiscService changes User.metaData (the durable sign-in cutoff and the
-   * googleSignInDisabled flag; nothing else in the server writes that column
-   * after the row is created).
+   * D-97 review SEC-W8RSC-1 / CR-W8RSC-1: how RiscService changes
+   * User.metaData (the durable sign-in cutoff and the googleSignInDisabled
+   * flag). Through updateUserMetaLocked (core/auth/sign-in-cutoff.ts), the one
+   * door the server changes that column through after the row is created; since
+   * D-101 (W9-RISC-PASSWORD-CUTOFF) AuthMiddleware writes the cleared marker
+   * through it too, under the same User row lock.
    *
-   * Both writers read the bag, change their own key and write the whole bag
+   * Every writer reads the bag, changes its own key and writes the whole bag
    * back. Unlocked, two RISC events for the same user handled together (say
    * account-disabled/bulk-account and sessions-revoked) both read the same
    * bag, and whichever wrote last erased the other's key: the flag write
    * dropped signInCutoffAt while the event row still said
    * sessions_terminated, and once the 24h Redis cutoff lapsed the pre-event
-   * sessions were admitted again (F7-SEC-2 reopened). So, as lockBusinessMeta
-   * does for Business.metaData (core/prisma/business-meta.ts), the read and
-   * the write run in one transaction that first takes the row lock
-   * (SELECT ... FOR NO KEY UPDATE, the lock the UPDATE takes anyway; it does
-   * not block inserts that reference the user): a concurrent writer waits for
-   * this one to commit and then reads its result. The lock is held for three
-   * statements; this route is public but reaches here only with a SET that
-   * Google signed, so no anonymous burst can queue on it.
+   * sessions were admitted again (F7-SEC-2 reopened). The read and the write
+   * now run in one transaction that first takes the row lock (SELECT ... FOR
+   * NO KEY UPDATE): a concurrent writer waits for this one to commit and then
+   * reads its result. The lock is held for three statements; this route is
+   * public but reaches here only with a SET that Google signed, so no
+   * anonymous burst can queue on it.
    *
    * `change` gets the stored bag (a plain object; anything else reads as {})
    * and returns the bag to write, or null to write nothing. Returns false when
@@ -597,18 +611,7 @@ export class RiscService {
     userId: string,
     change: (meta: Record<string, unknown>) => Record<string, unknown> | null,
   ): Promise<boolean> {
-    return this.prisma.client.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR NO KEY UPDATE`;
-      const user = await tx.user.findUnique({ where: { id: userId }, select: { metaData: true } });
-      if (!user) return false;
-      const raw = user.metaData;
-      const meta = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-      const next = change(meta);
-      if (next) {
-        await tx.user.update({ where: { id: userId }, data: { metaData: next as Prisma.InputJsonValue } });
-      }
-      return true;
-    });
+    return updateUserMetaLocked(this.prisma.client, userId, change);
   }
 
   /**

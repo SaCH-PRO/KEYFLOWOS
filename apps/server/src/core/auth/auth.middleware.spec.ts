@@ -1136,9 +1136,9 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
   type AmrEntry = Record<string, unknown> | string;
   const token = (claims: Record<string, unknown>) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, role: 'authenticated', ...claims })}.c2ln`;
-  /** An access token of a session whose amr is `amr`, minted at `iat`. app_metadata omitted when `appMeta` is undefined. */
+  /** An access token of a session whose amr is `amr`, minted at `iat`. app_metadata omitted when `appMeta` is null. */
   const signedIn = (amr: AmrEntry[], appMeta: unknown = BOTH, iat = NOW, sessionId = 's-d101') =>
-    token({ session_id: sessionId, iat, exp: iat + 3600, amr, ...(appMeta === undefined ? {} : { app_metadata: appMeta }) });
+    token({ session_id: sessionId, iat, exp: iat + 3600, amr, ...(appMeta === null ? {} : { app_metadata: appMeta }) });
   const by = (method: string, at: number, appMeta: unknown = BOTH) => signedIn([{ method, timestamp: at }], appMeta);
   const password = (at: number) => by('password', at);
   const google = (at: number) => by('oauth', at);
@@ -1259,7 +1259,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
   });
 
   it.each([
-    ['no app_metadata at all', [{ method: 'oauth', timestamp: CUTOFF + 30 }], undefined],
+    ['no app_metadata at all', [{ method: 'oauth', timestamp: CUTOFF + 30 }], null],
     ['app_metadata naming no external provider', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'email', providers: ['email'] }],
     ['app_metadata naming another OAuth provider too', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'google', providers: ['google', 'github'] }],
     ['app_metadata naming only another OAuth provider', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'github', providers: ['github'] }],
@@ -1275,7 +1275,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     const phone = harness({ signInCutoffAt: CUTOFF });
     expect(await phone.attached(by('otp', CUTOFF + 30, { provider: 'phone', providers: ['email', 'phone'] }))).toBeNull();
     const unknown = harness({ signInCutoffAt: CUTOFF });
-    expect(await unknown.attached(by('otp', CUTOFF + 30, undefined))).toBeNull();
+    expect(await unknown.attached(by('otp', CUTOFF + 30, null))).toBeNull();
     expect(phone.client.$transaction).not.toHaveBeenCalled();
     expect(unknown.client.$transaction).not.toHaveBeenCalled();
   });

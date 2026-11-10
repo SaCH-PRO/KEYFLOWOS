@@ -5,6 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { verifyAdminToken } from './admin-token.util';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import {
+  SIGN_IN_CUTOFF_CLEARED_META_KEY,
+  sessionSignedInWithGoogleOrEmailLink,
+  signInCutoffClearedAtOf,
+  updateUserMetaLocked,
+} from './sign-in-cutoff';
 
 /** Redis key of the per-user logout revocation marker, written by POST /identity/logout. */
 export const logoutRevocationKey = (userId: string): string => `auth:revoked:user:${userId}`;
@@ -93,6 +99,10 @@ export function logoutRevocationCutoff(
  * in again. Unlike the logout marker it has no TTL: GoTrue keeps the pre-event
  * refresh tokens (no provider global logout: R0-SEC-02 keeps
  * SUPABASE_JWT_SECRET empty), so a 24h cutoff would let them back in.
+ *
+ * D-101 (W9-RISC-PASSWORD-CUTOFF): signing in again after the cutoff means a
+ * Google or emailed-link sign-in until one has cleared the restriction
+ * (signInCutoffClearedAt, core/auth/sign-in-cutoff.ts); see resolveLocalUser.
  */
 export const SIGN_IN_CUTOFF_META_KEY = 'signInCutoffAt';
 
@@ -198,6 +208,14 @@ function sessionAuthenticatedAt(token: string): number | null {
  *     its session was authenticated, or when the token cannot say when that
  *     was. It has no TTL, so a pre-event session stays refused after the 24h
  *     marker lapses, however often its refresh token is used.
+ *   - D-101 (W9-RISC-PASSWORD-CUTOFF): after that cutoff a session is admitted
+ *     only when it signed in with Google or an emailed link, until one such
+ *     session has cleared the restriction (User.metaData.signInCutoffClearedAt,
+ *     its authentication time, which this middleware writes once under the
+ *     User row lock); then a session authenticated after the clearing is
+ *     admitted by any method. A password session opened after the cutoff by
+ *     whoever knows (or, through the pre-event GoTrue session, set) the
+ *     password is refused (SEC-W8RSC-4).
  *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
@@ -244,7 +262,11 @@ export class AuthMiddleware implements NestMiddleware {
     try {
       const user = await this.getSupabaseAuth().getUserFromToken(token);
       if (user?.id) {
-        const localUser = await this.resolveLocalUser(user.id, { sessionAuthenticatedAt: sessionAuthenticatedAt(token) });
+        const localUser = await this.resolveLocalUser(user.id, {
+          sessionAuthenticatedAt: sessionAuthenticatedAt(token),
+          // D-101: read only when the row holds a sign-in cutoff.
+          signedInWithGoogleOrEmailLink: () => sessionSignedInWithGoogleOrEmailLink(token),
+        });
         if (!localUser) {
           this.logger.warn(
             { userId: user.id },
@@ -335,7 +357,14 @@ export class AuthMiddleware implements NestMiddleware {
    *   sign-in cutoff      -> (D-97, Supabase tokens only) REJECT a token whose
    *                          session was authenticated at or before the row's
    *                          durable RISC cutoff (User.metaData.signInCutoffAt),
-   *                          or that cannot say when.
+   *                          or that cannot say when. D-101: a session
+   *                          authenticated after it is admitted only when it
+   *                          signed in with Google or an emailed link
+   *                          (`opts.signedInWithGoogleOrEmailLink`), and the
+   *                          first such session records the clearing
+   *                          (signInCutoffClearedAt); after the clearing, a
+   *                          session authenticated later is admitted by any
+   *                          method.
    *   revocation marker   -> REJECT a token whose session was authenticated at
    *                          or before the marker's revocation time
    *                          (`opts.sessionAuthenticatedAt`, or null: it cannot
@@ -364,7 +393,12 @@ export class AuthMiddleware implements NestMiddleware {
    */
   private async resolveLocalUser(
     userId: string,
-    opts: { requireRow?: boolean; honourLogoutMarker?: boolean; sessionAuthenticatedAt?: number | null } = {},
+    opts: {
+      requireRow?: boolean;
+      honourLogoutMarker?: boolean;
+      sessionAuthenticatedAt?: number | null;
+      signedInWithGoogleOrEmailLink?: () => boolean;
+    } = {},
   ): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
@@ -449,6 +483,21 @@ export class AuthMiddleware implements NestMiddleware {
         if (authenticatedAt === null || authenticatedAt <= signInCutoff) {
           return null;
         }
+        // D-101 (W9-RISC-PASSWORD-CUTOFF): until a Google or emailed-link
+        // sign-in has cleared the cutoff, only such a sign-in is admitted (any
+        // other method, a password above all, is refused: fail closed). Once
+        // cleared, a session authenticated AFTER the clearing is admitted by
+        // any method; one between the cutoff and the clearing still has to be
+        // such a sign-in, so the hijacker's password session stays refused.
+        const clearedAt = signInCutoffClearedAtOf(dbUser?.metaData, signInCutoff);
+        if (clearedAt === null || authenticatedAt <= clearedAt) {
+          if (!opts.signedInWithGoogleOrEmailLink?.()) {
+            return null;
+          }
+          if (clearedAt === null && !(await this.recordSignInCutoffCleared(userId, authenticatedAt))) {
+            return null;
+          }
+        }
       }
 
       if (!dbUser && opts.requireRow) {
@@ -463,6 +512,50 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.warn(`Local user lookup failed: ${(lookupErr as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * D-101 (W9-RISC-PASSWORD-CUTOFF): record that a Google or emailed-link
+   * session authenticated at `authenticatedAt` cleared the user's sign-in
+   * cutoff (User.metaData.signInCutoffClearedAt). Only a qualifying token
+   * reaches here, and only while the row holds no clearing for its cutoff.
+   *
+   * Written once, under the User row lock RiscService takes for the same bag
+   * (updateUserMetaLocked): the bag is read again under the lock, so a second
+   * request that read no marker before the first committed finds it and
+   * writes nothing, and a RISC event that committed in between is seen. When
+   * that event raised the cutoff to or past this session, nothing is written
+   * and the session is refused (false), as D-97 would refuse it. Otherwise
+   * returns true: the session is admitted by the rule, whether or not the
+   * write held. A failed write is logged and the next qualifying request
+   * retries it; until it holds, a session that is not a Google or emailed-link
+   * sign-in stays refused.
+   */
+  private async recordSignInCutoffCleared(userId: string, authenticatedAt: number): Promise<boolean> {
+    let stillAfterCutoff = true;
+    let wrote = false;
+    try {
+      await updateUserMetaLocked(this.prisma.client, userId, (meta) => {
+        const cutoff = signInCutoffOf(meta);
+        if (cutoff === null) return null;
+        if (authenticatedAt <= cutoff) {
+          stillAfterCutoff = false;
+          return null;
+        }
+        if (signInCutoffClearedAtOf(meta, cutoff) !== null) return null;
+        wrote = true;
+        return { ...meta, [SIGN_IN_CUTOFF_CLEARED_META_KEY]: authenticatedAt };
+      });
+    } catch (err) {
+      this.logger.warn(
+        `D-101: sign-in cutoff clearing for ${userId} not recorded (${(err as Error).message}); the session is admitted and the next request retries`,
+      );
+      return true;
+    }
+    if (wrote) {
+      this.logger.log(`D-101: sign-in cutoff cleared for ${userId} by a Google or emailed-link sign-in at ${authenticatedAt}`);
+    }
+    return stillAfterCutoff;
   }
 
   /**

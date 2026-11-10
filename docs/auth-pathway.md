@@ -936,6 +936,43 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   stays empty (R0-SEC-02). `account-enabled`,
   `account-credential-change-required`, `verification` and
   `account-disabled` for any other reason record no cutoff.
+- **After a cutoff, only a Google or emailed-link sign-in until it clears**
+  (owner ruling D-101, W9-RISC-PASSWORD-CUTOFF; closes SEC-W8RSC-4). A
+  session opened after the cutoff is admitted only when its ORIGINAL sign-in
+  (its earliest `amr` entry; a later MFA step-up does not count) was:
+  - Google: `amr` method `oauth`. GoTrue never names the OAuth provider in
+    the entry (it sets `provider` only for `sso/saml`), so the token's
+    server-set `app_metadata` must name Google as the user's only external
+    provider (`provider`/`providers`, ignoring `email` and `phone`); an entry
+    that names another provider, or a user with another OAuth identity too,
+    is refused. The web's only OAuth door is `provider=google`.
+  - an emailed link: `otp` (the implicit flow: GoTrue's `/verify` issues
+    every magic-link, email-code, signup, invite and recovery session with
+    `models.OTP`), only for a user whose `app_metadata` lists no `phone`
+    identity, since GoTrue stamps an SMS code `otp` too; or `magiclink`,
+    `email/signup`, `recovery`, `invite` (the PKCE flow's emailed links). A
+    password-recovery link counts as an emailed link: GoTrue sends it only to
+    the account's address and marks its session `recovery` (PKCE) or `otp`
+    (implicit, the same as a magic link).
+  - Anything else is refused with the middleware's ordinary 401 (fail closed):
+    `password`, `totp`, `mfa/*`, `sso/saml`, `anonymous`, `web3`, `passkey`,
+    `token_refresh`, `email_change` (its link goes to the NEW address), a
+    method GoTrue adds later, a string-only `amr`, or a token with no `amr`.
+
+  The first such session CLEARS the restriction: the middleware records its
+  authentication time as `users.meta_data.signInCutoffClearedAt`, written
+  once, under the same User row lock the RISC writes take (the bag is read
+  again under the lock, so concurrent requests write it once; a cutoff a RISC
+  event raised past the session meanwhile is not cleared and that session is
+  refused). From then on a session authenticated AFTER the clearing is
+  admitted by any method, while a session authenticated between the cutoff
+  and the clearing still has to be Google or an emailed link, so the
+  hijacker's password session stays refused, refreshed or not. If the write
+  fails, the qualifying session is still admitted and the next qualifying
+  request retries it. Every later session-ending event re-arms the
+  restriction: its cutoff write removes the marker (the cutoff is still never
+  lowered). A marker that is not after the current cutoff is ignored. No
+  schema change, no provider call, `SUPABASE_JWT_SECRET` stays empty.
 - The cutoff and the `googleSignInDisabled` flag share `users.meta_data`;
   each RISC write takes the User row lock before it reads the bag, so two
   events for the same user handled together never write back each other's
@@ -956,18 +993,32 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     operator can find the account in GoTrue and act on it (dashboard ban,
     password reset). A backfill from GoTrue's admin user list (identities,
     never the user-editable `user_metadata`) is a separate operator task.
-  - **A pre-event GoTrue session can mint a post-cutoff sign-in**
-    (SEC-W8RSC-4, owner ruling needed; not reproduced: needs a real GoTrue).
-    D-97 leaves the pre-event refresh token alive at GoTrue. With it a
-    hijacker can set a password (`PUT /auth/v1/user`, when secure password
-    change is off or the session is under 24h old) and then open a new
-    password session, whose `amr` is after the cutoff and is admitted. For
-    hijacking this works once the 65-minute ban lapses; sessions-revoked,
-    tokens-revoked and token-revoked set no ban. GoTrue's admin password
-    update ends every session of the user with the service-role key alone
-    (see `identity-password.service.ts`), so a provider-wide logout may not
-    need `SUPABASE_JWT_SECRET` after all; whether to use it (it replaces the
-    user's password) is for the owner (D-39/D-97).
+  - **A pre-event GoTrue session could mint a post-cutoff sign-in**
+    (SEC-W8RSC-4): closed by D-101 above. D-97 leaves the pre-event refresh
+    token alive at GoTrue, and with it (or a known password) a hijacker can
+    open a new password session after the cutoff; that session is now refused
+    until the real user has signed in with Google or an emailed link, and one
+    opened before that clearing stays refused after it.
+- Residuals of D-101 (they rest on GoTrue settings, not on this API):
+  - **Secure email change.** With the pre-event GoTrue session (or a password
+    session, which GoTrue itself still issues) a hijacker can ask GoTrue to
+    change the account's email. In the implicit flow the confirmation session
+    carries `otp`, the same method as a magic link, and from then on magic
+    links go to the new address. GoTrue's "Secure email change" (on by
+    default) requires the OLD address to confirm too, which the hijacker
+    cannot; keep it on.
+  - **Other OAuth providers or phone sign-in.** An `oauth` session counts as
+    Google only while Google is the user's only external identity, and an
+    `otp` session as an emailed link only while the user has no phone
+    identity. Enabling another provider or phone sign-in in the Supabase
+    dashboard keeps this fail-closed (a user with another OAuth identity
+    clears with an emailed link; a user with a phone identity clears with
+    Google or a PKCE emailed link, not an implicit-flow `otp`), but the allow
+    list must be revisited before either is offered.
+  - **The Google account itself.** A Google sign-in clears the restriction,
+    as the ruling says; after `account-disabled/hijacking` this relies on
+    Google having recovered the account (`googleSignInDisabled` is recorded
+    but nothing enforces it).
 
 See `docs/development/risc-setup.md` for GCP configuration and the
 `pnpm configure:risc` registration script.
