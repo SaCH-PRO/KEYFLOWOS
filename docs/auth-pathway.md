@@ -999,14 +999,26 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   SEC-W8RSC-2).
 - Residuals of D-97, not closed by W8-RISC-SIGNIN-CUTOFF:
   - **Accounts with no `UserIdentity` row** (SEC-W8RSC-3). Nothing wrote
-    that table before this packet and there is no backfill, so an account
-    last signed in with Google before the deploy is not reached by any RISC
-    event (`no_matching_user`: no cutoff, no 24h cutoff, no ban) until its
-    owner signs in again and bootstrap writes the row. Such an event is logged
-    (`SECURITY: RISC ... matched no user`) with the Google sub, so the
-    operator can find the account in GoTrue and act on it (dashboard ban,
-    password reset). A backfill from GoTrue's admin user list (identities,
-    never the user-editable `user_metadata`) is a separate operator task.
+    that table before this packet, so an account last signed in with Google
+    before the deploy is not reached by any RISC event (`no_matching_user`:
+    no cutoff, no 24h cutoff, no ban) until its owner signs in again and
+    bootstrap writes the row, or the operator runs the backfill. Such an
+    event is logged (`SECURITY: RISC ... matched no user`) with the Google
+    sub, so the operator can find the account in GoTrue and act on it
+    (dashboard ban, password reset). The backfill
+    (W9-IDENTITY-BACKFILL-SCRIPT): `pnpm backfill:google-identities` in
+    `apps/server` (`apps/server/scripts/backfill-google-identities.ts`)
+    pages GoTrue's admin user list (`GET /auth/v1/admin/users`,
+    service-role key, through `SupabaseAdminService.listUsersPage`), reads
+    each user's `identities[]` with provider `google` (the provider id, else
+    `identity_data.sub`; never the user-editable `user_metadata`) and
+    writes bootstrap's `UserIdentity` row for the local User with that id.
+    Dry run by default (counts only: no email, sub, user id or key);
+    `--apply` writes; idempotent. A sub already mapped to another local
+    user is a counted conflict and is never re-pointed; a GoTrue user with
+    no local User row is skipped and counted. Run it after the W8 deploy
+    (and again whenever a dry run counts `would_write` above 0); until it
+    has run with `--apply`, such accounts stay unreached.
   - **A pre-event GoTrue session can mint a post-cutoff sign-in**
     (SEC-W8RSC-4): narrowed by D-101 above, not closed (review
     SEC-W9RPC-2). D-97 leaves the pre-event refresh token alive at GoTrue,

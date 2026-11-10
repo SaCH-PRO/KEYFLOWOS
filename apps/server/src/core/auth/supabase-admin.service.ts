@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuthError, createClient, SupabaseClient } from '@supabase/supabase-js';
+import { AuthError, createClient, SupabaseClient, type User } from '@supabase/supabase-js';
 
 function statusOf(error: unknown): number | null {
   if (error instanceof AuthError) {
@@ -243,6 +243,27 @@ export class SupabaseAdminService {
       `findUserByEmail exhausted ${maxPages} pages without locating ${normalized}`,
     );
     return null;
+  }
+
+  /**
+   * One page of GoTrue's admin user list (GET /auth/v1/admin/users?page=&per_page=
+   * under the service-role key), for an operator walk over every auth user:
+   * scripts/backfill-google-identities.ts (W9-IDENTITY-BACKFILL-SCRIPT, the D-97
+   * residual SEC-W8RSC-3). Pages are 1-based; a page holding fewer than
+   * `perPage` users is the last.
+   *
+   * Unlike findUserByEmail, an error result THROWS (SupabaseAdminError with the
+   * provider's status): a walk must never read a failed page as the end of the
+   * list. auth-js's `nextPage` is not returned: the installed auth-js (2.94.0)
+   * reads only the first digit of the page number in GoTrue's Link header.
+   */
+  async listUsersPage(page: number, perPage: number): Promise<User[]> {
+    const client = this.getClient();
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new SupabaseAdminError(`listUsers failed (page ${page}): ${error.message}`, statusOf(error), error);
+    }
+    return data?.users ?? [];
   }
 
   /**

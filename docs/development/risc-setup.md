@@ -63,6 +63,26 @@ pnpm configure:risc
 
 This creates or updates the RISC stream config in Google to point at `RISC_RECEIVER_URL` and subscribes to the supported event types.
 
+## Backfill Google identities (accounts that last signed in before W8)
+
+`POST /identity/bootstrap` has written the Google `sub` -> user link at every Google sign-in since W8-RISC-SIGNIN-CUTOFF (D-97), from the verified provider record. An account whose owner last signed in with Google before that deploy has no `UserIdentity` row, so a RISC event for it matches no user (`no_matching_user`, logged as `SECURITY: RISC ... matched no user`) and ends no session (D-97 residual SEC-W8RSC-3). Backfill those rows from GoTrue's admin user list:
+
+```bash
+cd apps/server
+pnpm backfill:google-identities           # dry run: prints counts, writes nothing
+pnpm backfill:google-identities --apply   # writes the missing rows
+```
+
+It reads `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` from the repo-root `.env`, and:
+
+- pages `GET /auth/v1/admin/users` with the service-role key (`SupabaseAdminService.listUsersPage`); a page that fails stops the run with exit 1 (it is never read as the end of the list);
+- takes each user's `identities[]` entries with provider `google` (the identity's provider id, else `identity_data.sub`, the rule bootstrap uses) and NEVER `user_metadata`, which the user can edit;
+- writes the row bootstrap writes (`provider: google`, `providerSubject`, the identity's email, `userId` = the GoTrue user id) only for a GoTrue user that has a local `User` row, as an upsert on `(provider, providerSubject)`; re-running is safe (idempotent);
+- skips and counts: users with no Google identity, GoTrue users with no local `User` row, subs already mapped to the same user, and subs already mapped to a DIFFERENT local user (a conflict: the existing row is never re-pointed; resolve it by hand, or the real owner's next Google sign-in re-points it through bootstrap);
+- prints counts only: never an email, a Google sub, a user id or a key. Exit status: 0 done, 1 a GoTrue page or a write failed (re-run), 2 bad arguments or the admin client is not configured.
+
+Run the dry run first, then `--apply` once after deploying W8 or later. It makes no change at Google or GoTrue (read-only there).
+
 ## Testing
 
 You can request a verification token from Google with:
@@ -88,6 +108,7 @@ A `verification` event should arrive at `/webhooks/risc` and be written to `Auth
 - Validation & event handling: `apps/server/src/modules/risc/risc.service.ts`
 - Google `sub` capture: `apps/server/src/modules/identity/identity.service.ts` (`persistUserIdentities`)
 - Stream registration script: `scripts/configure-risc.ts`
+- Google identity backfill (operator): `apps/server/scripts/backfill-google-identities.ts` (`pnpm backfill:google-identities` in `apps/server`)
 
 ## GDPR / data protection notes
 
