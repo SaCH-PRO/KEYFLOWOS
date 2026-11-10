@@ -88,6 +88,12 @@
  *             row names its currency and equals that currency's sheet, every PDF amount is in the
  *             currency of the sheet it sits in, and nothing is converted or added across currencies
  *             (RED-BEFORE: the exports carried the USD sheet only and dropped byCurrency).
+ *   CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, owner ruling D-13) it.todo: the accountant pack's
+ *             balance-sheet.pdf (finance/accountant-export.service.ts computeBalanceSheet) still adds
+ *             every currency into one figure per account, labelled with the raw business currency.
+ *             Confirmed on this book: pack assets 357 = USD 277 + TTD 80. It predates the packet and
+ *             lies outside its write set (the finance module; the pack's P&L, cashflow and trial
+ *             balance group by account only too), so it needs its own packet.
  *
  * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04, a V1-37 regression confirmed on
  * int/trial-I): money against a document already stored in a currency outside D-13 is still
@@ -1397,6 +1403,20 @@ describe('V1-37 review residuals (V1-37b): the balance sheet never sums across c
       expect(pairs).toContain(`Total Equity => ${money(round2(s.equity.total + s.netEquityFromIncome), currency)}`);
     }
   }, 30_000);
+
+  /*
+   * CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, owner ruling D-13): the same defect
+   * class as RV37b-CR-03 in the other balance-sheet export. The accountant pack
+   * (finance/accountant-export.service.ts computeBalanceSheet) groups ledger
+   * entries by ['accountId'] only and labels balance-sheet.pdf with the raw
+   * business.currency, so a USD business's TTD cash is added into its USD
+   * figures. A probe run on this suite's USD book read pack assets 357 against
+   * the sheets' USD 277 and TTD 80. It predates W9-BALANCE-SHEET-EXPORT and lies
+   * outside its write set (the finance module; the pack's P&L, cashflow and
+   * trial balance group by account only as well), so it is held for its own
+   * packet.
+   */
+  it.todo('CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, D-13; needs its own packet, outside the write set): the accountant pack balance-sheet.pdf carries the USD sheet and then the TTD sheet on its own, labelled with the normalized business currency; no account adds TTD into USD');
 });
 
 describe('V1-37 review residuals (V1-37b): bank rules skip a row the door refuses for currency (RV37-04)', () => {

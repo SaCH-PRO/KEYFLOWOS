@@ -327,29 +327,92 @@ export function sendHtml(res: Response, html: string): void {
 
 type PdfSection = { heading?: string; rows: Array<[string, string]>; emphasis?: boolean };
 
+/** The amount column of a PDF row; the label takes the rest of the line. */
+const PDF_VALUE_WIDTH = 140;
+
+/*
+ * W9-BALANCE-SHEET-EXPORT review CR-BSX-02 (owner ruling D-13): a row is its
+ * label and its amount side by side, so it moves to a new page whole. renderPdf
+ * drew the label at the current y and then the amount at that same y: when the
+ * label did not fit, pdfkit carried the label to a new page and the amount,
+ * drawn at the old y, overflowed onto a third one, so an account name and its
+ * figure sat on different pages (any sheet of about 15 lines a section; the
+ * multi-currency balance sheet, RV37b-CR-03, reaches it with far fewer). Now:
+ *   - a row goes to a new page before it is drawn when the taller of its label
+ *     and its amount does not fit, and the next row starts below the taller one
+ *     (a wrapped label no longer runs under the next row);
+ *   - a heading starts a new page when it cannot keep the first row under it
+ *     (and the headings of any empty sections between) on its page;
+ *   - every heading starts at the left margin: the amount draw left the x in
+ *     the amount column, so each heading after the first was drawn there.
+ */
 async function renderPdf(filename: string, title: string, meta: string, sections: PdfSection[]): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'LETTER', margin: 48, info: { Title: title } });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
 
+  const left = doc.page.margins.left;
+  const contentWidth = doc.page.width - left - doc.page.margins.right;
+  const labelWidth = contentWidth - PDF_VALUE_WIDTH;
+  const bottom = () => doc.page.height - doc.page.margins.bottom;
+  /** A new page when `need` does not fit below the cursor (never a blank page for a block taller than a page). */
+  const breakFor = (need: number) => {
+    if (doc.y + need > bottom() && doc.y > doc.page.margins.top) doc.addPage();
+  };
+  // The font a heading is drawn in is the one the rows before it left set (pdfkit's Helvetica before any row), as before.
+  let style = { size: 9, font: 'Helvetica' };
+  const rowStyle = (s: PdfSection) => ({ size: s.emphasis ? 10 : 9, font: s.emphasis ? 'Helvetica-Bold' : 'Helvetica' });
+  /** A row is as tall as the taller of its label and its amount (either may wrap). Leaves the row's font set. */
+  const rowHeight = (s: PdfSection, [label, value]: [string, string]): number => {
+    const r = rowStyle(s);
+    doc.fontSize(r.size).font(r.font);
+    return Math.max(
+      doc.currentLineHeight(true),
+      doc.heightOfString(label, { width: labelWidth }),
+      doc.heightOfString(value, { width: PDF_VALUE_WIDTH, align: 'right' }),
+    );
+  };
+  /** The room a heading needs on its page: itself, the headings of the empty sections after it, and the first row below them. */
+  const keepWithNext = (k: number): number => {
+    let need = 0;
+    for (let j = k; j < sections.length; j++) {
+      const s = sections[j];
+      if (s.heading) {
+        doc.fontSize(12).font(style.font);
+        // moveDown(0.5) before and moveDown(0.3) after, measured at the heading's size (an upper bound).
+        need += doc.currentLineHeight(true) * 0.8 + doc.heightOfString(s.heading, { width: contentWidth });
+      }
+      if (s.rows.length) return need + rowHeight(s, s.rows[0]);
+    }
+    return need;
+  };
+
   doc.fontSize(18).fillColor('#111').text(title);
   doc.moveDown(0.25).fontSize(9).fillColor('#666').text(meta);
   doc.moveDown(0.75);
 
-  for (const s of sections) {
+  for (const [k, s] of sections.entries()) {
     if (s.heading) {
-      doc.moveDown(0.5).fontSize(12).fillColor('#111').text(s.heading);
-      doc.moveTo(doc.x, doc.y + 2).lineTo(doc.page.width - doc.page.margins.right, doc.y + 2).strokeColor('#ddd').stroke();
+      breakFor(keepWithNext(k));
+      doc.fontSize(style.size).font(style.font);
+      doc.moveDown(0.5).fontSize(12).fillColor('#111').text(s.heading, left);
+      doc.moveTo(left, doc.y + 2).lineTo(left + contentWidth, doc.y + 2).strokeColor('#ddd').stroke();
       doc.moveDown(0.3);
+      style = { ...style, size: 12 };
     }
-    for (const [label, value] of s.rows) {
+    for (const row of s.rows) {
+      const [label, value] = row;
+      const h = rowHeight(s, row);
+      breakFor(h);
       const y = doc.y;
-      const labelWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right - 140;
-      doc.fontSize(s.emphasis ? 10 : 9).fillColor('#222').font(s.emphasis ? 'Helvetica-Bold' : 'Helvetica');
-      doc.text(label, doc.page.margins.left, y, { width: labelWidth });
-      doc.text(value, doc.page.margins.left + labelWidth, y, { width: 140, align: 'right' });
+      doc.fillColor('#222');
+      doc.text(label, left, y, { width: labelWidth });
+      doc.text(value, left + labelWidth, y, { width: PDF_VALUE_WIDTH, align: 'right' });
+      doc.x = left;
+      doc.y = y + h;
       doc.moveDown(0.15);
+      style = rowStyle(s);
     }
   }
   doc.end();

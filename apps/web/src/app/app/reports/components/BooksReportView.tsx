@@ -223,9 +223,14 @@ function BalanceSheetBlock({ r }: { r: BalanceSheetWithCurrencies }) {
           <div className="text-xs text-muted-foreground">
             Balances in other currencies are shown on their own; they are not converted or added to the {r.currency} figures above.
           </div>
-          {/* V1-37b review RV37b-CR-03: the CSV / PDF export (report-formatters.ts) carries the business-currency sheet only. */}
+          {/*
+            W9-BALANCE-SHEET-EXPORT review CR-BSX-01 / SEC-BSX-1 (owner ruling D-13): since RV37b-CR-03 the
+            CSV / PDF export (report-formatters.ts) carries the business-currency sheet and then each other
+            currency's sheet on its own, as shown here. The note said "only", so a reader could share the
+            export as a one-currency sheet and hand over the other balances without knowing it.
+          */}
           <div className="text-xs text-muted-foreground" data-testid="balance-sheet-export-note">
-            The CSV and PDF exports carry the {r.currency} sheet only; the {others.map(([code]) => code).join(", ")} balances are shown here.
+            The CSV and PDF exports carry the {r.currency} sheet and then the {others.map(([code]) => code).join(", ")} balances, each on its own, as shown here.
           </div>
           {others.map(([code, sheet]) => (
             <div key={code} className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))" }}>
