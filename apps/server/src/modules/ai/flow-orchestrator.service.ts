@@ -37,7 +37,7 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
@@ -302,6 +302,28 @@ export interface FlowPageContext {
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
+  /**
+   * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): the holder of a
+   * membership-backed staff position, as JobRolePolicyService.holderForPosition resolved it; null
+   * or absent for a contact-only position. Read only by chatToolAction.
+   */
+  positionHolderUserId?: string | null;
+}
+
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88). The dispatch context of
+ * one model tool call in chat()'s turn: `base` (the surface's own: its principal, crew, source and
+ * session), and for call_create_task (JobRolePolicyService HOLDER_ONLY_TOOLS) on a staff position's
+ * turn, which has no principal, the position's holder as onBehalfOfUserId. call_create_task records
+ * the member the command runs for as the caller (contactBindMember), so on WhatsApp/SMS it now runs
+ * as the holder, never as the member the model names; a contact-only position has no holder and is
+ * refused before anything is written, as before. Every other tool, and a turn with a principal,
+ * keeps `base` unchanged: the holder is never a principal and grants nothing.
+ */
+export function chatToolAction(base: ActionContext, toolName: string, server?: FlowServerContext): KeyDispatchAction {
+  const holder = server?.positionHolderUserId;
+  if (!holder || base.principalUserId || !HOLDER_ONLY_TOOLS.includes(toolName)) return base;
+  return { ...base, onBehalfOfUserId: holder };
 }
 
 /**
@@ -2212,13 +2234,15 @@ ${triage.standingContext}`;
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
           const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
-          return this.governToolCall(businessId, tc, decision, {
+          // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
+          // runs for its holder (chatToolAction); every other call keeps this context.
+          return this.governToolCall(businessId, tc, decision, chatToolAction({
             surface: 'CHAT',
             principalUserId: userId ?? null,
             crew,
             sourceId: tc.id,
             sessionId: effectiveSessionId,
-          });
+          }, tc.name, server));
         }),
       );
 

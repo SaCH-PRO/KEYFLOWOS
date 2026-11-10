@@ -83,6 +83,14 @@ const TIER = new Map(FLOW_TOOLS.map((t) => [t.name, t.riskTier as number]));
  */
 const passes = (env: JobRoleEnvelope, tool: string) => allows(env, tool) && TIER.get(tool)! <= env.maxRiskTier;
 
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): what a position with no
+ * holder (a contact-only position) reaches of `reach`. call_create_task records the member the
+ * command runs for as the caller, and such a position has none, so it is not offered the tool
+ * (envelopeForPosition); everything else its JobRole map reaches, it reaches as before.
+ */
+const withoutHolderTools = (reach: string[]) => reach.filter((tool) => tool !== 'call_create_task');
+
 type Level = 'read' | 'write' | 'admin';
 const LEVELS: Level[] = ['read', 'write', 'admin'];
 
@@ -1580,7 +1588,9 @@ describe('V1-21b review 4 — KEY never exceeds HTTP for the same holder (DRV-1,
         requiresQuickConfirm: true,
       });
       const contactOnly = (await routeThroughBridge({ membershipId: null, userId: null, jobRole: SALES_LEAD }, null)).env;
-      expect(reachedBy(contactOnly)).toEqual(reachedBy(policy.envelopeForJobRole(SALES_LEAD)));
+      // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): all but call_create_task, which needs a holder
+      expect(reachedBy(contactOnly)).toEqual(withoutHolderTools(reachedBy(policy.envelopeForJobRole(SALES_LEAD))));
+      expect(reachedBy(contactOnly)).not.toContain('call_create_task');
     });
 
     it('fail closed: a membership-backed position whose membership cannot be read keeps the baseline only', async () => {
@@ -1859,9 +1869,10 @@ describe('V1-21b review 5 — a deleted or banned holder reaches over KEY nothin
       expect(reachedBy(env), JSON.stringify(membership)).toEqual(baseline);
       expect(env.maxRiskTier).toBe(1);
     }
-    // a contact-only position has no account; its JobRole map is its whole scope, as before
+    // a contact-only position has no account; its JobRole map is its whole scope, as before, but for
+    // call_create_task, which needs a holder (W9-KEY-DISPATCH-INCLUDES, CR-W7CTC-2; D-73, D-88)
     expect(reachedBy(policy.envelopeForPosition({ jobRole: SALES_LEAD, membershipId: null, userId: null }))).toEqual(
-      reachedBy(policy.envelopeForJobRole(SALES_LEAD)),
+      withoutHolderTools(reachedBy(policy.envelopeForJobRole(SALES_LEAD))),
     );
   });
 
@@ -2215,9 +2226,10 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
         } as any),
       ),
     ).toEqual(reachedBy(policy.envelopeForJobRole(SALES_LEAD)));
-    // a contact-only position has no account; its JobRole map is its whole scope, as before
+    // a contact-only position has no account; its JobRole map is its whole scope, as before, but for
+    // call_create_task, which needs a holder (W9-KEY-DISPATCH-INCLUDES, CR-W7CTC-2; D-73, D-88)
     expect(reachedBy(policy.envelopeForPosition({ jobRole: SALES_LEAD, businessId: BIZ_A, membershipId: null, userId: null } as any))).toEqual(
-      reachedBy(policy.envelopeForJobRole(SALES_LEAD)),
+      withoutHolderTools(reachedBy(policy.envelopeForJobRole(SALES_LEAD))),
     );
   });
 
@@ -2533,6 +2545,8 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
   /** What the Sales Lead position reaches bounded by each of `ms` (as HTTP reads each): the precise answer. */
   const capped = (...ms: MemberRow[]) =>
     REGISTRY.filter((t) => passes(policy.envelopeForJobRole(SALES_LEAD), t) && ms.every((m) => passes(envelope(scopesOf(m)), t))).sort();
+  /** The same for a contact-only position, which has no holder (W9-KEY-DISPATCH-INCLUDES, CR-W7CTC-2; D-73, D-88). */
+  const cappedContactOnly = (...ms: MemberRow[]) => withoutHolderTools(capped(...ms));
   const BASELINE_REACH = reachedBy(envelope({}));
 
   /** K2: every governed tool KEY reaches is one HTTP gives each of `holders` in business A. */
@@ -2672,13 +2686,13 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
     it("the repro, at run time: a contact-only position already on the ADMIN's phone (filed before the door was shut) follows the ADMIN's narrowing", async () => {
       const before: World = { users: [ADMIN_USER], memberships: [ADMIN_FULL], assignments: [contactOnly(PHONE)] };
       expect(await httpAnswer(before, ADMIN, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe(true);
-      expect(reachedBy((await routeThroughBridge(before, PHONE)).env)).toEqual(capped(ADMIN_FULL));
+      expect(reachedBy((await routeThroughBridge(before, PHONE)).env)).toEqual(cappedContactOnly(ADMIN_FULL));
 
       const w: World = { users: [ADMIN_USER], memberships: [ADMIN_NARROWED], assignments: [contactOnly(PHONE)] };
       expect(await httpAnswer(w, ADMIN, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe('Insufficient permissions: revenue requires write access (you have none)');
       expect(await httpAnswer(w, ADMIN, BIZ_A, { module: 'crm', minLevel: 'write' })).toBe('Insufficient permissions: crm requires write access (you have read)');
       const { env } = await routeThroughBridge(w, PHONE);
-      expect(reachedBy(env)).toEqual(capped(ADMIN_NARROWED));
+      expect(reachedBy(env)).toEqual(cappedContactOnly(ADMIN_NARROWED));
       for (const tool of ['commerce_create_invoice', 'deals_mark_won', 'payments_create_link']) {
         const d = await oversight.evaluate(BIZ_A, tool, undefined, [], env, reader(2));
         expect(d.allowed, `${tool}: ${d.reason}`).toBe(false);
@@ -2694,7 +2708,7 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
       const w: World = { users: [user(INVITED, '+1 (868) 555-1905')], memberships: [STAFF_ROW], assignments: [contactOnly('+18685551905')] };
       expect(await httpAnswer(w, INVITED, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe('Insufficient permissions: revenue requires write access (you have read)');
       const { env } = await routeThroughBridge(w, '+18685551905');
-      expect(reachedBy(env)).toEqual(capped(STAFF_ROW));
+      expect(reachedBy(env)).toEqual(cappedContactOnly(STAFF_ROW));
       expect((await oversight.evaluate(BIZ_A, 'commerce_create_invoice', undefined, [], env, reader(2))).allowed).toBe(false);
       await expectWithinHttp(w, env, [INVITED]);
     });
@@ -2704,7 +2718,7 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
       const A2 = member('m_2', 'u_2', BIZ_A, 'STAFF', { crm: 'read', revenue: 'admin' });
       const both: World = { users: [user('u_1', PHONE), user('u_2', '+1-868-555-1904')], memberships: [A1, A2], assignments: [contactOnly(PHONE)] };
       const env = (await routeThroughBridge(both, PHONE)).env;
-      expect(reachedBy(env)).toEqual(capped(A1, A2));
+      expect(reachedBy(env)).toEqual(cappedContactOnly(A1, A2));
       await expectWithinHttp(both, env, ['u_1', 'u_2']);
 
       for (const state of [BANNED, DELETED]) {
@@ -2717,7 +2731,7 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
         memberships: [member('m_b', 'u_b', BIZ_B, 'STAFF', {})],
         assignments: [contactOnly(PHONE)],
       };
-      expect(reachedBy((await routeThroughBridge(elsewhere, PHONE)).env)).toEqual(capped());
+      expect(reachedBy((await routeThroughBridge(elsewhere, PHONE)).env)).toEqual(cappedContactOnly());
     });
 
     it('K2 property: over positions on the phone x the members whose account phone it is, a governed tool KEY reaches is one HTTP gives every one of them', async () => {
@@ -2747,7 +2761,7 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
           };
           const { env } = await routeThroughBridge(w, PHONE);
           const holders = [...ms.map((m) => m.userId), ...(p.userId ? [p.userId] : [])];
-          const expected = p.userId ? capped(HOLDER_ROW, ...ms) : capped(...ms);
+          const expected = p.userId ? capped(HOLDER_ROW, ...ms) : cappedContactOnly(...ms);
           expect(reachedBy(env), `${JSON.stringify(p)} / ${ms.map((m) => m.id).join(',')}`).toEqual(expected);
           reached += expected.length;
           await expectWithinHttp(w, env, holders);
@@ -2759,8 +2773,8 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
     it('policy: phoneMembers bound a position; one not shown to be in the position business with an active account caps it to the baseline (fail closed)', () => {
       const row = { role: 'STAFF', permissionScopes: { crm: 'read' }, businessId: BIZ_A, userId: 'u_1', user: ACTIVE };
       const base = { jobRole: SALES_LEAD, businessId: BIZ_A, membershipId: null, userId: null };
-      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [] } as any))).toEqual(capped());
-      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [row] } as any))).toEqual(capped(member('m', 'u_1', BIZ_A, 'STAFF', { crm: 'read' })));
+      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [] } as any))).toEqual(cappedContactOnly());
+      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [row] } as any))).toEqual(cappedContactOnly(member('m', 'u_1', BIZ_A, 'STAFF', { crm: 'read' })));
       for (const [label, m] of [
         ['in another business', { ...row, businessId: BIZ_B }],
         ['business not given', { ...row, businessId: undefined }],

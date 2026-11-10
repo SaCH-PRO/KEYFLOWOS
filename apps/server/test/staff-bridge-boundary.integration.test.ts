@@ -774,8 +774,10 @@ describe("TD9-2 — a call log names only the business's own contact, and B's sc
       expect(turns).toHaveLength(4);
       expect(turns[3]).toMatchObject({ allowed: false });
       expect(turns[3].out).toBeUndefined();
-      expect(await db.callLog.count({ where: { businessId: ID.bizA, callerId: { in: [ID.banned, ID.ownerA] }, createdAt: { gte: new Date(Date.now() - 60_000) } } })).toBe(0);
+      expect(await db.callLog.count({ where: { businessId: ID.bizA, callerId: ID.banned } })).toBe(0);
+      // the only call logs this case wrote are the holder's two (WhatsApp and SMS)
       expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before + 2);
+      expect(await db.callLog.count({ where: { id: { in: [turns[1].out!.id, turns[2].out!.id] }, callerId: ID.full } })).toBe(2);
     } finally {
       orchestratorChat.chat.mockImplementation(async () => ({ reply: 'stub KEY reply', sessionId: null }));
     }
