@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { callLogsTheirCallerMayOpen } from './capacity-insight.service';
+import { callLogsTheirCallerMayLog } from './capacity-insight.service';
 
 export interface ChaseNotice {
   type: 'overdue_task' | 'pending_approval' | 'stalled_content' | 'missing_evidence' | 'unlogged_call';
@@ -164,10 +164,11 @@ export class ChaserService {
     }
 
     // 5. Unlogged call outcomes (>24h after scheduled). A caller is not asked to log a call log
-    // whose contact they may not open (W9-CALL-LOG-DEADEND, review CR-2): every call-log route
-    // answers them 404 for it.
+    // whose outcome POST complete refuses them (W9-CALL-LOG-DEADEND, review CR-2; SEC-W9CLD-1/2):
+    // not a member of the business (403, contactless call logs too), crm below write (403), or a
+    // contact they may not open (404).
     const callCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const unloggedCalls = await callLogsTheirCallerMayOpen(
+    const unloggedCalls = await callLogsTheirCallerMayLog(
       this.prisma,
       businessId,
       await this.prisma.client.callLog.findMany({

@@ -492,8 +492,9 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
    * 'unlogged_call' notice and CapacityInsightService's 'unlogged_calls' alert told a caller to log
    * the outcome of a call log whose contact they can no longer open, a call log every call-log route
    * answers them 404 for (CL-04d). Both now leave out the call logs whose contact the caller may not
-   * open by the V1-08 rule the call-log routes apply through CallLog.contactId (a caller who is no
-   * longer a member opens no contact). A contactless call log stays the business's, as on the routes.
+   * open by the V1-08 rule the call-log routes apply through CallLog.contactId. A contactless call
+   * log stays the business's, as on the routes, for a caller the routes admit (CL-04h, CL-04i: a
+   * caller who is not a member, or whose crm level is below write, is chased for none).
    * The real services run over this suite's real PrismaService; the event emitter is a recorder and
    * the workload aggregator reports nobody overloaded.
    */
@@ -610,6 +611,105 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
 
     expect(await chasedIds()).toEqual([]);
     expect(await flaggedIds()).toEqual([]);
+  });
+
+  /**
+   * W9-CALL-LOG-DEADEND review repairs (SEC-W9CLD-1/CR-W9CLD-1, SEC-W9CLD-2/CR-W9CLD-2), under the
+   * same CR-2 ruling: the chase is for the caller exactly as the call-log routes answer that caller.
+   * Two refusals came before the contact rule and were not applied: a caller who is not a member of
+   * the business (or a callerId that names no user, the legacy staff-member id) is refused 403 by
+   * every call-log route, contactless call logs included; and ModuleScopeGuard refuses POST
+   * calls/:id/complete, the outcome the notice asks for, to a member whose crm level, as the guard
+   * computes it (an explicit scope map's crm key, a missing key being 'none'; otherwise the role
+   * default), is below write. Rows here use a `dead_` id so CL-04e/f's exact `stale_` lists are
+   * untouched.
+   */
+  const DEAD = {
+    member: (tag: string) => `${P}dead_${tag}`,
+    contact: (tag: string) => `${P}cDead_${tag}`,
+  };
+
+  async function chasedAndFlagged(ids: string[]) {
+    const notices = ((await (await chaser()).svc.chaseBusiness(ID.bizA)) as any[])
+      .filter((n) => n.type === 'unlogged_call' && ids.includes(n.entityId));
+    const alerts = ((await (await capacity()).svc.scanBusiness(ID.bizA)) as any[])
+      .filter((a) => a.type === 'unlogged_calls' && a.affectedEntityIds.some((id: string) => ids.includes(id)));
+    return {
+      chased: notices.map((n) => [n.entityId, n.recipientUserId]).sort(),
+      flagged: alerts.map((a) => [a.affectedEntityIds[0], a.affectedUserIds[0]]).sort(),
+    };
+  }
+
+  it('CL-04h RULING (review CR-2; SEC-W9CLD-1, CR-W9CLD-1): a caller who is not a member of the business, or a callerId that names no user, is not chased or flagged for a contactless call log either; every call-log route answers that caller 403 (W9-CALL-LOG-DEADEND)', async () => {
+    await clearRateLimits();
+    const goneNone = `${P}dead_goneNone`; // contactless, caller is bizB's owner only
+    const staffRecord = `${P}dead_staffRecord`; // contactless, callerId a legacy staff-member id
+    const ctlNone = `${P}dead_ctlNone`; // CONTROL: contactless, a crm write member of bizA
+    for (const [id, callerId] of [[goneNone, ID.ownerB], [staffRecord, `${P}staffMemberRecord`], [ctlNone, ID.staffAll]]) {
+      await db.callLog.create({ data: { id, businessId: ID.bizA, contactId: null, callerId, scheduledAt: staleAt(), notes: 'unlogged', evidenceIds: [] } });
+    }
+
+    const { chased, flagged } = await chasedAndFlagged([goneNone, staffRecord, ctlNone]);
+    expect(chased).toEqual([[ctlNone, ID.staffAll]]);
+    expect(flagged).toEqual([[ctlNone, ID.staffAll]]);
+
+    // the dead-end the prompt pointed at: the non-member caller opens and completes nothing here
+    await as(ID.ownerB).get(`${calls}/${goneNone}`).expect(403);
+    await as(ID.ownerB).post(`${calls}/${goneNone}/complete`, { outcome: 'reached' }).expect(403);
+    expect((await db.callLog.findUnique({ where: { id: goneNone } })).completedAt).toBeNull();
+    await clearRateLimits();
+  });
+
+  it("CL-04i RULING (review CR-2; SEC-W9CLD-2, CR-W9CLD-2): a caller whose crm level is below write as ModuleScopeGuard computes it (crm 'none', an explicit scope map with no crm key, crm 'read', the STAFF role default) is not chased or flagged for a call log on their own contact or a contactless one; POST complete answers them 403, and a crm write member is still chased (W9-CALL-LOG-DEADEND)", async () => {
+    await clearRateLimits();
+    const below: Array<[string, Record<string, string> | null, number]> = [
+      // [tag, permissionScopes, what GET calls/:id answers them]
+      ['none', { crm: 'none' }, 403],
+      ['nokey', { operations: 'write' }, 403],
+      ['read', { crm: 'read' }, 200],
+      ['dflt', null, 200],
+    ];
+    const ids: string[] = [];
+    for (const [tag, permissionScopes] of below) {
+      const userId = DEAD.member(tag);
+      await db.user.create({ data: { id: userId, email: `${P}dead_${tag}@test.local`, role: 'USER' } });
+      await db.membership.create({
+        data: { id: `${P}m_dead_${tag}`, userId, businessId: ID.bizA, role: 'STAFF', ...(permissionScopes ? { permissionScopes } : {}) },
+      });
+      // a TEAM contact they own: their book, whatever their crm_view
+      await db.contact.create({ data: { id: DEAD.contact(tag), businessId: ID.bizA, firstName: 'V84D', lastName: `dead ${tag}`, visibility: 'TEAM', ownerId: userId } });
+      for (const [suffix, contactId] of [['own', DEAD.contact(tag)], ['none', null]] as const) {
+        const id = `${P}dead_${tag}_${suffix}`;
+        await db.callLog.create({ data: { id, businessId: ID.bizA, contactId, callerId: userId, scheduledAt: staleAt(), notes: 'unlogged', evidenceIds: [] } });
+        ids.push(id);
+      }
+    }
+    // CONTROL: a crm write member (staffAll) on a TEAM contact they may open and on no contact
+    const ctl: Array<[string, string | null]> = [[`${P}dead_ctlWrite_team`, ID.cTeam], [`${P}dead_ctlWrite_none`, null]];
+    for (const [id, contactId] of ctl) {
+      await db.callLog.create({ data: { id, businessId: ID.bizA, contactId, callerId: ID.staffAll, scheduledAt: staleAt(), notes: 'unlogged', evidenceIds: [] } });
+      ids.push(id);
+    }
+
+    const { chased, flagged } = await chasedAndFlagged(ids);
+    const expected = ctl.map(([id]) => [id, ID.staffAll]).sort();
+    expect(chased).toEqual(expected);
+    expect(flagged).toEqual(expected);
+
+    // the dead-end the prompt pointed at: each of them is refused the outcome it asks for
+    for (const [tag, , getStatus] of below) {
+      for (const suffix of ['own', 'none']) {
+        const id = `${P}dead_${tag}_${suffix}`;
+        await as(DEAD.member(tag)).get(`${calls}/${id}`).expect(getStatus);
+        const res = await as(DEAD.member(tag)).post(`${calls}/${id}/complete`, { outcome: 'reached' });
+        expect([res.status, res.body.message], `${tag} ${suffix}`).toEqual([
+          403,
+          `Insufficient permissions: crm requires write access (you have ${tag === 'read' || tag === 'dflt' ? 'read' : 'none'})`,
+        ]);
+        expect((await db.callLog.findUnique({ where: { id } })).completedAt, id).toBeNull();
+      }
+    }
+    await clearRateLimits();
   });
 });
 
