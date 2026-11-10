@@ -23,6 +23,12 @@ import { ReportsController } from './reports.controller';
 import { RevenueReportingController } from '../commerce/revenue-reporting.controller';
 import { CANONICAL_MODULE_TOOLS, JobRolePolicyService } from '../structure/job-role-policy.service';
 import { graphActionModuleScope, graphActionRequirement } from '../ai/graph-actions.controller';
+import {
+  cortexCommandRefusal,
+  cortexCommandRequirement,
+  type CortexMemberAuthority,
+} from '../key-cortex/key-cortex.controller';
+import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
 
 /** The KEY tool that reads what each revenue-gated report route reads. */
 const TOOL_ROUTE: ReadonlyArray<readonly [tool: string, handler: keyof ReportsController]> = [
@@ -37,6 +43,29 @@ const REPORT_TOOLS = TOOL_ROUTE.map(([t]) => t);
 
 const scopeOf = (proto: object, handler: string) =>
   Reflect.getMetadata(MODULE_SCOPE_KEY, (proto as Record<string, unknown>)[handler] as object);
+
+/**
+ * A7-SEC-2 (W9-MONEY-REPORTS-KEY, D-57): the KEY Cortex direct commands that read a money report,
+ * the module scope their connector module already needs at write, and the report route whose
+ * requirement they carry (generate_pnl reads the P&L; create_report / export_report read any report
+ * GET reports/generate serves, P&L, cash flow, balance sheet, tax summary and revenue by included).
+ */
+const MONEY_REPORT_COMMANDS: ReadonlyArray<
+  readonly [module: string, action: string, moduleScope: string, handler: keyof ReportsController]
+> = [
+  ['finance', 'generate_pnl', 'expenses', 'pnl'],
+  ['analytics', 'create_report', 'analytics', 'generateReport'],
+  ['analytics', 'export_report', 'analytics', 'generateReport'],
+];
+
+const member = (scopes: Record<string, string>, role = 'STAFF'): CortexMemberAuthority => ({
+  userId: 'usr_v95h_member',
+  businessId: 'biz_v95h_report',
+  role,
+  superAdmin: false,
+  scopes,
+  member: true,
+});
 
 const policy = new JobRolePolicyService();
 const reaches = (permissions: Record<string, string>, tool: string) =>
@@ -83,13 +112,72 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
     expect(graphActionRequirement(tool)).toEqual({ scopes: [{ module: 'revenue', minLevel: 'read' }] });
   });
 
-  // A7-SEC-2 (review, should-fix, outside this packet's write set): the KEY Cortex direct-command
-  // door (key-cortex.controller.ts CORTEX_MODULE_RULES: finance -> expenses, analytics -> analytics,
-  // at write) still serves finance.generate_pnl (finance-adapter.service.ts -> LedgerReportingService.getPnl)
-  // and analytics.create_report / export_report (P&L, balance sheet, tax summary, revenue by customer,
-  // CSV included) to a member with revenue:none. Closing it needs a per-action rule in the cortex
-  // controller; held for a follow-up packet.
-  it.todo(
-    'A7-SEC-2 (follow-up packet): cortexCommandRefusal refuses finance.generate_pnl and analytics.create_report / export_report to a member without revenue:read',
+  // A7-SEC-2 (W9-MONEY-REPORTS-KEY, owner ruling D-57): the KEY Cortex direct-command door
+  // (key-cortex.controller.ts CORTEX_MODULE_RULES: finance -> expenses, analytics -> analytics, at
+  // write) served finance.generate_pnl (finance-adapter.service.ts -> LedgerReportingService.getPnl)
+  // and analytics.create_report / export_report (P&L, cash flow, balance sheet, tax summary, revenue
+  // by customer, CSV included) to a member with revenue:none. Those three now also need revenue:read,
+  // the requirement the REST money reports declare, on top of their module's own write scope.
+  it.each(MONEY_REPORT_COMMANDS)(
+    'A7-SEC-2 (W9-MONEY-REPORTS-KEY, was it.todo): cortexCommandRefusal refuses %s.%s to a member without revenue:read (D-57)',
+    (module, action, moduleScope) => {
+      for (const scopes of [
+        { [moduleScope]: 'write' },
+        { [moduleScope]: 'admin', revenue: 'none' },
+        { [moduleScope]: 'admin', finance: 'admin', expenses: 'admin', analytics: 'admin', reports: 'admin' },
+        { [moduleScope]: 'admin', Revenue: 'read' },
+        { [moduleScope]: 'admin', revenue: 'owner' },
+      ]) {
+        const level = (scopes as Record<string, string>).revenue ?? 'none';
+        expect(cortexCommandRefusal(member(scopes), module, action), `${JSON.stringify(scopes)} -> ${module}.${action}`).toBe(
+          `Insufficient permissions: revenue requires read access (you have ${level})`,
+        );
+      }
+      for (const level of ['read', 'write', 'admin']) {
+        expect(cortexCommandRefusal(member({ [moduleScope]: 'write', revenue: level }), module, action), level).toBeNull();
+      }
+    },
   );
+
+  it.each(MONEY_REPORT_COMMANDS)(
+    'A7-SEC-2 (W9-MONEY-REPORTS-KEY): %s.%s asks for what the money report route asks for (the decorator ModuleScopeGuard reads, D-57)',
+    (module, action, moduleScope, handler) => {
+      const route = scopeOf(ReportsController.prototype, handler);
+      expect(route).toEqual({ module: 'revenue', minLevel: 'read' });
+      expect(cortexCommandRequirement(module, action)).toEqual({ scope: moduleScope, alsoRequires: route });
+    },
+  );
+
+  it('A7-SEC-2 (W9-MONEY-REPORTS-KEY) control: revenue:read does not replace the module write scope; other finance and analytics actions, the role defaults and SUPER_ADMIN are unchanged (D-57)', () => {
+    // revenue alone is not the module's own write scope
+    expect(cortexCommandRefusal(member({ revenue: 'admin' }), 'finance', 'generate_pnl')).toBe(
+      'Insufficient permissions: expenses requires write access (you have none)',
+    );
+    expect(cortexCommandRefusal(member({ revenue: 'admin', analytics: 'read' }), 'analytics', 'export_report')).toBe(
+      'Insufficient permissions: analytics requires write access (you have read)',
+    );
+    // the actions that read no money report keep the module rule alone
+    const others: ReadonlyArray<readonly [module: string, action: string, moduleScope: string]> = [
+      ['finance', 'record_expense', 'expenses'],
+      ['finance', 'create_budget', 'expenses'],
+      ['analytics', 'create_dashboard', 'analytics'],
+      ['analytics', 'track_event', 'analytics'],
+    ];
+    for (const [module, action, moduleScope] of others) {
+      expect(cortexCommandRequirement(module, action), `${module}.${action}`).toEqual({ scope: moduleScope });
+      for (const scopes of [{ [moduleScope]: 'write' }, { [moduleScope]: 'write', revenue: 'none' }]) {
+        expect(cortexCommandRefusal(member(scopes), module, action), `${module}.${action}`).toBeNull();
+      }
+    }
+    for (const [module, action] of MONEY_REPORT_COMMANDS) {
+      // OWNER and ADMIN role defaults hold revenue admin; STAFF defaults stop at the module write scope, as before
+      expect(cortexCommandRefusal(member(defaultScopesForRole('OWNER'), 'OWNER'), module, action)).toBeNull();
+      expect(cortexCommandRefusal(member(defaultScopesForRole('ADMIN'), 'ADMIN'), module, action)).toBeNull();
+      expect(cortexCommandRefusal(member(defaultScopesForRole('STAFF'), 'STAFF'), module, action)).toMatch(/requires write access \(you have read\)$/);
+      // ModuleScopeGuard admits SUPER_ADMIN on the REST money reports; D-46 is about invoice writes
+      for (const isMember of [true, false]) {
+        expect(cortexCommandRefusal({ ...member({}, 'SUPER_ADMIN'), superAdmin: true, member: isMember }, module, action)).toBeNull();
+      }
+    }
+  });
 });
