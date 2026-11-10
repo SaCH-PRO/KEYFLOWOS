@@ -1901,6 +1901,10 @@ export class CrmController {
     // W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13h; D-90 / D-63): every part is
     // read for this member, so one without revenue read gets no money row and no
     // money figure in the contact, meta, timeline, summary or insight.
+    // Not withheld yet (review SEC-W7CMV-3, follow-up): health.payment, the
+    // paid / total invoice ratio, which GET .../health-metrics also serves. It
+    // is a ratio, not an amount; withholding it on both routes needs a value
+    // the web HealthMetrics contract (a number, averaged into the score) accepts.
     const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
     const [story, insight, health] = await Promise.all([
       this.journey.getContactCrossJourney(businessId, contactId, actorUserId),

@@ -40,6 +40,28 @@ export type ContactWithStats = Contact & {
   meta?: ContactMeta;
 };
 
+/**
+ * W7-CONTACT-MONEY-VIEWS review repair SEC-W7CMV-3 (V55-13i; owner rulings
+ * D-90 and D-63): the Contact.riskFlags entries ContactInsightService.recompute
+ * derives from the contact's invoices (revenue rows, D-63): 'unpaid_invoices'
+ * (an unpaid invoice), 'poor_payment_history' (its paymentReliability) and
+ * 'declining_engagement' (a paid total above 0).
+ */
+const REVENUE_RISK_FLAGS: ReadonlySet<string> = new Set(['unpaid_invoices', 'poor_payment_history', 'declining_engagement']);
+
+/**
+ * The Contact.opportunities entries it derives from the contact's quotes and
+ * invoices (SEC-W7CMV-3; D-90 / D-63): 'pending_quotes' (a quote not accepted)
+ * and 'upsell_ready' (a paid total above 500, a revenue threshold like the
+ * insight's 'high-value' tag).
+ */
+const REVENUE_OPPORTUNITIES: ReadonlySet<string> = new Set(['pending_quotes', 'upsell_ready']);
+
+/** A stored riskFlags / opportunities list without the `revenue` entries; any other stored value as it is. */
+function withoutRevenueSignals(value: Prisma.JsonValue | null, revenue: ReadonlySet<string>): Prisma.JsonValue | null {
+  return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
+}
+
 type ContactHighlight = {
   contactId: string;
   name: string;
@@ -605,7 +627,16 @@ export class CrmStatsService {
    * so meta's invoice figures, totalRevenue and outstandingBalance included,
    * are 0 and its lead score has no invoice term), and the contact's stored
    * lifetimeValue / averageSpend (the paid total ContactInsightService
-   * writes) are null. Before it the route served
+   * writes) are null. Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): so is
+   * its stored paymentReliability (the paid / total invoice score, which GET
+   * .../revenue-summary already serves that member as null), and its stored
+   * riskFlags / opportunities lose the entries ContactInsightService derives
+   * from the contact's invoices and quotes (REVENUE_RISK_FLAGS,
+   * REVENUE_OPPORTUNITIES); the other entries stay. Not closed here (outside
+   * this write set, follow-up CR-W7CMV-2): GET /crm/businesses/:b/contacts
+   * (CrmService.listContacts) still serves the same stored fields, and sorts
+   * and filters on revenue, to the same member, so until that list is closed
+   * this withholding does not keep them from that member. Before it the route served
    * every event, invoice total and revenue figure on crm read alone. The owner,
    * a member with revenue read and a system-context caller get every row and
    * figure, as before.
@@ -732,7 +763,19 @@ export class CrmStatsService {
       (contact.status === 'CLIENT' ? 5 : 0);
 
     // W7-CONTACT-MONEY-VIEWS (V55-13h; D-90 / D-63): the stored amounts on the contact row itself.
-    const servedContact: Contact = readsRevenue ? contact : { ...contact, lifetimeValue: null, averageSpend: null };
+    // Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): and the stored signals
+    // read from the same invoice and quote rows, so this read agrees with
+    // GET .../revenue-summary (paymentReliability null for that member).
+    const servedContact: Contact = readsRevenue
+      ? contact
+      : {
+          ...contact,
+          lifetimeValue: null,
+          averageSpend: null,
+          paymentReliability: null,
+          riskFlags: withoutRevenueSignals(contact.riskFlags, REVENUE_RISK_FLAGS),
+          opportunities: withoutRevenueSignals(contact.opportunities, REVENUE_OPPORTUNITIES),
+        };
     return { contact: servedContact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 

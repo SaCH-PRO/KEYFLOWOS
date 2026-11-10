@@ -103,12 +103,23 @@ export class CrmJourneyService {
   /**
    * W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13g; owner rulings D-90 and D-63, the
    * V1-84 timeline rule, as the briefings apply it): the reading member, or null
-   * for a caller that names none (system context: every row and figure, as
-   * before). Every HTTP route names its member (crm.controller.ts). A member
+   * for a caller that names none (every row and figure, as before). A member
    * without revenue read is served no money row and no money figure: the
    * contact's invoices and quotes are not read (D-63: commerce rows are revenue
    * rows), every figure read from them is 0, and the ContactEvents V55-13e
    * withholds are withheld (readableContactEvents).
+   *
+   * Review repair SEC-W7CMV-2 / CR-W7CMV-1 (D-90 / D-63): the default is
+   * fail-open. A caller that names no member gets full disclosure, so it is
+   * correct only for a caller that serves no member. The crm.controller.ts
+   * routes this packet changed name their member (journey, cross-journey,
+   * story, dossier). Not every member route does yet: GET .../ai-insight
+   * (crm-ai.controller.ts) serves a member with crm read and calls
+   * generateAiInsight with no member, so that member still gets the payment
+   * sentence and the 'high-value' tag. That route is outside this packet's
+   * write set; passing the member from it, and making the no-member default
+   * explicit (a required system sentinel, so a route that forgets the member
+   * fails closed), is a follow-up.
    */
   private async viewerOf(businessId: string, viewerUserId?: string | null): Promise<TimelineViewer | null> {
     return viewerUserId ? resolveTimelineViewer(this.prisma, businessId, viewerUserId) : null;
@@ -614,8 +625,18 @@ export class CrmJourneyService {
    * `viewerUserId` is the reading member (GET .../dossier). For one without
    * revenue read the contact's invoices are not read, so the summary carries no
    * payment sentence (it printed 'payments totaling TTD <amount>') and no
-   * 'high-value' tag (a revenue threshold). With no viewer (the ai-insight
-   * route, system context) every figure, as before.
+   * 'high-value' tag (a revenue threshold). With no viewer, every figure, as
+   * before (fail-open, see viewerOf).
+   *
+   * Review repair SEC-W7CMV-2 / CR-W7CMV-1: GET .../ai-insight
+   * (crm-ai.controller.ts) is NOT a system context. It is a member's HTTP read
+   * (crm read plus the ai_tools flag, behind assertContactVisible), and the web
+   * contact page calls it. It calls this method with no member, so a member
+   * without revenue read still gets the payment sentence with its amount and
+   * the 'high-value' tag there. That route is outside this packet's write set
+   * and is a follow-up. So is GET .../insight-card on the same controller
+   * (ContactInsightService.getSnapshot), which serves lifetimeValue,
+   * openDeals.value and 'Lifetime value of TTD <amount>' on crm read alone.
    */
   async generateAiInsight(businessId: string, contactId: string, viewerUserId?: string | null): Promise<AiInsight> {
     const readsRevenue = this.readsRevenue(await this.viewerOf(businessId, viewerUserId));

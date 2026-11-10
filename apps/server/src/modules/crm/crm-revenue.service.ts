@@ -353,6 +353,17 @@ export class CrmRevenueService {
     return found.filter((row) => !isRefundRow(row));
   }
 
+  /**
+   * Not under W7-CONTACT-MONEY-VIEWS (review SEC-W7CMV-1, follow-up; it needs
+   * an owner ruling): this and getFinancialGrowth read the business's quotes,
+   * invoices and payments with no member. Their routes, GET
+   * /crm/businesses/:b/predictive-revenue and .../financial-growth
+   * (crm.controller.ts, RequireModuleScope('crm', 'read') only), serve the
+   * business-wide collected, invoiced, pipeline and average-client figures to
+   * a member with crm read and revenue 'none'. That is the member the
+   * contact-scoped reads above withhold one contact's figures from under D-90
+   * / D-63. Those handlers are outside this packet's write set.
+   */
   async getPredictiveRevenue(businessId: string): Promise<RevenueData> {
     const now = new Date();
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

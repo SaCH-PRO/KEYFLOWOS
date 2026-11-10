@@ -265,6 +265,14 @@
  * the insight's payment sentence, the contact's stored lifetimeValue /
  * averageSpend) is 0 or null in the response's existing shape. The owner and
  * a member with revenue read get every row and figure, as before.
+ *   Review repair SEC-W7CMV-3 (V55-13i): the detail and the dossier's contact
+ *   also serve that member the stored paymentReliability as null (as the
+ *   revenue summary does), and riskFlags / opportunities without the entries
+ *   derived from invoices and quotes. Residuals outside the write set (follow-
+ *   up): GET .../ai-insight and .../insight-card (crm-ai.controller.ts), the
+ *   contact list (stored amounts, revenue sort and filters), the business-wide
+ *   predictive-revenue / financial-growth, and health.payment (dossier and
+ *   .../health-metrics).
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -3126,6 +3134,60 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const foreign = await contactRoute(ID.ownerB, S13h.contactId, '');
     expect(foreign.status).toBe(403);
     expectNoMoney(foreign.body, 'the refusal');
+  });
+
+  // W7-CONTACT-MONEY-VIEWS review repair SEC-W7CMV-3 (owner rulings D-90 and
+  // D-63). Reproduced on 5be0a761 by a temporary probe: with the stored
+  // paymentReliability 37, riskFlags ['unpaid_invoices', 'poor_payment_history',
+  // 'dormant'] and opportunities ['upsell_ready', 'pending_quotes',
+  // 'open_deals'], GET contacts/:c and .../dossier served the member with crm
+  // read and revenue 'none' all of them (lifetimeValue null), while GET
+  // .../revenue-summary served the same member paymentReliability null.
+  // ContactInsightService derives those riskFlags / opportunities entries from
+  // the contact's invoices and quotes (revenue rows, D-63); 'upsell_ready' is a
+  // paid-total threshold like the insight's 'high-value' tag, which V55-13f
+  // withholds.
+  it("V55-13i (SEC-W7CMV-3, D-90 / D-63, W7-CONTACT-MONEY-VIEWS review): GET /crm/businesses/:b/contacts/:c and .../dossier serve a member with crm read and revenue 'none' the contact's stored paymentReliability as null, as .../revenue-summary does, and its stored riskFlags / opportunities without the entries derived from its invoices and quotes ('unpaid_invoices', 'poor_payment_history', 'declining_engagement', 'pending_quotes', 'upsell_ready'), the other entries kept in order; the owner and a member with revenue read keep every stored value", async () => {
+    const S13i = await seedMoneyContact('C13i');
+    const RISK = ['unpaid_invoices', 'dormant', 'poor_payment_history', 'high_cancellation_rate', 'declining_engagement'];
+    const OPPORTUNITIES = ['pending_quotes', 'open_deals', 'upsell_ready', 'referral_ask'];
+    await db.contact.update({ where: { id: S13i.contactId }, data: { paymentReliability: 37, riskFlags: RISK, opportunities: OPPORTUNITIES } });
+    const read = async (user: string, suffix: string) => {
+      const res = await contactRoute(user, S13i.contactId, suffix);
+      expect(res.status, `${user} ${suffix}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body;
+    };
+
+    // crm read, revenue 'none': the detail and the dossier's contact agree with the revenue summary.
+    for (const suffix of ['', '/dossier']) {
+      const { contact } = await read(S13i.staff, suffix);
+      expect(contact.id, suffix).toBe(S13i.contactId);
+      expect(contact.paymentReliability, suffix).toBeNull();
+      expect(contact.riskFlags, suffix).toEqual(['dormant', 'high_cancellation_rate']);
+      expect(contact.opportunities, suffix).toEqual(['open_deals', 'referral_ask']);
+      expect(contact.lifetimeValue, suffix).toBeNull();
+      expect(contact.averageSpend, suffix).toBeNull();
+      expectNoMoney(contact, `${suffix || 'detail'} contact, revenue 'none'`);
+    }
+    expect((await read(S13i.staff, '/revenue-summary')).paymentReliability).toBeNull();
+
+    // The owner, and a STAFF member with revenue read, keep every stored value.
+    for (const user of [C.owner, S13i.staffRev]) {
+      for (const suffix of ['', '/dossier']) {
+        const { contact } = await read(user, suffix);
+        expect(contact.paymentReliability, `${user} ${suffix}`).toBe(37);
+        expect(contact.riskFlags, `${user} ${suffix}`).toEqual(RISK);
+        expect(contact.opportunities, `${user} ${suffix}`).toEqual(OPPORTUNITIES);
+        expect(cents(contact.lifetimeValue), `${user} ${suffix}`).toBe(cents(MV.LIFETIME_VALUE));
+      }
+    }
+
+    // A stored value that is not a list is served as it is (null here).
+    const { Prisma } = await import('@prisma/client');
+    await db.contact.update({ where: { id: S13i.contactId }, data: { riskFlags: Prisma.DbNull, opportunities: Prisma.DbNull } });
+    const bare = (await read(S13i.staff, '')).contact;
+    expect(bare.riskFlags).toBeNull();
+    expect(bare.opportunities).toBeNull();
   });
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
