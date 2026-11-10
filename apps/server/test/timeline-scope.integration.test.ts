@@ -41,6 +41,12 @@
  *         contact of the business stays withheld from every member
  *         visibilityClause restricts (nothing to judge it by).
  *   ST-2, ST-3 are follow-ups outside the write set (it.todo, TS-13, TS-14).
+ *   TS-13a..c (W9-TEXT-ONLY-CONTACT-WRITERS, D-63; was it.todo TS-13, review
+ *   ST-2): live. The KEY send_invoice row ('Invoice <n> sent to <name>') and
+ *   the message_intake.approved row (detail = the plan's summary of the
+ *   sender's message) carry the contactId of the contact they name, written
+ *   here through the real writers, so the rule withholds them from a member
+ *   who may not open that contact.
  *   TS-14 (ST-3) is live since W5-BRIEFING-SCOPE (D-63): the morning briefing
  *   (AiController.morningBriefing) reads through the same rule.
  *   TS-15..TS-17 (W6-BRIEFINGS-SCOPE, D-63; reviews SEC-W5BS-1, SEC-W5BS-2,
@@ -194,6 +200,8 @@ async function cleanup() {
     `DELETE FROM finance_action_items WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W8-REVENUE-ACTIONS-SCOPE (TS-22c): the stored weekly briefing and its sibling notification.
     `DELETE FROM notifications WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    // W9-TEXT-ONLY-CONTACT-WRITERS (TS-13): the message intakes the approved-intake writer reads.
+    `DELETE FROM message_intakes WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_shares WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
@@ -651,10 +659,228 @@ describe('V1-84 review CR-1: rows of a soft-deleted contact (TS-12)', () => {
   });
 });
 
-describe('V1-84 review follow-up outside the write set (TS-13)', () => {
-  it.todo(
-    "TS-13 (review ST-2): a row that names a contact only in its title / detail (KEY send_invoice 'Invoice <n> sent to <contactName>', module commerce, flow-orchestrator.service.ts; message_intake.approved, detail = plan summary, message-intake-orchestrator.service.ts) is served to a revenue / communications reader who may not open that contact. Closing it needs those writers to set contactId, outside V1-84's write set; timeline-visibility.spec.ts TV-07 lists them (TEXT_ONLY_CONTACT_WRITERS) and fails on any new one",
-  );
+/**
+ * W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2; owner ruling D-63, the rule V1-84
+ * built in timeline-visibility.ts, unchanged by this packet): two writers named
+ * a contact only in their row's text, so the rule could not tell which contact
+ * the row names and served it to every reader of its module:
+ *   - KEY's commerce_send_invoice (FlowOrchestratorService.executeToolAction,
+ *     module commerce -> revenue): title 'Invoice <n> sent to <contact name>';
+ *   - MessageIntakeOrchestrator.executePlan (message_intake.approved, module
+ *     communications -> crm): detail = the plan's summary of the sender's
+ *     message ('<intent> from <sender> — <subject>').
+ * Both now carry the contactId of the contact they name. The rows are written
+ * here through the real writers: the orchestrator's mail, pay-link and status
+ * collaborators are stand-ins (an accepted delivery, no pay link, SENT), and
+ * the Activity rows are written by the real ActivityLogService.createActivity
+ * and TimelineService.recordEvent over this suite's PrismaService. The intake's
+ * plan holds no action (buildPlan's create_thread_and_message would write the
+ * inbox, which this rule does not read), so executePlan writes only its status
+ * and the approved row. The rows are then dated nine days back (T13), older
+ * than every row the cases above read. The block writes its own contacts (with
+ * an email: send_invoice refuses a contact without one), invoices and intakes,
+ * and removes them when it ends, so the cases below read what they did.
+ */
+describe('W9-TEXT-ONLY-CONTACT-WRITERS (D-63): rows that name a contact only in their text carry its contactId (TS-13)', () => {
+  const T13 = new Date(DAY.getTime() - 9 * 86_400_000);
+  const T13_PARAM = `${T13.getFullYear()}-${pad(T13.getMonth() + 1)}-${pad(T13.getDate())}T12:00:00`;
+  const T13_WINDOW = `from=${new Date(T13.getTime() - 3_600_000).toISOString()}&to=${new Date(T13.getTime() + 3_600_000).toISOString()}`;
+  const T13_CURSOR = `cursor=${new Date(T13.getTime() + 86_400_000).toISOString()}`;
+  /** A PRIVATE contact of the owner (ADMIN, staffOwned and staffCrmNone may not open it) and a TEAM one. */
+  const C = { priv: `${P}t13_cPriv`, team: `${P}t13_cTeam` };
+  const EMAIL = { priv: `${P}t13-hidden-payer@test.local`, team: `${P}t13-team-payer@test.local`, none: `${P}t13-stranger@test.local` };
+  const HIDDEN_NAME = 'T13 Hidden Payer';
+  const INV = { priv: `${P}t13_invPriv`, team: `${P}t13_invTeam` };
+  const INTAKE = { priv: `${P}t13_inPriv`, team: `${P}t13_inTeam`, none: `${P}t13_inNone` };
+  const HIDDEN_SUBJECT = 'v84a T13 confidential renovation';
+  /** The ids of the rows the two writers wrote (cuid ids). */
+  const ROW = { invPriv: '', invTeam: '', inPriv: '', inTeam: '', inNone: '' };
+  const READS = ['events', 'summary', 'legacy'] as const;
+
+  /** The T13 rows a member is served on /events, the day's summary and the legacy route. */
+  async function served(user: string): Promise<{ events: string[]; summary: string[]; legacy: string[]; text: string }> {
+    const ev = await events(user, `limit=200&${T13_WINDOW}`);
+    const day = await summary(user, ID.bizA, T13_PARAM);
+    expect(day.status, `${user}: ${JSON.stringify(day.body).slice(0, 300)}`).toBe(200);
+    const leg = await legacy(user, `limit=200&${T13_CURSOR}`);
+    const mine = new Set(Object.values(ROW));
+    const pick = (list: string[]) => list.filter((id) => mine.has(id)).sort();
+    return {
+      events: pick(await ids(ev)),
+      summary: pick(day.body.events.map((e: { id: string }) => e.id)),
+      legacy: pick(await ids(leg)),
+      text: JSON.stringify([ev.body, day.body, leg.body]),
+    };
+  }
+
+  beforeAll(async () => {
+    await db.contact.create({ data: { id: C.priv, businessId: ID.bizA, firstName: 'v84a', lastName: HIDDEN_NAME, email: EMAIL.priv, visibility: 'PRIVATE', ownerId: ID.owner } });
+    await db.contact.create({ data: { id: C.team, businessId: ID.bizA, firstName: 'v84a', lastName: 'T13 Team Payer', email: EMAIL.team, visibility: 'TEAM', ownerId: ID.owner } });
+    await db.invoice.createMany({
+      data: [
+        { id: INV.priv, invoiceNumber: 'v84a-T13-INV-1', status: 'DRAFT', subtotal: 90, total: 90, currency: 'TTD', businessId: ID.bizA, contactId: C.priv },
+        { id: INV.team, invoiceNumber: 'v84a-T13-INV-2', status: 'DRAFT', subtotal: 60, total: 60, currency: 'TTD', businessId: ID.bizA, contactId: C.team },
+      ],
+    });
+
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+    const { ActivityLogService } = await import('../src/modules/activity/activity.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { MessageIntakeOrchestrator } = await import('../src/modules/communications/message-intake-orchestrator.service');
+    const prisma = app.get(PrismaService);
+
+    // KEY's send_invoice, its activity row written by the real ActivityLogService.
+    const activityLog = new ActivityLogService(prisma);
+    const keySend = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma,
+      getTransactionalEmail: () => ({ send: async () => ({ status: 'SENT' }) }),
+      getCommerce: () => ({
+        automatedInvoiceUrl: async () => null,
+        updateInvoiceStatus: async ({ invoiceId }: { invoiceId: string }) => ({ id: invoiceId, status: 'SENT' }),
+      }),
+      getActivityLog: () => activityLog,
+    });
+    const sendInvoice = async (invoiceId: string) => {
+      const result = await keySend.executeToolAction(ID.bizA, 'commerce_send_invoice', { invoiceId });
+      expect(result.status).toBe('SENT');
+      const row = await db.activity.findFirst({ where: { businessId: ID.bizA, action: 'invoice_sent', entityId: invoiceId } });
+      expect(row, `${invoiceId}: the invoice_sent row`).toBeTruthy();
+      return row.id as string;
+    };
+    ROW.invPriv = await sendInvoice(INV.priv);
+    ROW.invTeam = await sendInvoice(INV.team);
+
+    // The approved message intake, its row written by the real TimelineService (fire-and-forget in executePlan).
+    const intakes = new MessageIntakeOrchestrator(
+      prisma,
+      {} as any,
+      {} as any,
+      { resolveApproval: async () => undefined } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      app.get(TimelineService),
+    );
+    const approve = async (id: string, from: string, contactId: string | null) => {
+      const subject = contactId === C.priv ? HIDDEN_SUBJECT : 'v84a T13 general question';
+      await db.messageIntake.create({
+        data: {
+          id,
+          businessId: ID.bizA,
+          connectorType: 'gmail',
+          sourceChannel: 'email',
+          from,
+          subject,
+          body: `v84a T13 message about ${subject}`,
+          contactId,
+          status: 'reviewing',
+          proposedActions: {
+            intakeId: id,
+            sourceChannel: 'email',
+            contactId: contactId ?? undefined,
+            intentType: 'quote_request',
+            actions: [],
+            // buildPlan's summary: '<intent> from <sender> — <subject>'.
+            summary: `quote request from ${from} — ${subject}`,
+          },
+        },
+      });
+      const out = await intakes.executePlan(ID.bizA, id, ID.owner);
+      expect(out.success, `${id}: executePlan`).toBe(true);
+      const row = await vi.waitFor(
+        async () => {
+          const found = await db.activity.findFirst({ where: { businessId: ID.bizA, action: 'message_intake.approved', entityId: id } });
+          expect(found, `${id}: the message_intake.approved row`).toBeTruthy();
+          return found;
+        },
+        { timeout: 10_000, interval: 100 },
+      );
+      return row.id as string;
+    };
+    ROW.inPriv = await approve(INTAKE.priv, EMAIL.priv, C.priv);
+    ROW.inTeam = await approve(INTAKE.team, EMAIL.team, C.team);
+    ROW.inNone = await approve(INTAKE.none, EMAIL.none, null);
+
+    const order = [ROW.invPriv, ROW.invTeam, ROW.inPriv, ROW.inTeam, ROW.inNone];
+    for (const [i, id] of order.entries()) {
+      const at = new Date(T13.getTime() - i * 1000);
+      await db.activity.update({ where: { id }, data: { occurredAt: at, createdAt: at } });
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (!db) return;
+    const rows = Object.values(ROW).filter(Boolean);
+    if (rows.length) await db.activity.deleteMany({ where: { id: { in: rows } } });
+    await db.messageIntake.deleteMany({ where: { id: { in: Object.values(INTAKE) } } });
+    await db.invoice.deleteMany({ where: { id: { in: Object.values(INV) } } });
+    await db.contact.deleteMany({ where: { id: { in: Object.values(C) } } });
+  });
+
+  it("TS-13a (W9-TEXT-ONLY-CONTACT-WRITERS, review ST-2, D-63; was it.todo TS-13): KEY send_invoice's row 'Invoice <n> sent to <name>' carries the invoice's contactId, so a view-all ADMIN, a crm 'none' revenue reader and a crm_view 'owned' revenue reader, who may not open the owner's PRIVATE contact, are not served it (nor the name) on /events, the day's summary or the legacy route; ADMIN is served the TEAM contact's row, and OWNER both", async () => {
+    const priv = await db.activity.findUnique({ where: { id: ROW.invPriv } });
+    expect(priv.title).toBe(`Invoice v84a-T13-INV-1 sent to v84a ${HIDDEN_NAME}`);
+    expect(priv.module).toBe('commerce');
+
+    const owner = await served(ID.owner);
+    for (const key of READS) expect(owner[key], `owner ${key}`).toEqual(expect.arrayContaining([ROW.invPriv, ROW.invTeam]));
+    const admin = await served(ID.admin);
+    for (const key of READS) {
+      expect(admin[key], `admin ${key}`).not.toContain(ROW.invPriv);
+      expect(admin[key], `admin ${key}`).toContain(ROW.invTeam);
+    }
+    expect(admin.text).not.toContain(HIDDEN_NAME);
+    for (const user of [ID.staffCrmNone, ID.staffOwned]) {
+      const seen = await served(user);
+      for (const key of READS) {
+        expect(seen[key], `${user} ${key}`).not.toContain(ROW.invPriv);
+        // crm 'none' reads no row naming a contact; the owned view does not own the TEAM contact.
+        expect(seen[key], `${user} ${key}`).not.toContain(ROW.invTeam);
+      }
+      expect(seen.text, user).not.toContain(HIDDEN_NAME);
+    }
+    // The writer names its contact in contactId (the rule's input), not only in the title.
+    expect(priv.contactId, 'the row names its contact in contactId').toBe(C.priv);
+    expect((await db.activity.findUnique({ where: { id: ROW.invTeam } })).contactId).toBe(C.team);
+  });
+
+  it("TS-13b (W9-TEXT-ONLY-CONTACT-WRITERS, review ST-2, D-63; was it.todo TS-13): the message_intake.approved row (detail = the plan's summary naming the sender) carries the intake's contactId, so ADMIN and a crm_view 'owned' member are not served the PRIVATE contact's row (nor its sender or subject); ADMIN is served the TEAM one; the row of an intake whose sender is no contact carries no contactId and is still served to crm readers", async () => {
+    const priv = await db.activity.findUnique({ where: { id: ROW.inPriv } });
+    expect(priv.module).toBe('communications');
+    expect(priv.detail).toBe(`quote request from ${EMAIL.priv} — ${HIDDEN_SUBJECT}`);
+
+    const owner = await served(ID.owner);
+    for (const key of READS) expect(owner[key], `owner ${key}`).toEqual(expect.arrayContaining([ROW.inPriv, ROW.inTeam, ROW.inNone]));
+    const admin = await served(ID.admin);
+    for (const key of READS) {
+      expect(admin[key], `admin ${key}`).not.toContain(ROW.inPriv);
+      expect(admin[key], `admin ${key}`).toEqual(expect.arrayContaining([ROW.inTeam, ROW.inNone]));
+    }
+    expect(admin.text).not.toContain(EMAIL.priv);
+    expect(admin.text).not.toContain(HIDDEN_SUBJECT);
+    const owned = await served(ID.staffOwned);
+    for (const key of READS) {
+      expect(owned[key], `staffOwned ${key}`).not.toContain(ROW.inPriv);
+      expect(owned[key], `staffOwned ${key}`).not.toContain(ROW.inTeam);
+      expect(owned[key], `staffOwned ${key}`).toContain(ROW.inNone);
+    }
+    expect(owned.text).not.toContain(HIDDEN_SUBJECT);
+    // crm 'none': no communications row at all (D-63 (iii)), naming a contact or not.
+    expect((await served(ID.staffCrmNone)).events.filter((id) => [ROW.inPriv, ROW.inTeam, ROW.inNone].includes(id))).toEqual([]);
+    // The writer names the intake's contact in contactId (the rule's input), and no contact when the sender is none.
+    expect(priv.contactId, 'the row names its contact in contactId').toBe(C.priv);
+    expect((await db.activity.findUnique({ where: { id: ROW.inTeam } })).contactId).toBe(C.team);
+    expect((await db.activity.findUnique({ where: { id: ROW.inNone } })).contactId).toBeNull();
+  });
+
+  it("TS-13c (W9-TEXT-ONLY-CONTACT-WRITERS, review ST-2, D-63; was it.todo TS-13): the two rows now belong to the contact's history: ?contactId= of the PRIVATE contact answers OWNER its invoice_sent and message_intake.approved rows, and ADMIN 200 []", async () => {
+    expect((await ids(events(ID.owner, `limit=50&contactId=${C.priv}`))).sort()).toEqual([ROW.invPriv, ROW.inPriv].sort());
+    expect((await ids(events(ID.owner, `limit=50&contactId=${C.team}`))).sort()).toEqual([ROW.invTeam, ROW.inTeam].sort());
+    expect(await ids(events(ID.admin, `limit=50&contactId=${C.priv}`))).toEqual([]);
+  });
 });
 
 /**
