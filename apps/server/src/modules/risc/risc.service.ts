@@ -39,13 +39,21 @@ const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configurat
  * The ban PAUSES the provider sessions; it does not revoke them (F7-SEC-2).
  * GoTrue refuses a refresh while the user is banned but keeps the refresh
  * token, and a ban does not log the user out. So once the ban lapsed a
- * pre-event refresh token (the hijacker's) worked at Supabase again. Closed by
+ * pre-event refresh token (the hijacker's) worked at Supabase again.
  * W7-RISC-REVOKE (D-39, the provider global logout): before the ban the
  * handler revokes every Supabase session of the user, and with them every
  * refresh token, through SupabaseAdminService.revokeAllSessions (see
  * terminateUserSessions). The ban stays as the fallback when that sign-out
  * fails; access tokens already issued, which GoTrue cannot recall, are refused
  * at this API by the local logout cutoff.
+ *
+ * F7-SEC-2 is NOT closed under the Release 0 rule (review CR-W7RR-1): that
+ * sign-out needs SUPABASE_JWT_SECRET, which a Release 0 server leaves empty,
+ * so there it never runs and the residual above stands (warned at boot,
+ * named provider_signout on every hijacking event). Nor for sessions-revoked,
+ * tokens-revoked and token-revoked (review CR-W7RR-2), which send nothing to
+ * the provider: only the 24h local cutoff holds against a pre-event refresh
+ * token. Both are it.todo cases in test/supabase-admin.service.test.ts.
  *
  * Long enough that every live client meets it: a default Supabase access token
  * lives 1h, so a client holding one issued just before the event must refresh
@@ -98,6 +106,8 @@ export class RiscService {
   ) {}
 
   onApplicationBootstrap() {
+    this.warnIfProviderSignOutUnavailable();
+
     // Listen for true user deletion events so RISC security logs are erased
     // automatically as part of GDPR right-to-erasure flows.
     this.events.on('user.deleted', async (payload: { userId: string }) => {
@@ -110,6 +120,29 @@ export class RiscService {
         );
       }
     });
+  }
+
+  /**
+   * W7-RISC-REVOKE review CR-W7RR-1 (D-39): say at boot when this server can
+   * accept a RISC event (a Google client id is set) but cannot revoke the
+   * user's Supabase refresh tokens on account-disabled/hijacking, which is the
+   * case under the Release 0 rule (SUPABASE_JWT_SECRET empty). Each such event
+   * then also names provider_signout on RiscEvent.actionTaken.
+   */
+  private warnIfProviderSignOutUnavailable(): void {
+    if (this.allowedAudiences().length === 0) return;
+    let unavailable: string | null;
+    try {
+      unavailable = this.supabaseAdmin.revokeAllSessionsUnavailable();
+    } catch (err: unknown) {
+      unavailable = err instanceof Error ? err.message : String(err);
+    }
+    if (!unavailable) return;
+    this.logger.warn(
+      `RISC: an account-disabled/hijacking event cannot revoke the user's Supabase sessions (${unavailable}). ` +
+        'Only the 65-minute provider ban and the 24h local cutoff hold, so a refresh token issued before the event ' +
+        'works again once both lapse (R0-ID-F7 F7-SEC-2 stays open here; D-39).',
+    );
   }
 
   /**
@@ -312,6 +345,13 @@ export class RiscService {
 
   /**
    * Map a RISC subject to a KeyFlowOS user via the `UserIdentity` table.
+   *
+   * W7-RISC-REVOKE review SEC-W7RR-1 (open, outside this module): the table's
+   * only writer, IdentityService.persistUserIdentities, runs only when
+   * bootstrapUser is handed identities, and POST /identity/bootstrap never
+   * hands it any. So in a deployment no row exists and every event resolves
+   * to no_matching_user. The follow-up reads the identities from GoTrue on the
+   * server (admin.getUserById), never from the request body.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
@@ -405,12 +445,17 @@ export class RiscService {
    *      refresh token: a pre-event refresh token (the hijacker's) mints
    *      nothing once the ban below lapses. Sent before the ban is read, so a
    *      ban already on the account (an operator's) cannot stand in its way.
+   *      It needs SUPABASE_JWT_SECRET: under the Release 0 rule (empty) it
+   *      sends nothing and the leg is named provider_signout (CR-W7RR-1).
    *   5. With `providerBan` only: the ban at Supabase (banAtProvider), which
    *      refuses to renew the user's sessions while it lasts: the fallback
    *      when the sign-out above fails (see RISC_PROVIDER_BAN_SECONDS).
    *
    * The other session-ending events (sessions-revoked, tokens-revoked,
    * token-revoked) send nothing to the provider (F7-CR-1): only the local legs.
+   * Their pre-event refresh tokens stay live at Supabase, so the local cutoff
+   * is all that refuses those sessions, for its 24h (review CR-W7RR-2: a
+   * provider sign-out on these events needs a ruling; an it.todo until then).
    *
    * Each leg's failure is logged, named in the result, and does not skip the
    * next.

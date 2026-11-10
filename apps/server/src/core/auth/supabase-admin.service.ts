@@ -167,19 +167,22 @@ export class SupabaseAdminService {
    * done. A secret GoTrue does not hold is refused there (bad_jwt): false too.
    * Never throws. The minted token never leaves this method except as that
    * bearer, and is never logged.
+   *
+   * NOT AVAILABLE UNDER THE RELEASE 0 RULE (W7-RISC-REVOKE review CR-W7RR-1):
+   * docs/auth-pathway.md requires SUPABASE_JWT_SECRET to be EMPTY on a
+   * Release 0 server (env.spec.ts fails on any template that sets it), so
+   * there this returns false on every call and sends nothing. D-39 has no
+   * recorded owner ruling that amends that rule; until one does, R0-ID-F7
+   * F7-SEC-2 stays open in that configuration. See revokeAllSessionsUnavailable,
+   * which RiscService reads at boot to warn.
    */
   async revokeAllSessions(userId: string): Promise<boolean> {
-    if (!this.isConfigured()) {
-      this.logger.warn(`revokeAllSessions(${userId}) not attempted: ${this.describeMissingConfig()} not set`);
+    const unavailable = this.revokeAllSessionsUnavailable();
+    if (unavailable) {
+      this.logger.warn(`revokeAllSessions(${userId}) not attempted: ${unavailable}`);
       return false;
     }
     const secret = (process.env.SUPABASE_JWT_SECRET || '').trim();
-    if (!secret) {
-      this.logger.warn(
-        `revokeAllSessions(${userId}) not attempted: SUPABASE_JWT_SECRET is not set, so no user JWT can be minted for POST /logout`,
-      );
-      return false;
-    }
     let jwt: string;
     try {
       const now = Math.floor(Date.now() / 1000);
@@ -200,6 +203,21 @@ export class SupabaseAdminService {
     const ok = await this.signOut(jwt, 'global');
     if (!ok) this.logger.warn(`revokeAllSessions(${userId}): GoTrue did not accept the global sign-out`);
     return ok;
+  }
+
+  /**
+   * Why revokeAllSessions cannot send anything on this server, or null when
+   * it can try (GoTrue may still refuse a secret it does not hold). Reads the
+   * environment on every call, as isConfigured does. W7-RISC-REVOKE review
+   * CR-W7RR-1 (D-39): with SUPABASE_JWT_SECRET empty, the Release 0 rule, the
+   * reason is that secret.
+   */
+  revokeAllSessionsUnavailable(): string | null {
+    if (!this.isConfigured()) return `${this.describeMissingConfig()} not set`;
+    if (!(process.env.SUPABASE_JWT_SECRET || '').trim()) {
+      return 'SUPABASE_JWT_SECRET is empty (the Release 0 rule, docs/auth-pathway.md), so no user JWT can be minted for POST /logout';
+    }
+    return null;
   }
 
   /**

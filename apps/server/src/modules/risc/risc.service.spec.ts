@@ -621,6 +621,11 @@ describe('RiscService', () => {
       expect(supabaseAdmin.admin.getUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.updateUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
+      // W7-RISC-REVOKE review SEC-W7RR-2 (D-39): nor the by-user-id global
+      // sign-out. account-enabled restores a recovered user; signing that user
+      // out everywhere would undo the recovery.
+      expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
+      expect(supabaseAdmin.signOut).not.toHaveBeenCalled();
       expect(persisted()?.actionTaken).not.toContain('revocation_incomplete');
     });
   });
