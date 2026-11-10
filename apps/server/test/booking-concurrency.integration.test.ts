@@ -31,8 +31,10 @@
  *   confirmBooking) is a claim too, so it cannot land on a slot booked since;
  *   controls: back into a free slot it succeeds, and a move between two
  *   slot-holding statuses still works for legacy rows that already overlap.
- *   TODO CR-V16-1: KEY's get_availability reads staff hours in UTC (outside
- *   this packet's write set); see the it.todo at the end.
+ *   CR-V16-1 (was an it.todo here; W9-KEY-AVAILABILITY-TZ): KEY's
+ *   get_availability read staff hours in UTC, so it offered a Port_of_Spain
+ *   staff member's slots four hours early and KEY's own create_booking and
+ *   reschedule_booking refused them; see the last describe.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
@@ -115,6 +117,7 @@ let db: any;
 let app: any;
 let redis: any;
 let bookingsService: any;
+let keyBookings: any;
 
 const eventStub = {
   emit: () => true,
@@ -137,6 +140,7 @@ const crmStub = {
 async function cleanup() {
   for (const sql of [
     `DELETE FROM availabilities WHERE staff_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM calendar_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -243,6 +247,7 @@ beforeAll(async () => {
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { CreateBookingDto } = await import('../src/modules/bookings/dto/create-booking.dto');
   const { PublicCreateBookingDto } = await import('../src/modules/bookings/dto/public-create-booking.dto');
+  const { BookingsAdapterService } = await import('../src/modules/key-cortex/adapters/bookings-adapter.service');
 
   // The two create handlers' parameter types as tsc emits them for the
   // production build (emitDecoratorMetadata), which vitest's esbuild transform
@@ -280,6 +285,13 @@ beforeAll(async () => {
       { provide: BookingWaitlistService, useValue: {} },
       { provide: CalendarService, useValue: { syncBookingToCalendar: async () => null } },
       { provide: BookingOptimizerService, useValue: {} },
+      // CR-V16-1: KEY's bookings adapter over the real BookingsService, PrismaService and
+      // CatalogService, in its constructor's order (vitest emits no design:paramtypes for it).
+      {
+        provide: BookingsAdapterService,
+        useFactory: (bookings: any, prisma: any, catalog: any) => new BookingsAdapterService(bookings, prisma, catalog),
+        inject: [BookingsService, PrismaService, CatalogService],
+      },
     ],
   }).compile();
 
@@ -299,6 +311,7 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
   bookingsService = moduleRef.get(BookingsService);
+  keyBookings = moduleRef.get(BookingsAdapterService);
 
   await cleanup(); // in case a prior run aborted
   await clearRateLimits();
@@ -612,8 +625,138 @@ describe('V1-16 a status write that brings a booking back claims its slot (SEC-V
   });
 });
 
+/**
+ * W9-KEY-AVAILABILITY-TZ (CR-V16-1, was an it.todo here). KEY's
+ * get_availability (key-cortex/adapters/bookings-adapter.service.ts) computed
+ * its own slots and read staff hours as UTC wall-clock, so on a UTC server a
+ * Port_of_Spain staff member working 10:00-12:00 was offered at 10:00Z and
+ * 11:00Z (06:00 and 07:00 local), which KEY create_booking and
+ * reschedule_booking, reading hours on the business's clock since V1-16,
+ * refuse. KEY now offers what the public picker offers
+ * (BookingsService.getAvailableSlots), staff member by staff member.
+ *
+ * The adapter is driven through execute(), the entry the KEY connector
+ * dispatches to, over the real BookingsService, CatalogService and database.
+ * bizK: Port_of_Spain, open Mondays 09:00-12:00 local (13:00Z-16:00Z) only.
+ * staffK1 works Mondays 10:00-12:00 local (14:00Z-16:00Z); staffK2 has no
+ * hours of their own, so the business's apply. svcK takes 60 minutes.
+ */
 describe('V1-16 consumers of the business clock outside this packet (review CR-V16-1)', () => {
-  it.todo(
-    "CR-V16-1: KEY get_availability (key-cortex/adapters/bookings-adapter.service.ts:217-225, outside the V1-16 write set) still reads staff hours as UTC wall-clock, so on a UTC server a Port_of_Spain business is offered 09:00Z..16:00Z and KEY create_booking/reschedule_booking refuse those slots as outside the staff member's hours; the adapter must read hours in Business.timezone (or ask BookingsService.getAvailableSlots) in a packet whose write set holds it",
-  );
+  const K = {
+    biz: `${P}bizK`,
+    contact: `${P}contactK`,
+    staff1: `${P}staffK1`,
+    staff2: `${P}staffK2`,
+    svc: `${P}svcK`,
+  };
+  const NAME = { [`${P}staffK1`]: 'Staff K One', [`${P}staffK2`]: 'Staff K Two' } as Record<string, string>;
+
+  /** A command as the KEY connector hands it to the bookings adapter. */
+  const keyCommand = (action: string, parameters: Record<string, unknown>) =>
+    keyBookings.execute({
+      module: 'bookings',
+      action,
+      parameters,
+      businessId: K.biz,
+      userId: ID.ownerA,
+      source: 'key_cortex',
+      timestamp: new Date(),
+      correlationId: `${P}corrK`,
+    });
+
+  const slot = (staffId: string, startTime: string) => ({
+    startTime,
+    endTime: plusMins(utc(startTime), 60).toISOString(),
+    staffId,
+    staffName: NAME[staffId],
+  });
+
+  /** The public picker's answer for one staff member on one day, as KEY slot rows. */
+  async function pickerSlots(staffId: string, date: string) {
+    const res = await agent().get(`/bookings/public/businesses/${K.biz}/slots`).query({ serviceId: K.svc, date, staffId });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date).toBe(date);
+    return (res.body.slots as string[]).map((startTime) => slot(staffId, startTime));
+  }
+
+  const byStaffThenStart = (rows: any[]) =>
+    [...rows].sort((a, b) => `${a.staffId} ${a.startTime}`.localeCompare(`${b.staffId} ${b.startTime}`));
+
+  beforeAll(async () => {
+    await db.business.create({
+      data: {
+        id: K.biz, name: 'V16A Biz K', ownerId: ID.ownerA, currency: 'TTD', timezone: POS,
+        businessHours: { mon: { open: '09:00', close: '12:00', closed: false }, tue: CLOSED, wed: CLOSED, thu: CLOSED, fri: CLOSED, sat: CLOSED, sun: CLOSED },
+      },
+    });
+    await db.membership.create({ data: { id: `${P}m_ownerA_K`, userId: ID.ownerA, businessId: K.biz, role: 'OWNER' } });
+    await db.contact.create({ data: { id: K.contact, businessId: K.biz, firstName: 'Kai', lastName: 'Client' } });
+    await db.staffMember.create({ data: { id: K.staff1, businessId: K.biz, name: NAME[K.staff1] } });
+    await db.availability.create({ data: { staffId: K.staff1, dayOfWeek: 1, startTime: '10:00', endTime: '12:00' } });
+    await db.staffMember.create({ data: { id: K.staff2, businessId: K.biz, name: NAME[K.staff2] } });
+    await db.service.create({ data: { id: K.svc, businessId: K.biz, name: 'svcK', duration: 60, price: 0 } });
+  });
+
+  // One Monday per server zone, so the booking the first run leaves behind is
+  // not in the second's way. The New York run writes the days as ISO instants
+  // with Port_of_Spain's offset: a "date" parameter names the calendar day it
+  // is written in.
+  const RUNS = [
+    { serverTz: 'UTC', day: '2030-01-07', from: '2030-01-07', to: '2030-01-07' },
+    { serverTz: 'America/New_York', day: '2030-01-14', from: '2030-01-14T00:00:00-04:00', to: '2030-01-14T23:59:59-04:00' },
+  ];
+  for (const run of RUNS) {
+    it(`CR-V16-1: KEY get_availability offers the public picker's slots on the business's clock, and KEY create_booking and reschedule_booking accept them, with the server at TZ=${run.serverTz} (W9-KEY-AVAILABILITY-TZ, was it.todo)`, async () => {
+      process.env.TZ = run.serverTz;
+      const picker = await pickerSlots(K.staff1, run.day);
+      // staffK1's 10:00-12:00 in Port_of_Spain, every 30 minutes.
+      expect(picker.map((s) => s.startTime)).toEqual([`${run.day}T14:00:00.000Z`, `${run.day}T14:30:00.000Z`, `${run.day}T15:00:00.000Z`]);
+
+      const offered = await keyCommand('get_availability', { serviceId: K.svc, from: run.from, to: run.to, staffId: K.staff1 });
+      expect(offered.success, offered.error).toBe(true);
+      expect(offered.data).toEqual(picker);
+
+      // Every slot KEY offers is one KEY can book: the first with create_booking ...
+      const slots = offered.data as Array<{ startTime: string; endTime: string }>;
+      const booked = await keyCommand('create_booking', { contactId: K.contact, serviceId: K.svc, staffId: K.staff1, startTime: slots[0].startTime });
+      expect(booked.success, booked.error).toBe(true);
+      // ... and the last with reschedule_booking.
+      const last = slots[slots.length - 1];
+      const moved = await keyCommand('reschedule_booking', { bookingId: booked.data.id, newStartTime: last.startTime });
+      expect(moved.success, moved.error).toBe(true);
+      const row = await db.booking.findUnique({ where: { id: booked.data.id } });
+      expect(row.staffId).toBe(K.staff1);
+      expect(row.startTime.toISOString()).toBe(last.startTime);
+      expect(row.endTime.toISOString()).toBe(last.endTime);
+
+      // After the move KEY still answers as the picker does: the held hour is gone.
+      const after = await keyCommand('get_availability', { serviceId: K.svc, from: run.from, to: run.to, staffId: K.staff1 });
+      expect(after.success, after.error).toBe(true);
+      expect(after.data).toEqual(await pickerSlots(K.staff1, run.day));
+      expect((after.data as any[]).map((s) => s.startTime)).toEqual([`${run.day}T14:00:00.000Z`]);
+    });
+  }
+
+  it('CR-V16-1: without a staff member KEY get_availability answers for each one on the business\'s clock, the business\'s hours for one with none of their own, and leaves out time blocked with KEY block_time (W9-KEY-AVAILABILITY-TZ)', async () => {
+    const day = '2030-01-21'; // a Monday
+    const blocked = await keyCommand('block_time', { staffId: K.staff2, startTime: `${day}T13:30:00.000Z`, endTime: `${day}T14:00:00.000Z`, reason: 'Break' });
+    expect(blocked.success, blocked.error).toBe(true);
+
+    const offered = await keyCommand('get_availability', { serviceId: K.svc, from: day, to: day });
+    expect(offered.success, offered.error).toBe(true);
+
+    const at = (staffId: string, times: string[]) => times.map((t) => slot(staffId, `${day}T${t}:00.000Z`));
+    // staffK1: 10:00-12:00 local. staffK2: the business's 09:00-12:00 local,
+    // less the two starts that overlap the 13:30Z-14:00Z block.
+    const expected = [...at(K.staff1, ['14:00', '14:30', '15:00']), ...at(K.staff2, ['14:00', '14:30', '15:00'])];
+    expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(expected));
+
+    // The same as the picker, staff member by staff member, apart from the block.
+    const blockStart = utc(`${day}T13:30:00.000Z`).getTime();
+    const blockEnd = utc(`${day}T14:00:00.000Z`).getTime();
+    const outsideBlock = (s: { startTime: string; endTime: string }) =>
+      !(utc(s.startTime).getTime() < blockEnd && utc(s.endTime).getTime() > blockStart);
+    const picker = [...(await pickerSlots(K.staff1, day)), ...(await pickerSlots(K.staff2, day)).filter(outsideBlock)];
+    expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(picker));
+  });
 });
