@@ -42,6 +42,11 @@
  *     high-potential card at all (W8: the cards were ranked by the stored
  *     score). D-100: the cards ranked by the money-free lead score (the score
  *     without its invoice terms), with no balance or unpaid count.
+ * Its review repairs (a second business, biz2): SEC-W9MR-1, those cards are
+ * picked from the contacts that member may open (never another member's
+ * PRIVATE contact); SEC-W9MR-2, that member's next actions are worked out with
+ * no invoice follow-up before the cap of 6, and the timeline's money rows are
+ * left out before its cut to 20, so unpaid invoices crowd nothing out.
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -788,4 +793,149 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
       }
     }
   });
+});
+
+// ---- W9-MONEY-RANKING review repairs (owner ruling D-100) -----------------------------------------
+
+/**
+ * W9-MONEY-RANKING review repairs SEC-W9MR-1 and SEC-W9MR-2 (owner ruling
+ * D-100), on a second business of this suite (biz2), so the first business's
+ * contacts and orders stay as the cases above pin them. Contacts, oldest
+ * first, all the owner's:
+ *   c2Task          LEAD, TEAM: 8 tasks (one overdue) and 8 notes, all older than the invoices;
+ *   c2Priv          CLIENT, PRIVATE (no share), stale (no interaction for 30 days): the member with
+ *                   crm read and revenue 'none' cannot open it (GET contacts/:c 404);
+ *   c2Owe1..c2Owe6  LEAD, TEAM: one SENT invoice each (OWE_AMOUNT).
+ */
+const ID2 = {
+  biz: `${P}biz2`,
+  cTask: `${P}c2Task`,
+  cPriv: `${P}c2Priv`,
+  cOwe: [1, 2, 3, 4, 5, 6].map((n) => `${P}c2Owe${n}`),
+};
+const OWE_AMOUNT = 431.57;
+const PRIVATE_NAME = 'V94E PrivateSecretName';
+/** The six owing contacts newest first (createdAt desc: the order the highlights read contacts in). */
+const OWE_NEWEST_FIRST = [...ID2.cOwe].reverse();
+
+/** GET /crm/businesses/:biz2/<routePath> as `user`. */
+function call2(user: string, routePath: string) {
+  return request(app.getHttpServer()).get(`/crm/businesses/${ID2.biz}/${routePath}`).set('x-test-user', user);
+}
+
+async function ok2(user: string, routePath: string) {
+  const res = await call2(user, routePath);
+  expect(res.status, `${user} GET biz2 ${routePath}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+  return res.body;
+}
+
+describe('W9-MONEY-RANKING review repairs: the highlights of a member without revenue read (D-100, real DB)', () => {
+  const noteIds: string[] = [];
+  const taskIds: string[] = [];
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: ID2.biz, name: 'V94E Biz2', ownerId: ID.owner, metaData: { features: { ai_tools: true } } } });
+    await db.membership.create({ data: { id: `${P}m2_owner`, userId: ID.owner, businessId: ID2.biz, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m2_noRev`, userId: ID.noRev, businessId: ID2.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}m2_rev`, userId: ID.rev, businessId: ID2.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+
+    const t0 = Date.now() - 10 * 60 * 60_000;
+    const at = (hours: number) => new Date(t0 + hours * 60 * 60_000);
+    const contact = (id: string, hour: number, status: string, extra: Record<string, unknown> = {}) =>
+      db.contact.create({
+        data: {
+          id, businessId: ID2.biz, firstName: 'V94E', lastName: id.slice(P.length), status, visibility: 'TEAM', ownerId: ID.owner,
+          email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`, createdAt: at(hour), ...extra,
+        },
+      });
+    await contact(ID2.cTask, 0, 'LEAD');
+    await contact(ID2.cPriv, 1, 'CLIENT', { visibility: 'PRIVATE', lastName: 'PrivateSecretName' });
+    for (const [i, id] of ID2.cOwe.entries()) await contact(id, 2 + i, 'LEAD');
+
+    // c2Task's 8 tasks (the first overdue, the others without a due date) and 8 notes, older than the invoices.
+    for (let k = 0; k < 8; k += 1) {
+      const taskId = `${P}c2task${k}`;
+      await db.contactTask.create({
+        data: {
+          id: taskId, businessId: ID2.biz, contactId: ID2.cTask, title: `V94E task ${k}`,
+          dueDate: k === 0 ? new Date(Date.now() - 86_400_000) : null, createdAt: at(0.1 + k * 0.1),
+        },
+      });
+      taskIds.push(taskId);
+      const noteId = `${P}c2note${k}`;
+      await db.contactNote.create({ data: { id: noteId, businessId: ID2.biz, contactId: ID2.cTask, body: `V94E note ${k}`, createdAt: at(0.15 + k * 0.1) } });
+      noteIds.push(noteId);
+    }
+
+    for (const id of ID2.cOwe) {
+      await db.invoice.create({
+        data: {
+          id: `${id}_inv`, invoiceNumber: `V94E-${id.slice(P.length)}`, status: 'SENT', subtotal: OWE_AMOUNT, total: OWE_AMOUNT, currency: 'TTD',
+          businessId: ID2.biz, contactId: id, dueDate: new Date(Date.now() + 5 * 86_400_000),
+          items: { create: [{ id: `${id}_inv_item1`, description: `V94E ${id.slice(P.length)}`, quantity: 1, unitPrice: OWE_AMOUNT, total: OWE_AMOUNT }] },
+        },
+      });
+    }
+
+    // c2Priv stale: no interaction for 30 days, its stored score and last interaction already the ones
+    // CrmStatsService.attachContactStats works out, so no read rewrites the row (and its updatedAt).
+    const stale = new Date(Date.now() - 30 * 86_400_000);
+    await db.$executeRawUnsafe('UPDATE contacts SET updated_at = $1, last_interaction_at = $1, lead_score = 55 WHERE id = $2', stale, ID2.cPriv);
+  });
+
+  it("SEC-W9MR-1 (D-100) (W9-MONEY-RANKING review): GET .../highlights picks that member's high-potential cards from the contacts they may open: another member's PRIVATE contact (GET contacts/:c 404, not in GET contacts) is never a card, whatever its money-free score; the owner's cards keep it", async () => {
+    expect((await call2(ID.noRev, `contacts/${ID2.cPriv}`)).status).toBe(404);
+    const listed = ((await ok2(ID.noRev, 'contacts')).contacts as Array<{ id: string }>).map((c) => c.id);
+    expect(listed).not.toContain(ID2.cPriv);
+    expect(listed).toHaveLength(7);
+
+    const withheld = await ok2(ID.noRev, 'highlights');
+    const cards = withheld.highlights.highPotential as Array<Record<string, any>>;
+    // Money-free: each owing LEAD 50 (no -5 unpaid term), c2Task 45 (its overdue task); c2Priv (CLIENT, 55) would lead.
+    expect(cards.map((card) => card.contactId)).toEqual(OWE_NEWEST_FIRST.slice(0, 4));
+    for (const card of cards) {
+      expect(listed, card.contactId).toContain(card.contactId);
+      expect(card.leadScore, card.contactId).toBe(50);
+      expect([card.outstandingBalance, card.unpaidInvoices], card.contactId).toEqual([0, 0]);
+    }
+    expect(JSON.stringify(withheld.highlights)).not.toContain('PrivateSecretName');
+    expect(JSON.stringify(withheld.highlights)).not.toContain(ID2.cPriv);
+
+    // Control: the owner may open c2Priv, and their cards rank it first (stored: c2Priv 55, each owing LEAD 45).
+    const owner = await ok2(ID.owner, 'highlights');
+    expect((owner.highlights.highPotential as Array<{ contactId: string }>).map((card) => card.contactId)).toEqual([ID2.cPriv, ...OWE_NEWEST_FIRST.slice(0, 3)]);
+    expect(owner.highlights.highPotential[0].name).toBe(PRIVATE_NAME);
+  });
+
+  it("SEC-W9MR-2 (D-100) (W9-MONEY-RANKING review): GET .../highlights works out that member's next actions with no invoice follow-up before the cap of 6, so unpaid invoices of newer contacts do not push their other actions out (the actions they see do not tell who owes), from the contacts they may open (not c2Priv's stale-contact action); the owner and a member with revenue read get the 6 invoice follow-ups", async () => {
+    const withheld = await ok2(ID.noRev, 'highlights');
+    expect((withheld.nextActions as Array<{ id: string }>).map((action) => action.id)).toEqual([`${ID2.cTask}-task-overdue`, `${ID2.cTask}-task`]);
+    expect(JSON.stringify(withheld.nextActions)).not.toContain(ID2.cPriv);
+
+    for (const user of [ID.owner, ID.rev]) {
+      const full = await ok2(user, 'highlights');
+      expect((full.nextActions as Array<{ id: string }>).map((action) => action.id), user).toEqual(OWE_NEWEST_FIRST.map((id) => `${id}-invoice`));
+      expect((full.nextActions as Array<{ trigger: string }>).every((action) => action.trigger === 'invoice-unpaid'), user).toBe(true);
+    }
+  });
+
+  it("SEC-W9MR-2 (D-100) (W9-MONEY-RANKING review): GET .../highlights cuts that member's timeline to 20 entries after its invoice rows are left out, so the six newer invoices do not push task and note rows out (all 16 are served); the owner's and a revenue-read member's timeline keep the invoice rows within their 20", async () => {
+    const withheld = await ok2(ID.noRev, 'highlights');
+    const timeline = withheld.timeline as Array<{ id: string; type: string }>;
+    expect(timeline.filter((entry) => entry.type === 'invoice')).toEqual([]);
+    expect(timeline.map((entry) => entry.id).sort()).toEqual([...taskIds, ...noteIds].sort());
+    expect(JSON.stringify(withheld)).not.toContain(String(OWE_AMOUNT));
+
+    for (const user of [ID.owner, ID.rev]) {
+      const full = (await ok2(user, 'highlights')).timeline as Array<{ type: string }>;
+      expect(full, user).toHaveLength(20);
+      expect(full.slice(0, 6).map((entry) => entry.type), user).toEqual(Array(6).fill('invoice'));
+    }
+  });
+
+  // Open, outside the W9-MONEY-RANKING write set (crm-ai.service.ts: naturalLanguageSearch only; crm-stats.service.ts:
+  // the money-free highlights only, "OWNER and revenue readers unchanged"): follow-up packets.
+  it.todo("SEC-W9MR-3 (D-100, D-63, D-90): GET .../ai-revenue-opportunities (CrmAiService.revenueOpportunityScan, crm read only) serves a member without revenue read each contact's paid totalRevenue, estimatedValue and the totalEstimatedRevenue, and picks 'Hot prospect' by the stored leadScore with its invoice terms; outside the W9-MONEY-RANKING write set (revenueOpportunityScan, crm-ai.controller.ts): follow-up packet");
+  it.todo("SEC-W9MR-4 (D-100): GET .../ai-reengagement (CrmAiService.bulkReengagementSuggestions) serves that member the stored leadScore with its invoice terms (+10 a paid, -5 an unpaid invoice), the SEC-W8MS-1 class on a sibling route; outside the W9-MONEY-RANKING write set (bulkReengagementSuggestions, crm-ai.controller.ts): follow-up packet");
+  it.todo("SEC-W9MR-1 residual (pre-existing): GET .../highlights reads its segments (contacts and counts) and timeline for the whole business, and a member with revenue read gets the cached high-potential cards and next actions of the whole business, so another member's PRIVATE contact can be named there; scoping the business-wide cached payload per viewer changes what revenue readers are served (the packet keeps them unchanged): follow-up packet");
 });

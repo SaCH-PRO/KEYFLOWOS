@@ -5,7 +5,7 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
-import { readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { crmRowCarriesMoney, readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 export type TopOpenDeal = {
   id: string;
@@ -84,6 +84,20 @@ function withoutInvoiceTerms(contact: ContactWithStats): ContactWithStats {
       invoiceCount: 0,
     },
   };
+}
+
+/** The entries GET .../highlights serves in its timeline (CrmTimelineService.buildTimeline's default cut). */
+const HIGHLIGHTS_TIMELINE_ENTRIES = 20;
+
+/**
+ * W8-MONEY-SIGNALS review repair SEC-W8MS-3 / W9-MONEY-RANKING review repair
+ * SEC-W9MR-2 (owner ruling D-100): whether a highlights timeline entry carries
+ * money: an invoice row ('Total <amount> <currency>') or a ContactEvent row of
+ * a money type (crmRowCarriesMoney, the feed's rule). A member without revenue
+ * read is served neither (crm.controller.ts withoutHighlightsMoney).
+ */
+export function timelineEntryCarriesMoney(entry: { type: string; title: string }): boolean {
+  return entry.type === 'invoice' || (entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title }));
 }
 
 type ContactHighlight = {
@@ -844,19 +858,34 @@ export class CrmStatsService {
 
   /**
    * The CRM highlights, cached for the whole business. W9-MONEY-RANKING
-   * (owner ruling D-100; review residual SEC-W8MS-3): with `readsRevenue`
-   * false (a member without revenue read) highPotential is ranked by the
-   * money-free lead score instead (highPotentialWithoutMoney); the rest of
-   * the payload is the cached one, which the controller projects for that
+   * (owner ruling D-100; review residual SEC-W8MS-3, review repairs SEC-W9MR-1
+   * and SEC-W9MR-2): with `readsRevenue` false (a member without revenue read,
+   * `viewerUserId`) three parts are worked out for that member instead, so no
+   * money signal chooses, places or crowds out an entry:
+   * - highPotential: ranked by the money-free lead score, from the contacts
+   *   that member may open (moneyFreeHighlightContacts), so another member's
+   *   PRIVATE contact is never a card (SEC-W9MR-1);
+   * - nextActions: from the same contacts, with no invoice follow-up before
+   *   the cap of 6 (their balance is 0), so unpaid invoices of newer contacts
+   *   do not push that member's other actions out (SEC-W9MR-2);
+   * - timeline: the money rows left out before the cut to 20
+   *   (timelineWithoutMoney; SEC-W9MR-2).
+   * The rest is the cached payload, which the controller projects for that
    * member (crm.controller.ts withoutHighlightsMoney). Absent or true: the
    * payload as before.
    */
-  async flowHighlights(input: { businessId: string; readsRevenue?: boolean }): Promise<FlowHighlightsPayload> {
+  async flowHighlights(input: { businessId: string; readsRevenue?: boolean; viewerUserId?: string }): Promise<FlowHighlightsPayload> {
     if (input.readsRevenue === false) {
-      const payload = await this.flowHighlights({ businessId: input.businessId });
+      const [payload, contacts, timeline] = await Promise.all([
+        this.flowHighlights({ businessId: input.businessId }),
+        this.moneyFreeHighlightContacts(input.businessId, input.viewerUserId),
+        this.timelineWithoutMoney(input.businessId),
+      ]);
       return {
         ...payload,
-        highlights: { ...payload.highlights, highPotential: await this.highPotentialWithoutMoney(input.businessId) },
+        highlights: { ...payload.highlights, highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore) },
+        timeline,
+        nextActions: this.buildNextActions(contacts),
       };
     }
     const cacheKey = `${input.businessId}:flowHighlights`;
@@ -874,7 +903,7 @@ export class CrmStatsService {
     const [segments, serviceAffinity, timeline] = await Promise.all([
       this.buildSegmentInsights(input.businessId),
       this.buildServiceAffinity(input.businessId),
-      this.timeline.buildTimeline(input.businessId),
+      this.timeline.buildTimeline(input.businessId, HIGHLIGHTS_TIMELINE_ENTRIES),
     ]);
     const flowResult = {
       highlights: {
@@ -897,27 +926,43 @@ export class CrmStatsService {
   }
 
   /**
-   * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3): the high-potential
-   * cards for a member without revenue read. The contacts flowHighlights
-   * ranks, each scored with no invoice term (withoutInvoiceTerms: the lead
-   * score without +10 a paid / -5 an unpaid invoice, the score that member's
-   * list and segment rows carry), so no card is chosen or placed by an
-   * invoice; each card's balance and unpaid count are 0. Cached for the
-   * business beside the highlights (invalidated with them).
+   * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3; review repairs
+   * SEC-W9MR-1 / SEC-W9MR-2): the contacts a member without revenue read has
+   * high-potential cards and next actions worked out from. The 200 newest
+   * contacts `viewerUserId` may open, by the rule GET contacts/:contactId
+   * applies (resolveCrmAccess + visibilityClause; the owner and SUPER_ADMIN
+   * have no clause), each with its stats without the invoice terms
+   * (withoutInvoiceTerms: the lead score without +10 a paid / -5 an unpaid
+   * invoice, the score that member's list and segment rows carry; balance,
+   * unpaid count and due date 0 or null), so no card is chosen or placed by an
+   * invoice and no invoice follow-up takes an action's place. No viewer: no
+   * contact (fails closed). Not cached: the visibility is that member's and
+   * is read at each request.
    */
-  private async highPotentialWithoutMoney(businessId: string): Promise<ContactHighlight[]> {
-    const cacheKey = `${businessId}:flowHighlights:highPotentialWithoutMoney`;
-    const cached = await this.cache.get<ContactHighlight[]>(cacheKey);
-    if (cached) return cached;
+  private async moneyFreeHighlightContacts(businessId: string, viewerUserId?: string): Promise<ContactWithStats[]> {
+    if (!viewerUserId) return [];
+    const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId) };
+    const visClause = visibilityClause(await resolveCrmAccess(this.prisma, businessId, viewerUserId), viewerUserId);
+    if (visClause) where.AND = [visClause];
     const rawContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(businessId),
+      where,
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
     const contacts = rawContacts.length > 0 ? await this.attachContactStats(businessId, rawContacts) : [];
-    const cards = this.buildHighlightCards(contacts.map(withoutInvoiceTerms), 4, (meta) => meta.leadScore);
-    await this.cache.set(cacheKey, cards);
-    return cards;
+    return contacts.map(withoutInvoiceTerms);
+  }
+
+  /**
+   * W9-MONEY-RANKING review repair SEC-W9MR-2 (owner ruling D-100): the
+   * timeline for a member without revenue read. Every entry
+   * CrmTimelineService.buildTimeline reads (no cut), the money rows left out
+   * (timelineEntryCarriesMoney), then cut to the 20 the highlights serve, so an
+   * invoice row never takes one of that member's 20 places.
+   */
+  private async timelineWithoutMoney(businessId: string): Promise<TimelineEntry[]> {
+    const entries = await this.timeline.buildTimeline(businessId, Number.POSITIVE_INFINITY);
+    return entries.filter((entry) => !timelineEntryCarriesMoney(entry)).slice(0, HIGHLIGHTS_TIMELINE_ENTRIES);
   }
 
   async getContactsPollState(businessId: string) {

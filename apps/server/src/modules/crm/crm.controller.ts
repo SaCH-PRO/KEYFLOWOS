@@ -14,13 +14,13 @@ import type { ContactRelationshipEdgeType } from '@keyflow/shared';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
-import { CrmStatsService } from './crm-stats.service';
+import { CrmStatsService, timelineEntryCarriesMoney } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { DATA_QUALITY_KINDS, type DataQualityKind } from './crm-data-quality.util';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService, withoutListMoney, withoutStoredMoney, type AuditContext } from './crm.service';
-import { crmRowCarriesMoney, resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { CrmSavedViewsService } from './crm-saved-views.service';
 import {
   CONTACT_RELATIONSHIP_HEALTH_VALUES,
@@ -69,16 +69,19 @@ type FlowHighlights = Awaited<ReturnType<CrmStatsService['flowHighlights']>>;
  * - overdueReminders (picked and ranked by the outstanding balance) is empty;
  * - highPotential is the one CrmStatsService.flowHighlights ranked for that
  *   member (readsRevenue false; W9-MONEY-RANKING, D-100): by the money-free
- *   lead score, each card with no balance or unpaid count (W8 served it
+ *   lead score, from the contacts that member may open (review repair
+ *   SEC-W9MR-1), each card with no balance or unpaid count (W8 served it
  *   empty: the cached cards are ranked by the score with its invoice terms);
  * - serviceAffinity keeps its bookings, its revenue figure is 0;
  * - the 'cold-with-unpaid' segment (its members are the contacts with an
  *   unpaid invoice) is left out, and every other segment's contacts are
  *   served as GET contacts serves that member a row (withoutListMoney);
  * - the timeline drops its invoice rows ('Total <amount> <currency>') and the
- *   ContactEvent rows of a money type (crmRowCarriesMoney, the feed's rule);
- * - nextActions drops the unpaid-invoice follow-ups, aiNextActions the
- *   payment reminders.
+ *   ContactEvent rows of a money type (timelineEntryCarriesMoney); flowHighlights
+ *   already left them out before its cut to 20 (SEC-W9MR-2);
+ * - nextActions drops the unpaid-invoice follow-ups (flowHighlights already
+ *   worked them out with none before its cap of 6, SEC-W9MR-2), aiNextActions
+ *   the payment reminders.
  */
 function withoutHighlightsMoney(payload: FlowHighlights): FlowHighlights {
   return {
@@ -91,9 +94,7 @@ function withoutHighlightsMoney(payload: FlowHighlights): FlowHighlights {
     segments: payload.segments
       .filter((segment) => segment.key !== 'cold-with-unpaid')
       .map((segment) => ({ ...segment, contacts: segment.contacts.map((contact) => withoutListMoney(contact)) })),
-    timeline: payload.timeline.filter(
-      (entry) => entry.type !== 'invoice' && !(entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title })),
-    ),
+    timeline: payload.timeline.filter((entry) => !timelineEntryCarriesMoney(entry)),
     nextActions: payload.nextActions.filter((action) => action.trigger !== 'invoice-unpaid'),
     aiNextActions: payload.aiNextActions.filter((action) => action.type !== 'payment_reminder'),
   };
@@ -1142,9 +1143,11 @@ export class CrmController {
     // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): a member
     // without revenue read gets no amount and no ranking by money; W9-MONEY-RANKING
     // (D-100): the viewer's revenue read is passed, so their highPotential is
-    // ranked by the money-free lead score.
+    // ranked by the money-free lead score; its review repairs SEC-W9MR-1 / SEC-W9MR-2
+    // pass the viewer too, so their cards and next actions come from the contacts
+    // they may open, with no invoice follow-up before the cap.
     const readsRevenue = await this.readsRevenue(businessId, req);
-    const payload = await this.crmStats.flowHighlights({ businessId, readsRevenue });
+    const payload = await this.crmStats.flowHighlights({ businessId, readsRevenue, viewerUserId: this.requireActorUserId(req) });
     return readsRevenue ? payload : withoutHighlightsMoney(payload);
   }
 
