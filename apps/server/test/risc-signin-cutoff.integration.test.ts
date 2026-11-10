@@ -181,6 +181,9 @@ async function accessToken(user: Who, signedInAt: number, iat = Math.floor(Date.
     role: 'authenticated',
     session_id: sessionId,
     amr: [{ method: 'oauth', timestamp: signedInAt }],
+    // GoTrue's server-set claim after a Google sign-in: bootstrap reads the
+    // verified provider record only for a bearer that names one.
+    app_metadata: { provider: 'google', providers: ['google'] },
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(ID[user])

@@ -9,6 +9,8 @@ import {
   LOGOUT_REVOCATION_TTL_SECONDS,
   logoutRevocationKey,
   logoutRevocationValue,
+  SIGN_IN_CUTOFF_META_KEY,
+  signInCutoffOf,
 } from '../../core/auth/auth.middleware';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { AuthSecurityService } from '../identity/auth-security.service';
@@ -39,25 +41,15 @@ const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configurat
  * The ban PAUSES the provider sessions; it does not revoke them (F7-SEC-2).
  * GoTrue refuses a refresh while the user is banned but keeps the refresh
  * token, and a ban does not log the user out. So once the ban lapsed a
- * pre-event refresh token (the hijacker's) worked at Supabase again.
- * W7-RISC-REVOKE: before the ban the handler asks GoTrue to revoke every
- * Supabase session of the user, and with them every refresh token, through
- * SupabaseAdminService.revokeAllSessions (see terminateUserSessions). That is
- * the provider-global-logout option of D-39, which BUILD-MAP-001 section (g)
- * still lists as an OPEN owner decision with no ruling (review CR-W7RR-2): it
- * is built so it can be ruled on, not on the authority of a ruling. The ban
- * stays as the fallback when that sign-out fails; access tokens already
- * issued, which GoTrue cannot recall, are refused at this API by the local
- * logout cutoff.
- *
- * F7-SEC-2 is NOT closed under the Release 0 rule (review SEC-W7RR-1,
- * CR-W7RR-1): that sign-out needs SUPABASE_JWT_SECRET, which a Release 0
- * server leaves empty, so there it never runs and the residual above stands
- * (warned at boot, named provider_signout on every hijacking event). Nor for sessions-revoked,
- * tokens-revoked and token-revoked (review SEC-W7RR-2), which send nothing to
- * the provider: only the 24h local cutoff holds against a pre-event refresh
- * token. Both stay OPEN as it.todo cases in test/supabase-admin.service.test.ts
- * under the prefix release0-index.json explains F7-SEC-2 by.
+ * pre-event refresh token (the hijacker's) worked at Supabase again, and, once
+ * the 24h local cutoff lapsed too, at this API. D-97 (W8-RISC-SIGNIN-CUTOFF;
+ * owner ruling, resolves D-39) closes that at this API: every session-ending
+ * event records a DURABLE sign-in cutoff on the User row
+ * (recordSignInCutoff), and AuthMiddleware refuses every token of a session
+ * that signed in at or before it, a refreshed one included, for good; the real
+ * user signs in again. The provider global logout W7-RISC-REVOKE added (a
+ * POST /logout under a user JWT minted with SUPABASE_JWT_SECRET) is not used:
+ * R0-SEC-02 keeps that secret empty.
  *
  * Long enough that every live client meets it: a default Supabase access token
  * lives 1h, so a client holding one issued just before the event must refresh
@@ -73,7 +65,7 @@ const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
  * A revocation leg of a session-ending event that can fail, named as
  * POST /identity/logout names its legs in the audit reason.
  */
-type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'local_sessions' | 'provider_signout' | 'provider_ban';
+type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'signin_cutoff' | 'local_sessions' | 'provider_ban';
 
 interface HandledEvent {
   /** What the event did; persisted on RiscEvent.actionTaken. */
@@ -110,8 +102,6 @@ export class RiscService {
   ) {}
 
   onApplicationBootstrap() {
-    this.warnIfProviderSignOutUnavailable();
-
     // Listen for true user deletion events so RISC security logs are erased
     // automatically as part of GDPR right-to-erasure flows.
     this.events.on('user.deleted', async (payload: { userId: string }) => {
@@ -124,29 +114,6 @@ export class RiscService {
         );
       }
     });
-  }
-
-  /**
-   * W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1: say at boot when this
-   * server can accept a RISC event (a Google client id is set) but cannot
-   * revoke the user's Supabase refresh tokens on account-disabled/hijacking,
-   * which is the case under the Release 0 rule (SUPABASE_JWT_SECRET empty).
-   * Each such event then also names provider_signout on RiscEvent.actionTaken.
-   */
-  private warnIfProviderSignOutUnavailable(): void {
-    if (this.allowedAudiences().length === 0) return;
-    let unavailable: string | null;
-    try {
-      unavailable = this.supabaseAdmin.revokeAllSessionsUnavailable();
-    } catch (err: unknown) {
-      unavailable = err instanceof Error ? err.message : String(err);
-    }
-    if (!unavailable) return;
-    this.logger.warn(
-      `RISC: an account-disabled/hijacking event cannot revoke the user's Supabase sessions (${unavailable}). ` +
-        'Only the 65-minute provider ban and the 24h local cutoff hold, so a refresh token issued before the event ' +
-        'works again once both lapse (R0-ID-F7 F7-SEC-2 stays open here; D-39 is not ruled).',
-    );
   }
 
   /**
@@ -213,9 +180,10 @@ export class RiscService {
       .audit({
         event: 'login_failure',
         // As for POST /identity/logout: 'success' means the server-side
-        // revocation (the logout cutoff) holds, when the event writes one; the
-        // reason names every leg that did not.
-        outcome: failed.includes('revocation_marker') ? 'error' : 'success',
+        // revocation (the logout cutoff and, D-97, the durable sign-in cutoff)
+        // holds, when the event writes one; the reason names every leg that
+        // did not.
+        outcome: failed.includes('revocation_marker') || failed.includes('signin_cutoff') ? 'error' : 'success',
         userId: userId ?? undefined,
         reason: failed.length > 0 ? `risc:${eventType}; revocation_incomplete: ${failed.join(', ')}` : `risc:${eventType}`,
         metadata: {
@@ -350,12 +318,10 @@ export class RiscService {
   /**
    * Map a RISC subject to a KeyFlowOS user via the `UserIdentity` table.
    *
-   * Found by the W7-RISC-REVOKE review (open, outside this module): the table's
-   * only writer, IdentityService.persistUserIdentities, runs only when
-   * bootstrapUser is handed identities, and POST /identity/bootstrap never
-   * hands it any. So in a deployment no row exists and every event resolves
-   * to no_matching_user. The follow-up reads the identities from GoTrue on the
-   * server (admin.getUserById), never from the request body.
+   * Its writer is POST /identity/bootstrap (IdentityService.persistUserIdentities),
+   * which since W8-RISC-SIGNIN-CUTOFF (D-97, W7-RISC-REVOKE review SEC-W7RR-1)
+   * persists the identities of the VERIFIED provider record (GoTrue's admin
+   * user record for the token's own subject), never the request body's.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
@@ -423,8 +389,8 @@ export class RiscService {
 
   /**
    * Revoke the user's sessions at this API and in the local Session rows, and,
-   * for account-disabled/hijacking (`providerBan`), revoke them at Supabase and
-   * pause them there. Returns every leg that did not hold.
+   * for account-disabled/hijacking (`providerBan`), pause them at Supabase.
+   * Returns every leg that did not hold.
    *
    * A RISC event carries no user JWT, so the handler cannot hand the provider
    * one (admin.signOut takes the user's ACCESS JWT as the bearer of
@@ -441,27 +407,20 @@ export class RiscService {
    *      (admin:user:<id>:revokedAt, ms, same TTL), so the user's admin
    *      local-auth tokens issued up to now are refused too: a hijacking event
    *      revokes no less than a voluntary logout (review F7-SEC-4).
-   *   3. The local Session rows.
-   *   4. With `providerBan` only: the provider global logout (W7-RISC-REVOKE;
-   *      review F7-SEC-2; the unruled provider-global-logout option of D-39,
-   *      review CR-W7RR-2): SupabaseAdminService.revokeAllSessions(userId)
-   *      mints the short-lived user JWT POST /logout needs (no session_id
-   *      claim), and GoTrue deletes every session of the user and so every
-   *      refresh token: a pre-event refresh token (the hijacker's) mints
-   *      nothing once the ban below lapses. Sent before the ban is read, so a
-   *      ban already on the account (an operator's) cannot stand in its way.
-   *      It needs SUPABASE_JWT_SECRET: under the Release 0 rule (empty) it
-   *      sends nothing and the leg is named provider_signout (SEC-W7RR-1,
-   *      CR-W7RR-1).
+   *   3. D-97 (W8-RISC-SIGNIN-CUTOFF): the DURABLE sign-in cutoff on the User
+   *      row (recordSignInCutoff), the same time as 1 but with no TTL:
+   *      AuthMiddleware refuses every token of a session that signed in at or
+   *      before it for good, so the pre-event refresh tokens GoTrue keeps mint
+   *      nothing this API accepts once 1 lapses (F7-SEC-2, SEC-W7RR-2).
+   *   4. The local Session rows.
    *   5. With `providerBan` only: the ban at Supabase (banAtProvider), which
-   *      refuses to renew the user's sessions while it lasts: the fallback
-   *      when the sign-out above fails (see RISC_PROVIDER_BAN_SECONDS).
+   *      refuses to renew the user's sessions while it lasts (see
+   *      RISC_PROVIDER_BAN_SECONDS). No provider global logout (D-97,
+   *      R0-SEC-02).
    *
    * The other session-ending events (sessions-revoked, tokens-revoked,
-   * token-revoked) send nothing to the provider (F7-CR-1): only the local legs.
-   * Their pre-event refresh tokens stay live at Supabase, so the local cutoff
-   * is all that refuses those sessions, for its 24h (review SEC-W7RR-2: a
-   * provider sign-out on these events needs a ruling; an it.todo until then).
+   * token-revoked) send nothing to the provider (F7-CR-1): only the local legs,
+   * the durable cutoff included.
    *
    * Each leg's failure is logged, named in the result, and does not skip the
    * next.
@@ -485,6 +444,8 @@ export class RiscService {
       failed.push('admin_cutoff');
     }
 
+    if (!(await this.recordSignInCutoff(userId, Math.floor(now / 1000)))) failed.push('signin_cutoff');
+
     try {
       await this.prisma.client.session.deleteMany({ where: { userId } });
     } catch (err: unknown) {
@@ -493,25 +454,43 @@ export class RiscService {
     }
 
     if (opts.providerBan) {
-      if (!(await this.revokeAtProvider(userId))) failed.push('provider_signout');
       if (!(await this.banAtProvider(userId))) failed.push('provider_ban');
     }
     return failed;
   }
 
   /**
-   * W7-RISC-REVOKE (the unruled provider-global-logout option of D-39):
-   * revoke every Supabase session of the user, and with them every refresh
-   * token, by user id. Returns whether GoTrue accepted the global sign-out;
-   * every failure is logged with the user id.
+   * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39): record the
+   * user's DURABLE sign-in cutoff, User.metaData.signInCutoffAt (epoch
+   * seconds), merged into the metaData already there and never lowered (a
+   * later cutoff already recorded stays). AuthMiddleware refuses every
+   * Supabase token whose session signed in at or before it. No schema change
+   * and no new secret: the same User.metaData bag flagGoogleSignInDisabled
+   * writes. Returns whether the cutoff holds when it returns; every failure is
+   * logged with the user id. Nothing clears it: account-enabled restores a
+   * recovered user, whose sign-in after the event passes it.
    */
-  private async revokeAtProvider(userId: string): Promise<boolean> {
+  private async recordSignInCutoff(userId: string, cutoff: number): Promise<boolean> {
     try {
-      if (await this.supabaseAdmin.revokeAllSessions(userId)) return true;
-      this.logger.warn(`Supabase global sign-out not done for ${userId}: its refresh tokens are not revoked`);
-      return false;
+      const user = await this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { metaData: true },
+      });
+      if (!user) {
+        this.logger.warn(`Sign-in cutoff not recorded for ${userId}: no User row`);
+        return false;
+      }
+      const raw = user.metaData;
+      const meta = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+      const recorded = signInCutoffOf(meta);
+      if (recorded !== null && recorded >= cutoff) return true;
+      await this.prisma.client.user.update({
+        where: { id: userId },
+        data: { metaData: { ...meta, [SIGN_IN_CUTOFF_META_KEY]: cutoff } },
+      });
+      return true;
     } catch (err: unknown) {
-      this.logger.warn(`Supabase global sign-out threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`Failed to record the sign-in cutoff for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

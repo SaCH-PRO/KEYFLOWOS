@@ -24,10 +24,17 @@ import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 
 const FAKE_TOKEN = 'fake-supabase-jwt-for-e2e';
 const FAKE_USER = { id: 'supabase-user-id', email: 'owner@example.com' };
+/**
+ * D-97 / SEC-W7RR-1: the same user's access token after a Google sign-in, as
+ * the stub verifier accepts it: JWT-shaped, GoTrue's server-set app_metadata
+ * naming the google provider (unsigned here; verification is the stub's).
+ */
+const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+const GOOGLE_TOKEN = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: FAKE_USER.id, role: 'authenticated', app_metadata: { provider: 'google', providers: ['email', 'google'] } })}.c2ln`;
 
 const supabaseAuthMock = {
   getUserFromToken: vi.fn(async (token?: string) =>
-    token === FAKE_TOKEN ? FAKE_USER : null,
+    token === FAKE_TOKEN || token === GOOGLE_TOKEN ? FAKE_USER : null,
   ),
 };
 
@@ -190,7 +197,7 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
 
       await request(app.getHttpServer())
         .post('/identity/bootstrap')
-        .set('Authorization', `Bearer ${FAKE_TOKEN}`)
+        .set('Authorization', `Bearer ${GOOGLE_TOKEN}`)
         .send(forgedBody)
         .expect(201);
 
@@ -215,7 +222,7 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
 
         await request(app.getHttpServer())
           .post('/identity/bootstrap')
-          .set('Authorization', `Bearer ${FAKE_TOKEN}`)
+          .set('Authorization', `Bearer ${GOOGLE_TOKEN}`)
           .send(forgedBody)
           .expect(201);
 
@@ -224,5 +231,21 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         expect(JSON.stringify(identityServiceMock.bootstrapUser.mock.calls)).not.toContain(FORGED_GOOGLE_SUB);
       },
     );
+
+    it('SEC-W7RR-1 negative control: a bearer that names no external sign-in provider (an email/password session) asks GoTrue nothing and forwards no identity, whatever body.identities says', async () => {
+      identityServiceMock.bootstrapUser.mockClear();
+      getUserById.mockClear();
+      identityServiceMock.bootstrapUser.mockResolvedValueOnce({ user: { id: FAKE_USER.id }, business: { id: 'biz-callback-1' } });
+
+      await request(app.getHttpServer())
+        .post('/identity/bootstrap')
+        .set('Authorization', `Bearer ${FAKE_TOKEN}`)
+        .send(forgedBody)
+        .expect(201);
+
+      expect(getUserById).not.toHaveBeenCalled();
+      expect(lastInput()?.identities ?? []).toEqual([]);
+      expect(JSON.stringify(identityServiceMock.bootstrapUser.mock.calls)).not.toContain(FORGED_GOOGLE_SUB);
+    });
   });
 });

@@ -991,6 +991,17 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   const sessionToken = (authenticatedAt: number, iat: number, sessionId = 's-f7') =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: authenticatedAt }] })}.c2ln`;
 
+  /**
+   * The request POST /identity/bootstrap sees after AuthMiddleware verified its
+   * bearer: GoTrue's server-set app_metadata says which providers the user
+   * signed in with.
+   */
+  const bootstrapReq = (providers: string[]) => {
+    const iat = Math.floor(Date.now() / 1000);
+    const bearer = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, role: 'authenticated', iat, exp: iat + 3600, app_metadata: { provider: providers[0], providers } })}.c2ln`;
+    return { headers: { authorization: `Bearer ${bearer}` } } as unknown as Request;
+  };
+
   async function riscToken(eventType: string, reason?: string) {
     const details: Record<string, unknown> = { subject: { subject_type: 'iss-sub', iss: GOOGLE_ISSUER, sub: GOOGLE_SUB } };
     if (reason) details.reason = reason;
@@ -1304,6 +1315,7 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     await ctrl.bootstrap(
       { company: 'F7 Co', identities: [{ provider: 'google', id: forged, identity_data: { sub: forged } }] } as never,
       { id: USER, email: 'f7@example.com' } as never,
+      bootstrapReq(['google']),
     );
 
     expect(h.gt.calls).toEqual([{ call: readCall, authorization: `Bearer ${SERVICE_KEY}`, body: undefined }]);
@@ -1326,8 +1338,24 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     await ctrl.bootstrap(
       { identities: [{ provider: 'google', id: 'google-sub-forged-f7', identity_data: { sub: 'google-sub-forged-f7' } }] } as never,
       { id: USER, email: 'f7@example.com' } as never,
+      bootstrapReq(['email', 'google']),
     );
     expect(bootstrapUser).toHaveBeenCalledTimes(1);
+    expect(bootstrapUser.mock.calls[0][0].identities ?? []).toEqual([]);
+    expect(JSON.stringify(bootstrapUser.mock.calls)).not.toContain('google-sub-forged-f7');
+  });
+
+  it('SEC-W7RR-1 (D-97): a bootstrap whose verified bearer names only email sign-in asks GoTrue nothing and forwards no identity, whatever body.identities says', async () => {
+    const h = build();
+    const bootstrapUser = vi.fn(async (_input: Record<string, unknown>, _opts?: unknown) => ({ user: { id: USER }, business: { id: 'biz-f7' }, isNewBusiness: false }));
+    const unused = {} as never;
+    const ctrl = new IdentityController({ bootstrapUser } as never, unused, unused, unused, unused, unused, { client: {} } as never, h.admin, h.redis as never);
+    await ctrl.bootstrap(
+      { identities: [{ provider: 'google', id: 'google-sub-forged-f7', identity_data: { sub: 'google-sub-forged-f7' } }] } as never,
+      { id: USER, email: 'f7@example.com' } as never,
+      bootstrapReq(['email']),
+    );
+    expect(h.gt.calls).toEqual([]);
     expect(bootstrapUser.mock.calls[0][0].identities ?? []).toEqual([]);
     expect(JSON.stringify(bootstrapUser.mock.calls)).not.toContain('google-sub-forged-f7');
   });

@@ -917,9 +917,25 @@ endpoint is public (Google has no KeyFlowOS bearer token); token
 authenticity is verified with Google's JWKS inside `RiscService`.
 
 - Google `sub` → local user mapping is stored in `UserIdentity` during
-  OAuth bootstrap (`/identity/bootstrap`).
-- `sessions-revoked` / `tokens-revoked` / `account-disabled` trigger
-  local session deletion + a Supabase global sign-out.
+  OAuth bootstrap (`/identity/bootstrap`), from the VERIFIED provider record
+  only: when the verified bearer's `app_metadata` names an external provider,
+  the server reads GoTrue's admin user record for the token's own subject
+  (service-role key) and persists its identities. `body.identities` is
+  ignored (W8-RISC-SIGNIN-CUTOFF, D-97; W7-RISC-REVOKE review SEC-W7RR-1).
+- `account-disabled` (reason `hijacking`), `sessions-revoked`,
+  `tokens-revoked` and `token-revoked` write the 24h logout cutoffs
+  (`auth:revoked:user:<id>`, `admin:user:<id>:revokedAt`), delete the local
+  Session rows and record a DURABLE sign-in cutoff on the user
+  (`users.meta_data.signInCutoffAt`, epoch seconds, never lowered). The
+  `AuthMiddleware` refuses every Supabase token whose session signed in at or
+  before that cutoff (its `amr` timestamps, which a refresh carries over),
+  however long ago the 24h cutoff lapsed; the real user simply signs in again
+  (owner ruling D-97, resolving D-39; closes R0-ID-F7 F7-SEC-2). Hijacking
+  also bans the user at Supabase for 65 minutes. No Supabase global sign-out
+  is sent: it would need a user JWT minted with `SUPABASE_JWT_SECRET`, which
+  stays empty (R0-SEC-02). `account-enabled`,
+  `account-credential-change-required`, `verification` and
+  `account-disabled` for any other reason record no cutoff.
 - Every event is deduplicated by `jti` and written to `risc_events`
   and `auth_audit_logs`.
 

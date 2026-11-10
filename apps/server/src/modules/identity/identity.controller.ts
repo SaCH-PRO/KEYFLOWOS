@@ -45,7 +45,7 @@ import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GenerateFieldDto } from './dto/generate-field.dto';
 import { GenerateProfileDto } from './dto/generate-profile.dto';
-import { BootstrapDto } from './dto/bootstrap.dto';
+import { BootstrapDto, UserIdentityDataDto } from './dto/bootstrap.dto';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
@@ -141,6 +141,33 @@ function ipv6Groups(address: string): number[] | null {
  * oldest goes, so memory is bounded however many clients a campaign uses.
  */
 const USERNAME_CHECK_AUDIT_MEMORY = 10_000;
+
+/**
+ * D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: whether the
+ * bearer AuthMiddleware has ALREADY verified (its payload bytes are covered by
+ * the signature getUserFromToken checked, locally or at Supabase) says its user
+ * signed in with an identity provider other than email or phone: GoTrue's
+ * server-set app_metadata.provider / app_metadata.providers. Only then is
+ * there an identity a RISC event could name (a Google sub), so only then does
+ * bootstrap read the verified provider record. Any other bearer (an admin
+ * local-auth token, an unparseable one) reads as no.
+ */
+function bearerNamesExternalProvider(req: Request | undefined): boolean {
+  const header = req?.headers?.authorization;
+  const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
+      app_metadata?: { provider?: unknown; providers?: unknown };
+    } | null;
+    const meta = payload?.app_metadata;
+    const named = [...(Array.isArray(meta?.providers) ? meta.providers : []), meta?.provider];
+    return named.some((p) => typeof p === 'string' && p !== '' && p !== 'email' && p !== 'phone');
+  } catch {
+    return false;
+  }
+}
 
 @Controller('identity')
 export class IdentityController {
@@ -1143,7 +1170,7 @@ export class IdentityController {
 
   @UseGuards(AuthGuard)
   @Post('bootstrap')
-  async bootstrap(@Body() body: BootstrapDto, @CurrentUser() user: AuthenticatedUser) {
+  async bootstrap(@Body() body: BootstrapDto, @CurrentUser() user: AuthenticatedUser, @Req() req?: Request) {
     if (!user?.id || !user?.email) {
       throw new UnauthorizedException('Missing authenticated user');
     }
@@ -1165,10 +1192,48 @@ export class IdentityController {
       avatarUrl: body.avatarUrl,
       company: body.company,
       referralCode: body.referralCode,
+      // D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: the
+      // identity-provider links persisted for RISC come from the VERIFIED
+      // provider record of the token's own subject, never from
+      // body.identities: an upsert of a client-supplied Google sub would let a
+      // signed-in user claim another person's sub and redirect that person's
+      // hijacking revocation to itself.
+      identities: bearerNamesExternalProvider(req) ? await this.verifiedProviderIdentities(userId) : [],
     }, {
       // Asked only when a pending team invitation holds the token's email.
       proveEmailOwnership: () => this.tokenEmailOwnershipProven(userId, tokenEmail),
     });
+  }
+
+  /**
+   * The identity-provider links (Google sub, ...) of the Supabase user the
+   * verified token names, read on the server from GoTrue's admin user record
+   * with the service-role key (D-97, SEC-W7RR-1), shaped as bootstrapUser
+   * persists them. A RISC event resolves its user through these
+   * (RiscService.resolveUser). Asked only when the verified bearer names an
+   * external sign-in provider (bearerNamesExternalProvider), so an
+   * email/password bootstrap makes no Supabase call. Best effort, like the
+   * persistence itself: with the admin client not configured, a read that
+   * fails, or a record for another id, none is returned and bootstrap goes on.
+   */
+  private async verifiedProviderIdentities(userId: string): Promise<UserIdentityDataDto[]> {
+    try {
+      if (!this.supabaseAdmin.isConfigured()) return [];
+      const { data, error } = await this.supabaseAdmin.getClient().auth.admin.getUserById(userId);
+      const record = data?.user;
+      if (error || !record || record.id !== userId) return [];
+      return (record.identities ?? [])
+        .filter((identity) => !identity.user_id || identity.user_id === userId)
+        .map((identity) => ({
+          identity_id: identity.identity_id,
+          id: identity.id,
+          provider: identity.provider,
+          identity_data: identity.identity_data,
+        }));
+    } catch (err: unknown) {
+      this.logger.warn(`Verified identity read for bootstrap failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      return [];
+    }
   }
 
   /**

@@ -84,6 +84,31 @@ export function logoutRevocationCutoff(
 }
 
 /**
+ * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39): the User.metaData
+ * key holding a user's DURABLE sign-in cutoff, in epoch seconds. A Google RISC
+ * session-ending event (account-disabled/hijacking, sessions-revoked,
+ * tokens-revoked, token-revoked) records it (RiscService, never lowered); a
+ * Supabase token whose session signed in at or before it is refused for good,
+ * a refreshed one included (sessionAuthenticatedAt), and the real user signs
+ * in again. Unlike the logout marker it has no TTL: GoTrue keeps the pre-event
+ * refresh tokens (no provider global logout: R0-SEC-02 keeps
+ * SUPABASE_JWT_SECRET empty), so a 24h cutoff would let them back in.
+ */
+export const SIGN_IN_CUTOFF_META_KEY = 'signInCutoffAt';
+
+/**
+ * The durable sign-in cutoff a User.metaData value holds (epoch seconds), or
+ * null when it holds none. Only RiscService writes it, as a whole number; any
+ * other shape is read as no cutoff rather than as a lock-out the user could
+ * never sign in past.
+ */
+export function signInCutoffOf(metaData: unknown): number | null {
+  if (!metaData || typeof metaData !== 'object' || Array.isArray(metaData)) return null;
+  const at = (metaData as Record<string, unknown>)[SIGN_IN_CUTOFF_META_KEY];
+  return typeof at === 'number' && Number.isSafeInteger(at) && at >= MIN_REVOCATION_EPOCH_S ? at : null;
+}
+
+/**
  * When the SESSION behind a token the verifier has ALREADY accepted was
  * authenticated, in epoch seconds — what a logout cutoff is compared against —
  * or null when the token cannot say. The payload bytes are covered by the
@@ -167,6 +192,12 @@ function sessionAuthenticatedAt(token: string): number | null {
  *     POST /api/admin/auth/logout and POST /identity/logout both write — NOT by
  *     the Supabase marker, whose seconds-granularity cutoff would refuse an
  *     admin login made in the same second as the logout.
+ *   - D-97 (W8-RISC-SIGNIN-CUTOFF): a Supabase token is also refused when the
+ *     User row holds a durable sign-in cutoff (User.metaData.signInCutoffAt,
+ *     written by a Google RISC session-ending event) at or after the moment
+ *     its session was authenticated, or when the token cannot say when that
+ *     was. It has no TTL, so a pre-event session stays refused after the 24h
+ *     marker lapses, however often its refresh token is used.
  *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
@@ -301,6 +332,10 @@ export class AuthMiddleware implements NestMiddleware {
    *                          meaningful, since every business-scoped route
    *                          needs a membership they do not have yet.
    *   row deleted/banned  -> REJECT.
+   *   sign-in cutoff      -> (D-97, Supabase tokens only) REJECT a token whose
+   *                          session was authenticated at or before the row's
+   *                          durable RISC cutoff (User.metaData.signInCutoffAt),
+   *                          or that cannot say when.
    *   revocation marker   -> REJECT a token whose session was authenticated at
    *                          or before the marker's revocation time
    *                          (`opts.sessionAuthenticatedAt`, or null: it cannot
@@ -388,13 +423,32 @@ export class AuthMiddleware implements NestMiddleware {
     }
 
     try {
-      const dbUser = await this.prisma.client.user.findUnique({
-        where: { id: userId },
-        select: { role: true, deletedAt: true, bannedAt: true },
-      });
+      // D-97: the Supabase branch also reads metaData, where a RISC event
+      // records the user's durable sign-in cutoff. The admin-token branch does
+      // not: an admin token cannot be refreshed and lives 24h, the TTL of its
+      // own admin:user:<id>:revokedAt cutoff, which the same event writes.
+      const dbUser: { role: string; deletedAt: Date | null; bannedAt: Date | null; metaData?: unknown } | null =
+        await this.prisma.client.user.findUnique({
+          where: { id: userId },
+          select: honourLogoutMarker
+            ? { role: true, deletedAt: true, bannedAt: true, metaData: true }
+            : { role: true, deletedAt: true, bannedAt: true },
+        });
 
       if (dbUser && (dbUser.deletedAt || dbUser.bannedAt)) {
         return null;
+      }
+
+      // D-97: a session that signed in at or before the durable cutoff is
+      // refused, whatever its iat (a refresh renews iat, not amr), and so is a
+      // session token that cannot say when it signed in (fail closed, as for
+      // the logout marker). A session opened after the cutoff passes.
+      const signInCutoff = honourLogoutMarker && dbUser ? signInCutoffOf(dbUser.metaData) : null;
+      if (signInCutoff !== null) {
+        const authenticatedAt = opts.sessionAuthenticatedAt ?? null;
+        if (authenticatedAt === null || authenticatedAt <= signInCutoff) {
+          return null;
+        }
       }
 
       if (!dbUser && opts.requireRow) {
