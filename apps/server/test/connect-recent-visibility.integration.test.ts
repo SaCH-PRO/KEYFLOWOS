@@ -2,8 +2,9 @@
  * W7-RECENT-CONTACTS-VISIBILITY (REAL database): the recently synced Google and
  * Outlook contacts lists follow the rule GET contacts/:contactId applies (the
  * crm read gate, then the CRM visibility clause). The Google Suite auth URL
- * keeps the Gmail owner rule of R0-CMF5 (D-11); making every Google consent
- * the owner's waits on an owner ruling (review CR-RCV-1, [V93E-B01] todo).
+ * keeps the Gmail owner rule of R0-CMF5 (D-11); owner ruling D-99 then made
+ * every Google consent the owner's (review CR-RCV-1, [V93E-B01], landed by
+ * W8-GOOGLE-CONSENT-OWNER).
  *
  * The defects (residuals W6-CONNECT-TAG-MERGE recorded):
  *   - GET /connect/businesses/:b/contacts/recent and .../outlook-contacts/recent
@@ -25,8 +26,10 @@
  *     (the web key-connect sign-in retries without gmail on GMAIL_OWNER_ONLY),
  *     and SEC-W7RCV-2 / CR-RCV-2 that GET /bookings/businesses/:b/calendar/
  *     auth-url and GET /drive/businesses/:b/auth-url give any member a Google
- *     consent URL anyway. So that change is held for an owner ruling and lands
- *     with the web follow-up and those two doors ([V93E-B01] stays it.todo).
+ *     consent URL anyway. So that change was held for an owner ruling; D-99
+ *     settled it and W8-GOOGLE-CONSENT-OWNER landed it on this door and those
+ *     two ([V93E-B01]; the bookings and drive doors in
+ *     google-consent-owner.integration.test.ts).
  *
  * The contract proven here:
  *   - each recent list is refused (403) to a member GET contacts/:contactId
@@ -41,8 +44,9 @@
  *   - the Google Suite auth URL refuses a consent with gmail (or the default
  *     set) to anyone but the business owner (OWNER membership,
  *     Business.ownerId) or a SUPER_ADMIN: 403 GMAIL_OWNER_ONLY, no Google URL;
- *     the owner, the distinguished owner and a SUPER_ADMIN get a consent
- *     without gmail.
+ *     since D-99 a consent without gmail is refused them the same way (403
+ *     GOOGLE_CONNECT_OWNER_ONLY); the owner, the distinguished owner and a
+ *     SUPER_ADMIN get a consent without gmail.
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership, contact, share and external mapping rows,
@@ -443,16 +447,27 @@ describe.each([
   });
 });
 
-describe('W7-RECENT-CONTACTS-VISIBILITY: starting a Google Suite connection keeps the Gmail owner rule (R0-CMF5, D-11); the owner rule for every service waits on an owner ruling (CR-RCV-1)', () => {
-  // Review CR-RCV-1, SEC-W7RCV-2 and CR-RCV-2: held, not dropped. Recorded D-94
-  // names Google Analytics and Search Console only; R0-CMF5 review 2 (CMF5R-2)
-  // lets a non-owner connect every Google service but gmail, and the web
-  // key-connect sign-in (core-channels-section.tsx) retries without gmail on
-  // GMAIL_OWNER_ONLY, so refusing that retry needs the web follow-up in the
-  // same change; and GET /bookings/businesses/:b/calendar/auth-url and GET
-  // /drive/businesses/:b/auth-url still give any member a Google consent URL,
-  // so a refusal on this door alone would not deny the capability.
-  it.todo('[V93E-B01] needs an owner ruling (CR-RCV-1): a crm write STAFF member and an ADMIN asking for a consent without gmail (calendar; contacts; drive, forms and business profile) are refused 403 GMAIL_OWNER_ONLY, no Google URL; lands with the web key-connect follow-up and the owner rule on the bookings calendar and drive auth-url routes (SEC-W7RCV-2, CR-RCV-2)');
+describe('W7-RECENT-CONTACTS-VISIBILITY: starting a Google Suite connection keeps the Gmail owner rule (R0-CMF5, D-11); since owner ruling D-99 (W8-GOOGLE-CONSENT-OWNER) every other Google consent is the owner\'s too (CR-RCV-1)', () => {
+  // Review CR-RCV-1, SEC-W7RCV-2 and CR-RCV-2, held for an owner ruling in W7:
+  // owner ruling D-99 (W8-GOOGLE-CONSENT-OWNER) makes every Google connection
+  // of a business (Calendar, Drive, Contacts, Gmail, Analytics, Search
+  // Console) the business owner's to start, sync and disconnect. A consent
+  // with gmail keeps its GMAIL_OWNER_ONLY refusal (R0-CMF5, B02); one without
+  // gmail is refused GOOGLE_CONNECT_OWNER_ONLY. The bookings calendar and
+  // drive consent URLs follow the same rule (google-consent-owner, V94D-A01,
+  // V94D-B01). The web key-connect sign-in (core-channels-section.tsx) still
+  // retries without gmail on GMAIL_OWNER_ONLY; the retry is now refused too and
+  // its message is shown (web follow-up recorded by W8-GOOGLE-CONSENT-OWNER).
+  it('[V93E-B01] RED-BEFORE (D-99, W8-GOOGLE-CONSENT-OWNER; CR-RCV-1): a crm write STAFF member and an ADMIN asking for a consent without gmail (calendar; contacts; drive, forms and business profile) are refused 403 GOOGLE_CONNECT_OWNER_ONLY, no Google URL', async () => {
+    for (const member of [ID.staff, ID.admin]) {
+      for (const services of NON_GMAIL_CONSENTS) {
+        const res = await suiteAuthUrl(ID.biz, member, { services });
+        expect(res.status, `${member} ${services.join(',')} ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body.code).toBe('GOOGLE_CONNECT_OWNER_ONLY');
+        expect(JSON.stringify(res.body)).not.toContain('accounts.google.com');
+      }
+    }
+  });
 
   it('[V93E-B02] control: a consent with gmail, or the default set (which includes gmail), is refused to the same members the same way (R0-CMF5, D-11)', async () => {
     for (const member of [ID.staff, ID.admin]) {

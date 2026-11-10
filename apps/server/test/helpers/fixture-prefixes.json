@@ -768,6 +768,11 @@
       "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
     },
     {
+      "prefix": "v94d_",
+      "owner": "apps/server/test/google-consent-owner.integration.test.ts",
+      "packet": "V1-94 (W8-GOOGLE-CONSENT-OWNER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

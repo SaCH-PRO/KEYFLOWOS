@@ -1500,12 +1500,17 @@ describe('R0-CMF5 review: an unconfirmed consent does not outlive its window (ST
 });
 
 describe('R0-CMF5 review: the Google Suite connect and the connector routes follow the same rule and binding (ST-CMF5-1)', () => {
-  it('[R0-CMF5-H01] the review reproduction: POST /connect/google-suite/businesses/:b/auth-url asking for gmail, or for the default set (which includes gmail), is refused for a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY, no URL); a STAFF member asking only for calendar still gets a URL (control); the owner\'s gmail URL carries a state naming the owner; a non-member 403, anonymous 401', async () => {
+  it('[R0-CMF5-H01] the review reproduction: POST /connect/google-suite/businesses/:b/auth-url asking for gmail, or for the default set (which includes gmail), is refused for a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY, no URL); since owner ruling D-99 (W8-GOOGLE-CONSENT-OWNER) a STAFF member asking only for calendar is refused too (403 GOOGLE_CONNECT_OWNER_ONLY, no URL) and the owner gets that calendar URL; the owner\'s gmail URL carries a state naming the owner; a non-member 403, anonymous 401', async () => {
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, { services: ['gmail'] }));
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, {}));
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.admin, { services: ['gmail', 'calendar'] }));
 
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    // D-99 (W8-GOOGLE-CONSENT-OWNER): every Google consent is the owner's, not only gmail.
+    const staffCalendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    expect(staffCalendar.status, JSON.stringify(staffCalendar.body)).toBe(403);
+    expect(staffCalendar.body.code).toBe('GOOGLE_CONNECT_OWNER_ONLY');
+    expect(JSON.stringify(staffCalendar.body)).not.toContain('accounts.google.com');
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
     expect(calendar.body.services).toEqual(['calendar']);
 
@@ -1649,8 +1654,9 @@ describe('R0-CMF5 review 2: the Google Suite state is single-use and purpose-bou
     expect((await preview(ID.biz, first.pending as string, ID.owner)).body).toMatchObject({ email: mine.email });
     expect((await mailboxOf(ID.biz)).email).toBeNull();
 
-    // Not only gmail states: a STAFF member's calendar-only state is good for one callback too.
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    // Not only gmail states: a calendar-only state is good for one callback too.
+    // Since D-99 (W8-GOOGLE-CONSENT-OWNER) only the owner is issued one.
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
     const calendarState = stateOf(calendar.body.authUrl);
     const staffOnce = googleAccount('suite_once_staff');
@@ -1661,10 +1667,10 @@ describe('R0-CMF5 review 2: the Google Suite state is single-use and purpose-bou
     await clearPending(ID.biz);
   });
 
-  it('[R0-CMF5-H06] SEC-CMF5-R2: a state is good only at the callback it was minted for: a STAFF member\'s calendar-only Google Suite state, or the owner\'s gmail one, at GET /commerce/gmail/callback redirects gmail=error reason=invalid_state and stages nothing; the owner\'s commerce state at the Google Suite callback redirects google=error with the generic invalid-state reason; no code is exchanged', async () => {
+  it('[R0-CMF5-H06] SEC-CMF5-R2: a state is good only at the callback it was minted for: a calendar-only Google Suite state (the owner\'s since D-99, W8-GOOGLE-CONSENT-OWNER), or the owner\'s gmail one, at GET /commerce/gmail/callback redirects gmail=error reason=invalid_state and stages nothing; the owner\'s commerce state at the Google Suite callback redirects google=error with the generic invalid-state reason; no code is exchanged', async () => {
     await clearPending(ID.biz);
     await clearMailbox(ID.biz);
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
     const staffMailbox = googleAccount('cross_staff');
     expect(redirectOf(await callback(stateOf(calendar.body.authUrl), staffMailbox.code)))
