@@ -200,7 +200,12 @@ item 3 is open.
             each connector form mapping, on the `typeform`, `jotform` and
             `webhook_form` rows.
 
-          Run these three statements too, with the old and the new id in
+          A fourth key sits in `google_form_mappings.opportunity_defaults`
+          (W9-FORMS-QUOTE-GATE, SEC-W9FQG-1): `configuredBy`, the member who
+          last saved a Google Forms mapping whose responses create quotes.
+          Its revenue write bounds every run of that form.
+
+          Run these four statements too, with the old and the new id in
           place of `<old id>` and `<new id>`:
 
           ```sql
@@ -217,6 +222,9 @@ item 3 is open.
               FROM jsonb_each(metadata -> 'formMappings') AS form(form_id, mapping)))
             WHERE jsonb_typeof(metadata -> 'formMappings') = 'object'
               AND jsonb_path_exists(metadata, '$.formMappings.* ? (@.configuredBy == $old)', jsonb_build_object('old', '<old id>'));
+          UPDATE google_form_mappings
+            SET opportunity_defaults = jsonb_set(opportunity_defaults, ARRAY['configuredBy'], to_jsonb('<new id>'::text))
+            WHERE opportunity_defaults ->> 'configuredBy' = '<old id>';
           ```
 
           Each changes only that key and leaves the rest of the row as it

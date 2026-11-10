@@ -82,6 +82,7 @@ async function cleanup() {
     `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM key_cortex_trigger_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM google_form_mappings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -409,6 +410,7 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
       await import('../src/modules/connect/google-contacts-sync.service');
     const { OutlookContactsSyncService } = await import('../src/modules/connect/outlook-contacts-sync.service');
     const { ConnectorFormMappingService } = await import('../src/modules/connect/connector-form-mapping.service');
+    const { GoogleFormsMappingService } = await import('../src/modules/connect/google-forms-mapping.service');
     const { CrmService } = await import('../src/modules/crm/crm.service');
     const { runWithTenant } = await import('../src/core/tenant/tenant-context');
 
@@ -419,9 +421,12 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
       .filter((f) => /\b(?:configuringMember|settingDefaultOwnerId)\(/.test(readFileSync(path.join(SRC, f), 'utf8')))
       .map((f) => f.split(path.sep).join('/'))
       .sort();
+    // W9-FORMS-QUOTE-GATE (SEC-W9FQG-1) added the Google Forms mapping's configuring member
+    // (google_form_mappings.opportunity_defaults.configuredBy), which step 4 re-points too.
     expect(writers).toEqual([
       'modules/connect/connector-form-mapping.service.ts',
       'modules/connect/google-contacts-sync.service.ts',
+      'modules/connect/google-forms-mapping.service.ts',
       'modules/connect/outlook-contacts-sync.service.ts',
     ]);
 
@@ -443,6 +448,22 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     await forms.saveMapping(ID.biz, 'typeform', FORM.owner, { fieldMappings }, ID.owner);
     await forms.saveMapping(ID.biz, 'jotform', FORM.member, { fieldMappings }, CFG_OLD);
     await google.saveMappingRules(ID.biz2, { defaultTags: ['v92d'], defaultOwnerId: ID.owner }, ID.owner);
+    // The Google Forms mappings whose responses create quotes record their configuring member in
+    // google_form_mappings.opportunity_defaults (W9-FORMS-QUOTE-GATE): the member's and the owner's.
+    const gforms = new GoogleFormsMappingService(prisma, {} as any, {} as any);
+    const GFORM = { member: `${P}gform_member`, owner: `${P}gform_owner` };
+    await gforms.saveMapping({ businessId: ID.biz, formId: GFORM.member, fieldMappings, opportunityDefaults: { enabled: true }, actorUserId: CFG_OLD });
+    await gforms.saveMapping({ businessId: ID.biz, formId: GFORM.owner, fieldMappings, opportunityDefaults: { enabled: true }, actorUserId: ID.owner });
+    const gformRows = async () =>
+      (await db.googleFormMapping.findMany({
+        where: { businessId: ID.biz },
+        select: { formId: true, opportunityDefaults: true, fieldMappings: true },
+      })).sort((a: any, b: any) => a.formId.localeCompare(b.formId));
+    const gformsBefore = await gformRows();
+    expect(gformsBefore.map((r: any) => [r.formId, r.opportunityDefaults?.configuredBy])).toEqual([
+      [GFORM.member, CFG_OLD],
+      [GFORM.owner, ID.owner],
+    ]);
 
     const connectorRows = async () =>
       (await db.connectorStatus.findMany({
@@ -468,6 +489,8 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     }
     const blocks = [...step4.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]);
     expect(blocks.some((b) => b.includes('connector_statuses')), 'step 4 carries a sql block for connector_statuses').toBe(true);
+    expect(step4, 'step 4 names `google_form_mappings.opportunity_defaults`').toContain('`google_form_mappings.opportunity_defaults`');
+    expect(blocks.some((b) => b.includes('google_form_mappings')), 'step 4 carries a sql block for google_form_mappings').toBe(true);
 
     // Step 4 as written, in its order: free the address, create the new row, re-point (the column this
     // member has, then every statement step 4 gives), delete the old row.
@@ -484,6 +507,10 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     const after = await connectorRows();
     expect(holding(after, CFG_OLD), 'no connector row still names the deleted id').toEqual([]);
     expect(after).toEqual(before.map((r: any) => ({ ...r, metadata: replacingId(r.metadata, CFG_OLD, CFG_NEW) })));
+    const gformsAfter = await gformRows();
+    expect(gformsAfter, 'the Google Forms mapping names the new id; the owner mapping and every other value as they were').toEqual(
+      gformsBefore.map((r: any) => ({ ...r, opportunityDefaults: replacingId(r.opportunityDefaults, CFG_OLD, CFG_NEW) })),
+    );
 
     // The runs the configuration binds: a system run, the member's own run and the owner's run.
     const crm = {
@@ -496,6 +523,7 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
       ['outlook_contacts', metadataOf('outlook_contacts')[RULES_CONFIGURED_BY]],
       ['typeform', metadataOf('typeform').formMappings[FORM.member].configuredBy],
       ['jotform', metadataOf('jotform').formMappings[FORM.member].configuredBy],
+      ['google_forms', gformsAfter.find((r: any) => r.formId === GFORM.member).opportunityDefaults.configuredBy],
     ];
     for (const [connector, configuredBy] of configured) {
       const runs = {
