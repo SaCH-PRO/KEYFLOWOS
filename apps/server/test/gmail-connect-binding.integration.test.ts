@@ -1500,12 +1500,16 @@ describe('R0-CMF5 review: an unconfirmed consent does not outlive its window (ST
 });
 
 describe('R0-CMF5 review: the Google Suite connect and the connector routes follow the same rule and binding (ST-CMF5-1)', () => {
-  it('[R0-CMF5-H01] the review reproduction: POST /connect/google-suite/businesses/:b/auth-url asking for gmail, or for the default set (which includes gmail), is refused for a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY, no URL); a STAFF member asking only for calendar still gets a URL (control); the owner\'s gmail URL carries a state naming the owner; a non-member 403, anonymous 401', async () => {
+  it('[R0-CMF5-H01] the review reproduction: POST /connect/google-suite/businesses/:b/auth-url asking for gmail, or for the default set (which includes gmail), is refused for a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY, no URL); since D-94 (W7-RECENT-CONTACTS-VISIBILITY) a STAFF member asking only for calendar is refused the same way, and the owner\'s calendar-only URL is still given; the owner\'s gmail URL carries a state naming the owner; a non-member 403, anonymous 401', async () => {
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, { services: ['gmail'] }));
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, {}));
     expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.admin, { services: ['gmail', 'calendar'] }));
 
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    // W7-RECENT-CONTACTS-VISIBILITY (owner ruling D-94): connecting any of the
+    // business's Google integrations is the owner's alone, as Gmail is. Before
+    // it, this was the control that a calendar-only consent was not gated.
+    expectOwnerOnly(await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] }));
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
     expect(calendar.body.services).toEqual(['calendar']);
 
@@ -1649,25 +1653,29 @@ describe('R0-CMF5 review 2: the Google Suite state is single-use and purpose-bou
     expect((await preview(ID.biz, first.pending as string, ID.owner)).body).toMatchObject({ email: mine.email });
     expect((await mailboxOf(ID.biz)).email).toBeNull();
 
-    // Not only gmail states: a STAFF member's calendar-only state is good for one callback too.
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    // Not only gmail states: a calendar-only state is good for one callback too.
+    // W7-RECENT-CONTACTS-VISIBILITY (D-94): only the owner may start one now, so
+    // it is the owner's (it was a STAFF member's before D-94).
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
     const calendarState = stateOf(calendar.body.authUrl);
-    const staffOnce = googleAccount('suite_once_staff');
-    expect(suiteRedirectOf(await suiteCallback(calendarState, staffOnce.code)).google).toBe('connected');
-    const staffAgain = googleAccount('suite_once_staff_again');
-    expect(suiteRedirectOf(await suiteCallback(calendarState, staffAgain.code))).toMatchObject({ google: 'error' });
-    expect(exchanges).not.toContain(staffAgain.code);
+    const calendarOnce = googleAccount('suite_once_calendar');
+    expect(suiteRedirectOf(await suiteCallback(calendarState, calendarOnce.code)).google).toBe('connected');
+    const calendarAgain = googleAccount('suite_once_calendar_again');
+    expect(suiteRedirectOf(await suiteCallback(calendarState, calendarAgain.code))).toMatchObject({ google: 'error' });
+    expect(exchanges).not.toContain(calendarAgain.code);
     await clearPending(ID.biz);
   });
 
-  it('[R0-CMF5-H06] SEC-CMF5-R2: a state is good only at the callback it was minted for: a STAFF member\'s calendar-only Google Suite state, or the owner\'s gmail one, at GET /commerce/gmail/callback redirects gmail=error reason=invalid_state and stages nothing; the owner\'s commerce state at the Google Suite callback redirects google=error with the generic invalid-state reason; no code is exchanged', async () => {
+  it('[R0-CMF5-H06] SEC-CMF5-R2: a state is good only at the callback it was minted for: the owner\'s calendar-only Google Suite state (only the owner may start one since D-94), or the owner\'s gmail one, at GET /commerce/gmail/callback redirects gmail=error reason=invalid_state and stages nothing; the owner\'s commerce state at the Google Suite callback redirects google=error with the generic invalid-state reason; no code is exchanged', async () => {
     await clearPending(ID.biz);
     await clearMailbox(ID.biz);
-    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    // W7-RECENT-CONTACTS-VISIBILITY (D-94): the calendar-only state is the
+    // owner's, since only the owner may start one (it was a STAFF member's).
+    const calendar = await suiteAuthUrl(ID.biz, ID.owner, { services: ['calendar'] });
     expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
-    const staffMailbox = googleAccount('cross_staff');
-    expect(redirectOf(await callback(stateOf(calendar.body.authUrl), staffMailbox.code)))
+    const calendarMailbox = googleAccount('cross_calendar');
+    expect(redirectOf(await callback(stateOf(calendar.body.authUrl), calendarMailbox.code)))
       .toMatchObject({ gmail: 'error', reason: 'invalid_state', pending: null });
 
     const ownSuite = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
@@ -1683,7 +1691,7 @@ describe('R0-CMF5 review 2: the Google Suite state is single-use and purpose-bou
     expect(reverse).toMatchObject({ path: '/app/key-connect', google: 'error', pending: null });
     expect(reverse.reason).toBe('Invalid or expired OAuth state');
 
-    for (const code of [staffMailbox.code, ownerSuiteMailbox.code, commerceMailbox.code]) expect(exchanges).not.toContain(code);
+    for (const code of [calendarMailbox.code, ownerSuiteMailbox.code, commerceMailbox.code]) expect(exchanges).not.toContain(code);
     expect(await pendingOf(ID.biz)).toEqual([]);
     expect((await mailboxOf(ID.biz)).email).toBeNull();
   });
