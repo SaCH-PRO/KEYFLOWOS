@@ -1087,6 +1087,9 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-110 | A platform SUPER_ADMIN who is not a member of a business is refused every trash restore and permanent delete in it, as on revenue writes (D-46); support work uses the admin tools. | None (as built, W6). |
 | D-111 | Managing KEY connectors (connect, change, remove) is limited to OWNER and ADMIN members; staff may use them. Google connections stay owner-only (D-99). | None (as built). |
 | D-112 | A storefront order not created paid may be marked PAID (order status edit or the fulfilment mark-paid action) only by a member with revenue write, and only through the audited paid door (payment row, ledger posting, actor named); anyone else gets 403. Fulfilment status changes stay open as today. | W10 order paid door (STL-SEC-1, V18-T2c). |
+| D-113 | D-101 extended: after a sign-in cutoff, password sign-ins stay refused until the user completes a password reset through KEYFLOW after the cutoff (the existing reset flow); Google and emailed-link sign-ins are accepted meanwhile and clear the rest of the restriction. A password set during the hijack therefore never signs in. | W10 RISC reset (SEC-W9RPC-1/2). |
+| D-114 | An explicit module scope binds ADMINs too: an ADMIN whose revenue access is set to 'none' is refused money steps in KEY plans (P&L, revenue reports, invoice actions), amending D-71's ADMIN bypass for explicit 'none' only; ADMINs with default scopes are unaffected. | W10 KEY plan scope (SEC-W9MRK-1). |
+| D-115 | Timeline rows written before W9 that name a contact only in their text are backfilled by an operator script (dry-run default) that sets their contact link from the invoice or message intake behind them; a row whose source is gone is served only to OWNER and ADMIN. | W10 timeline backfill (SEC-W9TO-1). |
 
 ---
 
