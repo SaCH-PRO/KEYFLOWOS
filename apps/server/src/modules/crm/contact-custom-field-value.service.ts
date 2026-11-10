@@ -81,9 +81,28 @@ export class ContactCustomFieldValueService {
     });
   }
 
+  /**
+   * Bind a contact's typed values, keyed by definition NAME, to its own
+   * business's live definitions (SEC-R015c-3, W9-CUSTOM-FIELDS-TENANT).
+   *
+   * A definition name is unique only per business (@@unique([businessId,
+   * name])) and ContactCustomFieldValue carries no businessId, so a lookup by
+   * name alone bound a contact of A to B's definition (a name only B defines,
+   * a name both define, or a name A archived while B's is live), and A's
+   * contact detail then served B's label, description and options. The
+   * business is the one on the contact row, whoever the caller is; a name the
+   * contact's business does not define (live) binds nothing.
+   */
   async setValuesForContact(contactId: string, values: Record<string, unknown>) {
+    const names = Object.keys(values);
+    if (names.length === 0) return [];
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId },
+      select: { businessId: true },
+    });
+    if (!contact) return [];
     const definitions = await this.prisma.client.customFieldDefinition.findMany({
-      where: { name: { in: Object.keys(values) }, archivedAt: null },
+      where: { businessId: contact.businessId, name: { in: names }, archivedAt: null },
     });
 
     const results: Array<{ definitionId: string; name: string; value: unknown }> = [];
