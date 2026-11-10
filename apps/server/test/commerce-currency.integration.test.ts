@@ -88,12 +88,18 @@
  *             row names its currency and equals that currency's sheet, every PDF amount is in the
  *             currency of the sheet it sits in, and nothing is converted or added across currencies
  *             (RED-BEFORE: the exports carried the USD sheet only and dropped byCurrency).
- *   CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, owner ruling D-13) it.todo: the accountant pack's
- *             balance-sheet.pdf (finance/accountant-export.service.ts computeBalanceSheet) still adds
- *             every currency into one figure per account, labelled with the raw business currency.
- *             Confirmed on this book: pack assets 357 = USD 277 + TTD 80. It predates the packet and
- *             lies outside its write set (the finance module; the pack's P&L, cashflow and trial
- *             balance group by account only too), so it needs its own packet.
+ *   CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review; W10-BOOKS-EXPORTS, owner ruling D-13; was it.todo)
+ *             RED-BEFORE the accountant pack (finance/accountant-export.service.ts) reports each
+ *             currency apart, labelled with the normalized business currency: balance-sheet.pdf
+ *             carries the USD sheet and then a "TTD balances" sheet on its own, every figure equal
+ *             to that currency's sheet (RED-BEFORE: the pack grouped by account only and added every
+ *             currency into one figure labelled with the raw business currency, pack assets
+ *             357 = USD 277 + TTD 80 on this book).
+ *   CR-BSX-03b (W10-BOOKS-EXPORTS, D-13) RED-BEFORE profit-and-loss.pdf and cashflow.pdf carry the
+ *             USD figures and then "TTD figures" on their own, each equal to Postgres per currency.
+ *   CR-BSX-03c (W10-BOOKS-EXPORTS, D-13) RED-BEFORE the pack's trial-balance.csv has one row per
+ *             (account, currency) naming its currency, equal to Postgres; each currency balances
+ *             on its own (RED-BEFORE: no currency column, one summed row per account).
  *
  * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04, a V1-37 regression confirmed on
  * int/trial-I): money against a document already stored in a currency outside D-13 is still
@@ -167,7 +173,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
-import { inflateSync } from 'zlib';
+import { inflateRawSync, inflateSync } from 'zlib';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -1405,18 +1411,202 @@ describe('V1-37 review residuals (V1-37b): the balance sheet never sums across c
   }, 30_000);
 
   /*
-   * CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, owner ruling D-13): the same defect
-   * class as RV37b-CR-03 in the other balance-sheet export. The accountant pack
-   * (finance/accountant-export.service.ts computeBalanceSheet) groups ledger
-   * entries by ['accountId'] only and labels balance-sheet.pdf with the raw
-   * business.currency, so a USD business's TTD cash is added into its USD
-   * figures. A probe run on this suite's USD book read pack assets 357 against
-   * the sheets' USD 277 and TTD 80. It predates W9-BALANCE-SHEET-EXPORT and lies
-   * outside its write set (the finance module; the pack's P&L, cashflow and
-   * trial balance group by account only as well), so it is held for its own
-   * packet.
+   * CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review; W10-BOOKS-EXPORTS, owner ruling
+   * D-13; was it.todo): the same defect class as RV37b-CR-03 in the other
+   * balance-sheet export. The accountant pack (finance/accountant-export.service.ts)
+   * grouped ledger entries by ['accountId'] only and labelled every statement
+   * with the raw business.currency, so a USD business's TTD cash was added into
+   * its USD figures (a probe on this suite's USD book read pack assets 357
+   * against the sheets' USD 277 and TTD 80); its P&L, cashflow and trial
+   * balance grouped by account only as well. The pack now reports the
+   * normalized business currency first and then each other currency on its own
+   * ("TTD balances" in balance-sheet.pdf, "TTD figures" in profit-and-loss.pdf
+   * and cashflow.pdf, one trial-balance.csv row per (account, currency) naming
+   * its currency), never converted or added. The cases build the pack with the
+   * real AccountantExportService over the real rows of the USD book (RV37-02
+   * above); the finance app's export route is off this suite's path (stubbed).
    */
-  it.todo('CR-BSX-03 (W9-BALANCE-SHEET-EXPORT review, D-13; needs its own packet, outside the write set): the accountant pack balance-sheet.pdf carries the USD sheet and then the TTD sheet on its own, labelled with the normalized business currency; no account adds TTD into USD');
+  const PACK_FROM = new Date('2000-01-01T00:00:00.000Z');
+  /** The entries of the pack's ZIP (zip-builder.ts: local file headers, raw deflate). */
+  function unzip(buf: Buffer): Record<string, Buffer> {
+    const out: Record<string, Buffer> = {};
+    let at = 0;
+    while (at + 30 <= buf.length && buf.readUInt32LE(at) === 0x04034b50) {
+      const method = buf.readUInt16LE(at + 8);
+      const size = buf.readUInt32LE(at + 18);
+      const nameLen = buf.readUInt16LE(at + 26);
+      const extraLen = buf.readUInt16LE(at + 28);
+      const name = buf.subarray(at + 30, at + 30 + nameLen).toString('utf8');
+      const start = at + 30 + nameLen + extraLen;
+      const data = buf.subarray(start, start + size);
+      out[name] = method === 8 ? inflateRawSync(data) : Buffer.from(data);
+      at = start + size;
+    }
+    return out;
+  }
+  /** The text runs of a pdf-builder.ts PDF (uncompressed `(...) Tj`) in drawing order, trimmed. */
+  function packPdfTexts(pdf: Buffer): string[] {
+    return [...pdf.toString('utf8').matchAll(/\(((?:\\[\\()]|[^\\)])*)\) Tj/g)]
+      .map((m) => m[1].replace(/\\([\\()])/g, '$1').trim());
+  }
+  /** The currency code of every amount drawn in a run of texts ('USD 1,234.50', '-TTD 5.00'). */
+  const codesShown = (texts: string[]) =>
+    texts.flatMap((t) => [...t.matchAll(/(?<![A-Za-z])([A-Za-z]{3}) [\d,]+\.\d{2}\b/g)].map((x) => x[1]));
+  const isAmount = (t: string) => /^-?[A-Za-z]{3} [\d,]+\.\d{2}$/.test(t);
+  /** Label then value, as the pack draws each row. */
+  const pairsOf = (texts: string[]) => texts.slice(0, -1).map((t, i) => `${t} => ${texts[i + 1]}`);
+  async function packNow(asOf: string): Promise<Record<string, Buffer>> {
+    const { AccountantExportService } = await import('../src/modules/finance/accountant-export.service');
+    const pack = await new AccountantExportService(prismaRef, coa).build({
+      businessId: ID.bizUsd, periodStart: PACK_FROM, periodEnd: new Date(asOf), basis: 'ACCRUAL',
+    });
+    return unzip(pack.buffer);
+  }
+  /** Split a pack PDF at its one "<code> <title>" heading: the business-currency region, then the other's. */
+  function regionsOf(texts: string[], heading: string): Record<string, string[]> {
+    const split = texts.indexOf(heading);
+    // RED-BEFORE: no other-currency section (-1).
+    expect(split, texts.join(' | ')).toBeGreaterThan(0);
+    expect(texts.filter((t) => t === heading), `one "${heading}" section`).toHaveLength(1);
+    expect(texts.slice(0, split).join(' '), 'the pack says other currencies are apart').toMatch(/not converted or added to the USD figures/);
+    const regions: Record<string, string[]> = { USD: texts.slice(0, split), TTD: texts.slice(split) };
+    for (const [currency, region] of Object.entries(regions)) {
+      const shown = codesShown(region);
+      expect(shown.length, `${currency} amounts`).toBeGreaterThan(0);
+      expect([...new Set(shown)], `every amount of the ${currency} section is ${currency}`).toEqual([currency]);
+    }
+    return regions;
+  }
+
+  it('CR-BSX-03 (W10-BOOKS-EXPORTS, D-13, was it.todo) RED-BEFORE: the accountant pack balance-sheet.pdf carries the USD sheet and then the TTD sheet on its own, labelled with the normalized business currency; no account adds TTD into USD', async () => {
+    const { asOf, expected } = await sheetNow();
+    // Stored in a legacy spelling (' usd'): the pack labels it USD, as the door and the Books view read it.
+    await db.business.update({ where: { id: ID.bizUsd }, data: { currency: ' usd' } });
+    let files: Record<string, Buffer>;
+    try {
+      files = await packNow(asOf);
+    } finally {
+      await db.business.update({ where: { id: ID.bizUsd }, data: { currency: 'USD' } });
+    }
+    // RED-BEFORE: 'Currency:    usd' (raw).
+    expect(files['manifest.txt'].toString('utf8')).toMatch(/^Currency: +USD$/m);
+    const texts = packPdfTexts(files['balance-sheet.pdf']);
+    expect(texts[0]).toBe('Balance Sheet');
+
+    // RED-BEFORE: one sheet, every figure labelled ' usd', TTD added into it.
+    const regions = regionsOf(texts, 'TTD balances');
+    for (const [currency, region] of Object.entries(regions)) {
+      const s = expected.byCurrency[currency];
+      const lines = [...s.assets.lines, ...s.liabilities.lines, ...s.equity.lines];
+      const pairs = pairsOf(region);
+      // One row per account holding a balance in this currency, each equal to that currency's sheet.
+      for (const l of lines) {
+        expect(pairs.some((p) => p.endsWith(`${l.name} => ${money(l.amount, currency)}`)), `${currency}: ${l.name} ${l.amount}`).toBe(true);
+      }
+      expect(region.filter(isAmount), `${currency}: the account rows and five totals, nothing else`).toHaveLength(lines.length + 5);
+      expect(pairs).toContain(`Total Assets => ${money(s.assets.total, currency)}`);
+      expect(pairs).toContain(`Total Liabilities => ${money(s.liabilities.total, currency)}`);
+      expect(pairs).toContain(`Total Equity => ${money(s.equity.total, currency)}`);
+      expect(pairs).toContain(`Retained earnings (period activity) => ${money(s.netEquityFromIncome, currency)}`);
+      expect(pairs).toContain(`Total Liabilities + Equity => ${money(round2(s.liabilities.total + s.equity.total + s.netEquityFromIncome), currency)}`);
+    }
+    // The USD sheet is the business currency's: the TTD figures are not added into it.
+    const { USD, TTD } = expected.byCurrency;
+    expect(USD.assets.total).not.toBe(round2(USD.assets.total + TTD.assets.total));
+    expect(pairsOf(regions.USD)).not.toContain(`Total Assets => ${money(round2(USD.assets.total + TTD.assets.total), 'USD')}`);
+  }, 30_000);
+
+  it('CR-BSX-03b (W10-BOOKS-EXPORTS, D-13) RED-BEFORE: the accountant pack profit-and-loss.pdf and cashflow.pdf report the USD figures and then the TTD figures on their own, each equal to Postgres per currency; nothing adds TTD into USD', async () => {
+    const asOf = new Date(Date.now() + 60_000).toISOString();
+    const files = await packNow(asOf);
+    // Postgres' own period sums per (normalized currency, account type, system key).
+    const pg: Array<{ currency: string; type: string; system_key: string | null; active: boolean; d: string; c: string }> = await db.$queryRawUnsafe(
+      `SELECT UPPER(TRIM(le.currency)) AS currency, coa.type::text AS type, coa.system_key, coa.is_active AS active,
+              SUM(le.debit)::text AS d, SUM(le.credit)::text AS c
+         FROM ledger_entries le JOIN chart_of_accounts coa ON coa.id = le.account_id
+        WHERE le.business_id = $1 AND coa.business_id = $1 AND le.date >= $2 AND le.date <= $3
+        GROUP BY 1, 2, 3, 4`,
+      ID.bizUsd, PACK_FROM, new Date(asOf),
+    );
+    const sum = (currency: string, keep: (r: (typeof pg)[number]) => boolean, net: (d: number, c: number) => number) =>
+      round2(pg.filter((r) => r.currency === currency && keep(r)).reduce((s, r) => s + net(Number(r.d), Number(r.c)), 0));
+    const CASH = ['CASH', 'BANK', 'PAYMENT_PROCESSOR'];
+    const want = (currency: string) => {
+      const revenue = sum(currency, (r) => r.active && r.type === 'INCOME', (d, c) => c - d);
+      const expenses = sum(currency, (r) => r.active && (r.type === 'EXPENSE' || r.type === 'COGS'), (d, c) => d - c);
+      const inflows = sum(currency, (r) => CASH.includes(r.system_key ?? ''), (d) => d);
+      const outflows = sum(currency, (r) => CASH.includes(r.system_key ?? ''), (_d, c) => c);
+      return {
+        revenue, expenses, net: round2(revenue - expenses),
+        tax: sum(currency, (r) => r.system_key === 'TAX_PAYABLE', (d, c) => c - d),
+        inflows, outflows, movement: round2(inflows - outflows),
+      };
+    };
+    // The book's period holds both currencies on both statements (CUR-06d paid a TTD invoice in cash).
+    for (const currency of ['USD', 'TTD']) {
+      expect(want(currency).revenue, `${currency} revenue`).not.toBe(0);
+      expect(want(currency).inflows, `${currency} cash in`).not.toBe(0);
+    }
+
+    // RED-BEFORE: one P&L, its revenue USD + TTD labelled USD.
+    const pnl = regionsOf(packPdfTexts(files['profit-and-loss.pdf']), 'TTD figures');
+    expect(pnl.USD[0]).toBe('Profit & Loss');
+    for (const [currency, region] of Object.entries(pnl)) {
+      const w = want(currency);
+      const pairs = pairsOf(region);
+      expect(pairs).toContain(`Sales (net of tax) => ${money(w.revenue, currency)}`);
+      expect(pairs).toContain(`Tax collected => ${money(w.tax, currency)}`);
+      expect(pairs).toContain(`Total Revenue => ${money(w.revenue, currency)}`);
+      expect(pairs).toContain(`Total Expenses => ${money(w.expenses, currency)}`);
+      expect(pairs).toContain(`Net Profit => ${money(w.net, currency)}`);
+    }
+    const sales = (currency: string) => money(round2(want('USD').revenue + want('TTD').revenue), currency);
+    expect(pairsOf(pnl.USD)).not.toContain(`Sales (net of tax) => ${sales('USD')}`);
+
+    // RED-BEFORE: one cashflow, its inflows USD + TTD labelled USD.
+    const cash = regionsOf(packPdfTexts(files['cashflow.pdf']), 'TTD figures');
+    expect(cash.USD[0]).toBe('Cashflow Statement');
+    for (const [currency, region] of Object.entries(cash)) {
+      const w = want(currency);
+      const pairs = pairsOf(region);
+      expect(pairs).toContain(`Total inflows => ${money(w.inflows, currency)}`);
+      expect(pairs).toContain(`Total outflows => ${money(w.outflows, currency)}`);
+      expect(pairs).toContain(`Net cash movement => ${money(w.movement, currency)}`);
+    }
+  }, 30_000);
+
+  it('CR-BSX-03c (W10-BOOKS-EXPORTS, D-13) RED-BEFORE: the accountant pack trial-balance.csv has one row per (account, currency) naming its currency, equal to Postgres; each currency balances on its own', async () => {
+    const asOf = new Date(Date.now() + 60_000).toISOString();
+    const files = await packNow(asOf);
+    const rows = parseCsv(files['trial-balance.csv'].toString('utf8')).filter((r) => r.length > 0);
+    // RED-BEFORE: no currency column; an account holding USD and TTD read as one summed row.
+    expect(rows[0]).toEqual(['code', 'name', 'type', 'debit', 'credit', 'currency']);
+    const got = rows.slice(1).map(([code, name, type, debit, credit, currency]) => ({ code, name, type, debit: Number(debit), credit: Number(credit), currency }));
+    // The business currency's rows first, then each other currency's.
+    expect([...new Set(got.map((r) => r.currency))]).toEqual(['USD', 'TTD']);
+    const keys = got.map((r) => `${r.code}|${r.name}|${r.currency}`);
+    expect(new Set(keys).size, 'one row per (account, currency)').toBe(keys.length);
+
+    const pg: Array<{ code: string | null; name: string; type: string; currency: string; net: string }> = await db.$queryRawUnsafe(
+      `SELECT coa.code, coa.name, coa.type::text AS type, UPPER(TRIM(le.currency)) AS currency, SUM(le.debit - le.credit)::text AS net
+         FROM ledger_entries le JOIN chart_of_accounts coa ON coa.id = le.account_id
+        WHERE le.business_id = $1 AND coa.business_id = $1 AND coa.is_active AND le.date <= $2
+        GROUP BY coa.id, coa.code, coa.name, coa.type, 4`,
+      ID.bizUsd, new Date(asOf),
+    );
+    const want = pg
+      .map((r) => ({ key: `${r.code ?? ''}|${r.name}|${r.currency}`, type: r.type, net: round2(Number(r.net)) }))
+      .filter((r) => r.net !== 0)
+      .sort((a, b) => a.key.localeCompare(b.key));
+    expect(
+      got.map((r) => ({ key: `${r.code}|${r.name}|${r.currency}`, type: r.type, net: round2(r.debit - r.credit) })).sort((a, b) => a.key.localeCompare(b.key)),
+      'every row equals Postgres for its (account, currency)',
+    ).toEqual(want);
+    for (const currency of ['USD', 'TTD']) {
+      const mine = got.filter((r) => r.currency === currency);
+      expect(round2(mine.reduce((s, r) => s + r.debit, 0)), `${currency} balances`).toBe(round2(mine.reduce((s, r) => s + r.credit, 0)));
+    }
+  }, 30_000);
 });
 
 describe('V1-37 review residuals (V1-37b): bank rules skip a row the door refuses for currency (RV37-04)', () => {
