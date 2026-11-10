@@ -110,6 +110,9 @@ describe('RiscService', () => {
       getClient: vi.fn().mockReturnValue(client),
       // The SupabaseAdminService wrapper (CR-2), which takes an access JWT.
       signOut: vi.fn().mockResolvedValue(false),
+      // W7-RISC-REVOKE (D-39): the by-user-id global sign-out. The service
+      // mints the user JWT itself; the RISC handler never holds one.
+      revokeAllSessions: vi.fn(async (_uid: string): Promise<boolean> => true),
       admin: client.auth.admin,
     };
   }
@@ -544,6 +547,65 @@ describe('RiscService', () => {
           outcome: 'success',
           reason: `risc:${RISC_EVENT_TYPES.TOKEN_REVOKED}; revocation_incomplete: local_sessions`,
         });
+      });
+    });
+
+    /**
+     * W7-RISC-REVOKE (D-39, closes R0-ID-F7 review F7-SEC-2): the ban only
+     * pauses the provider session, so account-disabled/hijacking also revokes
+     * every Supabase session of the user (and with them every refresh token)
+     * through SupabaseAdminService.revokeAllSessions(userId), which mints the
+     * user JWT GoTrue's POST /logout needs. The other session-ending events
+     * keep no provider traffic (F7-CR-1).
+     */
+    describe('W7-RISC-REVOKE (D-39) — account-disabled/hijacking revokes every provider session by user id', () => {
+      it('asks SupabaseAdminService.revokeAllSessions(userId) after the local legs and BEFORE the ban is read; never the JWT-taking signOut', async () => {
+        supabaseAdmin.revokeAllSessions.mockImplementationOnce(async () => {
+          order.push('provider revokeAllSessions');
+          return true;
+        });
+        await expect(deliverHijacking()).resolves.toEqual({ status: 202, processed: true });
+        expect(supabaseAdmin.revokeAllSessions).toHaveBeenCalledTimes(1);
+        expect(supabaseAdmin.revokeAllSessions).toHaveBeenCalledWith(USER);
+        expect(order).toEqual([
+          `setex ${logoutRevocationKey(USER)}`,
+          `set ${ADMIN_CUTOFF}`,
+          'provider revokeAllSessions',
+          'provider getUserById',
+          'provider updateUserById',
+        ]);
+        expect(supabaseAdmin.signOut).not.toHaveBeenCalled();
+        expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
+        expect(persisted()?.actionTaken).toBe('account_disabled_hijacking');
+      });
+
+      it.each([
+        ['reports false', () => supabaseAdmin.revokeAllSessions.mockResolvedValueOnce(false)],
+        ['throws', () => supabaseAdmin.revokeAllSessions.mockRejectedValueOnce(new Error('gotrue logout down'))],
+      ] as Array<[string, () => void]>)(
+        'a sign-out that %s is logged with the user id, named provider_signout, and does not skip the cutoff or the ban',
+        async (_name, arrange) => {
+          const logger = stubLogger();
+          arrange();
+          await expect(deliverHijacking()).resolves.toEqual({ status: 202, processed: true });
+          expect(redis.store.get(logoutRevocationKey(USER))?.value).toMatch(/^\d+$/);
+          expect(supabaseAdmin.admin.updateUserById).toHaveBeenCalledTimes(1);
+          expect(logger.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
+          expect(persisted()?.actionTaken).toBe('account_disabled_hijacking:revocation_incomplete:provider_signout');
+          expect(audited()).toMatchObject({
+            outcome: 'success',
+            reason: `risc:${RISC_EVENT_TYPES.ACCOUNT_DISABLED}; revocation_incomplete: provider_signout`,
+          });
+        },
+      );
+
+      it.each([
+        ...endingWithoutBan,
+        ['verification', RISC_EVENT_TYPES.VERIFICATION, undefined],
+        ['account-disabled/bulk-account', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'],
+      ] as Array<[string, string, string | undefined]>)('%s: no provider sign-out (F7-CR-1)', async (_name, eventType, reason) => {
+        await deliver(eventType, reason);
+        expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
       });
     });
 
