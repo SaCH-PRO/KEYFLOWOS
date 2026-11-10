@@ -8,6 +8,26 @@ export const ASSIGNABLE_TYPES = ['User', 'StaffMember', 'Contractor', 'KeyflowSt
 export type TaskType = (typeof TASK_TYPES)[number];
 export type AssignableType = (typeof ASSIGNABLE_TYPES)[number];
 
+/** Anything with a non-space run either side of an '@': an email address, or most of one. */
+const EMAIL_LIKE = /[^\s@]+@[^\s@]+/;
+
+/**
+ * W9-PROJECTS-SERVER (review SEC-W196-3): how GET .../task-assignments/options names a member: their
+ * name, else their first and last name, else 'Unnamed member (…<last 4 of id>)' (the label the
+ * web's assignee picker uses). Never the email: a name that looks like one is passed over.
+ */
+function assigneeMemberLabel(u: { id: string; name: string | null; firstName: string | null; lastName: string | null }): string {
+  const usable = (s: string | null | undefined) => {
+    const t = (s ?? '').trim();
+    return t.length > 0 && !EMAIL_LIKE.test(t) ? t : null;
+  };
+  return (
+    usable(u.name) ??
+    usable([u.firstName, u.lastName].map((p) => (p ?? '').trim()).filter(Boolean).join(' ')) ??
+    `Unnamed member (…${u.id.slice(-4)})`
+  );
+}
+
 export interface AssignTaskInput {
   taskType: TaskType;
   taskId: string;
@@ -473,12 +493,19 @@ export class TaskAssignmentService {
 
   /**
    * Get a flat list of assignable options for a business (users + staff).
+   *
+   * W9-PROJECTS-SERVER (review SEC-W196-3; D-87): every member of the business reads this list,
+   * STAFF refused the team list (team:none) included, so it names members and never shows their
+   * email: a member is offered by their name, else their first and last name, else a neutral
+   * label that tells options apart by the end of their id. A stored name that is an email address
+   * (account bootstrap stores the email as the name when none is given) is not a name. The email
+   * column is not read.
    */
   async getAssignableOptions(businessId: string) {
     const [users, staff] = await Promise.all([
       this.prisma.client.user.findMany({
         where: { businesses: { some: { businessId } } },
-        select: { id: true, name: true, email: true },
+        select: { id: true, name: true, firstName: true, lastName: true },
         take: 200,
       }),
       this.prisma.client.staffMember.findMany({
@@ -489,7 +516,7 @@ export class TaskAssignmentService {
     ]);
 
     return [
-      ...users.map((u) => ({ type: 'User' as AssignableType, id: u.id, name: u.name ?? u.email ?? u.id })),
+      ...users.map((u) => ({ type: 'User' as AssignableType, id: u.id, name: assigneeMemberLabel(u) })),
       ...staff.map((s) => ({ type: 'StaffMember' as AssignableType, id: s.id, name: s.name })),
       { type: 'KEY' as AssignableType, id: 'key_ai', name: 'KEY AI Assistant' },
     ];

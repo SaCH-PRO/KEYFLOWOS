@@ -166,7 +166,8 @@ describe("the Revenue tab shows the project's budget (F7b)", () => {
  * the budget card this packet mounts. The web half: a refused budget read (403) is a denial state,
  * and the Revenue tab shows the budget card's money only to a member the project's expense list
  * answers; one it refuses (403) sees the denial and the budget is not requested. The server half
- * (gating the route's cost fields on expenses/finance read) is outside this packet's write set.
+ * (gating the route's cost fields on expenses read) landed with W9-PROJECTS-SERVER: see the pointer
+ * at the end of this block.
  */
 describe("a member refused the project's costs is not shown them (SEC-W196-2)", () => {
   it("a 403 on the budget read is a denial state with no amounts, distinct from 'No budget set'", async () => {
@@ -188,7 +189,9 @@ describe("a member refused the project's costs is not shown them (SEC-W196-2)", 
     expect(screen.queryByText(/777/)).toBeNull();
   });
 
-  it.todo(
-    "server: GET /projects/businesses/:bid/projects/:pid/budget withholds expenseCost, timeCost and totalCost from a member without expenses/finance read — projects.controller.ts is outside PR196-PROJECTS-WEB's write set (server follow-up)",
-  );
+  // The server half (was it.todo here) is proved by W9-PROJECTS-SERVER in
+  // apps/server/test/projects-budget-assignee-scope.integration.test.ts ("SEC-W196-2 (was it.todo): ..."):
+  // GET /projects/businesses/:bid/projects/:pid/budget serves expenseCost, timeCost and totalCost (and
+  // remainingBudget, percentUsed, status) as null to a member without expenses read, the member the
+  // project's expense list refuses, so the Revenue tab above never requests the budget for them.
 });

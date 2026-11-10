@@ -157,8 +157,11 @@ export class ProjectsController {
   getProjectBudget(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.getProjectBudget(projectId, businessId);
+    // W9-PROJECTS-SERVER (review SEC-W196-2; D-100's withholding rule): the costs are served to a
+    // member who reads expenses, as the project's expense list is (GET .../expenses/by-project).
+    return this.projects.getProjectBudget(projectId, businessId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Get('businesses/:businessId/projects/:projectId/timeline')

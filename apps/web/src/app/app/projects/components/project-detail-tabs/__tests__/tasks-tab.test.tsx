@@ -452,8 +452,8 @@ describe("a reorder never writes the status of a task whose status and completio
  * Review SEC-W196-3: GET .../task-assignments/options names a member who has no name by their
  * email (TaskAssignmentService.getAssignableOptions), and any member may read it, including STAFF
  * refused the team list (team:none). The picker shows names only: an email-shaped name is shown
- * under a neutral label. (The server half, not falling back to the email, is outside this
- * packet's write set: see the it.todo below.)
+ * under a neutral label. (The server half, not falling back to the email, landed with
+ * W9-PROJECTS-SERVER: see the pointer below.)
  */
 describe("the assignee picker shows names, not email addresses (SEC-W196-3)", () => {
   it("a member listed by their email is offered under a neutral label", async () => {
@@ -473,7 +473,9 @@ describe("the assignee picker shows names, not email addresses (SEC-W196-3)", ()
     expect(labels).toEqual(expect.arrayContaining(["Ada Member", "Sam Staff", "Unnamed member (…7f3a)"]));
   });
 
-  it.todo(
-    "server: GET /businesses/:bid/task-assignments/options does not fall back to a member's email (or is gated on team:read) — task-assignment.service.ts / task-assignment.controller.ts are outside PR196-PROJECTS-WEB's write set (server follow-up)",
-  );
+  // The server half (was it.todo here) is proved by W9-PROJECTS-SERVER in
+  // apps/server/test/projects-budget-assignee-scope.integration.test.ts ("SEC-W196-3 (was it.todo): ..."):
+  // GET /businesses/:bid/task-assignments/options no longer falls back to a member's email. A member is
+  // offered by their name, else their first and last name, else "Unnamed member (…<last 4 of id>)", the
+  // label this picker uses; the list stays open to every member (not gated on team:read).
 });
