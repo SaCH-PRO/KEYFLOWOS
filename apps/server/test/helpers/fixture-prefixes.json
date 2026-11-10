@@ -798,6 +798,11 @@
       "packet": "V1-95 (W9-PROJECTS-SERVER)"
     },
     {
+      "prefix": "v96o_",
+      "owner": "apps/server/test/data-cleanup-scripts.integration.test.ts",
+      "packet": "V1-96 (W10-DATA-CLEANUP-SCRIPTS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
