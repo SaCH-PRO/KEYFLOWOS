@@ -7251,6 +7251,10 @@ ${triage.standingContext}`;
           action: 'invoice_sent',
           entityType: 'invoice',
           entityId: invoice.id,
+          // W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2, owner ruling D-63): the title names the
+          // invoice's contact, so the row carries its contactId; the timeline rule then serves it
+          // only to members who may open that contact (timeline-scope TS-13a).
+          contactId: invoice.contactId,
           title: `Invoice ${invoice.invoiceNumber} sent to ${contactName}`,
           tone: 'success',
         });
