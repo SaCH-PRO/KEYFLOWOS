@@ -41,6 +41,7 @@ import { ExchangeRateService, type CreateExchangeRateInput } from './exchange-ra
 import { FixedAssetService, type CreateFixedAssetInput, type UpdateFixedAssetInput } from './fixed-asset.service';
 import { SystemEmailSendError } from '../notifications/system-email.service';
 import { redactAddresses } from '../../core/security/redaction';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -285,12 +286,19 @@ export class FinanceController {
   }
 
   // ---------- Overview ----------
+  /**
+   * W9-FINANCE-OVERVIEW (TS-22g; review SEC-W8RA-4, CR-W8RA-2; owner ruling D-63): the overview's
+   * revenue actions are served to the member as GET revenue-actions serves them, so the member is
+   * passed as the viewer (resolveTimelineViewer, the revenue-actions routes' own); revenue read stays
+   * the gate (ModuleScopeGuard, D-57).
+   */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('overview')
   async getOverview(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.overview.getOverview(businessId);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, req.user.id);
+    return this.overview.getOverview(businessId, viewer);
   }
 
   @Get('expense-breakdown')

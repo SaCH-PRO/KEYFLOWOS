@@ -122,11 +122,16 @@
  *
  * V1-37c review CR-37c-01 (it.todo, outside the V1-37c write set):
  *
- *   CP-17  the Finance overview serves the business-currency cashBalance (CP-14
- *          pins it, never the sum) but does not yet report other-currency cash
- *          apart, and labels it with the raw stored currency code
+ *   CP-17  the Finance overview served the business-currency cashBalance (CP-14
+ *          pins it, never the sum) but did not report other-currency cash
+ *          apart, and labelled it with the raw stored currency code.
+ *          W9-FINANCE-OVERVIEW (D-13; was it.todo): live. The overview reports
+ *          cashCurrency and otherCurrencyCash as safe-to-spend and the OS
+ *          command center do, on a computed and a cached read, and labels its
+ *          figures with the normalized business currency
  *   CP-18  the overview's LOW_RUNWAY action is computed from business-currency
- *          cash alone and says nothing of other-currency cash
+ *          cash alone and says nothing of other-currency cash (it.todo, awaiting
+ *          a D-13 ruling)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1293,24 +1298,56 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
   }, 60_000);
 
-  // Review CR-37c-01 (confirmed by running at the packet head, on I after
-  // CP-15: TTD 150 beside USD 620, plus a 600 TTD expense 45 days ago, so a
-  // burn of 100 a month): GET /finance/businesses/:id/overview answers
-  // { cashBalance: 150, currency: 'TTD', cashRunwayMonths: 1.5, ... } with no
-  // cashCurrency, otherCurrencyCash or byCurrency key, and a PENDING
-  // LOW_RUNWAY RevenueAction is persisted ('Low cash runway', '~1.5 months at
-  // current burn', amountAtRisk 150) that says nothing of the USD 620. Both
-  // live in FinanceOverviewService.getOverview (finance-overview.service.ts:
-  // the response object, the `currency` label read raw from Business.currency,
-  // and the runway / LOW_RUNWAY spec), which is outside the V1-37c write set,
-  // as are its web readers (finance/_overview-client.tsx 'Cash on hand',
-  // money/components/money-cash-hero.tsx). Lift these into a follow-up packet
-  // whose write set holds finance-overview.service.ts:
-  //   expect(read.overview).toMatchObject({ cashBalance: 150, cashCurrency: 'TTD',
-  //     otherCurrencyCash: [{ currency: 'USD', amount: 620 }] });
-  //   a business stored as 'ttd': expect(read.overview.currency).toBe('TTD');
-  //   the LOW_RUNWAY action names the other-currency cash it leaves out (or is
-  //   withheld while other-currency cash exists: an owner ruling under D-13).
-  it.todo('CP-17 (review CR-37c-01) BLOCKED outside the V1-37c write set (finance-overview.service.ts): the Finance overview reports other-currency cash apart (cashCurrency, otherCurrencyCash) as safe-to-spend and the OS command center do, and labels cashBalance with the normalized business currency');
+  // Review CR-37c-01 (confirmed by running at the V1-37c head, on I after
+  // CP-15: TTD 150 beside USD 620): GET /finance/businesses/:id/overview
+  // answered { cashBalance: 150, currency: 'TTD', ... } with no cashCurrency or
+  // otherCurrencyCash key, the `currency` label read raw from
+  // Business.currency. W9-FINANCE-OVERVIEW (D-13; was it.todo CP-17): the
+  // overview reports the other currencies apart, from the same cash position
+  // it reads its cashBalance from, on every read (its 60s cache is checked
+  // against the business currency's figure only).
+  it('CP-17 (W9-FINANCE-OVERVIEW, was it.todo) (review CR-37c-01, D-13): the Finance overview reports other-currency cash apart (cashCurrency, otherCurrencyCash) as safe-to-spend and the OS command center do, and labels cashBalance with the normalized business currency, on a computed and on a cached read', async () => {
+    // I holds TTD 150 beside USD 620 (CP-14, CP-15). A computed read.
+    await redis.del(overviewKey(ID.bizI));
+    let read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview).toMatchObject({ cashBalance: 150, currency: 'TTD', cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 620 }] });
+    expect(read.overview.otherCurrencyCash, 'as safe-to-spend says it').toEqual(read.safe.otherCurrencyCash);
+    expect(read.overview.otherCurrencyCash, 'as the OS command center says it').toEqual(read.os.flows.financial.otherCurrencyCash);
+    expect(numbersIn(read.overview).filter(([, n]) => n === 770), 'no figure adds TTD and USD').toEqual([]);
+
+    // Inside the cache's TTL more USD lands; the TTD figure (the cache's check) is unchanged, and the
+    // overview says the new USD figure at once.
+    expect(await redis.exists(overviewKey(ID.bizI)), 'the overview is cached').toBe(1);
+    await postIn('USD', ID.bizI, 'i_cash_usd_cp17', 5, 'CASH', 'OTHER_INCOME');
+    expect(await ledgerCashByCurrency(ID.bizI)).toEqual({ TTD: 150, USD: 625 });
+    read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview).toMatchObject({ cashBalance: 150, currency: 'TTD', cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 625 }] });
+    expect(read.overview.otherCurrencyCash).toEqual(read.safe.otherCurrencyCash);
+    expect(numbersIn(read.overview).filter(([, n]) => n === 775), 'no figure adds TTD and USD').toEqual([]);
+
+    // A business whose stored currency is the legacy lower-case 'ttd': labelled TTD, as the cash
+    // position labels it, computed and cached.
+    await db.business.update({ where: { id: ID.bizI }, data: { currency: 'ttd' } });
+    try {
+      await redis.del(overviewKey(ID.bizI));
+      for (const pass of ['computed', 'cached']) {
+        const f = await overview(ID.bizI, ID.ownerI);
+        expect(f.status, `${pass}: ${JSON.stringify(f.body).slice(0, 200)}`).toBe(200);
+        expect(f.body, pass).toMatchObject({ cashBalance: 150, currency: 'TTD', cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 625 }] });
+      }
+    } finally {
+      await db.business.update({ where: { id: ID.bizI }, data: { currency: 'TTD' } });
+      await redis.del(overviewKey(ID.bizI));
+    }
+
+    // On the USD business J the cash is USD and its TTD is held apart (CP-16).
+    const j = await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
+    expect(j.overview).toMatchObject({ cashBalance: 300, currency: 'USD', cashCurrency: 'USD', otherCurrencyCash: [{ currency: 'TTD', amount: 40 }] });
+    expect(j.overview.otherCurrencyCash).toEqual(j.safe.otherCurrencyCash);
+    // A business whose cash is in its own currency alone: nothing held apart.
+    const a = await overview(ID.bizA, ID.ownerA);
+    expect(a.status).toBe(200);
+    expect(a.body).toMatchObject({ currency: 'TTD', cashCurrency: 'TTD', otherCurrencyCash: [] });
+  }, 60_000);
   it.todo('CP-18 (review CR-37c-01) BLOCKED outside the V1-37c write set (finance-overview.service.ts) and awaiting a D-13 ruling: the LOW_RUNWAY action computed from business-currency cash says when other-currency cash exists (or is withheld), never a silent low-runway alarm beside USD reserves');
 });

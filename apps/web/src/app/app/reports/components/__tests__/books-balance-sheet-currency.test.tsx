@@ -95,12 +95,21 @@ describe("Books balance sheet: one sheet per currency, never summed", () => {
     expect(screen.queryByText(/export/i)).toBeNull();
   });
 
-  it("BS-CUR-03 (review RV37b-CR-03): with other currencies on screen, the view says the CSV / PDF export carries the business-currency sheet only", async () => {
+  /*
+   * W9-BALANCE-SHEET-EXPORT review CR-BSX-01 / SEC-BSX-1 (owner ruling D-13): the
+   * exports now carry every currency's sheet (RV37b-CR-03, report-formatters.ts),
+   * so the note no longer says they carry the business-currency sheet only: a
+   * reader who trusted it could share an export as a one-currency sheet and hand
+   * over the other balances without knowing it.
+   */
+  it("BS-CUR-03 (review RV37b-CR-03; W9-BALANCE-SHEET-EXPORT review CR-BSX-01, D-13): with other currencies on screen, the view says the CSV / PDF export carries the business-currency sheet and then each other currency's sheet on its own, never the business-currency sheet only", async () => {
     vi.mocked(fetchLedgerBalanceSheet).mockResolvedValue({ data: REPORT, error: null } as never);
     render(<BooksReportView businessId="biz_bs" kind="books-balance-sheet" asOf="2026-11-02" />);
     await screen.findByTestId("balance-sheet-USD");
-    expect(screen.getByTestId("balance-sheet-export-note")).toHaveTextContent(
-      "The CSV and PDF exports carry the TTD sheet only; the USD balances are shown here.",
+    const note = screen.getByTestId("balance-sheet-export-note");
+    expect(note).toHaveTextContent(
+      "The CSV and PDF exports carry the TTD sheet and then the USD balances, each on its own, as shown here.",
     );
+    expect(note.textContent).not.toMatch(/\bonly\b/);
   });
 });

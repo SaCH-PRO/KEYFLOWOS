@@ -4,6 +4,7 @@ import {
   PnlReport,
   CashflowReport,
   BalanceSheetReport,
+  BalanceSheetCurrencySheet,
   TaxSummaryReport,
   DimensionRow,
 } from './ledger-reporting.service';
@@ -67,22 +68,57 @@ export function cashflowToCsv(r: CashflowReport): string {
   return toCsv(rows);
 }
 
+/*
+ * RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT; owner ruling D-13): the balance sheet
+ * is the business currency's sheet at the top level plus one sheet per currency
+ * the books hold under `byCurrency` (V1-37b, RV37-02). The CSV and PDF exports
+ * read the top level only and dropped every other currency. They now carry the
+ * business currency's sheet first and then each other currency's sheet on its
+ * own (sorted by code), as the Books view shows them; every amount is labelled
+ * with its currency and nothing is converted or added across currencies.
+ */
+
+/** The other currencies' sheets of a balance sheet, by code, each labelled with its code (RV37b-CR-03, D-13). */
+function otherCurrencySheets(r: BalanceSheetReport): BalanceSheetCurrencySheet[] {
+  return Object.entries(r.byCurrency ?? {})
+    .filter(([code]) => code !== r.currency)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, sheet]) => ({ ...sheet, currency: code }));
+}
+
+const otherCurrenciesNote = (currency: string): string =>
+  `Balances in other currencies are shown on their own; they are not converted or added to the ${currency} figures above.`;
+
+const balanceSheetEquityTotal = (s: BalanceSheetCurrencySheet): number => +(s.equity.total + s.netEquityFromIncome).toFixed(2);
+
+/** One currency's sheet as CSV rows: every amount row names that currency (RV37b-CR-03, D-13). */
+function balanceSheetCsvRows(s: BalanceSheetCurrencySheet): Array<Array<string | number>> {
+  const c = s.currency;
+  const rows: Array<Array<string | number>> = [['Section', 'Account', 'Amount', 'Currency']];
+  for (const a of s.assets.lines) rows.push(['Asset', a.name, a.amount, c]);
+  rows.push(['Assets Total', '', s.assets.total, c]);
+  for (const a of s.liabilities.lines) rows.push(['Liability', a.name, a.amount, c]);
+  rows.push(['Liabilities Total', '', s.liabilities.total, c]);
+  for (const a of s.equity.lines) rows.push(['Equity', a.name, a.amount, c]);
+  rows.push(['Retained Earnings (period income)', '', s.netEquityFromIncome, c]);
+  rows.push(['Equity Total', '', balanceSheetEquityTotal(s), c]);
+  rows.push(['Identity holds (A = L + E)', s.identityHolds ? 'YES' : 'NO', s.identityDelta, c]);
+  return rows;
+}
+
 export function balanceSheetToCsv(r: BalanceSheetReport): string {
   const rows: Array<Array<string | number>> = [
     ['Balance Sheet'],
     ['Currency', r.currency],
     ['As of', r.asOf],
     [],
-    ['Section', 'Account', 'Amount'],
+    ...balanceSheetCsvRows(r),
   ];
-  for (const a of r.assets.lines) rows.push(['Asset', a.name, a.amount]);
-  rows.push(['Assets Total', '', r.assets.total]);
-  for (const a of r.liabilities.lines) rows.push(['Liability', a.name, a.amount]);
-  rows.push(['Liabilities Total', '', r.liabilities.total]);
-  for (const a of r.equity.lines) rows.push(['Equity', a.name, a.amount]);
-  rows.push(['Retained Earnings (period income)', '', r.netEquityFromIncome]);
-  rows.push(['Equity Total', '', r.equity.total + r.netEquityFromIncome]);
-  rows.push(['Identity holds (A = L + E)', r.identityHolds ? 'YES' : 'NO', r.identityDelta]);
+  const others = otherCurrencySheets(r);
+  if (others.length) rows.push([], [otherCurrenciesNote(r.currency)]);
+  for (const s of others) {
+    rows.push([], [`${s.currency} balances`], ['Currency', s.currency], ['As of', s.asOf], [], ...balanceSheetCsvRows(s));
+  }
   return toCsv(rows);
 }
 
@@ -291,29 +327,92 @@ export function sendHtml(res: Response, html: string): void {
 
 type PdfSection = { heading?: string; rows: Array<[string, string]>; emphasis?: boolean };
 
+/** The amount column of a PDF row; the label takes the rest of the line. */
+const PDF_VALUE_WIDTH = 140;
+
+/*
+ * W9-BALANCE-SHEET-EXPORT review CR-BSX-02 (owner ruling D-13): a row is its
+ * label and its amount side by side, so it moves to a new page whole. renderPdf
+ * drew the label at the current y and then the amount at that same y: when the
+ * label did not fit, pdfkit carried the label to a new page and the amount,
+ * drawn at the old y, overflowed onto a third one, so an account name and its
+ * figure sat on different pages (any sheet of about 15 lines a section; the
+ * multi-currency balance sheet, RV37b-CR-03, reaches it with far fewer). Now:
+ *   - a row goes to a new page before it is drawn when the taller of its label
+ *     and its amount does not fit, and the next row starts below the taller one
+ *     (a wrapped label no longer runs under the next row);
+ *   - a heading starts a new page when it cannot keep the first row under it
+ *     (and the headings of any empty sections between) on its page;
+ *   - every heading starts at the left margin: the amount draw left the x in
+ *     the amount column, so each heading after the first was drawn there.
+ */
 async function renderPdf(filename: string, title: string, meta: string, sections: PdfSection[]): Promise<Buffer> {
   const doc = new PDFDocument({ size: 'LETTER', margin: 48, info: { Title: title } });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
 
+  const left = doc.page.margins.left;
+  const contentWidth = doc.page.width - left - doc.page.margins.right;
+  const labelWidth = contentWidth - PDF_VALUE_WIDTH;
+  const bottom = () => doc.page.height - doc.page.margins.bottom;
+  /** A new page when `need` does not fit below the cursor (never a blank page for a block taller than a page). */
+  const breakFor = (need: number) => {
+    if (doc.y + need > bottom() && doc.y > doc.page.margins.top) doc.addPage();
+  };
+  // The font a heading is drawn in is the one the rows before it left set (pdfkit's Helvetica before any row), as before.
+  let style = { size: 9, font: 'Helvetica' };
+  const rowStyle = (s: PdfSection) => ({ size: s.emphasis ? 10 : 9, font: s.emphasis ? 'Helvetica-Bold' : 'Helvetica' });
+  /** A row is as tall as the taller of its label and its amount (either may wrap). Leaves the row's font set. */
+  const rowHeight = (s: PdfSection, [label, value]: [string, string]): number => {
+    const r = rowStyle(s);
+    doc.fontSize(r.size).font(r.font);
+    return Math.max(
+      doc.currentLineHeight(true),
+      doc.heightOfString(label, { width: labelWidth }),
+      doc.heightOfString(value, { width: PDF_VALUE_WIDTH, align: 'right' }),
+    );
+  };
+  /** The room a heading needs on its page: itself, the headings of the empty sections after it, and the first row below them. */
+  const keepWithNext = (k: number): number => {
+    let need = 0;
+    for (let j = k; j < sections.length; j++) {
+      const s = sections[j];
+      if (s.heading) {
+        doc.fontSize(12).font(style.font);
+        // moveDown(0.5) before and moveDown(0.3) after, measured at the heading's size (an upper bound).
+        need += doc.currentLineHeight(true) * 0.8 + doc.heightOfString(s.heading, { width: contentWidth });
+      }
+      if (s.rows.length) return need + rowHeight(s, s.rows[0]);
+    }
+    return need;
+  };
+
   doc.fontSize(18).fillColor('#111').text(title);
   doc.moveDown(0.25).fontSize(9).fillColor('#666').text(meta);
   doc.moveDown(0.75);
 
-  for (const s of sections) {
+  for (const [k, s] of sections.entries()) {
     if (s.heading) {
-      doc.moveDown(0.5).fontSize(12).fillColor('#111').text(s.heading);
-      doc.moveTo(doc.x, doc.y + 2).lineTo(doc.page.width - doc.page.margins.right, doc.y + 2).strokeColor('#ddd').stroke();
+      breakFor(keepWithNext(k));
+      doc.fontSize(style.size).font(style.font);
+      doc.moveDown(0.5).fontSize(12).fillColor('#111').text(s.heading, left);
+      doc.moveTo(left, doc.y + 2).lineTo(left + contentWidth, doc.y + 2).strokeColor('#ddd').stroke();
       doc.moveDown(0.3);
+      style = { ...style, size: 12 };
     }
-    for (const [label, value] of s.rows) {
+    for (const row of s.rows) {
+      const [label, value] = row;
+      const h = rowHeight(s, row);
+      breakFor(h);
       const y = doc.y;
-      const labelWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right - 140;
-      doc.fontSize(s.emphasis ? 10 : 9).fillColor('#222').font(s.emphasis ? 'Helvetica-Bold' : 'Helvetica');
-      doc.text(label, doc.page.margins.left, y, { width: labelWidth });
-      doc.text(value, doc.page.margins.left + labelWidth, y, { width: 140, align: 'right' });
+      doc.fillColor('#222');
+      doc.text(label, left, y, { width: labelWidth });
+      doc.text(value, left + labelWidth, y, { width: PDF_VALUE_WIDTH, align: 'right' });
+      doc.x = left;
+      doc.y = y + h;
       doc.moveDown(0.15);
+      style = rowStyle(s);
     }
   }
   doc.end();
@@ -386,22 +485,34 @@ export async function cashflowToPdf(r: CashflowReport): Promise<Buffer> {
   return renderPdf('cashflow', 'Cashflow', `${r.period.from} → ${r.period.to} · ${r.basis} basis · ${r.currency}`, sections);
 }
 
-export async function balanceSheetToPdf(r: BalanceSheetReport): Promise<Buffer> {
-  return renderPdf('balance-sheet', 'Balance Sheet', `As of ${r.asOf} · ${r.currency}`, [
-    { heading: 'Assets', rows: r.assets.lines.map((a) => [a.name, fmt(a.amount, r.currency)]) },
-    { rows: [['Total Assets', fmt(r.assets.total, r.currency)]], emphasis: true },
-    { heading: 'Liabilities', rows: r.liabilities.lines.map((a) => [a.name, fmt(a.amount, r.currency)]) },
-    { rows: [['Total Liabilities', fmt(r.liabilities.total, r.currency)]], emphasis: true },
+/** One currency's sheet as PDF sections: every amount in that currency (RV37b-CR-03, D-13). */
+function balanceSheetPdfSections(s: BalanceSheetCurrencySheet): PdfSection[] {
+  const c = s.currency;
+  return [
+    { heading: 'Assets', rows: s.assets.lines.map((a) => [a.name, fmt(a.amount, c)]) },
+    { rows: [['Total Assets', fmt(s.assets.total, c)]], emphasis: true },
+    { heading: 'Liabilities', rows: s.liabilities.lines.map((a) => [a.name, fmt(a.amount, c)]) },
+    { rows: [['Total Liabilities', fmt(s.liabilities.total, c)]], emphasis: true },
     {
       heading: 'Equity',
       rows: [
-        ...r.equity.lines.map((a) => [a.name, fmt(a.amount, r.currency)] as [string, string]),
-        ['Retained earnings (period)', fmt(r.netEquityFromIncome, r.currency)],
+        ...s.equity.lines.map((a) => [a.name, fmt(a.amount, c)] as [string, string]),
+        ['Retained earnings (period)', fmt(s.netEquityFromIncome, c)],
       ],
     },
-    { rows: [['Total Equity', fmt(r.equity.total + r.netEquityFromIncome, r.currency)]], emphasis: true },
-    { rows: [['Identity (A − L − E)', `${fmt(r.identityDelta, r.currency)} ${r.identityHolds ? 'OK' : 'OUT OF BALANCE'}`]] },
-  ]);
+    { rows: [['Total Equity', fmt(balanceSheetEquityTotal(s), c)]], emphasis: true },
+    // ASCII minus: the standard PDF font has no U+2212 and drew it as '"'.
+    { rows: [['Identity (A - L - E)', `${fmt(s.identityDelta, c)} ${s.identityHolds ? 'OK' : 'OUT OF BALANCE'}`]] },
+  ];
+}
+
+export async function balanceSheetToPdf(r: BalanceSheetReport): Promise<Buffer> {
+  const others = otherCurrencySheets(r);
+  const meta = `As of ${r.asOf} · ${r.currency}`
+    + (others.length ? ` · other currencies on their own, not converted or added: ${others.map((s) => s.currency).join(', ')}` : '');
+  const sections = balanceSheetPdfSections(r);
+  for (const s of others) sections.push({ heading: `${s.currency} balances`, rows: [] }, ...balanceSheetPdfSections(s));
+  return renderPdf('balance-sheet', 'Balance Sheet', meta, sections);
 }
 
 export async function taxSummaryToPdf(r: TaxSummaryReport): Promise<Buffer> {

@@ -71,8 +71,12 @@
  *   some action binds (SEC-W8RA-1, CR-W8RA-1), its resolution is one of them
  *   (SEC-W8RA-2), and PATCH notifications read-all / :id/read leave the weekly
  *   briefing alone for a member without revenue read (SEC-W8RA-3). TS-22g
- *   (SEC-W8RA-4, CR-W8RA-2: GET finance/.../overview) is a follow-up outside
- *   the write set (it.todo).
+ *   (SEC-W8RA-4, CR-W8RA-2: GET finance/.../overview) was a follow-up outside
+ *   that write set (it.todo).
+ *   TS-22g (W9-FINANCE-OVERVIEW, D-63; was it.todo): live. The Finance overview
+ *   serves each revenue reader only the revenue actions GET revenue-actions
+ *   serves them (servedRevenueActions), filled past the ones withheld, cached
+ *   or not.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -2325,12 +2329,170 @@ describe('W8-REVENUE-ACTIONS-SCOPE (D-63): the revenue-actions routes and the st
       await db.$executeRawUnsafe(`DELETE FROM notifications WHERE id LIKE ${sqlLikePrefix(`${P}n_`)}`);
     }
   });
-});
 
-describe('W8-REVENUE-ACTIONS-SCOPE review follow-up outside the write set (TS-22g)', () => {
-  it.todo(
-    "TS-22g (review SEC-W8RA-4, CR-W8RA-2, D-63): GET finance/businesses/:businessId/overview (finance.controller.ts getOverview: revenue read only, no viewer passed; FinanceOverviewService.getOverview, both outside W8-REVENUE-ACTIONS-SCOPE's write set) returns the 25 highest-risk PENDING revenue actions with their title and detail, unfiltered by the D-63 contact rule, so a view-all ADMIN, a crm 'none' or a crm_view 'owned' revenue reader is served there the actions GET revenue-actions withholds from them ('Slow payer: Priv (avg 40d)', 'Chase Priv this week', 'Slow payer: Staff'); a follow-up packet applies the revenue-actions rule (servedRevenueActions in revenue-action.controller.ts) to overview.actions",
-  );
+  /**
+   * W9-FINANCE-OVERVIEW (TS-22g; review SEC-W8RA-4, CR-W8RA-2; owner ruling D-63): the real
+   * FinanceController and FinanceOverviewService over the suite's database, with the real guards and
+   * the overview's Redis cache wired as AppModule wires it (RedisService), so a member's read after
+   * the OWNER's runs the cached path. FinanceController's other collaborators are off this route and
+   * stubbed; the overview's account seeder is not composed (it is optional, and seeds no action), and
+   * ReceivablesService runs live over a chart seeder stand-in that seeds nothing.
+   */
+  let financeApp: any;
+  let financeRedis: any; // the finance app's RedisService client (quit when the app closes)
+  /** FinanceOverviewService's Redis key (finance-overview.service.ts cacheKey). */
+  const OVERVIEW_KEY = `finance:overview:${ID.bizA}`;
+  afterAll(async () => {
+    if (financeRedis) await financeRedis.del(OVERVIEW_KEY).catch(() => undefined);
+    if (financeApp) await financeApp.close();
+  });
+
+  async function ensureFinanceApp() {
+    if (financeApp) return;
+    const { Test } = await import('@nestjs/testing');
+    const IORedis = (await import('ioredis')).default;
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+    const { RedisService } = await import('../src/core/redis/redis.service');
+    const { FinanceController } = await import('../src/modules/finance/finance.controller');
+    const { FinanceOverviewService } = await import('../src/modules/finance/finance-overview.service');
+    const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const stubs = await Promise.all([
+      import('../src/modules/finance/ledger-balance.service').then((m) => m.LedgerBalanceService),
+      import('../src/modules/finance/finance-accounts.service').then((m) => m.FinanceAccountsService),
+      import('../src/modules/finance/finance-coa.service').then((m) => m.FinanceCoaService),
+      import('../src/modules/finance/finance-tax-rate.service').then((m) => m.FinanceTaxRateService),
+      import('../src/modules/finance/finance-settings.service').then((m) => m.FinanceSettingsService),
+      import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
+      import('../src/modules/finance/statement-source.service').then((m) => m.StatementSourceService),
+      import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
+      import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
+      import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
+      import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
+      import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
+      import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
+      import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
+      import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
+      import('../src/modules/finance/posting.service').then((m) => m.PostingService),
+      import('../src/modules/finance/safe-to-spend.service').then((m) => m.SafeToSpendService),
+      import('../src/modules/finance/cashflow-forecast.service').then((m) => m.CashflowForecastService),
+      import('../src/modules/finance/money-moves.service').then((m) => m.MoneyMovesService),
+      import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
+      import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
+      import('../src/modules/finance/accounting-period.service').then((m) => m.AccountingPeriodService),
+      import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
+      import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
+      import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
+    ]);
+    financeRedis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2 });
+    const ref = await Test.createTestingModule({
+      controllers: [FinanceController],
+      providers: [
+        { provide: PrismaService, useValue: app.get(PrismaService) },
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        FinanceOverviewService,
+        ReceivablesService,
+        // A has no chart of accounts (this suite writes no ledger): the AR account reads as absent (0),
+        // where the real seeder would first write A's chart rows, which this suite does not clean up.
+        { provide: ChartOfAccountsSeederService, useValue: { getBySystemKey: async () => null } },
+        { provide: REDIS_CLIENT, useValue: financeRedis },
+        RedisService,
+        ...stubs.map((token) => ({ provide: token, useValue: {} })),
+      ],
+    }).compile();
+    financeApp = ref.createNestApplication();
+    // Identity attachment only, as the suite's app does. No guard is overridden.
+    financeApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    financeApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    await financeApp.init();
+  }
+  async function overviewOf(user: string): Promise<request.Response> {
+    await ensureFinanceApp();
+    return request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizA}/overview`).set(HEADER, user);
+  }
+  const actionIds = (res: request.Response) => (res.body.actions ?? []).map((a: { id: string }) => a.id).sort();
+
+  it("TS-22g (W9-FINANCE-OVERVIEW, was it.todo) (review SEC-W8RA-4, CR-W8RA-2, D-63): GET finance/businesses/:businessId/overview serves a revenue reader only the PENDING revenue actions GET revenue-actions serves them (servedRevenueActions: a view-all ADMIN, a crm 'none' and a crm_view 'owned' member are not served 'Slow payer: Priv (avg 40d)', 'Chase Priv this week' or, where withheld, 'Slow payer: Staff'), filled past the actions withheld to its 25 and counted as served (pendingActionCount), on the cached read after the OWNER's as on a computed one; the OWNER gets the whole queue and a revenue-none member is refused (403)", async () => {
+    try {
+      await seedQueue();
+      await ensureFinanceApp();
+      await financeRedis.del(OVERVIEW_KEY);
+
+      // revenue 'none': refused before anything is read (ModuleScopeGuard), no action, no figure.
+      const none = await overviewOf(ID.staffRevNone);
+      expect(none.status, JSON.stringify(none.body).slice(0, 200)).toBe(403);
+      expect(JSON.stringify(none.body)).not.toMatch(/Priv|Slow payer|cashBalance|actions/);
+
+      // OWNER control: the whole queue; this read computes the business's overview and caches it.
+      const owner = await overviewOf(ID.owner);
+      expect(owner.status, JSON.stringify(owner.body).slice(0, 300)).toBe(200);
+      expect(actionIds(owner)).toEqual(ALL_ACTIONS);
+      expect(owner.body.pendingActionCount).toBe(QUEUE.length);
+      expect(JSON.stringify(owner.body)).toContain('Slow payer: Priv (avg 40d)');
+      expect(await financeRedis.exists(OVERVIEW_KEY), 'the overview is cached').toBe(1);
+
+      // Each revenue reader, inside the cache's TTL: what GET revenue-actions serves them, nothing more.
+      for (const [user, served] of Object.entries(SERVED)) {
+        const res = await overviewOf(user);
+        expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        expect(actionIds(res), `${user}: the overview's actions`).toEqual(served);
+        const list = await call('get', `${RA}?limit=200`, user);
+        expect(actionIds(res), `${user}: as GET revenue-actions serves them`).toEqual(itemIds(list));
+        expect(res.body.pendingActionCount, `${user}: counted as served`).toBe(served.length);
+        expect(JSON.stringify(res.body), `${user}: the owner's PRIVATE contact`).not.toContain('Priv');
+        // A revenue reader keeps the figures.
+        expect(typeof res.body.cashBalance, `${user}: cashBalance`).toBe('number');
+      }
+      for (const user of [ID.admin, ID.staffCrmNone]) {
+        expect(JSON.stringify((await overviewOf(user)).body), `${user}: staffOwned's PRIVATE contact`).not.toMatch(/Slow payer: Staff|Staff has/);
+      }
+      // A member's read never narrows the business's cached overview: the OWNER still gets the whole queue.
+      expect(actionIds(await overviewOf(ID.owner))).toEqual(ALL_ACTIONS);
+
+      // Filled past the actions withheld: 25 chases naming the PRIVATE contact outrank the queue, so the
+      // business's top 25 is all of them; each member is still served their whole share of the queue.
+      const HIDDEN: typeof QUEUE = Array.from({ length: 25 }, (_, i) => ({
+        key: `hide${String(i).padStart(2, '0')}`, type: 'CHASE_FROM_BRIEFING', title: `Chase Priv about invoice ${i + 1}`,
+        detail: 'Remind about the overdue balance', contactId: null, relatedType: 'briefing', relatedId: `briefing:v84a-hide-${i}`,
+        amountAtRisk: 1000 + i, priority: 1, recommendation: undefined,
+      }));
+      await seedQueue([...QUEUE, ...HIDDEN]);
+      await financeRedis.del(OVERVIEW_KEY);
+      const ownerTop = await overviewOf(ID.owner);
+      expect(ownerTop.status).toBe(200);
+      expect(ownerTop.body.actions).toHaveLength(25);
+      expect(ownerTop.body.actions.every((a: { title: string }) => a.title.startsWith('Chase Priv about invoice')), 'the business top 25').toBe(true);
+      expect(ownerTop.body.pendingActionCount).toBe(QUEUE.length + HIDDEN.length);
+      for (const [user, served] of Object.entries(SERVED)) {
+        const res = await overviewOf(user);
+        expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        expect(actionIds(res), `${user}: filled past the 25 withheld`).toEqual(served);
+        expect(res.body.pendingActionCount, `${user}: counted as served`).toBe(served.length);
+        expect(JSON.stringify(res.body), `${user}: the owner's PRIVATE contact`).not.toContain('Priv');
+      }
+
+      // Tenant control: B's member is refused A's overview.
+      expect((await overviewOf(ID.ownerB)).status).toBe(403);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      if (financeRedis) await financeRedis.del(OVERVIEW_KEY).catch(() => undefined);
+    }
+  });
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {
