@@ -1774,16 +1774,19 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/predictive-revenue')
-  getPredictiveRevenue(@Param('businessId') businessId: string) {
-    return this.revenue.getPredictiveRevenue(businessId);
+  getPredictiveRevenue(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-1): read for the session
+    // member, so one without revenue read gets the shape with no figure in it.
+    return this.revenue.getPredictiveRevenue(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/financial-growth')
-  getFinancialGrowth(@Param('businessId') businessId: string) {
-    return this.revenue.getFinancialGrowth(businessId);
+  getFinancialGrowth(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-1): as predictive-revenue.
+    return this.revenue.getFinancialGrowth(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1810,8 +1813,10 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.journey.getContactHealthMetrics(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-3): the reading member, so
+    // a member without revenue read gets no payment-health ratio.
+    return this.journey.getContactHealthMetrics(businessId, contactId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1901,15 +1906,15 @@ export class CrmController {
     // W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13h; D-90 / D-63): every part is
     // read for this member, so one without revenue read gets no money row and no
     // money figure in the contact, meta, timeline, summary or insight.
-    // Not withheld yet (review SEC-W7CMV-3, follow-up): health.payment, the
-    // paid / total invoice ratio, which GET .../health-metrics also serves. It
-    // is a ratio, not an amount; withholding it on both routes needs a value
-    // the web HealthMetrics contract (a number, averaged into the score) accepts.
+    // W8-MONEY-SIGNALS (owner ruling D-100; review SEC-W7CMV-3): so is
+    // health.payment, the paid / total invoice ratio GET .../health-metrics
+    // also serves: it is left out for that member (the web readers draw a
+    // missing metric without failing).
     const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
     const [story, insight, health] = await Promise.all([
       this.journey.getContactCrossJourney(businessId, contactId, actorUserId),
       this.journey.generateAiInsight(businessId, contactId, actorUserId),
-      this.journey.getContactHealthMetrics(businessId, contactId),
+      this.journey.getContactHealthMetrics(businessId, contactId, actorUserId),
     ]);
     return {
       generatedAt: new Date().toISOString(),

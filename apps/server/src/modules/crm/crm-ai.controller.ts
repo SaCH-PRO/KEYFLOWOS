@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { CrmAiService, type ContactScope } from './crm-ai.service';
 import { CrmJourneyService } from './crm-journey.service';
@@ -59,6 +59,15 @@ const CONTACT_EDIT_ACTIONS: ReadonlySet<string> = new Set(['change_status', 'tog
  * CrmService.bulkUpdateContacts as that route does (audit entry, timeline
  * event and cache invalidation; review SEC-V89-2), with its params checked
  * first (review SEC-V89-3).
+ *
+ * W8-MONEY-SIGNALS (owner ruling D-100; review SEC-W7CMV-2): GET
+ * contacts/:contactId/ai-insight and the insight card (GET insight-card, POST
+ * insight-card/recompute) are read for the session member (sessionMember: no
+ * member is 401, never the owner's view). A member without revenue read gets
+ * the insight without its payment sentence or 'high-value' tag
+ * (CrmJourneyService.generateAiInsight) and the card without money
+ * (ContactInsightService.getSnapshot, which serves such a member, or a call
+ * naming none, the money-free card instead of the cached one).
  */
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -80,8 +89,9 @@ export class CrmAiController {
     @Param('contactId') contactId: string,
     @Req() req: { user: { id: string } },
   ) {
-    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
-    return this.contactInsight.getSnapshot(businessId, contactId);
+    const member = this.sessionMember(req);
+    await assertContactVisible(this.prisma, businessId, contactId, member);
+    return this.contactInsight.getSnapshot(businessId, contactId, { viewerUserId: member });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -94,9 +104,12 @@ export class CrmAiController {
     @Param('contactId') contactId: string,
     @Req() req: { user: { id: string } },
   ) {
-    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
+    const member = this.sessionMember(req);
+    await assertContactVisible(this.prisma, businessId, contactId, member);
     checkAiRateLimit(businessId);
-    return this.contactInsight.recompute(businessId, contactId);
+    await this.contactInsight.recompute(businessId, contactId);
+    // The card just cached, as GET insight-card serves it to this member (D-100).
+    return this.contactInsight.getSnapshot(businessId, contactId, { viewerUserId: member });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -109,9 +122,10 @@ export class CrmAiController {
     @Param('contactId') contactId: string,
     @Req() req: { user: { id: string } },
   ) {
-    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
+    const member = this.sessionMember(req);
+    await assertContactVisible(this.prisma, businessId, contactId, member);
     checkAiRateLimit(businessId);
-    return this.journey.generateAiInsight(businessId, contactId);
+    return this.journey.generateAiInsight(businessId, contactId, member);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -407,6 +421,17 @@ export class CrmAiController {
     await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.generateFollowUpDraft(businessId, contactId);
+  }
+
+  /**
+   * The session member a money-bearing read is served for (W8-MONEY-SIGNALS,
+   * D-100). Fails closed: a request without one is 401, so these reads never
+   * fall back to the owner's view (the guards already refuse such a request).
+   */
+  private sessionMember(req: { user?: { id?: string } } | undefined): string {
+    const member = req?.user?.id;
+    if (!member) throw new UnauthorizedException('Authentication required');
+    return member;
   }
 
   /**

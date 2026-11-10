@@ -198,7 +198,8 @@ const SIBLING_READS: Array<{
   { route: 'cross-journey', collaborator: () => journeyMock.getContactCrossJourney, args: ['biz_1', 'contact_1', 'user_1'], direct: (c, req) => c.getContactCrossJourney('biz_1', 'contact_1', req) },
   { route: 'story', collaborator: () => journeyMock.getContactCrossJourney, args: ['biz_1', 'contact_1', 'user_1'], direct: (c, req) => c.getContactStory('biz_1', 'contact_1', req) },
   { route: 'revenue-summary', collaborator: () => revenueMock.getContactRevenueSummary, args: ['biz_1', 'contact_1', 'user_1'], direct: (c, req) => c.getContactRevenueSummary('biz_1', 'contact_1', req) },
-  { route: 'health-metrics', collaborator: () => journeyMock.getContactHealthMetrics, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactHealthMetrics('biz_1', 'contact_1', req) },
+  // W8-MONEY-SIGNALS (SEC-W7CMV-3; D-100): health-metrics also hands over the reading member, by whose revenue scope the payment-health ratio is withheld.
+  { route: 'health-metrics', collaborator: () => journeyMock.getContactHealthMetrics, args: ['biz_1', 'contact_1', 'user_1'], direct: (c, req) => c.getContactHealthMetrics('biz_1', 'contact_1', req) },
   { route: 'relationships', collaborator: () => networkMock.listForContact, args: ['biz_1', 'contact_1'], direct: (c, req) => c.listContactRelationships('biz_1', 'contact_1', req) },
   { route: 'network', collaborator: () => networkMock.getNeighbourhood, args: ['biz_1', 'contact_1', 2], direct: (c, req) => c.getContactNetwork('biz_1', 'contact_1', req) },
   { route: 'data-quality', collaborator: () => dataQualityMock.getContactIssues, args: ['biz_1', 'contact_1'], direct: (c, req) => c.dqContactIssues('biz_1', 'contact_1', req) },
@@ -754,10 +755,12 @@ describe('CRM e2e', () => {
       }
       // W7-CONTACT-MONEY-VIEWS (V55-13f; D-90 / D-63): the journey and the
       // insight are read for the session member (their money depends on that
-      // member's revenue read); the health metrics carry no amount.
+      // member's revenue read). W8-MONEY-SIGNALS (SEC-W7CMV-3; D-100): so are
+      // the health metrics (the payment-health ratio is withheld from a member
+      // without revenue read).
       expect(journeyMock.getContactCrossJourney).toHaveBeenCalledWith('biz_1', 'contact_1', 'user_1');
       expect(journeyMock.generateAiInsight).toHaveBeenCalledWith('biz_1', 'contact_1', 'user_1');
-      expect(journeyMock.getContactHealthMetrics).toHaveBeenCalledWith('biz_1', 'contact_1');
+      expect(journeyMock.getContactHealthMetrics).toHaveBeenCalledWith('biz_1', 'contact_1', 'user_1');
     });
 
     it('a dossier the detail service refuses is 404, carries no record, and never invokes the journey collaborators', async () => {

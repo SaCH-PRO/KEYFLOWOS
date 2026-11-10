@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { BestChannelService, type BestChannelExplanation } from './best-channel.service';
 import { contactWhereWithId } from './crm.helpers';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 export const CONTACT_INSIGHT_SCHEMA_VERSION = 1;
 
@@ -104,12 +105,23 @@ export class ContactInsightService {
    * Returns the cached snapshot. If none exists, computes synchronously.
    * If stale, returns the cached snapshot (with `stale: true`) and triggers a
    * background recompute. Caller can decide whether to wait.
+   *
+   * W8-MONEY-SIGNALS (owner ruling D-100; review SEC-W7CMV-2): the cached
+   * snapshot is computed with every figure (the owner's view: lifetimeValue,
+   * the 'high-value' tag, the overdue-invoice churn reason and an AI summary
+   * written from them). It is served only to `viewerUserId` when that member
+   * reads revenue. A member without revenue read, and a call that names no
+   * member (fail closed: a caller that forgets the member does not get the
+   * owner's view), are served moneyFreeSnapshot instead.
    */
   async getSnapshot(
     businessId: string,
     contactId: string,
-    options: { forceRecompute?: boolean } = {},
+    options: { forceRecompute?: boolean; viewerUserId?: string | null } = {},
   ): Promise<ContactInsightAggregate> {
+    if (!(await this.viewerReadsRevenue(businessId, options.viewerUserId))) {
+      return this.moneyFreeSnapshot(businessId, contactId);
+    }
     const contact = await this.db.contact.findFirst({
       where: contactWhereWithId(businessId, contactId),
       select: { id: true },
@@ -135,6 +147,32 @@ export class ContactInsightService {
     }
 
     return this.recompute(businessId, contactId);
+  }
+
+  /**
+   * Whether `viewerUserId` reads revenue rows (W8-MONEY-SIGNALS, D-100), by
+   * the module rule every W7 money view applies (resolveTimelineViewer). No
+   * member reads none: the card fails closed.
+   */
+  private async viewerReadsRevenue(businessId: string, viewerUserId?: string | null): Promise<boolean> {
+    return !!viewerUserId && (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
+  }
+
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-2): the card as a member
+   * without revenue read is served it, worked out now from the contact's rows
+   * without its invoices (revenue rows, D-63): lifetimeValue 0, so no
+   * 'high-value' tag; a churn risk with no overdue-invoice or "no deals or
+   * revenue" term; and the heuristic relationship summary without its
+   * lifetime-value sentence (the cached AI summary was written from those
+   * figures and is not served). Nothing is cached and the AI is not called.
+   * The response keeps the cached snapshot's shape. Deal figures (open deals)
+   * are CRM pipeline rows the deal routes serve on crm read and stay.
+   */
+  async moneyFreeSnapshot(businessId: string, contactId: string): Promise<ContactInsightAggregate> {
+    const payload = await this.aggregate(businessId, contactId, false);
+    payload.relationshipSummary = this.buildHeuristicSummary(payload, false);
+    return { payload, computedAt: new Date().toISOString(), stale: false, modelUsed: null };
   }
 
   /** Mark a contact's snapshot stale (no-op if no snapshot exists). */
@@ -464,7 +502,8 @@ export class ContactInsightService {
 
   // -----------------------------------------------------------------
 
-  private async aggregate(businessId: string, contactId: string): Promise<ContactInsightPayload> {
+  /** `readsRevenue` false: the money-free card (moneyFreeSnapshot): the contact's invoices are not read. */
+  private async aggregate(businessId: string, contactId: string, readsRevenue = true): Promise<ContactInsightPayload> {
     const [contact, deals, invoices, openTasks, conversationInsights, channelExplanation, lastEvent] =
       await Promise.all([
         this.db.contact.findFirst({
@@ -488,10 +527,12 @@ export class ContactInsightService {
           where: { businessId, contactId, deletedAt: null },
           select: { status: true, value: true, currency: true },
         }),
-        this.db.invoice.findMany({
-          where: { businessId, contactId, deletedAt: null },
-          select: { status: true, total: true, currency: true },
-        }),
+        readsRevenue
+          ? this.db.invoice.findMany({
+              where: { businessId, contactId, deletedAt: null },
+              select: { status: true, total: true, currency: true },
+            })
+          : [],
         this.db.contactTask.findMany({
           where: { businessId, contactId, status: { not: 'DONE' }, deletedAt: null },
           select: { id: true, title: true, dueDate: true, priority: true },
@@ -523,7 +564,8 @@ export class ContactInsightService {
       .filter((i) => i.status === 'PAID')
       .reduce((sum, i) => sum + Number(i.total ?? 0), 0);
     const currency = invoices[0]?.currency ?? deals[0]?.currency ?? 'TTD';
-    const lifetimeValue = wonDealValue + paidInvoiceTotal;
+    // W8-MONEY-SIGNALS (D-100): the lifetime value adds paid invoices to won deals, so it is withheld whole.
+    const lifetimeValue = readsRevenue ? wonDealValue + paidInvoiceTotal : 0;
 
     const dominantTopics = this.extractDominantTopics(conversationInsights);
     const churn = this.computeChurnRisk({
@@ -531,7 +573,7 @@ export class ContactInsightService {
       lastInteractionAt: contact.lastInteractionAt ?? contact.lastContactedAt ?? null,
       openInvoicesOverdue: invoices.filter((i) => i.status === 'OVERDUE').length,
       openDealsCount: openDeals.length,
-      lifetimeValue,
+      lifetimeValue: readsRevenue ? lifetimeValue : null,
     });
 
     const bestChannel = (channelExplanation?.channel ?? null) as ContactInsightPayload['bestChannel'];
@@ -602,7 +644,8 @@ export class ContactInsightService {
     lastInteractionAt: Date | null;
     openInvoicesOverdue: number;
     openDealsCount: number;
-    lifetimeValue: number;
+    /** null: not read (the money-free card, D-100), so the "no deals or revenue" term does not apply. */
+    lifetimeValue: number | null;
   }): { score: number; reason: string } {
     let score = 0;
     const reasons: string[] = [];
@@ -645,7 +688,7 @@ export class ContactInsightService {
       reasons.push(`${input.openInvoicesOverdue} overdue invoice${input.openInvoicesOverdue === 1 ? '' : 's'}`);
     }
 
-    if (input.openDealsCount === 0 && input.lifetimeValue === 0) {
+    if (input.lifetimeValue !== null && input.openDealsCount === 0 && input.lifetimeValue === 0) {
       score += 10;
       reasons.push('no deals or revenue');
     }
@@ -803,10 +846,14 @@ ${JSON.stringify(
     }
   }
 
-  private buildHeuristicSummary(p: ContactInsightPayload): string {
+  /** `withMoney` false: the money-free card's summary (D-100): no lifetime-value sentence. */
+  private buildHeuristicSummary(p: ContactInsightPayload, withMoney = true): string {
     const parts: string[] = [];
+    const deals = `${p.openDeals.count} open deal${p.openDeals.count === 1 ? '' : 's'}`;
     parts.push(
-      `Lifetime value of ${p.currency} ${Math.round(p.lifetimeValue).toLocaleString()} across ${p.openDeals.count} open deal${p.openDeals.count === 1 ? '' : 's'}.`,
+      withMoney
+        ? `Lifetime value of ${p.currency} ${Math.round(p.lifetimeValue).toLocaleString()} across ${deals}.`
+        : `${deals.charAt(0).toUpperCase()}${deals.slice(1)}.`,
     );
     if (p.bestChannel) {
       parts.push(
