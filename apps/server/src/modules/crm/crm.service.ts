@@ -2472,7 +2472,13 @@ export class CrmService {
     return this.timeline.dueTasks(input);
   }
 
-  async listNextActions(input: { businessId: string; windowDays?: number; limit?: number }) {
+  /**
+   * W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): `visibility` is the caller's CRM
+   * visibility clause (GET contact-next-actions passes the session member's;
+   * null or absent for the OWNER and SUPER_ADMIN): with one, only the contacts
+   * the member may open are listed, by the rule GET contacts/:contactId applies.
+   */
+  async listNextActions(input: { businessId: string; windowDays?: number; limit?: number; visibility?: Prisma.ContactWhereInput | null }) {
     const windowDays = Math.max(0, Math.min(60, input.windowDays ?? 7));
     const limit = Math.max(1, Math.min(100, input.limit ?? 25));
     const cutoff = new Date();
@@ -2484,6 +2490,7 @@ export class CrmService {
         ...contactWhereBase(input.businessId),
         archivedAt: null,
         nextActionAt: { not: null, lte: cutoff },
+        ...(input.visibility ? { AND: [input.visibility] } : {}),
       },
       orderBy: [
         { nextActionAt: 'asc' },

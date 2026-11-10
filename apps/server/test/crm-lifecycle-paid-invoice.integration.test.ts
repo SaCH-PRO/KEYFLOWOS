@@ -67,6 +67,13 @@
  *        each with a contact summary (no notesInternal); L-15 mounts CrmController under the
  *        real guards for its one route
  *
+ * W9-CRM-RESIDUALS review repair (SEC-W9CR-1, D-37; RED before the repair):
+ *   L-16 the next-action reads beside tasks/due (GET next-actions, contact-next-actions,
+ *        autopilot-actions, ai-next-actions and its AI prompt) name only the contacts the member
+ *        may open; it seeds a business of its own (bizN) and mounts CrmController as L-15 does
+ *        (crmControllerApp) over the real CrmActionsService (the AI gateway a recorder, no
+ *        provider traffic) and CrmService
+ *
  * Nothing on the event path is mocked: PrismaService, the user, business,
  * membership, contact, invoice and task rows, the real EventEmitter2
  * (EventEmitterModule with event-bus.module.ts's options), RevenueEventListener,
@@ -124,6 +131,13 @@ const ID = {
   cStageHuman: `${P}cStageHuman`, // L-13: bizA's LEAD a member moves to CLIENT
   cDuePriv: `${P}cDuePriv`, // L-15: bizA's PRIVATE contact of the OWNER (rep may not open it)
   cDueTeam: `${P}cDueTeam`, // L-15: bizA's TEAM contact of rep
+  // W9-CRM-RESIDUALS review SEC-W9CR-1 (L-16; created by that case): a business of its own, so the
+  // next-action reads list only these rows (getNextActions keeps 20, getAutopilotActions 15).
+  bizN: `${P}bizN`, // OWNER: owner; STAFF: rep
+  nxPrivTask: `${P}nxPrivTask`, // bizN's PRIVATE CLIENT of the OWNER, with an overdue and an upcoming task
+  nxTeamTask: `${P}nxTeamTask`, // bizN's TEAM CLIENT of rep, the same
+  nxPrivLead: `${P}nxPrivLead`, // bizN's PRIVATE new LEAD of the OWNER, with a SENT and a PAID invoice
+  nxTeamLead: `${P}nxTeamLead`, // bizN's TEAM new LEAD of rep, the same
 };
 
 /** The follow-up's source (as PR #196 named it). */
@@ -408,6 +422,80 @@ afterAll(async () => {
   if (db) await cleanup();
 });
 
+/**
+ * CrmController under the real guards (AuthGuard, BusinessGuard, ModuleScopeGuard, the CRM rate
+ * limit, feature flag and plan limit guards), for the routes L-15 and L-16 call. `real` names the
+ * collaborators on those routes by class name; every other one is an empty stand-in, so a route that
+ * reached one would fail. Identity is attached from `x-test-user` exactly as AuthMiddleware attaches
+ * it after token verification; no guard is overridden.
+ */
+async function crmControllerApp(real: Record<string, unknown>) {
+  const { Test } = await import('@nestjs/testing');
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+  const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+  const { CrmController } = await import('../src/modules/crm/crm.controller');
+  const { CrmService } = await import('../src/modules/crm/crm.service');
+  const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+  const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+  const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
+  const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
+  const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
+  const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
+  const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+  const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
+  const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
+  const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+  const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
+  const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
+  const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
+  const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
+  const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
+  const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
+  const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+  const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
+  const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
+  const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
+  const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+
+  const prisma = { client: db } as any;
+  const collaborators: any[] = [
+    CrmTimelineService, CrmService, CrmStatsService, CrmCacheService, EventEmitter2, CrmListsService, CrmFlowService, EntityResolutionService,
+    ContactAuditService, ContactCustomFieldValueService, CrmImportService, CrmPlaybookService, CrmActionsService, CrmRevenueService,
+    CrmJourneyService, CrmDuplicateDetectionService, CrmDataQualityService, CrmSavedViewsService, CrmRelationshipHealthService,
+    CrmCommunicationService, BestChannelService, ConversationAiService, CrmNetworkService, ContactInsightService,
+  ];
+  const moduleRef = await Test.createTestingModule({
+    controllers: [CrmController],
+    providers: [
+      { provide: PrismaService, useValue: prisma },
+      AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard, TeamAuditInterceptor,
+      ...collaborators.map((provide) => ({ provide, useValue: real[provide.name] ?? {} })),
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+    ],
+  }).compile();
+  const http = moduleRef.createNestApplication();
+  http.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers['x-test-user'];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+  await http.init();
+  return http;
+}
+
 describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT -> CLIENT (D-81)', () => {
   it('L-01 CTL wiring: RevenueEventListener is subscribed to invoice.paid on the bus', () => {
     expect(bus.listeners('invoice.paid').length).toBeGreaterThan(0);
@@ -673,41 +761,7 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
   });
 
   it("L-15 (W9-CRM-RESIDUALS, was it.todo; review SEC-L81-3, D-37): GET crm/businesses/:businessId/tasks/due lists only the due tasks of contacts the member may open, each with a contact summary (no notesInternal); the OWNER sees every due task, summarised the same way", async () => {
-    const { Test } = await import('@nestjs/testing');
-    const { EventEmitter2 } = await import('@nestjs/event-emitter');
-    const { PrismaService } = await import('../src/core/prisma/prisma.service');
-    const { AuthGuard } = await import('../src/core/auth/auth.guard');
-    const { BusinessGuard } = await import('../src/core/auth/business.guard');
-    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
-    const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
-    const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
-    const { CrmController } = await import('../src/modules/crm/crm.controller');
-    const { CrmService } = await import('../src/modules/crm/crm.service');
-    const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
     const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
-    const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
-    const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
-    const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
-    const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
-    const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
-    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
-    const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
-    const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
-    const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
-    const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
-    const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
-    const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
-    const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
-    const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
-    const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
-    const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
-    const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
-    const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
-    const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
-    const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
-    const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
-    const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
-    const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
 
     const DUE_SECRET = 'v88e-internal-note-of-a-due-contact-3k9';
     for (const [id, visibility, ownerId] of [[ID.cDuePriv, 'PRIVATE', ID.owner], [ID.cDueTeam, 'TEAM', ID.rep]] as const) {
@@ -726,37 +780,8 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
     }
 
     // The real route: CrmController under the real guards, over the real CrmTimelineService.
-    const prisma = { client: db } as any;
-    const timeline = new CrmTimelineService(prisma, {} as any, {} as any, {} as any, {} as any);
-    const offPath = [
-      CrmService, CrmStatsService, CrmCacheService, EventEmitter2, CrmListsService, CrmFlowService, EntityResolutionService, ContactAuditService,
-      ContactCustomFieldValueService, CrmImportService, CrmPlaybookService, CrmActionsService, CrmRevenueService, CrmJourneyService,
-      CrmDuplicateDetectionService, CrmDataQualityService, CrmSavedViewsService, CrmRelationshipHealthService, CrmCommunicationService,
-      BestChannelService, ConversationAiService, CrmNetworkService, ContactInsightService,
-    ];
-    const moduleRef = await Test.createTestingModule({
-      controllers: [CrmController],
-      providers: [
-        { provide: PrismaService, useValue: prisma },
-        AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard, TeamAuditInterceptor,
-        { provide: CrmTimelineService, useValue: timeline },
-        // Not on the due-tasks route's path.
-        ...offPath.map((provide) => ({ provide, useValue: {} })),
-        { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
-      ],
-    }).compile();
-    const http = moduleRef.createNestApplication();
-    // Identity attachment only (what AuthMiddleware attaches after token verification); no guard is overridden.
-    http.use(async (req: any, _res: any, next: any) => {
-      const header = req.headers['x-test-user'];
-      const id = typeof header === 'string' ? header : undefined;
-      if (id && id.startsWith(P)) {
-        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
-        if (user) req.user = { id: user.id, email: user.email, role: user.role };
-      }
-      next();
-    });
-    await http.init();
+    const timeline = new CrmTimelineService({ client: db } as any, {} as any, {} as any, {} as any, {} as any);
+    const http = await crmControllerApp({ CrmTimelineService: timeline });
     try {
       const due = (actor: string) => request(http.getHttpServer()).get(`/crm/businesses/${ID.bizA}/tasks/due?windowDays=7`).set('x-test-user', actor);
       const ours = (body: any[]) => body.filter((t) => t.contactId === ID.cDuePriv || t.contactId === ID.cDueTeam);
@@ -779,6 +804,134 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
         expect(Object.keys(task.contact).sort()).toEqual(SUMMARY_KEYS);
         expect(task.contact).toMatchObject({ id: task.contactId, firstName: task.contactId.slice(P.length) });
       }
+    } finally {
+      await http.close();
+    }
+  });
+
+  it("L-16 (W9-CRM-RESIDUALS repair, review SEC-W9CR-1, D-37): the next-action reads beside GET tasks/due (GET next-actions, contact-next-actions, autopilot-actions and ai-next-actions, with the AI prompt) name only the contacts the member may open; the OWNER's lists and prompt name every contact", async () => {
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+
+    await db.business.create({ data: { id: ID.bizN, name: 'V88E Biz N', ownerId: ID.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}m_owner_bizN`, userId: ID.owner, businessId: ID.bizN, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m_rep_bizN`, userId: ID.rep, businessId: ID.bizN, role: 'STAFF' } });
+    const DAY = 86_400_000;
+    const tail = (id: string) => id.slice(P.length);
+    let phone = 0;
+    for (const [id, visibility, ownerId, status] of [
+      [ID.nxPrivTask, 'PRIVATE', ID.owner, 'CLIENT'], [ID.nxTeamTask, 'TEAM', ID.rep, 'CLIENT'],
+      [ID.nxPrivLead, 'PRIVATE', ID.owner, 'LEAD'], [ID.nxTeamLead, 'TEAM', ID.rep, 'LEAD'],
+    ] as const) {
+      await db.contact.create({
+        data: {
+          id, businessId: ID.bizN, firstName: tail(id), lastName: 'V88e', email: `${P}${tail(id).toLowerCase()}@test.local`,
+          phone: `+1868558${String(1000 + phone++)}`, status, visibility, ownerId, nextActionAt: new Date(Date.now() + DAY), nextActionType: 'call',
+        },
+      });
+    }
+    for (const id of [ID.nxPrivTask, ID.nxTeamTask]) {
+      await db.contactTask.create({
+        data: { id: `${P}nxover_${tail(id)}`, businessId: ID.bizN, contactId: id, title: `V88e overdue ${tail(id)}`, status: 'OPEN', dueDate: new Date(Date.now() - DAY) },
+      });
+      await db.contactTask.create({
+        data: { id: `${P}nxsoon_${tail(id)}`, businessId: ID.bizN, contactId: id, title: `V88e soon ${tail(id)}`, status: 'OPEN', dueDate: new Date(Date.now() + DAY) },
+      });
+    }
+    for (const id of [ID.nxPrivLead, ID.nxTeamLead]) {
+      for (const [kind, status] of [['sent', 'SENT'], ['paid', 'PAID']] as const) {
+        await db.invoice.create({
+          data: {
+            id: `${P}nxinv_${kind}_${tail(id)}`, businessId: ID.bizN, contactId: id, invoiceNumber: `${P}NX-${kind}-${tail(id)}`, status,
+            subtotal: 75, total: 75, currency: 'TTD', dueDate: new Date(Date.now() + 5 * DAY), paidAt: status === 'PAID' ? new Date() : null,
+          },
+        });
+      }
+    }
+    /** Every action of one contact pair, by its id (each read's own id scheme). */
+    const nextActionIds = (task: string, lead: string) => [
+      `task_${P}nxover_${tail(task)}`, `scheduled_${P}nxsoon_${tail(task)}`,
+      `newlead_${lead}`, `invoice_${P}nxinv_sent_${tail(lead)}`, `thankyou_${P}nxinv_paid_${tail(lead)}`,
+    ];
+    const HIDDEN = [ID.nxPrivTask, ID.nxPrivLead];
+    const hiddenMarks = HIDDEN.flatMap((id) => [tail(id), `${P}${tail(id).toLowerCase()}@test.local`]);
+
+    // The model's answer names every contact of the business; the read keeps only the ones it put in the prompt.
+    const prompts: string[] = [];
+    const aiGateway = {
+      callAi: async (args: { messages?: Array<{ content: string }> }) => {
+        prompts.push((args.messages ?? []).map((m) => m.content).join('\n'));
+        const all = [ID.nxPrivTask, ID.nxTeamTask, ID.nxPrivLead, ID.nxTeamLead];
+        return {
+          content: JSON.stringify(all.map((contactId) => ({ type: 'follow_up', contactId, contactName: tail(contactId), reason: 'v88e recorded', priority: 'high' }))),
+        };
+      },
+    };
+    const prisma = { client: db } as any;
+    const timeline = new CrmTimelineService(prisma, {} as any, {} as any, {} as any, {} as any);
+    const http = await crmControllerApp({
+      CrmTimelineService: timeline,
+      CrmActionsService: new CrmActionsService(prisma, aiGateway as any, timeline),
+      // listNextActions reads through PrismaService only.
+      CrmService: crmService,
+    });
+    try {
+      const get = (routePath: string, actor: string) =>
+        request(http.getHttpServer()).get(`/crm/businesses/${ID.bizN}/${routePath}`).set('x-test-user', actor);
+      const expectNamesNoHidden = (res: { text: string }, what: string) => {
+        for (const id of HIDDEN) expect(res.text, `${what}: ${id}`).not.toContain(id);
+        for (const mark of hiddenMarks) expect(res.text, `${what}: ${mark}`).not.toContain(mark);
+      };
+
+      // GET next-actions
+      const repNext = await get('next-actions', ID.rep);
+      expect(repNext.status, repNext.text.slice(0, 200)).toBe(200);
+      expect(repNext.body.map((a: { id: string }) => a.id).sort(), 'rep: its contacts\' actions only').toEqual(nextActionIds(ID.nxTeamTask, ID.nxTeamLead).sort());
+      expectNamesNoHidden(repNext, 'next-actions');
+      const ownerNext = await get('next-actions', ID.owner);
+      expect(ownerNext.status).toBe(200);
+      expect(ownerNext.body.map((a: { id: string }) => a.id).sort(), 'the OWNER: every action').toEqual(
+        [...nextActionIds(ID.nxTeamTask, ID.nxTeamLead), ...nextActionIds(ID.nxPrivTask, ID.nxPrivLead)].sort(),
+      );
+      expect(ownerNext.body.find((a: { id: string }) => a.id === `scheduled_${P}nxsoon_${tail(ID.nxPrivTask)}`)).toMatchObject({
+        contactId: ID.nxPrivTask, contactName: `${tail(ID.nxPrivTask)} V88e`,
+      });
+
+      // GET contact-next-actions
+      const repDue = await get('contact-next-actions?windowDays=7', ID.rep);
+      expect(repDue.status, repDue.text.slice(0, 200)).toBe(200);
+      expect(repDue.body.items.map((c: { id: string }) => c.id).sort()).toEqual([ID.nxTeamLead, ID.nxTeamTask].sort());
+      expectNamesNoHidden(repDue, 'contact-next-actions');
+      const ownerDue = await get('contact-next-actions?windowDays=7', ID.owner);
+      expect(ownerDue.status).toBe(200);
+      expect(ownerDue.body.items.map((c: { id: string }) => c.id).sort()).toEqual([ID.nxPrivLead, ID.nxPrivTask, ID.nxTeamLead, ID.nxTeamTask].sort());
+
+      // GET autopilot-actions
+      const repAuto = await get('autopilot-actions', ID.rep);
+      expect(repAuto.status, repAuto.text.slice(0, 200)).toBe(200);
+      const autoIds = (res: { body: Array<{ id: string }> }) => res.body.map((a) => a.id).sort();
+      expect(autoIds(repAuto)).toEqual([`autowelcome_${ID.nxTeamLead}`, `pending_${P}nxsoon_${tail(ID.nxTeamTask)}`].sort());
+      expectNamesNoHidden(repAuto, 'autopilot-actions');
+      const ownerAuto = await get('autopilot-actions', ID.owner);
+      expect(ownerAuto.status).toBe(200);
+      expect(autoIds(ownerAuto)).toEqual([
+        `autowelcome_${ID.nxPrivLead}`, `autowelcome_${ID.nxTeamLead}`, `pending_${P}nxsoon_${tail(ID.nxPrivTask)}`, `pending_${P}nxsoon_${tail(ID.nxTeamTask)}`,
+      ].sort());
+
+      // GET ai-next-actions: the prompt and the answer
+      prompts.length = 0;
+      const repAi = await get('ai-next-actions', ID.rep);
+      expect(repAi.status, repAi.text.slice(0, 200)).toBe(200);
+      expect(prompts).toHaveLength(1);
+      for (const id of HIDDEN) expect(prompts[0], `the prompt names ${id}`).not.toContain(id);
+      for (const id of [ID.nxTeamTask, ID.nxTeamLead]) expect(prompts[0]).toContain(id);
+      expect(repAi.body.map((a: { contactId: string }) => a.contactId).sort()).toEqual([ID.nxTeamLead, ID.nxTeamTask].sort());
+      expectNamesNoHidden(repAi, 'ai-next-actions');
+      prompts.length = 0;
+      const ownerAi = await get('ai-next-actions', ID.owner);
+      expect(ownerAi.status).toBe(200);
+      for (const id of HIDDEN) expect(prompts[0], 'the OWNER\'s prompt').toContain(id);
+      expect(ownerAi.body.map((a: { contactId: string }) => a.contactId).sort()).toEqual([ID.nxPrivLead, ID.nxPrivTask, ID.nxTeamLead, ID.nxTeamTask].sort());
     } finally {
       await http.close();
     }

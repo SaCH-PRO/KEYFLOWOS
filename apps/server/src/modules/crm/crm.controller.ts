@@ -1161,15 +1161,27 @@ export class CrmController {
     @Query('windowDays') windowDays?: string,
   ) {
     // W9-CRM-RESIDUALS (review SEC-L81-3, D-37): only the tasks of contacts the
-    // member may open by the rule GET contacts/:contactId applies
-    // (resolveCrmAccess + visibilityClause); null for the OWNER and SUPER_ADMIN.
-    const actorUserId = this.requireActorUserId(req);
-    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    // member may open by the rule GET contacts/:contactId applies.
     return this.timeline.dueTasks({
       businessId,
       windowDays: windowDays ? Number(windowDays) : 7,
-      visibility: visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null,
+      visibility: await this.memberVisibility(businessId, req),
     });
+  }
+
+  /**
+   * W9-CRM-RESIDUALS (review SEC-L81-3, SEC-W9CR-1; D-37): the session member's
+   * CRM visibility clause, by the rule GET contacts/:contactId applies
+   * (resolveCrmAccess + visibilityClause), for the business-wide reads that
+   * name contacts (tasks/due, contact-next-actions, next-actions,
+   * autopilot-actions, ai-next-actions): null for the OWNER and SUPER_ADMIN, so
+   * their reads are unchanged. A request without a member is 401, a non-member
+   * 403 (resolveCrmAccess).
+   */
+  private async memberVisibility(businessId: string, req: { user?: { id?: string } } | undefined): Promise<Prisma.ContactWhereInput | null> {
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1201,8 +1213,9 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contact-next-actions')
-  listContactNextActions(
+  async listContactNextActions(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('windowDays') windowDays?: string,
     @Query('limit') limit?: string,
   ) {
@@ -1214,11 +1227,9 @@ export class CrmController {
       }
       return n;
     };
-    return this.crm.listNextActions({
-      businessId,
-      windowDays: parseIntParam(windowDays, 'windowDays'),
-      limit: parseIntParam(limit, 'limit'),
-    });
+    const parsed = { windowDays: parseIntParam(windowDays, 'windowDays'), limit: parseIntParam(limit, 'limit') };
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): only the contacts the member may open.
+    return this.crm.listNextActions({ businessId, ...parsed, visibility: await this.memberVisibility(businessId, req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1836,16 +1847,20 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/next-actions')
-  getNextActions(@Param('businessId') businessId: string) {
-    return this.actions.getNextActions(businessId);
+  async getNextActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): the tasks, quotes, invoices,
+    // bookings, contacts and enrollments of contacts the member may open only.
+    return this.actions.getNextActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(30, 60_000)
   @Get('businesses/:businessId/ai-next-actions')
-  getAiNextActions(@Param('businessId') businessId: string) {
-    return this.actions.getAiNextActions(businessId);
+  async getAiNextActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): the prompt profiles, and so the
+    // answer, only the contacts the member may open.
+    return this.actions.getAiNextActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1863,8 +1878,9 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/autopilot-actions')
-  getAutopilotActions(@Param('businessId') businessId: string) {
-    return this.actions.getAutopilotActions(businessId);
+  async getAutopilotActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): only the contacts the member may open.
+    return this.actions.getAutopilotActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

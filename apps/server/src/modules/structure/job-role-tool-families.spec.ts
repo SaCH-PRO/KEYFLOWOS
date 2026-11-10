@@ -1873,12 +1873,20 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     const crm = read('modules/crm/crm.service.ts');
     const cases = dispatcherCases();
     /**
-     * Reviewed: methods that read the clause only to decide what a refusal names, not which
-     * row is written. Asserted below.
+     * Reviewed: methods that read the clause only to decide what a refusal (or, since
+     * W9-CRM-RESIDUALS review SEC-W9CR-3, a writer's answer) names, not which row is written.
+     * Asserted below.
      */
     const ERROR_ONLY: Record<string, string> = {
       'CrmService.rejectContactIdentityTaken':
         'names the holder of a 409 (existingContactId) only when the actor sees it; executeTool returns error.message alone',
+      // W9-CRM-RESIDUALS review SEC-W9CR-3 (D-37): the deal writers (deals_create, deals_update,
+      // deals_move_stage, deals_mark_won, deals_mark_lost, crm_update_deal, crm_move_deal_stage)
+      // answer a deal of a contact the bound member cannot open as getDeal serves it. The clause
+      // decides only that answer; the deal they write is findDeal's, never narrowed, so they are
+      // not row-bound tools and stay granted (they are not CRM_ROW_VISIBILITY_TOOLS).
+      'CrmDealsService.answerForBoundMember':
+        "withholds a hidden contact from a deal writer's answer only; the writer reads and writes the deal findDeal returns",
     };
     const reachesClause = (call: string, seen = new Set<string>()): boolean => {
       if (call in ERROR_ONLY || seen.has(call)) return false;
@@ -2015,6 +2023,25 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       const executeTool = memberBody(read(ORCHESTRATOR), 'executeTool')!;
       expect(executeTool).toContain('error: (error as Error).message,');
       expect(executeTool).not.toMatch(/getResponse\(\)|existingContactId/);
+    });
+
+    it('W9-CRM-RESIDUALS review SEC-W9CR-3 (D-37): CrmDealsService.answerForBoundMember decides only what a deal writer answers, never which deal is written', () => {
+      const deals = read('modules/crm/crm-deals.service.ts');
+      const helper = memberBody(deals, 'answerForBoundMember')!;
+      expect(helper).toBeTruthy();
+      // it reaches the clause through boundMemberContactWhere, and only reads
+      expect(helper).toContain('await this.boundMemberContactWhere(businessId)');
+      expect(helper).not.toMatch(/\.(update|create|delete|upsert)(Many)?\(/);
+      expect(helper).toMatch(/\{ \.\.\.deal, contactId: null, contact: null, companyName: null, accountId: null \}/);
+      for (const writer of ['createDeal', 'updateDeal', 'moveStage', 'winDeal', 'loseDeal']) {
+        const body = memberBody(deals, writer)!;
+        expect(body, writer).toBeTruthy();
+        // the answer passes through it ...
+        expect(body, writer).toMatch(/return this\.answerForBoundMember\(input\.businessId, (deal|updated)\);/);
+        // ... and nothing else in the writer reaches the clause: the deal it writes is not narrowed
+        expect(body, writer).not.toMatch(/visibilityClause\(|boundMemberContactWhere\(/);
+        expect(serviceDelegates(`CrmDealsService.${writer}`).filter((d) => d !== 'CrmDealsService.answerForBoundMember').some((d) => reachesClause(d)), writer).toBe(false);
+      }
     });
   });
 

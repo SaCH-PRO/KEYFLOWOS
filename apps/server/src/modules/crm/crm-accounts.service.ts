@@ -328,12 +328,29 @@ export class CrmAccountsService {
   // ---------------------------------------------------------------------------
 
   async getAccountDetail(input: { businessId: string; accountId: string }) {
+    return (await this.accountView(input)).detail;
+  }
+
+  /**
+   * The account's detail rollup, and the contact bound of its timeline
+   * (`eventContact`) for the insight's 30-day count.
+   *
+   * W9-CRM-RESIDUALS (D-37) and its review SEC-W9CR-2: a contact of the account
+   * the member bound to the call cannot open (boundMemberOpensContacts: the
+   * OWNER, SUPER_ADMIN and a call with no member are not restricted) is left
+   * out of contacts, recentEvents and the rollup (contactCount, nextAction,
+   * eventsPerMonth, lastActivityAt), as its deals are left out, and the
+   * account's primary contact is withheld when it is such a contact. The
+   * account's contacts are read in full, so the ids that remain bound its
+   * timeline exactly.
+   */
+  private async accountView(input: { businessId: string; accountId: string }) {
     const account = await this.db.account.findFirst({
       where: { id: input.accountId, businessId: input.businessId, deletedAt: null },
     });
     if (!account) throw new NotFoundException('Account not found');
 
-    const [contacts, accountDeals, recentEvents] = await Promise.all([
+    const [accountContacts, accountDeals] = await Promise.all([
       this.db.contact.findMany({
         where: { businessId: input.businessId, accountId: account.id, deletedAt: null },
         orderBy: [{ lastInteractionAt: 'desc' }, { createdAt: 'desc' }],
@@ -349,21 +366,33 @@ export class CrmAccountsService {
         orderBy: [{ updatedAt: 'desc' }],
         include: { stage: true, contact: { select: { id: true, firstName: true, lastName: true, displayName: true } } },
       }),
-      this.db.contactEvent.findMany({
-        where: { businessId: input.businessId, contact: { accountId: account.id, deletedAt: null } },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: {
-          id: true, createdAt: true, type: true, data: true, source: true,
-          contact: { select: { id: true, firstName: true, lastName: true, displayName: true } },
-        },
-      }),
     ]);
     // W9-CRM-RESIDUALS (D-37): a deal whose contact the member bound to the call
     // cannot open is left out of the account's deals and their rollup, as GET
-    // deals?accountId= leaves it out (V1-89 review SEC-V89-4).
-    const opens = await boundMemberOpensContacts(this.prisma, input.businessId, accountDeals.map((d) => d.contactId));
+    // deals?accountId= leaves it out (V1-89 review SEC-V89-4); review SEC-W9CR-2:
+    // so is such a contact of the account itself (above).
+    const opens = await boundMemberOpensContacts(this.prisma, input.businessId, [
+      ...accountContacts.map((c) => c.id),
+      ...accountDeals.map((d) => d.contactId),
+      account.primaryContactId,
+    ]);
+    const contacts = opens ? accountContacts.filter((c) => opens(c.id)) : accountContacts;
     const deals = opens ? accountDeals.filter((d) => opens(d.contactId)) : accountDeals;
+    const primaryContactId = opens && account.primaryContactId && !opens(account.primaryContactId) ? null : account.primaryContactId;
+    const eventContact: Prisma.ContactWhereInput = {
+      accountId: account.id,
+      deletedAt: null,
+      ...(opens ? { id: { in: contacts.map((c) => c.id) } } : {}),
+    };
+    const recentEvents = await this.db.contactEvent.findMany({
+      where: { businessId: input.businessId, contact: eventContact },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true, createdAt: true, type: true, data: true, source: true,
+        contact: { select: { id: true, firstName: true, lastName: true, displayName: true } },
+      },
+    });
 
     const wonDeals = deals.filter((d) => d.status === 'WON');
     const lostDeals = deals.filter((d) => d.status === 'LOST');
@@ -398,9 +427,10 @@ export class CrmAccountsService {
         }
       : null;
 
-    return {
+    const detail = {
       account: {
         ...account,
+        primaryContactId,
         createdAt: account.createdAt.toISOString(),
         updatedAt: account.updatedAt.toISOString(),
       },
@@ -422,6 +452,7 @@ export class CrmAccountsService {
         nextAction,
       },
     };
+    return { detail, eventContact };
   }
 
   // ---------------------------------------------------------------------------
@@ -429,13 +460,15 @@ export class CrmAccountsService {
   // ---------------------------------------------------------------------------
 
   async getAccountInsight(businessId: string, accountId: string): Promise<AccountInsight> {
-    const detail = await this.getAccountDetail({ businessId, accountId });
-    const { account, contacts, deals, rollup } = detail;
+    const { detail, eventContact } = await this.accountView({ businessId, accountId });
+    const { account, contacts, rollup } = detail;
 
+    // W9-CRM-RESIDUALS review SEC-W9CR-2 (D-37): over the account's contacts the
+    // member may open, as the detail's timeline.
     const recentInteractionCount30d = await this.db.contactEvent.count({
       where: {
         businessId,
-        contact: { accountId, deletedAt: null },
+        contact: eventContact,
         createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) },
       },
     });

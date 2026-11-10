@@ -83,6 +83,13 @@
  * member may open. Each case seeds its own deals, stage, sequence or list and
  * removes them when it ends.
  *
+ * Its review repairs (D-37) add: SEC-W9CR-2, an account's contacts, timeline,
+ * rollup, primary contact and insight leave out a contact of the account the
+ * member cannot open (the earlier account case's hidden contact belonged to
+ * another account); SEC-W9CR-3, the deal writers (PATCH, move-stage, win,
+ * lose, and KEY's path) answer such a deal as GET deals/:dealId serves it and
+ * still write it. Both seed their own contacts and stages and remove them.
+ *
  * Requires DATABASE_URL. Every seeded row has the `v84c_` prefix (or belongs to
  * a v84c_ business) and is hard-deleted by raw SQL in beforeAll and afterAll.
  */
@@ -1099,6 +1106,147 @@ describe('ST-1 GET deals?contactId= holds the contacts/:contactId/deals rule', (
       expect(owner.body.rollup.dealCount).toBe(2);
     } finally {
       await db.$executeRawUnsafe(`DELETE FROM deals WHERE id IN ('${privDeal}', '${teamDeal}')`);
+    }
+  });
+
+  // W9-CRM-RESIDUALS review SEC-W9CR-2: the case above left a hidden contact's deal out of an account,
+  // but its contact (cPriv) belongs to another account, so it never showed that the account's contacts,
+  // timeline and rollup still named such a contact. createDeal copies the contact's account onto the
+  // deal, so in the normal case the hidden deal's contact is one of the account's contacts.
+  it("review SEC-W9CR-2 (W9-CRM-RESIDUALS repair, D-37): GET accounts/:accountId and its insight leave a contact of the account the member cannot open out of contacts, recentEvents, the rollup (contactCount, nextAction), the primary contact and the 30-day interaction count, as they leave out its deal; the OWNER's account is unchanged", async () => {
+    const account = `${P}acct_team`;
+    const kPriv = `${P}kPriv`;
+    await seedContact(kPriv, { visibility: 'PRIVATE', ownerId: ID.owner, accountId: account });
+    // The soonest next action of the account (any other contact's is later).
+    await db.contact.update({ where: { id: kPriv }, data: { nextActionAt: new Date('2000-01-01T00:00:00Z'), nextActionType: 'call' } });
+    await db.account.update({ where: { id: account }, data: { primaryContactId: kPriv } });
+    try {
+      // No member bound: the OWNER view (D-88). It copies the account and writes deal.created on kPriv's timeline.
+      const deal = await dealsService.createDeal({ businessId: ID.bizA, contactId: kPriv, title: 'v84c account contact deal', stageId: ID.stage, value: 10 });
+      expect(deal.accountId, 'fixture: the account copied from the contact').toBe(account);
+      expect(await opensFor(ID.staffOwned, kPriv), 'fixture').toBe(false);
+      expect(await opensFor(ID.admin, kPriv), 'fixture').toBe(false);
+      const kPrivEvents30d = await db.contactEvent.count({ where: { contactId: kPriv, createdAt: { gte: new Date(Date.now() - 29 * 86_400_000) } } });
+      expect(kPrivEvents30d, "fixture: kPriv's timeline").toBeGreaterThan(0);
+      const marks = [kPriv, `${P}${kPriv.slice(P.length).toLowerCase()}@contacts.test`];
+
+      const owner = await send('get', `accounts/${account}`, ID.owner, '');
+      expect(owner.status).toBe(200);
+      const ownerContacts = owner.body.contacts.map((c: { id: string }) => c.id);
+      expect(ownerContacts).toContain(kPriv);
+      expect(owner.body.rollup.contactCount).toBe(ownerContacts.length);
+      expect(owner.body.rollup.nextAction?.contactId).toBe(kPriv);
+      expect(owner.body.account.primaryContactId).toBe(kPriv);
+      expect(owner.body.recentEvents.some((e: { contact: { id: string } }) => e.contact.id === kPriv)).toBe(true);
+      const ownerInsight = await send('get', `accounts/${account}/insight`, ID.owner, '');
+      expect(ownerInsight.status).toBe(200);
+      expect(ownerInsight.body).toMatchObject({ contactCount: ownerContacts.length, primaryContactId: kPriv, nextAction: { contactId: kPriv } });
+
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        resetRecorders();
+        const res = await send('get', `accounts/${account}`, actor, '');
+        expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+        expect(svcCalls(), actor).toEqual(['accounts.getAccountDetail']);
+        const contacts = res.body.contacts.map((c: { id: string }) => c.id);
+        expect(contacts, actor).toEqual(ownerContacts.filter((id: string) => id !== kPriv));
+        expect(res.body.rollup.contactCount, actor).toBe(contacts.length);
+        expect(res.body.rollup.nextAction?.contactId ?? null, actor).not.toBe(kPriv);
+        expect(res.body.account.primaryContactId, `${actor}: the primary contact it cannot open`).toBeNull();
+        expect(res.body.deals.map((d: { id: string }) => d.id), actor).not.toContain(deal.id);
+        for (const mark of marks) expect(res.text, `${actor}: ${mark}`).not.toContain(mark);
+
+        const insight = await send('get', `accounts/${account}/insight`, actor, '');
+        expect(insight.status, actor).toBe(200);
+        expect(insight.body.contactCount, actor).toBe(contacts.length);
+        expect(insight.body.summary, actor).toContain(`has ${contacts.length} contact`);
+        expect(insight.body.primaryContactId, actor).not.toBe(kPriv);
+        expect(insight.body.nextAction?.contactId ?? null, actor).not.toBe(kPriv);
+        expect(insight.body.recentInteractionCount30d, `${actor}: kPriv's interactions are not counted`).toBe(
+          ownerInsight.body.recentInteractionCount30d - kPrivEvents30d,
+        );
+        for (const mark of marks) expect(insight.text, `${actor}: ${mark}`).not.toContain(mark);
+      }
+    } finally {
+      await db.account.update({ where: { id: account }, data: { primaryContactId: null } });
+      await dropContacts([kPriv]);
+    }
+  });
+
+  // W9-CRM-RESIDUALS review SEC-W9CR-3: the deal writers read the deal through findDeal and answered
+  // the raw row, so PATCH, move-stage (also to its current stage), win and lose served the contact,
+  // company and account GET deals/:dealId withholds.
+  it("review SEC-W9CR-3 (W9-CRM-RESIDUALS repair, D-37): PATCH deals/:dealId, POST move-stage (to another stage and to its current one), win and lose answer a deal whose contact the member cannot open as GET deals/:dealId serves it (contact, contactId, companyName and accountId null), and still write the deal, whose stored contact, company and account are kept; a contact it may open stays named; KEY's path (the member bound to the call) answers the same; the OWNER's answers are unchanged", async () => {
+    const WRITER_COMPANY = 'v84c-writer-company-8q';
+    const wPriv = `${P}wPriv`;
+    const wTeam = `${P}wTeam`;
+    const stage2 = `${P}wstage2`;
+    const won = `${P}wstageWon`;
+    const lost = `${P}wstageLost`;
+    await seedContact(wPriv, { visibility: 'PRIVATE', ownerId: ID.owner, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+    await seedContact(wTeam, { visibility: 'TEAM', ownerId: ID.staffOwned });
+    await db.dealStage.create({ data: { id: stage2, businessId: ID.bizA, name: 'V84C writer stage', slug: `${P}wstage2`, position: 20 } });
+    await db.dealStage.create({ data: { id: won, businessId: ID.bizA, name: 'V84C won', slug: `${P}wstagewon`, position: 21, category: 'WON' } });
+    await db.dealStage.create({ data: { id: lost, businessId: ID.bizA, name: 'V84C lost', slug: `${P}wstagelost`, position: 22, category: 'LOST' } });
+    try {
+      const deal = await dealsService.createDeal({ businessId: ID.bizA, contactId: wPriv, title: 'v84c writer deal', stageId: ID.stage, value: 10 });
+      const teamDeal = await dealsService.createDeal({ businessId: ID.bizA, contactId: wTeam, title: 'v84c writer team deal', stageId: ID.stage, value: 10 });
+      expect({ companyName: deal.companyName, accountId: deal.accountId }, 'fixture: copied from the contact').toEqual({ companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+      const marks = [wPriv, WRITER_COMPANY, `${P}${wPriv.slice(P.length).toLowerCase()}@contacts.test`];
+      const WITHHELD = { contactId: null, contact: null, companyName: null, accountId: null };
+      const withheldOf = (b: any) => ({ contactId: b.contactId, contact: b.contact ?? null, companyName: b.companyName, accountId: b.accountId });
+      const stored = async () => db.deal.findUnique({ where: { id: deal.id }, select: { stageId: true, status: true, contactId: true, companyName: true, accountId: true } });
+
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        const writes: Array<[string, Method, string, Record<string, unknown>, number, string, string]> = [
+          ['PATCH {}', 'patch', `deals/${deal.id}`, {}, 200, ID.stage, 'OPEN'],
+          ['move-stage to its current stage', 'post', `deals/${deal.id}/move-stage`, { stageId: ID.stage }, 201, ID.stage, 'OPEN'],
+          ['move-stage', 'post', `deals/${deal.id}/move-stage`, { stageId: stage2 }, 201, stage2, 'OPEN'],
+          ['win', 'post', `deals/${deal.id}/win`, { reasonNotes: 'v84c won it' }, 201, won, 'WON'],
+          ['lose', 'post', `deals/${deal.id}/lose`, { lossReason: 'v84c lost it' }, 201, lost, 'LOST'],
+          ['move-stage back', 'post', `deals/${deal.id}/move-stage`, { stageId: ID.stage }, 201, ID.stage, 'OPEN'],
+        ];
+        for (const [name, method, routePath, body, status, stageId, dealStatus] of writes) {
+          const res = await send(method, routePath, actor, '', body);
+          expect(res.status, `${actor} ${name}: ${res.text.slice(0, 200)}`).toBe(status);
+          expect(res.body.id, `${actor} ${name}`).toBe(deal.id);
+          expect(withheldOf(res.body), `${actor} ${name}`).toEqual(WITHHELD);
+          for (const mark of marks) expect(res.text, `${actor} ${name}: ${mark}`).not.toContain(mark);
+          // The write itself happened, and the deal keeps its contact, company and account.
+          expect(await stored(), `${actor} ${name}: the stored deal`).toEqual({
+            stageId, status: dealStatus, contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv`,
+          });
+        }
+      }
+
+      // A contact the member may open stays named.
+      const teamPatch = await send('patch', `deals/${teamDeal.id}`, ID.staffOwned, '', {});
+      expect(teamPatch.status).toBe(200);
+      expect(teamPatch.body.contactId).toBe(wTeam);
+      const teamSame = await send('post', `deals/${teamDeal.id}/move-stage`, ID.staffOwned, '', { stageId: ID.stage });
+      expect(teamSame.status).toBe(201);
+      expect(teamSame.body.contact).toMatchObject({ id: wTeam });
+
+      // KEY's path: the member the TenantInterceptor binds (D-88); no member bound keeps the OWNER view.
+      const keyMember = await runWithTenant(ID.bizA, ID.staffOwned, () => dealsService.updateDeal({ businessId: ID.bizA, dealId: deal.id }));
+      expect(withheldOf(keyMember)).toEqual(WITHHELD);
+      const keyMove = await runWithTenant(ID.bizA, ID.staffOwned, () => dealsService.moveStage({ businessId: ID.bizA, dealId: deal.id, stageId: ID.stage }));
+      expect(withheldOf(keyMove)).toEqual(WITHHELD);
+      const queue = await dealsService.moveStage({ businessId: ID.bizA, dealId: deal.id, stageId: ID.stage });
+      expect(queue.contact).toMatchObject({ id: wPriv, companyName: WRITER_COMPANY });
+
+      // The OWNER's answers are unchanged.
+      const ownerPatch = await send('patch', `deals/${deal.id}`, ID.owner, '', {});
+      expect(ownerPatch.status).toBe(200);
+      expect(ownerPatch.body).toMatchObject({ contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+      const ownerSame = await send('post', `deals/${deal.id}/move-stage`, ID.owner, '', { stageId: ID.stage });
+      expect(ownerSame.status).toBe(201);
+      expect(ownerSame.body.contact).toMatchObject({ id: wPriv, companyName: WRITER_COMPANY });
+      const ownerWin = await send('post', `deals/${deal.id}/win`, ID.owner, '', { reasonNotes: 'v84c owner won it' });
+      expect(ownerWin.status).toBe(201);
+      expect(ownerWin.body).toMatchObject({ contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+    } finally {
+      await dropContacts([wPriv, wTeam]);
+      await db.$executeRawUnsafe(`DELETE FROM deal_stages WHERE id IN ('${stage2}', '${won}', '${lost}')`);
     }
   });
 });

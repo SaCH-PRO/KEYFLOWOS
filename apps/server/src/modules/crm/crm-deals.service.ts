@@ -251,7 +251,7 @@ export class CrmDealsService {
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
 
     this.events.emit('crm.deal.created', { businessId: input.businessId, dealId: deal.id, contactId: input.contactId });
-    return deal;
+    return this.answerForBoundMember(input.businessId, deal);
   }
 
   /**
@@ -276,6 +276,23 @@ export class CrmDealsService {
     });
     if (!deal) throw new NotFoundException('Deal not found');
     return deal;
+  }
+
+  /**
+   * W9-CRM-RESIDUALS review SEC-W9CR-3 (D-37): what a deal writer (createDeal,
+   * updateDeal, moveStage, winDeal, loseDeal; PATCH deals/:dealId, move-stage,
+   * win, lose and KEY's deal tools) answers. A deal whose contact the member
+   * bound to the call cannot open is answered as getDeal serves it: without
+   * that contact and without the company name and account createDeal copies
+   * from it. It decides only the answer: the writers read and write the deal
+   * findDeal returns, whose stored contact, company and account are kept, and
+   * the deal's timeline entries still go to its contact.
+   */
+  private async answerForBoundMember<T extends { contactId: string }>(businessId: string, deal: T) {
+    const openable = await this.boundMemberContactWhere(businessId);
+    if (!openable) return deal;
+    const opens = await this.prisma.client.contact.count({ where: { AND: [openable, { id: deal.contactId }] } });
+    return opens > 0 ? deal : { ...deal, contactId: null, contact: null, companyName: null, accountId: null };
   }
 
   async updateDeal(input: {
@@ -334,14 +351,14 @@ export class CrmDealsService {
         : 0,
     });
 
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async moveStage(input: { businessId: string; dealId: string; stageId: string; actorId?: string }) {
     const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
     const target = await this.prisma.client.dealStage.findFirst({ where: { id: input.stageId, businessId: input.businessId } });
     if (!target) throw new BadRequestException('Invalid stageId');
-    if (deal.stageId === target.id) return deal;
+    if (deal.stageId === target.id) return this.answerForBoundMember(input.businessId, deal);
 
     const fromStage = deal.stage;
     const newStatus: DealStatus = target.category === 'WON' ? 'WON' : target.category === 'LOST' ? 'LOST' : 'OPEN';
@@ -400,7 +417,7 @@ export class CrmDealsService {
       }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
     }
 
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   /**
@@ -494,7 +511,7 @@ export class CrmDealsService {
     // must emit or the conversion is recorded for some wins and not others —
     // which is worse than never recording it, because the gap looks like data.
     this.emitDealWon({ businessId: input.businessId, deal, value: updated.value, currency: updated.currency });
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async loseDeal(input: { businessId: string; dealId: string; lossReason?: string; lostAt?: string; reasonId?: string | null; reasonNotes?: string | null; actorId?: string }) {
@@ -537,7 +554,7 @@ export class CrmDealsService {
     this.events.emit('crm.deal.stage_changed', {
       businessId: input.businessId, dealId: deal.id, contactId: deal.contactId, toStageId: stage.id, newStatus: 'LOST',
     });
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async deleteDeal(input: { businessId: string; dealId: string; actorId?: string }) {
