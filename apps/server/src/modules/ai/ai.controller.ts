@@ -1905,6 +1905,9 @@ export class AiController {
    * takes only the business's daily briefing, for the member it runs as, the OWNER or an ADMIN (as
    * execute-all does), and the skip is recorded as the plan's own execution-log row (PLAN_RECORD_MODULE,
    * no tool: shown with its plan by the plan read rule) naming the member who skipped it.
+   *
+   * Review SEC-W7BR-2 (D-73): it answers how many steps were skipped and the plan's status, and a skip
+   * that changed nothing (a repeat, a briefing already finished) writes no audit row.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/briefing/:planId/skip')
@@ -1913,10 +1916,11 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
     @Req() req: AuthenticatedRequest,
-  ) {
+  ): Promise<{ skipped: number; status: string }> {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required');
-    await this.morningBriefingSvc.skipBriefing(businessId, planId, userId);
+    const { skipped, status, changed } = await this.morningBriefingSvc.skipBriefing(businessId, planId, userId);
+    if (!changed) return { skipped, status };
     await this.executionLog.log({
       businessId,
       action: 'plan:skip',
@@ -1928,6 +1932,7 @@ export class AiController {
       rationale: `Daily briefing skipped by ${userId}`,
       success: true,
     });
+    return { skipped, status };
   }
 
   // ── Unified Inbox (Phase 7) ─────────────────────────────────────────────

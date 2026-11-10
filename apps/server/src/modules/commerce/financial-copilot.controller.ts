@@ -16,14 +16,26 @@ export class FinancialCopilotController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * W7-BRIEFINGS-REST review SEC-W7BR-3 (owner rulings D-63, D-57): financial-pulse (this week's,
+   * last week's and the month's revenue, expenses, net income, receivables, the cash position and the
+   * top unpaid invoices with their contacts' names), financial-alerts (drawn from the same figures) and
+   * cash-flow-forecast (the balance, projections, receivables and the invoices to collect first) are
+   * wholly revenue, a superset of the weekly briefing below, and were served to every member
+   * (AuthGuard + BusinessGuard only), so the weekly briefing's revenue guard was bypassed one route
+   * over. Each now needs revenue read (ModuleScopeGuard, D-57: a read carrying revenue and cash figures
+   * needs revenue:read), refused before any figure is read.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/financial-pulse')
   getFinancialPulse(@Param('businessId') businessId: string): Promise<FinancialPulse> {
     return this.copilot.getFinancialPulse(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @CrmRateLimit(30, 60_000)
   @Get('businesses/:businessId/financial-alerts')
   async getFinancialAlerts(@Param('businessId') businessId: string): Promise<{ alerts: FinancialAlert[] }> {
@@ -31,7 +43,8 @@ export class FinancialCopilotController {
     return { alerts: pulse.alerts };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @CrmRateLimit(20, 60_000)
   @Get('businesses/:businessId/cash-flow-forecast')
   getCashFlowForecast(@Param('businessId') businessId: string) {

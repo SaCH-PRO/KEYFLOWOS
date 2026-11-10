@@ -54,6 +54,12 @@
  *   briefing, the weekly financial briefing and the revenue-intelligence routes
  *   serve each member only the figures and contacts they read, and the briefing
  *   skip route is bound as execute-all is.
+ *   TS-20d..f, TS-21b (W7-BRIEFINGS-REST review repairs SEC-W7BR-1..3,
+ *   CR-W7BR-1): delegate-chase takes a chase's contact from the invoice or
+ *   quote it names, the financial pulse, alerts and forecast need revenue read,
+ *   a line is withheld only for a hidden contact's full name, display name or
+ *   email, and the skip skips only steps not yet run. TS-22 (SEC-W7BR-4) is a
+ *   follow-up outside that write set (it.todo).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -165,6 +171,10 @@ async function cleanup() {
     `DELETE FROM bookings WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM services WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W7-BRIEFINGS-REST review repairs (TS-20d): the delegated chases (cuid ids) and the quote a
+    // chase names (Quote.contact is NoAction).
+    `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM quotes WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W5-BRIEFING-SCOPE (TS-14): its invoices (Invoice.contact is NoAction).
     `DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     // W7-BRIEFINGS-REST (TS-20b, TS-21): the finance queue item and the skip route's audit rows.
@@ -1172,8 +1182,9 @@ describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow t
  * stand-in that records what each call sends and answers as a model would (the advisor's echoes the
  * JSON shape its prompt asks for, so its cashFlow is the prompt's). The strategic dashboard, the
  * slow-payer detector (a fixed report naming the suite's three live contacts), the pricing signals
- * and the revenue-action writer are stand-ins; every other collaborator is an empty stand-in the
- * routes never call. Each case writes its own rows and removes them when it ends.
+ * and the revenue-action writer are stand-ins (TS-20d hands the chases on to the real
+ * RevenueActionService over this suite's database); every other collaborator is an empty stand-in
+ * the routes never call. Each case writes its own rows and removes them when it ends.
  */
 describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intelligence briefings and the briefing skip route honour scope (TS-20, TS-21)', () => {
   let restApp: any;
@@ -1183,6 +1194,12 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
   let advisorReply: 'echo' | 'text' = 'echo';
   /** What POST briefing/delegate-chase handed the revenue-action writer. */
   const delegated: any[] = [];
+  /**
+   * W7-BRIEFINGS-REST review SEC-W7BR-1 (TS-20d): when set, the stand-in hands each chase to this real
+   * RevenueActionService over the suite's database (its upsert on the chase's key is what the review
+   * showed being rewritten), after recording it.
+   */
+  let revenueActionWriter: { createFromBriefing: (businessId: string, chase: any) => Promise<{ created: boolean; actionId?: string }> } | null = null;
   afterAll(async () => {
     if (restApp) await restApp.close();
   });
@@ -1195,6 +1212,8 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
     recommendation: 'Chase Priv this week',
     outlook: 'Stable',
   };
+  /** What the weekly briefing's stand-in model answers (TS-20f sets its own). */
+  let weeklyReply: typeof WEEKLY_REPLY = WEEKLY_REPLY;
   const REVENUE_REPLY = {
     headline: 'Chase Priv and Team this week',
     whatChanged: ['Forecast steady'],
@@ -1259,7 +1278,7 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
                   // The JSON shape the advisor's prompt asks for, as written there (its cashFlow included).
                   return { content: advisorReply === 'echo' ? text.slice(text.indexOf('{"summary"')) : 'v84a plain briefing', usage: {} };
                 }
-                if (opts.feature === 'financial_weekly_briefing') return { content: JSON.stringify(WEEKLY_REPLY), usage: {} };
+                if (opts.feature === 'financial_weekly_briefing') return { content: JSON.stringify(weeklyReply), usage: {} };
                 if (opts.feature === 'revenue_briefing') return { content: JSON.stringify(REVENUE_REPLY), usage: {} };
                 throw new Error(`v84a: unexpected AI feature ${opts.feature}`);
               },
@@ -1284,8 +1303,9 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
           {
             provide: RevenueActionService,
             useValue: {
-              createFromBriefing: async (_businessId: string, chase: unknown) => {
+              createFromBriefing: async (businessId: string, chase: unknown) => {
                 delegated.push(chase);
+                if (revenueActionWriter) return revenueActionWriter.createFromBriefing(businessId, chase);
                 return { created: true, actionId: `${P}ra_${delegated.length}` };
               },
             },
@@ -1487,6 +1507,173 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
     }
   });
 
+  it("TS-20d (W7-BRIEFINGS-REST review SEC-W7BR-1, D-63, D-64): POST .../revenue-intelligence/briefing/delegate-chase binds a chase to the contact of the invoice or quote it names, read from the business's own record: a chase on a live invoice or quote whose contact the member may not open is refused as absent (404, nothing written) whether or not the body names that contact; a body naming another contact than its record's, a relation other than an invoice or a quote, or a relatedId with no relation is refused (400), and another business's or a missing invoice as absent (404); a chase may not rewrite or unbind a delegated chase bound to a contact the member may not open (a hand-written chase's key included); the OWNER's chases, and a member's chase on an invoice whose contact they may open, are written bound to the record's contact", async () => {
+    const { RevenueActionService } = await import('../src/modules/commerce/revenue-action.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const base = `/commerce/businesses/${ID.bizA}/revenue-intelligence`;
+    const invPriv = `${P}inv_dc1`;
+    const invTeam = `${P}inv_dc2`;
+    const invB = `${P}inv_dcB`;
+    const quotePriv = `${P}q_dc1`;
+    const contactB = `${P}cDcB`;
+    try {
+      await db.contact.create({ data: { id: contactB, businessId: ID.bizB, firstName: 'BeeContact', visibility: 'TEAM', ownerId: ID.ownerB } });
+      await db.invoice.createMany({
+        data: [
+          { id: invPriv, invoiceNumber: 'v84a-INV-DC1', status: 'OVERDUE', subtotal: 250, total: 250, currency: 'TTD', dueDate: new Date(Date.now() - 20 * 86_400_000), businessId: ID.bizA, contactId: ID.cPriv },
+          { id: invTeam, invoiceNumber: 'v84a-INV-DC2', status: 'SENT', subtotal: 80, total: 80, currency: 'TTD', businessId: ID.bizA, contactId: ID.cTeam },
+          { id: invB, invoiceNumber: 'v84a-INV-DCB', status: 'SENT', subtotal: 10, total: 10, currency: 'TTD', businessId: ID.bizB, contactId: contactB },
+        ],
+      });
+      await db.quote.create({ data: { id: quotePriv, quoteNumber: 'v84a-Q-DC1', status: 'SENT', total: 300, businessId: ID.bizA, contactId: ID.cPriv } });
+      // The real writer (its upsert on the chase's key); no event leaves the suite.
+      revenueActionWriter = new RevenueActionService(app.get(PrismaService), { emit: () => true } as any, {} as any, {} as any);
+      const delegate = (user: string, chase: object) => rest('post', `${base}/briefing/delegate-chase`, user, { chase });
+      const rows = () => db.revenueAction.findMany({
+        where: { businessId: ID.bizA, type: 'CHASE_FROM_BRIEFING' },
+        orderBy: { relatedId: 'asc' },
+        select: { title: true, detail: true, contactId: true, relatedType: true, relatedId: true, amountAtRisk: true },
+      });
+
+      // OWNER control: the chase on the PRIVATE contact's invoice, and a hand-written chase naming that contact.
+      const ownerInvoice = await delegate(ID.owner, { title: 'Chase v84a-INV-DC1', detail: 'owner detail', amountAtRisk: 250, contactId: ID.cPriv, relatedType: 'invoice', relatedId: invPriv });
+      expect(ownerInvoice.status, JSON.stringify(ownerInvoice.body).slice(0, 200)).toBe(201);
+      expect(ownerInvoice.body.created).toBe(true);
+      const ownerHand = await delegate(ID.owner, { title: 'Call Priv about the deposit', detail: 'owner note', contactId: ID.cPriv });
+      expect(ownerHand.status, JSON.stringify(ownerHand.body).slice(0, 200)).toBe(201);
+      expect(ownerHand.body.created).toBe(true);
+      const before = await rows();
+      expect(before).toEqual([
+        { title: 'Call Priv about the deposit', detail: 'owner note', contactId: ID.cPriv, relatedType: 'briefing', relatedId: 'briefing:call-priv-about-the-deposit', amountAtRisk: null },
+        { title: 'Chase v84a-INV-DC1', detail: 'owner detail', contactId: ID.cPriv, relatedType: 'invoice', relatedId: invPriv, amountAtRisk: 250 },
+      ]);
+
+      // A view-all ADMIN may not open the owner's PRIVATE contact: no way to it writes anything.
+      const refused: Array<[string, object, number]> = [
+        ['the contact named', { title: 'admin chase', contactId: ID.cPriv, relatedType: 'invoice', relatedId: invPriv }, 404],
+        ['the invoice alone (the review repro)', { title: 'rewritten by admin', detail: 'admin detail', amountAtRisk: 1, relatedType: 'invoice', relatedId: invPriv }, 404],
+        ['the invoice with a null contact', { title: 'rewritten by admin', contactId: null, relatedType: 'invoice', relatedId: invPriv }, 404],
+        ['the quote alone', { title: 'admin quote chase', relatedType: 'quote', relatedId: quotePriv }, 404],
+        ["the hand-written chase's key, no contact", { title: 'Call Priv about the deposit', detail: 'rewritten by admin' }, 404],
+        ["another contact than its invoice's", { title: 'admin chase', contactId: ID.cTeam, relatedType: 'invoice', relatedId: invPriv }, 400],
+        ['a relation that is not an invoice or a quote', { title: 'admin chase', relatedType: 'contact', relatedId: ID.cPriv }, 400],
+        ['the hand-written relation spelled out', { title: 'admin chase', relatedType: 'briefing', relatedId: 'briefing:call-priv-about-the-deposit' }, 400],
+        ['a relatedId with no relation', { title: 'admin chase', relatedId: 'briefing:call-priv-about-the-deposit' }, 400],
+        ["another business's invoice", { title: 'admin chase', relatedType: 'invoice', relatedId: invB }, 404],
+        ['a missing invoice', { title: 'admin chase', relatedType: 'invoice', relatedId: `${P}inv_missing` }, 404],
+      ];
+      for (const [why, chase, status] of refused) {
+        const res = await delegate(ID.admin, chase);
+        expect(res.status, `ADMIN, ${why}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(status);
+        expect(JSON.stringify(res.body), `ADMIN, ${why}`).not.toContain('Priv');
+      }
+      expect(await rows(), 'nothing the ADMIN was refused was written').toEqual(before);
+
+      // The ADMIN's chase on the TEAM contact's invoice, naming no contact: written bound to the invoice's contact.
+      const team = await delegate(ID.admin, { title: 'Chase v84a-INV-DC2', detail: 'admin detail', amountAtRisk: 80, relatedType: 'invoice', relatedId: invTeam });
+      expect(team.status, JSON.stringify(team.body).slice(0, 200)).toBe(201);
+      expect(team.body.created).toBe(true);
+      expect(await rows()).toEqual([
+        ...before,
+        { title: 'Chase v84a-INV-DC2', detail: 'admin detail', contactId: ID.cTeam, relatedType: 'invoice', relatedId: invTeam, amountAtRisk: 80 },
+      ]);
+    } finally {
+      revenueActionWriter = null;
+      delegated.length = 0;
+      await db.$executeRawUnsafe(`DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      await db.$executeRawUnsafe(`DELETE FROM quotes WHERE id LIKE ${sqlLikePrefix(`${P}q_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id = '${contactB}'`);
+    }
+  });
+
+  it("TS-20e (W7-BRIEFINGS-REST review SEC-W7BR-3, D-63, D-57): GET commerce/businesses/:businessId/financial-pulse, financial-alerts and cash-flow-forecast, the weekly briefing's figures and more, refuse a member without revenue read (403: no figure, no contact name), as POST weekly-briefing does; a revenue reader and the OWNER get them", async () => {
+    try {
+      await db.invoice.create({
+        data: { id: `${P}inv_pulse`, invoiceNumber: 'v84a-INV-PULSE', status: 'OVERDUE', subtotal: 900, total: 900, currency: 'TTD', dueDate: new Date(Date.now() - 20 * 86_400_000), businessId: ID.bizA, contactId: ID.cPriv },
+      });
+      for (const path of ['financial-pulse', 'financial-alerts', 'cash-flow-forecast']) {
+        const refused = await rest('get', `/commerce/businesses/${ID.bizA}/${path}`, ID.staffRevNone);
+        expect(refused.status, `staffRevNone ${path}: ${JSON.stringify(refused.body).slice(0, 200)}`).toBe(403);
+        expect(JSON.stringify(refused.body), `staffRevNone ${path}`).not.toMatch(/Priv|900|Receivables|cashPosition|currentBalance/);
+        for (const user of [ID.owner, ID.staffCrmNone]) {
+          const res = await rest('get', `/commerce/businesses/${ID.bizA}/${path}`, user);
+          expect(res.status, `${user} ${path}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(200);
+        }
+      }
+      const pulse = await rest('get', `/commerce/businesses/${ID.bizA}/financial-pulse`, ID.owner);
+      expect(pulse.body.topUnpaidInvoices.map((i: { invoiceNumber: string }) => i.invoiceNumber)).toContain('v84a-INV-PULSE');
+      expect((await rest('get', `/commerce/businesses/${ID.bizA}/financial-pulse`, ID.ownerB)).status, "B's member").toBe(403);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_`)}`);
+    }
+  });
+
+  it("TS-20f (W7-BRIEFINGS-REST review CR-W7BR-1, D-63): a briefing line is withheld for naming a contact the member may not open by that contact's full name (first and last name, whatever the spacing and case), display name or email, not for a common word that is only one part of a hidden contact's name: with PRIVATE contacts Chase Ramdial, Will Persad and Cash Mohammed (display name Cash M. Trading) in the finance queue, a view-all ADMIN's and an owned-view member's weekly briefing keep 'Cash is tight this week', a summary saying 'you will improve cash flow' and a recommendation beginning 'Chase INV-0042', and drop the lines that name those contacts; the OWNER's briefing is whole", async () => {
+    const { briefingContactRule } = await import('../src/modules/commerce/revenue-intelligence.controller');
+    const { resolveTimelineViewer } = await import('../src/modules/timeline/timeline-visibility');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const hidden = { chase: `${P}cChase`, will: `${P}cWill`, cash: `${P}cCash` };
+    let clock: { mockRestore: () => void } | undefined;
+    try {
+      await db.contact.createMany({
+        data: [
+          { id: hidden.chase, businessId: ID.bizA, firstName: 'Chase', lastName: 'Ramdial', email: 'v84a_chase@test.local', visibility: 'PRIVATE', ownerId: ID.owner },
+          { id: hidden.will, businessId: ID.bizA, firstName: 'Will', lastName: 'Persad', visibility: 'PRIVATE', ownerId: ID.owner },
+          { id: hidden.cash, businessId: ID.bizA, firstName: 'Cash', lastName: 'Mohammed', displayName: 'Cash M. Trading', visibility: 'PRIVATE', ownerId: ID.owner },
+        ],
+      });
+      await db.financeActionItem.createMany({
+        data: Object.entries(hidden).map(([key, contactId]) => ({
+          id: `${P}fai_${key}`, businessId: ID.bizA, kind: 'SLOW_PAYER', severity: 'WARNING', title: `Slow payer: ${key}`, body: 'v84a slow payer', entityType: 'contact', entityId: contactId, amount: 100, status: 'OPEN',
+        })),
+      });
+
+      // The rule itself, over the database: the review's lines, and lines that do name a hidden contact.
+      const prisma = app.get(PrismaService);
+      const kept = ['Chase INV-0042 — Anika Ali', 'Follow up on outstanding invoices — you will improve cash flow', 'Cash is tight this week', 'Will you pay by Friday?'];
+      const withheld = ['Chase Ramdial owes TTD 100', 'chase   RAMDIAL is late', 'Write to v84a_chase@test.local', 'Will Persad paid early', 'An order from Cash M. Trading is late', 'Cash Mohammed is paying slowly'];
+      for (const [name, user] of [['admin', ID.admin], ['staffOwned', ID.staffOwned]] as const) {
+        const rule = await briefingContactRule(prisma, await resolveTimelineViewer(prisma, ID.bizA, user), { id: { in: Object.values(hidden) } });
+        for (const line of kept) expect(rule.namesHidden(line), `${name}: ${line}`).toBe(false);
+        for (const line of withheld) expect(rule.namesHidden(line), `${name}: ${line}`).toBe(true);
+      }
+      const ownerRule = await briefingContactRule(prisma, await resolveTimelineViewer(prisma, ID.bizA, ID.owner), { id: { in: Object.values(hidden) } });
+      for (const line of [...kept, ...withheld]) expect(ownerRule.namesHidden(line), `owner: ${line}`).toBe(false);
+
+      // End to end: the weekly briefing. Its rate limit (5 a minute per business, CrmRateLimitGuard,
+      // read from Date.now) already counts TS-20b's four calls, so this case's calls are made a minute on.
+      const realNow = Date.now.bind(Date);
+      clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 61_000);
+      weeklyReply = {
+        summary: 'Follow up on outstanding invoices — you will improve cash flow',
+        highlights: ['Will Persad paid early', 'Collections held up'],
+        concerns: ['Cash is tight this week', 'Chase Ramdial is paying slowly', 'Mail to v84a_chase@test.local bounces'],
+        recommendation: 'Chase INV-0042 this week',
+        outlook: 'Stable',
+      };
+      for (const [name, user] of [['admin', ID.admin], ['staffOwned', ID.staffOwned]] as const) {
+        const res = await rest('post', `/commerce/businesses/${ID.bizA}/weekly-briefing`, user, {});
+        expect(res.status, `${name}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(201);
+        expect(res.body, name).toMatchObject({
+          summary: weeklyReply.summary,
+          highlights: ['Collections held up'],
+          concerns: ['Cash is tight this week'],
+          recommendation: weeklyReply.recommendation,
+          outlook: 'Stable',
+        });
+      }
+      const owner = await rest('post', `/commerce/businesses/${ID.bizA}/weekly-briefing`, ID.owner, {});
+      expect(owner.status).toBe(201);
+      expect(owner.body).toMatchObject(weeklyReply);
+    } finally {
+      clock?.mockRestore();
+      weeklyReply = WEEKLY_REPLY;
+      await db.$executeRawUnsafe(`DELETE FROM finance_action_items WHERE id LIKE ${sqlLikePrefix(`${P}fai_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id IN ('${hidden.chase}', '${hidden.will}', '${hidden.cash}')`);
+    }
+  });
+
   it("TS-21 (W7-BRIEFINGS-REST, review SEC-W6BS-2, D-73, KEY-R3b SEC-R3b-4; was it.todo): POST /ai/businesses/:businessId/briefing/:planId/skip takes only the daily briefing (BRIEFING_SCOPE, its objective and raw input) of the business the route checked, for the member it runs as, the business OWNER or an ADMIN, as execute-all does: a STAFF member with ai 'none' is refused the OWNER's pending non-briefing plan (404) and the OWNER's briefing (403), and another business's briefing is refused (404), each left as it was with no audit row; a STAFF member skips the briefing it runs, and the OWNER skips the business's (201, plan completed, steps skipped, one plan:skip execution-log row naming who skipped)", async () => {
     const { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } = await import('../src/modules/ai/morning-briefing.service');
     const planId = (key: string) => `${P}plan_${key}`;
@@ -1547,6 +1734,88 @@ describe('W7-BRIEFINGS-REST (D-63, D-73): the advisor, weekly and revenue-intell
       await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id LIKE ${sqlLikePrefix(`${P}plan_`)}`);
     }
   });
+
+  it("TS-21b (W7-BRIEFINGS-REST review SEC-W7BR-2, D-73): POST /ai/businesses/:businessId/briefing/:planId/skip skips only the briefing's steps not yet run (pending): a step that ran (completed, its completedAt kept), failed (its errorMessage kept) or was handed on to run (approved) keeps its status, and the plan is closed (completed) only when no step is left to run; a skip that skips nothing (a repeat, or a briefing already finished) changes nothing and writes no further plan:skip row", async () => {
+    const { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } = await import('../src/modules/ai/morning-briefing.service');
+    const planId = (key: string) => `${P}plan_${key}`;
+    const RAN_AT = new Date('2000-01-01T08:00:00.000Z');
+    const seed = (key: string, status: string, steps: Array<{ status: string; completedAt?: Date; errorMessage?: string }>) =>
+      db.aiPlan.create({
+        data: {
+          id: planId(key),
+          businessId: ID.bizA,
+          userId: ID.owner,
+          objective: `${BRIEFING_OBJECTIVE_PREFIX}2000-01-02`,
+          rawInput: BRIEFING_RAW_INPUT,
+          scope: [BRIEFING_SCOPE],
+          status,
+          steps: { create: steps.map((step, i) => ({ id: `${P}step_${key}_${i + 1}`, order: i + 1, toolName: 'crm_list_contacts', module: 'crm', action: `v84a step ${i + 1}`, ...step })) },
+        },
+      });
+    const state = async (key: string) => {
+      const row = await db.aiPlan.findUnique({
+        where: { id: planId(key) },
+        select: { status: true, steps: { orderBy: { order: 'asc' }, select: { status: true, completedAt: true, errorMessage: true } } },
+      });
+      const logs = await db.aiExecutionLog.findMany({ where: { planId: planId(key) }, select: { action: true, userId: true } });
+      return { status: row?.status, steps: row?.steps, logs };
+    };
+    const skip = (key: string, user: string) => rest('post', `/ai/businesses/${ID.bizA}/briefing/${planId(key)}/skip`, user);
+    const ran = { status: 'completed', completedAt: RAN_AT, errorMessage: null };
+    const failed = { status: 'failed', completedAt: null, errorMessage: 'boom' };
+    const approved = { status: 'approved', completedAt: null, errorMessage: null };
+    const pending = { status: 'pending', completedAt: null, errorMessage: null };
+    const skippedStep = { status: 'skipped', completedAt: null, errorMessage: null };
+    // The route's rate limit (10 a minute per business, CrmRateLimitGuard, read from Date.now) already
+    // counts TS-21's six calls, so this case's calls are made a minute on.
+    const realNow = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 61_000);
+    try {
+      // The briefing the plan queue is running: one step ran, one failed, one is handed on to run, two wait.
+      await seed('mixed', 'executing', [{ status: 'completed', completedAt: RAN_AT }, { status: 'failed', errorMessage: 'boom' }, { status: 'approved' }, { status: 'pending' }, { status: 'pending' }]);
+      const admin = await skip('mixed', ID.admin);
+      expect(admin.status, JSON.stringify(admin.body).slice(0, 200)).toBe(201);
+      expect(admin.body).toEqual({ skipped: 2, status: 'executing' });
+      const afterAdmin = { status: 'executing', steps: [ran, failed, approved, skippedStep, skippedStep], logs: [{ action: 'plan:skip', userId: ID.admin }] };
+      expect(await state('mixed')).toEqual(afterAdmin);
+      // A repeat skips nothing: nothing changes, no second audit row.
+      for (const user of [ID.owner, ID.admin]) {
+        const again = await skip('mixed', user);
+        expect(again.status, JSON.stringify(again.body).slice(0, 200)).toBe(201);
+        expect(again.body).toEqual({ skipped: 0, status: 'executing' });
+        expect(await state('mixed')).toEqual(afterAdmin);
+      }
+
+      // No step left to run once the pending ones are skipped: the plan is closed.
+      await seed('done', 'executing', [{ status: 'completed', completedAt: RAN_AT }, { status: 'pending' }]);
+      const owner = await skip('done', ID.owner);
+      expect(owner.status, JSON.stringify(owner.body).slice(0, 200)).toBe(201);
+      expect(owner.body).toEqual({ skipped: 1, status: 'completed' });
+      const closed = { status: 'completed', steps: [ran, skippedStep], logs: [{ action: 'plan:skip', userId: ID.owner }] };
+      expect(await state('done')).toEqual(closed);
+      const repeat = await skip('done', ID.owner);
+      expect(repeat.status).toBe(201);
+      expect(repeat.body).toEqual({ skipped: 0, status: 'completed' });
+      expect(await state('done')).toEqual(closed);
+
+      // A briefing already finished is left as it is, its pending step included.
+      await seed('finished', 'partial', [{ status: 'completed', completedAt: RAN_AT }, { status: 'pending' }]);
+      const finished = await skip('finished', ID.owner);
+      expect(finished.status, JSON.stringify(finished.body).slice(0, 200)).toBe(201);
+      expect(finished.body).toEqual({ skipped: 0, status: 'partial' });
+      expect(await state('finished')).toEqual({ status: 'partial', steps: [ran, pending], logs: [] });
+    } finally {
+      clock.mockRestore();
+      await db.$executeRawUnsafe(`DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id LIKE ${sqlLikePrefix(`${P}plan_`)}`);
+    }
+  });
+});
+
+describe('W7-BRIEFINGS-REST review follow-up outside the write set (TS-22)', () => {
+  it.todo(
+    "TS-22 (review SEC-W7BR-4, D-63): what the briefings withhold is still served by two routes outside W7-BRIEFINGS-REST's write set: GET commerce/businesses/:businessId/revenue-actions (revenue-action.controller.ts, AuthGuard + BusinessGuard only) lists every revenue action, the CHASE_FROM_BRIEFING and SLOW_PAYER rows with their contactId and a title naming a contact the member may not open, to every member; and FinancialBriefingSchedulerService stores the weekly briefing as a business-wide 'financial.weekly_briefing' notification (lastWeekRevenue, 'Slow payer: <name>') that GET notifications/businesses/:businessId serves every member, a revenue-none member included",
+  );
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {
