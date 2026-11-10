@@ -101,10 +101,28 @@
  *           Expense, nothing written (the listener booked the total as an
  *           Expense for an UNPAID order)
  *
- * Still open (it.todo): the store_order.paid listeners that do not read the
- * stored payment status (for a STANDARD order). V18-T3 (the web caller of the
- * CASH / MANUAL offline completion, V1-33) is covered by the web spec
- * fulfillment-panel-complete-offline since trial-N repair round 2.
+ * W9-STORE-PAID-LISTENERS (FOLLOW10; D-18, SEC-V18-3), the former it.todo cases:
+ *
+ *   V18-T2  the store_order.paid listeners that did not read the stored payment
+ *           status (WebhookDispatcherService: the outbound webhook;
+ *           RevenueEventListener: the paid timeline entry;
+ *           StoreOrderRoutingListener: fulfilment routing) act only on an order
+ *           stored PAID in the event's business. A STANDARD order set 'paid' by
+ *           PATCH .../status without a payment (the emission still open after
+ *           V18-10), an UNPAID storefront order (a queued or forged event) and an
+ *           event naming another business get no webhook delivery, no paid
+ *           timeline entry and no routing. Controls: a STANDARD order stored PAID
+ *           and a checked-out storefront order get all three. The listeners run
+ *           on their own bus in this case (so the other cases' event lists are
+ *           unchanged); the payloads are the ones the real emitters put on the
+ *           suite's bus
+ *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
+ *           CASH and a MANUAL storefront order reach PAID through SiteController
+ *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
+ *           (revenue write, the signed-in member records it) with one invoice,
+ *           one payment and one posting; a second completion writes nothing; the
+ *           store fulfillment panel's Complete offline action posts to that route
+ *           (web spec fulfillment-panel-complete-offline FPO-01..04)
  *
  * Nothing on the money path is mocked: PrismaService, StoreOrderService
  * (createOrder's server-side pricing, completeCheckout's transaction),
@@ -179,6 +197,8 @@ async function cleanup() {
     `DELETE FROM revenue_attributions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM webhooks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -861,10 +881,228 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(await counts(), 'no invoice, payment or posting').toEqual(before);
   });
 
-  it.todo(
-    'V18-T2 store_order.paid listeners that do not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts). For a STOREFRONT order the marketplace emission is closed at its source (V18-10); a STANDARD order set paid by PATCH .../status without a payment still reaches them (SEC-V18-3)',
-  );
-  it.todo(
-    'V18-T3 CASH / MANUAL storefront orders reach PAID through POST /site/businesses/:id/orders/:orderId/complete-offline (V1-33, V33-07..V33-11); the store fulfillment panel calls it from its Complete offline action since trial-N repair round 2 (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04); this suite does not drive the web',
-  );
+  it('V18-T2 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, SEC-V18-3) the store_order.paid listeners that did not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts) act only on an order stored PAID in the event\'s business: a STANDARD order set paid by PATCH .../status without a payment, an UNPAID storefront order and an event naming another business get no webhook delivery, no paid timeline entry and no fulfilment routing; controls: a STANDARD order stored PAID and a checked-out storefront order get all three', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { WebhookDispatcherService } = await import('../src/modules/webhooks/webhook-dispatcher.service');
+    const { RevenueEventListener } = await import('../src/modules/crm/revenue-event.listener');
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+
+    // The outbound webhook receivers of business A and business B (fetch answered here: no network).
+    const HOOK = { A: 'https://v18a-hooks-a.test.invalid/store-order-paid', B: 'https://v18a-hooks-b.test.invalid/store-order-paid' };
+    await db.webhook.create({
+      data: { id: `${P}wh_a`, businessId: ID.biz, name: 'V18-T2 A', url: HOOK.A, events: ['store_order.paid'], secret: `${P}fake_signing_value_a` },
+    });
+    await db.webhook.create({
+      data: { id: `${P}wh_b`, businessId: ID.bizB, name: 'V18-T2 B', url: HOOK.B, events: ['store_order.paid'], secret: `${P}fake_signing_value_b` },
+    });
+    const deliveries: Array<{ hook: string; event: string; orderId?: string }> = [];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, init?: any) => {
+      const url = String(input);
+      const hook = url === HOOK.A ? 'A' : url === HOOK.B ? 'B' : null;
+      if (!hook) return realFetch(input, init);
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      deliveries.push({ hook, event: body.event, orderId: body.data?.order?.id });
+      return new Response('ok', { status: 200 });
+    });
+
+    // The CRM timeline writes RevenueEventListener asks for (its decision is real; the write is recorded).
+    const timelineWrites: Array<{ businessId: string; type: string; orderId?: string }> = [];
+    const listenerModule = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
+      providers: [
+        PrismaService,
+        WebhookDispatcherService,
+        RevenueEventListener,
+        StoreOrderRoutingListener,
+        {
+          provide: CrmTimelineService,
+          useValue: {
+            logEvent: async (businessId: string, _contactId: string, type: string, data: { orderId?: string }) => {
+              timelineWrites.push({ businessId, type, orderId: data?.orderId });
+              return null;
+            },
+          },
+        },
+        { provide: ContactInsightService, useValue: { markStale: async () => null } },
+        { provide: CrmService, useValue: {} },
+        // The suite's real routing service, over the same rows.
+        { provide: FulfillmentRoutingService, useValue: app.get(FulfillmentRoutingService) },
+      ],
+    }).compile();
+    const listenerApp = listenerModule.createNestApplication();
+    await listenerApp.init();
+    const paidBus = listenerApp.get(EventEmitter2);
+    const routingEvents: Array<{ name: string; orderId?: string; businessId?: string }> = [];
+    paidBus.onAny((name: string | string[], payload: any) => {
+      const n = Array.isArray(name) ? name.join('.') : String(name);
+      if (n !== 'store_order.paid') routingEvents.push({ name: n, orderId: payload?.orderId, businessId: payload?.businessId });
+    });
+    // Await the work an emit starts (two are { async: true } listeners: they start on the next tick).
+    const handlers: Array<[Record<string, any>, string]> = [
+      [listenerApp.get(WebhookDispatcherService), 'onStoreOrderPaid'],
+      [listenerApp.get(RevenueEventListener), 'onStoreOrderPaid'],
+      [listenerApp.get(RevenueEventListener), 'onFulfillmentRouted'],
+      [listenerApp.get(RevenueEventListener), 'onRoutingFailed'],
+      [listenerApp.get(StoreOrderRoutingListener), 'onStoreOrderPaid'],
+    ];
+    for (const [instance, name] of handlers) {
+      const original = instance[name].bind(instance);
+      instance[name] = (...args: unknown[]) => {
+        const work = original(...args);
+        inflight.push(Promise.resolve(work));
+        return work;
+      };
+    }
+    const deliver = async (payload: any) => {
+      await paidBus.emitAsync('store_order.paid', payload);
+      for (let round = 0; round < 6; round += 1) {
+        await new Promise((r) => setImmediate(r));
+        await settle();
+      }
+    };
+    const traces = async (orderId: string) => ({
+      webhooks: deliveries.filter((d) => d.orderId === orderId).map((d) => `${d.hook}:${d.event}`),
+      timeline: timelineWrites
+        .filter((t) => t.orderId === orderId)
+        .map((t) => `${t.businessId === ID.biz ? 'A' : t.businessId === ID.bizB ? 'B' : t.businessId}:${t.type}`)
+        .sort(),
+      routing: routingEvents.filter((e) => e.orderId === orderId).map((e) => e.name),
+      routes: await db.fulfillmentRoute.count({ where: { orderId } }),
+    });
+    const NOTHING = { webhooks: [], timeline: [], routing: [], routes: 0 };
+    const standardOrder = (suffix: string) =>
+      db.marketplaceOrder.create({
+        data: {
+          businessId: ID.biz,
+          orderNumber: `${P}std_t2_${suffix}`,
+          type: 'STANDARD',
+          status: 'placed',
+          paymentStatus: 'UNPAID',
+          customerName: 'Vee Eighteen',
+          customerEmail: CUSTOMER_EMAIL,
+          subtotal: ORDER_TOTAL,
+          total: ORDER_TOTAL,
+          currency: 'TTD',
+          items: { create: [{ productId: ID.product, name: 'V18A Widget', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+        },
+      });
+    const emittedPaid = (orderId: string) => seen.filter((e) => e.name === 'store_order.paid' && e.payload?.order?.id === orderId).map((e) => e.payload);
+
+    try {
+      // (1) A STANDARD order set 'paid' by PATCH .../status with no payment: the real route emits store_order.paid
+      // for an order stored UNPAID (SEC-V18-3). At the base all three listeners acted on it.
+      const unpaidStandard = await standardOrder('unpaid');
+      seen = [];
+      const patched = await market.updateOrderStatus(ID.biz, unpaidStandard.id, 'paid', { status: 'paid' });
+      await settle();
+      expect(`${patched.status}/${patched.paymentStatus}`, 'PATCH .../status paid without a payment').toBe('paid/UNPAID');
+      const [patchedEvent] = emittedPaid(unpaidStandard.id);
+      expect(patchedEvent, 'the route emitted store_order.paid').toBeTruthy();
+      await deliver(patchedEvent);
+      expect(await traces(unpaidStandard.id), 'STANDARD order stored UNPAID: no webhook, no paid timeline entry, no routing').toEqual(NOTHING);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: unpaidStandard.id } })).status, 'not routed').toBe('paid');
+
+      // (2) An UNPAID storefront order's paid event (a queued or forged copy, as V18-05).
+      const unpaidStorefront = await placeOrder();
+      const storedUnpaid = await db.marketplaceOrder.findUnique({ where: { id: unpaidStorefront.id }, include: { items: true } });
+      expect(storedUnpaid.paymentStatus).toBe('UNPAID');
+      await deliver({ order: storedUnpaid, businessId: ID.biz });
+      expect(await traces(unpaidStorefront.id), 'storefront order stored UNPAID: nothing').toEqual(NOTHING);
+
+      // (3) A STANDARD order of A stored PAID (PATCH with paymentStatus PAID), its event naming business B:
+      // B holds no such order, so B's webhook, B's contact (same email) and B's routing see nothing.
+      const paidStandard = await standardOrder('paid');
+      seen = [];
+      await market.updateOrderStatus(ID.biz, paidStandard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' });
+      await settle();
+      const [paidStandardEvent] = emittedPaid(paidStandard.id);
+      expect(paidStandardEvent?.order?.paymentStatus).toBe('PAID');
+      await deliver({ ...paidStandardEvent, businessId: ID.bizB });
+      expect(await traces(paidStandard.id), 'an event naming another business: nothing in either').toEqual(NOTHING);
+
+      // Control (4): the same event in its own business is acted on by all three listeners.
+      await deliver(paidStandardEvent);
+      const acted = await traces(paidStandard.id);
+      expect(acted.webhooks, 'A\'s webhook is delivered once').toEqual(['A:store_order.paid']);
+      expect(acted.timeline, 'A\'s contact gets the paid timeline entry').toContain('A:store_order.paid');
+      expect(acted.routing, 'the order is routed').toEqual(['store_order.fulfillment_routed']);
+      expect(acted.routes, 'fulfilment routes written').toBeGreaterThan(0);
+
+      // Control (5): a checked-out storefront order (completeCheckout's emission) is acted on by all three.
+      const checkedOut = await placeOrder();
+      seen = [];
+      await storeOrders.completeCheckout({ orderId: checkedOut.id, paymentRef: `${P}ref_t2`, provider: 'stripe', method: 'card' });
+      await settle();
+      const [checkoutEvent] = emittedPaid(checkedOut.id);
+      expect(checkoutEvent?.invoiceId).toBeTruthy();
+      await deliver(checkoutEvent);
+      const settled = await traces(checkedOut.id);
+      expect(settled.webhooks).toEqual(['A:store_order.paid']);
+      expect(settled.timeline).toContain('A:store_order.paid');
+      expect(settled.routing, 'routing ran for the settled order').toHaveLength(1);
+      await expectOnePaidInvoice(checkedOut);
+    } finally {
+      fetchSpy.mockRestore();
+      await settle();
+      await listenerApp.close();
+    }
+  });
+
+  it('V18-T3 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, V1-33) live pin: CASH and MANUAL storefront orders reach PAID through POST /site/businesses/:businessId/orders/:orderId/complete-offline (revenue write, the signed-in member records it) with one invoice, one payment and one posting, a second completion writes nothing, and the store fulfillment panel\'s Complete offline action posts to that route (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04)', async () => {
+    const fs = await import('fs');
+    const { RequestMethod } = await import('@nestjs/common');
+    const { PATH_METADATA, METHOD_METADATA } = await import('@nestjs/common/constants');
+    const { SiteController } = await import('../src/modules/site/site.controller');
+    const { MODULE_SCOPE_KEY } = await import('../src/core/auth/module-scope.guard');
+
+    // The route: POST /site/businesses/:businessId/orders/:orderId/complete-offline, revenue write.
+    const handler = SiteController.prototype.completeOfflineOrder;
+    expect(Reflect.getMetadata(PATH_METADATA, SiteController)).toBe('site');
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('businesses/:businessId/orders/:orderId/complete-offline');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(MODULE_SCOPE_KEY, handler)).toEqual({ module: 'revenue', minLevel: 'write' });
+
+    // The handler over the suite's real StoreOrderService (its other services are off this route).
+    const controller = new (SiteController as any)({}, storeOrders, {}, {}, {}, {}, {}, {}, {});
+    for (const method of ['CASH', 'MANUAL']) {
+      const order = await placeOrder(method);
+      expect(order.paymentStatus, `${method} order placed unpaid`).not.toBe('PAID');
+      seen = [];
+
+      const completed = await controller.completeOfflineOrder(ID.biz, order.id, { user: { id: ID.owner } });
+      await settle();
+
+      expect(completed.paymentStatus, `${method} order completed offline`).toBe('PAID');
+      const { payment } = await expectOnePaidInvoice(order);
+      expect(`${payment.provider}:${payment.method}:${payment.recordedBy}`, 'the payment names its method and the member').toBe(
+        `${method.toLowerCase()}:${method.toLowerCase()}:${ID.owner}`,
+      );
+      expect(storeEvents().filter((n) => n === 'store_order.paid'), 'one store_order.paid').toHaveLength(1);
+
+      // A second completion answers the paid order and writes nothing.
+      const before = await counts();
+      seen = [];
+      const again = await controller.completeOfflineOrder(ID.biz, order.id, { user: { id: ID.owner } });
+      await settle();
+      expect(again.paymentStatus).toBe('PAID');
+      expect(await counts(), 'nothing written by a second completion').toEqual(before);
+      expect(storeEvents(), 'no second store_order.paid').toEqual([]);
+      await expectOnePaidInvoice(order);
+    }
+
+    // The web caller: the store fulfillment panel's Complete offline action posts to this route, offered for CASH / MANUAL.
+    const panel = fs.readFileSync(path.resolve(__dirname, '../../web/src/app/app/store/components/fulfillment-panel.tsx'), 'utf8');
+    expect(panel).toContain('path: `/site/businesses/${businessId}/orders/${order.id}/complete-offline`');
+    expect(panel).toMatch(/OFFLINE_PAYMENT_METHODS = new Set\(\["CASH", "MANUAL"\]\)/);
+    expect(fs.existsSync(path.resolve(__dirname, '../../web/src/app/app/store/components/__tests__/fulfillment-panel-complete-offline.test.tsx'))).toBe(true);
+  });
 });
