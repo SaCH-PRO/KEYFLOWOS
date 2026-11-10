@@ -995,8 +995,19 @@ describe('D-97 — the durable RISC sign-in cutoff on the User row', () => {
   const CUTOFF = NOW - 600;
   const token = (claims: Record<string, unknown>) =>
     `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, role: 'authenticated', ...claims })}.c2ln`;
+  // A Google session as GoTrue mints it: amr 'oauth' and the server-set
+  // app_metadata naming Google. D-101 (W9-RISC-PASSWORD-CUTOFF) reads that
+  // claim, since GoTrue's amr entry never names the OAuth provider; a session
+  // opened after a cutoff is admitted only when it is a Google or emailed-link
+  // sign-in (see the D-101 block below).
   const session = (signedInAt: number, iat: number) =>
-    token({ session_id: 's-d97', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: signedInAt }] });
+    token({
+      session_id: 's-d97',
+      iat,
+      exp: iat + 3600,
+      amr: [{ method: 'oauth', timestamp: signedInAt }],
+      app_metadata: { provider: 'google', providers: ['google'] },
+    });
 
   function middleware(metaData: unknown, opts: { marker?: string | null } = {}) {
     const supabaseAuth = { getUserFromToken: vi.fn().mockResolvedValue({ id: USER, email: 'd97@example.com' }) };
@@ -1077,5 +1088,281 @@ describe('D-97 — the durable RISC sign-in cutoff on the User row', () => {
       if (prevSecret === undefined) delete process.env.ADMIN_JWT_SECRET;
       else process.env.ADMIN_JWT_SECRET = prevSecret;
     }
+  });
+});
+
+/**
+ * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, closes SEC-W8RSC-4): after a
+ * D-97 sign-in cutoff the account accepts only a NEW sign-in made with Google
+ * or an emailed link, methods an attacker cannot produce from a stolen
+ * refresh token or a known password. A session opened after the cutoff with
+ * any other method (a password above all; anything not in the allow list:
+ * fail closed) is refused until the real user has signed in once with Google
+ * or the emailed link. That session CLEARS the restriction: the middleware
+ * records User.metaData.signInCutoffClearedAt (its authentication time),
+ * once, under the User row lock RiscService takes. From then on a session
+ * authenticated AFTER the clearing is admitted by any method, while a session
+ * authenticated between the cutoff and the clearing (the hijacker's password
+ * session) stays refused.
+ *
+ * GoTrue's amr methods (supabase/auth internal/models/factor.go), and what
+ * D-101 reads them as:
+ *   oauth          an OAuth provider; GoTrue never names it in the entry, so
+ *                  it is Google only when the token's server-set
+ *                  app_metadata names Google as the user's only external
+ *                  provider (the web's only OAuth door is provider=google).
+ *   otp            the implicit flow's verification of an emailed link or
+ *                  code (magic link, email OTP, signup, recovery, invite);
+ *                  GoTrue also stamps an SMS code 'otp', so it counts only for
+ *                  a user with no phone identity.
+ *   magiclink, email/signup, recovery, invite
+ *                  the PKCE flow's emailed links. A password-recovery link is
+ *                  an emailed link: GoTrue marks it 'recovery' (PKCE) or 'otp'
+ *                  (implicit, the same as a magic link).
+ *   anything else  refused: password, totp, mfa/*, sso/saml, anonymous,
+ *                  web3, passkey, token_refresh, email_change (its link goes
+ *                  to the NEW address), or a method this list does not know.
+ * The session's ORIGINAL sign-in (its earliest amr entry, what D-97's
+ * sessionAuthenticatedAt reads) is the one judged: an MFA step-up later in
+ * the session does not change how it signed in.
+ */
+describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link sign-in is accepted until it clears', () => {
+  const USER = 'user_d101';
+  const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+  const NOW = Math.floor(Date.now() / 1000);
+  const CUTOFF = NOW - 3600;
+  /** GoTrue's app_metadata for a user with a password and a linked Google identity. */
+  const BOTH = { provider: 'email', providers: ['email', 'google'] };
+  type AmrEntry = Record<string, unknown> | string;
+  const token = (claims: Record<string, unknown>) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, role: 'authenticated', ...claims })}.c2ln`;
+  /** An access token of a session whose amr is `amr`, minted at `iat`. app_metadata omitted when `appMeta` is undefined. */
+  const signedIn = (amr: AmrEntry[], appMeta: unknown = BOTH, iat = NOW, sessionId = 's-d101') =>
+    token({ session_id: sessionId, iat, exp: iat + 3600, amr, ...(appMeta === undefined ? {} : { app_metadata: appMeta }) });
+  const by = (method: string, at: number, appMeta: unknown = BOTH) => signedIn([{ method, timestamp: at }], appMeta);
+  const password = (at: number) => by('password', at);
+  const google = (at: number) => by('oauth', at);
+  const LOCK = `lock SELECT id FROM users WHERE id = ? FOR NO KEY UPDATE [${USER}]`;
+
+  /**
+   * The real AuthMiddleware over one in-memory User row. Its metaData writes
+   * go through the interactive transaction (recorded as begin / lock / read /
+   * write / commit); `beforeLockedRead` changes the row the moment the lock is
+   * taken (a RISC event that committed in between); `failWrites` makes that
+   * many writes throw.
+   */
+  function harness(
+    metaData: Record<string, unknown>,
+    opts: { failWrites?: number; beforeLockedRead?: (meta: Record<string, unknown>) => Record<string, unknown> } = {},
+  ) {
+    const row = { role: 'USER', deletedAt: null as Date | null, bannedAt: null as Date | null, metaData: { ...metaData } };
+    const steps: string[] = [];
+    let failWrites = opts.failWrites ?? 0;
+    let inTx = false;
+    const client = {
+      user: {
+        findUnique: vi.fn(async () => {
+          if (inTx) steps.push('read');
+          return { ...row, metaData: { ...row.metaData } };
+        }),
+        update: vi.fn(async (args: { where: { id: string }; data: { metaData?: Record<string, unknown> } }) => {
+          steps.push('write');
+          if (failWrites > 0) {
+            failWrites--;
+            throw new Error('simulated database error');
+          }
+          if (args.data.metaData) row.metaData = { ...args.data.metaData };
+          return undefined;
+        }),
+      },
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        steps.push(`lock ${strings.join('?').replace(/\s+/g, ' ').trim()} [${values.join(',')}]`);
+        if (opts.beforeLockedRead) row.metaData = opts.beforeLockedRead({ ...row.metaData });
+        return [];
+      }),
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+        steps.push('begin');
+        inTx = true;
+        try {
+          const out = await fn(client);
+          steps.push('commit');
+          return out;
+        } catch (err) {
+          steps.push('rollback');
+          throw err;
+        } finally {
+          inTx = false;
+        }
+      }),
+    };
+    const supabaseAuth = { getUserFromToken: vi.fn().mockResolvedValue({ id: USER, email: 'd101@example.com' }) };
+    const redis = { get: vi.fn(async () => null), pttl: vi.fn(async () => -2), set: vi.fn(async () => 'OK') };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test doubles
+    const mw = new AuthMiddleware(supabaseAuth as any, { client } as any, redis as any);
+    const logger = { warn: vi.fn(), log: vi.fn(), debug: vi.fn(), error: vi.fn() };
+    (mw as unknown as { logger: unknown }).logger = logger;
+    const attached = async (bearer: string) => {
+      const req = makeReq({ headers: { authorization: `Bearer ${bearer}` } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      return ((req as any).user?.id as string | undefined) ?? null;
+    };
+    return { row, steps, attached, client, logger };
+  }
+
+  it('D-101: a password session authenticated after the cutoff is refused (no user attached: the 401 every guarded route answers) and nothing is written', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(password(CUTOFF + 60))).toBeNull();
+    expect(await h.attached(password(NOW))).toBeNull();
+    expect(h.client.$transaction).not.toHaveBeenCalled();
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF });
+  });
+
+  it('D-101: a Google session authenticated after the cutoff is admitted and records signInCutoffClearedAt (its authentication time) once, in one transaction that first takes the User row lock', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF, googleSignInDisabled: true });
+    expect(await h.attached(google(CUTOFF + 120))).toBe(USER);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, googleSignInDisabled: true, signInCutoffClearedAt: CUTOFF + 120 });
+    expect(h.steps).toEqual(['begin', LOCK, 'read', 'write', 'commit']);
+  });
+
+  it.each([
+    ['otp (implicit flow: a magic link, an email code, a recovery link)', 'otp'],
+    ['magiclink (PKCE magic link)', 'magiclink'],
+    ['email/signup (PKCE signup confirmation link)', 'email/signup'],
+    ['recovery (PKCE password-recovery link)', 'recovery'],
+    ['invite (PKCE invite link)', 'invite'],
+  ])('D-101: an emailed-link session — %s — clears the restriction like Google', async (_name, method) => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(by(method, CUTOFF + 30, { provider: 'email', providers: ['email'] }))).toBe(USER);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 30 });
+  });
+
+  it.each([
+    ['password', 'password'],
+    ['totp', 'totp'],
+    ['mfa/phone', 'mfa/phone'],
+    ['mfa/webauthn', 'mfa/webauthn'],
+    ['sso/saml', 'sso/saml'],
+    ['anonymous', 'anonymous'],
+    ['web3', 'web3'],
+    ['passkey', 'passkey'],
+    ['token_refresh', 'token_refresh'],
+    ['email_change (its link goes to the NEW address)', 'email_change'],
+    ['oauth_provider/authorization_code', 'oauth_provider/authorization_code'],
+    ['a method GoTrue does not define', 'carrier-pigeon'],
+    ['an empty method', ''],
+  ])('D-101: a session opened after the cutoff by %s is refused (fail closed) and writes nothing', async (_name, method) => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(by(method, CUTOFF + 30))).toBeNull();
+    expect(h.client.$transaction).not.toHaveBeenCalled();
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF });
+  });
+
+  it.each([
+    ['no app_metadata at all', [{ method: 'oauth', timestamp: CUTOFF + 30 }], undefined],
+    ['app_metadata naming no external provider', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'email', providers: ['email'] }],
+    ['app_metadata naming another OAuth provider too', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'google', providers: ['google', 'github'] }],
+    ['app_metadata naming only another OAuth provider', [{ method: 'oauth', timestamp: CUTOFF + 30 }], { provider: 'github', providers: ['github'] }],
+    ['an amr entry naming another provider', [{ method: 'oauth', timestamp: CUTOFF + 30, provider: 'github' }], BOTH],
+    ['an RFC-8176 string amr (no timestamp)', ['oauth'], BOTH],
+  ] as Array<[string, AmrEntry[], unknown]>)('D-101: an oauth sign-in that does not show it was Google is refused — %s', async (_name, amr, appMeta) => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(signedIn(amr, appMeta))).toBeNull();
+    expect(h.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('D-101: an otp session is an emailed link only for a user with no phone identity (GoTrue stamps an SMS code otp too), and only when app_metadata says so', async () => {
+    const phone = harness({ signInCutoffAt: CUTOFF });
+    expect(await phone.attached(by('otp', CUTOFF + 30, { provider: 'phone', providers: ['email', 'phone'] }))).toBeNull();
+    const unknown = harness({ signInCutoffAt: CUTOFF });
+    expect(await unknown.attached(by('otp', CUTOFF + 30, undefined))).toBeNull();
+    expect(phone.client.$transaction).not.toHaveBeenCalled();
+    expect(unknown.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("D-101: the session's ORIGINAL sign-in decides — a password session stepped up with TOTP stays refused, a Google session stepped up with TOTP is admitted", async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    // GoTrue lists the most recent entry first.
+    const stepped = (first: string) =>
+      signedIn([
+        { method: 'totp', timestamp: CUTOFF + 90 },
+        { method: first, timestamp: CUTOFF + 30 },
+      ]);
+    expect(await h.attached(stepped('password'))).toBeNull();
+    expect(h.row.metaData.signInCutoffClearedAt).toBeUndefined();
+    expect(await h.attached(stepped('oauth'))).toBe(USER);
+    expect(h.row.metaData.signInCutoffClearedAt).toBe(CUTOFF + 30);
+  });
+
+  it('D-101: a token with no session and no amr (its iat stands for its sign-in) is refused after the cutoff: it cannot say how it signed in', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(token({ iat: NOW, exp: NOW + 3600, app_metadata: BOTH }))).toBeNull();
+    expect(h.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('D-101: once cleared, a password session authenticated after the clearing is admitted, while one authenticated between the cutoff and the clearing (or in the clearing second) stays refused; nothing more is written', async () => {
+    const CLEARED = CUTOFF + 600;
+    const h = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CLEARED });
+    expect(await h.attached(password(CLEARED + 1))).toBe(USER);
+    expect(await h.attached(password(CUTOFF + 300))).toBeNull();
+    expect(await h.attached(password(CLEARED))).toBeNull();
+    // Still refused by D-97: signed in before the cutoff.
+    expect(await h.attached(google(CUTOFF - 60))).toBeNull();
+    expect(h.client.$transaction).not.toHaveBeenCalled();
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CLEARED });
+  });
+
+  it('D-101: the marker is written once — a later qualifying session (earlier or later than the clearing) is admitted and writes nothing', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(google(CUTOFF + 600))).toBe(USER);
+    expect(await h.attached(google(CUTOFF + 300))).toBe(USER);
+    expect(await h.attached(by('otp', CUTOFF + 900))).toBe(USER);
+    expect(h.client.user.update).toHaveBeenCalledTimes(1);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 });
+  });
+
+  it('D-101: two qualifying requests that both read no marker write it once — the second re-reads the row under the lock and finds it', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    // The second request's unlocked read happened before the first committed.
+    const stale = { ...h.row, metaData: { signInCutoffAt: CUTOFF } };
+    expect(await h.attached(google(CUTOFF + 600))).toBe(USER);
+    h.client.user.findUnique.mockImplementationOnce(async () => stale);
+    expect(await h.attached(google(CUTOFF + 700))).toBe(USER);
+    expect(h.client.$transaction).toHaveBeenCalledTimes(2);
+    expect(h.client.user.update).toHaveBeenCalledTimes(1);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 });
+  });
+
+  it('D-101: a cleared marker that is not after the current cutoff (left by an earlier cutoff) clears nothing — a password session after the cutoff is refused', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF - 60 });
+    expect(await h.attached(password(CUTOFF + 30))).toBeNull();
+    // A Google session then replaces it with one that belongs to this cutoff.
+    expect(await h.attached(google(CUTOFF + 30))).toBe(USER);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 30 });
+  });
+
+  it('D-101: when the clearing write fails the qualifying session is still admitted (logged), and the next request retries the write', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF }, { failWrites: 1 });
+    expect(await h.attached(google(CUTOFF + 120))).toBe(USER);
+    expect(h.row.metaData.signInCutoffClearedAt).toBeUndefined();
+    expect(h.logger.warn.mock.calls.some((c) => String(c[0]).includes(USER))).toBe(true);
+    // Until the marker holds, a password session is still refused.
+    expect(await h.attached(password(CUTOFF + 300))).toBeNull();
+    expect(await h.attached(google(CUTOFF + 120))).toBe(USER);
+    expect(h.row.metaData.signInCutoffClearedAt).toBe(CUTOFF + 120);
+    expect(h.client.user.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('D-101: the write re-reads the row under the lock — a cutoff a new RISC event raised past the session meanwhile is not cleared, and that session is refused', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF }, { beforeLockedRead: (meta) => ({ ...meta, signInCutoffAt: NOW + 5 }) });
+    expect(await h.attached(google(CUTOFF + 120))).toBeNull();
+    expect(h.client.user.update).not.toHaveBeenCalled();
+    expect(h.row.metaData).toEqual({ signInCutoffAt: NOW + 5 });
+  });
+
+  it('D-101 negative control: with no cutoff on the row a password session is admitted and nothing is written', async () => {
+    const h = harness({ googleSignInDisabled: false });
+    expect(await h.attached(password(NOW - 86_400))).toBe(USER);
+    expect(h.client.$transaction).not.toHaveBeenCalled();
   });
 });
