@@ -34,7 +34,8 @@
  * the CRM Google contact import consent (GET /crm/businesses/:b/google/auth-url)
  * and its callback by contacts-import-write-scope.integration.test.ts
  * ([V94D-C01]..[V94D-C03]). The Google doors outside this packet's write set
- * are it.todo at the end of this file ([V94D-T02]..[V94D-T04]).
+ * are it.todo at the end of this file ([V94D-T02]..[V94D-T04]); [V94D-T04]
+ * (the web) is now a pointer comment to the web suite of W9-GOOGLE-WEB-403.
  *
  * W9-GOOGLE-DOORS-SERVER (owner ruling D-99) turns two of them live: [V94D-T02]
  * the generic connector doors POST /connectors/businesses/:b/sync/:type,
@@ -969,5 +970,13 @@ describe('W8-GOOGLE-CONSENT-OWNER: Google doors outside this packet\'s write set
 
   it.todo('[V94D-T07] needs apps/server/src/modules/calendar/calendar.controller.ts (outside the W9-GOOGLE-DOORS-SERVER write set; review SEC-W9GD-3): POST /calendar/businesses/:b/sync/google/temporal-flow (GoogleCalendarTemporalSyncService.syncBusiness, which pulls the coming events from the business Google Calendar) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with syncBusiness not called, as its sibling .../sync/google/resync does ([V94D-D01]); the owner keeps it (D-99)');
 
-  it.todo('[V94D-T04] needs the web (outside the write set; review CR-W8GCO-1): apps/web/src/app/app/profile/components/google-drive-browser.tsx handleDisconnect and handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx show the GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect and GET .../auth-url to an ADMIN or STAFF member and keep the Drive connection shown as connected (today the browser clears it as if disconnected) (D-99)');
+  // [V94D-T04] (review CR-W8GCO-1, D-99) was an it.todo here: the web shows the
+  // GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect
+  // and GET .../auth-url to an ADMIN or STAFF member and keeps the Drive
+  // connection shown as connected (google-drive-browser.tsx handleDisconnect and
+  // handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx).
+  // The server cannot test the web: W9-GOOGLE-WEB-403 proves it in
+  // apps/web/src/app/app/__tests__/google-connect-owner-only-refusal.test.tsx
+  // (the [V94D-T04] cases, with the owner controls [V95K-W01]..[V95K-W02] and
+  // the connector and contact door pins [V95K-P01]..[V95K-P03]).
 });
