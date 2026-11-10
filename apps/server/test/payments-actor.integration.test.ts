@@ -45,9 +45,12 @@
  *         R0-CMF1 review repairs PA-16k..m: the service refuses a status outside
  *         SENT / OVERDUE / VOID / PAID (SEC-CMF1-1), the invoice write routes
  *         project the contact (SEC-CMF1-2), KEY's status entries are SYSTEM
- *         (SEC-CMF1-4). Still open, outside that write set (it.todo):
- *         PA-16n (SEC-CMF1-3) an omitted actor means KEY; PA-16o (SEC-CMF1-5)
- *         the ACCRUAL invoice_finalized posting and its reversal name no creator.
+ *         (SEC-CMF1-4). Left open by that write set (it.todo), CLOSED by
+ *         W7-INVOICE-ACTOR-RULES (D-88): PA-16n (SEC-CMF1-3) an omitted actor
+ *         meant KEY, now a status change with no actor is refused 403 and KEY's
+ *         tool names KEY explicitly; PA-16o (SEC-CMF1-5) the ACCRUAL
+ *         invoice_finalized posting and its reversal named no creator, now they
+ *         name the member who issued and the member who voided.
  *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
  *         records the refunder nowhere
  *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-17a..e below. Every manual
@@ -188,6 +191,19 @@ const ID = {
   invRecordRerun: `${P}invRecordRerun`,
   invKeyInitiated: `${P}invKeyInitiated`,
   invHumanInitiated: `${P}invHumanInitiated`,
+  // W7-INVOICE-ACTOR-RULES (D-88): PA-16n, an invoice status change with no
+  // actor is refused; KEY's commerce_update_invoice names KEY explicitly.
+  invNoActorStatus: `${P}invNoActorStatus`,
+  invNoActorSend: `${P}invNoActorSend`, // moved back to DRAFT by its describe block
+  invKeyToolVoid: `${P}invKeyToolVoid`,
+  // PA-16o: the ACCRUAL business whose invoice_finalized postings and their
+  // reversals name the member (seeded by that describe block; no `inv` prefix,
+  // so the CASH-business invoice loop below does not create them).
+  accBiz: `${P}accBiz`,
+  accContact: `${P}accContact`,
+  accInvV: `${P}accInvV`,
+  accInvUV: `${P}accInvUV`,
+  accInvKey: `${P}accInvKey`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -201,6 +217,14 @@ let systemActorId: string;
 let workflow: any;
 let driveOrchestrator: any;
 let revenuePosting: any;
+/** W7-INVOICE-ACTOR-RULES (PA-16o): seeds the ACCRUAL business's system chart of accounts. */
+let coaSeeder: any;
+/**
+ * W7-INVOICE-ACTOR-RULES (PA-16i, PA-16n; D-88): the flow dispatcher every KEY
+ * surface reaches (FlowOrchestratorService.executeToolDirectly), over the same
+ * real CommerceService, composed as commerce-contact-bind-visibility composes it.
+ */
+let dispatcher: any;
 /** V1-41 (D-27): the real PaymentEvidenceService, whose confirmPendingPayment records an extracted payment. */
 let paymentEvidence: any;
 /** The real TimelineService the recorder below passes every entry on to. */
@@ -484,6 +508,19 @@ beforeAll(async () => {
   realTimeline = new TimelineService(moduleRef.get(PrismaService));
   // The KEY cortex adapter, constructed exactly as KeyCortexModule wires it.
   adapter = new CommerceAdapterService(commerce);
+  coaSeeder = moduleRef.get(ChartOfAccountsSeederService);
+  // W7-INVOICE-ACTOR-RULES (D-88): KEY's flow tools through the real dispatcher entry. No
+  // constructor (as commerce-contact-bind-visibility composes it): the prototype with the real
+  // PrismaService and a module ref resolving the real CommerceService; the governance tier, the
+  // execution log and the graph cache executeTool touches are stubs off the boundary.
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    prisma: moduleRef.get(PrismaService),
+    moduleRef: { get: (token: unknown) => (token === CommerceService ? commerce : {}) },
+    governance: { getToolTier: () => 'MEDIUM' },
+    executionLog: { logToolExecution: async () => null },
+    businessGraph: { invalidateCache: () => undefined },
+  });
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -1133,8 +1170,14 @@ describe('R0-CMF1: status changes through PATCH .../invoices/:id record the huma
 
   it('PA-16i: the KEY flow executor call (commerce_update_invoice: updateInvoice with the tenant and no human actor) still marks PAID, attributed to KEY_SYSTEM_ACTOR_ID', async () => {
     const inv = ID.invKeyPatchPaid;
-    // The call shape of flow-orchestrator.service.ts `commerce_update_invoice`.
-    const result: any = await commerce.updateInvoice({ invoiceId: inv, businessId: ID.biz, status: 'PAID' });
+    // W7-INVOICE-ACTOR-RULES (PA-16n, D-88): the call itself, through the real dispatcher
+    // (flow-orchestrator.service.ts `commerce_update_invoice`) for a member's KEY turn. It
+    // used to be reproduced here as updateInvoice with no actor, which meant KEY; an omitted
+    // actor is now refused (PA-16n), and the tool names KEY_SYSTEM_ACTOR_ID explicitly.
+    const result: any = await dispatcher.executeToolDirectly(ID.biz, 'commerce_update_invoice', { invoiceId: inv, status: 'PAID' }, undefined, {
+      surface: 'CHAT',
+      principalUserId: ID.userU,
+    });
     expect(result.status).toBe('PAID');
     const rows = await paymentsOf(inv);
     expect(rows).toHaveLength(1);
@@ -1215,8 +1258,9 @@ describe('R0-CMF1 review repairs: service-level status allow-list, contact proje
     const inv = ID.invKeyBadStatus;
     for (const status of ['PARTIALLY_PAID', 'PENDING', 'FAILED', 'DRAFT', 'BOGUS']) {
       // The call shape of flow-orchestrator.service.ts `commerce_update_invoice`
-      // (args.status is the model's raw string).
-      const call = commerce.updateInvoice({ invoiceId: inv, businessId: ID.biz, status: status as any, notes: `${P}${status}` });
+      // (args.status is the model's raw string; W7-INVOICE-ACTOR-RULES, D-88: the
+      // tool names KEY_SYSTEM_ACTOR_ID explicitly, PA-16n).
+      const call = commerce.updateInvoice({ invoiceId: inv, businessId: ID.biz, status: status as any, notes: `${P}${status}` }, systemActorId);
       await expect(call, status).rejects.toMatchObject({
         status: 400,
         message: 'status must be one of the following values: SENT, OVERDUE, VOID, PAID',
@@ -1285,21 +1329,160 @@ describe('R0-CMF1 review repairs: service-level status allow-list, contact proje
   });
 });
 
-// R0-CMF1 review: real gaps whose fixes are in product code outside the
-// R0-CMF1-INVOICE-PATCH-ACTOR write set (commerce.controller.ts,
-// commerce.service.ts, dto/update-invoice.dto.ts). Each it.todo names the
-// behaviour a follow-up packet must make pass and the file it has to change.
-describe('open gaps found by the R0-CMF1 review (outside the R0-CMF1 write set)', () => {
-  it.todo(
-    'PA-16n (SEC-CMF1-3): CommerceService.updateInvoice called with no actor is refused (403) instead of acting as KEY_SYSTEM_ACTOR_ID; KEY\'s ' +
-      'commerce_update_invoice passes KEY_SYSTEM_ACTOR_ID explicitly and still marks PAID as KEY (PA-16i) - needs ai/flow-orchestrator.service.ts ' +
-      'commerce_update_invoice to pass the KEY actor, then actorId made required in commerce.service.ts updateInvoice; outside the R0-CMF1 write set',
-  );
-  it.todo(
-    'PA-16o (SEC-CMF1-5): on an ACCRUAL business, V PATCH {status:"SENT"} then {status:"VOID"} -> the Invoice:<id>:invoice_finalized posting and its ' +
-      ':reversal have createdById = V (today null) - needs invoice-workflow.service.ts transition to take the actor and pass createdById to ' +
-      'RevenuePostingService.onInvoiceFinalized / onInvoiceVoided (PostingOpts already has createdById); outside the R0-CMF1 write set',
-  );
+// ---------------------------------------------------------------------------
+// W7-INVOICE-ACTOR-RULES (FOLLOW8, Release 0 exit): the two R0-CMF1 review
+// gaps, closed (they were it.todo here, outside the R0-CMF1 write set). Owner
+// ruling D-88 (W3-D64) gave KEY's commerce_update_invoice the member its
+// command runs for, so every caller of updateInvoice has an actor to pass.
+//
+// SEC-CMF1-3 (PA-16n): CommerceService.updateInvoice read an omitted actor as
+// KEY_SYSTEM_ACTOR_ID, so a caller that forgot it wrote a payment, a posting
+// and timeline entries attributed to KEY. A status change with no actor is now
+// refused 403 (the refusal an empty actor already got) before anything is
+// read or written, and KEY's tool passes KEY_SYSTEM_ACTOR_ID explicitly.
+//
+// SEC-CMF1-5 (PA-16o): on an ACCRUAL business, Send posts the receivable
+// (Invoice:<id>:invoice_finalized) and Void reverses it, both inside
+// InvoiceWorkflowService.transition, which carried no actor: both rows had
+// createdById null. The member who issued and the member who voided are now
+// threaded through updateInvoiceStatus and the transition to the posting.
+// ---------------------------------------------------------------------------
+
+/** The accrual recognition posting of one ACCRUAL-business invoice and its void reversal (fresh reads). */
+async function invoiceFinalizedPostings(invoiceId: string): Promise<{ finalized: any[]; reversal: any[] }> {
+  const ref = `Invoice:${invoiceId}:invoice_finalized`;
+  const finalized = await db.financialTransaction.findMany({ where: { businessId: ID.accBiz, externalRef: ref } });
+  const reversal = await db.financialTransaction.findMany({ where: { businessId: ID.accBiz, externalRef: `${ref}:reversal` } });
+  return { finalized, reversal };
+}
+
+function patchAccrualInvoiceAs(user: string, inv: string, body: Record<string, unknown>) {
+  return agent().patch(`/commerce/businesses/${ID.accBiz}/invoices/${inv}`).set(HEADER, user).send(body);
+}
+
+describe('W7-INVOICE-ACTOR-RULES: an invoice status change names its actor, and the accrual postings name the member (PA-16n, PA-16o; D-88)', () => {
+  beforeAll(async () => {
+    // SENT is reachable only from DRAFT.
+    await db.invoice.update({ where: { id: ID.invNoActorSend }, data: { status: 'DRAFT' } });
+    // PA-16o: an ACCRUAL business of U's in which V (STAFF) holds revenue:write, as on the CASH one.
+    await db.business.create({ data: { id: ID.accBiz, name: 'PYA Accrual Biz', ownerId: ID.userU, currency: 'TTD', accountingBasis: 'ACCRUAL' } });
+    await db.membership.create({ data: { id: `${P}m_acc_userU`, userId: ID.userU, businessId: ID.accBiz, role: 'OWNER' } });
+    await db.membership.create({
+      data: { id: `${P}m_acc_userV`, userId: ID.userV, businessId: ID.accBiz, role: 'STAFF', permissionScopes: { revenue: 'write' } },
+    });
+    await db.contact.create({ data: { id: ID.accContact, businessId: ID.accBiz, firstName: 'Pya', lastName: 'Accrual', email: `${P}acc@test.local` } });
+    await coaSeeder.ensureDefaults(ID.accBiz);
+    let n = 0;
+    for (const id of [ID.accInvV, ID.accInvUV, ID.accInvKey]) {
+      n += 1;
+      await db.invoice.create({
+        data: {
+          id,
+          invoiceNumber: `PYA-ACC-${n}`,
+          status: 'DRAFT',
+          subtotal: INVOICE_TOTAL,
+          total: INVOICE_TOTAL,
+          currency: 'TTD',
+          businessId: ID.accBiz,
+          contactId: ID.accContact,
+          items: { create: [{ id: `${id}_item1`, description: `PYA accrual item ${n}`, quantity: 1, unitPrice: INVOICE_TOTAL, total: INVOICE_TOTAL }] },
+        },
+      });
+    }
+  });
+
+  it('PA-16n (SEC-CMF1-3): CommerceService.updateInvoice asked for a status change with no actor (omitted, undefined, null or empty) is refused 403 before anything is read or written, instead of acting as KEY_SYSTEM_ACTOR_ID; KEY\'s commerce_update_invoice (the real dispatcher, for a member\'s turn) passes KEY_SYSTEM_ACTOR_ID explicitly and still changes the status as KEY (PA-16i, D-88)', async () => {
+    const { ForbiddenException } = await import('@nestjs/common');
+    const update = commerce.updateInvoice as unknown as (input: Record<string, unknown>, actorId?: unknown) => Promise<any>;
+    const cases: Array<[string, string]> = [
+      [ID.invNoActorStatus, 'PAID'],
+      [ID.invNoActorStatus, 'VOID'],
+      [ID.invNoActorStatus, 'OVERDUE'],
+      [ID.invNoActorSend, 'SENT'],
+    ];
+    for (const [inv, status] of cases) {
+      const input = { invoiceId: inv, businessId: ID.biz, status, notes: `${P}no actor ${status}` };
+      const calls: Array<[string, () => Promise<unknown>]> = [
+        ['omitted', () => update.call(commerce, input)],
+        ['undefined', () => update.call(commerce, input, undefined)],
+        ['null', () => update.call(commerce, input, null)],
+        ['empty', () => update.call(commerce, input, '')],
+      ];
+      for (const [how, call] of calls) {
+        const label = `${status} with the actor ${how}`;
+        const outcome = call();
+        await expect(outcome, label).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(outcome, label).rejects.toMatchObject({ status: 403, message: 'Not authorized to update this invoice' });
+      }
+    }
+    // Nothing was written: no status, notes, payment, posting, contact event or timeline entry.
+    expect(await invoiceRow(ID.invNoActorStatus)).toMatchObject({ status: 'SENT', paidAt: null, notes: null });
+    expect(await invoiceRow(ID.invNoActorSend)).toMatchObject({ status: 'DRAFT', notes: null });
+    for (const inv of [ID.invNoActorStatus, ID.invNoActorSend]) {
+      expect(await paymentsOf(inv), inv).toHaveLength(0);
+      expect(await postingsAbout(inv), inv).toHaveLength(0);
+      expect(await allContactEventsFor(inv), inv).toHaveLength(0);
+      expect(activity.filter((a) => a.data?.invoiceId === inv), inv).toHaveLength(0);
+    }
+
+    // KEY's tool, for V's turn (D-88: V is the member the command runs for), names KEY on the
+    // status change, labelled SYSTEM (SEC-CMF1-4), never V and never nobody.
+    const result: any = await dispatcher.executeToolDirectly(ID.biz, 'commerce_update_invoice', { invoiceId: ID.invKeyToolVoid, status: 'VOID' }, undefined, {
+      surface: 'CHAT',
+      principalUserId: ID.userV,
+    });
+    expect(result.status).toBe('VOID');
+    expect((await invoiceRow(ID.invKeyToolVoid)).status).toBe('VOID');
+    const voided = await contactEventsFor(ID.invKeyToolVoid, 'invoice.void');
+    expect(voided).toHaveLength(1);
+    expect(voided[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM', source: 'commerce' });
+    expect(activityFor(ID.invKeyToolVoid, 'invoice.void')).toEqual([expect.objectContaining({ actorId: KEY_ACTOR, actorType: 'SYSTEM' })]);
+    expect(await paymentsOf(ID.invKeyToolVoid)).toHaveLength(0);
+  });
+
+  it('PA-16o (SEC-CMF1-5): on an ACCRUAL business, V PATCH {status:"SENT"} then {status:"VOID"} -> the Invoice:<id>:invoice_finalized posting and its :reversal have createdById V (they had null); U issuing and V voiding are each named on their own row; KEY passed explicitly is named KEY on both (D-88)', async () => {
+    // V issues and voids.
+    let res = await patchAccrualInvoiceAs(ID.userV, ID.accInvV, { status: 'SENT' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: ID.accInvV, status: 'SENT' });
+    let rows = await invoiceFinalizedPostings(ID.accInvV);
+    expect(rows.finalized, 'invoice_finalized postings after Send').toHaveLength(1);
+    expect(rows.finalized[0]).toMatchObject({ type: 'INCOME', status: 'POSTED', sourceType: 'Invoice', sourceId: ID.accInvV });
+    expect(Number(rows.finalized[0].amount)).toBe(INVOICE_TOTAL);
+    expect(rows.finalized[0].createdById, 'the issuing member on the receivable').toBe(ID.userV);
+    expect(rows.reversal).toHaveLength(0);
+
+    res = await patchAccrualInvoiceAs(ID.userV, ID.accInvV, { status: 'VOID' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: ID.accInvV, status: 'VOID' });
+    rows = await invoiceFinalizedPostings(ID.accInvV);
+    expect(rows.finalized).toHaveLength(1);
+    expect(rows.finalized[0]).toMatchObject({ status: 'REVERSED', createdById: ID.userV });
+    expect(rows.reversal, 'the void reversal').toHaveLength(1);
+    expect(rows.reversal[0]).toMatchObject({ type: 'REVERSAL', status: 'POSTED', reversalOfId: rows.finalized[0].id, sourceId: ID.accInvV });
+    expect(rows.reversal[0].createdById, 'the voiding member on the reversal').toBe(ID.userV);
+
+    // U issues, V voids: each row names its own member.
+    res = await patchAccrualInvoiceAs(ID.userU, ID.accInvUV, { status: 'SENT' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    res = await patchAccrualInvoiceAs(ID.userV, ID.accInvUV, { status: 'VOID' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    rows = await invoiceFinalizedPostings(ID.accInvUV);
+    expect(rows.finalized).toHaveLength(1);
+    expect(rows.finalized[0]).toMatchObject({ status: 'REVERSED', createdById: ID.userU });
+    expect(rows.reversal).toHaveLength(1);
+    expect(rows.reversal[0]).toMatchObject({ reversalOfId: rows.finalized[0].id, createdById: ID.userV });
+
+    // KEY passed explicitly (its tool's call shape) is named KEY, never a member and never nobody.
+    const update = commerce.updateInvoice as unknown as (input: Record<string, unknown>, actorId?: string) => Promise<any>;
+    expect((await update.call(commerce, { invoiceId: ID.accInvKey, businessId: ID.accBiz, status: 'SENT' }, systemActorId)).status).toBe('SENT');
+    expect((await update.call(commerce, { invoiceId: ID.accInvKey, businessId: ID.accBiz, status: 'VOID' }, systemActorId)).status).toBe('VOID');
+    rows = await invoiceFinalizedPostings(ID.accInvKey);
+    expect(rows.finalized).toHaveLength(1);
+    expect(rows.finalized[0]).toMatchObject({ status: 'REVERSED', createdById: KEY_ACTOR });
+    expect(rows.reversal).toHaveLength(1);
+    expect(rows.reversal[0]).toMatchObject({ reversalOfId: rows.finalized[0].id, createdById: KEY_ACTOR });
+  });
 });
 
 // ---------------------------------------------------------------------------
