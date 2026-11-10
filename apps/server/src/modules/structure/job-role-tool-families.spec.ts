@@ -1942,8 +1942,12 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       // the deals' contacts, and its contactId, accountId and company search, by the clause for the
       // member the tenant context binds (boundMemberContactWhere); a run with no member keeps the
       // OWNER view (D-88).
+      // W9-CRM-RESIDUALS (D-37): CrmDealsService.getDeal (deals_get) withholds a deal's contact the
+      // bound member cannot open through the same boundMemberContactWhere, so it joins the list.
+      // (deals_pipeline_velocity's DealVelocityService.getReport withholds an outlier's contact through
+      // the module-level boundMemberOpensContacts, which this class-member derivation does not follow.)
       expect(reads).toEqual(
-        ['calendar_list_events', 'call_list_tasks', 'crm_list_contacts', 'crm_list_deals', 'crm_search_contacts', 'deals_list'],
+        ['calendar_list_events', 'call_list_tasks', 'crm_list_contacts', 'crm_list_deals', 'crm_search_contacts', 'deals_get', 'deals_list'],
       );
     });
 

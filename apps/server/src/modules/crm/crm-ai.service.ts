@@ -1171,6 +1171,30 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
+  /**
+   * W9-CRM-RESIDUALS (D-37): each sequence's enrollments and each contact
+   * list's members among the contacts `scope` lets the member open (the tenant
+   * predicate, deletedAt null and the visibility scope), for ai-command's
+   * prompt, which otherwise names counts that include contacts the member
+   * cannot open.
+   */
+  private async visibleEnrollmentAndMemberCounts(
+    businessId: string,
+    scope: Prisma.ContactWhereInput,
+    sequenceIds: string[],
+    listIds: string[],
+  ): Promise<{ enrolled: Map<string, number>; members: Map<string, number> }> {
+    const contact = this.contactWhere(businessId, scope);
+    const [enrolled, members] = await Promise.all([
+      this.db.crmSequenceEnrollment.groupBy({ by: ['sequenceId'], where: { sequenceId: { in: sequenceIds }, contact }, _count: { _all: true } }),
+      this.db.contactListMember.groupBy({ by: ['listId'], where: { listId: { in: listIds }, contact }, _count: { _all: true } }),
+    ]);
+    return {
+      enrolled: new Map(enrolled.map((r) => [r.sequenceId, r._count._all])),
+      members: new Map(members.map((r) => [r.listId, r._count._all])),
+    };
+  }
+
   async interpretCommand(businessId: string, command: string, scope?: ContactScope) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const [contacts, sequencesList, contactLists] = await Promise.all([
@@ -1192,12 +1216,19 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
 
+    // W9-CRM-RESIDUALS (D-37): for a member whose view is scoped, the counts are
+    // over the contacts the member may open; the OWNER's are listSequences' and
+    // listContactLists' own.
+    const visible = scope
+      ? await this.visibleEnrollmentAndMemberCounts(businessId, scope, sequencesList.map((s: { id: string }) => s.id), contactLists.map((l) => l.id))
+      : null;
+
     const sequenceSummary = sequencesList.length > 0
-      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${s.enrollmentCount} enrolled`).join('\n')
+      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${visible ? visible.enrolled.get(s.id) ?? 0 : s.enrollmentCount} enrolled`).join('\n')
       : undefined;
 
     const listSummary = contactLists.length > 0
-      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${l.memberCount ?? 0} members`).join('\n')
+      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${visible ? visible.members.get(l.id) ?? 0 : l.memberCount ?? 0} members`).join('\n')
       : undefined;
 
     const systemPrompt = buildCommandInterpreterPrompt(contactSummary, sequenceSummary, listSummary);

@@ -444,6 +444,14 @@ export class RevenueEventListener {
       `${type}:${Date.now()}`;
     const dedupeKey = `rev:${type}:${entityId}`;
     try {
+      // W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-12): the entry is written
+      // only for a contact of the payload's business, so a payload naming
+      // another tenant's contact writes nothing on it (as D-81's move reads the
+      // contact in the invoice's business). A forgotten contact in its grace
+      // period still counts: aggregate is the Contact read the soft-delete
+      // extension leaves as written.
+      const inBusiness = await this.prisma.client.contact.aggregate({ where: { id: contactId, businessId }, _count: { _all: true } });
+      if (inBusiness._count._all === 0) return;
       // Content-based dedupe: any same-type event for this contact in the
       // last 10 minutes that references the same entity (by dedupeKey, or by
       // matching id field in legacy rows that were written directly by

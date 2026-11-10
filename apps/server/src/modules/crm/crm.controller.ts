@@ -1155,13 +1155,20 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/tasks/due')
-  dueTasks(
+  async dueTasks(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('windowDays') windowDays?: string,
   ) {
+    // W9-CRM-RESIDUALS (review SEC-L81-3, D-37): only the tasks of contacts the
+    // member may open by the rule GET contacts/:contactId applies
+    // (resolveCrmAccess + visibilityClause); null for the OWNER and SUPER_ADMIN.
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
     return this.timeline.dueTasks({
       businessId,
       windowDays: windowDays ? Number(windowDays) : 7,
+      visibility: visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null,
     });
   }
 

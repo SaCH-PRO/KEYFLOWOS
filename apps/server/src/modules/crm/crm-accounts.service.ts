@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { boundMemberOpensContacts } from './crm-deals.service';
 
 export type AccountListFilters = {
   businessId: string;
@@ -332,7 +333,7 @@ export class CrmAccountsService {
     });
     if (!account) throw new NotFoundException('Account not found');
 
-    const [contacts, deals, recentEvents] = await Promise.all([
+    const [contacts, accountDeals, recentEvents] = await Promise.all([
       this.db.contact.findMany({
         where: { businessId: input.businessId, accountId: account.id, deletedAt: null },
         orderBy: [{ lastInteractionAt: 'desc' }, { createdAt: 'desc' }],
@@ -358,6 +359,11 @@ export class CrmAccountsService {
         },
       }),
     ]);
+    // W9-CRM-RESIDUALS (D-37): a deal whose contact the member bound to the call
+    // cannot open is left out of the account's deals and their rollup, as GET
+    // deals?accountId= leaves it out (V1-89 review SEC-V89-4).
+    const opens = await boundMemberOpensContacts(this.prisma, input.businessId, accountDeals.map((d) => d.contactId));
+    const deals = opens ? accountDeals.filter((d) => opens(d.contactId)) : accountDeals;
 
     const wonDeals = deals.filter((d) => d.status === 'WON');
     const lostDeals = deals.filter((d) => d.status === 'LOST');
