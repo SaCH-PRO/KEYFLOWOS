@@ -1543,6 +1543,11 @@ describe('ST-2 crm-ai: a contact id in the body and the business scans hold the 
       if (scan.path === 'ai-duplicates') {
         // The twins' name cluster keeps one contact STAFF_OWNED may open: it is no cluster.
         expect(staffIds, scan.name).not.toContain(ID.tTeam);
+      } else if (scan.path === 'ai-revenue-opportunities') {
+        // W10-MONEY-SIGNALS-REST (owner ruling D-100, SEC-W9MR-3): STAFF_OWNED holds no revenue read, so it is
+        // served no opportunity (each one is picked by a money signal, tTeam's 'Hot prospect' by its stored lead
+        // score); the scan still reads only the contacts it may open (contactsAnalyzed, the aggregate case below).
+        expect(staffIds, scan.name).toEqual([]);
       } else {
         expect(staffIds, scan.name).toContain(ID.tTeam);
       }

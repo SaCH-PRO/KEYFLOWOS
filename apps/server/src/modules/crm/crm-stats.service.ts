@@ -89,6 +89,9 @@ function withoutInvoiceTerms(contact: ContactWithStats): ContactWithStats {
 /** The entries GET .../highlights serves in its timeline (CrmTimelineService.buildTimeline's default cut). */
 const HIGHLIGHTS_TIMELINE_ENTRIES = 20;
 
+/** A contact scope no contact matches: the highlights of a member without revenue read when the call names no viewer (fail closed). */
+const NO_CONTACT: Prisma.ContactWhereInput = { id: { in: [] } };
+
 /**
  * W8-MONEY-SIGNALS review repair SEC-W8MS-3 / W9-MONEY-RANKING review repair
  * SEC-W9MR-2 (owner ruling D-100): whether a highlights timeline entry carries
@@ -861,63 +864,98 @@ export class CrmStatsService {
   }
 
   /**
-   * The CRM highlights, cached for the whole business. W9-MONEY-RANKING
-   * (owner ruling D-100; review residual SEC-W8MS-3, review repairs SEC-W9MR-1
-   * and SEC-W9MR-2): with `readsRevenue` false (a member without revenue read,
-   * `viewerUserId`) three parts are worked out for that member instead, so no
-   * money signal chooses, places or crowds out an entry:
-   * - highPotential: ranked by the money-free lead score, from the contacts
-   *   that member may open (moneyFreeHighlightContacts), so another member's
-   *   PRIVATE contact is never a card (SEC-W9MR-1);
-   * - nextActions: from the same contacts, with no invoice follow-up before
-   *   the cap of 6 (their balance is 0), so unpaid invoices of newer contacts
-   *   do not push that member's other actions out (SEC-W9MR-2);
-   * - timeline: the money rows left out before the cut to 20
-   *   (timelineWithoutMoney; SEC-W9MR-2).
-   * The rest is the cached payload, which the controller projects for that
-   * member (crm.controller.ts withoutHighlightsMoney). Absent or true: the
-   * payload as before.
+   * The CRM highlights. A viewer no visibility rule hides a contact from (the
+   * OWNER, SUPER_ADMIN) with revenue read, or a call that names no viewer
+   * with `readsRevenue` absent or true, gets the payload of the whole
+   * business, cached for it, as before.
+   *
+   * W10-MONEY-SIGNALS-REST (owner rulings D-63 and D-100; review residuals
+   * SEC-W9MR-1 and SEC-W9MR-2 remainder): any other viewer gets every part
+   * worked out from the contacts they may open (buildHighlights), a member
+   * with revenue read included, so another member's PRIVATE contact is never
+   * named or counted there; W9-MONEY-RANKING (D-100): with `readsRevenue`
+   * false (a member without revenue read) no money signal chooses, places or
+   * crowds out an entry, and a call naming no viewer reads no contact (fails
+   * closed). Not cached: the visibility is that viewer's and is read at each
+   * request.
    */
   async flowHighlights(input: { businessId: string; readsRevenue?: boolean; viewerUserId?: string }): Promise<FlowHighlightsPayload> {
-    if (input.readsRevenue === false) {
-      const [payload, contacts, timeline] = await Promise.all([
-        this.flowHighlights({ businessId: input.businessId }),
-        this.moneyFreeHighlightContacts(input.businessId, input.viewerUserId),
-        this.timelineWithoutMoney(input.businessId),
-      ]);
-      return {
-        ...payload,
-        highlights: { ...payload.highlights, highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore) },
-        timeline,
-        nextActions: this.buildNextActions(contacts),
-      };
+    const readsRevenue = input.readsRevenue !== false;
+    const visibility = input.viewerUserId
+      ? (visibilityClause(await resolveCrmAccess(this.prisma, input.businessId, input.viewerUserId), input.viewerUserId) as Prisma.ContactWhereInput | null)
+      : null;
+    if (!readsRevenue || visibility) {
+      // W10-MONEY-SIGNALS-REST (D-63, D-100): worked out for this viewer, not cached; no viewer reads no contact (fails closed).
+      return this.buildHighlights(input.businessId, readsRevenue, input.viewerUserId ? visibility : NO_CONTACT);
     }
     const cacheKey = `${input.businessId}:flowHighlights`;
     const cached = await this.cache.get<FlowHighlightsPayload>(cacheKey);
     if (cached) return cached;
 
+    const flowResult = await this.buildHighlights(input.businessId, true, null);
+    await this.cache.set(cacheKey, flowResult);
+    return flowResult;
+  }
+
+  /**
+   * The highlights of the contacts matching `scope` (null: every contact of
+   * the business, the owner's payload as before).
+   *
+   * W10-MONEY-SIGNALS-REST (owner ruling D-63, the contact rule; review
+   * residual SEC-W9MR-1): every part is read from the contacts `scope` admits,
+   * the viewer's visibility clause (resolveCrmAccess + visibilityClause, the
+   * rule GET contacts/:contactId applies), so another member's PRIVATE contact
+   * is never a card, an overdue reminder, a next action, a segment contact or
+   * count, a timeline entry or a service-affinity booking or top contact, for
+   * a member with revenue read too:
+   * - the 200 newest such contacts, with their stats, give highPotential,
+   *   overdueReminders and nextActions;
+   * - the segments count and list only such contacts (buildSegmentInsights);
+   * - service affinity counts their bookings only (buildServiceAffinity);
+   * - the timeline reads their rows only (CrmTimelineService.buildTimeline).
+   *
+   * With `readsRevenue` false (a member without revenue read; W9-MONEY-RANKING,
+   * owner ruling D-100, review repairs SEC-W9MR-1 / SEC-W9MR-2) no money signal
+   * chooses, places or crowds out an entry: each contact's stats are taken
+   * without the invoice terms (withoutInvoiceTerms: the lead score without +10
+   * a paid / -5 an unpaid invoice, the score that member's list and segment
+   * rows carry; balance, unpaid count and due date 0 or null), so the
+   * high-potential cards are ranked by the money-free score and no invoice
+   * follow-up takes an action's place before the cap of 6; there are no
+   * overdue reminders and no 'cold-with-unpaid' segment; the timeline is read
+   * without money (timelineWithoutMoney). The controller then projects what
+   * is left for that member (crm.controller.ts withoutHighlightsMoney).
+   */
+  private async buildHighlights(businessId: string, readsRevenue: boolean, scope: Prisma.ContactWhereInput | null): Promise<FlowHighlightsPayload> {
+    // A related row's contact, as the viewer may open it (live and within the clause).
+    const visibleContact: Prisma.ContactWhereInput | null = scope ? { deletedAt: null, AND: [scope] } : null;
     const rawContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(input.businessId),
+      where: scope ? { ...contactWhereBase(businessId), AND: [scope] } : contactWhereBase(businessId),
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    const contacts = rawContacts.length > 0
-      ? await this.attachContactStats(input.businessId, rawContacts)
+    const withStats = rawContacts.length > 0
+      ? await this.attachContactStats(businessId, rawContacts)
       : [];
+    const contacts = readsRevenue ? withStats : withStats.map(withoutInvoiceTerms);
     const [segments, serviceAffinity, timeline] = await Promise.all([
-      this.buildSegmentInsights(input.businessId),
-      this.buildServiceAffinity(input.businessId),
-      this.timeline.buildTimeline(input.businessId, HIGHLIGHTS_TIMELINE_ENTRIES),
+      this.buildSegmentInsights(businessId, scope, readsRevenue),
+      this.buildServiceAffinity(businessId, visibleContact),
+      readsRevenue
+        ? this.timeline.buildTimeline(businessId, HIGHLIGHTS_TIMELINE_ENTRIES, { contacts: visibleContact })
+        : this.timelineWithoutMoney(businessId, visibleContact),
     ]);
-    const flowResult = {
+    return {
       highlights: {
         highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore),
-        overdueReminders: this.buildHighlightCards(
-          contacts,
-          4,
-          (meta) => meta.outstandingBalance,
-          (contact) => (contact.meta?.outstandingBalance ?? 0) > 0,
-        ),
+        overdueReminders: readsRevenue
+          ? this.buildHighlightCards(
+              contacts,
+              4,
+              (meta) => meta.outstandingBalance,
+              (contact) => (contact.meta?.outstandingBalance ?? 0) > 0,
+            )
+          : [],
         serviceAffinity,
       },
       segments,
@@ -925,47 +963,20 @@ export class CrmStatsService {
       nextActions: this.buildNextActions(contacts),
       aiNextActions: [],
     };
-    await this.cache.set(cacheKey, flowResult);
-    return flowResult;
-  }
-
-  /**
-   * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3; review repairs
-   * SEC-W9MR-1 / SEC-W9MR-2): the contacts a member without revenue read has
-   * high-potential cards and next actions worked out from. The 200 newest
-   * contacts `viewerUserId` may open, by the rule GET contacts/:contactId
-   * applies (resolveCrmAccess + visibilityClause; the owner and SUPER_ADMIN
-   * have no clause), each with its stats without the invoice terms
-   * (withoutInvoiceTerms: the lead score without +10 a paid / -5 an unpaid
-   * invoice, the score that member's list and segment rows carry; balance,
-   * unpaid count and due date 0 or null), so no card is chosen or placed by an
-   * invoice and no invoice follow-up takes an action's place. No viewer: no
-   * contact (fails closed). Not cached: the visibility is that member's and
-   * is read at each request.
-   */
-  private async moneyFreeHighlightContacts(businessId: string, viewerUserId?: string): Promise<ContactWithStats[]> {
-    if (!viewerUserId) return [];
-    const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId) };
-    const visClause = visibilityClause(await resolveCrmAccess(this.prisma, businessId, viewerUserId), viewerUserId);
-    if (visClause) where.AND = [visClause];
-    const rawContacts = await this.prisma.client.contact.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    const contacts = rawContacts.length > 0 ? await this.attachContactStats(businessId, rawContacts) : [];
-    return contacts.map(withoutInvoiceTerms);
   }
 
   /**
    * W9-MONEY-RANKING review repair SEC-W9MR-2 (owner ruling D-100): the
-   * timeline for a member without revenue read. Every entry
-   * CrmTimelineService.buildTimeline reads (no cut), the money rows left out
-   * (timelineEntryCarriesMoney), then cut to the 20 the highlights serve, so an
-   * invoice row never takes one of that member's 20 places.
+   * timeline for a member without revenue read. CrmTimelineService.buildTimeline
+   * reads it without money (no invoice; the money-type ContactEvent rows left
+   * out in the event query itself, so they take none of its 10 places:
+   * W10-MONEY-SIGNALS-REST, SEC-W9MR-2 remainder) and with no cut, from the
+   * rows of the contacts `contacts` admits (D-63); any entry that still
+   * carries money (timelineEntryCarriesMoney) is left out, then the timeline
+   * is cut to the 20 the highlights serve.
    */
-  private async timelineWithoutMoney(businessId: string): Promise<TimelineEntry[]> {
-    const entries = await this.timeline.buildTimeline(businessId, Number.POSITIVE_INFINITY);
+  private async timelineWithoutMoney(businessId: string, contacts: Prisma.ContactWhereInput | null): Promise<TimelineEntry[]> {
+    const entries = await this.timeline.buildTimeline(businessId, Number.POSITIVE_INFINITY, { contacts, withoutMoney: true });
     return entries.filter((entry) => !timelineEntryCarriesMoney(entry)).slice(0, HIGHLIGHTS_TIMELINE_ENTRIES);
   }
 
@@ -1035,7 +1046,15 @@ export class CrmStatsService {
     };
   }
 
-  private async buildSegmentInsights(businessId: string): Promise<SegmentInsight[]> {
+  /**
+   * The highlights' segments. W10-MONEY-SIGNALS-REST (owner ruling D-63;
+   * SEC-W9MR-1 residual): with a `scope` (the viewer's visibility clause) each
+   * segment counts and lists only the contacts it admits; null, every contact
+   * of the business, as before. Without revenue read (D-100) the
+   * 'cold-with-unpaid' segment, whose members are the contacts with an unpaid
+   * invoice, is not read (the controller leaves it out for that member too).
+   */
+  private async buildSegmentInsights(businessId: string, scope: Prisma.ContactWhereInput | null = null, readsRevenue = true): Promise<SegmentInsight[]> {
     const now = new Date();
     const startOfWeek = new Date(now);
     startOfWeek.setHours(0, 0, 0, 0);
@@ -1084,14 +1103,16 @@ export class CrmStatsService {
 
     const insights: SegmentInsight[] = [];
     for (const def of definitions) {
+      if (!readsRevenue && def.key === 'cold-with-unpaid') continue;
       const take = def.take ?? 6;
+      const where: Prisma.ContactWhereInput = scope ? { ...def.countWhere, AND: [scope] } : def.countWhere;
       const [rawContacts, count] = await Promise.all([
         this.prisma.client.contact.findMany({
-          where: def.countWhere,
+          where,
           orderBy: { createdAt: 'desc' },
           take,
         }),
-        this.prisma.client.contact.count({ where: def.countWhere }),
+        this.prisma.client.contact.count({ where }),
       ]);
       const contactsWithStats = rawContacts.length > 0
         ? await this.attachContactStats(businessId, rawContacts)
@@ -1107,10 +1128,17 @@ export class CrmStatsService {
     return insights;
   }
 
-  private async buildServiceAffinity(businessId: string): Promise<ServiceAffinity[]> {
+  /**
+   * The highlights' service affinity. W10-MONEY-SIGNALS-REST (owner ruling
+   * D-63; SEC-W9MR-1 residual): with `visibleContact` (the contacts the
+   * viewer may open) only their bookings are counted and only one of them is a
+   * service's top contact; null, every booking of the business, as before.
+   */
+  private async buildServiceAffinity(businessId: string, visibleContact: Prisma.ContactWhereInput | null = null): Promise<ServiceAffinity[]> {
+    const bookingWhere: Prisma.BookingWhereInput = { businessId, deletedAt: null, ...(visibleContact ? { contact: visibleContact } : {}) };
     const serviceStats = await this.prisma.client.booking.groupBy({
       by: ['serviceId'],
-      where: { businessId, deletedAt: null },
+      where: bookingWhere,
       _count: { serviceId: true },
       orderBy: { _count: { serviceId: 'desc' } },
       take: 5,
@@ -1123,7 +1151,7 @@ export class CrmStatsService {
     const serviceMap = new Map(services.map((service) => [service.id, service]));
     const contactStats = await this.prisma.client.booking.groupBy({
       by: ['serviceId', 'contactId'],
-      where: { businessId, deletedAt: null, serviceId: { in: serviceIds } },
+      where: { ...bookingWhere, serviceId: { in: serviceIds } },
       _count: { contactId: true },
     });
     const contactIds = Array.from(new Set(contactStats.map((stat) => stat.contactId)));
