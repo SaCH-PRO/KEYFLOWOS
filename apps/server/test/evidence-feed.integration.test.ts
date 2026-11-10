@@ -250,7 +250,21 @@
  *   ContactEvents and amounts, one sibling GET away on the same contact, from
  *   cross-journey / story / dossier (V55-13f), revenue-summary and journey
  *   (V55-13g), and the contact detail the web Timeline tab draws from
- *   (V55-13h).
+ *   (V55-13h) (closed by W7-CONTACT-MONEY-VIEWS, below).
+ *
+ * W7-CONTACT-MONEY-VIEWS (SEC-W6CEM-1, SEC-W6CEM-2, CR-W6CEM-1; owner rulings
+ * D-90 and D-63, the V1-84 timeline rule, as the briefings apply it; V55-13f,
+ * V55-13g, V55-13h, were it.todo): the contact's sibling reads serve a member
+ * without revenue read no money row and no money figure. Cross-journey, story
+ * and dossier (CrmJourneyService.getContactCrossJourney, generateAiInsight),
+ * the journey and the revenue summary (CrmRevenueService
+ * .getContactRevenueSummary), and the contact detail (CrmStatsService
+ * .contactDetail): the ContactEvents V55-13e withholds are withheld (the page
+ * filled from older events), the contact's invoices and quotes are not read,
+ * and every figure read from them (totals, revenue, balances, invoice counts,
+ * the insight's payment sentence, the contact's stored lifetimeValue /
+ * averageSpend) is 0 or null in the response's existing shape. The owner and
+ * a member with revenue read get every row and figure, as before.
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -397,6 +411,9 @@ async function cleanup() {
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W4-TIMELINE-SCOPE (EF-15): the share of contact A with the owned-view member.
     `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W7-CONTACT-MONEY-VIEWS (V55-13f..h): tenant C's quotes and contact notes (Quote.contact is NoAction).
+    `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -2655,14 +2672,17 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   // V55-13c). The real CrmController is mounted on its own app over this
   // suite's PrismaService and identity header, with the real CrmService (`crm`,
   // over the suite's real CrmTimelineService); its other collaborators are
-  // empty stand-ins the route never calls.
+  // empty stand-ins the route never calls. W7-CONTACT-MONEY-VIEWS (V55-13f..h)
+  // adds the real CrmJourneyService, CrmRevenueService and CrmStatsService the
+  // contact's sibling reads call (CrmStatsService's cache is a stand-in that
+  // contactDetail never reads).
   let crmApp: any;
   afterAll(async () => {
     if (crmApp) await crmApp.close();
   });
 
-  /** GET /crm/businesses/:biz/contacts/:contactId/events as `user`, through the real CrmController. */
-  async function contactEventsRoute(user: string, contactId: string, biz = C.biz): Promise<request.Response> {
+  /** The real CrmController app (built once). */
+  async function crmControllerApp(): Promise<any> {
     if (!crmApp) {
       const { Test } = await import('@nestjs/testing');
       const { EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -2675,6 +2695,10 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
       const { CrmController } = await import('../src/modules/crm/crm.controller');
       const { CrmService } = await import('../src/modules/crm/crm.service');
       const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+      const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
+      const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
+      const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+      const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
       const ref = await Test.createTestingModule({
         controllers: [CrmController],
         providers: [
@@ -2685,6 +2709,10 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
           CrmRateLimitGuard,
           { provide: CrmService, useValue: crm },
           { provide: CrmTimelineService, useValue: app.get(CrmTimelineService) },
+          CrmJourneyService,
+          CrmRevenueService,
+          CrmStatsService,
+          { provide: CrmCacheService, useValue: { get: async () => null, set: async () => undefined, invalidate: async () => undefined } },
           { provide: EventEmitter2, useValue: { emit: () => true } },
         ],
       })
@@ -2704,7 +2732,12 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
       crmApp.useGlobalFilters(new GlobalHttpExceptionFilter());
       await crmApp.init();
     }
-    return request(crmApp.getHttpServer()).get(`/crm/businesses/${biz}/contacts/${contactId}/events`).set(HEADER, user);
+    return crmApp;
+  }
+
+  /** GET /crm/businesses/:biz/contacts/:contactId/events as `user`, through the real CrmController. */
+  async function contactEventsRoute(user: string, contactId: string, biz = C.biz): Promise<request.Response> {
+    return request((await crmControllerApp()).getHttpServer()).get(`/crm/businesses/${biz}/contacts/${contactId}/events`).set(HEADER, user);
   }
 
   it("V55-13e (SEC-W5FC-1, D-90 / D-63, W6-CONTACT-EVENTS-MONEY, was it.todo): GET /crm/businesses/:b/contacts/:c/events (CrmController.contactEvents -> CrmTimelineService.listContactEvents) withholds from a member with crm read and revenue 'none' every ContactEvent the feed reads as a money row (a manual payment's invoice.payment_recorded {amount, totalPaid, invoiceTotal}, which D-90 still writes; invoice.paid; store_order.paid; a storefront booking.created's deposit; deal.won by its type), fills that member's page from older events, and serves the owner and a member with revenue read every event, amounts included", async () => {
@@ -2816,24 +2849,284 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect([401, 403]).toContain(anonymous.status);
   });
 
-  // W6-CONTACT-EVENTS-MONEY review repairs (SEC-W6CEM-1, SEC-W6CEM-2,
-  // CR-W6CEM-1; owner rulings D-90 and D-63, the V1-84 timeline rule). V55-13e
-  // closes the /events route only. Reproduced on db6bc4b9 by a temporary probe
-  // in this describe (removed): the real CrmController and guards with the real
-  // CrmTimelineService, CrmJourneyService, CrmRevenueService and
-  // CrmStatsService; a STAFF member {crm: 'read', revenue: 'none'}; a TEAM
-  // contact with a SENT invoice (4975.5) paid 1357.91 through the real manual
-  // payment route (its invoice.payment_recorded ContactEvent), a PAID invoice
-  // (4321.87) with an invoice.paid ContactEvent {amount: 4321.87}, and a
-  // note.created. GET .../events served the note only (V55-13e holds); every
-  // read below answered 200 with the amounts. Each needs a ruling on what a
-  // crm-read, revenue-'none' member sees of a contact's money, and a follow-up
-  // packet: the services are outside this packet's write set
-  // (crm-timeline.service.ts listContactEvents and crm.controller.ts
-  // contactEvents only).
-  it.todo("V55-13f (SEC-W6CEM-1, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c/cross-journey (CrmJourneyService.getContactCrossJourney, crm read only; the web calls it, client.ts) and the two routes built on it, .../story (any ?filter=, money included) and .../dossier, withhold from a member with crm read and revenue 'none' the money ContactEvents V55-13e withholds (reproduced: timeline item invoice.paid value 4321.87 with description 'TTD 4,321.87', invoice.payment_recorded value 1357.91), summary.totalRevenue (4321.87) and the dossier's insight summary ('payments totaling TTD 4,321.87'); the owner and a member with revenue read keep them. Outside the write set (crm-journey.service.ts, crm.controller.ts getContactCrossJourney / getContactStory / getContactDossier): needs a ruling and a follow-up packet");
-  it.todo("V55-13g (SEC-W6CEM-2, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c/revenue-summary (CrmRevenueService.getContactRevenueSummary, crm read only; the web calls it, client.ts) and .../journey (CrmJourneyService.getContactJourney) withhold the contact's amounts from a member with crm read and revenue 'none' (reproduced: lifetimeRevenue 1357.91, lastPaymentAmount 1357.91, recentRevenueActions[].amount 1357.91 and 4321.87 read from the money ContactEvents; the journey's 'Payment Received' milestone value 4321.87): revenue-gate the money fields, or judge the events by canReadActivityRow / crmRowCarriesMoney as V55-13e does; the owner and a member with revenue read keep them. Outside the write set (crm-revenue.service.ts, crm-journey.service.ts, crm.controller.ts): needs a ruling and a follow-up packet");
-  it.todo("V55-13h (CR-W6CEM-1, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c (CrmStatsService.contactDetail, the 50 newest ContactEvents with no viewer filter, returned as `events`, which the web contact page's Timeline tab draws from: contact-detail-tabs.tsx, timeline-tab-panel.tsx) serves a member with crm read and revenue 'none' only the ContactEvents V55-13e serves them (reproduced: events held invoice.payment_recorded {amount 1357.91, totalPaid, invoiceTotal 4975.5} and invoice.paid {amount 4321.87}); the same response's invoices[].total and meta.totalRevenue / outstandingBalance (also the dossier's meta) need the same ruling; the owner and a member with revenue read keep them. Outside the write set (crm-stats.service.ts, crm.controller.ts getContactDetail): needs a ruling and a follow-up packet");
+  // W7-CONTACT-MONEY-VIEWS (W6-CONTACT-EVENTS-MONEY review SEC-W6CEM-1,
+  // SEC-W6CEM-2, CR-W6CEM-1; owner rulings D-90 and D-63, the V1-84 timeline
+  // rule, as W5-BRIEFING-SCOPE / W6-BRIEFINGS-SCOPE apply them to the
+  // briefings). V55-13e closed GET .../events only. Reproduced on db6bc4b9 by a
+  // temporary probe: the same member with crm read and revenue 'none' read the
+  // same ContactEvents and amounts one sibling GET away on the same contact
+  // (cross-journey / story / dossier, revenue-summary / journey, and the contact
+  // detail), every read answering 200 with the amounts. Each read now serves
+  // that member no money row and no money figure: the ContactEvents V55-13e
+  // withholds are withheld (the page filled from older events), the contact's
+  // invoices and quotes (revenue rows, D-63: commerce maps to revenue) are not
+  // read, and every figure read from them is 0 or null in the response's
+  // existing shape (as the briefings report revenueToday and openInvoices as 0).
+  // The owner and a member with revenue read get every row and figure, as before.
+  // The real CrmController with the real CrmJourneyService, CrmRevenueService
+  // and CrmStatsService (crmControllerApp above).
+
+  /** GET /crm/businesses/:biz/contacts/:contactId<suffix> as `user`, through the real CrmController. */
+  async function contactRoute(user: string, contactId: string, suffix: string, biz = C.biz): Promise<request.Response> {
+    return request((await crmControllerApp()).getHttpServer()).get(`/crm/businesses/${biz}/contacts/${contactId}${suffix}`).set(HEADER, user);
+  }
+
+  /** The amounts the V55-13f..h contact carries, each distinct so a leak names its source. */
+  const MV = {
+    SENT_TOTAL: 4975.5, // a SENT invoice, part paid through the real manual payment route
+    PAID: 1357.91, // that payment (its invoice.payment_recorded ContactEvent, its Payment row)
+    PAID_INVOICE: 5321.87, // a PAID invoice, with an invoice.paid ContactEvent { amount }
+    OPEN_TOTAL: 2468.13, // a SENT invoice nothing was paid on
+    QUOTE_TOTAL: 3697.41, // a SENT quote
+    LIFETIME_VALUE: 8642.19, // Contact.lifetimeValue (ContactInsightService writes the contact's paid total)
+    AVERAGE_SPEND: 1728.44, // Contact.averageSpend
+  };
+  /** Every way the reads print one of those amounts (plain, grouped, in TTD text), and the insight's payment sentence. */
+  const MV_LEAKS = [
+    '4975.5', '4,975.5', '1357.91', '1,357.91', '5321.87', '5,321.87', '2468.13', '2,468.13',
+    '3697.41', '3,697.41', '8642.19', '8,642.19', '1728.44', '1,728.44', 'TTD ', 'payments totaling',
+  ];
+  const expectNoMoney = (served: unknown, where: string) => {
+    const text = JSON.stringify(served);
+    for (const leak of MV_LEAKS) expect(text.includes(leak), `${where} mentions ${leak}`).toBe(false);
+  };
+
+  /**
+   * A TEAM contact of C (status CLIENT, its stored lifetimeValue / averageSpend
+   * set) with money on every read V55-13f..h covers, and the two STAFF members
+   * that read it: `staff` {crm: 'read', revenue: 'none'} and `staffRev` {crm:
+   * 'read', revenue: 'read'}. ContactEvents, oldest first: a call and a
+   * note.created (no amount), the PAID invoice's invoice.paid {amount}, then the
+   * manual payment's invoice.payment_recorded {amount, totalPaid, invoiceTotal}
+   * (the real route, as D-90 still writes it).
+   */
+  async function seedMoneyContact(tag: string) {
+    const staff = `${P}${RUN}_staff${tag}`;
+    const staffRev = `${P}${RUN}_staff${tag}Rev`;
+    const contactId = `${P}${RUN}_cTeam${tag}`;
+    const inv = { sent: `${P}${RUN}_inv${tag}Sent`, paid: `${P}${RUN}_inv${tag}Paid`, open: `${P}${RUN}_inv${tag}Open` };
+    const quoteId = `${P}${RUN}_quote${tag}`;
+    const noteId = `${P}${RUN}_note${tag}`;
+    await db.user.create({ data: { id: staff, email: `${P}${RUN}_staff${tag}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: staffRev, email: `${P}${RUN}_staff${tag}Rev@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_m${tag}`, userId: staff, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}${RUN}_m${tag}Rev`, userId: staffRev, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+    await db.contact.create({
+      data: {
+        id: contactId, businessId: C.biz, firstName: 'K19a', lastName: `Team${tag}`, status: 'CLIENT', visibility: 'TEAM', ownerId: C.owner,
+        lifetimeValue: MV.LIFETIME_VALUE, averageSpend: MV.AVERAGE_SPEND,
+      },
+    });
+    const t0 = Date.now() - 60 * 60_000;
+    const at = (minutes: number) => new Date(t0 + minutes * 60_000);
+    const invoice = (id: string, suffix: string, status: string, total: number, extra: Record<string, unknown> = {}) =>
+      db.invoice.create({
+        data: {
+          id, invoiceNumber: `K19A-${RUN}-${tag}${suffix}`, status, subtotal: total, total, currency: 'TTD', businessId: C.biz, contactId,
+          items: { create: [{ id: `${id}_item1`, description: `K19A ${tag} item ${suffix}`, quantity: 1, unitPrice: total, total }] },
+          ...extra,
+        },
+      });
+    await invoice(inv.sent, 'S', 'SENT', MV.SENT_TOTAL);
+    await invoice(inv.paid, 'P', 'PAID', MV.PAID_INVOICE, { paidAt: at(2) });
+    await invoice(inv.open, 'O', 'SENT', MV.OPEN_TOTAL);
+    await db.quote.create({
+      data: { id: quoteId, quoteNumber: `K19A-Q-${RUN}-${tag}`, status: 'SENT', subtotal: MV.QUOTE_TOTAL, total: MV.QUOTE_TOTAL, currency: 'TTD', businessId: C.biz, contactId },
+    });
+    await db.contactNote.create({ data: { id: noteId, businessId: C.biz, contactId, body: `K19a ${tag} note body`, createdAt: at(1) } });
+    const ev = (key: string, type: string, data: Record<string, unknown>, createdAt: Date) => ({
+      id: `${P}${RUN}_${tag}_${key}`, businessId: C.biz, contactId, type, data, actorType: 'SYSTEM', source: 'k19a', createdAt,
+    });
+    const call = ev('call', 'communication.call', { summary: `K19a ${tag} call` }, at(0));
+    const note = ev('note', 'note.created', { noteId }, at(1));
+    const invoicePaid = ev('paid', 'invoice.paid', { invoiceId: inv.paid, amount: MV.PAID_INVOICE, currency: 'TTD' }, at(2));
+    await db.contactEvent.createMany({ data: [call, note, invoicePaid] });
+    const reference = `${P}${RUN}-${tag}`;
+    const paid = await payAs(C.owner, C.biz, inv.sent, { amount: MV.PAID, method: 'bank_transfer', reference });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    const [payment] = await contactEventsFor(C.biz, contactId, reference);
+    expect(payment, "the payment's ContactEvent").toBeTruthy();
+    expect(cents((payment.data as any).amount)).toBe(cents(MV.PAID));
+    expect(cents((payment.data as any).invoiceTotal)).toBe(cents(MV.SENT_TOTAL));
+    return { staff, staffRev, contactId, inv, quoteId, noteId, callId: call.id, noteEventId: note.id, invoicePaidId: invoicePaid.id, payment };
+  }
+
+  it("V55-13f (SEC-W6CEM-1, D-90 / D-63, W7-CONTACT-MONEY-VIEWS, was it.todo): GET /crm/businesses/:b/contacts/:c/cross-journey (CrmJourneyService.getContactCrossJourney) and the two routes built on it, .../story (any ?filter=, money included) and .../dossier, serve a member with crm read and revenue 'none' no money row and no amount: not the money ContactEvents V55-13e withholds (invoice.paid, invoice.payment_recorded), not the contact's invoice and quote rows, summary.totalRevenue 0, the dossier's insight without its payment sentence or the 'high-value' tag, and the dossier's contact and meta without their amounts; the owner and a member with revenue read keep every row and amount", async () => {
+    const S13f = await seedMoneyContact('C13f');
+    type Item = { id: string; module: string; type: string; description?: string; value?: number };
+    const read = async (user: string, suffix: string) => {
+      const res = await contactRoute(user, S13f.contactId, suffix);
+      expect(res.status, `${user} ${suffix}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body;
+    };
+    const PLAIN_IDS = ['first_contact', S13f.callId, S13f.noteEventId].sort();
+
+    // crm read, revenue 'none': the contact, its call and its note; no money row, no amount.
+    const journey = await read(S13f.staff, '/cross-journey');
+    expect((journey.timeline as Item[]).map((i) => i.id).sort()).toEqual(PLAIN_IDS);
+    expect((journey.timeline as Item[]).filter((i) => i.module === 'commerce')).toEqual([]);
+    expect(journey.summary.totalRevenue).toBe(0);
+    expect(journey.summary.moduleCounts.commerce).toBe(0);
+    expect((journey.timeline as Item[]).find((i) => i.id === S13f.noteEventId)?.description).toBe('K19a C13f note body');
+    expectNoMoney(journey, "cross-journey, revenue 'none'");
+    for (const suffix of ['/story', '/story?filter=all', '/story?filter=money', '/story?filter=notes']) {
+      const story = await read(S13f.staff, suffix);
+      expect(story.summary.totalRevenue, suffix).toBe(0);
+      expectNoMoney(story, `${suffix}, revenue 'none'`);
+    }
+    expect((await read(S13f.staff, '/story?filter=money')).timeline).toEqual([]);
+    const dossier = await read(S13f.staff, '/dossier');
+    expect(dossier.contact.id).toBe(S13f.contactId);
+    expect((dossier.timeline as Item[]).map((i) => i.id).sort()).toEqual(PLAIN_IDS);
+    expect(dossier.summary.totalRevenue).toBe(0);
+    expect(dossier.meta.totalRevenue).toBe(0);
+    expect(dossier.meta.outstandingBalance).toBe(0);
+    expect(dossier.contact.lifetimeValue).toBeNull();
+    expect(dossier.insight.summary).toMatch(/^K19a is a client with \d+ interactions and 1 notes\.$/);
+    expect(dossier.insight.tags).not.toContain('high-value');
+    expect(dossier.notes.map((n: any) => n.id)).toEqual([S13f.noteId]);
+    expectNoMoney(dossier, "dossier, revenue 'none'");
+
+    // The owner, and a STAFF member with revenue read, get every row and amount.
+    for (const user of [C.owner, S13f.staffRev]) {
+      const all = await read(user, '/cross-journey');
+      const byId = new Map((all.timeline as Item[]).map((i) => [i.id, i]));
+      expect(cents(byId.get(S13f.invoicePaidId)?.value), user).toBe(cents(MV.PAID_INVOICE));
+      expect(byId.get(S13f.invoicePaidId)?.description, user).toMatch(/^TTD 5,?321\.87$/);
+      expect(cents(byId.get(S13f.payment.id)?.value), user).toBe(cents(MV.PAID));
+      expect(cents(byId.get(`inv_${S13f.inv.open}`)?.value), user).toBe(cents(MV.OPEN_TOTAL));
+      expect(cents(byId.get(`quote_${S13f.quoteId}`)?.value), user).toBe(cents(MV.QUOTE_TOTAL));
+      for (const id of PLAIN_IDS) expect(byId.has(id), `${user}: ${id}`).toBe(true);
+      expect(cents(all.summary.totalRevenue), user).toBe(cents(MV.PAID_INVOICE));
+      const money = await read(user, '/story?filter=money');
+      expect((money.timeline as Item[]).map((i) => i.id).sort(), user).toEqual(
+        [S13f.invoicePaidId, S13f.payment.id, `inv_${S13f.inv.open}`, `quote_${S13f.quoteId}`].sort(),
+      );
+      const full = await read(user, '/dossier');
+      expect(cents(full.summary.totalRevenue), user).toBe(cents(MV.PAID_INVOICE));
+      expect(cents(full.meta.totalRevenue), user).toBe(cents(MV.PAID_INVOICE));
+      expect(cents(full.contact.lifetimeValue), user).toBe(cents(MV.LIFETIME_VALUE));
+      expect(full.insight.summary, user).toMatch(/payments totaling TTD 5,?321\.87/);
+      expect(full.insight.tags, user).toContain('high-value');
+    }
+
+    // Tenant control: owner B on C's contact is refused on every route, and carries no amount.
+    for (const suffix of ['/cross-journey', '/story?filter=money', '/dossier']) {
+      const foreign = await contactRoute(ID.ownerB, S13f.contactId, suffix);
+      expect(foreign.status, suffix).toBe(403);
+      expectNoMoney(foreign.body, `${suffix}, the refusal`);
+    }
+  });
+
+  it("V55-13g (SEC-W6CEM-2, D-90 / D-63, W7-CONTACT-MONEY-VIEWS, was it.todo): GET /crm/businesses/:b/contacts/:c/revenue-summary (CrmRevenueService.getContactRevenueSummary) and .../journey (CrmJourneyService.getContactJourney) serve a member with crm read and revenue 'none' no amount and no revenue figure: the summary keeps its shape with lifetimeRevenue, outstandingBalance, openInvoices and openQuotes 0, lastPaymentAt, lastPaymentAmount and paymentReliability null and no recentRevenueActions, and the journey has no 'Payment Received' or quote milestone; the owner and a member with revenue read keep every figure", async () => {
+    const S13g = await seedMoneyContact('C13g');
+    const read = async (user: string, suffix: string) => {
+      const res = await contactRoute(user, S13g.contactId, suffix);
+      expect(res.status, `${user} ${suffix}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body;
+    };
+
+    // crm read, revenue 'none'.
+    const summary = await read(S13g.staff, '/revenue-summary');
+    expect(summary).toEqual({
+      contactId: S13g.contactId,
+      currency: 'TTD',
+      lifetimeRevenue: 0,
+      outstandingBalance: 0,
+      openInvoices: 0,
+      openQuotes: 0,
+      lastPaymentAt: null,
+      lastPaymentAmount: null,
+      paymentReliability: null,
+      recentRevenueActions: [],
+    });
+    const milestones = await read(S13g.staff, '/journey');
+    expect((milestones as Array<{ type: string }>).map((m) => m.type)).toEqual(['first_contact']);
+    expectNoMoney(summary, "revenue-summary, revenue 'none'");
+    expectNoMoney(milestones, "journey, revenue 'none'");
+
+    // The owner, and a STAFF member with revenue read, get every figure.
+    for (const user of [C.owner, S13g.staffRev]) {
+      const full = await read(user, '/revenue-summary');
+      expect(cents(full.lifetimeRevenue), user).toBe(cents(MV.PAID));
+      expect(cents(full.lastPaymentAmount), user).toBe(cents(MV.PAID));
+      expect(cents(full.outstandingBalance), user).toBeGreaterThanOrEqual(cents(MV.OPEN_TOTAL));
+      expect(full.openQuotes, user).toBe(1);
+      expect((full.recentRevenueActions as Array<{ amount: number | null }>).map((a) => cents(a.amount)).sort(), user).toEqual(
+        [cents(MV.PAID), cents(MV.PAID_INVOICE)].sort(),
+      );
+      const journey = (await read(user, '/journey')) as Array<{ id: string; title: string; value?: number }>;
+      const payment = journey.find((m) => m.id === `payment_${S13g.inv.paid}`);
+      expect(payment?.title, user).toBe('Payment Received');
+      expect(cents(payment?.value), user).toBe(cents(MV.PAID_INVOICE));
+      expect(cents(journey.find((m) => m.id === `quote_${S13g.quoteId}`)?.value), user).toBe(cents(MV.QUOTE_TOTAL));
+    }
+
+    // Tenant control: owner B on C's contact is refused.
+    for (const suffix of ['/revenue-summary', '/journey']) {
+      const foreign = await contactRoute(ID.ownerB, S13g.contactId, suffix);
+      expect(foreign.status, suffix).toBe(403);
+      expectNoMoney(foreign.body, `${suffix}, the refusal`);
+    }
+  });
+
+  it("V55-13h (CR-W6CEM-1, D-90 / D-63, W7-CONTACT-MONEY-VIEWS, was it.todo): GET /crm/businesses/:b/contacts/:c (CrmStatsService.contactDetail, whose `events` the web contact page's Timeline tab draws from) serves a member with crm read and revenue 'none' only the ContactEvents V55-13e serves them, the page of 50 filled from older events, no invoice rows, meta's invoice figures (totalRevenue, outstandingBalance, unpaidInvoices, paidInvoices, invoiceCount) 0 and the contact's lifetimeValue / averageSpend null; the owner and a member with revenue read keep every event, invoice and figure", async () => {
+    const S13h = await seedMoneyContact('C13h');
+    type Detail = { contact: any; events: Array<{ id: string; type: string; data: any }>; invoices: Array<{ id: string; total: number | null }>; meta: any };
+    const read = async (user: string) => {
+      const res = await contactRoute(user, S13h.contactId, '');
+      expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body as Detail;
+    };
+    const plainNewestFirst = [S13h.noteEventId, S13h.callId];
+
+    // crm read, revenue 'none'.
+    const detail = await read(S13h.staff);
+    expect(detail.contact.id).toBe(S13h.contactId);
+    expect(detail.events.map((e) => e.id)).toEqual(plainNewestFirst);
+    expect(detail.invoices).toEqual([]);
+    expect(detail.meta).toMatchObject({ totalRevenue: 0, outstandingBalance: 0, unpaidInvoices: 0, paidInvoices: 0, invoiceCount: 0, oldestUnpaidInvoiceDueAt: null });
+    expect(detail.contact.lifetimeValue).toBeNull();
+    expect(detail.contact.averageSpend).toBeNull();
+    expectNoMoney(detail, "contact detail, revenue 'none'");
+
+    // The owner, and a STAFF member with revenue read, get every event, invoice and figure.
+    for (const user of [C.owner, S13h.staffRev]) {
+      const full = await read(user);
+      expect(full.events.map((e) => e.id), user).toEqual([S13h.payment.id, S13h.invoicePaidId, ...plainNewestFirst]);
+      expect(cents(full.events[0].data.amount), user).toBe(cents(MV.PAID));
+      expect(new Map(full.invoices.map((i) => [i.id, cents(i.total)])), user).toEqual(
+        new Map([[S13h.inv.sent, cents(MV.SENT_TOTAL)], [S13h.inv.paid, cents(MV.PAID_INVOICE)], [S13h.inv.open, cents(MV.OPEN_TOTAL)]]),
+      );
+      expect(cents(full.meta.totalRevenue), user).toBe(cents(MV.PAID_INVOICE));
+      expect(cents(full.meta.outstandingBalance), user).toBeGreaterThanOrEqual(cents(MV.OPEN_TOTAL));
+      expect(full.meta.invoiceCount, user).toBe(3);
+      expect(cents(full.contact.lifetimeValue), user).toBe(cents(MV.LIFETIME_VALUE));
+      expect(cents(full.contact.averageSpend), user).toBe(cents(MV.AVERAGE_SPEND));
+    }
+
+    // The page (50 events): fifty more money events, newer than every other.
+    // The owner's page is those fifty; the member without revenue read still
+    // gets the events with no amount (the page is filled from older events).
+    const base = new Date(S13h.payment.createdAt).getTime();
+    await db.contactEvent.createMany({
+      data: Array.from({ length: 50 }, (_, i) => ({
+        id: `${P}${RUN}_C13h_more${i}`, businessId: C.biz, contactId: S13h.contactId, type: 'store_order.paid',
+        data: { orderId: `${P}${RUN}_orderC13h${i}`, total: 7000 + i, currency: 'TTD' }, actorType: 'SYSTEM', source: 'k19a',
+        createdAt: new Date(base + (i + 1) * 1000),
+      })),
+    });
+    expect((await read(C.owner)).events.map((e) => e.id)).toEqual(Array.from({ length: 50 }, (_, i) => `${P}${RUN}_C13h_more${49 - i}`));
+    const page = await read(S13h.staff);
+    expect(page.events.map((e) => e.id)).toEqual(plainNewestFirst);
+    expectNoMoney(page, "contact detail, revenue 'none', page 2");
+    expect(JSON.stringify(page.events)).not.toContain('"total"');
+
+    // Tenant control: owner B on C's contact is refused.
+    const foreign = await contactRoute(ID.ownerB, S13h.contactId, '');
+    expect(foreign.status).toBe(403);
+    expectNoMoney(foreign.body, 'the refusal');
+  });
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
   // the only rows of a manual payment and of a booking create with a category
