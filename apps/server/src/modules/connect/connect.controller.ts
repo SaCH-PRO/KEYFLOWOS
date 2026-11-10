@@ -10,10 +10,13 @@ import {
   Put,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
 import {
   GoogleFormsMappingService,
@@ -57,7 +60,34 @@ export class ConnectController {
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
     @Inject(ConnectorFormMappingService)
     private readonly connectorForms: ConnectorFormMappingService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * W7-RECENT-CONTACTS-VISIBILITY (the residual W6-CONNECT-TAG-MERGE recorded;
+   * CONTACTS-v1 RECORD VISIBILITY, the clause D-37 and D-64 apply): the recent
+   * Google and Outlook contacts lists name CRM contacts (name, email, phone,
+   * company, status, tags), so each keeps only the contacts the caller may
+   * open by the rule GET contacts/:contactId applies (resolveCrmAccess +
+   * visibilityClause, through contactVisibilityFilter): a view-all member sees
+   * TEAM and SHARED contacts, their own and those shared with them; a member
+   * without view-all (crm_view owned) only their own and those shared with
+   * them. The owner and a SUPER_ADMIN (no filter) get the list exactly as
+   * before. The access is resolved before the list is read. A hidden contact
+   * leaves the page it was on, so a restricted member may get fewer rows than
+   * `limit`.
+   */
+  private async recentForMember<T extends { id: string }>(
+    businessId: string,
+    actorUserId: string | undefined,
+    read: () => Promise<T[]>,
+  ): Promise<T[]> {
+    if (!actorUserId) throw new UnauthorizedException('Authentication required');
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const rows = await read();
+    const visible = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, rows.map((row) => row.id));
+    return visible ? rows.filter((row) => visible(row.id)) : rows;
+  }
 
   // ----- Google Forms -----
   @Get('businesses/:businessId/forms')
@@ -232,12 +262,16 @@ export class ConnectController {
     return this.contacts.getStatus(businessId);
   }
 
+  // W7-RECENT-CONTACTS-VISIBILITY: only the linked contacts the caller may open.
   @Get('businesses/:businessId/contacts/recent')
   getContactsRecent(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('limit') limit?: string,
   ) {
-    return this.contacts.getRecent(businessId, limit ? Number(limit) : undefined);
+    return this.recentForMember(businessId, req?.user?.id, () =>
+      this.contacts.getRecent(businessId, limit ? Number(limit) : undefined),
+    );
   }
 
   @Get('businesses/:businessId/contacts/mapping-rules')
@@ -268,12 +302,16 @@ export class ConnectController {
     return this.outlook.getStatus(businessId);
   }
 
+  // W7-RECENT-CONTACTS-VISIBILITY: as the Google Contacts list above.
   @Get('businesses/:businessId/outlook-contacts/recent')
   getOutlookRecent(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('limit') limit?: string,
   ) {
-    return this.outlook.getRecent(businessId, limit ? Number(limit) : undefined);
+    return this.recentForMember(businessId, req?.user?.id, () =>
+      this.outlook.getRecent(businessId, limit ? Number(limit) : undefined),
+    );
   }
 
   @Get('businesses/:businessId/outlook-contacts/mapping-rules')
