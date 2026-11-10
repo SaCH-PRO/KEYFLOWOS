@@ -767,11 +767,35 @@ describe("step 7 — optional services fail visibly", () => {
     expect(writes()).toEqual([key("POST", P.aiChatStream), key("POST", P.aiChat)]);
   });
 
-  it.todo(
-    "invoices/[id] send-email answering 503 {code: 'provider_not_configured'} (R0-07) renders a visible 'email is not configured' error and leaves the status on screen unchanged. " +
-      "NOT RENDERABLE ON THIS BASE: invoices/[id] has no send-email door. Its 'Send' calls updateInvoiceStatus (PATCH /commerce/invoices/:id/status/sent) and emails no one, " +
-      "and sendInvoiceEmail (lib/client.ts, POST .../invoices/:id/send-email) has no caller anywhere in apps/web. Adding the door is app code, outside the R0-23 write set.",
-  );
+  // W9-WEB-COMMERCE-NAV (was it.todo, NOT RENDERABLE on the R0-23 base:
+  // invoices/[id] had no send-email door; its Send only PATCHes the status and
+  // emails no one, and sendInvoiceEmail had no caller). The door is "Email
+  // invoice" (POST .../invoices/:id/send-email, which the server answers by
+  // emailing the customer and moving a DRAFT to SENT). With no Gmail
+  // connection it answers the R0-07 503 before any outbound call; the screen
+  // says email is not configured and the status stays as the server left it.
+  it("invoices/[id] send-email answering 503 {code: 'provider_not_configured'} (R0-07) renders a visible 'email is not configured' error and leaves the status on screen unchanged (W9-WEB-COMMERCE-NAV, was it.todo)", async () => {
+    signedIn();
+    routes[key("POST", P.sendEmail)] = answer(S.gmailNotConfigured);
+    openInvoice(J.invoiceDraft);
+    expect(await invoiceHeading()).toBeInTheDocument();
+    const header = () => within(screen.getByRole("heading", { name: `Invoice ${INVOICE.invoiceNumber}` }).parentElement as HTMLElement);
+    expect(header().getByText("Draft")).toBeInTheDocument();
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 0.00", remaining: "TTD 250.00" });
+
+    fireEvent.click(screen.getByRole("button", { name: /email invoice/i }));
+
+    await waitFor(() => expect(callsTo("POST", P.sendEmail)).toHaveLength(1));
+    const alert = await screen.findByRole("alert", {}, { timeout: 3000 });
+    expect(alert).toHaveTextContent(/email is not configured/i);
+    // The server's own words (GmailService gmailNotConfigured) are shown too.
+    expect(alert).toHaveTextContent((S.gmailNotConfigured.body as { message: string }).message);
+    expect(header().getByText("Draft")).toBeInTheDocument();
+    expect(header().queryByText("Sent")).not.toBeInTheDocument();
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 0.00", remaining: "TTD 250.00" });
+    // The refused send is the only write: the status was not moved some other way.
+    expect(writes()).toEqual([key("POST", P.sendEmail)]);
+  });
 
   it("invoices/[id]: the email door it does have (Resend receipt on a PAID invoice) answering the R0-07 503 shows the server's message and the status stays PAID", async () => {
     signedIn();
