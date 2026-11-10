@@ -267,6 +267,30 @@ export class SupabaseAdminService {
   }
 
   /**
+   * One GoTrue user record by id (GET /auth/v1/admin/users/{id} under the
+   * service-role key), with its identities: GoTrue's handler reads it through
+   * models.findUser, which eager-loads them, whereas the LIST above
+   * (models.FindUsersInAudience, no Eager) serves every user with
+   * `identities: null` (W9-IDENTITY-BACKFILL-SCRIPT review CR-W9IBS-1). The
+   * same record bootstrap reads (IdentityController.verifiedProviderIdentities).
+   *
+   * Like listUsersPage, an error result THROWS (SupabaseAdminError with the
+   * provider's status), as does an answer with no user: a walk must never read
+   * a failed read as a user without identities.
+   */
+  async getUserRecord(userId: string): Promise<User> {
+    const client = this.getClient();
+    const { data, error } = await client.auth.admin.getUserById(userId);
+    if (error) {
+      throw new SupabaseAdminError(`getUserById failed: ${error.message}`, statusOf(error), error);
+    }
+    if (!data?.user) {
+      throw new SupabaseAdminError('getUserById returned no user', null);
+    }
+    return data.user;
+  }
+
+  /**
    * Ask Supabase to email a password-recovery link.
    *
    * Delivery stays with Supabase rather than moving to Resend: the recovery

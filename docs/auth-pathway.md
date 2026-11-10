@@ -1009,16 +1009,38 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     (W9-IDENTITY-BACKFILL-SCRIPT): `pnpm backfill:google-identities` in
     `apps/server` (`apps/server/scripts/backfill-google-identities.ts`)
     pages GoTrue's admin user list (`GET /auth/v1/admin/users`,
-    service-role key, through `SupabaseAdminService.listUsersPage`), reads
-    each user's `identities[]` with provider `google` (the provider id, else
-    `identity_data.sub`; never the user-editable `user_metadata`) and
-    writes bootstrap's `UserIdentity` row for the local User with that id.
-    Dry run by default (counts only: no email, sub, user id or key);
-    `--apply` writes; idempotent. A sub already mapped to another local
-    user is a counted conflict and is never re-pointed; a GoTrue user with
-    no local User row is skipped and counted. Run it after the W8 deploy
-    (and again whenever a dry run counts `would_write` above 0); until it
-    has run with `--apply`, such accounts stay unreached.
+    service-role key, through `SupabaseAdminService.listUsersPage`) only to
+    enumerate the user ids: GoTrue does not load identities on the list
+    (`models.FindUsersInAudience` has no `Eager()`, so each listed user
+    carries `identities: null`; review CR-W9IBS-1). It reads each user's
+    RECORD (`GET /auth/v1/admin/users/{id}`,
+    `SupabaseAdminService.getUserRecord`, identities eager-loaded: the
+    record bootstrap reads), takes its `identities[]` with provider
+    `google` (the provider id, else `identity_data.sub`; never the
+    user-editable `user_metadata`) and writes bootstrap's `UserIdentity`
+    row for the local User with that id. A record whose identities are not
+    loaded, or a GoTrue read that fails, stops the run with exit 1: it is
+    never counted as a user without a Google identity. Dry run by default
+    (counts only: no email, sub, user id or key); `--apply` writes;
+    idempotent. A sub already mapped to another local user is a counted
+    conflict and is never re-pointed, also when another writer maps it
+    between the script's read and its write (review SEC-W9IBS-2); a GoTrue
+    user with no local User row is skipped and counted. Run it after the W8
+    deploy (and again whenever a dry run counts `would_write` above 0);
+    until it has run with `--apply`, such accounts stay unreached.
+  - **RISC events that arrived before the backfill are not replayed**
+    (review SEC-W9IBS-1). Google answered a session-ending event for an
+    unmapped sub with 202 (`no_matching_user`) and does not send it again;
+    mapping the sub afterwards does NOT apply that event's cutoff, so the
+    account holds no sign-in cutoff for it. The backfill counts such events
+    (`unapplied_risc_events`, `unapplied_risc_accounts`: session-ending
+    rows of `risc_events` with no user and action `no_matching_user` whose
+    sub now resolves, or in a dry run would after `--apply`) and prints a
+    NOTE when there are any. The operator lists those accounts with the
+    query in `docs/development/risc-setup.md` ("RISC events that arrived
+    before the backfill") and acts on each by hand, as for a live
+    `no_matching_user` event (Supabase dashboard sign-out or ban, password
+    reset, contact the owner). Until then such an account is NOT covered.
   - **A pre-event GoTrue session can mint a post-cutoff sign-in**
     (SEC-W8RSC-4): narrowed by D-101 above, not closed (review
     SEC-W9RPC-2). D-97 leaves the pre-event refresh token alive at GoTrue,
