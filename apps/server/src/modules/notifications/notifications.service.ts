@@ -27,20 +27,30 @@ export class NotificationsService {
     });
   }
 
-  async listForBusiness(businessId: string, opts?: { unreadOnly?: boolean; limit?: number }) {
+  /**
+   * `excludeTypes` (W8-REVENUE-ACTIONS-SCOPE, D-63): notification types the caller may not be served,
+   * left out in the query so the page stays full (the weekly financial briefing for a member without
+   * revenue read).
+   */
+  async listForBusiness(businessId: string, opts?: { unreadOnly?: boolean; limit?: number; excludeTypes?: string[] }) {
     return this.notifModel.findMany({
       where: {
         businessId,
         ...(opts?.unreadOnly ? { read: false } : {}),
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: opts?.limit ?? 50,
     });
   }
 
-  async unreadCount(businessId: string) {
+  async unreadCount(businessId: string, opts?: { excludeTypes?: string[] }) {
     return this.notifModel.count({
-      where: { businessId, read: false },
+      where: {
+        businessId,
+        read: false,
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
+      },
     });
   }
 

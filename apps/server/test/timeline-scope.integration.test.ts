@@ -2020,7 +2020,8 @@ describe('W8-REVENUE-ACTIONS-SCOPE (D-63): the revenue-actions routes and the st
           const res = await call('post', `${RA}/${raId(key)}/${verb}`, ID.admin, verb === 'snooze' ? { hours: 2 } : { resolution: 'v84a done' });
           expect(res.status, `admin ${verb} ${key}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(404);
           expect(JSON.stringify(res.body)).toContain('action not found');
-          expect(JSON.stringify(res.body)).not.toMatch(/Priv|Staff/);
+          // The error echoes the request's own path (the action id), nothing of the action.
+          expect(JSON.stringify({ ...res.body, path: undefined })).not.toMatch(/Priv|Staff/);
         }
         expect(await actionState(key), `admin: ${key} unchanged`).toEqual(PENDING_STATE);
       }
