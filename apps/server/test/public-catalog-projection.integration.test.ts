@@ -27,6 +27,9 @@
  *     SEC-V123-3, W10-QUALIFICATION-PUBLIC) never read storeEnabled: it scored
  *     a closed store's active products, wrote a QualificationJourney for it
  *     and returned every product with executionMeta in allProducts.
+ *   - GET /site/storefront/public/:slug/qualification-flow (review
+ *     SEC-W10QP-1) answered a closed store 404 'Store is currently
+ *     unavailable' and an unknown one 404 'Store not found'.
  *
  * Contract pinned here:
  *
@@ -45,6 +48,8 @@
  *                                    store's allProducts is exactly the site storefront
  *                                    projection (PUBLIC_PRODUCT_SELECT) and nothing of
  *                                    the canary reaches the body (W10-QUALIFICATION-PUBLIC)
+ *   qualification-flow            -> a closed (or soft-deleted) store is the unknown
+ *                                    store's 404, the same body (SEC-W10QP-1)
  *   rate limit                    -> the catalog products route carries
  *                                    @PublicRateLimit(N <= 60, >= 60s); request N+1
  *                                    in the window is a 429. The commerce products
@@ -60,7 +65,8 @@
  * route), BookingsController + BookingsService (the slots read) and
  * SiteController + SiteService read real rows behind the production
  * GlobalHttpExceptionFilter and ValidationPipe; QualificationService is real
- * for the qualification-recommend read (W10-QUALIFICATION-PUBLIC). Every
+ * for the qualification-recommend and qualification-flow reads
+ * (W10-QUALIFICATION-PUBLIC). Every
  * request is anonymous.
  * Collaborators the public reads never call (waitlist, calendar, ledger, AI,
  * orders, promo codes, e-mail, timeline...) are stubs.
@@ -191,6 +197,9 @@ const qualificationRecommend = (slugOrId: string) =>
   agent()
     .post(`/site/storefront/public/${encodeURIComponent(slugOrId)}/qualification-recommend`)
     .send({ answers: QUALIFICATION_ANSWERS });
+/** The guided selector's first call (SEC-W10QP-1). */
+const qualificationFlow = (slugOrId: string) =>
+  agent().get(`/site/storefront/public/${encodeURIComponent(slugOrId)}/qualification-flow`);
 
 function sortedKeys(row: unknown): string[] {
   return Object.keys((row ?? {}) as Record<string, unknown>).sort();
@@ -591,7 +600,8 @@ describe('V1-23 sibling public product reads outside the write set', () => {
   // (site.controller.ts -> qualification.service.ts scoreAndRecommend) never
   // reads storeEnabled, lists a closed store's active products with
   // executionMeta in allProducts, and writes a QualificationJourney row for
-  // it. Its sibling GET .../qualification-flow already 404s a closed store.
+  // it. Its sibling GET .../qualification-flow already 404d a closed store,
+  // with its own message (SEC-W10QP-1, the next case).
   // W10-QUALIFICATION-PUBLIC (was it.todo): the packet keeps executionMeta
   // private (M36): the web guided selector only types it and renders
   // nothing from it, and the scorer never read it. allProducts is the site
@@ -657,6 +667,65 @@ describe('V1-23 sibling public product reads outside the write set', () => {
     expect(byId.status).toBe(201);
     expectRowsProjected(byId.body.allProducts, SITE_PRODUCT_KEYS, [...PRODUCT_SECRET_KEYS, 'executionModel'], 'qualification allProducts by id');
     expectNoCanary(byId.body);
+  });
+
+  // Review finding SEC-W10QP-1 (confirmed by running): the guided selector's
+  // first call, GET /site/storefront/public/:slugOrId/qualification-flow
+  // (qualification.service.ts getPublicQualificationFlow), answered an
+  // unknown store 404 'Store not found' but a closed one 404 'Store is
+  // currently unavailable', so any anonymous caller could tell that a closed
+  // store exists (CF-56 parity). It now shares the recommend route's public
+  // store lookup.
+  it('qualification-flow 404s a closed or soft-deleted store with the unknown store\'s body (W10-QUALIFICATION-PUBLIC review SEC-W10QP-1, CF-56 parity): by slug or id, nothing of the flow is answered; an open store still answers 200 with its questions', async () => {
+    const FLOW = { owner: `${P}ownerFlow`, biz: `${P}bizFlow`, slug: `${P}store-flow` };
+    const GONE = { owner: `${P}ownerGoneFlow`, biz: `${P}bizGoneFlow`, slug: `${P}store-gone-flow` };
+    const flowWith = (title: string) => ({
+      qualificationFlow: {
+        enabled: true,
+        title,
+        questions: [{ id: 'goal', label: 'What do you need?', type: 'single', options: [{ value: 'templates', label: 'Templates' }] }],
+      },
+    });
+    await db.user.create({ data: { id: FLOW.owner, email: `${P}ownerFlow@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: GONE.owner, email: `${P}ownerGoneFlow@test.local`, role: 'USER' } });
+    await db.business.create({
+      data: { id: FLOW.biz, name: 'V23A Flow Store', slug: FLOW.slug, ownerId: FLOW.owner, currency: 'TTD', storeEnabled: true, metaData: flowWith('Find your template') },
+    });
+    await db.business.create({
+      data: {
+        id: GONE.biz, name: 'V23A Deleted Flow Store', slug: GONE.slug, ownerId: GONE.owner, currency: 'TTD', storeEnabled: true,
+        deletedAt: new Date(), metaData: flowWith(`${CANARY}deleted store flow`),
+      },
+    });
+    // The closed store carries an enabled flow too, so a leak would show.
+    await db.business.update({ where: { id: ID.bizOff }, data: { metaData: flowWith(`${CANARY}closed store flow`) } });
+
+    const unknown = await qualificationFlow(UNKNOWN_BIZ);
+    expect(unknown.status).toBe(404);
+    for (const [label, slugOrId] of [
+      ['closed store by slug', SLUG.off],
+      ['closed store by id', ID.bizOff],
+      ['soft-deleted store by slug', GONE.slug],
+      ['soft-deleted store by id', GONE.biz],
+    ] as const) {
+      const res = await qualificationFlow(slugOrId);
+      expect(res.status, `${label} answered ${res.status} ${JSON.stringify(res.body)}`).toBe(404);
+      expect(res.body, label).not.toHaveProperty('questions');
+      expect(stripVolatile(res.body), label).toEqual(stripVolatile(unknown.body));
+      expectNoCanary(res.body);
+    }
+
+    // CONTROL: an open store answers its flow, by slug and by id.
+    for (const slugOrId of [FLOW.slug, FLOW.biz]) {
+      const res = await qualificationFlow(slugOrId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ enabled: true, settings: { title: 'Find your template' } });
+      expect(res.body.questions.map((q: any) => q.id)).toEqual(['goal']);
+    }
+    // An open store without a flow is still 200 { enabled: false }.
+    const noFlow = await qualificationFlow(SLUG.a);
+    expect(noFlow.status).toBe(200);
+    expect(noFlow.body).toEqual({ enabled: false, questions: [] });
   });
 });
 

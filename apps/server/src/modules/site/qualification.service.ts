@@ -57,19 +57,27 @@ export class QualificationService {
     return config;
   }
 
+  /**
+   * The public store behind a slug or id, as the guided selector's two routes
+   * see it. A store that is closed (storeEnabled false), soft-deleted or
+   * unknown answers one 404, 'Store not found', so neither route tells an
+   * anonymous caller that a closed store exists (CF-56 parity, as
+   * CatalogService.assertPublicStore). W10-QUALIFICATION-PUBLIC review
+   * SEC-W10QP-1: qualification-flow answered a closed store 'Store is
+   * currently unavailable' while scoreAndRecommend answered 'Store not found'.
+   */
+  private async findPublicStore(slugOrId: string) {
+    const select = { id: true, metaData: true, storeEnabled: true } as const;
+    const business =
+      (await this.prisma.client.business.findFirst({ where: { slug: slugOrId, deletedAt: null }, select })) ??
+      (await this.prisma.client.business.findFirst({ where: { id: slugOrId, deletedAt: null }, select }));
+    if (!business || !business.storeEnabled) throw new NotFoundException('Store not found');
+    return business;
+  }
+
+  /** SEC-W10QP-1: a closed or soft-deleted store is the unknown store's 404 (findPublicStore). */
   async getPublicQualificationFlow(slug: string) {
-    let business = await this.prisma.client.business.findFirst({
-      where: { slug },
-      select: { id: true, metaData: true, storeEnabled: true },
-    });
-    if (!business) {
-      business = await this.prisma.client.business.findFirst({
-        where: { id: slug },
-        select: { id: true, metaData: true, storeEnabled: true },
-      });
-    }
-    if (!business) throw new NotFoundException('Store not found');
-    if (!business.storeEnabled) throw new NotFoundException('Store is currently unavailable');
+    const business = await this.findPublicStore(slug);
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const flow = meta.qualificationFlow;
@@ -100,17 +108,7 @@ export class QualificationService {
    * recommendation's executionModel, the visitor's chosen style, goes back.
    */
   async scoreAndRecommend(slug: string, answers: QualificationAnswer[]) {
-    let business = await this.prisma.client.business.findFirst({
-      where: { slug, deletedAt: null },
-      select: { id: true, metaData: true, storeEnabled: true },
-    });
-    if (!business) {
-      business = await this.prisma.client.business.findFirst({
-        where: { id: slug, deletedAt: null },
-        select: { id: true, metaData: true, storeEnabled: true },
-      });
-    }
-    if (!business || !business.storeEnabled) throw new NotFoundException('Store not found');
+    const business = await this.findPublicStore(slug);
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const flow = meta.qualificationFlow ?? {};
