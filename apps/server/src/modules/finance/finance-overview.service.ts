@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { CashPositionService, otherCurrencyCash, type CashPosition, type OtherCurrencyCash } from './cash-position.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
+import { D13_CURRENCIES } from './posting.service';
 import { ReceivablesService } from './receivables.service';
 import { CASH_NET_PAYMENT_WHERE } from '../commerce/invoice-workflow.service';
 import { roundMoney } from '../commerce/money';
@@ -133,6 +134,17 @@ function sameOtherCurrencyCash(cached: OtherCurrencyCash[] | undefined, now: Oth
 }
 
 /**
+ * W10-LOW-RUNWAY review SEC-W10LR-1 (owner ruling D-107): a currency code the LOW_RUNWAY text may
+ * name. FinancialAccount.currency is free text (create only normalizes it, PATCH stores it raw, and
+ * the account routes check membership only), and the cash position bridges an unposted opening under
+ * whatever label its row holds, so a label is named only when it is a three-letter code.
+ */
+const LOW_RUNWAY_CURRENCY_CODE = /^[A-Z]{3}$/;
+
+/** SEC-W10LR-1 (D-107): the most other currencies the LOW_RUNWAY text names; the rest are counted. */
+export const LOW_RUNWAY_LISTED_CURRENCY_LIMIT = 5;
+
+/**
  * W10-LOW-RUNWAY (owner ruling D-107; review CR-37c-01, CP-18): the LOW_RUNWAY action's text. The
  * runway stays computed from the business currency's cash alone (cashBalance, `cashCurrency`); cash
  * held in another currency is never added to it nor converted (no exchange rate, D-13), and the
@@ -140,12 +152,36 @@ function sameOtherCurrencyCash(cached: OtherCurrencyCash[] | undefined, now: Oth
  * order. With no other-currency cash the text is as it was. The action is served only to revenue
  * readers (the overview and GET revenue-actions need revenue read: D-63, D-100), who are served that
  * cash on the overview and safe-to-spend too, so no viewer it reaches has the figures withheld.
+ *
+ * Review SEC-W10LR-1 (D-107, CP-19): the text is the owner's priority-1 alarm, persisted, shown on
+ * the Finance overview and the revenue-actions queue and put into the KEY chat prompt, and a member
+ * can write an account currency label. So it names only cash held under a three-letter code, at most
+ * LOW_RUNWAY_LISTED_CURRENCY_LIMIT of them (D-13's currencies first, then the others in code order;
+ * listed in code order), and counts the rest: a label that is not a code is never echoed (its
+ * amount is counted, never added to another), and the text stays bounded whatever the labels are.
  */
-function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
+export function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
   const runway = `~${runwayMonths.toFixed(1)} months at current burn`;
   if (other.length === 0) return runway;
-  const held = other.map((o) => `${o.currency} ${o.amount.toFixed(2)}`).join(', ');
-  return `${runway}, from ${cashCurrency} cash only. Cash in other currencies, not included and not converted: ${held}.`;
+  const coded = other.filter((o) => LOW_RUNWAY_CURRENCY_CODE.test(o.currency));
+  const named = new Set([
+    ...coded.filter((o) => D13_CURRENCIES.includes(o.currency)),
+    ...coded.filter((o) => !D13_CURRENCIES.includes(o.currency)),
+  ].slice(0, LOW_RUNWAY_LISTED_CURRENCY_LIMIT));
+  const parts: string[] = [];
+  const listed = coded.filter((o) => named.has(o)).map((o) => `${o.currency} ${o.amount.toFixed(2)}`);
+  if (listed.length > 0) parts.push(listed.join(', '));
+  const unlisted = coded.length - named.size;
+  if (unlisted > 0) parts.push(`${unlisted} more ${unlisted === 1 ? 'currency' : 'currencies'} (not listed)`);
+  const unlabelled = other.length - coded.length;
+  if (unlabelled > 0) {
+    parts.push(unlabelled === 1
+      ? '1 amount held under a label that is not a currency code (label not shown)'
+      : `${unlabelled} amounts held under labels that are not currency codes (labels not shown)`);
+  }
+  // The business currency is normalized Business.currency: named only when it is a code too.
+  const from = LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : "the business currency's cash";
+  return `${runway}, from ${from} only. Cash in other currencies, not included and not converted: ${parts.join('; ')}.`;
 }
 
 /**
@@ -437,7 +473,8 @@ export class FinanceOverviewService {
       })),
     ];
     // W10-LOW-RUNWAY (D-107, CP-18): computed from business-currency cash; the text lists the cash
-    // held in every other currency, unconverted (lowRunwayDetail).
+    // held in every other currency, unconverted (lowRunwayDetail): only three-letter codes, at most
+    // five, the rest counted, never a label echoed (review SEC-W10LR-1, CP-19).
     if (cashRunwayMonths != null && cashRunwayMonths < 2) {
       specs.push({
         type: 'LOW_RUNWAY',

@@ -140,6 +140,13 @@
  *          readers, who read that cash on the overview and safe-to-spend too,
  *          so no viewer it reaches has the figures withheld; a revenue-none
  *          member is refused the overview (D-100)
+ *   CP-19  W10-LOW-RUNWAY review SEC-W10LR-1 (D-107): the LOW_RUNWAY text
+ *          copied each other-currency label into the owner's alarm, and an
+ *          account currency is free text (a module-none member can write one
+ *          through the account routes). The text lists only cash held under a
+ *          three-letter code, at most five (D-13's currencies first), and
+ *          counts the rest without echoing a label: bounded, never a sentence
+ *          a member typed for a currency
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1444,5 +1451,55 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     expect(a.status).toBe(200);
     expect(a.body).toMatchObject({ cashBalance: 1025.05, otherCurrencyCash: [] });
     expect(lowRunway(a.body).map((x: any) => [x.amountAtRisk, x.detail])).toEqual([[1025.05, '~1.0 months at current burn']]);
+  }, 60_000);
+
+  // Review SEC-W10LR-1 (W10-LOW-RUNWAY repair, owner ruling D-107): FinancialAccount.currency is free
+  // text. Create normalizes it, PATCH stores it raw, and the account routes check membership only,
+  // so a member whose every module scope is none can write one (the review ran that through the
+  // real routes). An opening on a CASH account linked to a non-cash chart row is never posted, so it
+  // never meets the D-13 currency check, yet the cash position bridges it under that label (CP-11).
+  // The LOW_RUNWAY text is the owner's priority-1 alarm: persisted, shown on the Finance overview and
+  // the revenue-actions queue, and put into the KEY chat prompt. It lists only cash held under a
+  // three-letter code, at most five (D-13's currencies first), and counts the rest without echoing a
+  // label, so its length stays bounded. The rows are written directly here (whichever writer stored
+  // them): the account routes' own check is outside this packet.
+  it('CP-19 (W10-LOW-RUNWAY repair, D-107) (review SEC-W10LR-1): the LOW_RUNWAY text never echoes an account currency that is not a three-letter code and lists at most five currencies, D-13 currencies first, counting the rest; a free-text label never reaches the alarm, its persisted row or a revenue reader, and the text stays bounded', async () => {
+    const lowRunway = (body: any) => (body.actions ?? []).filter((a: any) => a.type === 'LOW_RUNWAY');
+    const actionsOf = async (as: string) => {
+      const res = await overview(ID.bizI, as);
+      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+      return lowRunway(res.body).map((a: any) => [a.amountAtRisk, a.detail]);
+    };
+    const persisted = async () =>
+      (await db.revenueAction.findFirst({ where: { businessId: ID.bizI, type: 'LOW_RUNWAY', relatedType: 'business', relatedId: ID.bizI } }))?.detail;
+    const head = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: ';
+
+    // I holds TTD 150 beside EUR 12 and USD 635 (CP-18). A CASH account on the inventory row, its
+    // opening never posted, holds 5 under a sentence for a currency (create upper-cases it).
+    const injected = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+    const labelled = await legacyAccount(ID.bizI, 'V34A Label I', 'CASH', 'INVENTORY_ASSET', 5, daysAgo(1), injected);
+    const read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview.cashRunwayMonths, 'the runway is still TTD cash alone').toBe(1.5);
+    let detail = `${head}EUR 12.00, USD 635.00; 1 amount held under a label that is not a currency code (label not shown).`;
+    expect(lowRunway(read.overview).map((a: any) => [a.amountAtRisk, a.detail]), 'the label is counted, never echoed').toEqual([[150, detail]]);
+    expect(await persisted(), 'the persisted row (KEYFLOW Today, R3, GET revenue-actions)').toBe(detail);
+    expect(await actionsOf(`${P}staffIr`), 'a filtered revenue reader (CP-18)').toEqual([[150, detail]]);
+
+    // PATCH stores the label raw: 5000 characters. The text is unchanged and bounded.
+    await db.financialAccount.update({ where: { id: labelled.id }, data: { currency: 'x'.repeat(5000) } });
+    expect(await actionsOf(ID.ownerI)).toEqual([[150, detail]]);
+    expect(await persisted()).toBe(detail);
+    expect((await persisted())?.length).toBeLessThan(300);
+    expect(await persisted()).not.toMatch(/XXX|URGENT|WIRE/);
+
+    // Four more three-letter codes: six in all. Five are listed in code order, USD (a D-13 currency)
+    // kept before the legacy codes; the sixth is counted, never silently dropped.
+    for (const [code, amount] of [['AAA', 1], ['BBB', 2], ['CCC', 3], ['DDD', 4]] as const) {
+      await legacyAccount(ID.bizI, `V34A Code ${code} I`, 'CASH', 'INVENTORY_ASSET', amount, daysAgo(1), code);
+    }
+    detail = `${head}AAA 1.00, BBB 2.00, CCC 3.00, DDD 4.00, USD 635.00; 1 more currency (not listed); 1 amount held under a label that is not a currency code (label not shown).`;
+    expect(await actionsOf(ID.ownerI)).toEqual([[150, detail]]);
+    expect(await persisted()).toBe(detail);
+    expect(detail.length).toBeLessThan(300);
   }, 60_000);
 });
