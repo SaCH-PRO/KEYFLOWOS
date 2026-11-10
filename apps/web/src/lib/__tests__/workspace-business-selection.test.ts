@@ -33,6 +33,8 @@ vi.mock("@/lib/client", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
   useRouter: () => nav.router,
+  // The shell's rail reads the search params (W9-WEB-COMMERCE-NAV); none here.
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({}) }));
 vi.mock("@/lib/theme-context", () => ({

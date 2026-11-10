@@ -28,7 +28,7 @@
  * naming a route that does not exist is wrong no matter what the other 93% do.
  * Skipping computed targets costs coverage; it cannot cost correctness.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { operateSections } from '../nav-config';
@@ -502,7 +502,7 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
 
 describe('the nav has a door to invoices and quotes (CF-20)', () => {
   // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
-  // which reads ?view=quotes on mount (finance-pipeline.tsx).
+  // which follows ?view, quotes included (finance-pipeline.tsx).
   const operate = (() => {
     const src = read('lib/nav-config.ts');
     return src.slice(src.indexOf('export const operateSections'), src.indexOf('export const buildSections'));
@@ -551,17 +551,96 @@ describe('the nav has a door to invoices and quotes (CF-20)', () => {
     expect(commerce).toMatch(/\}, \[paramTab\]\);/);
   });
 
-  // BLOCKED (outside the R0-08b write set, review F2): the rail's active state.
-  // use-app-layout.ts refreshes queryTab only when the pathname changes, so a
-  // search-param-only click (Sales -> Quotes on /app/commerce) leaves the rail
-  // lit as it was; and matchTab "pipeline" lights Quotes for every pipeline
-  // view, Invoices included, because isSecondaryActive cannot match ?view.
-  // Both need apps/web/src/hooks/use-app-layout.ts (read the search params
-  // reactively; a matchView on NavItem), which this packet may not edit.
+  // W9-WEB-COMMERCE-NAV (was it.todo, BLOCKED outside the R0-08b write set,
+  // review F2): the rail's active state. use-app-layout.ts refreshed its tab
+  // only when the pathname changed, so a search-param-only click (Sales ->
+  // Quotes on /app/commerce) left the rail lit as it was; and matchTab
+  // "pipeline" lit Quotes for every pipeline view, Invoices included. The real
+  // hook is rendered here (its network and storage edges stubbed), the URL
+  // moves by pushState with the pathname unchanged, as Next does, and the
+  // rail is read through the isSecondaryActive the sidebar and drawer call.
   // Sales lighting beside Quotes is the existing parent-entry rule (Sales also
   // lights on /app/commerce/invoices and /app/commerce/gateway), not a defect
   // of this entry.
-  it.todo('Quotes lights only on the quotes view, and the rail follows a search-param-only click');
+  it('Quotes lights only on the quotes view, and the rail follows a search-param-only click (W9-WEB-COMMERCE-NAV, was it.todo)', async () => {
+    const { renderHook, act } = await import('@testing-library/react');
+    vi.doMock('next/navigation', () => ({
+      usePathname: () => window.location.pathname,
+      useRouter: () => ({ push: () => {}, replace: () => {}, back: () => {}, prefetch: () => {}, refresh: () => {} }),
+      useSearchParams: () => new URLSearchParams(window.location.search),
+    }));
+    vi.doMock('@/lib/navigation-context', () => ({ useNavigationContext: () => ({}) }));
+    vi.doMock('@/lib/theme-context', () => ({ useThemeColors: () => ({ setAccent1: () => {}, setAccent2: () => {} }) }));
+    vi.doMock('@/hooks/use-plan', () => ({ usePlanLimitHandler: () => ({ planLimitHit: null, clearPlanLimit: () => {} }) }));
+    vi.doMock('@/lib/api', () => ({
+      apiGet: async () => ({ data: null, error: 'not stubbed' }),
+      apiPatch: async () => ({ data: null, error: 'not stubbed' }),
+      apiPost: async () => ({ data: null, error: 'not stubbed' }),
+    }));
+    vi.doMock('@/lib/workspace', () => ({
+      clearStoredBusinessId: () => {},
+      getStoredBusinessId: () => null,
+      getCachedUser: () => null,
+      getUserDisplayName: () => '',
+      getUserInitials: () => 'KF',
+      refreshWorkspace: async () => null,
+      getCachedBusiness: () => null,
+      isSuperAdmin: () => false,
+      BUSINESS_CHANGED_EVENT: 'kf:business-changed',
+    }));
+    try {
+      const { useAppLayout } = await import('@/hooks/use-app-layout');
+      const item = (label: string) => {
+        const found = money().find((i) => i.label === label);
+        if (!found) throw new Error(`${label} is not in the Money section`);
+        return found;
+      };
+      const quotes = item('Quotes');
+      const invoices = item('Invoices');
+
+      window.history.replaceState({}, '', '/app/commerce');
+      const { result, rerender, unmount } = renderHook(() => useAppLayout());
+      const lit = () => ({ quotes: result.current.isSecondaryActive(quotes), invoices: result.current.isSecondaryActive(invoices) });
+      /** A nav click that changes only the search params: the page and the shell stay mounted. */
+      const click = (url: string) => act(() => {
+        window.history.pushState({}, '', url);
+        rerender();
+      });
+
+      // Money > Sales (the Snapshot): Quotes is dark.
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      // Money > Quotes clicked from there: the rail follows without a pathname change.
+      click('/app/commerce?tab=pipeline&view=quotes');
+      expect(lit()).toEqual({ quotes: true, invoices: false });
+      // The pipeline's other views are not the quotes view.
+      click('/app/commerce?tab=pipeline&view=invoices');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      click('/app/commerce?tab=pipeline');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      click('/app/commerce?tab=pipeline&view=quotes');
+      expect(lit()).toEqual({ quotes: true, invoices: false });
+      // Back to the Snapshot by a search-param-only click: Quotes goes dark again.
+      click('/app/commerce');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      unmount();
+
+      // Mounted on a pipeline view other than quotes, Quotes is dark from the start.
+      window.history.replaceState({}, '', '/app/commerce?tab=pipeline&view=invoices');
+      const second = renderHook(() => useAppLayout());
+      expect(second.result.current.isSecondaryActive(quotes)).toBe(false);
+      second.unmount();
+
+      // Invoices keeps its own page: lit there, by pathname.
+      window.history.replaceState({}, '', '/app/commerce/invoices');
+      const third = renderHook(() => useAppLayout());
+      expect(third.result.current.isSecondaryActive(invoices)).toBe(true);
+      expect(third.result.current.isSecondaryActive(quotes)).toBe(false);
+      third.unmount();
+    } finally {
+      for (const m of ['next/navigation', '@/lib/navigation-context', '@/lib/theme-context', '@/hooks/use-plan', '@/lib/api', '@/lib/workspace']) vi.doUnmock(m);
+      window.history.replaceState({}, '', '/');
+    }
+  });
 });
 
 describe('the "+ Contact" entry opens the add-contact form', () => {

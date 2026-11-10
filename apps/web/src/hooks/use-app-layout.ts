@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useThemeColors } from "@/lib/theme-context";
 import { usePlanLimitHandler } from "./use-plan";
@@ -32,6 +32,7 @@ import {
   buildSections,
   moreNav,
   meNav,
+  isNavItemActive,
   type NavItem,
   type NavSection,
   type PrimaryNavItem,
@@ -120,12 +121,11 @@ export function useAppLayout(): AppLayoutState {
     return "cockpit";
   }, [pathname]);
 
-  const [queryTab, setQueryTab] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setQueryTab(new URLSearchParams(window.location.search).get("tab"));
-  }, [pathname]);
+  // The rail follows the search params as they change, not only on a pathname
+  // change (W9-WEB-COMMERCE-NAV): a nav door that changes only ?tab or ?view
+  // (Money > Quotes clicked from Money > Sales on /app/commerce) left the rail
+  // lit for the tab read on the last pathname change.
+  const searchParams = useSearchParams();
 
   const [drawerSurface, setDrawerSurface] = useState<DrawerSurface>(null);
 
@@ -133,16 +133,10 @@ export function useAppLayout(): AppLayoutState {
     setDrawerSurface(null);
   }, [pathname]);
 
-  const isSecondaryActive = useCallback((item: NavItem) => {
-    const basePath = item.href.split("?")[0];
-    if (item.matchTab) {
-      return pathname === basePath && queryTab === item.matchTab;
-    }
-    if (item.exactMatch) {
-      return pathname === basePath && !queryTab;
-    }
-    return pathname === basePath || pathname.startsWith(basePath + "/");
-  }, [pathname, queryTab]);
+  const isSecondaryActive = useCallback(
+    (item: NavItem) => isNavItemActive(item, pathname, searchParams),
+    [pathname, searchParams],
+  );
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);

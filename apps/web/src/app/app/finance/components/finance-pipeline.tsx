@@ -154,15 +154,20 @@ export function FinancePipeline({
   React.useEffect(() => { setLocalInvoices(invoices); }, [invoices]);
   React.useEffect(() => { setLocalQuotes(quotes); }, [quotes]);
 
-  // Sync view with URL ?view= query param
+  // The view follows ?view for as long as the pipeline is mounted, not only on
+  // mount (W9-WEB-COMMERCE-NAV, review R0-08b F2). Next keeps the commerce page
+  // and this pipeline mounted across a search-param-only navigation, so Money >
+  // Quotes (?tab=pipeline&view=quotes) clicked from the Invoices view changed
+  // the URL and left Invoices on screen. Following it keeps the pipeline
+  // mounted, with its search, stage and selection. setView writes its view
+  // back through replaceState, which Next feeds into useSearchParams, so
+  // following the URL there is a no-op; no valid ?view is the All view, which
+  // setView writes as no ?view.
+  const paramView = searchParams.get("view");
   useEffect(() => {
-    const paramView = searchParams.get("view");
     const validViews: PipelineView[] = ["all", "quotes", "invoices", "collections"];
-    if (paramView && validViews.includes(paramView as PipelineView)) {
-      setViewState(paramView as PipelineView);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount read
-  }, []);
+    setViewState(paramView && validViews.includes(paramView as PipelineView) ? (paramView as PipelineView) : "all");
+  }, [paramView]);
 
   const setView = useCallback((next: PipelineView) => {
     setViewState(next);

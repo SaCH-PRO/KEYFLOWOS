@@ -51,6 +51,52 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
 ];
 
+/**
+ * A booking (or order) the checkout made, as the confirmation shows it.
+ * CR-V28-3 (W9-WEB-COMMERCE-NAV): `invoiceUrl` is the customer's own
+ * /public/invoice/<token> link the public booking create answers (D-07: token
+ * links only), which OrderConfirmation opens as "View invoice and receipt".
+ */
+type BookingRef = { bookingId: string; invoiceId?: string; invoiceUrl?: string };
+
+/**
+ * SEC-W9WCN-1 (W9-WEB-COMMERCE-NAV review; D-07: the token link is the
+ * customer's own). A mixed cart books its services before it places the store
+ * order; when that order's payment fails or its provider redirect is
+ * abandoned, the bookings made are kept so the same customer who comes back
+ * (Try Again, or Back to Shop and another payment method) is not booked twice.
+ * They are kept under this key: the customer and the service lines they booked.
+ * The next checkout reuses them only under the same key; any other checkout
+ * (another customer in the tab or browser, or other services) books its own,
+ * so it neither skips its bookings nor shows the first customer's token link.
+ */
+function bookingReuseKey(
+  data: { firstName: string; lastName: string; email: string; phone: string; serviceBookings: Record<string, ServiceBookingData> },
+  serviceItems: CartItem[],
+): string {
+  const services = serviceItems.flatMap((si) => {
+    const bd = data.serviceBookings[`${si.id}_${si.itemType}`];
+    return bd
+      ? [[si.sourceServiceId || si.id, si.quantity, bd.date, bd.time, bd.staffId || "", bd.location?.trim() || ""]]
+      : [];
+  });
+  const customer = [
+    (data.firstName || "").trim(),
+    (data.lastName || "").trim(),
+    (data.email || "").trim().toLowerCase(),
+    (data.phone || "").trim(),
+  ];
+  return JSON.stringify({ customer, services });
+}
+
+/** The bookings a pending checkout record keeps: never a token link (SEC-W9WCN-1). */
+function withoutTokenLinks(refs: unknown): BookingRef[] {
+  if (!Array.isArray(refs)) return [];
+  return refs
+    .filter((r): r is { bookingId: string; invoiceId?: unknown } => typeof r?.bookingId === "string")
+    .map((r) => ({ bookingId: r.bookingId, invoiceId: typeof r.invoiceId === "string" ? r.invoiceId : undefined }));
+}
+
 function PublicBookingPageInner() {
   const params = useParams();
   const _router = useRouter();
@@ -72,7 +118,7 @@ function PublicBookingPageInner() {
   const [success, setSuccess] = useState(false);
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
-  const [bookingResults, setBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [bookingResults, setBookingResults] = useState<BookingRef[]>([]);
   const [confirmedDetails, setConfirmedDetails] = useState<{
     serviceNames: string[];
     dates: string[];
@@ -87,7 +133,9 @@ function PublicBookingPageInner() {
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
   const [confirmedEstimatedDelivery, setConfirmedEstimatedDelivery] = useState<string | null>(null);
   const [confirmedCustomerEmail, setConfirmedCustomerEmail] = useState<string | null>(null);
-  const [completedBookingResults, setCompletedBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [completedBookingResults, setCompletedBookingResults] = useState<BookingRef[]>([]);
+  /** SEC-W9WCN-1: whose checkout completedBookingResults belong to (bookingReuseKey). */
+  const [completedBookingKey, setCompletedBookingKey] = useState<string | null>(null);
   const [failedOrderPayload, setFailedOrderPayload] = useState<{
     items: { productId: string; quantity: number }[];
     customer: { name: string; email?: string; phone?: string };
@@ -362,10 +410,16 @@ function PublicBookingPageInner() {
       setConfirmedOrderNumber(pending.orderNumber ?? null);
       setConfirmedOrderId(pending.orderId ?? null);
       setConfirmedCustomerEmail(pending.customerEmail ?? null);
-      setCompletedBookingResults(pending.bookingResults ?? []);
+      // SEC-W9WCN-1: the record holds no token link; the bookings it names are
+      // kept for the customer it names (its reuse key) only while the payment
+      // is not through, and a record without a key is reused by nobody.
+      const pendingRefs = withoutTokenLinks(pending.bookingResults);
+      const keepRefs = outcome !== "success";
+      setCompletedBookingResults(keepRefs ? pendingRefs : []);
+      setCompletedBookingKey(keepRefs && typeof pending.bookingReuseKey === "string" ? pending.bookingReuseKey : null);
       setConfirmedDetails(pending.confirmedDetails ?? null);
 
-      const allResults = [...(pending.bookingResults ?? [])];
+      const allResults: BookingRef[] = [...pendingRefs];
       if (pending.orderNumber) {
         allResults.push({ bookingId: pending.orderNumber });
       }
@@ -586,11 +640,12 @@ function PublicBookingPageInner() {
 
   const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
-    bookingRefs: { bookingId: string; invoiceId?: string }[],
+    bookingRefs: BookingRef[],
     paymentMethodUI: PaymentMethod,
     shippingZoneId: string | null,
     orderPayload: typeof failedOrderPayload,
     serviceDetails: { serviceNames: string[]; dates: string[]; times: string[]; locations: (string | null)[]; businessName: string } | null,
+    reuseKey: string | null,
   ) => {
     const allResults = [...bookingRefs];
     if (storeOrder?.order) {
@@ -599,11 +654,15 @@ function PublicBookingPageInner() {
 
     if (storeOrder?.payment?.redirectUrl) {
       setCompletedBookingResults(bookingRefs);
+      setCompletedBookingKey(reuseKey);
       setFailedOrderPayload(orderPayload);
       if (typeof window !== "undefined") {
         try {
+          // SEC-W9WCN-1: the record outlives the tab, so it names the bookings
+          // and whose they are, never their token link.
           localStorage.setItem(`kf_pending_checkout_${slug}`, JSON.stringify({
-            bookingResults: bookingRefs,
+            bookingResults: withoutTokenLinks(bookingRefs),
+            bookingReuseKey: reuseKey,
             orderPayload,
             orderNumber: storeOrder?.order?.orderNumber ?? null,
             orderId: storeOrder?.order?.id ?? null,
@@ -628,6 +687,7 @@ function PublicBookingPageInner() {
       setConfirmedOrderId(storeOrder.order?.id ?? null);
       setConfirmedCustomerEmail(orderPayload?.customer?.email ?? null);
       setCompletedBookingResults(bookingRefs);
+      setCompletedBookingKey(reuseKey);
       setFailedOrderPayload(orderPayload);
       setBookingResults(allResults);
       setPaymentFailed(true);
@@ -643,6 +703,7 @@ function PublicBookingPageInner() {
       setConfirmedOrderId(storeOrder.order.id);
       setConfirmedCustomerEmail(orderPayload?.customer?.email ?? null);
       setCompletedBookingResults(bookingRefs);
+      setCompletedBookingKey(reuseKey);
       setFailedOrderPayload(orderPayload);
       setBookingResults(allResults);
       setPaymentFailed(true);
@@ -667,6 +728,7 @@ function PublicBookingPageInner() {
     setPaymentFailed(false);
     setPaymentPending(false);
     setCompletedBookingResults([]);
+    setCompletedBookingKey(null);
     setFailedOrderPayload(null);
     updateCart([]);
     handleRemovePromo();
@@ -687,9 +749,17 @@ function PublicBookingPageInner() {
   }) => {
     if (!business) return;
 
-    const bookingRefs = completedBookingResults.length > 0
-      ? [...completedBookingResults]
-      : [];
+    // SEC-W9WCN-1: the bookings an unfinished checkout made are reused only
+    // by the same customer booking the same services; any other checkout
+    // drops them and books its own.
+    const reuseKey = bookingReuseKey(data, serviceItemsInCart);
+    const reusable = completedBookingResults.length > 0 && completedBookingKey === reuseKey;
+    if (!reusable && completedBookingResults.length > 0) {
+      setCompletedBookingResults([]);
+      setCompletedBookingKey(null);
+      setFailedOrderPayload(null);
+    }
+    const bookingRefs: BookingRef[] = reusable ? [...completedBookingResults] : [];
 
     if (bookingRefs.length === 0) {
       for (const si of serviceItemsInCart) {
@@ -703,6 +773,8 @@ function PublicBookingPageInner() {
           const { data: resData, error: err } = await apiPost<{
             bookingId: string;
             invoiceId?: string;
+            invoiceUrl?: string;
+            depositInvoiceUrl?: string;
             success: boolean;
           }>({
             path: `/bookings/public/businesses/${business.id}`,
@@ -721,7 +793,16 @@ function PublicBookingPageInner() {
           });
 
           if (err) throw new Error(err);
-          if (resData) bookingRefs.push({ bookingId: resData.bookingId, invoiceId: resData.invoiceId });
+          // CR-V28-3: the create answers the customer's token link, invoiceUrl
+          // for a service invoiced at booking or depositInvoiceUrl for its
+          // deposit (as public/book reads it); the confirmation opens it.
+          if (resData) {
+            bookingRefs.push({
+              bookingId: resData.bookingId,
+              invoiceId: resData.invoiceId,
+              invoiceUrl: resData.invoiceUrl ?? resData.depositInvoiceUrl ?? undefined,
+            });
+          }
         }
       }
     }
@@ -777,7 +858,7 @@ function PublicBookingPageInner() {
       };
 
       storeOrder = await submitStoreOrder(orderPayload);
-      const handled = handleStoreOrderResult(storeOrder, bookingRefs, data.paymentMethod, data.shippingZoneId, orderPayload, computedServiceDetails);
+      const handled = handleStoreOrderResult(storeOrder, bookingRefs, data.paymentMethod, data.shippingZoneId, orderPayload, computedServiceDetails, reuseKey);
       if (handled) return;
       // The order is placed: the next checkout gets its own key.
       checkoutKeyring.reset();
@@ -793,6 +874,11 @@ function PublicBookingPageInner() {
       setSuccess(true);
       setPaymentFailed(false);
       setPaymentPending(false);
+      // SEC-W9WCN-1: the checkout is complete, so nothing it booked is kept
+      // for the next one (a service-only checkout that reused them kept them).
+      setCompletedBookingResults([]);
+      setCompletedBookingKey(null);
+      setFailedOrderPayload(null);
       updateCart([]);
       handleRemovePromo();
       if (business?.id) trackStoreEvent(business.id, 'checkout_complete');
@@ -816,11 +902,12 @@ function PublicBookingPageInner() {
         failedOrderPayload.shipping?.zoneId || null,
         failedOrderPayload,
         confirmedDetails,
+        completedBookingKey,
       );
     } catch {
       setPaymentFailed(true);
     }
-  }, [failedOrderPayload, completedBookingResults, confirmedPaymentMethod, confirmedDetails, handleStoreOrderResult, submitStoreOrder]);
+  }, [failedOrderPayload, completedBookingResults, completedBookingKey, confirmedPaymentMethod, confirmedDetails, handleStoreOrderResult, submitStoreOrder]);
 
   if (loading) {
     return (
@@ -958,6 +1045,11 @@ function PublicBookingPageInner() {
             setConfirmedOrderId(null);
             setConfirmedEstimatedDelivery(null);
             setConfirmedCustomerEmail(null);
+            // SEC-W9WCN-1: the retry door is left behind with the confirmation.
+            // The bookings already made stay kept for their own customer
+            // (bookingReuseKey), so that customer, back with another payment
+            // method, is not booked twice; nobody else's checkout reuses them.
+            setFailedOrderPayload(null);
           }}
           onRetryPayment={handleRetryPayment}
           formatDate={formatDate}

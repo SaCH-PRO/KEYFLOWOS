@@ -18,13 +18,24 @@
  * demo tenant can never pass for a read of the member's own business.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Profiler, type ReactNode, type ReactElement } from "react";
-import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
+import { Profiler, useEffect, type ReactNode, type ReactElement } from "react";
+import { render, screen, waitFor, cleanup, fireEvent, act, within } from "@testing-library/react";
 import { ContactCustomFields } from "../contact-custom-fields";
 import { ContactDetailInfo } from "../contact-detail-info";
 import { ContactForm } from "../contact-form";
-import type { ContactDetailData } from "../contact-detail";
+import { ContactDetail, type ContactDetailData } from "../contact-detail";
 import { selectBusiness, setStoredBusinessId } from "@/lib/workspace";
+import CustomFieldsSettingsPage from "@/app/app/settings/custom-fields/page";
+import { PipelineTabContent } from "@/app/app/crm/pipeline/pipeline-tab-content";
+import { useContactsPipeline } from "@/app/app/crm/pipeline/use-contacts-pipeline";
+import {
+  fetchCustomFieldDefinitions,
+  createCustomFieldDefinition,
+  updateCustomFieldDefinition,
+  archiveCustomFieldDefinition,
+  restoreCustomFieldDefinition,
+  deleteCustomFieldDefinition,
+} from "@/lib/client";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -99,29 +110,56 @@ interface StubOptions {
   held?: Record<string, Promise<void>>;
 }
 
+/** One request the browser sent: "METHOD /path" and its JSON body. */
+interface SentCall {
+  call: string;
+  body: unknown;
+}
+
 /**
  * Stub the API as the guards answer it for a member of `memberOf`. Returns
- * every pathname the browser asked for.
+ * every pathname the browser asked for (and, in `calls`, each request's method
+ * and body). Besides the definition reads it answers the definition writes the
+ * settings page sends, and the contact list read and contact create the
+ * pipeline sends (W9-CUSTOM-FIELDS-TENANT).
  */
 function stubApi(memberOf: string[] = [SELECTED, HANDED], options: StubOptions = {}) {
   const requested: string[] = [];
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const calls: SentCall[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(url, "http://localhost");
+    const method = (init?.method ?? "GET").toUpperCase();
     requested.push(pathname);
+    calls.push({ call: `${method} ${pathname}`, body: typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined });
     const tenant = pathname.match(/\/businesses\/([^/]+)\//)?.[1];
     if (tenant && !memberOf.includes(decodeURIComponent(tenant))) return forbidden();
+    const business = tenant ? decodeURIComponent(tenant) : "";
     if (tenant && pathname.endsWith(`/crm/businesses/${tenant}/custom-field-definitions`)) {
-      const business = decodeURIComponent(tenant);
+      if (method === "POST") return jsonResponse(201, { ...DEFINITIONS[0], id: "cfd_new", businessId: business, label: "Birthday" });
       await options.held?.[business];
       const definitions = options.definitionsOf?.(business) ?? DEFINITIONS;
       return jsonResponse(200, definitions.map((d) => ({ ...d, businessId: business })));
+    }
+    if (/\/custom-field-definitions\/[^/]+\/(archive|restore)$/.test(pathname)) {
+      return jsonResponse(200, { ...DEFINITIONS[0], businessId: business });
+    }
+    if (/\/custom-field-definitions\/[^/]+$/.test(pathname)) {
+      if (method === "PATCH") return jsonResponse(200, { ...DEFINITIONS[0], businessId: business });
+      if (method === "DELETE") return jsonResponse(200, {});
+    }
+    if (/\/crm\/businesses\/[^/]+\/contacts$/.test(pathname)) {
+      if (method === "POST") return jsonResponse(201, { id: "c_new", firstName: "Grace", lastName: "Hopper" });
+      return jsonResponse(200, { contacts: [], nextCursor: null, hasMore: false });
     }
     return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
   });
   vi.stubGlobal("fetch", fetchMock);
   return {
     requested,
+    calls,
+    /** Every request that is not a read, as "METHOD /path". */
+    writes: () => calls.filter((c) => !c.call.startsWith("GET ")),
     definitionReads: () => requested.filter((p) => p.endsWith("/custom-field-definitions")),
     namingDemo: () => requested.filter((p) => p.includes(`/businesses/${DEMO}`)),
   };
@@ -462,42 +500,207 @@ describe("the contact form (ContactForm) reads custom fields from the selected b
   });
 });
 
-describe("follow-ups outside this web write set", () => {
-  // SEC-R015c-3 (review, confirmed against a real database): the form now sends
-  // typed customFieldValues keyed by the selected business's definition NAMES,
-  // and ContactCustomFieldValueService.setValuesForContact
-  // (apps/server/src/modules/crm/contact-custom-field-value.service.ts) resolves
-  // those names with no businessId, while names are unique only per business.
-  // A contact can be bound to another business's definition (label, description
-  // and options then disclosed on the contact's detail). The fix scopes that
-  // lookup to the contact's business: a server packet, not this web one.
-  it.todo("server: a contact's typed custom-field names resolve only against its own business's definitions (SEC-R015c-3)");
+/**
+ * W9-CUSTOM-FIELDS-TENANT: the second review round's findings, which this suite
+ * carried as it.todo. Each screen that is bound to a business hands that
+ * business to the custom fields it mounts, the page that manages the
+ * definitions works in the selected business, and the server binds a
+ * contact's typed values only to its own business's definitions.
+ *
+ * The web halves (SEC-R015c-1, SEC-R015c-2) were fixed by a later packet,
+ * R0-15d-WEB-BUSINESS-SCOPE-MOUNTS (contact-detail.tsx, pipeline-tab-content.tsx,
+ * settings/custom-fields/page.tsx and lib/client.ts; proven there in
+ * lib/api/business-scope.spec.ts), so these cases went live as regression pins
+ * with no source change in this packet. They pin the end-to-end property: what
+ * the screen shows and what it writes name the same business.
+ *
+ * Each business answers with its own label here, so the screen shows WHICH
+ * business's definitions it holds.
+ */
 
-  // SEC-R015c-1 (second review round, confirmed by running): the screens that know their
-  // business do not hand it down, so the fields read kf_business_id instead of
-  // the business the screen is bound to. ContactDetail receives businessId and
-  // passes it to ContactDetailTabs but not to ContactDetailInfo
-  // (contact-detail.tsx, the <ContactDetailInfo> mount); the pipeline mounts
-  // ContactForm without the businessId it captured at mount and submits to
-  // (pipeline-tab-content.tsx, the <ContactForm> mount; use-contacts-data.ts,
-  // use-contact-actions.ts handleSubmitContact). Once the stored selection moves
-  // (a sign-in in another tab), the form shows one business's definitions and
-  // submits their names to the other. Both components here already honour a
-  // handed businessId over the selection (the "given the business by its
-  // parent" cases and the control above); the missing line is in each parent,
-  // outside this write set.
-  it.todo("ContactDetail hands its businessId to ContactDetailInfo, so the panel reads the bound business's definitions, not kf_business_id (SEC-R015c-1)");
-  it.todo("the pipeline mounts ContactForm with the businessId its submit writes to, so the form never shows another business's definitions (SEC-R015c-1)");
+/** Another tab signs in elsewhere: kf_business_id moves and a `storage` event says so. */
+function switchInAnotherTab(businessId: string) {
+  act(() => {
+    const previous = window.localStorage.getItem("kf_business_id");
+    window.localStorage.setItem("kf_business_id", businessId);
+    window.dispatchEvent(new StorageEvent("storage", { key: "kf_business_id", oldValue: previous, newValue: businessId }));
+  });
+}
 
-  // SEC-R015c-2 (second review round, confirmed by running): the page that manages the
-  // definitions (app/app/settings/custom-fields/page.tsx) calls
-  // fetchCustomFieldDefinitions(undefined) and create/update/archive/restore/
-  // delete without a businessId; lib/client.ts defaults every one of them to
-  // DEFAULT_BUSINESS_ID ("biz_demo"). A member gets 403 (so nobody can create the
-  // definitions these screens now read); a SUPER_ADMIN, whom BusinessGuard lets
-  // into any business, writes the demo tenant's definitions instead of the
-  // selected business's. The fix is in that page and in lib/client.ts (drop the
-  // biz_demo default so a missing business no longer compiles): outside this
-  // write set.
-  it.todo("settings/custom-fields reads and writes the selected business's definitions and never names biz_demo; the client's custom-field-definition functions require a businessId (SEC-R015c-2)");
+/** The text input of the typed custom field labelled `label`. */
+function fieldInput(label: string): HTMLInputElement {
+  const input = screen.getByText(label).closest("div")?.querySelector("input");
+  if (!input) throw new Error(`no input for the custom field "${label}"`);
+  return input;
+}
+
+/** A contact as ContactDetail is handed it. */
+const detailContact = { ...contact, status: "LEAD", tags: [] } as unknown as ContactDetailData;
+
+/** The contact's stored typed values, one per business's definition, so whichever business is read shows a value. */
+const storedValuesPerBusiness = [SELECTED, HANDED].map((businessId) => ({
+  id: `cfv_${businessId}`,
+  definitionId: `cfd_${businessId}`,
+  value: `Gold at ${businessId}`,
+  definition: { name: `tier_${businessId}`, label: fieldOf(businessId), type: "TEXT", description: null, placeholder: null },
+}));
+
+/** Every request (any method) that named `businessId` as its tenant. */
+const callsNaming = (api: ReturnType<typeof stubApi>, businessId: string) =>
+  api.calls.map((c) => c.call).filter((c) => c.includes(`/businesses/${businessId}/`));
+
+describe("the screens bound to a business hand it down, and the definitions are managed in the selected business (W9-CUSTOM-FIELDS-TENANT)", () => {
+  // SEC-R015c-3 (server) is proven against a real database in
+  // apps/server/test/contact-custom-field-names-tenant.integration.test.ts
+  // (W9-CUSTOM-FIELDS-TENANT, fixture prefix v95p_): the form sends typed
+  // customFieldValues keyed by definition NAME, names are unique only per
+  // business, and ContactCustomFieldValueService.setValuesForContact now
+  // resolves them against the contact's own business only, also for a caller
+  // with no ambient tenant (through HTTP the global TenantInterceptor already
+  // scoped that lookup). The values route and the contact detail serve only the
+  // contact's own business's definitions, and a custom-field write removes a
+  // row already bound to another business's definition (review SF-1).
+
+  it("SEC-R015c-1 (W9-CUSTOM-FIELDS-TENANT, was it.todo): ContactDetail hands its businessId to ContactDetailInfo, so the panel reads the bound business's definitions, not kf_business_id", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    render(<ContactDetail contact={detailContact} customFieldValues={storedValuesPerBusiness} businessId={HANDED} />);
+    fireEvent.click(screen.getByRole("button", { name: /More details/ }));
+
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.getByText(`Gold at ${HANDED}`)).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+
+    // The stored selection moving, here or in another tab, does not move the panel.
+    act(() => { selectBusiness(HANDED); });
+    switchInAnotherTab(SELECTED);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(screen.getByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+
+    expect(api.definitionReads()).toEqual([definitionsPath(HANDED)]);
+    expect(callsNaming(api, SELECTED)).toEqual([]);
+    expect(api.namingDemo()).toEqual([]);
+  });
+
+  it("SEC-R015c-1 (W9-CUSTOM-FIELDS-TENANT, was it.todo): the pipeline mounts ContactForm with the businessId its submit writes to, so the form never shows another business's definitions", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    function PipelineScreen() {
+      const state = useContactsPipeline();
+      const { businessId, setShowAddForm } = state;
+      useEffect(() => {
+        if (businessId) setShowAddForm(true);
+      }, [businessId, setShowAddForm]);
+      return <PipelineTabContent state={state} />;
+    }
+    render(<PipelineScreen />);
+
+    // The pipeline is bound to the business selected at mount (its contact list names it).
+    await waitFor(() => expect(api.requested).toContain(`/crm/businesses/${SELECTED}/contacts`));
+    // Another tab signs in elsewhere before the member opens the typed fields.
+    switchInAnotherTab(HANDED);
+
+    fireEvent.click(await screen.findByText("Structured Custom Fields"));
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(HANDED))).not.toBeInTheDocument();
+
+    // The member fills the field the form shows and saves: the names it submits
+    // are the definitions of the business the submit writes to.
+    const form = screen.getByPlaceholderText("John").closest("form") as HTMLFormElement;
+    fireEvent.change(within(form).getByPlaceholderText("John"), { target: { value: "Grace" } });
+    fireEvent.change(fieldInput(fieldOf(SELECTED)), { target: { value: "Gold" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add Contact" }));
+
+    const creates = () => api.writes().filter((c) => /\/contacts$/.test(c.call));
+    await waitFor(() => expect(creates().map((c) => c.call)).toEqual([`POST /crm/businesses/${SELECTED}/contacts`]));
+    expect(creates()[0].body).toMatchObject({ firstName: "Grace", customFieldValues: { [`tier_${SELECTED}`]: "Gold" } });
+    expect(api.definitionReads()).toEqual([definitionsPath(SELECTED)]);
+    expect(callsNaming(api, HANDED)).toEqual([]);
+    expect(api.namingDemo()).toEqual([]);
+  });
+
+  it("SEC-R015c-2 (W9-CUSTOM-FIELDS-TENANT, was it.todo): settings/custom-fields reads and writes the selected business's definitions and never names biz_demo; the client's custom-field-definition functions require a businessId", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    render(<CustomFieldsSettingsPage />);
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+
+    // Create.
+    fireEvent.change(screen.getByPlaceholderText("e.g. Birthday"), { target: { value: "Birthday" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create Field/ }));
+    await waitFor(() => expect(api.writes().map((c) => c.call)).toContain(`POST ${definitionsPath(SELECTED)}`));
+    // Edit (update).
+    fireEvent.click((await screen.findAllByTitle("Edit"))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /Update Field/ }));
+    await waitFor(() => expect(api.writes().map((c) => c.call)).toContain(`PATCH ${definitionsPath(SELECTED)}/cfd_${SELECTED}`));
+    // Archive.
+    fireEvent.click((await screen.findAllByTitle("Archive"))[0]);
+    await waitFor(() => expect(api.writes().map((c) => c.call)).toContain(`POST ${definitionsPath(SELECTED)}/cfd_${SELECTED}/archive`));
+    // Delete, confirmed.
+    fireEvent.click((await screen.findAllByTitle("Delete"))[0]);
+    const confirm = (await screen.findByText("Delete Permanently?")).closest("div.space-y-4") as HTMLElement;
+    fireEvent.click(within(confirm).getByRole("button", { name: /^Delete$/ }));
+    await waitFor(() => expect(api.writes().map((c) => c.call)).toContain(`DELETE ${definitionsPath(SELECTED)}/cfd_${SELECTED}`));
+
+    // Every definition call the page sent named the selected business.
+    const definitionCalls = api.calls.map((c) => c.call).filter((c) => c.includes("/custom-field-definitions"));
+    expect(definitionCalls.length).toBeGreaterThanOrEqual(5);
+    expect(definitionCalls.filter((c) => !c.includes(`/crm/businesses/${SELECTED}/custom-field-definitions`))).toEqual([]);
+    expect(api.namingDemo()).toEqual([]);
+
+    // The client: each custom-field-definition function takes the business it
+    // works in. Compile-time half (web tsc): a call that names no business does
+    // not compile; a default business re-added to any of them turns the
+    // matching @ts-expect-error into an error (TS2578). Never called.
+    const data = { name: "x", label: "X", type: "TEXT", description: null, placeholder: null, options: null, defaultValue: null, required: false, order: 0 };
+    const unnamed = [
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => fetchCustomFieldDefinitions(),
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => createCustomFieldDefinition(data),
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => updateCustomFieldDefinition("cfd_1", data),
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => archiveCustomFieldDefinition("cfd_1"),
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => restoreCustomFieldDefinition("cfd_1"),
+      // @ts-expect-error SEC-R015c-2: the business is required
+      () => deleteCustomFieldDefinition("cfd_1"),
+    ];
+    expect(unnamed).toHaveLength(6);
+
+    // Runtime half: handed no business (as an untyped caller could), none of
+    // them sends a request or falls back to any tenant; each answers "No
+    // business selected". Handed one, each names it.
+    window.localStorage.clear();
+    const sentBefore = api.calls.length;
+    const none = undefined as unknown as string;
+    const refused = await Promise.all([
+      fetchCustomFieldDefinitions(none),
+      createCustomFieldDefinition(data, none),
+      updateCustomFieldDefinition("cfd_1", data, none),
+      archiveCustomFieldDefinition("cfd_1", none),
+      restoreCustomFieldDefinition("cfd_1", none),
+      deleteCustomFieldDefinition("cfd_1", none),
+    ]);
+    expect(api.calls.slice(sentBefore)).toEqual([]);
+    for (const answer of refused) expect(answer).toEqual({ data: null, error: "No business selected" });
+
+    await fetchCustomFieldDefinitions(HANDED);
+    await createCustomFieldDefinition(data, HANDED);
+    await updateCustomFieldDefinition("cfd_1", data, HANDED);
+    await archiveCustomFieldDefinition("cfd_1", HANDED);
+    await restoreCustomFieldDefinition("cfd_1", HANDED);
+    await deleteCustomFieldDefinition("cfd_1", HANDED);
+    expect(api.calls.slice(sentBefore).map((c) => c.call)).toEqual([
+      `GET ${definitionsPath(HANDED)}`,
+      `POST ${definitionsPath(HANDED)}`,
+      `PATCH ${definitionsPath(HANDED)}/cfd_1`,
+      `POST ${definitionsPath(HANDED)}/cfd_1/archive`,
+      `POST ${definitionsPath(HANDED)}/cfd_1/restore`,
+      `DELETE ${definitionsPath(HANDED)}/cfd_1`,
+    ]);
+    expect(api.namingDemo()).toEqual([]);
+  });
 });

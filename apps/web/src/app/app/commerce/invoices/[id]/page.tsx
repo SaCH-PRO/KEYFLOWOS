@@ -37,11 +37,12 @@ import {
   createInvoicePaymentLink,
   recordInvoicePayment,
   confirmPendingInvoicePayment,
+  sendInvoiceEmail,
   Invoice,
   PaymentRecord,
   InvoiceTimelineEntry,
 } from "@/lib/client";
-import { apiDelete } from "@/lib/api";
+import { apiDelete, providerUnavailableOf } from "@/lib/api";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
@@ -106,6 +107,9 @@ export default function InvoiceDetailPage() {
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmMessage, setConfirmMessage] = useState("");
   const [showSendReview, setShowSendReview] = useState(false);
+  // W9-WEB-COMMERCE-NAV (R0-07): why the last "Email invoice" did not go out,
+  // when the server said email is not set up or not available.
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -195,6 +199,30 @@ export default function InvoiceDetailPage() {
       else toast.error(error ?? "Failed");
     });
   };
+
+  // W9-WEB-COMMERCE-NAV (R0-07): the send-email door. The server emails the
+  // customer the invoice with its token pay link and moves a DRAFT to SENT
+  // (POST .../invoices/:id/send-email). With no Gmail connection it answers
+  // 503 {code: 'provider_not_configured'} before any outbound call (and
+  // provider_unavailable when Gmail is down): the page says so where the owner
+  // is looking, with the server's message, and the status stays as it was.
+  // "Send" is unchanged: it marks the invoice sent without emailing anyone.
+  const handleEmailInvoice = () => withLoading("email", async () => {
+    if (!businessId || !invoice) return;
+    setEmailError(null);
+    const res = await sendInvoiceEmail(businessId, invoice.id, {});
+    if (!mountedRef.current) return;
+    if (!res.error && res.data) {
+      if (invoice.status === "DRAFT") setInvoice(prev => prev ? { ...prev, status: "SENT" } : prev);
+      toast.success("Invoice emailed");
+      return;
+    }
+    const unavailable = providerUnavailableOf(res);
+    if (unavailable) {
+      const what = unavailable.code === "provider_not_configured" ? "Email is not configured" : "Email is unavailable right now";
+      setEmailError(`${what}: ${res.error ?? "no email provider answered"}. The invoice was not emailed.`);
+    } else toast.error(res.error ?? "Could not email this invoice");
+  });
 
   const handleMarkPaid = () => withLoading("paid", async () => {
     if (!invoice) return;
@@ -322,6 +350,8 @@ export default function InvoiceDetailPage() {
 
   const canEdit = invoice.status === "DRAFT";
   const canSend = invoice.status === "DRAFT";
+  // The server emails any invoice but a VOID one; a PAID one has its receipt door.
+  const canEmail = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canRemind = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canRecordPayment = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canVoid = invoice.status !== "VOID" && invoice.status !== "PAID";
@@ -371,6 +401,13 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       </div>
+
+      {emailError && (
+        <div role="alert" className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{emailError}</span>
+          <button onClick={() => setEmailError(null)} className="shrink-0 text-xs font-medium underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Status Timeline */}
       <div className="rounded-xl border border-border bg-card shadow-sm p-5 mb-6">
@@ -539,6 +576,7 @@ export default function InvoiceDetailPage() {
           <div className="rounded-xl border border-border bg-card shadow-sm p-5 space-y-1">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Actions</h3>
             {canSend && <ActionButton icon={Send} label="Send invoice" onClick={handleSend} loading={actionLoading.send} primary />}
+            {canEmail && <ActionButton icon={Send} label="Email invoice" onClick={handleEmailInvoice} loading={actionLoading.email} />}
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
             <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />

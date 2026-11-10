@@ -164,10 +164,17 @@ export default function CommercePage() {
     } else if (["products", "billing", "insights"].includes(paramTab)) {
       setActiveTab("snapshot");
     } else if (["quotes", "invoices", "payments"].includes(paramTab)) {
-      // Redirect old tabs to pipeline
+      // Redirect old tabs to pipeline. CR-W9WCN-1 (W9-WEB-COMMERCE-NAV
+      // review): the pipeline follows ?view while mounted and no ?view is its
+      // All view, so the rewrite names the view the legacy tab meant (the
+      // command palette, new-entity menu and contact actions still push
+      // ?tab=quotes / ?tab=invoices). ?tab=payments has no pipeline view.
       setActiveTab("pipeline");
       const url = new URL(window.location.href);
       url.searchParams.set("tab", "pipeline");
+      if (paramTab === "quotes" || paramTab === "invoices") {
+        url.searchParams.set("view", paramTab);
+      }
       window.history.replaceState({}, "", url.toString());
     }
   }, [paramTab]);
