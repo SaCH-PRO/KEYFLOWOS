@@ -5,6 +5,7 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 export type TopOpenDeal = {
   id: string;
@@ -38,6 +39,28 @@ export type ContactMeta = {
 export type ContactWithStats = Contact & {
   meta?: ContactMeta;
 };
+
+/**
+ * W7-CONTACT-MONEY-VIEWS review repair SEC-W7CMV-3 (V55-13i; owner rulings
+ * D-90 and D-63): the Contact.riskFlags entries ContactInsightService.recompute
+ * derives from the contact's invoices (revenue rows, D-63): 'unpaid_invoices'
+ * (an unpaid invoice), 'poor_payment_history' (its paymentReliability) and
+ * 'declining_engagement' (a paid total above 0).
+ */
+const REVENUE_RISK_FLAGS: ReadonlySet<string> = new Set(['unpaid_invoices', 'poor_payment_history', 'declining_engagement']);
+
+/**
+ * The Contact.opportunities entries it derives from the contact's quotes and
+ * invoices (SEC-W7CMV-3; D-90 / D-63): 'pending_quotes' (a quote not accepted)
+ * and 'upsell_ready' (a paid total above 500, a revenue threshold like the
+ * insight's 'high-value' tag).
+ */
+const REVENUE_OPPORTUNITIES: ReadonlySet<string> = new Set(['pending_quotes', 'upsell_ready']);
+
+/** A stored riskFlags / opportunities list without the `revenue` entries; any other stored value as it is. */
+function withoutRevenueSignals(value: Prisma.JsonValue | null, revenue: ReadonlySet<string>): Prisma.JsonValue | null {
+  return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
+}
 
 type ContactHighlight = {
   contactId: string;
@@ -592,15 +615,50 @@ export class CrmStatsService {
    * Contact detail projection. `actorUserId` is the caller whose CRM
    * visibility bounds the lookup (the HTTP route always supplies it); omitted
    * only by system-context callers, which keep the tenant-only predicate.
+   *
+   * W7-CONTACT-MONEY-VIEWS (V55-13h; CR-W6CEM-1, owner rulings D-90 and D-63,
+   * the V1-84 timeline rule): `actorUserId` is also the reading member whose
+   * revenue read decides the money in the response (GET contacts/:id and the
+   * dossier's contact and meta). One without revenue read is served no money
+   * row and no money figure: `events` are the ContactEvents GET .../events
+   * serves them (the rule of CrmTimelineService.listContactEvents, V55-13e,
+   * read here through Prisma: the money events withheld, the 50 filled from
+   * older events), the contact's invoices are not read (`invoices` is empty,
+   * so meta's invoice figures, totalRevenue and outstandingBalance included,
+   * are 0 and its lead score has no invoice term), and the contact's stored
+   * lifetimeValue / averageSpend (the paid total ContactInsightService
+   * writes) are null. Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): so is
+   * its stored paymentReliability (the paid / total invoice score, which GET
+   * .../revenue-summary already serves that member as null), and its stored
+   * riskFlags / opportunities lose the entries ContactInsightService derives
+   * from the contact's invoices and quotes (REVENUE_RISK_FLAGS,
+   * REVENUE_OPPORTUNITIES); the other entries stay. Not closed here (outside
+   * this write set, follow-up CR-W7CMV-2): GET /crm/businesses/:b/contacts
+   * (CrmService.listContacts) still serves the same stored fields, and sorts
+   * and filters on revenue, to the same member, so until that list is closed
+   * this withholding does not keep them from that member. Before it the route served
+   * every event, invoice total and revenue figure on crm read alone. The owner,
+   * a member with revenue read and a system-context caller get every row and
+   * figure, as before.
    */
   async contactDetail(params: { businessId: string; contactId: string; actorUserId?: string }) {
     const contact = await this.assertContact(params.businessId, params.contactId, params.actorUserId);
+    const viewer = params.actorUserId ? await resolveTimelineViewer(this.prisma, params.businessId, params.actorUserId) : null;
+    const readsRevenue = viewer === null || viewer.readable.has('revenue');
+    const eventWhere = { businessId: params.businessId, contactId: params.contactId };
     const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
-      this.prisma.client.contactEvent.findMany({
-        where: { businessId: params.businessId, contactId: params.contactId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+      viewer
+        ? // The rule CrmTimelineService.listContactEvents applies to GET .../events (V55-13e):
+          // each event judged as the feed judges its CRM copy (module crm, naming the contact).
+          readVisibleActivityPage(this.prisma, viewer, 50, async (skip, take) => {
+            const rows = await this.prisma.client.contactEvent.findMany({ where: eventWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip, take });
+            return rows.map((event) => ({ module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data, event }));
+          }).then((page) => page.map((row) => row.event))
+        : this.prisma.client.contactEvent.findMany({
+            where: eventWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+          }),
       this.prisma.client.contactNote.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },
         orderBy: { createdAt: 'desc' },
@@ -611,19 +669,21 @@ export class CrmStatsService {
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
-        select: {
-          id: true,
-          status: true,
-          total: true,
-          currency: true,
-          dueDate: true,
-          issueDate: true,
-          createdAt: true,
-          paidAt: true,
-        },
-      }),
+      readsRevenue
+        ? this.prisma.client.invoice.findMany({
+            where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
+            select: {
+              id: true,
+              status: true,
+              total: true,
+              currency: true,
+              dueDate: true,
+              issueDate: true,
+              createdAt: true,
+              paidAt: true,
+            },
+          })
+        : [],
       this.prisma.client.booking.findMany({
         where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
         select: { id: true, status: true, startTime: true, endTime: true, serviceId: true, staffId: true },
@@ -702,7 +762,21 @@ export class CrmStatsService {
       meta.overdueTasks * 5 +
       (contact.status === 'CLIENT' ? 5 : 0);
 
-    return { contact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
+    // W7-CONTACT-MONEY-VIEWS (V55-13h; D-90 / D-63): the stored amounts on the contact row itself.
+    // Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): and the stored signals
+    // read from the same invoice and quote rows, so this read agrees with
+    // GET .../revenue-summary (paymentReliability null for that member).
+    const servedContact: Contact = readsRevenue
+      ? contact
+      : {
+          ...contact,
+          lifetimeValue: null,
+          averageSpend: null,
+          paymentReliability: null,
+          riskFlags: withoutRevenueSignals(contact.riskFlags, REVENUE_RISK_FLAGS),
+          opportunities: withoutRevenueSignals(contact.opportunities, REVENUE_OPPORTUNITIES),
+        };
+    return { contact: servedContact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 
   async segmentSummary(input: { businessId: string }) {
