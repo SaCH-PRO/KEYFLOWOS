@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Inject,
   Param,
   Post,
   Req,
@@ -11,15 +12,26 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { LivekitService } from './livekit.service';
 
 @Controller('livekit')
 export class LivekitController {
-  constructor(private readonly livekit: LivekitService) {}
+  constructor(@Inject(LivekitService) private readonly livekit: LivekitService) {}
 
-  /** Create a KEY voice room + agent dispatch + user join token. */
+  /**
+   * Create a KEY voice room + agent dispatch + user join token.
+   *
+   * W9-LIVEKIT-VOICE (SEC-PR196V-1): bounded with the existing CrmRateLimitGuard
+   * (per client address, business and handler), checked after the member and
+   * the business are verified: each call creates a LiveKit room and dispatches
+   * the KEY voice agent (an OpenAI Realtime session), so it carries the bound
+   * of the other provider-cost KEY routes (ai/plan, ai/simulate, ai/briefing:
+   * 10 a minute). Past it the POST answers 429 before any room or dispatch.
+   */
   @Post('businesses/:businessId/voice-session')
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
+  @CrmRateLimit(10, 60_000)
   createVoiceSession(
     @Param('businessId') businessId: string,
     @Req() req: { user?: { id?: string } },
