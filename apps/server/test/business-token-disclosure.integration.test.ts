@@ -52,6 +52,9 @@ beforeAll(async () => {
   await cleanup();
   await db.user.create({ data: { id: ID.userA, email: `${P}a@t.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizA, name: 'Biz A', ownerId: ID.userA, slug: ID.slug, ...tokenSeed } });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): discovery is Membership only, so
+  // the owner holds its OWNER row (fixture change).
+  await db.membership.create({ data: { userId: ID.userA, businessId: ID.bizA, role: 'OWNER' } });
 }, 60_000);
 
 afterAll(async () => { if (db) await cleanup(); });
