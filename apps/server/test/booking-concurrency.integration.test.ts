@@ -844,6 +844,7 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
     expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(expected));
 
     // KEY offers the picker's slots less the business-hours starts whose buffer runs past 16:00Z (12:00 local).
+    // Since W10-BOOKING-BUFFER the picker leaves those out itself, so the filter below removes nothing.
     const close = utc(`${day}T16:00:00.000Z`).getTime();
     const bufferFits = (s: { endTime: string }) => utc(s.endTime).getTime() + 15 * 60_000 <= close;
     const pickerFor = async (staffId: string) => {
