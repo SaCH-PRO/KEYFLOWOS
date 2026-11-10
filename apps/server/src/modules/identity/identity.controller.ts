@@ -37,6 +37,8 @@ import {
   LOGOUT_REVOCATION_TTL_SECONDS,
   logoutRevocationKey,
   logoutRevocationValue,
+  signInCutoffRefusalOfIssuedSession,
+  type SignInCutoffRefusal,
 } from '../../core/auth/auth.middleware';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
@@ -84,6 +86,29 @@ import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-compl
  * avoids.
  */
 export const USERNAME_CHECK_RULE = { scope: 'check_username:ip', limit: 240, windowMs: 60_000 } as const satisfies RateLimitRule;
+
+/**
+ * D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): what POST /identity/login
+ * and /identity/refresh say, beside the code, when AuthMiddleware would refuse
+ * the session GoTrue just issued because of a RISC sign-in cutoff. The web
+ * sign-in shows password_reset_required with the reset link.
+ */
+export const SIGN_IN_CUTOFF_REFUSAL_MESSAGES: Readonly<Record<SignInCutoffRefusal, string>> = {
+  password_reset_required:
+    'Password reset required after a security event. Reset your password to sign in with it again, or continue with Google.',
+  google_or_email_link_required: 'After a security event, sign in with Google or an emailed link.',
+  signed_in_before_cutoff: 'This session ended after a security event. Please sign in again.',
+};
+
+/** The sign-in cutoff refusal code a 401 from refuseSessionAfterSignInCutoff carries, or undefined for any other error. */
+function signInCutoffRefusalCodeOf(err: unknown): SignInCutoffRefusal | undefined {
+  if (!(err instanceof UnauthorizedException)) return undefined;
+  const response = err.getResponse();
+  const code = typeof response === 'object' && response !== null ? (response as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(SIGN_IN_CUTOFF_REFUSAL_MESSAGES, code)
+    ? (code as SignInCutoffRefusal)
+    : undefined;
+}
 
 /**
  * The client a check-username call is counted against: an IPv4 address as it
@@ -392,6 +417,12 @@ export class IdentityController {
       // tokens of the session this login opens, authenticated after it. A bare
       // '1' left by the previous release is read by its TTL as the time it was
       // written, so this login is admitted under it too.
+      //
+      // D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): after a RISC sign-in
+      // cutoff, a session AuthMiddleware will refuse is not answered
+      // 'authenticated' and not audited as login_success: the 401 names why
+      // (password_reset_required until a password reset after the cutoff).
+      await this.refuseSessionAfterSignInCutoff(session.accessToken);
       await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
       return {
         status: 'authenticated',
@@ -400,11 +431,39 @@ export class IdentityController {
         refreshToken: session.refreshToken,
       };
     } catch (err: any) {
-      const reason = err instanceof BadRequestException
+      // D-113: the sign-in cutoff refusal is a 401, audited by its code.
+      const reason = signInCutoffRefusalCodeOf(err) ?? (err instanceof BadRequestException
         ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
-        : err instanceof Error ? err.message : 'unknown';
+        : err instanceof Error ? err.message : 'unknown');
       await this.authSec.audit({ event: 'login_failure', outcome: 'failure', email, ip, userAgent: ua, reason });
       throw err;
+    }
+  }
+
+  /**
+   * D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): POST /identity/login and
+   * /identity/refresh receive the session from GoTrue itself, so after a RISC
+   * sign-in cutoff they used to answer it ('authenticated', login_success)
+   * while AuthMiddleware refused it on every request and the web showed a
+   * generic error. The issued session is judged by the middleware's own rule
+   * (signInCutoffVerdict) and a refusal is a 401 naming its code:
+   * password_reset_required (D-113: a password sign-in waits for a password
+   * reset through KEYFLOW after the cutoff; the web shows it with the reset
+   * link), google_or_email_link_required (D-101) or signed_in_before_cutoff
+   * (D-97). The middleware stays the control: when the User row cannot be
+   * read here the session is answered as before (logged) and the middleware,
+   * which fails closed, decides.
+   */
+  private async refuseSessionAfterSignInCutoff(accessToken: string): Promise<void> {
+    let refusal: SignInCutoffRefusal | null;
+    try {
+      refusal = await signInCutoffRefusalOfIssuedSession(this.prisma.client, accessToken);
+    } catch (err) {
+      this.logger.warn(`Sign-in cutoff check unavailable (${(err as Error).message}); the session is answered and AuthMiddleware decides`);
+      return;
+    }
+    if (refusal !== null) {
+      throw new UnauthorizedException({ code: refusal, message: SIGN_IN_CUTOFF_REFUSAL_MESSAGES[refusal] });
     }
   }
 
@@ -535,6 +594,9 @@ export class IdentityController {
 
     try {
       const session = await this.signupSvc.refreshSession(body.refreshToken);
+      // D-113 / CR-W9RPC-2: a refreshed session AuthMiddleware will refuse
+      // after a sign-in cutoff is not handed back; the 401 names why.
+      await this.refuseSessionAfterSignInCutoff(session.accessToken);
       return {
         status: 'ok',
         accessToken: session.accessToken,
@@ -543,12 +605,13 @@ export class IdentityController {
         refreshToken: session.refreshToken,
       };
     } catch (err) {
+      // D-113: a sign-in cutoff refusal is audited by its code.
       await this.authSec.audit({
         event: 'token_refresh_failed',
         outcome: 'failure',
         ip,
         userAgent: ua,
-        reason: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+        reason: signInCutoffRefusalCodeOf(err) ?? (err instanceof Error ? err.message.slice(0, 200) : 'unknown'),
       });
       throw err;
     }
