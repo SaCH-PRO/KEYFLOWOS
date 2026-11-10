@@ -111,6 +111,7 @@ async function cleanup() {
     `DELETE FROM key_cortex_trigger_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM autopilot_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM call_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -253,10 +254,18 @@ beforeAll(async () => {
     executionLog: new AiExecutionLogService(prisma),
     businessGraph: { invalidateCache: () => undefined },
   });
+  // W8-CALL-TASK-NO-MEMBER review CR-W8CTNM-1: call_create_task's own case writes through the real
+  // CallLogService (its caller rule over real memberships and contacts), so PA-04's owner-run monitor
+  // records a real call log (cleaned up with the v87b_ business).
+  const { CallLogService } = await import('../src/modules/call-tasks/call-log.service');
+  const callLog = new CallLogService(prisma, { emit: () => true } as any);
+  flow.getCallLog = () => callLog;
   const realExecuteToolAction = FlowOrchestratorService.prototype['executeToolAction' as keyof typeof FlowOrchestratorService.prototype] as any;
   // Contact reads run the orchestrator's own query (crm_list_contacts with contactReadAccess;
-  // segment_contacts, which applies no member's visibility at all).
-  const REAL_TOOLS = new Set(['crm_list_contacts', 'segment_contacts']);
+  // segment_contacts, which applies no member's visibility at all). W8-CALL-TASK-NO-MEMBER (D-73):
+  // call_create_task runs the orchestrator's own case, which refuses a run with no member before it
+  // writes anything (QW-06 runs it only for plans with no member).
+  const REAL_TOOLS = new Set(['crm_list_contacts', 'segment_contacts', 'call_create_task']);
   flow.executeToolAction = async (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) => {
     monitorCalls.push({ toolName, action });
     if (REAL_TOOLS.has(toolName)) return realExecuteToolAction.call(flow, businessId, toolName, args, action);
@@ -629,7 +638,50 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // and executeToolAction). The refusal is permanent, so it belongs in the pre-dispatch gate the queue,
   // the Pro Auto monitor and the proposal executor read (noMemberToolRefusal, plan-step-authority.ts),
   // outside W7-CALL-TASK-CALLER's write set (the call_create_task case only).
-  it.todo('QW-06 a plan with no member with call_create_task: refused before dispatch and recorded on the step, nothing dispatched, the job completes, and no refusal counts toward the tool\'s circuit breaker (review CR-W7CTC-1; plan-step-authority.ts noMemberToolRefusal)');
+  // W8-CALL-TASK-NO-MEMBER (D-73): call_create_task names a contact and records a caller, so a plan
+  // with no member is refused it before dispatch, as it is refused a contact read or a money write.
+  // The dispatcher here is the real ActionDispatcherService and call_create_task runs the
+  // orchestrator's own case (REAL_TOOLS), so a step that got through would reach the real refusal
+  // and count it; CIRCUIT_THRESHOLD (5) such steps opened the tool's circuit for every business.
+  it('QW-06 W8-CALL-TASK-NO-MEMBER (D-73): a plan with no member with call_create_task: refused before dispatch and recorded on the step, nothing dispatched, the job completes, and no refusal counts toward the tool\'s circuit breaker (review CR-W7CTC-1; plan-step-authority.ts noMemberToolRefusal)', async () => {
+    const circuit = () => queue.actionDispatcher.getCircuitStatus('call_create_task');
+    expect(circuit()).toMatchObject({ open: false, failures: 0 });
+    for (let i = 1; i <= 5; i++) {
+      const planId = `${P}qw06_${i}`;
+      const args = { contactId: ID.cTeam, callerId: ID.owner, notes: `v87b qw06 ${i}` };
+      const stepId = await seedQueuePlan(planId, null, 'call_create_task', args);
+      const result = await runQueueStep(planId, 'call_create_task', args);
+      expect(dispatchedFor(stepId), planId).toEqual([]);
+      expect(result, planId).toMatchObject({ ok: true, value: { refused: expect.stringMatching(/call_create_task.*no member/) } });
+      const row = await planRow(planId);
+      expect(row.steps[0].status, planId).toBe('failed');
+      expect(String(row.steps[0].errorMessage), planId).toMatch(/^Refused: .*no member principal/);
+    }
+    expect(circuit()).toEqual({ open: false, failures: 0, lastFailure: null });
+    expect(noMemberToolRefusal('call_create_task')).toMatch(/no member principal/);
+    // Regression control: the gate is the no-member one only. The OWNER's plan, and the daily
+    // briefing (stored with no member, run as the business owner: D-93), still pass it.
+    const own = `${P}qw06_owner`;
+    await seedQueuePlan(own, ID.owner, 'call_create_task', { contactId: ID.cTeam });
+    expect(await planStepRunRefusal(prisma, ID.biz, own, 'call_create_task')).toBeNull();
+    const brief = `${P}qw06_brief`;
+    await seedBriefingPlan(brief, null, 'call_create_task', { contactId: ID.cTeam });
+    expect(await planStepRunRefusal(prisma, ID.biz, brief, 'call_create_task')).toBeNull();
+  });
+
+  // W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (open; reproduced here with the real
+  // ActionDispatcherService and a real CallLogService): QW-06 keeps the runs with no member out of the
+  // breaker, but a member's plan still reaches call_create_task's refusals inside dispatch. Five plans of
+  // staffCrmW (STAFF, crm write) naming the OWNER's PRIVATE contact each passed planStepRunRefusal (null),
+  // each failed in dispatch with 404 'Contact not found', and the fifth opened the circuit
+  // ({open: true, failures: 5}); the bizB OWNER's plan with call_create_task then failed with 'Circuit
+  // breaker open for tool "call_create_task"', nothing dispatched. The same holds for an owner by
+  // Business.ownerId alone (403, CR-W4PP-2) and a SUPER_ADMIN who is no member (403, D-46). The breaker is
+  // ActionDispatcherService's (circuits keyed by tool name alone, process-wide; recordFailure counts a
+  // permanent 4xx refusal), outside W8-CALL-TASK-NO-MEMBER's write set (noMemberToolRefusal only), and no
+  // pre-dispatch gate can see the contact (planStepRunRefusal takes no arguments). A follow-up: key
+  // circuits by business and tool, or stop counting non-retryable 4xx refusals.
+  it.todo('QW-07 W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (D-73): a member\'s plan whose call_create_task is refused inside dispatch (a contact the member may not open: 404; an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) counts toward no circuit breaker another business shares: five such refusals in biz leave call_create_task running for bizB (ActionDispatcherService circuits, outside this packet\'s write set)');
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */
@@ -657,6 +709,30 @@ describe('PRO_AUTO_MONITOR has no member: it reads no contacts and writes no mon
     const result = await flow.autoExecuteToolForMonitoring(ID.biz, 'helpdesk_create_ticket', { title: 'v87b monitor ticket' });
     expect(result).toMatchObject({ success: true });
     expect(monitorCalls.slice(from).map((c) => c.toolName)).toEqual(['helpdesk_create_ticket']);
+  });
+
+  it('PA-04 W8-CALL-TASK-NO-MEMBER (D-73, D-93; review CR-W8CTNM-1): run for no member, call_create_task is refused before it runs (blocked, a recorded refusal, no call log); run for the business owner it passes the gate, records the owner as the caller (not the callerId the model named), and its execution log row withholds the arguments and the answer', async () => {
+    const pa04Logs = () => db.callLog.findMany({ where: { businessId: ID.biz, notes: { startsWith: 'v87b pa04' } }, select: { contactId: true, callerId: true, notes: true } });
+    const from = monitorCalls.length;
+    const result = await flow.autoExecuteToolForMonitoring(ID.biz, 'call_create_task', { contactId: ID.cTeam, callerId: ID.staff, notes: 'v87b pa04 no member' });
+    expect(monitorCalls.slice(from)).toEqual([]);
+    expect(result).toMatchObject({ success: false, blocked: true });
+    expect(String(result.error)).toMatch(/^Refused: "call_create_task" .*no member principal has no member to record \(D-73\)/);
+    const refused = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, toolName: 'call_create_task', mode: 'pro_auto' }, orderBy: { createdAt: 'desc' } });
+    expect(refused).toMatchObject({ success: false, userId: null });
+    expect(await pa04Logs()).toEqual([]);
+
+    // Regression control (D-93): ProAutoMonitorService runs the monitor for the business owner.
+    const fromOwner = monitorCalls.length;
+    const ran = await flow.autoExecuteToolForMonitoring(ID.biz, 'call_create_task', { contactId: ID.cTeam, callerId: ID.staff, notes: 'v87b pa04 owner' }, { memberId: ID.owner });
+    expect(ran, JSON.stringify(ran)).toMatchObject({ success: true });
+    expect(monitorCalls.slice(fromOwner)).toEqual([{ toolName: 'call_create_task', action: { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: ID.owner } }]);
+    expect(await pa04Logs()).toEqual([{ contactId: ID.cTeam, callerId: ID.owner, notes: 'v87b pa04 owner' }]);
+    const row = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, toolName: 'call_create_task', mode: 'pro_auto', success: true }, orderBy: { createdAt: 'desc' } });
+    expect(row).toMatchObject({ userId: ID.owner });
+    expect(JSON.stringify([row.inputSummary, row.outputSummary, row.toolResult])).toContain('withheld');
+    expect(JSON.stringify(row)).not.toContain('v87b pa04 owner');
+    expect(JSON.stringify(row)).not.toContain(ID.cTeam);
   });
 });
 

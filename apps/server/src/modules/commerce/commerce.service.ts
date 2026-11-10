@@ -1881,9 +1881,15 @@ export class CommerceService {
    *   a guard establishes who is asking without constraining what is touched.
    *   REQUIRED when the actor is KEY: a system actor's authority comes from the
    *   tenant scope its caller established, and there is nothing else to check.
+   * @param options.initiatedBy W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88,
+   *   D-90): the member KEY's commerce_mark_invoice_paid or bulk PAID ran for,
+   *   kept beside KEY exactly as markInvoicePaidFor keeps it for
+   *   commerce_update_invoice (SEC-W7IAR-2). Audit data, never authority;
+   *   ignored unless the actor is KEY. Omitted, the call is the three-argument
+   *   one it always was (RA-G16-01's census).
    */
-  async markInvoicePaid(invoiceId: string, actorId?: string | null, businessId?: string) {
-    return this.markInvoicePaidFor(invoiceId, actorId, businessId, {});
+  async markInvoicePaid(invoiceId: string, actorId?: string | null, businessId?: string, options: { initiatedBy?: string | null } = {}) {
+    return this.markInvoicePaidFor(invoiceId, actorId, businessId, { initiatedBy: options.initiatedBy });
   }
 
   /**
@@ -1893,8 +1899,9 @@ export class CommerceService {
    * invoice.payment_recorded entry (recordPayment's rule, PL07-ST-3) and on the
    * invoice.paid entry. Audit data, never authority; ignored unless the actor is
    * KEY, and never KEY itself. Private, so markInvoicePaid keeps its public
-   * (invoice, actor, tenant) shape (RA-G16-01's census); its only other caller
-   * is updateInvoice, which always names the tenant.
+   * (invoice, actor, tenant) shape (RA-G16-01's census), with only the same
+   * options beside it since W8-KEY-REVENUE-GATE (SEC-W7KMP-1); its only other
+   * caller is updateInvoice, which always names the tenant.
    */
   private async markInvoicePaidFor(
     invoiceId: string,

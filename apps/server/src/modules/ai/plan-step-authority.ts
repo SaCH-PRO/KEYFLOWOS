@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
-import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
+import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import {
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
@@ -56,6 +57,28 @@ export function noMemberToolRefusal(toolName: string): string | null {
   // monitor with no member runs none of them either (review SEC-W3CV-2).
   if (graphActionBoundByContactVisibility(toolName)) {
     return `"${toolName}" reads the business's contacts (only a member principal's visibility bounds them), and a KEY plan or monitor with no member principal reads no contacts (D-73, D-93)`;
+  }
+  // W8-CALL-TASK-NO-MEMBER (D-73; review CR-W7CTC-1): call_create_task names a contact and records the
+  // member the run is for as its caller (W7-CALL-TASK-CALLER, D-88), so a run with no member has no
+  // caller to record. Its dispatcher case refuses such a run, but only once dispatched, where
+  // ActionDispatcherService retries the refusal and counts it toward the tool's circuit breaker, which
+  // it keys by tool name alone (five refusals stopped the tool for every business). Refused here, before
+  // dispatch, on every surface that reads this gate:
+  //   - the plan queue: a plan with no member that is not the daily briefing (D-93);
+  //   - the Pro Auto monitor run for no member (a business with no owner). Run for the owner (D-93) it
+  //     passes and records the owner as the caller; since this answer is not null, its execution log
+  //     row withholds the tool's arguments and answer (the owner's view, SEC-D93-2);
+  //   - the proposal executor (review CR-W8CTNM-1, a change on that surface): an AI_PLAN proposal of a
+  //     plan with no member, or with no stored plan, ran before for the member who executed it and
+  //     recorded them as the caller; it is now refused before dispatch. W4-PROPOSAL-PRINCIPAL: a plan
+  //     step's proposal runs as the plan's member, the approver neither widens nor narrows that run, and
+  //     a plan with no member has none (D-73). Any other proposal still runs for the member who executes
+  //     it (memberToolRunAuthority).
+  // Review SEC-W8CTNM-1 (open, outside this gate): only a run with no member is kept out of the breaker.
+  // A member's step whose call_create_task is refused inside dispatch (a contact they may not open: 404;
+  // an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) still counts toward it.
+  if (toolName === 'call_create_task') {
+    return `"${toolName}" names a contact and records the member it runs for as the caller, and a KEY plan or monitor with no member principal has no member to record (D-73)`;
   }
   const money = requirement.scopes.find(
     (s) => (s.module === 'revenue' || s.module === 'expenses') && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write,
@@ -220,4 +243,126 @@ export async function memberToolRunAuthority(
     if (err instanceof ForbiddenException) return { refusal: err.message, principal: false };
     throw err;
   }
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (owner ruling D-98, 2026-11-10; review residuals SEC-W7IAR-2, SEC-W7KMP-2): the
+ * revenue level the web routes require for KEY's money-writing tool `toolName`, or null for any other
+ * tool. D-98: when a member drives KEY, KEY's money-writing tools (mark an invoice paid, update an
+ * invoice, record a payment) need that member's own revenue write, as the web routes do.
+ *
+ * KEY's money-writing tools, read off the tables the routes are derived into, never chosen here:
+ *   - CANONICAL_MODULE_TOOLS.revenue at write or above (job-role-tool-families.spec.ts re-derives it
+ *     from the route decorators): commerce_mark_invoice_paid, commerce_update_invoice, the invoice and
+ *     quote create, convert and delete tools, the payment link writes and payments_refund_charge;
+ *   - a governed tool whose governed part is a revenue write (GOVERNED_UNGRANTED, with the revenue
+ *     scope graphActionRequirement gives it): commerce_send_invoice (CommerceService.updateInvoiceStatus
+ *     to SENT) and update_status_with_confirmation's invoice moves (bulk SENT, VOID and PAID; "needs crm
+ *     AND revenue"). W8-KEY-REVENUE-GATE review CR-W8KRG-1: that tool also bulk-moves contact statuses,
+ *     which is no money write (PATCH crm contacts/bulk needs crm:write alone), so its call is judged by
+ *     its arguments (REVENUE_WRITE_ARGUMENTS) and its contact moves are left as they were.
+ * A tool no route governs (a GRAPH_ACTION_TOOL_MODULES prefix floor such as finance_* or retainers_*)
+ * has no web route to copy, so D-98 leaves it as it was; the same narrowest reading as D-40's
+ * operations gate (CANONICAL_MODULE_TOOLS.operations only).
+ *
+ * `args`: the call's arguments, when the tool's money write depends on them; omitted, such a tool is
+ * read as writing money (fail closed). The tool menu asks keyRevenueMenuLevel instead.
+ *
+ * One rule for every surface a member drives KEY on (D-98: "chat or a plan"). Refused with
+ * memberRevenueWriteRefusal, from FlowOrchestratorService.memberScopeRefusal (executeTool,
+ * governToolCall, execute_custom_logic's inner calls) and its tool menu, for: the member's own chat
+ * turn (CHAT, CHAT_STREAM, CHAT_CONFIRM: its principal); a plan run over HTTP (PLAN_HTTP, POST
+ * ai/businesses/:b/flow/execute-plan/:planId: the calling member, its principal; review SEC-W8KRG-1);
+ * a KEY-cortex turn's bridged flow tool (CORTEX_BRIDGE: the member the turn runs for; review
+ * SEC-W8KRG-2). A plan step on the plan queue and an approved proposal are held to every module scope
+ * of the tool before dispatch instead (memberToolRunAuthority: assertMayRunGraphAction, D-71), this
+ * revenue scope included; a run with no member writes no money at all (noMemberToolRefusal, D-73).
+ */
+export function keyRevenueWriteLevel(toolName: string, args?: unknown): 'write' | 'admin' | null {
+  const level = revenueWriteLevelOfTool(toolName);
+  if (!level) return null;
+  if (args !== undefined && Object.prototype.hasOwnProperty.call(REVENUE_WRITE_ARGUMENTS, toolName) && !REVENUE_WRITE_ARGUMENTS[toolName](args)) {
+    return null;
+  }
+  return level;
+}
+
+/**
+ * W8-KEY-REVENUE-GATE review (CR-W8KRG-1; D-98): a money-writing tool whose call writes money only for
+ * some arguments, and the test of whether these arguments do. update_status_with_confirmation moves
+ * invoices (SENT, VOID, PAID: money) or contacts (CrmService.bulkUpdateContacts: no money; PATCH crm
+ * contacts/bulk needs crm:write alone). The test is the dispatcher's own branch
+ * (flow-orchestrator.service.ts, `entityType === 'contact'`), read the other way round, so anything but
+ * the contact branch counts as money (fail closed; an unknown entity type is refused there anyway).
+ */
+const REVENUE_WRITE_ARGUMENTS: Readonly<Record<string, (args: unknown) => boolean>> = {
+  update_status_with_confirmation: (args) =>
+    !(args && typeof args === 'object' && (args as { entityType?: unknown }).entityType === 'contact'),
+};
+
+/**
+ * W8-KEY-REVENUE-GATE review (CR-W8KRG-1; D-98): the revenue level a member needs to be offered
+ * `toolName` on KEY's tool menu (FlowOrchestratorService.selectToolsForRequest). A tool whose money
+ * write depends on its arguments (REVENUE_WRITE_ARGUMENTS) stays offered: the call is judged by its
+ * arguments when it runs (keyRevenueWriteLevel), so a crm:write member below revenue:write still moves
+ * contact statuses with update_status_with_confirmation, as PATCH crm contacts/bulk lets them.
+ */
+export function keyRevenueMenuLevel(toolName: string): 'write' | 'admin' | null {
+  if (Object.prototype.hasOwnProperty.call(REVENUE_WRITE_ARGUMENTS, toolName)) return null;
+  return keyRevenueWriteLevel(toolName);
+}
+
+/** keyRevenueWriteLevel's tool-level answer, read off the route tables (whatever the arguments). */
+function revenueWriteLevelOfTool(toolName: string): 'write' | 'admin' | null {
+  const own = (table: object) => Object.prototype.hasOwnProperty.call(table, toolName);
+  if (own(CANONICAL_MODULE_TOOLS.revenue)) {
+    const level = CANONICAL_MODULE_TOOLS.revenue[toolName];
+    return level === 'write' || level === 'admin' ? level : null;
+  }
+  if (!own(GOVERNED_UNGRANTED)) return null;
+  const requirement = graphActionRequirement(toolName);
+  if (!requirement || 'refused' in requirement) return null;
+  const revenue = requirement.scopes.find((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write);
+  return revenue && revenue.minLevel !== 'read' ? revenue.minLevel : null;
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (D-98): `userId`'s revenue level in `businessId`, read as the routes' money
+ * writes read it (CommerceService.assertActorMayWriteRevenue, behind ModuleScopeGuard revenue write on
+ * PATCH .../paid): the membership's explicit permissionScopes map, where a missing key is none, else
+ * its role's defaults (OWNER and ADMIN admin, STAFF read). No membership is none, a platform
+ * SUPER_ADMIN included (D-46: one who is not a member does not write the business's invoices).
+ */
+export async function memberRevenueLevel(prisma: PrismaService, businessId: string, userId: string): Promise<string> {
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return 'none';
+  const scopes: Record<string, string> =
+    membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+  return scopes.revenue || 'none';
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (D-98): why KEY may not run the money-writing tool `toolName` for `memberId`
+ * in `businessId`, or null when it may (or this call writes no money: keyRevenueWriteLevel, judged with
+ * the call's `args` for a tool whose money write depends on them; review CR-W8KRG-1). The answer starts
+ * with the words ModuleScopeGuard and the service answer the same member's PATCH .../paid with, so a
+ * member and the model read KEY's refusal as the route's.
+ */
+export async function memberRevenueWriteRefusal(
+  prisma: PrismaService,
+  businessId: string,
+  memberId: string,
+  toolName: string,
+  args?: unknown,
+): Promise<string | null> {
+  const required = keyRevenueWriteLevel(toolName, args);
+  if (!required) return null;
+  const level = await memberRevenueLevel(prisma, businessId, memberId);
+  if (rankOf(level) >= LEVEL_RANK[required]) return null;
+  return `Insufficient permissions: revenue requires ${required} access (you have ${level}); KEY runs "${toolName}" for a member only with the revenue access the routes require (D-98)`;
 }

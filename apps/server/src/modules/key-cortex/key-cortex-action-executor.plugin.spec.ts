@@ -22,6 +22,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } from '../ai/morning-briefing.service';
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 
 class RegistryStub {
@@ -205,5 +206,62 @@ describe('W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1: only the stored plan makes a 
     } as never;
     await plugin.execute('biz_1', proposal);
     expect(orchestrator.executeToolDirectly.mock.calls[0][3]).toEqual({ planId: 'plan_1', planStepId: 'step_1' });
+  });
+});
+
+/**
+ * W8-CALL-TASK-NO-MEMBER (D-73; review CR-W8CTNM-1): noMemberToolRefusal refuses call_create_task, a
+ * change on this surface too. An AI_PLAN proposal of a plan with no member, or with no stored plan, ran
+ * before for the member who executed it (onBehalfOfUserId), and the call task recorded them as its
+ * caller (W7-CALL-TASK-CALLER). It is now refused before dispatch: a plan step's proposal runs as the
+ * plan's member, the approver neither widens nor narrows that run (W4-PROPOSAL-PRINCIPAL), and a plan
+ * with no member has none to record (D-73). A plan's member, the daily briefing's owner (D-93) and the
+ * executor of any other proposal still run it.
+ */
+describe('W8-CALL-TASK-NO-MEMBER review CR-W8CTNM-1 (D-73): call_create_task on the proposal surface', () => {
+  const CALL_ARGS = { contactId: 'c_1', callerId: 'user_9', notes: 'call Ada' };
+  const callProposal = (fields: Record<string, unknown>) =>
+    ({ ...fields, payload: { toolName: 'call_create_task', inputPayload: CALL_ARGS } }) as never;
+  const REFUSED = /^Refused: "call_create_task" names a contact and records the member it runs for as the caller, and a KEY plan or monitor with no member principal has no member to record \(D-73\)$/;
+
+  it('CTNM-P1 W8-CALL-TASK-NO-MEMBER (D-73): a stored plan with no member (not the daily briefing): its call_create_task step proposal, executed by a member, is refused before dispatch; the executor is not taken as its caller', async () => {
+    const { plugin, orchestrator, prisma } = makePlugin();
+    prisma.client.aiPlan.findFirst.mockResolvedValue({ userId: null, objective: 'journey x', rawInput: 'r', scope: [] } as never);
+    const out = await plugin.execute('biz_1', callProposal({ userId: null, sourceType: 'AI_PLAN', planId: 'plan_1', planStepId: 'step_1' }), 'user_2');
+    expect(out.success).toBe(false);
+    expect(out.error).toMatch(REFUSED);
+    expect(orchestrator.executeToolDirectly).not.toHaveBeenCalled();
+  });
+
+  it('CTNM-P2 W8-CALL-TASK-NO-MEMBER (D-73): an AI_PLAN proposal with no stored plan (a plan step with no member), executed by a member: refused before dispatch, no plan read', async () => {
+    const { plugin, orchestrator, prisma } = makePlugin();
+    const out = await plugin.execute('biz_1', callProposal({ userId: 'user_2', sourceType: 'AI_PLAN' }), 'user_2');
+    expect(out.success).toBe(false);
+    expect(out.error).toMatch(REFUSED);
+    expect(orchestrator.executeToolDirectly).not.toHaveBeenCalled();
+    expect(prisma.client.aiPlan.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("CTNM-P3 W8-CALL-TASK-NO-MEMBER regression control (D-73, D-93): a member's plan step runs call_create_task as the plan's member (its principal), the daily briefing's as the business owner, and any other proposal for the member who executes it", async () => {
+    const member = makePlugin();
+    const ran = await member.plugin.execute('biz_1', callProposal({ userId: 'user_1', sourceType: 'AI_PLAN', planId: 'plan_1', planStepId: 'step_1' }), 'user_2');
+    expect(ran.success).toBe(true);
+    expect(member.orchestrator.executeToolDirectly.mock.calls[0]?.[4]).toMatchObject({ surface: 'PROPOSAL', principalUserId: 'user_1' });
+
+    const briefing = makePlugin();
+    briefing.prisma.client.aiPlan.findFirst.mockResolvedValue({
+      userId: null, objective: `${BRIEFING_OBJECTIVE_PREFIX}today`, rawInput: BRIEFING_RAW_INPUT, scope: [BRIEFING_SCOPE],
+    } as never);
+    Object.assign(briefing.prisma.client.business, { findUnique: vi.fn(async () => ({ ownerId: 'owner_1' })) });
+    const brief = await briefing.plugin.execute('biz_1', callProposal({ userId: null, sourceType: 'AI_PLAN', planId: 'plan_b', planStepId: 'step_b' }), 'user_2');
+    expect(brief.success).toBe(true);
+    expect(briefing.orchestrator.executeToolDirectly.mock.calls[0]?.[4]).toMatchObject({ surface: 'PROPOSAL', principalUserId: 'owner_1' });
+
+    const manual = makePlugin();
+    const filed = await manual.plugin.execute('biz_1', callProposal({ userId: 'user_3', sourceType: 'MANUAL' }), 'user_2');
+    expect(filed.success).toBe(true);
+    const action = manual.orchestrator.executeToolDirectly.mock.calls[0]?.[4] as Record<string, unknown> | undefined;
+    expect(action).toMatchObject({ surface: 'PROPOSAL', onBehalfOfUserId: 'user_2' });
+    expect(action).not.toHaveProperty('principalUserId');
   });
 });

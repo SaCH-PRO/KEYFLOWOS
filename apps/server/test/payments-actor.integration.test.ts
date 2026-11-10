@@ -171,6 +171,8 @@ const ID = {
   invPatchPaidU: `${P}invPatchPaidU`,
   invRoutePaidU: `${P}invRoutePaidU`,
   invKeyPatchPaid: `${P}invKeyPatchPaid`,
+  // W8-KEY-REVENUE-GATE (D-98): PA-16i, the SENT invoice W's KEY turn may not mark PAID.
+  invKeyPatchPaidW: `${P}invKeyPatchPaidW`,
   invKeyPatchVoid: `${P}invKeyPatchVoid`,
   // R0-CMF1 review repairs: PA-16k..m (SEC-CMF1-1, -2, -4). The PRIVATE
   // contact owned by U is seeded by that describe block, after the fixture
@@ -230,6 +232,9 @@ const ID = {
   invKeyMemberPaid: `${P}invKeyMemberPaid`,
   invKeyMemberVoid: `${P}invKeyMemberVoid`,
   invHumanInitVoid: `${P}invHumanInitVoid`,
+  // W8-KEY-REVENUE-GATE (SEC-W7KMP-1): PA-16s, the member KEY's mark-paid and bulk PAID ran for.
+  invKeyMemberMarkPaid: `${P}invKeyMemberMarkPaid`,
+  invKeyMemberBulkPaid: `${P}invKeyMemberBulkPaid`,
   // W7-DRIVE-INTAKE-SCOPE (SEC-CMF2-3; D-46): PA-18e..f. The two members below
   // revenue:write and the non-member SUPER_ADMIN are seeded by that describe
   // block, after the fixture sanity case.
@@ -1227,7 +1232,33 @@ describe('R0-CMF1: status changes through PATCH .../invoices/:id record the huma
     }
   });
 
-  it('PA-16i: the KEY flow executor call (commerce_update_invoice: updateInvoice with the tenant and no human actor) still marks PAID, attributed to KEY_SYSTEM_ACTOR_ID', async () => {
+  it('PA-16i (D-98; SEC-W7IAR-2): KEY\'s money tools run for W\'s chat turn (STAFF, revenue:read) are refused as PATCH .../paid refuses W (commerce_update_invoice {status:"PAID"}, commerce_mark_invoice_paid, update_status_with_confirmation to PAID) and nothing is written; for the owner U\'s turn commerce_update_invoice still marks PAID, attributed to KEY_SYSTEM_ACTOR_ID', async () => {
+    // W8-KEY-REVENUE-GATE (owner ruling D-98): the case pinned the old authority, a member's KEY
+    // turn marking PAID whatever their revenue scope (review SEC-W7IAR-2: a revenue:read member had
+    // KEY mark an invoice PAID). W, whom PATCH .../paid refuses (PA-16f), now gets the same refusal
+    // from KEY, on every surface a member's own chat arrives on, before anything is read or written.
+    const denied = ID.invKeyPatchPaidW;
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['commerce_update_invoice', { invoiceId: denied, status: 'PAID' }],
+      ['commerce_mark_invoice_paid', { invoiceId: denied }],
+      ['update_status_with_confirmation', { entityType: 'invoice', ids: [denied], newStatus: 'PAID' }],
+    ];
+    for (const surface of ['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']) {
+      for (const [tool, args] of calls) {
+        await expect(
+          dispatcher.executeToolDirectly(ID.biz, tool, { ...args }, undefined, { surface, principalUserId: ID.userW }),
+          `${surface} ${tool}`,
+        ).rejects.toThrow(/^Insufficient permissions: revenue requires write access \(you have read\).*\(D-98\)/);
+      }
+    }
+    expect(await invoiceRow(denied)).toMatchObject({ status: 'SENT', paidAt: null });
+    expect(await paymentsOf(denied)).toHaveLength(0);
+    expect(await postingsAbout(denied)).toHaveLength(0);
+    expect(await allContactEventsFor(denied)).toHaveLength(0);
+    expect(activity.filter((a) => a.data?.invoiceId === denied)).toHaveLength(0);
+    expect(await financeActivityFor(denied)).toHaveLength(0);
+
+    // The control: the owner U's turn (revenue:write by role) still marks PAID through KEY.
     const inv = ID.invKeyPatchPaid;
     // W7-INVOICE-ACTOR-RULES (PA-16n, D-88): the call itself, through the real dispatcher
     // (flow-orchestrator.service.ts `commerce_update_invoice`) for a member's KEY turn. It
@@ -1750,6 +1781,38 @@ describe('W7-INVOICE-ACTOR-RULES review repairs: every Send and Void door names 
     expect(human[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
     expect((human[0].data as any).initiatedBy).toBeUndefined();
     expect(JSON.stringify(human)).not.toContain(ID.userV);
+  });
+
+  it('PA-16s (SEC-W7KMP-1; D-88, D-90, D-98): KEY\'s commerce_mark_invoice_paid and update_status_with_confirmation {newStatus:"PAID"} for V\'s turn keep V beside KEY, as commerce_update_invoice does (PA-16r): Payment.recordedBy and the posting stay KEY, the FINANCE payment_recorded row and the invoice.payment_recorded / invoice.paid entries are KEY (SYSTEM) with data.initiatedBy V', async () => {
+    // W8-KEY-REVENUE-GATE: CommerceService.markInvoicePaid took no initiatedBy, so both tools
+    // recorded KEY alone. V holds revenue:write, so D-98 lets V's turn run them.
+    const turn = { surface: 'CHAT', principalUserId: ID.userV };
+    const viaMarkPaid: any = await dispatcher.executeToolDirectly(ID.biz, 'commerce_mark_invoice_paid', { invoiceId: ID.invKeyMemberMarkPaid }, undefined, turn);
+    expect(viaMarkPaid.invoice).toMatchObject({ id: ID.invKeyMemberMarkPaid, status: 'PAID' });
+    const viaBulk: any = await dispatcher.executeToolDirectly(
+      ID.biz,
+      'update_status_with_confirmation',
+      { entityType: 'invoice', ids: [ID.invKeyMemberBulkPaid], newStatus: 'PAID' },
+      undefined,
+      turn,
+    );
+    expect(viaBulk).toMatchObject({ entityType: 'invoice', updatedCount: 1, newStatus: 'PAID' });
+
+    for (const inv of [ID.invKeyMemberMarkPaid, ID.invKeyMemberBulkPaid]) {
+      expect((await invoiceRow(inv)).status, inv).toBe('PAID');
+      const rows = await paymentsOf(inv);
+      expect(rows, inv).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ provider: 'manual', amount: INVOICE_TOTAL, recordedBy: KEY_ACTOR });
+      await expectPostingBy(rows[0].id, KEY_ACTOR);
+      await expectContactEventBy(inv, KEY_ACTOR, 'SYSTEM');
+      const finance = await financeActivityFor(inv);
+      expect(finance[0].data, `${inv} FINANCE row`).toMatchObject({ initiatedBy: ID.userV });
+      expect(((await contactEventsFor(inv))[0].data as any).initiatedBy, `${inv} invoice.payment_recorded`).toBe(ID.userV);
+      const paidEntries = await contactEventsFor(inv, 'invoice.paid');
+      expect(paidEntries, inv).toHaveLength(1);
+      expect(paidEntries[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM' });
+      expect((paidEntries[0].data as any).initiatedBy, `${inv} invoice.paid`).toBe(ID.userV);
+    }
   });
 });
 
