@@ -6,16 +6,19 @@ import {
   Req,
   UseGuards,
   BadRequestException,
+  ForbiddenException,
   Query,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { ConnectorIntelligenceService } from '../ai/connector-intelligence.service';
 import { DriveIntakeOrchestrator } from './drive-intake-orchestrator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 interface AuthenticatedRequest {
-  user?: { id: string };
+  user?: { id: string; role?: string };
 }
 
 @Controller('drive/businesses/:businessId')
@@ -50,12 +53,26 @@ export class DriveIntakeController {
     return { items };
   }
 
+  /**
+   * W7-DRIVE-INTAKE-SCOPE (R0-CMF2 review SEC-CMF2-3): approving a plan runs
+   * its steps (create_invoice, record_payment, apply_credit_note), so it needs
+   * revenue:write, the scope every payment-writing route has required since
+   * R0-02. Behind AuthGuard and BusinessGuard alone, a member with revenue:read,
+   * or with only crm:read, approved a plan that recorded a payment the manual
+   * payment route refuses them. A refused approval is answered before the
+   * orchestrator claims the intake, so nothing is written and the plan stays
+   * approvable by a member who may. The approver is still the recorder
+   * (R0-CMF2, PA-18a): the orchestrator is handed req.user, never the plan.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intake/:intakeFileId/approve')
   async approve(
     @Param('businessId') businessId: string,
     @Param('intakeFileId') intakeFileId: string,
     @Req() req: AuthenticatedRequest,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const userId = req.user?.id;
     if (!userId) throw new BadRequestException('Authenticated user required');
     return this.orchestrator.executePlan(businessId, intakeFileId, userId);
@@ -71,5 +88,40 @@ export class DriveIntakeController {
     if (!userId) throw new BadRequestException('Authenticated user required');
     await this.orchestrator.rejectIntakeFile(businessId, intakeFileId, userId);
     return { success: true };
+  }
+
+  /**
+   * W7-DRIVE-INTAKE-SCOPE, owner ruling D-46 (a platform SUPER_ADMIN who is not
+   * a member stays refused on tenant invoice writes): BusinessGuard and
+   * ModuleScopeGuard admit SUPER_ADMIN to every tenant and skip the module
+   * scope, so approve, now a revenue:write handler of the commerce module,
+   * applies FOLLOW3-A2's rule as CommerceController.assertSuperAdminMayWriteRevenue
+   * does (private there; restated here as RecurringInvoiceController and
+   * PaymentsOpsController restate it). That role needs a Membership in
+   * :businessId whose scope map (or, without one, the role defaults) holds
+   * revenue:write. No membership answers 403 'Not authorized to update this
+   * invoice'; a membership below revenue:write answers the guard's message.
+   * Refused before any read or write. Every other caller is unchanged and costs
+   * no query (the guards already applied this rule to it). d46-write-routes.spec.ts
+   * lists approve as GUARDED.
+   */
+  private async assertSuperAdminMayWriteRevenue(req: AuthenticatedRequest | undefined, businessId: string): Promise<void> {
+    const user = req?.user;
+    if (user?.role !== 'SUPER_ADMIN') return;
+    const membership = user.id
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: user.id, businessId } },
+          select: { role: true, permissionScopes: true },
+        })
+      : null;
+    if (!membership) throw new ForbiddenException('Not authorized to update this invoice');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
   }
 }
