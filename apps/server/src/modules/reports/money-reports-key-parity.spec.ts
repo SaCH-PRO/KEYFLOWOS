@@ -180,4 +180,37 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
       }
     }
   });
+
+  // W9-MONEY-REPORTS-KEY review round 1 (owner ruling D-57): three other KEY doors still reach the
+  // same money reports without revenue:read. Each was reproduced (a throwaway probe, deleted, or
+  // the code path read) and none can be closed in this packet's write set (the cortexCommandRefusal
+  // implementation and this spec), so each stays it.todo for a follow-up packet:
+  //  - SEC-W9MRK-1 / MRK-CR-1, the plan door: memberPlanStepScopeRefusal (key-cortex-plan-authority.ts,
+  //    called by KeyCortexPlannerService.assertMemberSteps for POST cortex/plans/:planId/execute and
+  //    chat goal plans) maps finance to expenses and analytics to analytics with no per-action rule:
+  //    it returns null for finance.generate_pnl with { expenses: 'write', revenue: 'none' } and for
+  //    analytics.create_report / export_report with { analytics: 'write', revenue: 'none' }, where
+  //    cortexCommandRefusal now refuses. assertMemberSteps also skips that check for an ADMIN (D-71:
+  //    an ADMIN keeps every module), while the direct-command door holds an ADMIN's explicit scopes;
+  //    the follow-up needs a ruling on an ADMIN with explicit revenue 'none'.
+  //  - SEC-W9MRK-2, the read door: planStepReadRule (graph-actions.controller.ts; GET ai/plans,
+  //    GET ai/plans/:planId, GET cortex/plans/:planId, and GET ai/execution-logs through
+  //    visibleExecutionLogs, which reuses it) judges a KEY-cortex step by its module's read scope
+  //    alone, so an ADMIN (seesEveryPlan) with { expenses: 'read', analytics: 'read', revenue: 'none' }
+  //    reads the stored output of the OWNER's finance.generate_pnl or analytics.create_report step
+  //    intact (the executor stores the whole report in outputResult and the execution log row).
+  //  - SEC-W9MRK-3, the chat door: POST cortex/chat and its stream with enableActions run the parsed
+  //    commands through executorService.executeBatch after the autonomy authority alone
+  //    (key-cortex-query-pipeline.service.ts, evaluateParsedCommandAutonomy); no member scope rule
+  //    (cortexCommandRefusal or any membership read) applies, and the batch result data is returned.
+  //    Pre-existing, and wider than the money reports: it holds for every registry action.
+  it.todo(
+    'SEC-W9MRK-1 / MRK-CR-1 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read (memberPlanStepScopeRefusal, D-57, D-71)',
+  );
+  it.todo(
+    'SEC-W9MRK-2 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)',
+  );
+  it.todo(
+    'SEC-W9MRK-3 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a command parsed on POST cortex/chat or the chat stream with enableActions is refused to a member the cortexCommandRefusal rule refuses, the money reports included (D-57)',
+  );
 });
