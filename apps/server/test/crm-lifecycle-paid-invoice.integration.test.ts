@@ -34,7 +34,8 @@
  *   L-03 RED-BEFORE  PROSPECT -> CLIENT the same way
  *   L-04 CTL         CLIENT and LOST contacts are untouched (no task, audit, event, feed row)
  *   L-05 CTL         booking.confirmed, store_order.paid, payment.received and quote.accepted
- *                    leave a LEAD a LEAD with no follow-up
+ *                    leave a LEAD a LEAD with no follow-up (the store_order.paid names an order
+ *                    stored PAID in bizA: W9-STORE-PAID-LISTENERS, V18-T2)
  *   L-06 RED-BEFORE  replayed invoice.paid deliveries: one move, one follow-up, one audit,
  *                    one contact.updated, one feed row
  *   L-07 RED-BEFORE  concurrent deliveries of two paid invoices of one contact (each delivered
@@ -131,6 +132,7 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -433,6 +435,23 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
 
   it('L-05 CTL: only invoice.paid moves a contact: booking.confirmed, store_order.paid, payment.received and quote.accepted leave a LEAD a LEAD', async () => {
     const email = `${P}${ID.cOther.slice(P.length)}@test.local`;
+    // W9-STORE-PAID-LISTENERS (V18-T2; D-18): RevenueEventListener logs store_order.paid only for an order stored PAID in
+    // the event's business, so the order this event names exists, PAID, in bizA.
+    await db.marketplaceOrder.create({
+      data: {
+        id: `${P}order1`,
+        businessId: ID.bizA,
+        orderNumber: `${P}order1`,
+        type: 'STANDARD',
+        status: 'paid',
+        paymentStatus: 'PAID',
+        customerName: 'Other Lead',
+        customerEmail: email,
+        subtotal: 80,
+        total: 80,
+        currency: 'TTD',
+      },
+    });
     bus.emit('booking.confirmed', { businessId: ID.bizA, booking: { id: `${P}bk1`, businessId: ID.bizA, contactId: ID.cOther } });
     bus.emit('store_order.paid', { businessId: ID.bizA, order: { id: `${P}order1`, customerEmail: email, total: 80, currency: 'TTD' } });
     bus.emit('payment.received', { businessId: ID.bizA, contactId: ID.cOther, amount: 80, currency: 'TTD', provider: 'stripe', externalId: `${P}pi1` });
