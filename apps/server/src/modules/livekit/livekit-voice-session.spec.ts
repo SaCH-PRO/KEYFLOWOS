@@ -39,7 +39,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AccessToken } from 'livekit-server-sdk';
 import { LivekitService, KEY_VOICE_AGENT_NAME } from './livekit.service';
-import { LivekitController } from './livekit.controller';
+import { LivekitController, VoiceSessionMemberRateLimitGuard } from './livekit.controller';
 import { GlobalHttpExceptionFilter } from '../../core/filters/http-exception.filter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -458,5 +458,131 @@ describe('PR196-VOICE review follow-ups (W9-LIVEKIT-VOICE)', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+/**
+ * W9-LIVEKIT-VOICE review repair (SEC-W9LK-1, on SEC-PR196V-1): the voice-session
+ * bound must hold per member, not only per client address.
+ *
+ * CrmRateLimitGuard keys its window on `${req.ip}:${businessId}:${handler}`, with no
+ * member in it. Reproduced on the packet head with trust proxy 1 (the production
+ * default, TRUST_PROXY=1 in app-bootstrap.ts): one member sending each POST from a
+ * fresh address (several IPv6 addresses in their /64, several networks) got a fresh
+ * window every time, so every POST made a LiveKit room and a KEY voice agent dispatch
+ * (an OpenAI Realtime session), with no 429. The same held across the businesses a
+ * member belongs to. The handler now also carries a per-member window
+ * (VoiceSessionMemberRateLimitGuard, after the address window): 10 sessions a minute
+ * per authenticated member, whatever the address and whichever business.
+ */
+describe('PR196-VOICE review repair (W9-LIVEKIT-VOICE, SEC-W9LK-1)', () => {
+  it('SEC-W9LK-1: one member sending each POST voice-session from a fresh client address, across two businesses, is still refused 429 past 10 a minute, with no room or dispatch, while another member is not affected (SEC-PR196V-1; W9-LIVEKIT-VOICE)', async () => {
+    configureLivekit();
+    const BIZ_A = 'w9lk-biz-rotate-A-0123456789';
+    const BIZ_B = 'w9lk-biz-rotate-B-0123456789';
+    const ROTATING = 'w9lk-member-rotating';
+    const COLLEAGUE = 'w9lk-member-colleague';
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: `vs-w9lk-rot-${create.mock.calls.length}`, ...data }));
+    const moduleRef = await Test.createTestingModule({
+      controllers: [LivekitController],
+      providers: [LivekitService, { provide: PrismaService, useValue: { client: { voiceSession: { create } } } }],
+    })
+      // The member comes from a test header (the real AuthGuard is proven elsewhere);
+      // membership of both businesses is admitted. The address and member windows are real.
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate: (ctx: ExecutionContext) => {
+          const req = ctx.switchToHttp().getRequest();
+          req.user = { id: String(req.headers['x-test-user']) };
+          return true;
+        },
+      })
+      .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication({ logger: false });
+    // The production default (TRUST_PROXY=1): req.ip is the address the front proxy saw.
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+    await app.init();
+    try {
+      const LIMIT = 10;
+      let address = 0;
+      const post = (member: string, biz: string) =>
+        request(app.getHttpServer())
+          .post(`/livekit/businesses/${biz}/voice-session`)
+          .set('x-test-user', member)
+          // A fresh client address on every request: no address window ever fills.
+          .set('X-Forwarded-For', `2001:db8::${(++address).toString(16)}`)
+          .send({});
+
+      for (let i = 0; i < LIMIT; i++) {
+        const res = await post(ROTATING, BIZ_A);
+        expect(res.status, `POST ${i + 1}: ${JSON.stringify(res.body)}`).toBe(201);
+        expect(res.body.roomName).toMatch(/^key-voice-/);
+      }
+      expect(lk.rooms).toHaveLength(LIMIT);
+      expect(lk.dispatches).toHaveLength(LIMIT);
+
+      // Past the member's bound: refused from fresh addresses, in either business.
+      for (let i = 0; i < 6; i++) {
+        const res = await post(ROTATING, i % 2 === 0 ? BIZ_A : BIZ_B);
+        expect(res.status, `POST ${LIMIT + i + 1} (address ${address}): ${JSON.stringify(res.body)}`).toBe(429);
+        expect(res.body.token).toBeUndefined();
+      }
+      // No room, no agent dispatch, no join token, no VoiceSession row past the bound.
+      expect(lk.rooms).toHaveLength(LIMIT);
+      expect(lk.roomClients).toBe(LIMIT);
+      expect(lk.dispatches).toHaveLength(LIMIT);
+      expect(lk.dispatchClients).toBe(LIMIT);
+      expect(lk.tokens).toBe(LIMIT);
+      expect(create).toHaveBeenCalledTimes(LIMIT);
+      expect(new Set(lk.rooms.map((r) => JSON.parse(String(r.metadata)).userId))).toEqual(new Set([ROTATING]));
+
+      // Control: the bound is the member's own. Another member of the same business is admitted.
+      const colleague = await post(COLLEAGUE, BIZ_A);
+      expect(colleague.status, JSON.stringify(colleague.body)).toBe(201);
+      expect(claims(colleague.body.token).sub).toBe(`user-${COLLEAGUE}`);
+      expect(lk.rooms).toHaveLength(LIMIT + 1);
+      expect(lk.dispatches).toHaveLength(LIMIT + 1);
+
+      // Declared on the handler: the address window (packet), then the member window (this repair).
+      const guards = Reflect.getMetadata(GUARDS_METADATA, LivekitController.prototype.createVoiceSession);
+      expect(guards).toEqual([AuthGuard, BusinessGuard, CrmRateLimitGuard, VoiceSessionMemberRateLimitGuard]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('SEC-W9LK-1 control: the member window refuses a request that reaches it with no authenticated member (401) rather than share one anonymous window (W9-LIVEKIT-VOICE)', () => {
+    const guard = new VoiceSessionMemberRateLimitGuard();
+    const ctx = { switchToHttp: () => ({ getRequest: () => ({ ip: '2001:db8::ff', params: { businessId: BIZ } }) }) } as unknown as ExecutionContext;
+    let err: any;
+    try {
+      guard.canActivate(ctx);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(401);
+  });
+
+  it('SEC-W9LK-1 control: the member window slides. A member refused at 10 in a minute is admitted again once the minute has passed (W9-LIVEKIT-VOICE)', () => {
+    const guard = new VoiceSessionMemberRateLimitGuard();
+    const as = (ip: string) =>
+      ({ switchToHttp: () => ({ getRequest: () => ({ ip, user: { id: 'w9lk-member-window' }, params: { businessId: BIZ } }) }) }) as unknown as ExecutionContext;
+    const t0 = 1_800_000_000_000;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
+    for (let i = 0; i < 10; i++) expect(guard.canActivate(as(`2001:db8::a${i}`))).toBe(true);
+    now.mockReturnValue(t0 + 59_999);
+    let err: any;
+    try {
+      guard.canActivate(as('2001:db8::b1'));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(429);
+    now.mockReturnValue(t0 + 60_000);
+    expect(guard.canActivate(as('2001:db8::b2'))).toBe(true);
   });
 });
