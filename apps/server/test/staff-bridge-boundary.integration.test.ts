@@ -115,6 +115,9 @@ let projects: any;
 let callLogs: any;
 let callScripts: any;
 let gateway: { complete: ReturnType<typeof vi.fn> };
+/** KEY's LLM turn as the bridge reaches it (FlowOrchestratorService.chat), and the real bridge. */
+let orchestratorChat: { chat: ReturnType<typeof vi.fn>; getConversationHistory: ReturnType<typeof vi.fn> };
+let bridge: any;
 const saved = { secret: process.env.WHATSAPP_APP_SECRET, token: process.env.TWILIO_AUTH_TOKEN, verify: process.env.WHATSAPP_VERIFY_TOKEN };
 
 /** Any method, any depth: an async no-op (the collaborators the path does not decide). */
@@ -336,12 +339,12 @@ beforeAll(async () => {
     policy,
   );
   // KEY's LLM turn: never reached by a reply approval; answers a plain message.
-  const orchestratorChat = { chat: vi.fn(async () => ({ reply: 'stub KEY reply', sessionId: null })), getConversationHistory: vi.fn(async () => []) };
+  orchestratorChat = { chat: vi.fn(async () => ({ reply: 'stub KEY reply', sessionId: null })), getConversationHistory: vi.fn(async () => []) };
   const bridgeRef = {
     get: (token: unknown) =>
       token === JobRolePolicyService ? policy : token === AiOversightService ? oversight : token === FlowOrchestratorService ? orchestratorChat : undefined,
   };
-  const bridge = new StaffChatBridgeService(structure, prisma as any, bridgeRef as any);
+  bridge = new StaffChatBridgeService(structure, prisma as any, bridgeRef as any);
   const entityResolution = { resolveContact: vi.fn(async () => ({ contactId: null, matchedOn: 'none', isNew: false, merged: false })) };
   const whatsapp = new WhatsAppService(prisma as any, { emit: vi.fn() } as any, entityResolution as any, stub(), bridge);
   const logger = new WebhookIngressLoggerService(prisma as any);
@@ -712,11 +715,71 @@ describe("TD9-2 — a call log names only the business's own contact, and B's sc
     expect(await db.callLog.count({ where: { contactId: ID.contactB, businessId: { not: ID.bizB } } })).toBe(0);
   });
 
-  // Review CR-W7CTC-2 hand-off (needs an owner ruling or a follow-up packet; the change is in
-  // staff-chat-bridge.service.ts and chat()'s dispatch context, outside W7-CALL-TASK-CALLER's write
-  // set, which is the call_create_task case only): the job-role envelope still offers call_create_task
-  // to crm:write positions, so a staff member on WhatsApp or SMS is offered a tool that always fails.
-  it.todo("a staff position backed by a membership creates call tasks over WhatsApp/SMS as its holder (assignment.userId as onBehalfOfUserId), and a contact-only position is refused or not offered call_create_task (review CR-W7CTC-2; staff-chat-bridge.service.ts, job-role-policy.service.ts)");
+  // Review CR-W7CTC-2 (W9-KEY-DISPATCH-INCLUDES; owner rulings D-73, D-88): the bridge's chat turn
+  // has no principal, so call_create_task, which records the member the command runs for as the
+  // caller, always failed on WhatsApp/SMS while the job-role envelope still offered it to crm:write
+  // positions. Now the bridge hands chat() the holder of a membership-backed position (server-only,
+  // beside the envelope), and chat() dispatches the model's call_create_task with that holder as
+  // onBehalfOfUserId (chatToolAction): the call log names the holder, never the member the model
+  // named. A contact-only position has no member: its envelope does not offer the tool, and a call
+  // that reached the dispatcher anyway is refused before anything is written (as above).
+  //
+  // HOW: a real signed Twilio delivery (and an SMS turn) reaches the real bridge; KEY's LLM turn is
+  // the stub, which here does what chat() does with a model's call_create_task: the real
+  // AiOversightService.evaluate under the envelope the bridge passed, then the real dispatcher with
+  // the context chatToolAction builds from the bridge's server-only argument.
+  it("CR-W7CTC-2 (W9-KEY-DISPATCH-INCLUDES, was it.todo; D-73, D-88): a staff position backed by a membership creates call tasks over WhatsApp/SMS as its holder (assignment.userId as onBehalfOfUserId), and a contact-only position is refused or not offered call_create_task (staff-chat-bridge.service.ts, job-role-policy.service.ts)", async () => {
+    const flow: Record<string, any> = await import('../src/modules/ai/flow-orchestrator.service');
+    const turns: Array<{ allowed: boolean; reason?: string; out?: { id: string; callerId: string }; error?: string }> = [];
+    orchestratorChat.chat.mockImplementation(
+      async (businessId: string, _m: string, _h: unknown, _p: unknown, _ctx: unknown, _r: unknown, _a: unknown, sessionId: string | undefined, userId: string | undefined, server: any) => {
+        const decision = await oversight.evaluate(businessId, 'call_create_task', undefined, [], server?.jobRoleEnvelope);
+        const turn: (typeof turns)[number] = { allowed: decision.allowed, reason: decision.reason };
+        try {
+          const base = { surface: 'CHAT', principalUserId: userId ?? null, crew: [], sourceId: 'v21b_tc_ctc2', sessionId: sessionId ?? null };
+          // the model names A's owner as the caller; the dispatcher never reads it
+          turn.out = await run(businessId, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA }, flow.chatToolAction(base, 'call_create_task', server));
+        } catch (err) {
+          turn.error = err instanceof Error ? err.message : String(err);
+        }
+        turns.push(turn);
+        return { reply: 'stub KEY reply', sessionId: null };
+      },
+    );
+    try {
+      const before = await db.callLog.count({ where: { businessId: ID.bizA } });
+
+      // a contact-only position (posCtl; its JobRole carries the OWNER's scopes): not offered, refused, nothing written
+      const ctl = await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.ctl}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2ctl' });
+      expect(ctl.status).toBe(201);
+      expect(turns).toHaveLength(1);
+      expect(turns[0], 'contact-only: call_create_task is not offered').toMatchObject({ allowed: false });
+      expect(turns[0].error).toBe('call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)');
+      expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before);
+
+      // a membership-backed position (posFull, held by an ADMIN of A): offered, and the call log names its holder
+      const full = await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.full}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2full' });
+      expect(full.status).toBe(201);
+      expect(turns).toHaveLength(2);
+      expect(turns[1], JSON.stringify(turns[1])).toMatchObject({ allowed: true, out: { callerId: ID.full } });
+      expect(await db.callLog.findUnique({ where: { id: turns[1].out!.id } })).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA, callerId: ID.full });
+
+      // over SMS too (InboundCommunicationsService hands the bridge channel 'sms')
+      expect(await bridge.routeInboundMessage(ID.bizA, PHONE.full, 'Call Alpha tomorrow', 'sms', 'SMv21bctc2sms')).toMatchObject({ handled: true });
+      expect(turns).toHaveLength(3);
+      expect(turns[2], JSON.stringify(turns[2])).toMatchObject({ allowed: true, out: { callerId: ID.full } });
+
+      // control: a holder HTTP refuses (banned) keeps the baseline envelope: not offered, and nothing is written as anyone
+      await twilioPost(ID.bizA, { From: `whatsapp:${PHONE.banned}`, Body: 'Call Alpha tomorrow', SmsMessageSid: 'SMv21bctc2banned' });
+      expect(turns).toHaveLength(4);
+      expect(turns[3]).toMatchObject({ allowed: false });
+      expect(turns[3].out).toBeUndefined();
+      expect(await db.callLog.count({ where: { businessId: ID.bizA, callerId: { in: [ID.banned, ID.ownerA] }, createdAt: { gte: new Date(Date.now() - 60_000) } } })).toBe(0);
+      expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before + 2);
+    } finally {
+      orchestratorChat.chat.mockImplementation(async () => ({ reply: 'stub KEY reply', sessionId: null }));
+    }
+  });
 
   it("B's call script never reads a task another business put on B's contact (a row written before this repair)", async () => {
     await db.contactTask.create({ data: { id: `${P}legacy_task`, businessId: ID.bizA, contactId: ID.contactB, title: 'planted-via-own-log', status: 'OPEN' } });
@@ -786,15 +849,23 @@ describe("TD9-4 — an invoice or a quote names only the business's own contact 
 describe("V1-21c — a project's task includes read only the business's own tasks (a cross-linked row written before TD9-1)", () => {
   const planted = `${P}planted_ptask`;
   const own = `${P}own_ptask_b`;
+  // W9-KEY-DISPATCH-INCLUDES (ST-1): A's booking that names B's service and B's contact, as
+  // bookings_create_booking wrote it before TD9-3 looked them up, and A's own booking beside it.
+  const plantedBooking = `${P}planted_booking`;
+  const ownBooking = `${P}own_booking_a`;
 
   beforeAll(async () => {
     // A's task filed on B's project, as ProjectsService.addTask wrote it before TD9-1 looked the project up
     await db.projectTask.create({ data: { id: planted, businessId: ID.bizA, projectId: ID.projectB, title: 'A-CROSSLINKED-PTASK', trackedHours: 99 } });
     await db.projectTask.create({ data: { id: own, businessId: ID.bizB, projectId: ID.projectB, title: 'B-OWN-PTASK', trackedHours: 2 } });
+    const at = (days: number) => new Date(Date.now() + days * 24 * 3600_000);
+    await db.booking.create({ data: { id: plantedBooking, businessId: ID.bizA, contactId: ID.contactB, serviceId: ID.serviceB, startTime: at(40), endTime: at(40.05) } });
+    await db.booking.create({ data: { id: ownBooking, businessId: ID.bizA, contactId: ID.contactA, serviceId: ID.serviceA, startTime: at(41), endTime: at(41.05) } });
   });
   afterAll(async () => {
     // Raw SQL: ProjectTask is soft-deleted, so deleteMany would only set deletedAt and leave the rows.
     await db.$executeRaw`DELETE FROM project_tasks WHERE id IN (${planted}, ${own})`;
+    await db.$executeRaw`DELETE FROM bookings WHERE id IN (${plantedBooking}, ${ownBooking})`;
   });
 
   it('getProject, listProjects and updateProject return the project with its own tasks only', async () => {
@@ -815,23 +886,62 @@ describe("V1-21c — a project's task includes read only the business's own task
   });
 
   // The KEY dispatcher reads these with its own queries (FlowOrchestratorService.executeToolAction,
-  // src/modules/ai/flow-orchestrator.service.ts), which V1-21c's write set does not include. Over
-  // rows written before the TD9 repairs (V1-21c review ST-1, confirmed by running):
-  //   projects_list_tasks for A returns B's project name through the task's to-one project include
+  // src/modules/ai/flow-orchestrator.service.ts), which V1-21c's write set did not include. Over
+  // rows written before the TD9 repairs (V1-21c review ST-1, confirmed by running at V1-21c):
+  //   projects_list_tasks for A returned B's project name through the task's to-one project include
   //     (a row like `planted`);
-  //   bookings_list_bookings for A returns B's service name AND B's contact (firstName, lastName,
+  //   bookings_list_bookings for A returned B's service name AND B's contact (firstName, lastName,
   //     email) through a booking's to-one service and contact includes (an A booking that names
-  //     serviceB and contactB);
-  //   projects_list for B counts A's task in projectB's taskCount (its _count's where names no
+  //     serviceB and contactB: `plantedBooking`);
+  //   projects_list for B counted A's task in projectB's taskCount (its _count's where named no
   //     business).
   // A to-one include cannot be filtered, and binding the booking's where on one relation
-  // ({ service: { businessId } }) would leave the other leaking: each to-one relation has to be
-  // read with its businessId and dropped when it is not the caller's (or the row left out by a
-  // where on every relation it includes), and the _count's where has to name businessId.
-  it.todo("projects_list_tasks does not read another business's project through a task's project include (dispatcher outside the V1-21c write set, ST-1)");
-  it.todo("bookings_list_bookings does not read another business's service through a booking's service include (dispatcher outside the V1-21c write set, ST-1)");
-  it.todo("bookings_list_bookings does not read another business's contact through a booking's contact include (dispatcher outside the V1-21c write set, ST-1)");
-  it.todo("projects_list does not count another business's task in a project's taskCount (dispatcher outside the V1-21c write set, ST-1)");
+  // ({ service: { businessId } }) would leave the other leaking: each to-one relation is read with
+  // its businessId and dropped when it is not the caller's (ownRelations), and the _count's where
+  // names businessId. V1-21d made those dispatcher repairs; W9-KEY-DISPATCH-INCLUDES turns the four
+  // V1-21c todos into live pins over the real dispatcher on this real database (green on its base,
+  // no source change: flow-dispatcher-tenant.spec.ts pins the same reads statically).
+  it("ST-1 (W9-KEY-DISPATCH-INCLUDES, was it.todo): projects_list_tasks does not read another business's project through a task's project include", async () => {
+    for (const args of [{}, { projectId: ID.projectB }]) {
+      const out = await run(ID.bizA, 'projects_list_tasks', args);
+      const row = out.tasks.find((t: { id: string }) => t.id === planted);
+      expect(row, `A's own task is listed (${JSON.stringify(args)})`).toBeDefined();
+      expect(row.project, JSON.stringify(args)).toBeNull();
+      expect(JSON.stringify(out), JSON.stringify(args)).not.toContain(SECRET.project);
+    }
+    // control: B reads its own task with its own project, and never A's task filed there
+    const b = await run(ID.bizB, 'projects_list_tasks', { projectId: ID.projectB });
+    expect(b.tasks.map((t: { id: string }) => t.id)).toEqual([own]);
+    expect(b.tasks[0].project).toMatchObject({ id: ID.projectB, name: SECRET.project });
+  });
+
+  it("ST-1 (W9-KEY-DISPATCH-INCLUDES, was it.todo): bookings_list_bookings does not read another business's service through a booking's service include", async () => {
+    const out = await run(ID.bizA, 'bookings_list_bookings', { limit: 100 });
+    const row = out.bookings.find((b: { id: string }) => b.id === plantedBooking);
+    expect(row, "A's own booking is listed").toBeDefined();
+    expect(row.service).toBeNull();
+    expect(JSON.stringify(out)).not.toContain(SECRET.service);
+    // control: A's own booking names its own service
+    expect(out.bookings.find((b: { id: string }) => b.id === ownBooking).service).toMatchObject({ name: 'A-OWN-SERVICE' });
+  });
+
+  it("ST-1 (W9-KEY-DISPATCH-INCLUDES, was it.todo): bookings_list_bookings does not read another business's contact through a booking's contact include", async () => {
+    const out = await run(ID.bizA, 'bookings_list_bookings', { limit: 100 });
+    const row = out.bookings.find((b: { id: string }) => b.id === plantedBooking);
+    expect(row, "A's own booking is listed").toBeDefined();
+    expect(row.contact).toBeNull();
+    expect(JSON.stringify(out)).not.toContain(SECRET.contact);
+    expect(JSON.stringify(out)).not.toContain('Bravo');
+    // control: A's own booking names its own contact
+    expect(out.bookings.find((b: { id: string }) => b.id === ownBooking).contact).toMatchObject({ firstName: 'Vtwentyonebee', lastName: 'Alpha' });
+  });
+
+  it("ST-1 (W9-KEY-DISPATCH-INCLUDES, was it.todo): projects_list does not count another business's task in a project's taskCount", async () => {
+    // premise: projectB carries two live tasks, A's planted one and B's own
+    expect(await db.projectTask.count({ where: { projectId: ID.projectB, deletedAt: null } })).toBe(2);
+    const out = await run(ID.bizB, 'projects_list', {});
+    expect(out.projects.find((p: { id: string }) => p.id === ID.projectB)).toMatchObject({ name: SECRET.project, taskCount: 1 });
+  });
 });
 
 // ─── V1-21c review ST-2: a project's goal, written and read ──────────────────
