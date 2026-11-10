@@ -27,6 +27,10 @@
  * KeyCortexPlannerService.executePlan (records the plan id: running the plan is not this packet's).
  * RK-03 (W7-AUTH-DOCS-REKEY, D-73) reads docs/auth-pathway.md, identity.service.ts and schema.prisma
  * from the repository and runs the doc's statements, as written, against the real database.
+ * RK-04 (W7-AUTH-DOCS-REKEY review SEC-ADR-1, D-93) stores the connector configuring member and default
+ * owner through the real writers (GoogleContactsSyncService, OutlookContactsSyncService and
+ * ConnectorFormMappingService), follows step 4 of that doc as written, and checks syncPrincipals and the
+ * CRM create door (CrmService.assertCanCreateContacts, real) for the runs the configuration binds.
  *
  * Fixtures: prefix `v92d_` (registered in test/helpers/fixture-prefixes.json), hard-deleted by raw SQL
  * with sqlLikePrefix() in beforeAll and afterAll. No $transaction wrapping. Cases tagged RED-BEFORE fail
@@ -34,7 +38,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
@@ -63,6 +67,7 @@ const OBJECTIVE = {
 };
 
 let db: any;
+let prisma: any;
 let identity: any;
 let agentTriggers: any;
 let cortexTriggers: any;
@@ -76,12 +81,46 @@ async function cleanup() {
     `DELETE FROM ai_goals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM key_cortex_trigger_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
+}
+
+const REPO = path.resolve(__dirname, '../../..');
+const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+/** Step 4 of the manual operator re-key in docs/auth-pathway.md ("Fixed by R0-SEC-01"), as the doc has it. */
+function docStep4(): string {
+  const doc = readFileSync(path.join(REPO, 'docs/auth-pathway.md'), 'utf8');
+  const heading = doc.indexOf('**Moving an account to a new subject is now a manual operator step.**');
+  expect(heading).toBeGreaterThan(0);
+  const section = doc.slice(heading);
+  const step4At = section.search(/^\s+4\. /m);
+  const step5At = section.search(/^\s+5\. /m);
+  expect(step4At).toBeGreaterThan(0);
+  expect(step5At).toBeGreaterThan(step4At);
+  return section.slice(step4At, step5At);
+}
+
+/** Every path in `value` (a JSON document) whose value is the string `id`, dot-joined. */
+function pathsHolding(value: unknown, id: string, at = ''): string[] {
+  const join = (key: string | number) => (at ? `${at}.${key}` : String(key));
+  if (value === id) return [at];
+  if (Array.isArray(value)) return value.flatMap((v, i) => pathsHolding(v, id, join(i)));
+  if (value && typeof value === 'object') return Object.entries(value).flatMap(([k, v]) => pathsHolding(v, id, join(k)));
+  return [];
+}
+
+/** `value` (a JSON document) with every string equal to `from` replaced by `to`. */
+function replacingId(value: unknown, from: string, to: string): unknown {
+  if (value === from) return to;
+  if (Array.isArray(value)) return value.map((v) => replacingId(v, from, to));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replacingId(v, from, to)]));
+  return value;
 }
 
 /** The members recorded on the plans the agent triggers of `businessId` wrote, by objective. */
@@ -106,7 +145,7 @@ beforeAll(async () => {
   const { KeyCortexTriggerService } = await import('../src/modules/key-cortex/key-cortex-trigger.service');
   const { KeyCortexPlannerService } = await import('../src/modules/key-cortex/key-cortex-planner.service');
 
-  const prisma = new PrismaService();
+  prisma = new PrismaService();
   identity = new IdentityService(prisma, {} as any);
   (identity as any).logger = new Logger('v92d-identity');
 
@@ -251,9 +290,6 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
   // Every $executeRaw and updateMany in reconcileUserId has to be parsed, so a re-point added there
   // without a line in the doc fails here.
   it("RK-03 RED-BEFORE (W7-AUTH-DOCS-REKEY; D-73; review SEC-RKC-1, RK-CR-1): the manual operator re-key in docs/auth-pathway.md (step 4) re-points $createdBy in agent_triggers.condition and key_cortex_trigger_rules.filter_json with the same jsonb_set statements reconcileUserId runs, names every column reconcileUserId re-points and every User foreign key it leaves, and its statements run as written re-point a rule's creator in both stores and leave the other rules alone", async () => {
-    const REPO = path.resolve(__dirname, '../../..');
-    const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
-
     // reconcileUserId as the code has it: from its signature to the next class member.
     const service = readFileSync(path.join(REPO, 'apps/server/src/modules/identity/identity.service.ts'), 'utf8');
     const creatorKey = /const TRIGGER_CREATOR_KEY = '([^']+)';/.exec(service)?.[1];
@@ -303,15 +339,7 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     expect(leftByReconcile.length).toBeGreaterThan(0);
 
     // Step 4 of the manual operator re-key, as the doc has it.
-    const doc = readFileSync(path.join(REPO, 'docs/auth-pathway.md'), 'utf8');
-    const heading = doc.indexOf('**Moving an account to a new subject is now a manual operator step.**');
-    expect(heading).toBeGreaterThan(0);
-    const section = doc.slice(heading);
-    const step4At = section.search(/^\s+4\. /m);
-    const step5At = section.search(/^\s+5\. /m);
-    expect(step4At).toBeGreaterThan(0);
-    expect(step5At).toBeGreaterThan(step4At);
-    const step4 = section.slice(step4At, step5At);
+    const step4 = docStep4();
 
     for (const col of repointed) expect(step4, `step 4 names \`${col}\` (reconcileUserId re-points it)`).toContain(`\`${col}\``);
     for (const col of jsonColumns) expect(step4, `step 4 names \`${col}\` (the trigger creator)`).toContain(`\`${col}\``);
@@ -354,5 +382,138 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
       cortexOther: { kind: 'v92d', $createdBy: ID.other },
       cortexLegacy: { kind: 'v92d' },
     });
+  });
+
+  // Review SEC-ADR-1, closed by the W7-AUTH-DOCS-REKEY repair (D-93). Step 4 says it re-points every
+  // reference to the old id. Three more member ids live inside JSON, in connector_statuses.metadata,
+  // where schema.prisma does not show them either: the configuring member a contact sync rules save
+  // records (rulesConfiguredBy, on the google_contacts and outlook_contacts rows; W6-CONNECT-TAG-MERGE),
+  // the default owner those rules give new contacts (mappingRules.defaultOwnerId), and the member who
+  // saved a connector form mapping (formMappings.<form id>.configuredBy, on the typeform, jotform and
+  // webhook_form rows). D-93: a contact sync or form backfill runs with its configuring member among the
+  // members every write must be allowed for (syncPrincipals), and resolveCrmAccess refuses a deleted id.
+  // So after step 4 as it was written, every contact sync and form backfill of the business created and
+  // updated nothing, whoever started it (the owner and a system run included), until someone saved the
+  // rules again. This case stores those ids through the real writers, follows step 4 as written (every
+  // sql block in it, with the old and new id filled in), and expects:
+  //  - no JSON path of the business's connector rows to hold the old id, the same paths to hold the new
+  //    one, and every other value (another member's mapping, another business's rules) as it was;
+  //  - a system run, the member's own run and the owner's run of each sync and backfill to have the new
+  //    id as their configuring member and to be allowed to create contacts, and the default owner to
+  //    apply again.
+  // Every server file that records a configuring member or a default owner (configuringMember,
+  // settingDefaultOwnerId) must be one this case drives, so a new writer without a line in step 4 fails
+  // here.
+  it("RK-04 RED-BEFORE (W7-AUTH-DOCS-REKEY; D-93; review SEC-ADR-1): the manual operator re-key in docs/auth-pathway.md (step 4), followed as written, re-points the connector configuring member (connector_statuses.metadata rulesConfiguredBy and formMappings.<form id>.configuredBy) and the contact sync default owner (mappingRules.defaultOwnerId) the real writers stored, leaves every other value of those rows as it was, and a system run, the member's own run and the owner's run of each contact sync and form backfill may create contacts again", async () => {
+    const { GoogleContactsSyncService, RULES_CONFIGURED_BY, syncPrincipals, membersMayCreateContacts, memberDefaultOwnerId } =
+      await import('../src/modules/connect/google-contacts-sync.service');
+    const { OutlookContactsSyncService } = await import('../src/modules/connect/outlook-contacts-sync.service');
+    const { ConnectorFormMappingService } = await import('../src/modules/connect/connector-form-mapping.service');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { runWithTenant } = await import('../src/core/tenant/tenant-context');
+
+    // Every server file that records a configuring member or a default owner is one this case drives.
+    const SRC = path.join(REPO, 'apps/server/src');
+    const writers = (readdirSync(SRC, { recursive: true }) as string[])
+      .filter((f) => f.endsWith('.ts') && !/\.(?:spec|test)\.ts$/.test(f))
+      .filter((f) => /\b(?:configuringMember|settingDefaultOwnerId)\(/.test(readFileSync(path.join(SRC, f), 'utf8')))
+      .map((f) => f.split(path.sep).join('/'))
+      .sort();
+    expect(writers).toEqual([
+      'modules/connect/connector-form-mapping.service.ts',
+      'modules/connect/google-contacts-sync.service.ts',
+      'modules/connect/outlook-contacts-sync.service.ts',
+    ]);
+
+    // An ADMIN member of biz saves the contact sync rules (naming themselves the default owner) and two
+    // form mappings; the owner saves another mapping and biz2's rules.
+    const CFG_OLD = `${P}cfg_old`;
+    const CFG_NEW = `${P}cfg_new`;
+    const CFG_EMAIL = `${P}cfg@test.local`;
+    await db.user.create({ data: { id: CFG_OLD, email: CFG_EMAIL, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_cfg_biz`, userId: CFG_OLD, businessId: ID.biz, role: 'ADMIN' } });
+    const google = new GoogleContactsSyncService(prisma, {} as any, {} as any);
+    const outlook = new OutlookContactsSyncService(prisma, {} as any, {} as any);
+    const forms = new ConnectorFormMappingService(prisma, {} as any);
+    const FORM = { member: `${P}form_member`, owner: `${P}form_owner` };
+    const fieldMappings = [{ questionId: 'q_email', crmField: 'email' }] as any;
+    await google.saveMappingRules(ID.biz, { defaultTags: ['v92d'], defaultOwnerId: CFG_OLD }, CFG_OLD);
+    await outlook.saveMappingRules(ID.biz, { defaultTags: ['v92d'], defaultOwnerId: CFG_OLD }, CFG_OLD);
+    await forms.saveMapping(ID.biz, 'typeform', FORM.member, { fieldMappings }, CFG_OLD);
+    await forms.saveMapping(ID.biz, 'typeform', FORM.owner, { fieldMappings }, ID.owner);
+    await forms.saveMapping(ID.biz, 'jotform', FORM.member, { fieldMappings }, CFG_OLD);
+    await google.saveMappingRules(ID.biz2, { defaultTags: ['v92d'], defaultOwnerId: ID.owner }, ID.owner);
+
+    const connectorRows = async () =>
+      (await db.connectorStatus.findMany({
+        where: { businessId: { in: [ID.biz, ID.biz2] } },
+        select: { businessId: true, connectorType: true, metadata: true },
+      })).sort((a: any, b: any) => `${a.businessId} ${a.connectorType}`.localeCompare(`${b.businessId} ${b.connectorType}`));
+    const holding = (rows: any[], id: string) =>
+      rows.flatMap((r) => pathsHolding(r.metadata, id).map((p) => `${r.businessId.slice(P.length)} ${r.connectorType} ${p}`)).sort();
+    const before = await connectorRows();
+    expect(holding(before, CFG_OLD)).toEqual([
+      'biz google_contacts mappingRules.defaultOwnerId',
+      `biz google_contacts ${RULES_CONFIGURED_BY}`,
+      `biz jotform formMappings.${FORM.member}.configuredBy`,
+      'biz outlook_contacts mappingRules.defaultOwnerId',
+      `biz outlook_contacts ${RULES_CONFIGURED_BY}`,
+      `biz typeform formMappings.${FORM.member}.configuredBy`,
+    ]);
+
+    // Step 4 names these keys and carries the statements for them.
+    const step4 = docStep4();
+    for (const name of ['connector_statuses.metadata', RULES_CONFIGURED_BY, 'mappingRules.defaultOwnerId', 'formMappings.<form id>.configuredBy']) {
+      expect(step4, `step 4 names \`${name}\``).toContain(`\`${name}\``);
+    }
+    const blocks = [...step4.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]);
+    expect(blocks.some((b) => b.includes('connector_statuses')), 'step 4 carries a sql block for connector_statuses').toBe(true);
+
+    // Step 4 as written, in its order: free the address, create the new row, re-point (the column this
+    // member has, then every statement step 4 gives), delete the old row.
+    await db.user.update({ where: { id: CFG_OLD }, data: { email: `${P}cfg_parked@local.invalid` } });
+    await db.user.create({ data: { id: CFG_NEW, email: CFG_EMAIL, role: 'USER' } });
+    await db.membership.updateMany({ where: { userId: CFG_OLD }, data: { userId: CFG_NEW } });
+    for (const block of blocks) {
+      for (const statement of block.split(';').map(squash).filter(Boolean)) {
+        await db.$executeRawUnsafe(statement.split("'<old id>'").join(`'${CFG_OLD}'`).split("'<new id>'").join(`'${CFG_NEW}'`));
+      }
+    }
+    await db.user.delete({ where: { id: CFG_OLD } });
+
+    const after = await connectorRows();
+    expect(holding(after, CFG_OLD), 'no connector row still names the deleted id').toEqual([]);
+    expect(after).toEqual(before.map((r: any) => ({ ...r, metadata: replacingId(r.metadata, CFG_OLD, CFG_NEW) })));
+
+    // The runs the configuration binds: a system run, the member's own run and the owner's run.
+    const crm = {
+      assertCanCreateContacts: (businessId: string, member: string) =>
+        (CrmService.prototype as any).assertCanCreateContacts.call({ prisma }, businessId, member),
+    } as any;
+    const metadataOf = (connectorType: string) => after.find((r: any) => r.businessId === ID.biz && r.connectorType === connectorType).metadata;
+    const configured: Array<[string, unknown]> = [
+      ['google_contacts', metadataOf('google_contacts')[RULES_CONFIGURED_BY]],
+      ['outlook_contacts', metadataOf('outlook_contacts')[RULES_CONFIGURED_BY]],
+      ['typeform', metadataOf('typeform').formMappings[FORM.member].configuredBy],
+      ['jotform', metadataOf('jotform').formMappings[FORM.member].configuredBy],
+    ];
+    for (const [connector, configuredBy] of configured) {
+      const runs = {
+        system: await syncPrincipals(prisma, ID.biz, configuredBy),
+        member: await runWithTenant(ID.biz, CFG_NEW, () => syncPrincipals(prisma, ID.biz, configuredBy)),
+        owner: await runWithTenant(ID.biz, ID.owner, () => syncPrincipals(prisma, ID.biz, configuredBy)),
+      };
+      expect(Object.fromEntries(Object.entries(runs).map(([run, p]) => [run, p.members])), connector).toEqual({
+        system: [CFG_NEW],
+        member: [CFG_NEW],
+        owner: [ID.owner, CFG_NEW],
+      });
+      for (const [run, p] of Object.entries(runs)) {
+        expect(await membersMayCreateContacts(crm, ID.biz, p.members), `${connector} ${run} run may create contacts`).toBe(true);
+      }
+    }
+    for (const connector of ['google_contacts', 'outlook_contacts']) {
+      expect(await memberDefaultOwnerId(prisma, ID.biz, metadataOf(connector).mappingRules.defaultOwnerId), connector).toBe(CFG_NEW);
+    }
   });
 });
