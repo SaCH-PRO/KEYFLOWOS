@@ -66,6 +66,24 @@
  *     the registry's thread-less row of the same call instead of adding a
  *     second one.
  *
+ * W9-KEY-CORTEX-AUDIT (FOLLOW10) turned the four it.todo cases live:
+ *   - trackActionExecution (the legacy gate's audit door) names every required
+ *     column: the V1-02b review already named the session's business and
+ *     actor, so that case is a live regression pin with no source change;
+ *   - the callers name their actor and command thread: the chat's bridged
+ *     organ tools (flow-orchestrator executeBridgedCortexTool) pass the
+ *     dispatch's member, session and correlation (and an approved proposal's
+ *     id), and cortex.execute_tool (handleExecuteTool) passes its own call's
+ *     actor and thread to the tool it runs, so a call outside a request is
+ *     attributed too;
+ *   - POST /cortex/chat reads episodic memory as the requesting member may
+ *     (buildMemoryContext): the member's own AiExecutionLog and CortexActionLog
+ *     rows (MemoryRetrievalOptions.userId), and none at all when the session
+ *     names no member of the business (fail closed);
+ *   - lifecycle.recordExecution's AiExecutionLog row names only columns the
+ *     model has (no startedAt), so it is written and cortex.action_executed is
+ *     emitted; its payloads are bounded as AiExecutionLogService bounds its own.
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -89,6 +107,12 @@ const ID = {
   biz2: `${P}biz2`,
   /** A business with no row: an audit insert for it fails on the business foreign key. */
   missingBiz: `${P}biz_missing`,
+  /** W9-KEY-CORTEX-AUDIT: a business whose episodic memory is read into a member's prompt (owned by ID.owner, no membership row). */
+  memBiz: `${P}biz_mem`,
+  /** W9-KEY-CORTEX-AUDIT: a STAFF member of ID.memBiz. */
+  member: `${P}member`,
+  /** W9-KEY-CORTEX-AUDIT: a user with no membership in ID.memBiz (and not its owner). */
+  outsider: `${P}outsider`,
 };
 
 const TOOL_OK = 'v19c.create_ticket';
@@ -107,6 +131,10 @@ const TOOL_BRIDGED_NAMED = 'v19c.inbox_read_thread_named';
 /** Run by a tool loop that has no turn identity (CR-V19c-1). */
 const TOOL_NOTURN = 'v19c.no_turn_ticket';
 const TOOL_NOTURN_TWICE = 'v19c.no_turn_twice';
+/** W9-KEY-CORTEX-AUDIT: the organ tool the chat's inbox_read_thread is bridged to (CORTEX_TOOL_BRIDGE). */
+const TOOL_ORGAN_THREAD = 'key_inbox.get_thread';
+/** W9-KEY-CORTEX-AUDIT: the tool cortex.execute_tool runs by name. */
+const TOOL_EXEC_INNER = 'v19c.exec_inner_ticket';
 
 /** Personal data a tool call carries in its input; no audit column may hold it. */
 const PII_EMAIL = `${P}person@example.test`;
@@ -115,8 +143,11 @@ const PII_PHONE = '+1868555000';
 
 let db: any;
 let app: any;
+let prisma: any;
 let registry: any;
 let lifecycle: any;
+/** W9-KEY-CORTEX-AUDIT: the legacy facade, its cortex.* tools registered into `registry`. */
+let actions: any;
 let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
 
 async function cleanup() {
@@ -157,7 +188,7 @@ beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({ providers: [PrismaService] }).compile();
   app = moduleRef;
   await app.init();
-  const prisma = moduleRef.get(PrismaService);
+  prisma = moduleRef.get(PrismaService);
 
   const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
   const safety = { check: async () => ({ allowed: true }), recordExecution: async () => undefined };
@@ -215,6 +246,16 @@ beforeAll(async () => {
   registry.register(toolDef(TOOL_BRIDGED_NAMED, thread_));
   registry.register(toolDef(TOOL_NOTURN, async () => ({ success: true, data: { ticketId: 'T-9' } })));
   registry.register(toolDef(TOOL_NOTURN_TWICE, async () => ({ success: true, data: { ticketId: 'T-10' } })));
+  // W9-KEY-CORTEX-AUDIT: a stand-in for the inbox organ's tool, under the name the chat's bridge dispatches to.
+  registry.register(toolDef(TOOL_ORGAN_THREAD, thread_));
+  registry.register(toolDef(TOOL_EXEC_INNER, async () => ({ success: true, data: { ticketId: 'T-12' } })));
+
+  // W9-KEY-CORTEX-AUDIT: the legacy facade registers its cortex.* tools (cortex.execute_tool among
+  // them) into the same registry, as onModuleInit does in the app. Positionally, as Nest constructs
+  // it: prisma, the AI-module tool registry, the command service, the canonical registry.
+  const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
+  actions = new KeyCortexActionsService(prisma, undefined, {} as any, registry);
+  actions.onModuleInit();
 
   const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
   const redis = { get: async () => null, set: async () => undefined };
@@ -225,6 +266,32 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'V19C Biz', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.biz2, name: 'V19C Biz 2', ownerId: ID.owner } });
+
+  // W9-KEY-CORTEX-AUDIT: episodic memory of three people in one business, and one business-wide fact.
+  await db.user.create({ data: { id: ID.member, email: `${P}member@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.outsider, email: `${P}outsider@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.memBiz, name: 'V19C Memory Biz', ownerId: ID.owner } });
+  await db.membership.create({ data: { userId: ID.member, businessId: ID.memBiz, role: 'STAFF' } });
+  const episode = (userId: string, label: string) => ({
+    businessId: ID.memBiz,
+    userId,
+    sessionId: `${P}sess_mem_${label}`,
+    actionType: `v19c.mem.${label}_action`,
+    status: 'success',
+    description: `v19c memory: the ${label}'s own episode`,
+  });
+  await db.cortexActionLog.createMany({
+    data: [episode(ID.owner, 'owner'), episode(ID.member, 'member'), episode(ID.outsider, 'outsider')],
+  });
+  await db.aiExecutionLog.createMany({
+    data: [
+      { businessId: ID.memBiz, userId: ID.owner, action: 'v19c.mem.owner_exec', success: true, rationale: 'v19c memory: the owner asked' },
+      { businessId: ID.memBiz, userId: ID.member, action: 'v19c.mem.member_exec', success: true, rationale: 'v19c memory: the member asked' },
+    ],
+  });
+  await db.aiMemory.create({
+    data: { businessId: ID.memBiz, category: 'fact', key: `${P}shared_fact`, value: 'v19c memory: a business-wide fact' },
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -389,12 +456,39 @@ describe('static: every cortexActionLog write names only the model\'s fields', (
     expect(missing).toEqual([]);
   });
 
-  it.todo(
-    'key-cortex-actions.service.ts trackActionExecution names every required column: it names no businessId, so ' +
-      'Prisma refuses its row ("Argument `business` is missing") and the catch logs it. Out of the V1-19c write set ' +
-      '(V1-02b owns that file). Note for its fix: executeAction already runs through the registry, which now audits ' +
-      'the execution, so a repaired trackActionExecution would write a second row for the same call.',
-  );
+  // W9-KEY-CORTEX-AUDIT: satisfied before this packet by the V1-02b review (SEC-V102b-1, CR-V102b-1), which
+  // named the session's business and actor on the legacy gate's row; a live regression pin, no source change.
+  // The gate's row (its outcome, keyed CREATE_TASK and so on) and the registry's row of the tool the gate
+  // runs (cortex.create_task) stay two envelopes: V1-02b-DB05 pins the gate's row of a run action.
+  it('key-cortex-actions.service.ts trackActionExecution names every required column: its row names the session\'s business and actor and is written outside any tenant context (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
+    const model = await cortexActionLogModel();
+    const required = model.fields
+      .filter((f) => f.kind === 'scalar' && f.isRequired && !f.hasDefaultValue)
+      .map((f) => f.name);
+    const creates = scanCortexActionLogUses().writes.filter(
+      (w) => w.method === 'create' && /key-cortex-actions\.service\.ts$/.test(w.file),
+    );
+    expect(creates).toHaveLength(1);
+    expect(creates.flatMap((w) => required.filter((r) => !w.fields.includes(r)))).toEqual([]);
+    expect(creates[0].fields).toEqual(expect.arrayContaining(['businessId', 'userId']));
+
+    // Real database, no ambient tenant (the gate also runs from jobs): the row is written and attributed
+    // (in ID.biz2: the fixture sanity case below still finds ID.biz without a row).
+    const sessionId = `${P}sess_track_${++seq}`;
+    const errorSpy = vi.spyOn(actions.logger, 'error');
+    try {
+      await actions.trackActionExecution(
+        { actionType: 'CREATE_TASK', status: 'blocked', description: 'v19c: refused by the gate', error: 'v19c: denied', requiresApproval: false },
+        { id: sessionId, businessId: ID.biz2, userId: ID.owner },
+      );
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+    const rows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz2, sessionId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ businessId: ID.biz2, userId: ID.owner, sessionId, actionType: 'CREATE_TASK', status: 'blocked', error: 'v19c: denied' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -610,7 +704,7 @@ describe('the row holds no value of the call input, and is bounded (SEC-V19c-1)'
           startedAt: new Date(now - 1),
           completedAt: new Date(now),
         })
-        .catch(() => undefined); // its AiExecutionLog write is refused (it.todo below); the row is what is pinned
+        .catch(() => undefined); // the CortexActionLog row is what is pinned here (its AiExecutionLog row: W9-KEY-CORTEX-AUDIT cases below)
     };
     await record(small, { contact: { id: `${P}contact_ref`, email: PII_EMAIL } });
     await record(big, { contact: { email: PII_EMAIL }, blob: 'y'.repeat(10_000) });
@@ -666,21 +760,106 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(rows[0].userId).toBe(named);
   });
 
-  it.todo(
-    'the callers name their actor and command thread: flow-orchestrator.service.ts executeBridgedCortexTool ' +
-      '(registry.execute(cortexName, { businessId, preApproved: true }, args)) and key-cortex-actions.service.ts ' +
-      'handleExecuteTool ({ businessId, autonomyLevel: 2 }) pass no userId, sessionId or correlationId, so a call ' +
-      'outside a request (a job, a queue worker) still has a row with userId null and sessionId "unknown". Both files ' +
-      'are outside the V1-19c write set (V1-KEY2 group owns them).',
-  );
+  it('the callers name their actor and command thread: flow-orchestrator.service.ts executeBridgedCortexTool, outside any request, names the dispatch\'s member, session, correlation and approved proposal on the row (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    // The dispatcher with the real registry behind its module ref, as cortex-tool-bridge.spec.ts builds it.
+    const orchestrator: any = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      moduleRef: { get: () => registry },
+    });
+    const readThread = (action: Record<string, unknown>) =>
+      orchestrator.executeToolAction(ID.biz, 'inbox_read_thread', { threadId: `${P}thread_w9` }, action);
 
-  it.todo(
-    "POST /cortex/chat reads episodic memory business-wide: key-cortex-prompt-context.service.ts buildMemoryContext " +
-      'calls UnifiedMemoryRetrievalService.retrieveContext with no userId, so every member\'s prompt gets the ' +
-      "CortexActionLog and AiExecutionLog rows of every other member's calls (tool answers included, which can hold " +
-      'third-party message bodies). MemoryRetrievalOptions.userId documents that omitting it is wrong for a prompt. ' +
-      'Outside the V1-19c write set.',
-  );
+    // A member's own chat turn: its principal and the chat session (the chat sets no correlation id).
+    const chatSession = `${P}sess_chat_bridge_${++seq}`;
+    await readThread({ surface: 'CHAT', principalUserId: ID.owner, sessionId: chatSession, sourceId: `${P}tc_1` });
+    // A KEY-cortex turn's bridged call: the member the turn runs for, and the turn's thread.
+    const t = thread('bridge');
+    await readThread({ surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.member, sessionId: t.sessionId, correlationId: t.correlationId });
+    // An approved proposal: the member it runs for, and the proposal it executes.
+    const proposalId = `${P}proposal_bridge_${++seq}`;
+    await readThread({ surface: 'PROPOSAL', actionId: proposalId, onBehalfOfUserId: ID.owner });
+
+    const chatRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, sessionId: chatSession } });
+    expect(chatRows).toHaveLength(1);
+    expect(chatRows[0]).toMatchObject({ userId: ID.owner, sessionId: chatSession, status: 'success' });
+
+    const turnRows = await rowsFor(t.correlationId);
+    expect(turnRows).toHaveLength(1);
+    expect(turnRows[0]).toMatchObject({ actionType: TOOL_ORGAN_THREAD, userId: ID.member, sessionId: t.sessionId, correlationId: t.correlationId });
+
+    const proposalRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, proposalId } });
+    expect(proposalRows).toHaveLength(1);
+    expect(proposalRows[0]).toMatchObject({ userId: ID.owner, proposalId });
+
+    // No row of these calls is left unattributed.
+    const unattributed = await db.cortexActionLog.count({ where: { businessId: ID.biz, actionType: TOOL_ORGAN_THREAD, userId: null } });
+    expect(unattributed).toBe(0);
+  });
+
+  it('the callers name their actor and command thread: key-cortex-actions.service.ts handleExecuteTool (cortex.execute_tool), outside any request, passes its own call\'s actor and thread to the tool it runs (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
+    const t = thread('exectool');
+    const proposalId = `${P}proposal_exectool_${seq}`;
+    const result = await registry.execute(
+      'cortex.execute_tool',
+      { businessId: ID.biz, userId: ID.owner, preApproved: true, proposalId, ...t },
+      { toolName: TOOL_EXEC_INNER, toolParams: {} },
+    );
+    expect(result).toMatchObject({ success: true, data: { ticketId: 'T-12' } });
+
+    const rows = await rowsFor(t.correlationId);
+    expect(rows.map((r: any) => r.actionType).sort()).toEqual(['cortex.execute_tool', TOOL_EXEC_INNER].sort());
+    const inner = rows.find((r: any) => r.actionType === TOOL_EXEC_INNER);
+    expect(inner).toMatchObject({
+      userId: ID.owner,
+      sessionId: t.sessionId,
+      commandId: t.commandId,
+      correlationId: t.correlationId,
+      proposalId,
+      status: 'success',
+    });
+  });
+
+  // W9-KEY-CORTEX-AUDIT: the prompt-context service over the real memory store (no semantic search: the
+  // session has no message, so no query, and no embedding request is made).
+  async function memoryFor(userId: string | undefined): Promise<string> {
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    const unified = new UnifiedMemoryRetrievalService(prisma, {} as any);
+    // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
+    const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, undefined, prisma);
+    const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages: [] } as any;
+    const memory = await promptContext.buildMemoryContext(ID.memBiz, session);
+    return memory.aiMemory ?? '';
+  }
+
+  it("POST /cortex/chat reads episodic memory as the requesting member may: key-cortex-prompt-context.service.ts buildMemoryContext gives a member their own CortexActionLog and AiExecutionLog rows, not another member's (W9-KEY-CORTEX-AUDIT, was it.todo)", async () => {
+    const member = await memoryFor(ID.member);
+    expect(member).toContain('v19c.mem.member_action');
+    expect(member).toContain('v19c.mem.member_exec');
+    expect(member).not.toContain('v19c.mem.owner_action');
+    expect(member).not.toContain('v19c.mem.owner_exec');
+    expect(member).not.toContain('v19c.mem.outsider_action');
+    // Business-wide memory is not narrowed.
+    expect(member).toContain('v19c memory: a business-wide fact');
+
+    // The owner by Business.ownerId (no membership row) is a member of their business: their own rows only.
+    const owner = await memoryFor(ID.owner);
+    expect(owner).toContain('v19c.mem.owner_action');
+    expect(owner).toContain('v19c.mem.owner_exec');
+    expect(owner).not.toContain('v19c.mem.member_action');
+    expect(owner).not.toContain('v19c.mem.member_exec');
+  });
+
+  it('W9-KEY-CORTEX-AUDIT buildMemoryContext fails closed: a session whose user is no member of the business, or that names no user, reads no episodic memory at all', async () => {
+    for (const userId of [ID.outsider, undefined]) {
+      const memory = await memoryFor(userId);
+      expect(memory).not.toContain('[cortex_action_log]');
+      expect(memory).not.toContain('[ai_execution_log]');
+      // Its own row in a business it is no member of is not read either.
+      expect(memory).not.toContain('v19c.mem.outsider_action');
+      expect(memory).toContain('v19c memory: a business-wide fact');
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -767,12 +946,104 @@ describe('the tool loop: registry.execute then lifecycle.recordExecution for the
     expect(JSON.stringify(rows[0])).not.toContain(PII_EMAIL);
   });
 
-  it.todo(
-    'lifecycle.recordExecution writes its AiExecutionLog row: the write names startedAt, which AiExecutionLog does not ' +
-      'have, so Prisma refuses it, recordExecution rejects and cortex.action_executed is never emitted. Not a ' +
-      'CortexActionLog writer, and AiExecutionLog rows feed the daily action caps (agent-trigger, journey-orchestrator, ' +
-      'key-cortex-executor), so turning them on is a follow-up with its own ruling, not part of V1-19c.',
-  );
+  it('lifecycle.recordExecution writes its AiExecutionLog row: the write names only columns AiExecutionLog has (no startedAt), so the row is written, recordExecution resolves and cortex.action_executed is emitted (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
+    // Static: the lifecycle's aiExecutionLog writes name only the model's fields (Prisma's own DMMF).
+    const { Prisma } = await import('@prisma/client');
+    const model = (Prisma as any).dmmf.datamodel.models.find((m: any) => m.name === 'AiExecutionLog');
+    const columns = new Set<string>(model.fields.map((f: any) => f.name));
+    const lifecycleFile = path.join(SRC, 'modules/key-cortex/key-cortex-lifecycle.service.ts');
+    const sf = ts.createSourceFile(lifecycleFile, readFileSync(lifecycleFile, 'utf8'), ts.ScriptTarget.Latest, true);
+    const named: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ['create', 'createMany', 'update', 'upsert'].includes(node.expression.name.text) &&
+        ts.isPropertyAccessExpression(node.expression.expression) &&
+        node.expression.expression.name.text === 'aiExecutionLog'
+      ) {
+        const arg = node.arguments[0];
+        const data = arg && ts.isObjectLiteralExpression(arg)
+          ? arg.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'data')
+          : undefined;
+        expect(data && ts.isPropertyAssignment(data) && ts.isObjectLiteralExpression(data.initializer)).toBe(true);
+        for (const p of ((data as ts.PropertyAssignment).initializer as ts.ObjectLiteralExpression).properties) {
+          expect(ts.isSpreadAssignment(p)).toBe(false);
+          if (p.name && ts.isIdentifier(p.name)) named.push(p.name.text);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.filter((f) => !columns.has(f))).toEqual([]);
+
+    // Real database: the row, and the event.
+    const t = thread('aiexec');
+    const emitSpy = vi.spyOn(lifecycle.eventBus, 'emit');
+    try {
+      const now = Date.now();
+      await expect(
+        lifecycle.recordExecution({
+          identity: { ...t, businessId: ID.biz, userId: ID.owner },
+          toolName: 'v19c.lifecycle_exec',
+          module: 'v19c',
+          riskTier: 1,
+          requiresApproval: false,
+          input: { ticketRef: `${P}ticket_1` },
+          output: { ticketId: 'T-11' },
+          success: true,
+          durationMs: 7,
+          startedAt: new Date(now - 7),
+          completedAt: new Date(now),
+        }),
+      ).resolves.toBeUndefined();
+      const rows = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz, correlationId: t.correlationId } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        businessId: ID.biz,
+        userId: ID.owner,
+        sessionId: t.sessionId,
+        commandId: t.commandId,
+        correlationId: t.correlationId,
+        action: 'v19c.lifecycle_exec',
+        toolName: 'v19c.lifecycle_exec',
+        module: 'v19c',
+        riskTier: 1,
+        success: true,
+        durationMs: 7,
+        actor: 'key_cortex',
+        inputSummary: { ticketRef: `${P}ticket_1` },
+        outputSummary: { ticketId: 'T-11' },
+      });
+      const events = emitSpy.mock.calls.map((c: any[]) => c[0]);
+      expect(events.some((e: any) => e.type === 'cortex.action_executed' && e.payload?.correlationId === t.correlationId)).toBe(true);
+    } finally {
+      emitSpy.mockRestore();
+    }
+  });
+
+  it('W9-KEY-CORTEX-AUDIT the lifecycle\'s AiExecutionLog payloads are bounded as AiExecutionLogService bounds its own (over 5000 characters: { _truncated, _size, _preview })', async () => {
+    const t = thread('aiexecbig');
+    const now = Date.now();
+    await lifecycle.recordExecution({
+      identity: { ...t, businessId: ID.biz, userId: ID.owner },
+      toolName: 'v19c.lifecycle_big',
+      module: 'v19c',
+      riskTier: 1,
+      requiresApproval: false,
+      input: { note: 'z'.repeat(6000) },
+      output: { blob: 'y'.repeat(200_000) },
+      success: true,
+      durationMs: 3,
+      startedAt: new Date(now - 3),
+      completedAt: new Date(now),
+    });
+    const [row] = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz, correlationId: t.correlationId } });
+    expect(row.outputSummary).toEqual({ _truncated: true, _size: 200_011, _preview: expect.any(String) });
+    expect(row.outputSummary._preview).toHaveLength(500);
+    expect(row.inputSummary).toMatchObject({ _truncated: true, _size: expect.any(Number) });
+  });
 });
 
 /**
