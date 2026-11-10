@@ -213,8 +213,17 @@ export class WebhookDispatcherService {
     });
   }
 
+  /**
+   * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): a store_order.paid is
+   * delivered only for an order stored PAID in the event's business. PATCH
+   * .../orders/:id/status 'paid' with no payment emits it for a STANDARD order
+   * stored UNPAID, and a queued or forged copy can name an unpaid order or
+   * another business's order; each went to the business's endpoints as a paid
+   * order. Nothing is sent otherwise.
+   */
   @OnEvent('store_order.paid')
   async onStoreOrderPaid(payload: StoreOrderPaidPayload) {
+    if (!(await this.isStoredOrderPaid(payload))) return;
     await this.dispatch('store_order.paid', payload.businessId, {
       order: payload.order,
     });
@@ -372,6 +381,26 @@ export class WebhookDispatcherService {
     };
     this.addLog(log);
     return log;
+  }
+
+  /** W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order the paid event names, read in its business, is stored PAID. */
+  private async isStoredOrderPaid(payload: StoreOrderPaidPayload): Promise<boolean> {
+    const orderId = (payload?.order as { id?: unknown } | undefined)?.id;
+    if (typeof orderId !== 'string' || !orderId || !payload?.businessId) return false;
+    try {
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: orderId, businessId: payload.businessId },
+        select: { paymentStatus: true },
+      });
+      if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
+      this.logger.warn(
+        `store_order.paid for order ${orderId} not stored PAID in business ${payload.businessId} (${stored ? stored.paymentStatus : 'not found'}); no webhook sent`,
+      );
+      return false;
+    } catch (err) {
+      this.logger.error(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
+      return false;
+    }
   }
 
   private sanitizeContact(contact: any) {
