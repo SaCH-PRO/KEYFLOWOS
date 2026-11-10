@@ -57,6 +57,16 @@
  * the draft), so a draft saved before the PATCH, whether it carried the old
  * slug or a slug the owner had not published yet, cannot put an older address
  * back on Business.slug at the owner's next publish.
+ * W7-SLUG-PRESENCE-DRAFT review repair (cases S13-S15; D-11, review CR-1):
+ * the PATCH records the slugs it replaced in the stored draft, so a non-owner
+ * whose editor still sends the replaced slug (the web editor sends its whole
+ * payload on save and autosave) saves content (200) with the draft keeping
+ * the PATCHed slug, while any other new slug is still refused (S13, findings
+ * SEC-W7SPD-2 and CRR-1). The PATCH locks the draft row and the draft save
+ * takes FOR SHARE on the business row, so a save racing the PATCH cannot put
+ * the replaced slug back (S14) and a PATCH racing a save does not write the
+ * older draft over it (S15, finding SEC-W7SPD-1); both race cases force the
+ * interleaving with a separate transaction holding the draft row FOR UPDATE.
  * Every auto-configure call writes the business's setup configuration into
  * Business.metaData (conciergeTemplateId, conciergeSetupAt, the setup
  * milestone; paymentMethodsConfigured and paymentRecommendations by default),
@@ -307,6 +317,50 @@ function patchBusiness(actor: string, businessId: string, body: Record<string, u
     .patch(`/identity/businesses/${businessId}`)
     .set('x-test-user', actor)
     .send(body);
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Starts a supertest request now and settles it later; a transport error comes back as status -1. */
+function settle(req: PromiseLike<any>): Promise<{ status: number; body: any }> {
+  return Promise.resolve(req).then((res) => res, (err: unknown) => ({ status: -1, body: String(err) }));
+}
+
+/**
+ * W7-SLUG-PRESENCE-DRAFT repair (SEC-W7SPD-1, cases S14 and S15): waits until
+ * `count` backends of this database are blocked on a lock (pg_stat_activity),
+ * or `ms` has passed, so a race case sends its next request only once the
+ * earlier one is parked behind the lock the case holds.
+ */
+async function lockWaiters(count: number, ms = 5_000): Promise<number> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const rows = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    const n = Number(rows[0]?.n ?? 0);
+    if (n >= count || Date.now() > until) return n;
+    await sleep(50);
+  }
+}
+
+/**
+ * Holds a row lock on the business's draft (SELECT ... FOR UPDATE in a
+ * transaction of its own) until release() is awaited. It only forces an
+ * interleaving of the requests a race case sends; nothing is written through it.
+ */
+async function holdDraftRowLock(businessId: string): Promise<{ release: () => Promise<void> }> {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  let locked!: () => void;
+  const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+  const done: Promise<void> = db.$transaction(async (tx: any) => {
+    await tx.$queryRawUnsafe('SELECT id FROM site_page_drafts WHERE business_id = $1 FOR UPDATE', businessId);
+    locked();
+    await gate;
+  }, { maxWait: 5_000, timeout: 30_000 });
+  await Promise.race([isLocked, done]);
+  return { release: async () => { open(); await done; } };
 }
 
 function autoConfigure(actor: string, businessId: string, body: Record<string, unknown>) {
@@ -748,6 +802,98 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect(JSON.stringify(await publishedPayload(ID.bizP)), 'the published page carries the content').toContain('k09b content before a long slug');
     expect(draftAfterPatch, 'the replaced slug left the draft').not.toHaveProperty('slug');
     expect(JSON.stringify(draftAfterPatch), 'the draft keeps its content').toContain('k09b content before a long slug');
+  });
+
+  it("[D11-S13] W7-SLUG-PRESENCE-DRAFT repair (D-11, review CR-1; SEC-W7SPD-2, CRR-1): after the OWNER moves Business.slug through PATCH /identity/businesses/:id (200), a non-owner (STAFF on role defaults or every scope admin, ADMIN on role defaults or with settings:write) whose editor still sends the replaced slug saves a content edit (200): the draft keeps the PATCHed slug and takes the content, their publish (201) goes live at the owner's address with the Business row byte-identical and the owner's next publish (201) keeps the PATCHed slug; a slug neither the business nor its draft has carried is still refused (403, draft row byte-identical)", async () => {
+    for (const { id, label } of NON_OWNERS) {
+      await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
+      const patch = await patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') });
+      expect(patch.status, `${label}: PATCH ${JSON.stringify(patch.body)}`).toBe(200);
+      const before = await businessRowText(ID.bizP);
+
+      // The editor loaded before the PATCH: it sends its whole payload, the replaced slug included, on save and autosave.
+      const put = await putDraft(id, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b stale editor content' }));
+      expect(put.status, `${label}: the stale editor's content save: ${JSON.stringify(put.body)}`).toBe(200);
+      expect(put.body?.payload?.slug, `${label}: the save answers with the draft's slug`).toBe(slugOf('owner-patched'));
+      const draft = await draftPayload(ID.bizP);
+      expect(draft?.slug, `${label}: the draft keeps the PATCHed slug`).toBe(slugOf('owner-patched'));
+      expect(JSON.stringify(draft), `${label}: the draft takes the content`).toContain('k09b stale editor content');
+
+      // A slug neither the business nor its draft has carried is still the owner's to set.
+      const draftBefore = await draftRowText(ID.bizP);
+      const hijack = await putDraft(id, ID.bizP, payload({ slug: slugOf('member-hijack'), headline: 'k09b member hijack' }));
+      expectRefusal(hijack, SLUG_CODE, `${label}: a new slug after the PATCH`);
+      expect(await draftRowText(ID.bizP), `${label}: the refused save wrote nothing`).toBe(draftBefore);
+
+      const pub = await publish(id, ID.bizP);
+      expect(pub.status, `${label}: publish ${JSON.stringify(pub.body)}`).toBe(201);
+      expect(await businessRowText(ID.bizP), `${label}: the Business row is byte-identical`).toBe(before);
+      const page = await publishedPayload(ID.bizP);
+      expect(page?.slug, `${label}: the page is live at the owner's address`).toBe(slugOf('owner-patched'));
+      expect(JSON.stringify(page), `${label}: the page carries the content`).toContain('k09b stale editor content');
+
+      const ownerPub = await publish(ID.owner, ID.bizP);
+      expect(ownerPub.status, `${label}: owner publish ${JSON.stringify(ownerPub.body)}`).toBe(201);
+      expect((await businessRow(ID.bizP))?.slug, `${label}: the owner's publish keeps the PATCHed slug`).toBe(slugOf('owner-patched'));
+    }
+
+    // A PATCHed slug the presence payload cannot carry took the slug out of the draft (S12): the stale save keeps it out.
+    const longSlug = `${slugOf('long')}-${'a'.repeat(64)}`;
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP] }));
+    const longPatch = await patchBusiness(ID.owner, ID.bizP, { slug: longSlug });
+    expect(longPatch.status, JSON.stringify(longPatch.body)).toBe(200);
+    const slugless = await putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b stale after a long slug' }));
+    expect(slugless.status, JSON.stringify(slugless.body)).toBe(200);
+    const sluglessDraft = await draftPayload(ID.bizP);
+    expect(sluglessDraft, 'the draft stays without a slug').not.toHaveProperty('slug');
+    expect(JSON.stringify(sluglessDraft)).toContain('k09b stale after a long slug');
+  });
+
+  it("[D11-S14] W7-SLUG-PRESENCE-DRAFT repair (D-11, SEC-W7SPD-1): a STAFF member's content save that reaches the server while the OWNER's PATCH of Business.slug is in flight waits for the PATCH, so it cannot put the replaced slug back: PATCH 200, save 200, the draft carries the PATCHed slug and the STAFF content, and the owner's next publish (201) keeps the PATCHed Business.slug", async () => {
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
+    // Only forces the interleaving: the PATCH is held at the draft row it moves, then the save arrives.
+    const lock = await holdDraftRowLock(ID.bizP);
+    const patchP = settle(patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') }));
+    await lockWaiters(1);
+    const putP = settle(putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff raced content' })));
+    await lockWaiters(2);
+    await lock.release();
+    const [patch, put] = await Promise.all([patchP, putP]);
+    expect(patch.status, `PATCH ${JSON.stringify(patch.body)}`).toBe(200);
+    expect(put.status, `save ${JSON.stringify(put.body)}`).toBe(200);
+    expect((await businessRow(ID.bizP))?.slug).toBe(slugOf('owner-patched'));
+    const draft = await draftPayload(ID.bizP);
+    expect(draft?.slug, 'the save did not put the replaced slug back in the draft').toBe(slugOf('owner-patched'));
+    expect(JSON.stringify(draft), "the draft carries the STAFF member's content").toContain('k09b staff raced content');
+
+    const pub = await publish(ID.owner, ID.bizP);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug, "the owner's publish keeps the PATCHed slug").toBe(slugOf('owner-patched'));
+    expect((await publishedPayload(ID.bizP))?.slug).toBe(slugOf('owner-patched'));
+  });
+
+  it("[D11-S15] W7-SLUG-PRESENCE-DRAFT repair (D-11, SEC-W7SPD-1): the OWNER's PATCH of Business.slug that reaches the server while a STAFF member's content save is in flight waits for the save and moves the slug of what it saved, so the STAFF content is not overwritten by the older draft: save 200, PATCH 200, the draft carries the STAFF content and the PATCHed slug, and the owner's next publish (201) keeps the PATCHed Business.slug with that content", async () => {
+    await resetPresence(ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b before the rename' }));
+    // Only forces the interleaving: the save is held at the draft row it writes, then the PATCH arrives.
+    const lock = await holdDraftRowLock(ID.bizP);
+    const putP = settle(putDraft(ID.staff, ID.bizP, payload({ slug: LIVE[ID.bizP], headline: 'k09b staff content first' })));
+    await lockWaiters(1);
+    const patchP = settle(patchBusiness(ID.owner, ID.bizP, { slug: slugOf('owner-patched') }));
+    await lockWaiters(2);
+    await lock.release();
+    const [put, patch] = await Promise.all([putP, patchP]);
+    expect(put.status, `save ${JSON.stringify(put.body)}`).toBe(200);
+    expect(patch.status, `PATCH ${JSON.stringify(patch.body)}`).toBe(200);
+    const draft = await draftPayload(ID.bizP);
+    expect(JSON.stringify(draft), "the PATCH did not write the older draft over the STAFF member's content").toContain('k09b staff content first');
+    expect(draft?.slug, 'the draft carries the PATCHed slug').toBe(slugOf('owner-patched'));
+
+    const pub = await publish(ID.owner, ID.bizP);
+    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
+    expect((await businessRow(ID.bizP))?.slug, "the owner's publish keeps the PATCHed slug").toBe(slugOf('owner-patched'));
+    const page = await publishedPayload(ID.bizP);
+    expect(page?.slug).toBe(slugOf('owner-patched'));
+    expect(JSON.stringify(page)).toContain('k09b staff content first');
   });
 });
 
