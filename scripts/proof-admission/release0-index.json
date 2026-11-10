@@ -1269,9 +1269,15 @@
       "suite": "src/core/config/key-cortex-tenant-binding.spec.ts",
       "kind": "it.todo",
       "titleStartsWith": "key-connector/key-connector.controller.ts reads @Query('businessId')",
-      "reason": "OPEN. KeyConnectorController still takes businessId from the query string in 10 handlers behind BusinessGuard; R0-34b bound only the KEY cortex controllers (its write set) and parked this as a todo.",
-      "owner": "R0-34b-KEY-TENANT-BINDING (parked it); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-KEY-CONNECTOR-TENANT: the todo is a live, passing case in src/core/config/key-cortex-tenant-binding.spec.ts.",
+      "owner": "W7-KEY-CONNECTOR-TENANT",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/src/core/config/key-cortex-tenant-binding.spec.ts",
+          "contains": "it(\"key-connector/key-connector.controller.ts: none of its 10 BusinessGuard-guarded handlers"
+        }
+      ]
     },
     {
       "suite": "src/main.listen.spec.ts",
@@ -1291,17 +1297,29 @@
       "suite": "test/ai-direct-provider-503.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "POST /commerce/businesses/:b/products/import/scan answers 503",
-      "reason": "OPEN. CommerceVisionService.extractProductsFromImage still catches every error and returns [], so a keyless scan answers 2xx with no products instead of a visible 503; outside the R0-07a write set.",
-      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-AI-SERVICES-503: the todo is a live, passing case in test/ai-direct-provider-503.integration.test.ts.",
+      "owner": "W7-AI-SERVICES-503",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/ai-direct-provider-503.integration.test.ts",
+          "contains": "it('POST /commerce/businesses/:b/products/import/scan answers 503"
+        }
+      ]
     },
     {
       "suite": "test/ai-direct-provider-503.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "GET /ai/businesses/:b/agent/memory/search and POST .../agent/memory/backfill",
-      "reason": "OPEN. SemanticMemoryService.search and backfillFromAiMemory swallow the missing-embeddings error and answer an empty 200; outside the R0-07a write set.",
-      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-AI-SERVICES-503: the todo is a live, passing case in test/ai-direct-provider-503.integration.test.ts.",
+      "owner": "W7-AI-SERVICES-503",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/ai-direct-provider-503.integration.test.ts",
+          "contains": "it('GET /ai/businesses/:b/agent/memory/search and POST .../agent/memory/backfill"
+        }
+      ]
     },
     {
       "suite": "test/commerce-invoice-errors.integration.test.ts",
@@ -1348,27 +1366,45 @@
       "suite": "test/contacts-import-write-scope.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "FOLLOW-UP PACKET: POST crm/businesses/:businessId/google/import",
-      "reason": "OPEN. CrmGoogleController.importFromGoogle still runs under AuthGuard and BusinessGuard only (no crm write scope) and importGoogleContacts passes no actor, so a crm read-only member can merge Google data into a PRIVATE contact; both files are outside the R0-13 write set.",
-      "owner": "R0-13-CT-PERSISTENCE-PROOF (parked it); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-GOOGLE-IMPORT-SCOPE: the todo is a live, passing case in test/contacts-import-write-scope.integration.test.ts.",
+      "owner": "W7-GOOGLE-IMPORT-SCOPE",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/contacts-import-write-scope.integration.test.ts",
+          "contains": "it(\"W7-GOOGLE-IMPORT-SCOPE NEGATIVE CONTROL"
+        }
+      ]
     },
     {
       "suite": "test/crm.e2e.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "KEY call_create_task records a member of the business as the caller",
-      "reason": "OPEN. FlowOrchestratorService call_create_task still passes args.callerId through to CallLogService.createCallLog; the REST call-log route takes the caller from the session (V1-54), the KEY tool does not (review ST-4).",
-      "owner": "V1-54-CT-ROUTE-ORDER-CALLER (REST half done); KEY tool half: follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN",
-      "followUp": "V1-54-CT-ROUTE-ORDER-CALLER"
+      "reason": "CLOSED by W7-CALL-TASK-CALLER: the todo is a live, passing case in test/crm.e2e.test.ts.",
+      "owner": "W7-CALL-TASK-CALLER",
+      "status": "CLOSED",
+      "followUp": "V1-54-CT-ROUTE-ORDER-CALLER",
+      "closedBy": [
+        {
+          "file": "apps/server/test/crm.e2e.test.ts",
+          "contains": "it('KEY call_create_task records a member of the business as the caller"
+        }
+      ]
     },
     {
       "suite": "test/d11-sibling-writes.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "REQUIRED (follow-up; identity.service.ts updateBusiness",
-      "reason": "OPEN (review CR-1, true before R0-09b). When the OWNER changes Business.slug through PATCH /identity/businesses/:id, a presence draft keeping the old slug can put it back on the next publish; identity.service.ts is outside the R0-09b write set.",
-      "owner": "R0-09b-D11-SIBLING-WRITES (parked it, under R0-09-ID-HARDEN, D-11); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN",
-      "followUp": "D-11"
+      "reason": "CLOSED by W7-SLUG-PRESENCE-DRAFT: the todo is a live, passing case in test/d11-sibling-writes.integration.test.ts.",
+      "owner": "W7-SLUG-PRESENCE-DRAFT",
+      "status": "CLOSED",
+      "followUp": "D-11",
+      "closedBy": [
+        {
+          "file": "apps/server/test/d11-sibling-writes.integration.test.ts",
+          "contains": "it(\"[D11-S10] W7-SLUG-PRESENCE-DRAFT"
+        }
+      ]
     },
     {
       "suite": "test/evidence-feed.integration.test.ts",
@@ -1411,9 +1447,15 @@
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T04] review SEC-R013g-4",
-      "reason": "OPEN. Command-item approve/complete/dismiss and procurement acknowledge/fulfill/invoice audit rows do not name the acting member: CommandService and ProcurementService take no actor, outside the R0-13g write set.",
-      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, under R0-13-CT-PERSISTENCE-PROOF, D-40); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-OPS-AUDIT-ACTOR: the todo is a live, passing case in test/ops-scope-command-procurement.integration.test.ts.",
+      "owner": "W7-OPS-AUDIT-ACTOR",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/ops-scope-command-procurement.integration.test.ts",
+          "contains": "it(\"[OPS-T04] review SEC-R013g-4"
+        }
+      ]
     },
     {
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
@@ -1429,10 +1471,16 @@
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T02] the web hides the procurement nav entry",
-      "reason": "OPEN, WEB. Hiding the procurement nav entry and disabling command-item actions for a member without operations is apps/web work (nav-config.ts, sidebar, command cards), outside the R0-13g write set; the server already refuses (403).",
-      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, D-40); web follow-up not yet queued in BUILD-MAP",
-      "status": "OPEN",
-      "followUp": "D-40"
+      "reason": "CLOSED by W7-WEB-OPS-SCOPE: the web hides the procurement nav entry and disables command-item actions for a member without operations (D-40; the cockpit stays open per D-96).",
+      "owner": "W7-WEB-OPS-SCOPE",
+      "status": "CLOSED",
+      "followUp": "D-40",
+      "closedBy": [
+        {
+          "webSuite": "apps/web/src/app/app/command-center/__tests__/command-actions-ops-scope.test.tsx",
+          "case": "[WOS-C01] RED-BEFORE: a member without operations"
+        }
+      ]
     },
     {
       "suite": "test/optional-services-fail-visibly.integration.test.ts",
@@ -1496,25 +1544,43 @@
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-16n (SEC-CMF1-3)",
-      "reason": "OPEN per the todo. CommerceService.updateInvoice with no actor still acts as KEY_SYSTEM_ACTOR_ID instead of refusing; needs the KEY commerce_update_invoice tool to pass its actor first (flow-orchestrator.service.ts), outside the R0-CMF1 write set.",
-      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-INVOICE-ACTOR-RULES: the todo is a live, passing case in test/payments-actor.integration.test.ts.",
+      "owner": "W7-INVOICE-ACTOR-RULES",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/payments-actor.integration.test.ts",
+          "contains": "it('PA-16n (SEC-CMF1-3)"
+        }
+      ]
     },
     {
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-16o (SEC-CMF1-5)",
-      "reason": "OPEN per the todo. On an ACCRUAL business the invoice_finalized posting and its reversal record createdById null instead of the member who issued and voided; needs the invoice workflow transition to carry the actor, outside the R0-CMF1 write set.",
-      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-INVOICE-ACTOR-RULES: the todo is a live, passing case in test/payments-actor.integration.test.ts.",
+      "owner": "W7-INVOICE-ACTOR-RULES",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/payments-actor.integration.test.ts",
+          "contains": "it('PA-16o (SEC-CMF1-5)"
+        }
+      ]
     },
     {
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-18e (SEC-CMF2-3)",
-      "reason": "OPEN. DriveIntakeController.approve still runs under AuthGuard and BusinessGuard only, so a member with revenue read (or only crm read) can approve a plan whose record_payment step writes a payment; needs RequireModuleScope('revenue', 'write'), outside the R0-CMF2 write set.",
-      "owner": "R0-CMF2-PAYMENT-ACTOR-GAPS (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-DRIVE-INTAKE-SCOPE: the todo is a live, passing case in test/payments-actor.integration.test.ts.",
+      "owner": "W7-DRIVE-INTAKE-SCOPE",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/payments-actor.integration.test.ts",
+          "contains": "it('PA-18e (SEC-CMF2-3)"
+        }
+      ]
     },
     {
       "suite": "test/revenue-authorization.integration.test.ts",
@@ -1529,9 +1595,15 @@
       "suite": "test/revenue-authorization.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "RR-SEC3-02 (SEC3-ST-2)",
-      "reason": "OPEN per the todo. The KEY tool commerce_mark_invoice_paid returns markInvoicePaid's reload with the linked Booking and Contact rows to a revenue:write member without bookings or CRM scope; the fix is in FlowOrchestratorService, outside the R0-SEC3 write set.",
-      "owner": "R0-SEC3-INVOICE-WRITE-PROJECTION (parked it, under R0-02-REV-AUTH-CONFORM); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "reason": "CLOSED by W7-KEY-MARK-PAID-PROJECTION (V1-21d had landed the projection): the todo is a live, passing case in test/revenue-authorization.integration.test.ts.",
+      "owner": "W7-KEY-MARK-PAID-PROJECTION (V1-21d had landed the projection)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": "apps/server/test/revenue-authorization.integration.test.ts",
+          "contains": "it('RR-SEC3-02 (SEC3-ST-2)"
+        }
+      ]
     },
     {
       "suite": "test/revenue-authorization.integration.test.ts",
@@ -1546,9 +1618,10 @@
       "suite": "test/supabase-admin.service.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet",
-      "reason": "OPEN. A RISC account-disabled/hijacking event pauses the pre-event Supabase session (a 65-minute ban) and sets the 24h auth:revoked:user cutoff; it does not revoke the refresh token, so the hijacker's session works again once both lapse. Needs a durable cutoff AuthMiddleware reads or a GoTrue global logout under a server-minted user JWT, outside the R0-ID-F7 repair write set. Indexed now that this suite is a Release 0 suite (R0-35 review SEC-R035-3).",
+      "reason": "OPEN, ruled: owner ruling D-97 (D-39 resolved) is a durable per-user sign-in cutoff with no new secret; W7-RISC-REVOKE's provider global logout needs SUPABASE_JWT_SECRET, which R0-SEC-02 forbids, and UserIdentity is never written so RISC events resolve no user (SEC-W7RR-1); queued as the W8 RISC durable cutoff packet.",
       "owner": "R0-ID-F7-RISC-SIGNOUT-SHAPE (parked it, under R0-05-ID-REALDB-TENANT-ALIGN); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN"
+      "status": "OPEN",
+      "followUp": "D-97"
     },
     {
       "suite": "test/stripe-ops-tenancy.integration.test.ts",
@@ -1572,28 +1645,46 @@
       "suite": "test/evidence-feed.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "V55-13f (SEC-W6CEM-1, D-90 / D-63, residual of W",
-      "reason": "OPEN. the contact cross-journey, story and dossier (CrmJourneyService; the dossier insight text carries amounts) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
-      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
-      "status": "OPEN",
-      "followUp": "D-90"
+      "reason": "CLOSED by W7-CONTACT-MONEY-VIEWS: the todo is a live, passing case in test/evidence-feed.integration.test.ts.",
+      "owner": "W7-CONTACT-MONEY-VIEWS",
+      "status": "CLOSED",
+      "followUp": "D-90",
+      "closedBy": [
+        {
+          "file": "apps/server/test/evidence-feed.integration.test.ts",
+          "contains": "it(\"V55-13f (SEC-W6CEM-1, D-90 / D-63, W7-CONTACT-MONEY-VIEWS"
+        }
+      ]
     },
     {
       "suite": "test/evidence-feed.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "V55-13g (SEC-W6CEM-2, D-90 / D-63, residual of W",
-      "reason": "OPEN. the contact revenue summary (CrmRevenueService.getContactRevenueSummary) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
-      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
-      "status": "OPEN",
-      "followUp": "D-90"
+      "reason": "CLOSED by W7-CONTACT-MONEY-VIEWS: the todo is a live, passing case in test/evidence-feed.integration.test.ts.",
+      "owner": "W7-CONTACT-MONEY-VIEWS",
+      "status": "CLOSED",
+      "followUp": "D-90",
+      "closedBy": [
+        {
+          "file": "apps/server/test/evidence-feed.integration.test.ts",
+          "contains": "it(\"V55-13g (SEC-W6CEM-2, D-90 / D-63, W7-CONTACT-MONEY-VIEWS"
+        }
+      ]
     },
     {
       "suite": "test/evidence-feed.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "V55-13h (CR-W6CEM-1, D-90 / D-63, residual of W6",
-      "reason": "OPEN. the contact detail (CrmStatsService.contactDetail: invoices[].total, meta.totalRevenue, outstandingBalance) serves payment amounts to a member with crm read and revenue none, which the feed withholds under D-90 / D-63; residual of W6-CONTACT-EVENTS-MONEY, queued as W7-CONTACT-MONEY-VIEWS.",
-      "owner": "W6-CONTACT-EVENTS-MONEY (residual); W7-CONTACT-MONEY-VIEWS",
-      "status": "OPEN",
-      "followUp": "D-90"
+      "reason": "CLOSED by W7-CONTACT-MONEY-VIEWS: the todo is a live, passing case in test/evidence-feed.integration.test.ts.",
+      "owner": "W7-CONTACT-MONEY-VIEWS",
+      "status": "CLOSED",
+      "followUp": "D-90",
+      "closedBy": [
+        {
+          "file": "apps/server/test/evidence-feed.integration.test.ts",
+          "contains": "it(\"V55-13h (CR-W6CEM-1, D-90 / D-63, W7-CONTACT-MONEY-VIEWS"
+        }
+      ]
     }
   ],
   "editedOnly": [

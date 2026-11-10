@@ -1066,6 +1066,10 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 |---|---|---|
 | D-95 | Restoring or permanently deleting a trashed record needs write access to the module the record belongs to (CRM for contacts, accounts and opportunities; revenue for invoices, quotes and recurring invoices; people for staff; marketing for community posts and landing pages); seeing it in the trash needs that module's read access. D-46 still refuses a non-member SUPER_ADMIN. | W6 trash packet (SEC-TL500-3). |
 | D-96 | The Command Center cockpit snapshot stays open to every member; each tile is filtered by that member's own module permissions (V1-47). D-40's operations scope does not gate it. | None (as built); closes the R0-35 referred explanation. |
+| D-97 | D-39 resolved: a RISC hijacking, account-disabled, sessions-revoked or token-revoked event records a durable per-user sign-in cutoff (stored on the user, no schema change, no new secret); the API refuses any token whose original sign-in time is older than the cutoff, even after refresh, and the real user simply signs in again. The provider global logout that needs SUPABASE_JWT_SECRET is not used (R0-SEC-02 stands). | W8 RISC durable cutoff packet; also persist UserIdentity from the verified provider record so RISC events resolve a user (SEC-W7RR-1). |
+| D-98 | When a member drives KEY (chat or a plan), KEY's money-writing tools (mark an invoice paid, update an invoice, record a payment) need that member's own revenue write permission, as the web routes do; a read-only member gets a refusal from KEY too. | W8 KEY revenue gate (SEC-W7IAR-2, SEC-W7KMP-2). |
+| D-99 | Every Google connection for a business (Calendar, Drive, Contacts, Gmail, Analytics, Search Console) is started, synced and disconnected only by the business owner. | W8 Google consent doors (CR-RCV-1, SEC-W7RCV-2). |
+| D-100 | A member without revenue read sees no money signals at all: revenue sorts and filters on the contact list are ignored, and the payment-health ratio is withheld, as amounts are (D-63, D-90). | W8 money-signal packet (CR-W7CMV-2, SEC-W7CMV-3, SEC-W7CMV-1). |
 
 ---
 

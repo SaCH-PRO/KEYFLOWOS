@@ -912,9 +912,9 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     "[OPS-T01] the cockpit snapshot (GET business-command-center/businesses/:id/snapshot) under operations 'read' — not done: release0-journey.integration.test.ts step 5 (an R0 exit proof, outside this packet's write set) pins a STAFF member with no operations key reading it 200, V1-47 projects each tile by the member's own scopes, and the snapshot reads no command item or procurement row; whether D-40 covers it is referred to the owner",
   );
 
-  it.todo(
-    '[OPS-T02] the web hides the procurement nav entry and disables the command-item actions for a member without operations — not done: the entry points are apps/web/src/lib/nav-config.ts, components/layout/desktop-sidebar.tsx and mobile-drawer.tsx, components/command/command-card*.tsx and app/app/command-center/page.tsx (V1-25), all outside this packet\'s write set; apps/web/src/lib/module-access.ts holds the decision helpers they would call',
-  );
+  // [OPS-T02] the web half (hide the procurement nav entry, disable command-item actions for a member
+  // without operations) is closed by W7-WEB-OPS-SCOPE: apps/web/src/app/app/command-center/__tests__/
+  // command-actions-ops-scope.test.tsx (WOS-C01..C04) and command-item-detail-ops-scope.test.tsx.
 });
 
 /** One procurement request as a whole row (to_jsonb text): what "byte-identical" compares. */
