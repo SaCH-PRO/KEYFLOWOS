@@ -121,8 +121,10 @@ export class SemanticMemoryService {
       }));
     } catch (err: any) {
       // W7-AI-SERVICES-503 (R0-07a rule): embeddings not configured fails visibly.
-      // TemporalFlowService and UnifiedMemoryRetrievalService catch it (optional
-      // enrichment); FlowOrchestratorService.chat/streamChat do not yet.
+      // TemporalFlowService, UnifiedMemoryRetrievalService and (since the
+      // W7-AI-SERVICES-503 review repair, SEC503-1 / CR-503-1)
+      // FlowOrchestratorService.buildSemanticMemorySection catch it: optional
+      // enrichment of a turn that goes on without it.
       if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`Semantic search failed: ${(err as Error).message}`);
       return [];
