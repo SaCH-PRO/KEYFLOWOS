@@ -86,6 +86,13 @@
  * (SEC-D15-3); a decision is a compare-and-set on the status it read, 409 when
  * another landed first (SEC-D15-2); a failed audit insert rolls the decision
  * back, 503 (SEC-D15-4).
+ *
+ * W7-OPS-AUDIT-ACTOR (FOLLOW8, Release 0 exit) extends this suite (same prefix)
+ * and turns the OPS-T04 todo into a live case: the controllers hand the member
+ * to CommandService and ProcurementService, and every feed row the two write for
+ * a member names them (actorType USER, actorId the member), the command item
+ * approve, complete and dismiss and the procurement acknowledge, fulfill and
+ * invoice rows the review named (SEC-R013g-4) included.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -174,6 +181,8 @@ let MODULE_SCOPE_KEY = '';
 const controllers: Record<string, any> = {};
 /** The real ProcurementService of the app under test, for the direct (no request, no tenant armed) calls. */
 let procurementService: any;
+/** The real CommandService of the app under test (W7-OPS-AUDIT-ACTOR: the bulk writes, whose member comes from TenantInterceptor's context). */
+let commandService: any;
 let NotFound: any;
 let Conflict: any;
 let ServiceUnavailable: any;
@@ -483,6 +492,7 @@ beforeAll(async () => {
     ],
   }).compile();
   procurementService = moduleRef.get(ProcurementService);
+  commandService = moduleRef.get(CommandService);
 
   app = moduleRef.createNestApplication();
   // As app-bootstrap.ts: the client address comes from the proxy header.
@@ -815,9 +825,78 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
   // and POST /ai/businesses/:id/key/command do/auto/draft in FOLLOW3-D9-DOITFORME-SCOPE
   // (test/key-do-it-for-me-scope.integration.test.ts: no item is filed below operations write).
 
-  it.todo(
-    "[OPS-T04] review SEC-R013g-4: the audit rows name the member who acted (command item approve, complete and dismiss record actorType USER with no actorId; procurement acknowledge, fulfill and invoice record neither) — not done: CommandService.approve/complete/dismiss and ProcurementService.acknowledgeVendor/markFulfilled/markInvoiced take no actor, so the controllers cannot pass one, and both services are outside this packet's write set",
-  );
+  // W7-OPS-AUDIT-ACTOR closes [OPS-T04] (review SEC-R013g-4). The rows are the Activity feed rows
+  // (D-08) CommandService and ProcurementService write through TimelineService, the recorder here.
+  // The single-item routes are sent over HTTP; the bulk routes take their member from
+  // TenantInterceptor's context (ambientActor, FOLLOW3-D10), which this harness does not arm (see
+  // OPS-09), so their rows are proven on the real CommandService called with the member.
+  it("[OPS-T04] review SEC-R013g-4 (W7-OPS-AUDIT-ACTOR, D-40): the feed rows name the member who acted. RED-BEFORE: command item approve, complete and dismiss recorded actorType USER with no actorId, procurement acknowledge, fulfill and invoice recorded neither. Sent by a STAFF member with operations write and by the OWNER, each of those six routes writes exactly one row naming that member (actorType USER, actorId the member), and so does every other route that writes a row for a member: command create, PATCH, snooze, execute, assign, reopen and DELETE, procurement submit; bulk complete, dismiss and delete name the member they are called with", async () => {
+    const future = () => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    type ActorCase = { label: string; verb: Verb; url: string; body?: unknown; entityId?: string; action: string; status: number };
+    const commandCase = async (label: string, verb: Verb, suffix: string, action: string, body?: unknown): Promise<ActorCase> => {
+      const ci = await seedCommandItem(ID.bizA);
+      return { label, verb, url: `${cmd(ID.bizA)}/items/${ci.id}${suffix}`, body, entityId: ci.id, action, status: okStatus(verb) };
+    };
+    const procurementCase = async (label: string, suffix: string, action: string): Promise<ActorCase> => {
+      const row = await seedProcurementRequest(ID.bizA, { supplier: SUPPLIER.a });
+      return { label, verb: 'post', url: `${proc(ID.bizA)}/${row.id}${suffix}`, entityId: row.id, action, status: 201 };
+    };
+
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      const cases: ActorCase[] = [
+        // the six the review named
+        await commandCase('command approve', 'post', '/approve', 'approve'),
+        await commandCase('command complete', 'post', '/complete', 'complete'),
+        await commandCase('command dismiss', 'post', '/dismiss', 'dismiss'),
+        await procurementCase('procurement acknowledge', '/acknowledge', 'request.vendor_acknowledged'),
+        await procurementCase('procurement fulfill', '/fulfill', 'request.fulfilled'),
+        await procurementCase('procurement invoice', '/invoice', 'request.invoiced'),
+        // every other row the two services write for a member
+        {
+          label: 'command create', verb: 'post', url: `${cmd(ID.bizA)}/items`, action: 'create', status: 201,
+          body: { sourceModule: 'k13o', title: `${P}created by a member`, category: 'WORK', actionType: 'k13o_check' },
+        },
+        await commandCase('command PATCH', 'patch', '', 'update', { title: `${P}renamed by a member` }),
+        await commandCase('command snooze', 'post', '/snooze', 'snooze', { until: future() }),
+        await commandCase('command execute', 'post', '/execute', 'execute', { result: { k13o: true } }),
+        await commandCase('command assign', 'post', '/assign', 'assign', { ownerType: 'USER', ownerId: ID.owner }),
+        await commandCase('command reopen', 'post', '/reopen', 'reopen'),
+        await commandCase('command DELETE', 'delete', '', 'delete'),
+        await procurementCase('procurement submit', '/submit', 'request.submitted'),
+      ];
+      for (const c of cases) {
+        const from = timeline.events.length;
+        const res = await send(c.verb, c.url, actor, c.body);
+        const entityId = c.entityId ?? res.body?.id;
+        outcomes[`${actor} ${c.label}`] = [
+          res.status,
+          timeline.events.slice(from).map((e) => ({ action: e.action, entityId: e.entityId, actorType: e.actorType, actorId: e.actorId })),
+        ];
+        expected[`${actor} ${c.label}`] = [c.status, [{ action: c.action, entityId, actorType: 'USER', actorId: actor }]];
+      }
+
+      // bulk complete, dismiss and delete: the member the controller hands the service (ambientActor) is on every row
+      for (const [method, action] of [['bulkComplete', 'complete'], ['bulkDismiss', 'dismiss'], ['bulkDelete', 'delete']] as const) {
+        const ids = [(await seedCommandItem(ID.bizA)).id, (await seedCommandItem(ID.bizA)).id];
+        const from = timeline.events.length;
+        const result = await commandService[method](ID.bizA, ids, actor);
+        // one row per item, in the order the service read them (no order is asked for): compared by item id
+        outcomes[`${actor} ${method}`] = [
+          result,
+          timeline.events.slice(from)
+            .map((e) => ({ action: e.action, entityId: e.entityId as string, actorType: e.actorType, actorId: e.actorId }))
+            .sort((a, b) => a.entityId.localeCompare(b.entityId)),
+        ];
+        expected[`${actor} ${method}`] = [
+          { count: 2 },
+          [...ids].sort((a, b) => a.localeCompare(b)).map((entityId) => ({ action, entityId, actorType: 'USER', actorId: actor })),
+        ];
+      }
+    }
+    expect(outcomes).toEqual(expected);
+  }, HEAVY_CASE_MS);
 
   it.todo(
     "[OPS-T01] the cockpit snapshot (GET business-command-center/businesses/:id/snapshot) under operations 'read' — not done: release0-journey.integration.test.ts step 5 (an R0 exit proof, outside this packet's write set) pins a STAFF member with no operations key reading it 200, V1-47 projects each tile by the member's own scopes, and the snapshot reads no command item or procurement row; whether D-40 covers it is referred to the owner",
