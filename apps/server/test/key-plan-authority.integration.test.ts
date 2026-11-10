@@ -669,19 +669,94 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
     expect(await planStepRunRefusal(prisma, ID.biz, brief, 'call_create_task')).toBeNull();
   });
 
-  // W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (open; reproduced here with the real
-  // ActionDispatcherService and a real CallLogService): QW-06 keeps the runs with no member out of the
-  // breaker, but a member's plan still reaches call_create_task's refusals inside dispatch. Five plans of
-  // staffCrmW (STAFF, crm write) naming the OWNER's PRIVATE contact each passed planStepRunRefusal (null),
-  // each failed in dispatch with 404 'Contact not found', and the fifth opened the circuit
-  // ({open: true, failures: 5}); the bizB OWNER's plan with call_create_task then failed with 'Circuit
-  // breaker open for tool "call_create_task"', nothing dispatched. The same holds for an owner by
-  // Business.ownerId alone (403, CR-W4PP-2) and a SUPER_ADMIN who is no member (403, D-46). The breaker is
-  // ActionDispatcherService's (circuits keyed by tool name alone, process-wide; recordFailure counts a
-  // permanent 4xx refusal), outside W8-CALL-TASK-NO-MEMBER's write set (noMemberToolRefusal only), and no
-  // pre-dispatch gate can see the contact (planStepRunRefusal takes no arguments). A follow-up: key
-  // circuits by business and tool, or stop counting non-retryable 4xx refusals.
-  it.todo('QW-07 W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (D-73): a member\'s plan whose call_create_task is refused inside dispatch (a contact the member may not open: 404; an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) counts toward no circuit breaker another business shares: five such refusals in biz leave call_create_task running for bizB (ActionDispatcherService circuits, outside this packet\'s write set)');
+  // W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1, reproduced here with the real ActionDispatcherService
+  // and a real CallLogService: QW-06 keeps the runs with no member out of the breaker, but a member's
+  // plan still reaches call_create_task's refusals inside dispatch. Five plans of staffCrmW (STAFF, crm
+  // write) naming the OWNER's PRIVATE contact each passed planStepRunRefusal (null), each failed in
+  // dispatch with 404 'Contact not found', and the fifth opened the circuit ({open: true, failures: 5});
+  // the bizB OWNER's plan with call_create_task then failed with 'Circuit breaker open for tool
+  // "call_create_task"', nothing dispatched. The same held for an owner by Business.ownerId alone (403,
+  // CR-W4PP-2) and a SUPER_ADMIN who is no member (403, D-46). The breaker was ActionDispatcherService's,
+  // keyed by tool name alone, process-wide, and recordFailure counted a permanent 4xx refusal.
+  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): circuits are keyed by business and tool, and a 4xx
+  // refusal (an HttpException other than 408 or 429) is answered once, neither retried nor counted.
+  // This harness hands the dispatcher the refusal as CallLogService throws it (executeToolAction);
+  // QW-07b is the same refusal through FlowOrchestratorService.executeToolDirectly.
+  it('QW-07 W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (D-73): a member\'s plan whose call_create_task is refused inside dispatch (a contact the member may not open: 404; an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) counts toward no circuit breaker another business shares: five such refusals in biz leave call_create_task running for bizB (W9-DISPATCH-CIRCUIT, was it.todo)', async () => {
+    const dispatcher = queue.actionDispatcher;
+    const superAdmin = `${P}qw07_sa`; // a SUPER_ADMIN who is no member of biz (D-46)
+    const ownerOnly = `${P}qw07_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2)
+    const bizC = `${P}qw07_bizc`;
+    const cB = `${P}qw07_c_bizb`;
+    const cC = `${P}qw07_c_bizc`;
+    await db.user.create({ data: { id: superAdmin, email: `${P}qw07_sa@test.local`, role: 'SUPER_ADMIN' } });
+    await db.user.create({ data: { id: ownerOnly, email: `${P}qw07_owner_only@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: bizC, name: 'V87B Biz C', ownerId: ownerOnly } });
+    await db.contact.create({ data: { id: cB, businessId: ID.bizB, firstName: 'V87B B', visibility: 'TEAM', ownerId: ID.outsider } });
+    await db.contact.create({ data: { id: cC, businessId: bizC, firstName: 'V87B C', visibility: 'TEAM', ownerId: ownerOnly } });
+    const callLogs = (businessId: string) => db.callLog.findMany({ where: { businessId, notes: { startsWith: 'v87b qw07' } }, select: { contactId: true, callerId: true, notes: true } });
+
+    try {
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual({ open: false, failures: 0, lastFailure: null });
+      const refusals: Array<{ planId: string; userId: string; businessId: string; contactId: string; error: RegExp }> = [];
+      for (let i = 1; i <= 5; i++) {
+        refusals.push({ planId: `${P}qw07_crmw_${i}`, userId: ID.staffCrmW, businessId: ID.biz, contactId: ID.cPriv, error: /^Contact not found$/ });
+      }
+      refusals.push({ planId: `${P}qw07_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, error: /Only a member of this business/ });
+      refusals.push({ planId: `${P}qw07_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, error: /Only a member of this business/ });
+      for (const r of refusals) {
+        const args = { contactId: r.contactId, notes: `v87b qw07 ${r.planId}` };
+        const stepId = await seedQueuePlan(r.planId, r.userId, 'call_create_task', args, r.businessId);
+        // It passes the gate before dispatch (the refusal is the tool's, inside dispatch).
+        expect(await planStepRunRefusal(prisma, r.businessId, r.planId, 'call_create_task'), r.planId).toBeNull();
+        const result = await runQueueStep(r.planId, 'call_create_task', args, r.businessId);
+        expect(result.ok, r.planId).toBe(false);
+        // Answered once: a refusal is not retried.
+        expect(dispatchedFor(stepId), r.planId).toHaveLength(1);
+        const row = await planRow(r.planId);
+        expect(row.steps[0].status, r.planId).toBe('failed');
+        expect(String(row.steps[0].errorMessage), r.planId).toMatch(r.error);
+      }
+      expect(await callLogs(ID.biz)).toEqual([]);
+      expect(await callLogs(bizC)).toEqual([]);
+      // No refusal counted, in any business.
+      expect(dispatcher.getCircuitStatus('call_create_task', ID.biz)).toEqual({ open: false, failures: 0, lastFailure: null });
+      expect(dispatcher.getCircuitStatus('call_create_task', bizC)).toEqual({ open: false, failures: 0, lastFailure: null });
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual({ open: false, failures: 0, lastFailure: null });
+
+      // bizB's OWNER still runs call_create_task: dispatched once, completed, the call log recorded.
+      const planB = `${P}qw07_bizb`;
+      const argsB = { contactId: cB, notes: 'v87b qw07 bizb owner' };
+      const stepB = await seedQueuePlan(planB, ID.outsider, 'call_create_task', argsB, ID.bizB);
+      const ranB = await runQueueStep(planB, 'call_create_task', argsB, ID.bizB);
+      expect(ranB, JSON.stringify(ranB)).toMatchObject({ ok: true });
+      expect(dispatchedFor(stepB)).toHaveLength(1);
+      expect((await planRow(planB)).steps[0].status).toBe('completed');
+      expect(await callLogs(ID.bizB)).toEqual([{ contactId: cB, callerId: ID.outsider, notes: 'v87b qw07 bizb owner' }]);
+
+      // Regression control: biz's OWNER still runs it in biz too.
+      const planA = `${P}qw07_owner`;
+      const argsA = { contactId: ID.cTeam, notes: 'v87b qw07 biz owner' };
+      await seedQueuePlan(planA, ID.owner, 'call_create_task', argsA);
+      expect(await runQueueStep(planA, 'call_create_task', argsA)).toMatchObject({ ok: true });
+      expect((await planRow(planA)).steps[0].status).toBe('completed');
+      expect(await callLogs(ID.biz)).toEqual([{ contactId: ID.cTeam, callerId: ID.owner, notes: 'v87b qw07 biz owner' }]);
+    } finally {
+      // A RED run leaves no open circuit for the cases after this one.
+      dispatcher.resetCircuit('call_create_task');
+    }
+  });
+
+  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73), left open: through the real
+  // FlowOrchestratorService.executeToolDirectly the refusal does not reach the dispatcher as the
+  // HttpException CallLogService throws. executeTool catches it and answers { success: false, error }
+  // with the message alone, and executeToolDirectly rethrows a plain Error(result.error), so the
+  // dispatcher sees no status and still retries and counts a member's 404/403 toward the circuit of
+  // that business and tool. QW-07 holds there (the circuit is the business's own), but five refusals
+  // stop call_create_task in biz itself for CIRCUIT_TIMEOUT_MS. executeToolDirectly must carry the
+  // refusal's status (rethrow an HttpException of it), which is FlowOrchestratorService, outside
+  // W9-DISPATCH-CIRCUIT's write set (ActionDispatcherService only).
+  it.todo('QW-07b W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): through the real FlowOrchestratorService.executeToolDirectly, a member\'s call_create_task refused inside dispatch (404, 403) is answered once and counts toward no circuit in its own business either: five such refusals in biz leave call_create_task running for biz\'s OWNER (executeToolDirectly rethrows a plain Error, so the dispatcher cannot see the status; FlowOrchestratorService, outside this packet\'s write set)');
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */
