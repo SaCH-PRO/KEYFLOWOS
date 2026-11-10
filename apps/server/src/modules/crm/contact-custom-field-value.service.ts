@@ -23,6 +23,12 @@ export class ContactCustomFieldValueService {
    * one the actor may not see (another member's PRIVATE contact; another
    * member's TEAM contact for a crm_view=owned member), answers exactly like an
    * absent one (404), before any value is read.
+   *
+   * Only values whose definition is the contact's own business's are served
+   * (SEC-R015c-3 review SF-1, W9-CUSTOM-FIELDS-TENANT): the tenant extension
+   * never reaches an `include`d relation, so a row that binds this contact to
+   * another business's definition (left by the business-blind name lookup)
+   * would otherwise serve that business's label, description and options.
    */
   async getValuesForContact(businessId: string, contactId: string, actorUserId: string) {
     const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
@@ -38,15 +44,20 @@ export class ContactCustomFieldValueService {
     if (!contact) throw new NotFoundException('Contact not found');
 
     return this.prisma.client.contactCustomFieldValue.findMany({
-      where: { contactId },
+      where: { contactId, definition: { businessId } },
       include: { definition: true },
     });
   }
 
-  async getValuesForContacts(contactIds: string[]) {
+  /**
+   * Values of several contacts of `businessId`: only rows whose contact and
+   * definition are both that business's (SF-1, W9-CUSTOM-FIELDS-TENANT).
+   * No visibility check; a caller serving a member applies its own.
+   */
+  async getValuesForContacts(businessId: string, contactIds: string[]) {
     if (contactIds.length === 0) return [];
     return this.prisma.client.contactCustomFieldValue.findMany({
-      where: { contactId: { in: contactIds } },
+      where: { contactId: { in: contactIds }, contact: { businessId }, definition: { businessId } },
       include: { definition: true },
     });
   }
@@ -92,6 +103,14 @@ export class ContactCustomFieldValueService {
    * contact detail then served B's label, description and options. The
    * business is the one on the contact row, whoever the caller is; a name the
    * contact's business does not define (live) binds nothing.
+   *
+   * Through HTTP the ambient tenant (TenantInterceptor, CustomFieldDefinition
+   * in BUSINESS_ID_MODELS) already scoped this lookup to the path business, so
+   * this scoping is defence in depth for a caller with no ambient tenant
+   * (review CR-W9CF-1). Rows bound to another business's definition that such
+   * a caller, or HTTP before the tenant provider was installed, already wrote
+   * cannot be addressed by name any more, so every write here first removes
+   * them from this contact (review SF-1).
    */
   async setValuesForContact(contactId: string, values: Record<string, unknown>) {
     const names = Object.keys(values);
@@ -101,6 +120,9 @@ export class ContactCustomFieldValueService {
       select: { businessId: true },
     });
     if (!contact) return [];
+    await this.prisma.client.contactCustomFieldValue.deleteMany({
+      where: { contactId, definition: { businessId: { not: contact.businessId } } },
+    });
     const definitions = await this.prisma.client.customFieldDefinition.findMany({
       where: { businessId: contact.businessId, name: { in: names }, archivedAt: null },
     });

@@ -688,8 +688,12 @@ export class CrmStatsService {
         where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
         select: { id: true, status: true, startTime: true, endTime: true, serviceId: true, staffId: true },
       }),
+      // Only the contact's own business's definitions (SEC-R015c-3 review SF-1,
+      // W9-CUSTOM-FIELDS-TENANT): the tenant extension never reaches the
+      // included definition, so a value row bound to another business's
+      // definition would serve its label, description and options here.
       this.prisma.client.contactCustomFieldValue.findMany({
-        where: { contactId: params.contactId },
+        where: { contactId: params.contactId, definition: { businessId: params.businessId } },
         include: { definition: true },
       }),
     ]);

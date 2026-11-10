@@ -555,8 +555,11 @@ describe("the screens bound to a business hand it down, and the definitions are 
   // (W9-CUSTOM-FIELDS-TENANT, fixture prefix v95p_): the form sends typed
   // customFieldValues keyed by definition NAME, names are unique only per
   // business, and ContactCustomFieldValueService.setValuesForContact now
-  // resolves them against the contact's own business only, so a contact can no
-  // longer be bound to (and disclose) another business's definition.
+  // resolves them against the contact's own business only, also for a caller
+  // with no ambient tenant (through HTTP the global TenantInterceptor already
+  // scoped that lookup). The values route and the contact detail serve only the
+  // contact's own business's definitions, and a custom-field write removes a
+  // row already bound to another business's definition (review SF-1).
 
   it("SEC-R015c-1 (W9-CUSTOM-FIELDS-TENANT, was it.todo): ContactDetail hands its businessId to ContactDetailInfo, so the panel reads the bound business's definitions, not kf_business_id", async () => {
     window.localStorage.setItem("kf_business_id", SELECTED);

@@ -23,10 +23,36 @@
  * The fix scopes the lookup to the contact's own business (the business on the
  * contact row), so only that business's live definitions can bind.
  *
+ * WHAT PRODUCTION COULD REACH (review CR-W9CF-1). In the deployed app the
+ * global TenantInterceptor (app.module.ts APP_INTERCEPTOR) installs the path
+ * business as the ambient tenant (verifiedTenantBusinessId: the guarded path
+ * business, SUPER_ADMIN included) and main.ts installs
+ * setTenantContextProvider, and CustomFieldDefinition is in BUSINESS_ID_MODELS
+ * (packages/db/src/client.ts), so the extension already added that businessId
+ * to the business-blind findMany on every POST/PATCH contacts request. Under
+ * that wiring, which this suite now installs exactly as production does, the
+ * HTTP write cases (C01..C08) pass on the pre-fix service too: they are
+ * regression pins, not proof of a bind production HTTP could make today. The
+ * write-path fix is defence in depth for a caller with NO ambient tenant
+ * (the service called outside a request, by a job, a KEY flow or a script):
+ * the [CFN-D*] cases call the service directly with no tenant installed, and
+ * those are RED on the pre-fix service.
+ *
+ * READS (review SF-1). The extension never reaches an `include`d relation, and
+ * ContactCustomFieldValue has no businessId, so a value row that already binds
+ * A's contact to B's definition (left by the business-blind lookup from a
+ * no-tenant caller, or by HTTP before main.ts installed the provider) was
+ * served to A in full, with production wiring: B's businessId, label,
+ * description and options, through the values route and the contact detail.
+ * Both reads now keep only definitions of the contact's own business, and a
+ * custom-field write on the contact removes such a row, which A could not
+ * address by name (the [CFN-R*] cases, RED on the packet head before review).
+ *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the user,
  * business, membership, contact, definition and value rows, CrmRateLimitGuard,
  * AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard,
- * TeamAuditInterceptor, the global ValidationPipe and
+ * TeamAuditInterceptor, the global TenantInterceptor (APP_INTERCEPTOR) with the
+ * tenant context provider main.ts installs, the global ValidationPipe and
  * GlobalHttpExceptionFilter (as app-bootstrap.ts configures them),
  * CrmController, CrmService, CrmStatsService (detail), CrmTimelineService,
  * ContactAuditService, ContactCustomFieldValueService and CrmCustomFieldsController
@@ -47,12 +73,14 @@
  * whether `customFieldValues` reaches the service, as it does in production;
  * the positive controls prove it does.
  *
- * Cases tagged RED-BEFORE fail on the packet base (53e9424a): a contact is
- * bound to the other business's definition. For a name both businesses
- * define, the business-blind lookup took whichever row the database returned
- * first; on the base run the database returned A's row first, so A's cases
- * C03 and C04 passed and B's mirror case C08 bound B's contact to A's
- * definition. Either order fails one side.
+ * Cases tagged RED-BEFORE fail before their fix: the [CFN-D*] cases on the
+ * packet base (53e9424a), where the service bound a contact to the other
+ * business's definition; the [CFN-R*] cases on the packet head before review
+ * (194fdc6e), where the reads served B's definition. For a name both
+ * businesses define, the business-blind lookup took whichever row the
+ * database returned first, so either order fails one side. (Without the
+ * TenantInterceptor, as this suite was first written, C01, C02, C05, C06 and
+ * C08 also failed on the base; that harness did not match production.)
  *
  * Every seeded row carries the `v95p_` prefix (contacts created through the
  * API are deleted by their business id, their values by contact) and is
@@ -79,6 +107,12 @@ const ID = {
   cA: `${P}cA`,
   cA2: `${P}cA2`,
   cB: `${P}cB`,
+  // A's contacts for the direct service calls (no ambient tenant) and the
+  // cross-bound reads.
+  cD: `${P}cD`,
+  cX: `${P}cX`,
+  // B's contact for the direct-call mirror
+  cBD: `${P}cBD`,
   // definitions. B's are inserted before A's, so a business-blind lookup meets B's row first.
   defBOnly: `${P}defBOnly`,         // B: `secretTier` (A defines no such name)
   defBShared: `${P}defBShared`,     // B: `tier`
@@ -88,6 +122,10 @@ const ID = {
   defARetired: `${P}defARetired`,   // A: `retired`, ARCHIVED
   // a value B already holds on its own contact
   valB: `${P}valB`,
+  // a row the business-blind lookup left behind: A's contact cX bound to B's definition
+  valCross: `${P}valCross`,
+  // A's own value on cX
+  valXOwn: `${P}valXOwn`,
 };
 
 /** Definition names: unique per business only, so the shared ones collide across A and B on purpose. */
@@ -107,6 +145,10 @@ const B_SECRET = {
 
 let db: any;
 let app: any;
+/** The real ContactCustomFieldValueService of the app, for the calls made outside a request. */
+let valueService: any;
+let setTenantContextProvider: ((p: { getCurrentBusinessId: () => string | undefined }) => void) | undefined;
+let getCurrentBusinessId: () => string | undefined;
 let asyncWrites: ReturnType<typeof trackAsyncWrites> | undefined;
 /** B's rows (definitions and values), serialized by the database, before any attempt. */
 let bStateBefore: string;
@@ -206,9 +248,17 @@ function expectNoTraceOfB(body: unknown) {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  const tenantMod = await import('../src/core/tenant/tenant-context');
+  getCurrentBusinessId = tenantMod.getCurrentBusinessId;
+  // As main.ts does before the app serves (CR-W9CF-1): the Prisma tenant
+  // extension reads the ambient tenant that TenantInterceptor installs.
+  setTenantContextProvider = dbMod.setTenantContextProvider;
+  setTenantContextProvider({ getCurrentBusinessId: tenantMod.getCurrentBusinessId });
 
   const { Test } = await import('@nestjs/testing');
   const { ValidationPipe } = await import('@nestjs/common');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { EventEmitter2 } = await import('@nestjs/event-emitter');
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
@@ -290,6 +340,8 @@ beforeAll(async () => {
       FeatureFlagGuard,
       PlanLimitGuard,
       TeamAuditInterceptor,
+      // The app's global tenant scope (app.module.ts), registered as production registers it.
+      { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
       CrmStatsService,
       CrmService,
       CrmTimelineService,
@@ -337,6 +389,7 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
+  valueService = app.get(ContactCustomFieldValueService);
 
   await cleanup(); // in case a prior run aborted
 
@@ -353,6 +406,9 @@ beforeAll(async () => {
     [ID.cA, ID.bizA, ID.ownerA, 'Ada'],
     [ID.cA2, ID.bizA, ID.ownerA, 'Alan'],
     [ID.cB, ID.bizB, ID.ownerB, 'Barbara'],
+    [ID.cD, ID.bizA, ID.ownerA, 'Dora'],
+    [ID.cX, ID.bizA, ID.ownerA, 'Xavier'],
+    [ID.cBD, ID.bizB, ID.ownerB, 'Bettina'],
   ] as const) {
     await db.contact.create({
       data: { id, businessId, firstName: `${P}${first}`, lastName: 'Seeded', visibility: 'TEAM', ownerId },
@@ -380,6 +436,7 @@ afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
   asyncWrites?.restore();
+  setTenantContextProvider?.({ getCurrentBusinessId: () => undefined });
 }, 60_000);
 
 describe('W9-CUSTOM-FIELDS-TENANT fixture sanity (real rows)', () => {
@@ -401,13 +458,13 @@ describe('W9-CUSTOM-FIELDS-TENANT fixture sanity (real rows)', () => {
   });
 });
 
-describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) a contact\'s typed custom-field names resolve only against its own business\'s definitions', () => {
-  it('[CFN-C01] RED-BEFORE: creating a contact of A with a name only B defines binds no value; B\'s definition never reaches A\'s contact', async () => {
+describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) through HTTP with the production tenant wiring, a contact\'s typed custom-field names resolve only against its own business\'s definitions', () => {
+  it('[CFN-C01] creating a contact of A with a name only B defines binds no value; B\'s definition never reaches A\'s contact', async () => {
     const id = await createInA('BOnlyCreate', { [NAME.bOnly]: 'b-plat' });
     expect(await boundValues(id)).toEqual([]);
   });
 
-  it('[CFN-C02] RED-BEFORE: updating a contact of A with a name only B defines binds no value', async () => {
+  it('[CFN-C02] updating a contact of A with a name only B defines binds no value', async () => {
     const res = await updateContact(ID.ownerA, ID.bizA, ID.cA, { customFieldValues: { [NAME.bOnly]: 'b-plat' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(await boundValues(ID.cA)).toEqual([]);
@@ -424,7 +481,7 @@ describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) a contact\'s typed custom-field 
     expect(await boundValues(ID.cA2)).toEqual([{ definitionId: ID.defAShared, business: ID.bizA, name: NAME.shared, value: 'Silver' }]);
   });
 
-  it('[CFN-C05] RED-BEFORE: a name A has archived while B\'s is live binds nothing (no fall-through to B)', async () => {
+  it('[CFN-C05] a name A has archived while B\'s is live binds nothing (no fall-through to B)', async () => {
     const created = await createInA('RetiredCreate', { [NAME.retired]: 'x' });
     expect(await boundValues(created)).toEqual([]);
     const res = await updateContact(ID.ownerA, ID.bizA, ID.cA, { customFieldValues: { [NAME.retired]: 'y' } });
@@ -432,7 +489,7 @@ describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) a contact\'s typed custom-field 
     expect(await boundValues(ID.cA)).toEqual([]);
   });
 
-  it('[CFN-C06] RED-BEFORE: after the attempts above, A\'s values route and contact detail serve nothing B defines (label, description, options)', async () => {
+  it('[CFN-C06] after the attempts above, A\'s values route and contact detail serve nothing B defines (label, description, options)', async () => {
     const id = await createInA('Disclosure', { [NAME.bOnly]: 'b-plat', [NAME.shared]: 'Gold', [NAME.retired]: 'x' });
     const values = await valuesRoute(ID.ownerA, ID.bizA, id);
     expect(values.status).toBe(200);
@@ -468,7 +525,7 @@ describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) a contact\'s typed custom-field 
       .toEqual(['v95p A own field', 'v95p A tier']);
   });
 
-  it('[CFN-C08] RED-BEFORE: B\'s own contact with the name both businesses define binds B\'s definition, never A\'s (the mirror of C03 and C04)', async () => {
+  it('[CFN-C08] B\'s own contact with the name both businesses define binds B\'s definition, never A\'s (the mirror of C03 and C04)', async () => {
     const res = await updateContact(ID.ownerB, ID.bizB, ID.cB, { customFieldValues: { [NAME.shared]: 'B-Gold' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(await boundValues(ID.cB)).toEqual([
@@ -478,6 +535,93 @@ describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT) a contact\'s typed custom-field 
     // B's names also still bind B's definitions (the scoping is not a refusal
     // of every name). Undo, so B's state below compares against the seed.
     await db.$executeRawUnsafe('DELETE FROM contact_custom_field_values WHERE contact_id = $1 AND definition_id = $2', ID.cB, ID.defBShared);
+  });
+});
+
+describe('SEC-R015c-3 (W9-CUSTOM-FIELDS-TENANT, review CR-W9CF-1) with no ambient tenant, as a caller outside a request runs, the service binds only the contact\'s own business\'s live definitions', () => {
+  /** No tenant is installed: the Prisma tenant extension adds nothing, so the service's own scoping is all there is. */
+  async function setOutsideARequest(contactId: string, values: Record<string, unknown>) {
+    expect(getCurrentBusinessId()).toBeUndefined();
+    return valueService.setValuesForContact(contactId, values);
+  }
+
+  /** Values of `contactId` bound to a definition of any business but `own`. */
+  async function boundElsewhere(contactId: string, own: string) {
+    return (await boundValues(contactId)).filter((v) => v.business !== own);
+  }
+
+  it('[CFN-D01] RED-BEFORE: a name only B defines binds nothing on A\'s contact', async () => {
+    expect(await setOutsideARequest(ID.cD, { [NAME.bOnly]: 'b-plat' })).toEqual([]);
+    expect(await boundValues(ID.cD)).toEqual([]);
+  });
+
+  it('[CFN-D02] RED-BEFORE: a name both businesses define binds A\'s definition on A\'s contact and B\'s on B\'s, whichever row the database returns first', async () => {
+    try {
+      await setOutsideARequest(ID.cD, { [NAME.shared]: 'Gold' });
+      await setOutsideARequest(ID.cBD, { [NAME.shared]: 'B-Gold' });
+      expect(await boundValues(ID.cD)).toEqual([{ definitionId: ID.defAShared, business: ID.bizA, name: NAME.shared, value: 'Gold' }]);
+      expect(await boundValues(ID.cBD)).toEqual([{ definitionId: ID.defBShared, business: ID.bizB, name: NAME.shared, value: 'B-Gold' }]);
+    } finally {
+      // B's contact is not A's attempt: undo it, so B's state below compares against the seed.
+      await db.$executeRawUnsafe('DELETE FROM contact_custom_field_values WHERE contact_id = $1', ID.cBD);
+    }
+  });
+
+  it('[CFN-D03] RED-BEFORE: a name A archived while B\'s is live binds nothing (no fall-through to B)', async () => {
+    await setOutsideARequest(ID.cD, { [NAME.retired]: 'x' });
+    expect((await boundValues(ID.cD)).filter((v) => v.name === NAME.retired)).toEqual([]);
+    expect(await boundElsewhere(ID.cD, ID.bizA)).toEqual([]);
+  });
+});
+
+describe('SF-1 (W9-CUSTOM-FIELDS-TENANT review) a value row already bound to another business\'s definition is never served, and a custom-field write on the contact removes it', () => {
+  beforeAll(async () => {
+    // A's own value, and the row the business-blind lookup left behind
+    // (written directly, as no fixed path can write it now).
+    await db.contactCustomFieldValue.create({ data: { id: ID.valXOwn, contactId: ID.cX, definitionId: ID.defAOwn, value: 'x-own' } });
+    await db.contactCustomFieldValue.create({ data: { id: ID.valCross, contactId: ID.cX, definitionId: ID.defBOnly, value: 'b-plat' } });
+  });
+
+  afterAll(async () => {
+    // The planted row is this block's fixture, not A's attempt: S01 below
+    // measures only what A's requests did to B's rows.
+    await db.$executeRawUnsafe('DELETE FROM contact_custom_field_values WHERE id = $1', ID.valCross);
+  });
+
+  const ownOnly = [{ definitionId: ID.defAOwn, business: ID.bizA, name: NAME.aOwn, value: 'x-own' }];
+
+  it('[CFN-R01] RED-BEFORE: A\'s values route serves A\'s own value and nothing bound to B\'s definition (no B businessId, label, description or options)', async () => {
+    const res = await valuesRoute(ID.ownerA, ID.bizA, ID.cX);
+    expect(res.status).toBe(200);
+    expectNoTraceOfB(res.body);
+    expect(JSON.stringify(res.body)).not.toContain(ID.bizB);
+    expect((res.body as Array<{ id: string }>).map((v) => v.id)).toEqual([ID.valXOwn]);
+  });
+
+  it('[CFN-R02] RED-BEFORE: A\'s contact detail serves A\'s own value and nothing bound to B\'s definition', async () => {
+    const res = await detailRoute(ID.ownerA, ID.bizA, ID.cX);
+    expect(res.status).toBe(200);
+    expectNoTraceOfB(res.body.customFieldValues);
+    expect(JSON.stringify(res.body.customFieldValues)).not.toContain(ID.bizB);
+    expect((res.body.customFieldValues as Array<{ id: string }>).map((v) => v.id)).toEqual([ID.valXOwn]);
+  });
+
+  it('[CFN-R03] RED-BEFORE: getValuesForContacts names its business and answers only rows whose contact and definition both belong to it', async () => {
+    const rows: Array<{ id: string }> = await valueService.getValuesForContacts(ID.bizA, [ID.cX, ID.cB]);
+    expect(rows.map((r) => r.id)).toEqual([ID.valXOwn]);
+  });
+
+  it('[CFN-R04] RED-BEFORE: a PATCH of A\'s contact that clears B\'s field name removes the row bound to B\'s definition; A\'s own value and B\'s own rows are untouched', async () => {
+    expect(await boundValues(ID.cX)).toEqual([
+      ...ownOnly,
+      { definitionId: ID.defBOnly, business: ID.bizB, name: NAME.bOnly, value: 'b-plat' },
+    ]);
+    const res = await updateContact(ID.ownerA, ID.bizA, ID.cX, { customFieldValues: { [NAME.bOnly]: null } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await boundValues(ID.cX)).toEqual(ownOnly);
+    expect(await boundValues(ID.cB)).toEqual([{ definitionId: ID.defBOnly, business: ID.bizB, name: NAME.bOnly, value: 'b-plat' }]);
+    const values = await valuesRoute(ID.ownerA, ID.bizA, ID.cX);
+    expect((values.body as Array<{ id: string }>).map((v) => v.id)).toEqual([ID.valXOwn]);
   });
 });
 
