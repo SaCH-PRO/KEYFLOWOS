@@ -338,7 +338,8 @@ export class CrmAiController {
     }
     const scope = await this.contactScope(businessId, req.user.id);
     checkAiRateLimit(businessId);
-    return this.crmAi.naturalLanguageSearch(businessId, body.query, scope);
+    // W9-MONEY-RANKING (D-100): the viewer, so no money signal orders a revenue-none member's search.
+    return this.crmAi.naturalLanguageSearch(businessId, body.query, scope, req.user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)

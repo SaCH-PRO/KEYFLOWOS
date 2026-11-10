@@ -62,6 +62,30 @@ function withoutRevenueSignals(value: Prisma.JsonValue | null, revenue: Readonly
   return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
 }
 
+/**
+ * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3): a contact's stats with no
+ * invoice term: meta's lead score without +10 a paid and -5 an unpaid invoice
+ * (attachContactStats' terms; the score withoutListMoney in crm.service.ts
+ * serves a member without revenue read) and its invoice figures 0.
+ */
+function withoutInvoiceTerms(contact: ContactWithStats): ContactWithStats {
+  const meta = contact.meta;
+  if (!meta) return contact;
+  return {
+    ...contact,
+    meta: {
+      ...meta,
+      leadScore: meta.leadScore - meta.paidInvoices * 10 + meta.unpaidInvoices * 5,
+      outstandingBalance: 0,
+      unpaidInvoices: 0,
+      paidInvoices: 0,
+      oldestUnpaidInvoiceDueAt: null,
+      totalRevenue: 0,
+      invoiceCount: 0,
+    },
+  };
+}
+
 type ContactHighlight = {
   contactId: string;
   name: string;
@@ -818,7 +842,23 @@ export class CrmStatsService {
     return segResult;
   }
 
-  async flowHighlights(input: { businessId: string }): Promise<FlowHighlightsPayload> {
+  /**
+   * The CRM highlights, cached for the whole business. W9-MONEY-RANKING
+   * (owner ruling D-100; review residual SEC-W8MS-3): with `readsRevenue`
+   * false (a member without revenue read) highPotential is ranked by the
+   * money-free lead score instead (highPotentialWithoutMoney); the rest of
+   * the payload is the cached one, which the controller projects for that
+   * member (crm.controller.ts withoutHighlightsMoney). Absent or true: the
+   * payload as before.
+   */
+  async flowHighlights(input: { businessId: string; readsRevenue?: boolean }): Promise<FlowHighlightsPayload> {
+    if (input.readsRevenue === false) {
+      const payload = await this.flowHighlights({ businessId: input.businessId });
+      return {
+        ...payload,
+        highlights: { ...payload.highlights, highPotential: await this.highPotentialWithoutMoney(input.businessId) },
+      };
+    }
     const cacheKey = `${input.businessId}:flowHighlights`;
     const cached = await this.cache.get<FlowHighlightsPayload>(cacheKey);
     if (cached) return cached;
@@ -854,6 +894,30 @@ export class CrmStatsService {
     };
     await this.cache.set(cacheKey, flowResult);
     return flowResult;
+  }
+
+  /**
+   * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3): the high-potential
+   * cards for a member without revenue read. The contacts flowHighlights
+   * ranks, each scored with no invoice term (withoutInvoiceTerms: the lead
+   * score without +10 a paid / -5 an unpaid invoice, the score that member's
+   * list and segment rows carry), so no card is chosen or placed by an
+   * invoice; each card's balance and unpaid count are 0. Cached for the
+   * business beside the highlights (invalidated with them).
+   */
+  private async highPotentialWithoutMoney(businessId: string): Promise<ContactHighlight[]> {
+    const cacheKey = `${businessId}:flowHighlights:highPotentialWithoutMoney`;
+    const cached = await this.cache.get<ContactHighlight[]>(cacheKey);
+    if (cached) return cached;
+    const rawContacts = await this.prisma.client.contact.findMany({
+      where: contactWhereBase(businessId),
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const contacts = rawContacts.length > 0 ? await this.attachContactStats(businessId, rawContacts) : [];
+    const cards = this.buildHighlightCards(contacts.map(withoutInvoiceTerms), 4, (meta) => meta.leadScore);
+    await this.cache.set(cacheKey, cards);
+    return cards;
   }
 
   async getContactsPollState(businessId: string) {

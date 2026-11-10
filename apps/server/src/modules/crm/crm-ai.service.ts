@@ -10,6 +10,7 @@ import { CrmService } from './crm.service';
 import { isContactStatus } from './crm.constants';
 import { normalizeContactEventType } from '@keyflow/shared';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
 import { buildChurnDetectionPrompt } from './prompts/churn-detection.prompt';
@@ -758,7 +759,20 @@ Respond in valid JSON:
     }
   }
 
-  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope) {
+  /**
+   * W9-MONEY-RANKING (owner ruling D-100; review residual SEC-W8MS-2): for a
+   * `viewerUserId` without revenue read (resolveTimelineViewer, the rule GET
+   * contacts applies) a 'score' or 'revenue' search is ordered by the
+   * money-free key GET contacts uses for that member when it ignores those
+   * sorts (createdAt desc, whatever the sortOrder): both ordered by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice). Every row's leadScore is withheld (null), as GET contacts
+   * serves it without includeStats (withoutStoredMoney). The owner, a member
+   * with revenue read and a call that names no viewer are served as before.
+   */
+  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = !viewerUserId
+      || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
     const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
       where: this.contactWhere(businessId, scope),
@@ -838,7 +852,9 @@ Respond in valid JSON:
           } : {}),
         },
         take: 50,
-        orderBy: cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+        // D-100 (W9-MONEY-RANKING): no stored-score order for a member without revenue read.
+        orderBy: !readsRevenue && (cleanFilters.sortBy === 'score' || cleanFilters.sortBy === 'revenue') ? { createdAt: 'desc' }
+          : cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'revenue' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'newest' ? { createdAt: 'desc' }
           : cleanFilters.sortBy === 'oldest' ? { createdAt: 'asc' }
@@ -852,7 +868,8 @@ Respond in valid JSON:
       });
 
       return {
-        contacts,
+        // D-100 (W9-MONEY-RANKING): the stored lead score is withheld from a member without revenue read.
+        contacts: readsRevenue ? contacts : contacts.map((contact) => ({ ...contact, leadScore: null })),
         filters: cleanFilters,
         interpretation: parsed.interpretation ?? '',
         confidence: Number(parsed.confidence) || 0.5,

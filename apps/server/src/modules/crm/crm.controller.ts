@@ -66,9 +66,11 @@ type FlowHighlights = Awaited<ReturnType<CrmStatsService['flowHighlights']>>;
  * (CrmStatsService.flowHighlights, cached for the whole business) is read as
  * it is and projected here, so the cache never holds the withheld view and an
  * owner's read never gets it:
- * - overdueReminders (picked and ranked by the outstanding balance) and
- *   highPotential (ranked by the lead score with its invoice terms, each card
- *   carrying that score, the balance and the unpaid count) are empty;
+ * - overdueReminders (picked and ranked by the outstanding balance) is empty;
+ * - highPotential is the one CrmStatsService.flowHighlights ranked for that
+ *   member (readsRevenue false; W9-MONEY-RANKING, D-100): by the money-free
+ *   lead score, each card with no balance or unpaid count (W8 served it
+ *   empty: the cached cards are ranked by the score with its invoice terms);
  * - serviceAffinity keeps its bookings, its revenue figure is 0;
  * - the 'cold-with-unpaid' segment (its members are the contacts with an
  *   unpaid invoice) is left out, and every other segment's contacts are
@@ -82,7 +84,7 @@ function withoutHighlightsMoney(payload: FlowHighlights): FlowHighlights {
   return {
     ...payload,
     highlights: {
-      highPotential: [],
+      highPotential: payload.highlights.highPotential,
       overdueReminders: [],
       serviceAffinity: payload.highlights.serviceAffinity.map((service) => ({ ...service, revenue: 0 })),
     },
@@ -1137,10 +1139,13 @@ export class CrmController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/highlights')
   async flowHighlights(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
-    const payload = await this.crmStats.flowHighlights({ businessId });
     // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): a member
-    // without revenue read gets no amount and no ranking by money.
-    return (await this.readsRevenue(businessId, req)) ? payload : withoutHighlightsMoney(payload);
+    // without revenue read gets no amount and no ranking by money; W9-MONEY-RANKING
+    // (D-100): the viewer's revenue read is passed, so their highPotential is
+    // ranked by the money-free lead score.
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    const payload = await this.crmStats.flowHighlights({ businessId, readsRevenue });
+    return readsRevenue ? payload : withoutHighlightsMoney(payload);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
