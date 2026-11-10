@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CASH_NET_PAYMENT_WHERE, balanceOfStoredRows, roundMoney } from '../commerce/invoice-workflow.service';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { contactWhereBase } from './crm.helpers';
 
 type StoredPaymentRow = {
@@ -152,10 +153,22 @@ export class CrmRevenueService {
    * whose reference links to no row read has that reference looked up among
    * the contact's own-tenant rows of its invoice, and one that links to a row
    * older than the read is that row's, never charged to another payment.
+   *
+   * W7-CONTACT-MONEY-VIEWS (V55-13g; SEC-W6CEM-2, owner rulings D-90 and D-63,
+   * as the briefings report revenueToday and openInvoices): `viewerUserId` is
+   * the reading member (GET .../revenue-summary). One without revenue read gets
+   * the summary's shape with no figure in it: no quote, invoice, payment or
+   * ContactEvent row is read; the money and count figures are 0, the payment
+   * fields null, and recentRevenueActions empty (every type it lists is a
+   * sales_revenue ContactEvent, which GET .../events withholds from that member,
+   * V55-13e). Before it the route served the contact's revenue, balances and
+   * payment amounts on crm read alone. With no viewer (system context), and for
+   * the owner and a member with revenue read, every figure, as before.
    */
   async getContactRevenueSummary(
     businessId: string,
     contactId: string,
+    viewerUserId?: string | null,
   ): Promise<{
     contactId: string;
     currency: string;
@@ -175,6 +188,20 @@ export class CrmRevenueService {
       entityId: string | null;
     }>;
   }> {
+    if (viewerUserId && !(await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue')) {
+      return {
+        contactId,
+        currency: 'TTD',
+        lifetimeRevenue: 0,
+        outstandingBalance: 0,
+        openInvoices: 0,
+        openQuotes: 0,
+        lastPaymentAt: null,
+        lastPaymentAmount: null,
+        paymentReliability: null,
+        recentRevenueActions: [],
+      };
+    }
     // Own-tenant rows only: the Payment row's tenant and its invoice's.
     const ownRows = { businessId, invoice: { businessId, contactId } };
     const [quotes, invoices, payments, cashNet, recentEvents] = await Promise.all([

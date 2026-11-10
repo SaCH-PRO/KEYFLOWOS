@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { readVisibleActivityPage, resolveTimelineViewer, type TimelineViewer } from '../timeline/timeline-visibility';
 import { contactWhereWithId } from './crm.helpers';
 
 type HealthMetrics = {
@@ -99,6 +100,47 @@ export class CrmJourneyService {
     return contact;
   }
 
+  /**
+   * W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13g; owner rulings D-90 and D-63, the
+   * V1-84 timeline rule, as the briefings apply it): the reading member, or null
+   * for a caller that names none (system context: every row and figure, as
+   * before). Every HTTP route names its member (crm.controller.ts). A member
+   * without revenue read is served no money row and no money figure: the
+   * contact's invoices and quotes are not read (D-63: commerce rows are revenue
+   * rows), every figure read from them is 0, and the ContactEvents V55-13e
+   * withholds are withheld (readableContactEvents).
+   */
+  private async viewerOf(businessId: string, viewerUserId?: string | null): Promise<TimelineViewer | null> {
+    return viewerUserId ? resolveTimelineViewer(this.prisma, businessId, viewerUserId) : null;
+  }
+
+  /** Whether `viewer` reads revenue rows; a caller that names no member (null) does. */
+  private readsRevenue(viewer: TimelineViewer | null): boolean {
+    return viewer === null || viewer.readable.has('revenue');
+  }
+
+  /**
+   * The contact's newest `limit` ContactEvents `viewer` may read (W7-CONTACT-
+   * MONEY-VIEWS, V55-13f; D-90 / D-63). Judged as CrmTimelineService
+   * .listContactEvents judges them for GET .../events (V55-13e): each event as
+   * the feed judges its CRM copy (module crm, naming the contact), by
+   * canReadActivityRow through readVisibleActivityPage, so an event of a
+   * sales_revenue type or whose data carries a MONEY_DATA_FIELDS field is
+   * withheld from a member without revenue read and the page is filled from
+   * older events. With no viewer (system context), the newest `limit`, as before.
+   */
+  private async readableContactEvents(businessId: string, contactId: string, limit: number, viewer: TimelineViewer | null) {
+    const where = { businessId, contactId };
+    if (!viewer) {
+      return this.db.contactEvent.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit });
+    }
+    const page = await readVisibleActivityPage(this.prisma, viewer, limit, async (skip, take) => {
+      const rows = await this.db.contactEvent.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip, take });
+      return rows.map((event) => ({ module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data, event }));
+    });
+    return page.map((row) => row.event);
+  }
+
   async getContactHealthMetrics(businessId: string, contactId: string): Promise<HealthMetrics> {
     await this.assertContact(businessId, contactId);
     const now = new Date();
@@ -137,7 +179,14 @@ export class CrmJourneyService {
     };
   }
 
-  async getContactJourney(businessId: string, contactId: string): Promise<JourneyMilestone[]> {
+  /**
+   * W7-CONTACT-MONEY-VIEWS (V55-13g; D-90 / D-63): `viewerUserId` is the reading
+   * member. One without revenue read gets no quote or payment milestone (their
+   * values are the quote's and the paid invoice's totals): the contact's quotes
+   * and paid invoices are not read for them.
+   */
+  async getContactJourney(businessId: string, contactId: string, viewerUserId?: string | null): Promise<JourneyMilestone[]> {
+    const readsRevenue = this.readsRevenue(await this.viewerOf(businessId, viewerUserId));
     const [contact, events, invoices, quotes, bookings] = await Promise.all([
       this.db.contact.findFirst({
         where: contactWhereWithId(businessId, contactId),
@@ -148,16 +197,20 @@ export class CrmJourneyService {
         orderBy: { createdAt: 'asc' },
         take: 20,
       }),
-      this.db.invoice.findMany({
-        where: { businessId, contactId, status: 'PAID' },
-        orderBy: { paidAt: 'asc' },
-        take: 5,
-      }),
-      this.db.quote.findMany({
-        where: { businessId, contactId },
-        orderBy: { createdAt: 'asc' },
-        take: 5,
-      }),
+      readsRevenue
+        ? this.db.invoice.findMany({
+            where: { businessId, contactId, status: 'PAID' },
+            orderBy: { paidAt: 'asc' },
+            take: 5,
+          })
+        : [],
+      readsRevenue
+        ? this.db.quote.findMany({
+            where: { businessId, contactId },
+            orderBy: { createdAt: 'asc' },
+            take: 5,
+          })
+        : [],
       this.db.booking.findMany({
         where: { businessId, contactId },
         orderBy: { startTime: 'asc' },
@@ -217,17 +270,26 @@ export class CrmJourneyService {
     });
   }
 
-  async getContactCrossJourney(businessId: string, contactId: string): Promise<CrossJourneyResponse> {
+  /**
+   * W7-CONTACT-MONEY-VIEWS (V55-13f; SEC-W6CEM-1, owner rulings D-90 and D-63):
+   * `viewerUserId` is the reading member (GET .../cross-journey, .../story and
+   * .../dossier). One without revenue read is served no money row and no money
+   * figure: the ContactEvents V55-13e withholds are withheld (the 50 filled from
+   * older events), the contact's invoices and quotes are not read, so the
+   * timeline has no commerce invoice / quote row, summary.totalRevenue is 0 and
+   * momentum carries no revenue term. Before it these routes served every
+   * event, invoice and quote, amounts included, on crm read alone. The owner
+   * and a member with revenue read get every row and figure, as before.
+   */
+  async getContactCrossJourney(businessId: string, contactId: string, viewerUserId?: string | null): Promise<CrossJourneyResponse> {
     const contact = await this.assertContact(businessId, contactId);
+    const viewer = await this.viewerOf(businessId, viewerUserId);
+    const readsRevenue = this.readsRevenue(viewer);
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const [events, notes, tasks, invoices, quotes, bookings, recentEventCount] = await Promise.all([
-      this.db.contactEvent.findMany({
-        where: { businessId, contactId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+      this.readableContactEvents(businessId, contactId, 50, viewer),
       this.db.contactNote.findMany({
         where: { businessId, contactId },
         orderBy: { createdAt: 'desc' },
@@ -238,18 +300,22 @@ export class CrmJourneyService {
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
-      this.db.invoice.findMany({
-        where: { businessId, contactId, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: { id: true, status: true, total: true, currency: true, invoiceNumber: true, createdAt: true, paidAt: true, issueDate: true, dueDate: true },
-      }),
-      this.db.quote.findMany({
-        where: { businessId, contactId },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: { id: true, status: true, total: true, currency: true, quoteNumber: true, createdAt: true },
-      }),
+      readsRevenue
+        ? this.db.invoice.findMany({
+            where: { businessId, contactId, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+            select: { id: true, status: true, total: true, currency: true, invoiceNumber: true, createdAt: true, paidAt: true, issueDate: true, dueDate: true },
+          })
+        : [],
+      readsRevenue
+        ? this.db.quote.findMany({
+            where: { businessId, contactId },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+            select: { id: true, status: true, total: true, currency: true, quoteNumber: true, createdAt: true },
+          })
+        : [],
       this.db.booking.findMany({
         where: { businessId, contactId, deletedAt: null },
         orderBy: { startTime: 'desc' },
@@ -543,17 +609,28 @@ export class CrmJourneyService {
     };
   }
 
-  async generateAiInsight(businessId: string, contactId: string): Promise<AiInsight> {
+  /**
+   * W7-CONTACT-MONEY-VIEWS (V55-13f; owner rulings D-90 and D-63):
+   * `viewerUserId` is the reading member (GET .../dossier). For one without
+   * revenue read the contact's invoices are not read, so the summary carries no
+   * payment sentence (it printed 'payments totaling TTD <amount>') and no
+   * 'high-value' tag (a revenue threshold). With no viewer (the ai-insight
+   * route, system context) every figure, as before.
+   */
+  async generateAiInsight(businessId: string, contactId: string, viewerUserId?: string | null): Promise<AiInsight> {
+    const readsRevenue = this.readsRevenue(await this.viewerOf(businessId, viewerUserId));
     const [contact, events, notes, invoices, tasks] = await Promise.all([
       this.db.contact.findFirst({
         where: contactWhereWithId(businessId, contactId),
       }),
       this.db.contactEvent.count({ where: { businessId, contactId } }),
       this.db.contactNote.count({ where: { businessId, contactId } }),
-      this.db.invoice.findMany({
-        where: { businessId, contactId },
-        select: { status: true, total: true },
-      }),
+      readsRevenue
+        ? this.db.invoice.findMany({
+            where: { businessId, contactId },
+            select: { status: true, total: true },
+          })
+        : [],
       this.db.contactTask.findMany({
         where: { businessId, contactId, status: { not: 'DONE' } },
         select: { title: true, dueDate: true },
@@ -573,10 +650,13 @@ export class CrmJourneyService {
     const paidInvoices = invoices.filter(i => i.status === 'PAID');
     const totalRevenue = paidInvoices.reduce((sum, i) => sum + toNum(i.total), 0);
     
-    const summary = `${firstName} is a ${status.toLowerCase()} with ${events} interactions and ${notes} notes. ` +
-      (paidInvoices.length > 0 
-        ? `They've made ${paidInvoices.length} payments totaling TTD ${totalRevenue.toLocaleString()}.`
-        : 'No payments recorded yet.');
+    const activity = `${firstName} is a ${status.toLowerCase()} with ${events} interactions and ${notes} notes.`;
+    const summary = !readsRevenue
+      ? activity
+      : `${activity} ` +
+        (paidInvoices.length > 0
+          ? `They've made ${paidInvoices.length} payments totaling TTD ${totalRevenue.toLocaleString()}.`
+          : 'No payments recorded yet.');
 
     let nextBestAction: string;
     let suggestedMessage: string | undefined;

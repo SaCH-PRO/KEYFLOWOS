@@ -1795,8 +1795,10 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.revenue.getContactRevenueSummary(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W7-CONTACT-MONEY-VIEWS (V55-13g; D-90 / D-63): the reading member, so a
+    // member without revenue read gets the summary with no figure in it.
+    return this.revenue.getContactRevenueSummary(businessId, contactId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1821,8 +1823,10 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.journey.getContactJourney(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W7-CONTACT-MONEY-VIEWS (V55-13g; D-90 / D-63): the reading member, so a
+    // member without revenue read gets no quote or payment milestone.
+    return this.journey.getContactJourney(businessId, contactId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1834,8 +1838,10 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.journey.getContactCrossJourney(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W7-CONTACT-MONEY-VIEWS (V55-13f; D-90 / D-63): the reading member, so a
+    // member without revenue read gets no money row and no money figure.
+    return this.journey.getContactCrossJourney(businessId, contactId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1848,8 +1854,11 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
     @Query('filter') filter?: string,
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    const result = await this.journey.getContactCrossJourney(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W7-CONTACT-MONEY-VIEWS (V55-13f; D-90 / D-63): the story is the reading
+    // member's cross-journey, so ?filter=money finds no money row for a member
+    // without revenue read.
+    const result = await this.journey.getContactCrossJourney(businessId, contactId, actorUserId);
     if (!filter || filter === 'all') return result;
     const filterFn = (() => {
       switch (filter) {
@@ -1889,10 +1898,13 @@ export class CrmController {
     // Authorization and the visible row come first. A request the caller may
     // not make never starts the journey, AI-insight or health lookups, which
     // read the same contact's related data.
+    // W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13h; D-90 / D-63): every part is
+    // read for this member, so one without revenue read gets no money row and no
+    // money figure in the contact, meta, timeline, summary or insight.
     const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
     const [story, insight, health] = await Promise.all([
-      this.journey.getContactCrossJourney(businessId, contactId),
-      this.journey.generateAiInsight(businessId, contactId),
+      this.journey.getContactCrossJourney(businessId, contactId, actorUserId),
+      this.journey.generateAiInsight(businessId, contactId, actorUserId),
       this.journey.getContactHealthMetrics(businessId, contactId),
     ]);
     return {
