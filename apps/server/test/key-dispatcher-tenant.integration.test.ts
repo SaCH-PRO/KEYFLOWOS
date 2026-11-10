@@ -565,33 +565,117 @@ describe('V1-21d SEC3-ST-2 — a KEY commerce write answers with the write proje
   });
 });
 
-// ─── W7-KEY-MARK-PAID-PROJECTION review: what the tool does not yet do for the member a turn runs for ───
+// ─── W7-KEY-MARK-PAID-PROJECTION review: the member a KEY turn runs for (W8-KEY-REVENUE-GATE) ───
 //
 // Both findings were reproduced on a real database (keyflowos_w16, revenue-authorization's rva_
-// fixtures, a probe reverted after the run). Neither fix lies in that packet's write set (the
-// dispatcher's commerce_mark_invoice_paid case only), so they stay visible here as todos. This
-// suite is no Release 0 suite (release0-index.json), so a todo here needs no index entry.
+// fixtures) and kept here as todos until owner ruling D-98 (2026-11-10): when a member drives KEY,
+// KEY's money-writing tools need that member's own revenue write, as the web routes do.
+// W8-KEY-REVENUE-GATE makes both live. The dispatcher is the real executeTool entry
+// (executeToolDirectly) every member chat surface reaches, over this suite's real CommerceService;
+// the governance tier, the execution log and the graph cache executeTool touches are stubs off the
+// boundary. This suite is no Release 0 suite (release0-index.json).
 
 describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and the member a KEY turn runs for', () => {
-  it.todo(
-    "W7KMP-01 (SEC-W7KMP-1; D-88, D-90): commerce_mark_invoice_paid run for a member keeps that member beside KEY as " +
-      'data.initiatedBy on the invoice.payment_recorded and invoice.paid entries and the FINANCE payment_recorded row, as ' +
-      "commerce_update_invoice {status: 'PAID'} does since SEC-W7IAR-2 (payments-actor PA-16r). DEFERRED: follow-up packet " +
-      '(outside the W7-KEY-MARK-PAID-PROJECTION write set) — CommerceService.markInvoicePaid takes no initiatedBy ' +
-      '(markInvoicePaidFor is private, and the RA-G16-01 census pins every markInvoicePaid call site to three arguments), ' +
-      "update_status_with_confirmation {newStatus: 'PAID'} calls it the same way, and the chat path that runs a tool without " +
-      'confirmation hands executeTool no actorUserId, so its execution log row names no member. Reproduced: for ' +
-      'rva_staffWriteA both entries carry actorId key_ai, actorType SYSTEM and no initiatedBy; commerce_update_invoice ' +
-      'PAID for the same member records initiatedBy rva_staffWriteA.',
+  /** A SENT invoice of A on A's contact that no case here may move. */
+  const SENT = `${P}inv_kmp_sent`;
+  /** A STAFF member of A whose explicit scope map holds revenue write. */
+  const memberWriteA = `${P}memberWriteA`;
+  const MONEY_TOOLS: Array<[string, (invoiceId: string) => Record<string, unknown>]> = [
+    ['commerce_mark_invoice_paid', (invoiceId) => ({ invoiceId })],
+    ['commerce_update_invoice', (invoiceId) => ({ invoiceId, status: 'PAID' })],
+    ['update_status_with_confirmation', (invoiceId) => ({ entityType: 'invoice', ids: [invoiceId], newStatus: 'PAID' })],
+  ];
+  let chat: any;
+  let commerce: any;
+  const turn = (surface: string, principalUserId: string) => ({ surface, principalUserId });
+
+  beforeAll(async () => {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    commerce = dispatcher.moduleRef.get(CommerceService);
+    // executeTool's collaborators off the boundary; everything else is the suite's dispatcher.
+    chat = Object.assign(Object.create(dispatcher), {
+      governance: { getToolTier: () => 'MEDIUM' },
+      executionLog: { logToolExecution: async () => null },
+      businessGraph: { invalidateCache: () => undefined },
+    });
+    await db.user.create({ data: { id: memberWriteA, email: `${memberWriteA}@${P}test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: m(memberWriteA), userId: memberWriteA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'write' } },
+    });
+    await db.invoice.create({ data: { id: SENT, businessId: ID.bizA, contactId: ID.contactA, invoiceNumber: `${P}INV-KMP`, total: 40, status: 'SENT' } });
+  });
+
+  it(
+    "W7KMP-01 (SEC-W7KMP-1; D-88, D-90): commerce_mark_invoice_paid and update_status_with_confirmation {newStatus: 'PAID'} run for a " +
+      'member hand CommerceService.markInvoicePaid that member as initiatedBy beside KEY, as commerce_update_invoice does ' +
+      '(SEC-W7IAR-2); the entries it writes carry it (payments-actor PA-16s)',
+    async () => {
+      const spy = vi.spyOn(commerce, 'markInvoicePaid');
+      try {
+        // A's PAID invoice: markInvoicePaid answers it as it is (idempotent), so only the call is read.
+        await chat.executeToolDirectly(ID.bizA, 'commerce_mark_invoice_paid', { invoiceId: ID.invOwnPaid }, undefined, turn('CHAT', memberWriteA));
+        await chat.executeToolDirectly(
+          ID.bizA,
+          'update_status_with_confirmation',
+          { entityType: 'invoice', ids: [ID.invOwnPaid], newStatus: 'PAID' },
+          undefined,
+          turn('CHAT', ID.ownerA),
+        );
+        expect(spy.mock.calls).toEqual([
+          [ID.invOwnPaid, 'key_ai', ID.bizA, { initiatedBy: memberWriteA }],
+          [ID.invOwnPaid, 'key_ai', ID.bizA, { initiatedBy: ID.ownerA }],
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+    },
   );
-  it.todo(
-    "W7KMP-02 (SEC-W7KMP-2; needs an owner ruling extending D-40 / D-71 to revenue on member chat): a member's chat turn " +
-      "runs commerce_mark_invoice_paid only with revenue:write, as PATCH /commerce/invoices/:invoiceId/paid requires. " +
-      'DEFERRED: owner ruling, then a follow-up packet — on member chat the dispatcher gates the operations module only ' +
-      '(operationsScopeRefusal, selectToolsForRequest and governToolCall, D-40), AiOversightService checks a position ' +
-      'envelope only on the staff bridge, and markInvoicePaid accepts KEY on the tenant alone. Reproduced: rva_staffNoneA ' +
-      "({ revenue: 'none', crm: 'read' }) and rva_noMember (no membership) each mark a SENT copy PAID through " +
-      "executeToolDirectly on the CHAT surface, while PATCH .../paid answers rva_staffNoneA 403.",
+
+  it(
+    "W7KMP-02 (SEC-W7KMP-2; D-98): a member's chat turn runs KEY's money-writing tools (commerce_mark_invoice_paid, " +
+      "commerce_update_invoice {status: 'PAID'}, update_status_with_confirmation to PAID) only with revenue:write, as " +
+      'PATCH /commerce/invoices/:invoiceId/paid requires: a STAFF member on role defaults (revenue read) and a user with no ' +
+      'membership in the business are refused on CHAT, CHAT_STREAM and CHAT_CONFIRM before anything is written, and are not ' +
+      'offered the tools; the owner and a revenue:write member are offered them and run them',
+    async () => {
+      const refusal = (level: string) => new RegExp(`^Insufficient permissions: revenue requires write access \\(you have ${level}\\).*\\(D-98\\)`);
+      for (const surface of ['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']) {
+        for (const [who, level] of [
+          [ID.memberA, 'read'],
+          [ID.ownerB, 'none'],
+        ] as const) {
+          for (const [tool, args] of MONEY_TOOLS) {
+            await expect(
+              chat.executeToolDirectly(ID.bizA, tool, args(SENT), undefined, turn(surface, who)),
+              `${surface} ${who} ${tool}`,
+            ).rejects.toThrow(refusal(level));
+          }
+        }
+      }
+      // Nothing was written: the invoice is still SENT with no payment.
+      expect(await db.invoice.findUnique({ where: { id: SENT }, select: { status: true, paidAt: true } })).toEqual({ status: 'SENT', paidAt: null });
+      expect(await db.payment.count({ where: { invoiceId: SENT } })).toBe(0);
+
+      // The menu: a member below revenue write is not offered the money-writing tools (reads stay).
+      const menu = async (who: string): Promise<string[]> =>
+        ((await chat.selectToolsForRequest(ID.bizA, [], 'mark the invoice paid, update the invoice, record the payment', undefined, who)) as Array<{
+          function: { name: string };
+        }>).map((t) => t.function.name);
+      for (const who of [ID.memberA, ID.ownerB]) {
+        const offered = await menu(who);
+        expect(offered, who).toContain('commerce_list_invoices');
+        for (const [tool] of MONEY_TOOLS) expect(offered, `${who} ${tool}`).not.toContain(tool);
+      }
+      for (const who of [ID.ownerA, memberWriteA]) {
+        expect(await menu(who), who).toEqual(expect.arrayContaining(['commerce_mark_invoice_paid', 'commerce_update_invoice']));
+      }
+
+      // The control: the owner and the revenue:write member run the tool (A's PAID invoice, answered as it is).
+      for (const who of [ID.ownerA, memberWriteA]) {
+        const out = await chat.executeToolDirectly(ID.bizA, 'commerce_mark_invoice_paid', { invoiceId: ID.invOwnPaid }, undefined, turn('CHAT', who));
+        expect(out.invoice, who).toMatchObject({ id: ID.invOwnPaid, status: 'PAID' });
+      }
+    },
   );
 });
 
