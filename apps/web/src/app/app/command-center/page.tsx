@@ -59,6 +59,7 @@ import {
 import { DueObligationsPanel } from "./components/due-obligations-panel";
 import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
 import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
 import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
 import { BusinessPulseCardV2 } from "./components-v2/business-pulse-card-v2";
@@ -220,6 +221,16 @@ export default function CommandCenterPage() {
   const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
   const [queueTotal, setQueueTotal] = useState(0);
   const [queueLoading, setQueueLoading] = useState(false);
+  /**
+   * W7-WEB-OPS-SCOPE (D-40): the member's operations level as the server's refusals name it; the
+   * queue disables the item actions below write. The cockpit itself is every member's (D-96).
+   */
+  const [operationsLevel, setOperationsLevel] = useState<OperationsLevel>("unknown");
+  /** An item action's answer: a refusal names the level, and every item action needs write. */
+  const noteActionAnswer = (res: { error?: string | null; status?: number }) => {
+    const refused = operationsLevelFromAnswer(res);
+    if (refused) setOperationsLevel(refused);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -259,9 +270,14 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     setQueueLoading(true);
     try {
-      const { data } = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      const res = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      const { data } = res;
       setCommandItems(data?.items ?? []);
       setQueueTotal(data?.total ?? 0);
+      // A refused read names the level (none); a read that succeeds means at least read.
+      const refused = operationsLevelFromAnswer(res);
+      if (refused) setOperationsLevel(refused);
+      else if (data) setOperationsLevel((prev) => (prev === "none" ? "unknown" : prev));
     } finally {
       setQueueLoading(false);
     }
@@ -275,50 +291,52 @@ export default function CommandCenterPage() {
 
   const handleComplete = async (id: string) => {
     if (!businessId) return;
-    await completeCommandItem(businessId, id);
+    noteActionAnswer(await completeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleApprove = async (id: string) => {
     if (!businessId) return;
-    await approveCommandItem(businessId, id);
+    noteActionAnswer(await approveCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleExecute = async (id: string) => {
     if (!businessId) return;
-    await executeCommandItem(businessId, id);
+    noteActionAnswer(await executeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleAssign = async (id: string) => {
     if (!businessId) return;
-    await assignCommandItem(businessId, id, "USER", "me");
+    noteActionAnswer(await assignCommandItem(businessId, id, "USER", "me"));
     await loadQueue();
   };
 
   const handleDismiss = async (id: string) => {
     if (!businessId) return;
-    await dismissCommandItem(businessId, id);
+    noteActionAnswer(await dismissCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleSnooze = async (id: string) => {
     if (!businessId) return;
     const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await snoozeCommandItem(businessId, id, until);
+    noteActionAnswer(await snoozeCommandItem(businessId, id, until));
     await loadQueue();
   };
 
   const handleReopen = async (id: string) => {
     if (!businessId) return;
-    await reopenCommandItem(businessId, id);
+    noteActionAnswer(await reopenCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleDischarge = async (id: string) => {
     if (!businessId) return;
-    await dischargeObligation(businessId, id, "manual");
+    // W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): discharge is an item action too (operations write);
+    // its refusal names the level like the queue's actions do.
+    noteActionAnswer(await dischargeObligation(businessId, id, "manual"));
     // The queue reads the same table, so a discharged obligation has to leave
     // both lists — refreshing only the panel would show it gone in one place
     // and present in the other.
@@ -397,7 +415,11 @@ export default function CommandCenterPage() {
             priority and answers "what should I look at"; this sorts by date and
             answers "what do I owe". Different questions, same table. */}
         <CommandSection icon={CalendarClock} title="Due this week">
-          <DueObligationsPanel businessId={businessId} onDischarge={handleDischarge} />
+          <DueObligationsPanel
+            businessId={businessId}
+            onDischarge={handleDischarge}
+            dischargeDisabledReason={commandActionsDisabledReason(operationsLevel)}
+          />
         </CommandSection>
 
         {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps
@@ -420,6 +442,7 @@ export default function CommandCenterPage() {
             onDismiss={handleDismiss}
             onSnooze={handleSnooze}
             onReopen={handleReopen}
+            operationsLevel={operationsLevel}
           />
         </CommandSection>
 

@@ -33,6 +33,12 @@ interface CommandCardProps {
   onAssign?: (id: string) => void | Promise<void>;
   onSnooze?: (id: string) => void | Promise<void>;
   onReopen?: (id: string) => void | Promise<void>;
+  /**
+   * W7-WEB-OPS-SCOPE (D-40): why this member cannot act on command items (every item action needs
+   * operations write), or null when the actions are offered. Set, every action is disabled and
+   * carries it as its title.
+   */
+  actionsDisabledReason?: string | null;
 }
 
 const CATEGORY_COLORS: Record<string, V2AccentColor> = {
@@ -80,13 +86,15 @@ export function CommandCardV2({
   onAssign,
   onSnooze,
   onReopen,
+  actionsDisabledReason = null,
 }: CommandCardProps) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "orange";
+  const actionsDisabled = !!loading || !!actionsDisabledReason;
 
   const handleAction = async (action: string, handler?: (id: string) => void | Promise<void>) => {
-    if (!handler) return;
+    if (!handler || actionsDisabledReason) return;
     setLoading(action);
     try {
       await handler(item.id);
@@ -191,7 +199,8 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("complete", onComplete)}
                 isLoading={loading === "complete"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
+                title={actionsDisabledReason ?? undefined}
                 variant="primary"
                 className="h-8 px-2.5 text-xs"
                 leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
@@ -203,7 +212,8 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("approve", onApprove)}
                 isLoading={loading === "approve"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
+                title={actionsDisabledReason ?? undefined}
                 variant="soft"
                 className="h-8 px-2.5 text-xs text-mint bg-mint/10 hover:bg-mint/15 border-mint/20"
                 leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
@@ -215,7 +225,8 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("execute", onExecute)}
                 isLoading={loading === "execute"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
+                title={actionsDisabledReason ?? undefined}
                 variant="glow"
                 className="h-8 px-2.5 text-xs"
                 leftIcon={<Zap className="w-3.5 h-3.5" />}
@@ -227,11 +238,11 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("assign", onAssign)}
                 isLoading={loading === "assign"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
                 variant="icon"
                 className="h-8 w-8"
                 aria-label="Assign"
-                title="Assign"
+                title={actionsDisabledReason ?? "Assign"}
               >
                 <UserPlus className="w-3.5 h-3.5" />
               </Button>
@@ -240,11 +251,11 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("snooze", onSnooze)}
                 isLoading={loading === "snooze"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
                 variant="icon"
                 className="h-8 w-8"
                 aria-label="Snooze 24h"
-                title="Snooze 24h"
+                title={actionsDisabledReason ?? "Snooze 24h"}
               >
                 <Clock className="w-3.5 h-3.5" />
               </Button>
@@ -252,11 +263,11 @@ export function CommandCardV2({
             <Button
               onClick={() => void handleAction("dismiss", onDismiss)}
               isLoading={loading === "dismiss"}
-              disabled={!!loading}
+              disabled={actionsDisabled}
               variant="icon"
               className="h-8 w-8"
               aria-label="Dismiss"
-              title="Dismiss"
+              title={actionsDisabledReason ?? "Dismiss"}
             >
               <XCircle className="w-3.5 h-3.5" />
             </Button>
@@ -267,11 +278,11 @@ export function CommandCardV2({
               <Button
                 onClick={() => void handleAction("reopen", onReopen)}
                 isLoading={loading === "reopen"}
-                disabled={!!loading}
+                disabled={actionsDisabled}
                 variant="icon"
                 className="h-8 w-8"
                 aria-label="Reopen"
-                title="Reopen"
+                title={actionsDisabledReason ?? "Reopen"}
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </Button>

@@ -14,25 +14,64 @@ import { fetchProcurementStats } from "./client";
  * The web cannot read a STAFF member's own scope map (GET
  * /identity/businesses/:id/team needs team read, which STAFF does not hold by
  * default), so it asks the server instead of re-deriving the rule: GET
- * procurement stats requires operations read and answers 403 to a member
- * without it. The server stays the enforcer; this decides only what to show.
- * An answer that is neither success nor 403 (offline, 5xx, no business
- * selected) is "unknown", and unknown shows the entry: hiding a door on a
- * network blip would be worse than a door the server then refuses.
+ * procurement stats requires operations read, and ModuleScopeGuard refuses a
+ * member without it with 403 "Insufficient permissions: operations requires
+ * read access (you have none)". The server stays the enforcer; this decides
+ * only what to show. Only that refusal is "denied". Any other answer (offline,
+ * 5xx, no business selected, and every other 403, such as BusinessGuard's
+ * transient "Unable to verify business access" / "Service unavailable" or its
+ * "No access to this business" for a business that is no longer the member's)
+ * says nothing about the member's operations level and is "unknown", and
+ * unknown shows the entry: hiding a door on a network blip would be worse than
+ * a door the server then refuses (W7-WEB-OPS-SCOPE review WOS-R1, D-40).
  *
  * The cockpit (/app/command-center) is not gated: it is every member's home and
  * its snapshot is open to every member (business-command-center.controller.ts).
  */
 export type OperationsAccess = "granted" | "denied" | "unknown";
 
+/**
+ * W7-WEB-OPS-SCOPE (owner rulings D-40 and D-96; OPS-T02): the member's
+ * 'operations' level in a business, as the server last stated it. Every
+ * command-item route needs operations read to list and write for every action
+ * (complete, approve, dismiss, execute, assign, snooze, reopen, discharge); a
+ * read cannot tell read from write, so the level is "unknown" until a refusal
+ * names it.
+ */
+export type OperationsLevel = "none" | "read" | "write" | "admin" | "unknown";
+
+/** ModuleScopeGuard's refusal (apps/server core/auth/module-scope.guard.ts) for the operations module. */
+const OPERATIONS_REFUSAL = /\boperations requires (?:none|read|write|admin) access \(you have (none|read|write|admin)\)/;
+
+/**
+ * The operations level a refused request names, or null when the answer is not ModuleScopeGuard's
+ * operations refusal (success, another 403 such as BusinessGuard's "Unable to verify business
+ * access", a 5xx): those say nothing about the member's level.
+ */
+export function operationsLevelFromAnswer(res: { error?: string | null; status?: number } | null | undefined): OperationsLevel | null {
+  if (!res || res.status !== 403) return null;
+  const named = OPERATIONS_REFUSAL.exec(res.error ?? "");
+  return named ? (named[1] as OperationsLevel) : null;
+}
+
+/** Why a member at `level` cannot act on command items, or null when the actions are offered. */
+export function commandActionsDisabledReason(level: OperationsLevel | undefined): string | null {
+  if (level === "none") return "No operations access in this business: command items can't be viewed or acted on.";
+  if (level === "read") return "View only: completing, approving or dismissing needs operations write access.";
+  return null;
+}
+
 /** Web routes whose every server call requires operations: hidden from a member the server refuses. */
 export const OPERATIONS_GATED_HREFS: readonly string[] = ["/app/procurement"];
 
-/** The access a probe answer stands for. */
+/**
+ * The access a probe answer stands for: success is granted; only ModuleScopeGuard's refusal naming
+ * no operations access is denied (WOS-R1); anything else is unknown.
+ */
 export function operationsAccessFromResponse(res: { error: string | null; status?: number } | null | undefined): OperationsAccess {
   if (!res) return "unknown";
   if (res.error === null) return "granted";
-  if (res.status === 403) return "denied";
+  if (operationsLevelFromAnswer(res) === "none") return "denied";
   return "unknown";
 }
 

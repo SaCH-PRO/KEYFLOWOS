@@ -86,6 +86,20 @@
  * (SEC-D15-3); a decision is a compare-and-set on the status it read, 409 when
  * another landed first (SEC-D15-2); a failed audit insert rolls the decision
  * back, 503 (SEC-D15-4).
+ *
+ * W7-OPS-AUDIT-ACTOR (FOLLOW8, Release 0 exit) extends this suite (same prefix)
+ * and turns the OPS-T04 todo into a live case: the controllers hand the member
+ * to CommandService and ProcurementService, and every feed row the two write for
+ * a member names them (actorType USER, actorId the member), the command item
+ * approve, complete and dismiss and the procurement acknowledge, fulfill and
+ * invoice rows the review named (SEC-R013g-4) included.
+ *
+ * Its review repair (SEC-W7OAA-1, OPS-20..OPS-22): those rows named the member
+ * but recorded moves that should not happen, since acknowledge, fulfill and
+ * invoice checked no status (a DRAFT request could be invoiced, a replay wrote a
+ * second row, an acknowledge after the invoice moved the request back). Each is
+ * now a compare-and-set on the step before it, as a decision is (SEC-D15-2), so
+ * the route table seeds each at that step.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -174,6 +188,8 @@ let MODULE_SCOPE_KEY = '';
 const controllers: Record<string, any> = {};
 /** The real ProcurementService of the app under test, for the direct (no request, no tenant armed) calls. */
 let procurementService: any;
+/** The real CommandService of the app under test (W7-OPS-AUDIT-ACTOR: the bulk writes, whose member comes from TenantInterceptor's context). */
+let commandService: any;
 let NotFound: any;
 let Conflict: any;
 let ServiceUnavailable: any;
@@ -228,13 +244,13 @@ async function seedCommandItem(businessId: string, kind: 'SUGGESTION' | 'OBLIGAT
   });
 }
 
-async function seedProcurementRequest(businessId: string, opts: { supplier?: string } = {}) {
+async function seedProcurementRequest(businessId: string, opts: { supplier?: string; status?: string } = {}) {
   seq += 1;
   return db.procurementRequest.create({
     data: {
       id: `${P}pr_${seq}`,
       businessId,
-      status: 'DRAFT',
+      status: opts.status ?? 'DRAFT',
       priority: 'normal',
       userPrompt: `${P}need ${seq}`,
       interpretedNeed: { category: 'k13o' },
@@ -260,7 +276,7 @@ const cmd = (biz: string) => `/command/businesses/${biz}`;
 const proc = (biz: string) => `/procurement/businesses/${biz}`;
 const item = async (biz: string, suffix: string, kind?: 'SUGGESTION' | 'OBLIGATION') =>
   `${cmd(biz)}/items/${(await seedCommandItem(biz, kind)).id}${suffix}`;
-const preq = async (biz: string, suffix: string, opts?: { supplier?: string }) =>
+const preq = async (biz: string, suffix: string, opts?: { supplier?: string; status?: string }) =>
   `${proc(biz)}/${(await seedProcurementRequest(biz, opts)).id}${suffix}`;
 const supplierOf = (biz: string) => (biz === ID.bizA ? SUPPLIER.a : SUPPLIER.b);
 
@@ -306,9 +322,11 @@ const PROCUREMENT_ROUTES: RouteCase[] = [
   { key: 'ProcurementController.reject', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/reject'), body: { reason: `${P}not now` } }) },
   { key: 'ProcurementController.selectVendor', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/vendor'), body: { supplierConnectionId: supplierOf(b) } }) },
   { key: 'ProcurementController.issuePO', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/issue-po', { supplier: supplierOf(b) }) }) },
-  { key: 'ProcurementController.acknowledgeVendor', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/acknowledge') }) },
-  { key: 'ProcurementController.markFulfilled', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/fulfill') }) },
-  { key: 'ProcurementController.markInvoiced', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/invoice') }) },
+  // W7-OPS-AUDIT-ACTOR review SEC-W7OAA-1 (D-40): each vendor transition moves a request only from the
+  // step before it (OPS-20), so each is seeded at that step and an admitted caller's call is a real move
+  { key: 'ProcurementController.acknowledgeVendor', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/acknowledge', { status: 'PO_ISSUED' }) }) },
+  { key: 'ProcurementController.markFulfilled', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/fulfill', { status: 'VENDOR_ACKNOWLEDGED' }) }) },
+  { key: 'ProcurementController.markInvoiced', verb: 'post', level: 'write', build: async (b) => ({ url: await preq(b, '/invoice', { status: 'FULFILLED' }) }) },
 ];
 
 /** The census's one named exception (see the header): open to every member of the business. */
@@ -483,6 +501,7 @@ beforeAll(async () => {
     ],
   }).compile();
   procurementService = moduleRef.get(ProcurementService);
+  commandService = moduleRef.get(CommandService);
 
   app = moduleRef.createNestApplication();
   // As app-bootstrap.ts: the client address comes from the proxy header.
@@ -815,9 +834,79 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
   // and POST /ai/businesses/:id/key/command do/auto/draft in FOLLOW3-D9-DOITFORME-SCOPE
   // (test/key-do-it-for-me-scope.integration.test.ts: no item is filed below operations write).
 
-  it.todo(
-    "[OPS-T04] review SEC-R013g-4: the audit rows name the member who acted (command item approve, complete and dismiss record actorType USER with no actorId; procurement acknowledge, fulfill and invoice record neither) — not done: CommandService.approve/complete/dismiss and ProcurementService.acknowledgeVendor/markFulfilled/markInvoiced take no actor, so the controllers cannot pass one, and both services are outside this packet's write set",
-  );
+  // W7-OPS-AUDIT-ACTOR closes [OPS-T04] (review SEC-R013g-4). The rows are the Activity feed rows
+  // (D-08) CommandService and ProcurementService write through TimelineService, the recorder here.
+  // The single-item routes are sent over HTTP; the bulk routes take their member from
+  // TenantInterceptor's context (ambientActor, FOLLOW3-D10), which this harness does not arm (see
+  // OPS-09), so their rows are proven on the real CommandService called with the member.
+  it("[OPS-T04] review SEC-R013g-4 (W7-OPS-AUDIT-ACTOR, D-40): the feed rows name the member who acted. RED-BEFORE: command item approve, complete and dismiss recorded actorType USER with no actorId, procurement acknowledge, fulfill and invoice recorded neither. Sent by a STAFF member with operations write and by the OWNER, each of those six routes writes exactly one row naming that member (actorType USER, actorId the member), and so does every other route that writes a row for a member: command create, PATCH, snooze, execute, assign, reopen and DELETE, procurement submit; bulk complete, dismiss and delete name the member they are called with", async () => {
+    const future = () => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    type ActorCase = { label: string; verb: Verb; url: string; body?: unknown; entityId?: string; action: string; status: number };
+    const commandCase = async (label: string, verb: Verb, suffix: string, action: string, body?: unknown): Promise<ActorCase> => {
+      const ci = await seedCommandItem(ID.bizA);
+      return { label, verb, url: `${cmd(ID.bizA)}/items/${ci.id}${suffix}`, body, entityId: ci.id, action, status: okStatus(verb) };
+    };
+    // review SEC-W7OAA-1: a vendor transition is seeded at the step it moves the request from (OPS-20)
+    const procurementCase = async (label: string, suffix: string, action: string, status = 'DRAFT'): Promise<ActorCase> => {
+      const row = await seedProcurementRequest(ID.bizA, { supplier: SUPPLIER.a, status });
+      return { label, verb: 'post', url: `${proc(ID.bizA)}/${row.id}${suffix}`, entityId: row.id, action, status: 201 };
+    };
+
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      const cases: ActorCase[] = [
+        // the six the review named
+        await commandCase('command approve', 'post', '/approve', 'approve'),
+        await commandCase('command complete', 'post', '/complete', 'complete'),
+        await commandCase('command dismiss', 'post', '/dismiss', 'dismiss'),
+        await procurementCase('procurement acknowledge', '/acknowledge', 'request.vendor_acknowledged', 'PO_ISSUED'),
+        await procurementCase('procurement fulfill', '/fulfill', 'request.fulfilled', 'VENDOR_ACKNOWLEDGED'),
+        await procurementCase('procurement invoice', '/invoice', 'request.invoiced', 'FULFILLED'),
+        // every other row the two services write for a member
+        {
+          label: 'command create', verb: 'post', url: `${cmd(ID.bizA)}/items`, action: 'create', status: 201,
+          body: { sourceModule: 'k13o', title: `${P}created by a member`, category: 'WORK', actionType: 'k13o_check' },
+        },
+        await commandCase('command PATCH', 'patch', '', 'update', { title: `${P}renamed by a member` }),
+        await commandCase('command snooze', 'post', '/snooze', 'snooze', { until: future() }),
+        await commandCase('command execute', 'post', '/execute', 'execute', { result: { k13o: true } }),
+        await commandCase('command assign', 'post', '/assign', 'assign', { ownerType: 'USER', ownerId: ID.owner }),
+        await commandCase('command reopen', 'post', '/reopen', 'reopen'),
+        await commandCase('command DELETE', 'delete', '', 'delete'),
+        await procurementCase('procurement submit', '/submit', 'request.submitted'),
+      ];
+      for (const c of cases) {
+        const from = timeline.events.length;
+        const res = await send(c.verb, c.url, actor, c.body);
+        const entityId = c.entityId ?? res.body?.id;
+        outcomes[`${actor} ${c.label}`] = [
+          res.status,
+          timeline.events.slice(from).map((e) => ({ action: e.action, entityId: e.entityId, actorType: e.actorType, actorId: e.actorId })),
+        ];
+        expected[`${actor} ${c.label}`] = [c.status, [{ action: c.action, entityId, actorType: 'USER', actorId: actor }]];
+      }
+
+      // bulk complete, dismiss and delete: the member the controller hands the service (ambientActor) is on every row
+      for (const [method, action] of [['bulkComplete', 'complete'], ['bulkDismiss', 'dismiss'], ['bulkDelete', 'delete']] as const) {
+        const ids = [(await seedCommandItem(ID.bizA)).id, (await seedCommandItem(ID.bizA)).id];
+        const from = timeline.events.length;
+        const result = await commandService[method](ID.bizA, ids, actor);
+        // one row per item, in the order the service read them (no order is asked for): compared by item id
+        outcomes[`${actor} ${method}`] = [
+          result,
+          timeline.events.slice(from)
+            .map((e) => ({ action: e.action, entityId: e.entityId as string, actorType: e.actorType, actorId: e.actorId }))
+            .sort((a, b) => a.entityId.localeCompare(b.entityId)),
+        ];
+        expected[`${actor} ${method}`] = [
+          { count: 2 },
+          [...ids].sort((a, b) => a.localeCompare(b)).map((entityId) => ({ action, entityId, actorType: 'USER', actorId: actor })),
+        ];
+      }
+    }
+    expect(outcomes).toEqual(expected);
+  }, HEAVY_CASE_MS);
 
   it.todo(
     "[OPS-T01] the cockpit snapshot (GET business-command-center/businesses/:id/snapshot) under operations 'read' — not done: release0-journey.integration.test.ts step 5 (an R0 exit proof, outside this packet's write set) pins a STAFF member with no operations key reading it 200, V1-47 projects each tile by the member's own scopes, and the snapshot reads no command item or procurement row; whether D-40 covers it is referred to the owner",
@@ -1141,5 +1230,121 @@ describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds
     expect((await auditRows(row.id)).map((e: any) => [e.eventType, e.actorId, e.metadata])).toEqual([
       ['procurement_request.rejected', ID.opsWrite, { reason: `${P}over budget` }],
     ]);
+  }, HEAVY_CASE_MS);
+});
+
+/**
+ * The vendor side of a request's life, in the order the request page (apps/web app/procurement/[requestId])
+ * offers it: each transition moves a request only from the step before it (W7-OPS-AUDIT-ACTOR review
+ * SEC-W7OAA-1, D-40).
+ */
+const VENDOR_STEPS = [
+  { route: '/acknowledge', method: 'acknowledgeVendor', from: 'PO_ISSUED', to: 'VENDOR_ACKNOWLEDGED', action: 'request.vendor_acknowledged' },
+  { route: '/fulfill', method: 'markFulfilled', from: 'VENDOR_ACKNOWLEDGED', to: 'FULFILLED', action: 'request.fulfilled' },
+  { route: '/invoice', method: 'markInvoiced', from: 'FULFILLED', to: 'INVOICED', action: 'request.invoiced' },
+] as const;
+/** Every status a ProcurementRequest holds (packages/db/prisma/schema.prisma, ProcurementRequest.status). */
+const REQUEST_STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'PO_ISSUED', 'VENDOR_ACKNOWLEDGED', 'FULFILLED', 'INVOICED', 'COMPLETED'];
+
+/** The feed rows (TimelineService recorder) about one request since `from`, as the claims compare them. */
+const feedFor = (id: string, from: number) =>
+  timeline.events.slice(from).filter((e) => e.entityId === id).map((e) => ({ action: e.action, actorType: e.actorType, actorId: e.actorId }));
+
+describe('W7-OPS-AUDIT-ACTOR review SEC-W7OAA-1 (D-40): acknowledge, fulfill and invoice move a request only from the step before, once', () => {
+  it("[OPS-20] RED-BEFORE: over HTTP each vendor transition answers 409 from every status but the step before it (acknowledge from PO_ISSUED, fulfill from VENDOR_ACKNOWLEDGED, invoice from FULFILLED: the order the request page offers them), for a STAFF member with operations write and for the OWNER, invoicing a DRAFT request with no PO and no vendor included; a refused call leaves the request byte-identical and writes no feed row or other row, and from the step before each answers 201, moves the request and writes one feed row naming the member", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      for (const step of VENDOR_STEPS) {
+        for (const status of REQUEST_STATUSES) {
+          const key = `${actor} ${step.route} from ${status}`;
+          const row = await seedProcurementRequest(ID.bizA, { status });
+          const unchanged = await requestRow(row.id);
+          const before = await writableState();
+          const feedFrom = timeline.events.length;
+          const res = await send('post', `${proc(ID.bizA)}/${row.id}${step.route}`, actor);
+          if (status === step.from) {
+            outcomes[key] = [res.status, res.body?.status, feedFor(row.id, feedFrom)];
+            expected[key] = [201, step.to, [{ action: step.action, actorType: 'USER', actorId: actor }]];
+          } else {
+            outcomes[key] = [res.status, (await requestRow(row.id)) === unchanged, JSON.stringify(await writableState()) === JSON.stringify(before)];
+            expected[key] = [409, true, true];
+          }
+        }
+      }
+    }
+    expect(outcomes).toEqual(expected);
+    // the review's case answers why: invoicing a DRAFT request names the step it needs and the one it is at
+    const draft = await seedProcurementRequest(ID.bizA);
+    const res = await send('post', `${proc(ID.bizA)}/${draft.id}/invoice`, ID.opsWrite);
+    expect([res.status, res.body.message]).toEqual([409, 'A request is marked invoiced only once it is FULFILLED; this one is DRAFT']);
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-21] RED-BEFORE: the review's replay is refused. A PO_ISSUED request the STAFF member with operations write acknowledges, fulfills and invoices answers 201 to each and 409 to a replay of each, and the OWNER's acknowledge after the invoice answers 409: every refused call leaves the request byte-identical, the request ends INVOICED with the times its first calls stamped, and the feed holds exactly three rows for it, acknowledged, fulfilled and invoiced in that order, each naming the member", async () => {
+    const row = await seedProcurementRequest(ID.bizA, { supplier: SUPPLIER.a, status: 'PO_ISSUED' });
+    const url = (suffix: string) => `${proc(ID.bizA)}/${row.id}${suffix}`;
+    const feedFrom = timeline.events.length;
+    const outcomes: Array<[string, number, boolean?]> = [];
+    for (const step of VENDOR_STEPS) {
+      outcomes.push([step.route, (await send('post', url(step.route), ID.opsWrite)).status]);
+      const moved = await requestRow(row.id);
+      outcomes.push([`${step.route} replay`, (await send('post', url(step.route), ID.opsWrite)).status, (await requestRow(row.id)) === moved]);
+    }
+    const invoiced = await requestRow(row.id);
+    outcomes.push(['/acknowledge after invoice (OWNER)', (await send('post', url('/acknowledge'), ID.owner)).status, (await requestRow(row.id)) === invoiced]);
+    expect(outcomes).toEqual([
+      ['/acknowledge', 201], ['/acknowledge replay', 409, true],
+      ['/fulfill', 201], ['/fulfill replay', 409, true],
+      ['/invoice', 201], ['/invoice replay', 409, true],
+      ['/acknowledge after invoice (OWNER)', 409, true],
+    ]);
+    const final = await db.procurementRequest.findUnique({ where: { id: row.id } });
+    expect(final.status).toBe('INVOICED');
+    expect(final.vendorAcknowledgedAt <= final.fulfilledAt && final.fulfilledAt <= final.invoicedAt).toBe(true);
+    expect(feedFor(row.id, feedFrom)).toEqual(VENDOR_STEPS.map((s) => ({ action: s.action, actorType: 'USER', actorId: ID.opsWrite })));
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-22] the same holds for a caller that names no member (the KEY dispatcher's direct call, no TenantInterceptor armed): markInvoiced of a DRAFT request, markFulfilled of a PO_ISSUED one and acknowledgeVendor of an INVOICED one are refused (ConflictException) and write nothing; and each transition is a compare-and-set on the status it read, as a decision is (SEC-D15-2): when another acknowledge lands between a call's read and its write, the later call is refused (ConflictException), writes no feed row, and the first stands", async () => {
+    const outcomes: Record<string, unknown> = {};
+    for (const [method, status] of [['markInvoiced', 'DRAFT'], ['markFulfilled', 'PO_ISSUED'], ['acknowledgeVendor', 'INVOICED']] as const) {
+      const row = await seedProcurementRequest(ID.bizA, { status });
+      const unchanged = await requestRow(row.id);
+      const before = await writableState();
+      let outcome = 'resolved';
+      try {
+        await procurementService[method](ID.bizA, row.id);
+      } catch (err) {
+        outcome = err instanceof Conflict ? 'Conflict' : `${(err as Error).constructor.name}: ${(err as Error).message}`;
+      }
+      outcomes[`${method} from ${status}`] = [outcome, (await requestRow(row.id)) === unchanged, JSON.stringify(await writableState()) === JSON.stringify(before)];
+    }
+    expect(outcomes).toEqual({
+      'markInvoiced from DRAFT': ['Conflict', true, true],
+      'markFulfilled from PO_ISSUED': ['Conflict', true, true],
+      'acknowledgeVendor from INVOICED': ['Conflict', true, true],
+    });
+
+    // deterministic interleaving: the OWNER's acknowledge lands while the member's is between its read and its write
+    const row = await seedProcurementRequest(ID.bizA, { status: 'PO_ISSUED' });
+    const svc = procurementService;
+    const realGet = svc.get;
+    svc.get = async function interleaved(businessId: string, id: string) {
+      delete svc.get; // one interleaving only
+      const seen = await realGet.call(svc, businessId, id);
+      await svc.acknowledgeVendor(businessId, id, ID.owner);
+      return seen;
+    };
+    const feedFrom = timeline.events.length;
+    let outcome = 'resolved';
+    try {
+      await svc.acknowledgeVendor(ID.bizA, row.id, ID.opsWrite);
+    } catch (err) {
+      outcome = err instanceof Conflict ? 'Conflict' : `${(err as Error).constructor.name}: ${(err as Error).message}`;
+    } finally {
+      delete svc.get;
+    }
+    expect(outcome).toBe('Conflict');
+    expect((await db.procurementRequest.findUnique({ where: { id: row.id } })).status).toBe('VENDOR_ACKNOWLEDGED');
+    expect(feedFor(row.id, feedFrom)).toEqual([{ action: 'request.vendor_acknowledged', actorType: 'USER', actorId: ID.owner }]);
   }, HEAVY_CASE_MS);
 });

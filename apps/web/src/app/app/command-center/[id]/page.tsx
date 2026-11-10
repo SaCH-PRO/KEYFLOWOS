@@ -18,6 +18,7 @@ import {
   Bot,
   AlertTriangle,
   ClipboardList,
+  Lock,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -32,6 +33,7 @@ import {
   type CommandItem,
 } from "@/lib/api/command";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -80,6 +82,14 @@ export default function CommandItemDetailPage() {
   const [item, setItem] = useState<CommandItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  /**
+   * W7-WEB-OPS-SCOPE review SEC-WOS-3 (D-40, D-96): the member's operations level as the server's
+   * refusals name it (lib/module-access.ts), as the queue reads it. Every action here needs
+   * operations write and reading the item needs read; below write the actions are disabled with
+   * the reason.
+   */
+  const [operationsLevel, setOperationsLevel] = useState<OperationsLevel>("unknown");
+  const actionsDisabledReason = commandActionsDisabledReason(operationsLevel);
 
   const businessId = getStoredBusinessId();
 
@@ -88,8 +98,11 @@ export default function CommandItemDetailPage() {
     setLoading(true);
     try {
       const res = await fetchCommandItem(businessId, id);
+      const refused = operationsLevelFromAnswer(res);
+      if (refused) setOperationsLevel(refused);
       if (res.data) setItem(res.data);
-      else toast.error("Failed to load command item");
+      // A refused read is shown as no access below, not as a failed load.
+      else if (!refused) toast.error("Failed to load command item");
     } catch {
       toast.error("Failed to load command item");
     } finally {
@@ -101,10 +114,19 @@ export default function CommandItemDetailPage() {
     load();
   }, [load]);
 
-  const handleAction = async (action: string, fn: () => Promise<void>) => {
+  const handleAction = async (action: string, fn: () => Promise<{ error: string | null; status?: number }>) => {
+    if (actionsDisabledReason) return;
     setActionLoading(action);
     try {
-      await fn();
+      const res = await fn();
+      // apiPost answers a refusal ({error, status}) rather than throwing it: a refused action is a
+      // failure, never a success (SEC-WOS-3), and ModuleScopeGuard's refusal names the level.
+      if (res.error) {
+        const refused = operationsLevelFromAnswer(res);
+        if (refused) setOperationsLevel(refused);
+        toast.error(`Failed to ${action}: ${res.error}`);
+        return;
+      }
       await load();
       toast.success(`${action.charAt(0).toUpperCase() + action.slice(1)} successful`);
     } catch {
@@ -125,11 +147,22 @@ export default function CommandItemDetailPage() {
   }
 
   if (!item) {
+    // A member refused the item read (operations none) is told why, not that the item does not exist.
+    const noAccess = operationsLevel === "none";
     return (
       <WorkspaceShell icon={ClipboardList} title="Command">
         <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-          <AlertTriangle className="w-12 h-12 text-muted-foreground mb-3" />
-          <h2 className="text-lg font-medium">Command item not found</h2>
+          {noAccess ? (
+            <Lock className="w-12 h-12 text-muted-foreground mb-3" />
+          ) : (
+            <AlertTriangle className="w-12 h-12 text-muted-foreground mb-3" />
+          )}
+          <h2 className="text-lg font-medium">{noAccess ? "No access" : "Command item not found"}</h2>
+          {noAccess && actionsDisabledReason && (
+            <p data-testid="command-actions-withheld" role="note" className="mt-1 text-sm text-muted-foreground">
+              {actionsDisabledReason}
+            </p>
+          )}
           <button
             onClick={() => router.push("/app/command-center")}
             className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg"
@@ -270,16 +303,25 @@ export default function CommandItemDetailPage() {
             {/* Actions */}
             <div className="border rounded-xl p-4" style={{ borderColor: "hsl(var(--kf-border))" }}>
               <h3 className="text-sm font-medium mb-3">Actions</h3>
+              {actionsDisabledReason && (
+                <p
+                  data-testid="command-actions-withheld"
+                  role="note"
+                  className="mb-3 flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
+                >
+                  <Lock className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+                  {actionsDisabledReason}
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {!isDone && (
                   <>
                     <button
                       onClick={() =>
-                        handleAction("complete", async () => {
-                          await completeCommandItem(businessId!, item.id);
-                        })
+                        handleAction("complete", () => completeCommandItem(businessId!, item.id))
                       }
-                      disabled={!!actionLoading}
+                      disabled={!!actionLoading || !!actionsDisabledReason}
+                      title={actionsDisabledReason ?? undefined}
                       className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
                     >
                       {actionLoading === "complete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -287,11 +329,10 @@ export default function CommandItemDetailPage() {
                     </button>
                     <button
                       onClick={() =>
-                        handleAction("dismiss", async () => {
-                          await dismissCommandItem(businessId!, item.id);
-                        })
+                        handleAction("dismiss", () => dismissCommandItem(businessId!, item.id))
                       }
-                      disabled={!!actionLoading}
+                      disabled={!!actionLoading || !!actionsDisabledReason}
+                      title={actionsDisabledReason ?? undefined}
                       className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
                       style={{ borderColor: "hsl(var(--kf-border))" }}
                     >
@@ -301,11 +342,10 @@ export default function CommandItemDetailPage() {
                     <button
                       onClick={() => {
                         const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-                        handleAction("snooze", async () => {
-                          await snoozeCommandItem(businessId!, item.id, until);
-                        });
+                        handleAction("snooze", () => snoozeCommandItem(businessId!, item.id, until));
                       }}
-                      disabled={!!actionLoading}
+                      disabled={!!actionLoading || !!actionsDisabledReason}
+                      title={actionsDisabledReason ?? undefined}
                       className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
                       style={{ borderColor: "hsl(var(--kf-border))" }}
                     >
@@ -315,11 +355,10 @@ export default function CommandItemDetailPage() {
                     {item.requiresApproval && (
                       <button
                         onClick={() =>
-                          handleAction("approve", async () => {
-                            await approveCommandItem(businessId!, item.id);
-                          })
+                          handleAction("approve", () => approveCommandItem(businessId!, item.id))
                         }
-                        disabled={!!actionLoading}
+                        disabled={!!actionLoading || !!actionsDisabledReason}
+                        title={actionsDisabledReason ?? undefined}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
                       >
                         {actionLoading === "approve" ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -329,11 +368,10 @@ export default function CommandItemDetailPage() {
                     {item.executableByKey && (
                       <button
                         onClick={() =>
-                          handleAction("execute", async () => {
-                            await executeCommandItem(businessId!, item.id);
-                          })
+                          handleAction("execute", () => executeCommandItem(businessId!, item.id))
                         }
-                        disabled={!!actionLoading}
+                        disabled={!!actionLoading || !!actionsDisabledReason}
+                        title={actionsDisabledReason ?? undefined}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
                         style={{ background: "hsl(var(--kf-accent1))", color: "#fff" }}
                       >
@@ -343,11 +381,10 @@ export default function CommandItemDetailPage() {
                     )}
                     <button
                       onClick={() =>
-                        handleAction("assign", async () => {
-                          await assignCommandItem(businessId!, item.id, "USER", "me");
-                        })
+                        handleAction("assign", () => assignCommandItem(businessId!, item.id, "USER", "me"))
                       }
-                      disabled={!!actionLoading}
+                      disabled={!!actionLoading || !!actionsDisabledReason}
+                      title={actionsDisabledReason ?? undefined}
                       className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
                       style={{ borderColor: "hsl(var(--kf-border))" }}
                     >
@@ -359,11 +396,10 @@ export default function CommandItemDetailPage() {
                 {isDone && (
                   <button
                     onClick={() =>
-                      handleAction("reopen", async () => {
-                        await reopenCommandItem(businessId!, item.id);
-                      })
+                      handleAction("reopen", () => reopenCommandItem(businessId!, item.id))
                     }
-                    disabled={!!actionLoading}
+                    disabled={!!actionLoading || !!actionsDisabledReason}
+                    title={actionsDisabledReason ?? undefined}
                     className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
                     style={{ borderColor: "hsl(var(--kf-border))" }}
                   >

@@ -16,6 +16,7 @@ import {
 import { primaryNav } from "@/lib/nav-config";
 import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import type { NavItem, NavSection, PrimaryNavItem, DrawerSurface } from "@/lib/nav-config";
+import { navItemsForOperationsAccess, sectionsForOperationsAccess, useOperationsAccess } from "./operations-nav";
 
 interface DesktopSidebarProps {
   drawerSurface: DrawerSurface;
@@ -243,9 +244,9 @@ export function DesktopSidebar({
   drawerSurface,
   setDrawerSurface,
   isPrimaryActive,
-  visibleOperateSections,
-  visibleBuildSections,
-  visibleMoreNav,
+  visibleOperateSections: operateSectionsIn,
+  visibleBuildSections: buildSectionsIn,
+  visibleMoreNav: moreNavIn,
   meNav,
   isSecondaryActive,
   isFeatureLocked,
@@ -254,6 +255,11 @@ export function DesktopSidebar({
   setKfStoreOpen,
 }: DesktopSidebarProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
+  // W7-WEB-OPS-SCOPE (D-40): no Purchasing entry for a member the server refuses operations; the cockpit stays (D-96).
+  const operationsAccess = useOperationsAccess();
+  const visibleOperateSections = sectionsForOperationsAccess(operateSectionsIn, operationsAccess);
+  const visibleBuildSections = sectionsForOperationsAccess(buildSectionsIn, operationsAccess);
+  const visibleMoreNav = navItemsForOperationsAccess(moreNavIn, operationsAccess);
 
   return (
     <aside
