@@ -14,6 +14,19 @@ const mockPrisma = {
     cortexMessage: {
       createMany: vi.fn(),
     },
+    // W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3, D-57): the member a chat turn's parsed commands run for
+    // is read as CortexMemberAuthorityGuard reads it for POST cortex/execute. The fixture's user-1 is
+    // the OWNER of biz-1 (its OWNER membership, on the role's default scopes), so every command the
+    // autonomy authority lets through here is one the member may run (cortexCommandRefusal).
+    user: {
+      findUnique: vi.fn(async () => ({ role: 'USER' })),
+    },
+    membership: {
+      findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })),
+    },
+    business: {
+      findFirst: vi.fn(async () => ({ id: 'biz-1' })),
+    },
   },
 };
 
@@ -345,6 +358,77 @@ describe('KeyCortexQueryPipelineService — Phase C wiring', () => {
     expect(enrichedSystemPrompt).toContain('=== RELEVANT MEMORY ===');
     expect(enrichedSystemPrompt).toContain('CREATE_TASK');
   });
+});
+
+// W10-CORTEX-CHAT-SCOPE (W9-KEY-CORTEX-AUDIT residual; review SEC-W9KCA-2, CR-W9KCA-4): the memory block
+// processQuery and its stream path render into a member's system prompt is read by the rule
+// buildMemoryContext applies: the member's own episodic rows, none for a requester who is no member of
+// the business, and no KEY tool-call record from the business-wide stores. The real-database proof is
+// in test/key-cortex-action-audit.integration.test.ts.
+describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requesting member may', () => {
+  const fragment = (id: string, sourceType: string, title: string, content: string, entityType: string | null = null) => ({
+    id,
+    sourceType,
+    title,
+    content,
+    entityType,
+    timestamp: new Date(),
+    confidence: 0.9,
+    relevanceScore: 0.9,
+    recencyScore: 0.9,
+    rankScore: 0.9,
+  });
+  const fragments = [
+    fragment('mf_fact', 'ai_memory', 'fact', 'v96r business-wide fact'),
+    fragment('mf_ledger', 'business_event', 'ACTION_EXECUTED', 'v96r another member tool answer', 'tool_execution'),
+    fragment('mf_bus', 'cognitive_event', 'tool.executed', 'v96r another member typed input'),
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockModelGateway.complete.mockResolvedValue({
+      content: 'Hello',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { totalTokens: 10, estimatedCost: 0.001 },
+      fallbackUsed: false,
+    });
+    mockModelGateway.streamComplete.mockImplementation(async function* () {
+      yield { content: 'Done.', provider: 'openai', model: 'gpt-4o' };
+    });
+    mockSessionService.getOrCreateSession.mockResolvedValue(mockSession);
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+  });
+
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'W10-CORTEX-CHAT-SCOPE (SEC-W9KCA-2) %s: a member reads its own episodes (userId), a requester who is no member reads none (includeEpisodic false), and no tool-call record of the business-wide stores reaches the system prompt',
+    async (path) => {
+      for (const [access, narrowed] of [
+        [{ id: 'biz-1' }, { userId: 'user-1' }],
+        [null, { includeEpisodic: false }],
+      ] as const) {
+        mockPromptContextService.buildMessages.mockClear();
+        (mockPrisma.client.business.findFirst as any).mockImplementationOnce(async () => access);
+        const pipeline = createPipeline({ memoryFragments: fragments });
+        const query = { text: 'What is our revenue forecast?', businessId: 'biz-1', userId: 'user-1' } as any;
+        const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+        if (path === 'processQuery') await pipeline.processQuery(query, flags);
+        else for await (const _chunk of pipeline.streamQuery(query, flags)) void _chunk;
+
+        const unified = ((pipeline as any).memoryRetrieval as any).unifiedMemory;
+        expect(unified.retrieveContext).toHaveBeenCalledTimes(1);
+        expect(unified.retrieveContext).toHaveBeenCalledWith(
+          'biz-1',
+          expect.objectContaining({ query: 'What is our revenue forecast?', limit: 10, ...narrowed }),
+        );
+        const systemPrompt = mockPromptContextService.buildMessages.mock.calls[0][2] as string;
+        expect(systemPrompt).toContain('v96r business-wide fact');
+        expect(systemPrompt).not.toContain('v96r another member tool answer');
+        expect(systemPrompt).not.toContain('v96r another member typed input');
+      }
+    },
+  );
 });
 
 // KF-EXEC-AUTH-FAIL-CLOSED-001. Authority uncertainty may only narrow what can
@@ -1054,6 +1138,23 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
     description: 'monthly revenue report',
     requiresApproval: false,
   };
+  // W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3): a stream action runs as an autopilot command, and only one the
+  // KEY capability registry lists for autopilot may run or be put up for approval (cortexCommandRefusal,
+  // as on POST cortex/execute). create_event, generate_report and create_invoice are not autopilot
+  // actions (the autopilot adapter answers "Unknown autopilot action"), so the cases that need a second
+  // runnable action, or an approval request, use these listed ones.
+  const detectedLoop = {
+    actionType: 'ENABLE_LOOP',
+    status: 'pending_approval',
+    description: 'turn the weekly follow-up loop back on',
+    requiresApproval: false,
+  };
+  const detectedLoopNeedsApproval = {
+    actionType: 'CREATE_LOOP',
+    status: 'pending_approval',
+    description: 'start a daily overdue-invoice loop',
+    requiresApproval: true,
+  };
   const allow = {
     allowed: true,
     requiresApproval: false,
@@ -1387,7 +1488,8 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
   });
 
   it('V1-02-ST05 streamQuery yields one unverified result, not a replay, when executeBatch throws', async () => {
-    const t = setup({ detected: [detectedTask, detectedEvent] });
+    // W10-CORTEX-CHAT-SCOPE: two actions both admitted to the batch (create_event is no autopilot action).
+    const t = setup({ detected: [detectedTask, detectedLoop] });
     t.executorService.executeBatch.mockRejectedValue(new Error('connector timeout'));
 
     const chunks = await t.stream();
@@ -1428,7 +1530,8 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
   const supervised = { ...allow, requiresApproval: true, tier: 'supervised', reason: 'needs approval' };
 
   it.each([
-    ['the detector flags it', [detectedInvoice], allow, 'create_invoice', 'CREATE_INVOICE'],
+    // W10-CORTEX-CHAT-SCOPE: a flagged action autopilot lists (create_invoice is refused before any request).
+    ['the detector flags it', [detectedLoopNeedsApproval], allow, 'create_loop', 'CREATE_LOOP'],
     ['the verdict is supervised', [detectedTask], supervised, 'create_task', 'CREATE_TASK'],
   ])(
     'V1-02-ST07 streamQuery: an allowed action that needs approval because %s gets an approval request from the executor approval flow, not an execution',
@@ -1543,15 +1646,17 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
   });
 
   it('V1-02-ST11 streamQuery: an approval request that cannot be created is a refusal, never an execution', async () => {
-    const t = setup({ detected: [detectedInvoice] });
+    // W10-CORTEX-CHAT-SCOPE: a flagged action autopilot lists, so the approval request is attempted.
+    const t = setup({ detected: [detectedLoopNeedsApproval] });
     t.executorService.executeWithApproval.mockRejectedValue(new Error('proposal store down'));
 
     const chunks = await t.stream();
 
+    expect(t.executorService.executeWithApproval).toHaveBeenCalledTimes(1);
     expect(t.executorService.executeBatch).not.toHaveBeenCalled();
     expect(mockActionsService.executeActions).not.toHaveBeenCalled();
     expect(t.streamedResults(chunks)).toEqual([
-      expect.objectContaining({ actionType: 'CREATE_INVOICE', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CREATE_LOOP', status: 'blocked' }),
     ]);
     expect(auditedRecords(t.executorService)).toEqual([
       expect.objectContaining({
@@ -1575,6 +1680,123 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
     ]);
     expect(t.logged.error).toHaveBeenCalledWith(expect.stringContaining('audit db down'));
     expect(chunks[chunks.length - 1]).toEqual({ type: 'done' });
+  });
+
+  // ── W10-CORTEX-CHAT-SCOPE (review SEC-W9MRK-3, owner ruling D-57) ─────────
+  // A parsed or detected chat command runs through the executor POST cortex/execute runs a direct
+  // command through, after the autonomy authority alone. It is now held to that route's rule
+  // (cortexCommandRefusal) for the member the chat runs for, read as CortexMemberAuthorityGuard reads it.
+
+  /** The next member read: its membership row (null: none) and its User role. */
+  const asMember = (membership: unknown, role = 'USER') => {
+    (mockPrisma.client.membership.findUnique as any).mockImplementationOnce(async () => membership);
+    (mockPrisma.client.user.findUnique as any).mockImplementationOnce(async () => ({ role }));
+  };
+
+  it.each([
+    ['a STAFF member on role defaults (revenue read)', { role: 'STAFF', permissionScopes: null }, 'USER', 'Insufficient permissions: revenue requires write access (you have read)'],
+    ['an ADMIN whose explicit scopes leave revenue out', { role: 'ADMIN', permissionScopes: { crm: 'admin' } }, 'USER', 'Insufficient permissions: revenue requires write access (you have none)'],
+    ['a user with no membership in the business', null, 'USER', /^Not a member of this business: /],
+    ['a platform SUPER_ADMIN who is no member (D-46)', null, 'SUPER_ADMIN', /^Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices \(D-46\)/],
+  ] as const)(
+    'W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3, D-57) processQuery: %s is refused a parsed commerce.create_invoice the authority allows or puts up for approval: nothing executes, no approval is requested, and the refusal row names the member',
+    async (_label, membership, role, reason) => {
+      for (const verdict of [allow, { ...allow, tier: 'supervised', requiresApproval: true }]) {
+        const t = setup();
+        asMember(membership, role);
+        t.autonomyOrchestrator.evaluateAction.mockResolvedValue(verdict);
+
+        const response = await t.run();
+
+        expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+        expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+        expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+        expect(response.actions).toEqual([]);
+        expect(auditedRecords(t.executorService)).toEqual([
+          expect.objectContaining({
+            command: expect.objectContaining({ module: 'commerce', action: 'create_invoice', businessId: 'biz-1', userId: 'user-1' }),
+            result: expect.objectContaining({
+              success: false,
+              error: typeof reason === 'string' ? reason : expect.stringMatching(reason),
+            }),
+          }),
+        ]);
+      }
+    },
+  );
+
+  it('W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3, D-57) processQuery control: a member with revenue write has the same command run, and a platform SUPER_ADMIN who is a member keeps the bypass', async () => {
+    for (const [membership, role] of [
+      [{ role: 'STAFF', permissionScopes: { revenue: 'write' } }, 'USER'],
+      [{ role: 'STAFF', permissionScopes: {} }, 'SUPER_ADMIN'],
+    ] as const) {
+      const t = setup();
+      asMember(membership, role);
+
+      await t.run();
+
+      expect(t.executedCommands()).toEqual([expect.objectContaining({ module: 'commerce', action: 'create_invoice', userId: 'user-1' })]);
+      expect(auditedRecords(t.executorService)).toEqual([]);
+    }
+  });
+
+  it('W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3) processQuery: a member that cannot be read fails the batch closed: nothing executes, no approval is requested, and every command gets a refusal row', async () => {
+    const t = setup({ intents: [createInvoice, { ...createInvoice, action: 'send_invoice', requiresApproval: true }] });
+    (mockPrisma.client.membership.findUnique as any).mockImplementationOnce(async () => {
+      throw new Error('membership store down');
+    });
+
+    await t.run();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    const step5 = t.loggedSteps().find((e: any) => e.step === 'STEP_5_CHECK_AUTONOMY');
+    expect(step5.data).toMatchObject({ approvedCommands: 0, outcome: 'authority_check_failed_closed', authorityCheckFailed: true });
+    const audited = auditedRecords(t.executorService);
+    expect(audited.map((r: any) => r.command.action)).toEqual(['create_invoice', 'send_invoice']);
+    for (const record of audited) {
+      expect(record.result.error).toContain('failed closed');
+      expect(record.result.error).toContain('membership store down');
+    }
+  });
+
+  it('W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3) streamQuery: a detected action the KEY capability registry does not list for autopilot is refused before any approval request or execution (deny by default, as on POST cortex/execute), audited with its refusal and reported blocked; a listed one beside it runs', async () => {
+    const t = setup({ detected: [detectedTask, detectedEvent, detectedInvoice] });
+
+    const chunks = await t.stream();
+
+    expect(t.executedCommands()).toEqual([expect.objectContaining({ module: 'autopilot', action: 'create_task', userId: 'user-1' })]);
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    expect(auditedRecords(t.executorService).map((r: any) => [r.command.action, r.command.userId, r.result.error])).toEqual([
+      ['create_event', 'user-1', '"autopilot.create_event" is not an action the KEY capability registry lists, so it is not run'],
+      ['create_invoice', 'user-1', '"autopilot.create_invoice" is not an action the KEY capability registry lists, so it is not run'],
+    ]);
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'success' }),
+      expect.objectContaining({ actionType: 'CREATE_EVENT', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CREATE_INVOICE', status: 'blocked' }),
+    ]);
+  });
+
+  it('W10-CORTEX-CHAT-SCOPE (SEC-W9MRK-3) streamQuery: a member without automations write is refused every detected action; the member is read once per turn', async () => {
+    const t = setup({ detected: [detectedTask, detectedLoop] });
+    asMember({ role: 'STAFF', permissionScopes: null });
+
+    const chunks = await t.stream();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(mockPrisma.client.membership.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.client.membership.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId_businessId: { userId: 'user-1', businessId: 'biz-1' } } }),
+    );
+    expect(auditedRecords(t.executorService).map((r: any) => r.result.error)).toEqual([
+      'Insufficient permissions: automations requires write access (you have read)',
+      'Insufficient permissions: automations requires write access (you have read)',
+    ]);
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'ENABLE_LOOP', status: 'blocked' }),
+    ]);
   });
 
   // ── static ────────────────────────────────────────────────

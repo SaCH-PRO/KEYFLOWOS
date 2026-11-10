@@ -17,7 +17,7 @@
  * with the real ModuleScopeGuard are in job-role-policy.service.spec.ts.
  */
 import 'reflect-metadata';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
 import { ReportsController } from './reports.controller';
 import { RevenueReportingController } from '../commerce/revenue-reporting.controller';
@@ -29,6 +29,7 @@ import {
   type CortexMemberAuthority,
 } from '../key-cortex/key-cortex.controller';
 import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
+import { KeyCortexQueryPipelineService } from '../key-cortex/key-cortex-query-pipeline.service';
 
 /** The KEY tool that reads what each revenue-gated report route reads. */
 const TOOL_ROUTE: ReadonlyArray<readonly [tool: string, handler: keyof ReportsController]> = [
@@ -68,6 +69,141 @@ const member = (scopes: Record<string, string>, role = 'STAFF'): CortexMemberAut
 });
 
 const policy = new JobRolePolicyService();
+
+/**
+ * SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, D-57): the KEY chat pipeline behind POST cortex/chat (processQuery)
+ * and the chat stream (streamQuery), run with the v2 integration on as KeyCortexReasoningService runs it:
+ * the commands parsed from the member's words, or detected in the stream's answer, are put to the
+ * autonomy authority (which allows everything here) and run through the executor's executeBatch. The
+ * member is the one the membership row names; every other collaborator is a stand-in.
+ */
+const CHAT_USER = 'usr_v96r_chat_member';
+const CHAT_BIZ = 'biz_v96r_chat';
+
+function chatPipeline(opts: {
+  membership: { role: string; permissionScopes: Record<string, string> | null } | null;
+  intents?: Array<{ module: string; action: string }>;
+  detected?: Array<{ actionType: string }>;
+}) {
+  const allow = { allowed: true, requiresApproval: false, tier: 'full', confidence: 1, reason: 'policy allows', ruleTrace: [], createdAt: new Date(0) };
+  const record = (command: any) => ({
+    id: `exec-${command.action}`,
+    command,
+    result: { command, success: true, data: { ran: true }, executionTimeMs: 1 },
+    startedAt: new Date(0),
+    finishedAt: new Date(0),
+    durationMs: 1,
+    traceId: 'trace',
+    rolledBack: false,
+  });
+  const executor = {
+    executeBatch: vi.fn(async (commands: any[]) => ({
+      results: commands.map(record),
+      totalCommands: commands.length,
+      succeededCount: commands.length,
+      failedCount: 0,
+      rolledBackCount: 0,
+      durationMs: 1,
+      traceId: 'trace',
+      stoppedEarly: false,
+      summary: 'stand-in',
+    })),
+    executeWithApproval: vi.fn(async (command: any) => ({ id: `proposal-${command.action}`, command, status: 'pending', requestedAt: new Date(0) })),
+    logExecution: vi.fn(async (_row: unknown) => undefined),
+  };
+  const prisma = {
+    client: {
+      user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
+      membership: { findUnique: vi.fn(async () => opts.membership) },
+      business: { findFirst: vi.fn(async () => null) },
+    },
+  };
+  const session = { id: 'sess_v96r_chat', businessId: CHAT_BIZ, userId: CHAT_USER, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+  const route = {
+    taskCategory: 'general', layers: ['ethics'], promptVariant: 'concise', includeGenomeContext: false, includeMemoryContext: false,
+    includeActions: true, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+  };
+  const pipeline = new KeyCortexQueryPipelineService(
+    {
+      complete: async () => ({ content: 'Done.', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }),
+      streamComplete: async function* () {
+        yield { content: 'Done.', provider: 'openai', model: 'stand-in' };
+      },
+    } as any,
+    prisma as any,
+    { get: async () => null, setex: async () => undefined } as any,
+    {
+      getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+      buildSystemPrompt: () => 'You are KEY.',
+      buildValueBlock: async () => '',
+      classifyPersona: async () => undefined,
+      selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+    } as any,
+    { buildContextSnapshot: async () => ({ businessId: CHAT_BIZ, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+    { buildToolDefinitions: async () => [], executeActions: vi.fn(async () => []) } as any,
+    {
+      getOrCreateSession: async () => session,
+      generateId: () => 'msg_v96r',
+      saveMessage: async () => undefined,
+      updateSessionCognitionMetadata: async () => undefined,
+      updateRunningSummary: async () => undefined,
+    } as any,
+    { buildMemoryContext: async () => ({}), buildMessages: () => [] } as any,
+    { handleToolCalls: async () => null } as any,
+    {
+      detectActions: () =>
+        (opts.detected ?? []).map((d) => ({ actionType: d.actionType, status: 'pending_approval', description: `detected ${d.actionType}`, requiresApproval: false })),
+    } as any,
+    { generateSuggestions: async () => [] } as any,
+    {} as any,
+    { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+    {
+      classifyTaskCategory: () => 'general',
+      buildStructuredOutputInstructions: () => '',
+      parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'Done.', confidence: 80 }),
+    } as any,
+    { detectMood: () => 'casual' } as any,
+    undefined,
+    { route: async () => route } as any,
+    { getAllCapabilities: () => [] } as any,
+    {
+      parseIntent: async () =>
+        (opts.intents ?? []).map((i) => ({ ...i, parameters: {}, requiresApproval: false, naturalLanguage: `${i.module}.${i.action}` })),
+      toConnectorCommand: (intent: any, businessId: string, userId: string) => ({
+        module: intent.module,
+        action: intent.action,
+        parameters: intent.parameters,
+        businessId,
+        userId,
+        source: 'key_cortex',
+      }),
+    } as any,
+    executor as any,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { evaluateAction: vi.fn(async () => allow) } as any,
+  );
+  for (const level of ['error', 'warn', 'log', 'debug'] as const) {
+    vi.spyOn((pipeline as any).logger, level).mockImplementation(() => undefined);
+  }
+  const query = { text: 'run it', businessId: CHAT_BIZ, userId: CHAT_USER, enableActions: true } as any;
+  const flags = { integrationV2Enabled: true, genomeV3Enabled: false };
+  return {
+    executor,
+    chat: () => pipeline.processQuery(query, flags),
+    stream: async () => {
+      const chunks: any[] = [];
+      for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+      return chunks;
+    },
+    executed: () => executor.executeBatch.mock.calls.flatMap(([commands]: any[]) => commands),
+    refusals: () => executor.logExecution.mock.calls.map(([row]: any[]) => row),
+  };
+}
 const reaches = (permissions: Record<string, string>, tool: string) =>
   policy.isToolAllowed(policy.envelopeForJobRole({ id: 'jr_v81', name: 'Position', permissions }), tool);
 
@@ -204,13 +340,72 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
   //    (key-cortex-query-pipeline.service.ts, evaluateParsedCommandAutonomy); no member scope rule
   //    (cortexCommandRefusal or any membership read) applies, and the batch result data is returned.
   //    Pre-existing, and wider than the money reports: it holds for every registry action.
+  //    W10-CORTEX-CHAT-SCOPE turned it live (below).
   it.todo(
     'SEC-W9MRK-1 / MRK-CR-1 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read (memberPlanStepScopeRefusal, D-57, D-71)',
   );
   it.todo(
     'SEC-W9MRK-2 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)',
   );
-  it.todo(
-    'SEC-W9MRK-3 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a command parsed on POST cortex/chat or the chat stream with enableActions is refused to a member the cortexCommandRefusal rule refuses, the money reports included (D-57)',
+
+  // SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, owner ruling D-57): a parsed chat command runs through the
+  // executor POST cortex/execute runs a direct command through, so it is held to the same rule
+  // (cortexCommandRefusal) for the member the chat runs for. A refused command reaches neither
+  // executeBatch nor an approval request, and is put on record through the executor's audit door with
+  // its refusal. The stream's detected actions (autopilot commands) are held to it too.
+  it.each(MONEY_REPORT_COMMANDS)(
+    'SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, D-57, was it.todo): a command parsed on POST cortex/chat or the chat stream with enableActions is refused to a member the cortexCommandRefusal rule refuses, the money reports included: %s.%s',
+    async (module, action, moduleScope) => {
+      // the chat door: a STAFF member with the module's write scope and revenue none
+      const refused = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { [moduleScope]: 'write', revenue: 'none' } },
+        intents: [{ module, action }],
+      });
+      await refused.chat();
+      expect(refused.executor.executeBatch, `${module}.${action}`).not.toHaveBeenCalled();
+      expect(refused.executor.executeWithApproval).not.toHaveBeenCalled();
+      expect(refused.refusals()).toEqual([
+        expect.objectContaining({
+          command: expect.objectContaining({ module, action, businessId: CHAT_BIZ, userId: CHAT_USER }),
+          result: expect.objectContaining({
+            success: false,
+            error: 'Insufficient permissions: revenue requires read access (you have none)',
+          }),
+        }),
+      ]);
+
+      // control: the same member with revenue:read has the report run
+      const allowed = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { [moduleScope]: 'write', revenue: 'read' } },
+        intents: [{ module, action }],
+      });
+      await allowed.chat();
+      expect(allowed.executed()).toEqual([expect.objectContaining({ module, action, userId: CHAT_USER })]);
+      expect(allowed.refusals()).toEqual([]);
+
+      // the chat stream: its detected actions run as autopilot commands, held to the same rule
+      const streamRefused = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { automations: 'read', [moduleScope]: 'admin', revenue: 'admin' } },
+        detected: [{ actionType: 'CREATE_TASK' }],
+      });
+      const chunks = await streamRefused.stream();
+      expect(streamRefused.executor.executeBatch).not.toHaveBeenCalled();
+      expect(streamRefused.refusals()).toEqual([
+        expect.objectContaining({
+          command: expect.objectContaining({ module: 'autopilot', action: 'create_task', userId: CHAT_USER }),
+          result: expect.objectContaining({ success: false, error: 'Insufficient permissions: automations requires write access (you have read)' }),
+        }),
+      ]);
+      expect(chunks.filter((c) => c.type === 'action_delta').slice(1).map((c) => c.action)).toEqual([
+        expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+      ]);
+      // control: automations write runs it
+      const streamAllowed = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { automations: 'write' } },
+        detected: [{ actionType: 'CREATE_TASK' }],
+      });
+      await streamAllowed.stream();
+      expect(streamAllowed.executed()).toEqual([expect.objectContaining({ module: 'autopilot', action: 'create_task' })]);
+    },
   );
 });
