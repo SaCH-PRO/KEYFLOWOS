@@ -10,7 +10,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereWithId } from './crm.helpers';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ReputationService } from '../community/reputation.service';
-import type { InvoicePaidPayload } from '../../core/event-bus/events.types';
+import type { InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 
 const REFERRER_BUMP_ON_REFER = 5;
 const REFERRER_BUMP_ON_DEAL_WON = 15;
@@ -432,4 +432,75 @@ export class CrmNetworkService {
       this.logger.warn(`onInvoicePaid handler failed: ${(err as Error).message}`);
     }
   }
+
+  /**
+   * W10-REOPEN-REVERSALS (owner ruling D-102): a refund's reopen of a paid
+   * invoice takes back the referrer lead-score bump its invoice.paid gave. The
+   * referrers are read from the referral.deal_won notes the paid handler wrote
+   * for this invoice (not from today's edges): a referrer with more deal_won
+   * notes than referral.deal_reopened notes for it has one bump to take back,
+   * once, and gets one referral.deal_reopened note (a timeline note, nobody is
+   * messaged). An invoice whose payment bumped nobody takes nothing back. The
+   * count and the writes run under the referrer's row lock, so a re-delivered
+   * or concurrent reopen takes the bump back once; a re-pay's bump (a new
+   * deal_won note) is taken back by its own reopen.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload & { previousStatus?: string }) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const won = await this.db.contactEvent.findMany({
+        where: { businessId, type: 'note.created', AND: [dealNote('referral.deal_won'), { data: { path: ['invoiceId'], equals: invoiceId } }] },
+        select: { contactId: true, data: true },
+      });
+      const referrers = Array.from(new Set(won.map((e) => e.contactId)));
+      let reversed = 0;
+      for (const referrerId of referrers) {
+        const referredContactId = (won.find((e) => e.contactId === referrerId)?.data as Record<string, unknown> | null)?.referredContactId ?? null;
+        const took = await this.db.$transaction(async (tx) => {
+          const locked = await tx.$queryRaw<Array<{ id: string; lead_score: number | null }>>`
+            SELECT id, lead_score FROM contacts WHERE id = ${referrerId} AND business_id = ${businessId} FOR UPDATE`;
+          if (locked.length === 0) return false;
+          const count = (kind: string) => tx.contactEvent.count({
+            where: { businessId, contactId: referrerId, type: 'note.created', AND: [dealNote(kind), { data: { path: ['invoiceId'], equals: invoiceId } }] },
+          });
+          if ((await count('referral.deal_won')) <= (await count('referral.deal_reopened'))) return false;
+          const next = Math.max(0, Math.min(100, (locked[0].lead_score ?? 0) - REFERRER_BUMP_ON_DEAL_WON));
+          await tx.contact.update({ where: { id: referrerId }, data: { leadScore: next } });
+          await this.timeline.logEvent(
+            businessId,
+            referrerId,
+            'note.created',
+            {
+              kind: 'referral.deal_reopened',
+              referredContactId,
+              invoiceId,
+              total: payload?.invoice?.total,
+              previousStatus: payload?.previousStatus ?? null,
+            },
+            { source: 'crm-network' },
+            tx,
+          );
+          return true;
+        });
+        if (took) reversed += 1;
+      }
+      if (reversed > 0) {
+        try {
+          await this.reputation.recalculate(businessId);
+        } catch (err) {
+          this.logger.warn(`reputation.recalculate failed: ${(err as Error).message}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`onInvoiceReopened handler failed: ${(err as Error).message}`);
+    }
+  }
+}
+
+/** W10-REOPEN-REVERSALS (D-102): a crm-network referral note of this kind (note.created data.kind). */
+function dealNote(kind: string) {
+  return { data: { path: ['kind'], equals: kind } };
 }

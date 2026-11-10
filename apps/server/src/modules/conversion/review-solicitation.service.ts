@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
-import { BookingCompletedPayload, InvoicePaidPayload } from '../../core/event-bus/events.types';
+import { BookingCompletedPayload, InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
@@ -44,6 +44,52 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
     await this.scheduleReviewRequest(payload.businessId, payload.invoice.id, 'invoice', payload.invoice.contact);
   }
 
+  /**
+   * W10-REOPEN-REVERSALS (owner ruling D-102): a refund's reopen of a paid
+   * invoice cancels its review request while it is not yet sent: the PENDING
+   * job becomes CANCELLED by a compare-and-set on PENDING, which the runner's
+   * claim (PENDING -> COMPLETED before it sends, V1-35) also takes, so the two
+   * never both win. A request already sent (COMPLETED) is a message already
+   * sent and stays; a re-delivered reopen finds nothing PENDING. Nobody is
+   * messaged. Paying the invoice again re-arms the job (scheduleReviewRequest);
+   * if it is PAID again by the time this ran, the job is re-armed here.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const status = await this.invoiceStatus(businessId, invoiceId);
+      if (status == null || status === 'PAID') return;
+      const cancelled = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: {
+          businessId,
+          entityId: invoiceId,
+          checkpoint: `review_invoice_${invoiceId}`,
+          jobType: 'review_solicitation',
+          status: 'PENDING',
+        },
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.count === 0) return;
+      this.logger.log(`D-102: cancelled the unsent review request of reopened invoice ${invoiceId}`);
+      if ((await this.invoiceStatus(businessId, invoiceId)) === 'PAID') {
+        await this.scheduleReviewRequest(businessId, invoiceId, 'invoice', payload.invoice.contact ?? undefined);
+      }
+    } catch (e) {
+      this.logger.warn(`D-102 review request cancel failed for invoice ${invoiceId}: ${(e as Error).message}`);
+    }
+  }
+
+  private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {
+    const inv = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { status: true },
+    });
+    return inv?.status ?? null;
+  }
+
   private async scheduleReviewRequest(
     businessId: string,
     entityId: string,
@@ -56,9 +102,20 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
     const existing = await this.prisma.client.scheduledAgentJob.findFirst({
       where: { businessId, entityId, checkpoint },
     });
-    if (existing) return;
-
     const scheduledFor = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+    if (existing) {
+      // W10-REOPEN-REVERSALS (D-102): an invoice paid again after its reopen cancelled the
+      // request gets it re-armed (CANCELLED -> PENDING); a sent or pending request stays as it is.
+      if (existing.status === 'CANCELLED' && entityType === 'invoice') {
+        const rearmed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: existing.id, status: 'CANCELLED' },
+          data: { status: 'PENDING', scheduledFor, executedAt: null },
+        });
+        if (rearmed.count === 1) this.logger.log(`Re-armed review request for invoice ${entityId} at ${scheduledFor.toISOString()}`);
+      }
+      return;
+    }
+
     await this.prisma.client.scheduledAgentJob.create({
       data: {
         businessId,
