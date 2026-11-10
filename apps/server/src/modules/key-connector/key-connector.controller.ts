@@ -15,6 +15,7 @@ import {
 import { Request } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { KeyConnectorService } from './key-connector.service';
 import { ConnectProviderDto, AiCommandDto } from './dto';
 import {
@@ -39,6 +40,20 @@ import {
  *   GET    /sync                       — Sync history
  *   POST   /ai/command                 — Execute an AI command
  *   GET    /audit                      — Audit log
+ *
+ * Tenant (W7-KEY-CONNECTOR-TENANT, the R0-34b pattern). The base path carries
+ * no `:businessId` segment, so the request names the tenant and BusinessGuard
+ * resolves and checks it from params, then body, then query
+ * (core/auth/request-business-id.ts). These handlers used to read
+ * `@Query('businessId')`: a member of A sending the JSON body
+ * `{businessId: A}` with `?businessId=B` passed the guard for A and the
+ * handler acted on B, and SUPER_ADMIN (whom the guard admits naming no
+ * tenant) reached the service with `undefined`, which its Prisma reads drop
+ * as a filter (every tenant's rows). Every handler now takes
+ * `@GuardedBusinessId()`, the resolver the guard ran, and refuses a request
+ * that named no tenant (`requireGuardedTenant`). A query businessId naming
+ * another business is ignored when the body names one, and refused by the
+ * guard when it is the only one named.
  * ───────────────────────────────────────────────────────────────────────
  */
 
@@ -47,22 +62,35 @@ import {
 export class KeyConnectorController {
   constructor(private readonly service: KeyConnectorService) {}
 
+  /**
+   * The tenant a handler acts on: the one BusinessGuard resolved and checked.
+   * `undefined` only when no request field named one, which the guard refuses
+   * for every ordinary user; SUPER_ADMIN bypasses the guard and is refused
+   * here, because a tenant forwarded as `undefined` reads every tenant's rows.
+   */
+  private requireGuardedTenant(businessId: string | undefined): string {
+    if (!businessId) throw new ForbiddenException('businessId is required');
+    return businessId;
+  }
+
   // ── Provider Discovery ──────────────────────────────────────────────
 
   @Get('providers')
   async getProviders(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Query('category') category?: string,
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getProviders(businessId, category);
     return { success: true, data: result };
   }
 
   @Get('providers/:key')
   async getProviderDetail(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Param('key') providerKey: string,
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getProviderDetail(
       businessId,
       providerKey,
@@ -73,11 +101,12 @@ export class KeyConnectorController {
   @Post('providers/:key/connect')
   @HttpCode(HttpStatus.CREATED)
   async connectProvider(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Param('key') providerKey: string,
     @Body() dto: ConnectProviderDto,
     @Req() req: Request & { user?: { id?: string } },
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const userId = req.user?.id ?? '';
     const result = await this.service.connectProvider(
       businessId,
@@ -95,18 +124,19 @@ export class KeyConnectorController {
   @Delete('connections/:id')
   @HttpCode(HttpStatus.OK)
   async disconnectProvider(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Param('id') connectionId: string,
     @Req() req: Request & { user?: { id?: string } },
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const userId = req.user?.id ?? '';
     await this.service.disconnectProvider(businessId, connectionId, userId);
     return { success: true, message: 'Connection removed' };
   }
 
   @Get('connections')
-  async getConnections(@Query('businessId') businessId: string,
-  ) {
+  async getConnections(@GuardedBusinessId() guardedBusinessId: string | undefined) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getConnections(businessId);
     return { success: true, data: result };
   }
@@ -114,8 +144,8 @@ export class KeyConnectorController {
   // ── Health ──────────────────────────────────────────────────────────
 
   @Get('health')
-  async getHealth(@Query('businessId') businessId: string,
-  ) {
+  async getHealth(@GuardedBusinessId() guardedBusinessId: string | undefined) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getConnectionHealth(businessId);
     return { success: true, data: result };
   }
@@ -125,11 +155,12 @@ export class KeyConnectorController {
   @Post('sync/:id/trigger')
   @HttpCode(HttpStatus.ACCEPTED)
   async triggerSync(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Param('id') connectionId: string,
     @Query('direction')
     direction: 'inbound' | 'outbound' | 'bidirectional' = 'bidirectional',
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.triggerSync(
       businessId,
       connectionId,
@@ -140,10 +171,11 @@ export class KeyConnectorController {
 
   @Get('sync')
   async getSyncHistory(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Query('connectionId') connectionId?: string,
     @Query('limit') limit?: string,
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getSyncHistory(
       businessId,
       connectionId,
@@ -157,10 +189,11 @@ export class KeyConnectorController {
   @Post('ai/command')
   @HttpCode(HttpStatus.OK)
   async executeAiCommand(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Body() dto: AiCommandDto,
     @Req() req: Request & { user?: { id?: string } },
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const userId = req.user?.id ?? '';
 
     const command: AiGatewayCommand = {
@@ -185,9 +218,10 @@ export class KeyConnectorController {
 
   @Get('audit')
   async getAuditLog(
-    @Query('businessId') businessId: string,
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Query('limit') limit?: string,
   ) {
+    const businessId = this.requireGuardedTenant(guardedBusinessId);
     const result = await this.service.getAuditLog(
       businessId,
       limit ? parseInt(limit, 10) : 100,
