@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@keyflow/db';
 import { QuoteStatus } from '@prisma/client';
@@ -6,6 +6,7 @@ import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/m
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleFormsService } from './google-forms.service';
 import { CrmService } from '../crm/crm.service';
+import { configuringMember, syncPrincipals, type SyncPrincipals } from './google-contacts-sync.service';
 
 export type CrmField =
   | 'firstName'
@@ -39,6 +40,17 @@ export interface OpportunityDefaults {
   defaultBudget?: number;
   defaultCurrency?: string;
   defaultStatus?: string;
+  /**
+   * W9-FORMS-QUOTE-GATE review SEC-W9FQG-1 (D-46, D-93): the member who last
+   * saved a mapping that names opportunity defaults (the configuring member).
+   * Only the server writes it (saveMapping sets it after the body's defaults
+   * are spread, so a body cannot name one), and its revenue write bounds every
+   * run of a mapping that creates quotes, whoever starts it (as
+   * connector-form-mapping's configuredBy bounds a backfill, SEC-W6CTM-2). A
+   * mapping saved before records none: a run no member starts then runs as the
+   * business owner (D-93).
+   */
+  configuredBy?: string | null;
 }
 
 interface RawFormResponse {
@@ -63,14 +75,16 @@ interface ProcessResult {
   opportunitiesCreated: number;
   errors: string[];
   lastResponseTime?: string;
-  /**
-   * W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up): why this run applied no
-   * response of a mapping that creates quotes (its member may not create
-   * quotes: formQuoteRefusal), or null. Each such response is counted in
-   * responsesSkipped and stays pending for a run by a member who may.
-   */
-  opportunityRefusal: string | null;
 }
+
+/**
+ * W9-FORMS-QUOTE-GATE review SEC-W9FQG-2: who starts a run. `request`: a
+ * member's request (the backfill and process-new routes pass their caller);
+ * `poller`: the connector.synced listener, which a member's request starts
+ * when the registry emits inside it (POST connectors/.../sync/google_forms)
+ * and no member starts when the nightly connector sync emits it.
+ */
+type FormRunStart = { kind: 'request'; caller: string | null } | { kind: 'poller' };
 
 interface MappingRow {
   id: string;
@@ -174,6 +188,8 @@ function parseOpportunityDefaults(
       typeof obj.defaultCurrency === 'string' ? obj.defaultCurrency : undefined,
     // SEC-D92R-1: a stored value is never applied; the quote is a DRAFT.
     defaultStatus: FORM_QUOTE_STATUS,
+    // W9-FORMS-QUOTE-GATE review SEC-W9FQG-1: the configuring member (server-written).
+    configuredBy: typeof obj.configuredBy === 'string' && obj.configuredBy ? obj.configuredBy : null,
   };
 }
 
@@ -226,6 +242,16 @@ export class GoogleFormsMappingService {
     });
   }
 
+  /**
+   * W9-FORMS-QUOTE-GATE review SEC-W9FQG-1 (D-46, D-93): `actorUserId` is the
+   * member saving the mapping (the route passes its caller; else the member
+   * the TenantInterceptor bound to the request for this business). A mapping
+   * whose opportunity defaults are enabled creates a quote with every
+   * response, so only a member with revenue:write saves one (403 otherwise,
+   * nothing stored), and the mapping records them as its configuring member.
+   * Before this any member saved one (the route is AuthGuard + BusinessGuard
+   * only) and the poller, running as the owner, created the quotes they chose.
+   */
   async saveMapping(input: {
     businessId: string;
     formId: string;
@@ -233,14 +259,30 @@ export class GoogleFormsMappingService {
     fieldMappings: FieldMappingEntry[];
     opportunityDefaults?: OpportunityDefaults | null;
     autoCreate?: boolean;
+    actorUserId?: string | null;
   }) {
     const cleaned = this.validateMappings(input.fieldMappings);
     const fieldJson = cleaned as unknown as Prisma.InputJsonValue;
+    const opp = input.opportunityDefaults;
     // SEC-D92R-1: the quote a response creates is a DRAFT; any other status is a 400 before anything is written.
-    const oppJson: Prisma.InputJsonValue | typeof Prisma.JsonNull = input.opportunityDefaults
+    const defaultStatus = opp ? settingFormQuoteStatus(opp.defaultStatus) : null;
+    // SEC-W9FQG-1: enabled as a run reads it (parseOpportunityDefaults: Boolean(enabled)).
+    const savedBy = configuringMember(input.businessId, input.actorUserId);
+    if (opp && Boolean(opp.enabled)) {
+      const level = await this.memberRevenueLevel(input.businessId, savedBy);
+      if (rankOf(level) < LEVEL_RANK.write) {
+        throw new ForbiddenException(
+          `Insufficient permissions: revenue requires write access (you have ${level}); ` +
+            'only a member with revenue write sets up a form that creates a quote with each response',
+        );
+      }
+    }
+    const oppJson: Prisma.InputJsonValue | typeof Prisma.JsonNull = opp
       ? ({
-          ...input.opportunityDefaults,
-          defaultStatus: settingFormQuoteStatus(input.opportunityDefaults.defaultStatus),
+          ...opp,
+          defaultStatus,
+          // SEC-W9FQG-1: the configuring member is the server's, never the body's.
+          configuredBy: savedBy,
         } as unknown as Prisma.InputJsonValue)
       : Prisma.JsonNull;
 
@@ -291,55 +333,76 @@ export class GoogleFormsMappingService {
   }
 
   /**
-   * W9-FORMS-QUOTE-GATE (W5-D92-RESIDUALS review SEC-D92R-1 follow-up; owner
-   * rulings D-46, D-93): why a run as `memberId` may not create the quotes
-   * `mapping` asks for, or null when it may (or the mapping creates none). The
-   * quote a response creates is written here (applyResponse), not through
-   * CommerceService.createQuote, whose route needs revenue:write
-   * (ModuleScopeGuard), while the forms backfill and process-new routes carry
-   * AuthGuard and BusinessGuard only: any member ran a mapping that created
-   * quotes. The run's member is held to the quote door's rule: a Membership in
-   * the business whose scope map (or, without one, its role defaults) holds
-   * revenue:write, read as CommerceService.assertActorMayWriteRevenue and
-   * memberRevenueLevel (ai/plan-step-authority.ts) read it. No Membership is
-   * none, a platform SUPER_ADMIN included (D-46), and so is a run with no
-   * member. The answer starts with the words ModuleScopeGuard answers POST
-   * quotes with for the same member.
+   * W9-FORMS-QUOTE-GATE: `memberId`'s revenue level in `businessId`, read as
+   * the quote door reads it (CommerceService.assertActorMayWriteRevenue,
+   * memberRevenueLevel in ai/plan-step-authority.ts): the Membership's scope
+   * map, else its role defaults. No Membership is none, a platform SUPER_ADMIN
+   * included (D-46), and so is no member.
    */
-  private async formQuoteRefusal(mapping: MappingRow, memberId: string | null): Promise<string | null> {
-    if (!mapping.opportunityDefaults?.enabled) return null;
-    let level = 'none';
-    if (memberId) {
-      const membership = await this.prisma.client.membership.findUnique({
-        where: { userId_businessId: { userId: memberId, businessId: mapping.businessId } },
-        select: { role: true, permissionScopes: true },
-      });
-      if (membership) {
-        const scopes: Record<string, string> =
-          membership.permissionScopes && typeof membership.permissionScopes === 'object'
-            ? (membership.permissionScopes as Record<string, string>)
-            : defaultScopesForRole(membership.role);
-        level = scopes.revenue || 'none';
-      }
-    }
-    if (rankOf(level) >= LEVEL_RANK.write) return null;
-    return (
-      `Insufficient permissions: revenue requires write access (you have ${level}); ` +
-      'this form creates a quote with each response, so its responses wait for a run by a member with revenue write'
-    );
+  private async memberRevenueLevel(businessId: string, memberId: string | null): Promise<string> {
+    if (!memberId) return 'none';
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: memberId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return 'none';
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return scopes.revenue || 'none';
   }
 
   /**
-   * W9-FORMS-QUOTE-GATE (D-93: a job no member starts runs with the business
-   * owner as its member): the member the scheduled poller (onConnectorSynced)
-   * runs a form as, read when it runs.
+   * W9-FORMS-QUOTE-GATE (W5-D92-RESIDUALS review SEC-D92R-1 follow-up; owner
+   * rulings D-46, D-93) and its review repairs SEC-W9FQG-1/2: why a run of
+   * `mapping` started by `start` may not create the quotes the mapping asks
+   * for, or null when it may (or the mapping creates none). The quote a
+   * response creates is written here (applyResponse), not through
+   * CommerceService.createQuote, whose route needs revenue:write
+   * (ModuleScopeGuard), while the forms routes carry AuthGuard and
+   * BusinessGuard only. Who the run is held to (syncPrincipals, the W6 rule
+   * for contact syncs and connector form backfills, review SEC-W6CTM-2):
+   *  - the run's member: the caller of a backfill or process-new request; for
+   *    the poller, the member whose request emitted connector.synced (the
+   *    TenantInterceptor binds them for this business), and only for a run no
+   *    member starts, the configuring member, else the business owner (D-93).
+   *    SEC-W9FQG-2: the poller ran as the owner even inside a member's
+   *    request, so a member refused here created the quotes through POST
+   *    connectors/.../sync/google_forms;
+   *  - and the configuring member, whose revenue write bounds every run
+   *    (SEC-W9FQG-1).
+   * Every one must hold revenue:write. The answer starts with the words
+   * ModuleScopeGuard answers POST quotes with for the same member.
    */
-  private async businessOwnerId(businessId: string): Promise<string | null> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { ownerId: true },
-    });
-    return business?.ownerId ?? null;
+  private async formQuoteRefusal(mapping: MappingRow, start: FormRunStart): Promise<string | null> {
+    if (!mapping.opportunityDefaults?.enabled) return null;
+    const configured = mapping.opportunityDefaults.configuredBy ?? null;
+    let principals: SyncPrincipals;
+    if (start.kind === 'request') {
+      const actor = configuringMember(mapping.businessId, start.caller);
+      principals = { actor, members: Array.from(new Set([actor, configured].filter((m): m is string => !!m))) };
+    } else {
+      principals = await syncPrincipals(this.prisma, mapping.businessId, configured);
+    }
+    const actorLevel = await this.memberRevenueLevel(mapping.businessId, principals.actor);
+    if (rankOf(actorLevel) < LEVEL_RANK.write) {
+      return (
+        `Insufficient permissions: revenue requires write access (you have ${actorLevel}); ` +
+        'this form creates a quote with each response, so its responses wait for a run by a member with revenue write'
+      );
+    }
+    for (const member of principals.members) {
+      if (member === principals.actor) continue;
+      const level = await this.memberRevenueLevel(mapping.businessId, member);
+      if (rankOf(level) < LEVEL_RANK.write) {
+        return (
+          `Insufficient permissions: revenue requires write access (the member who set up this form has ${level}); ` +
+          'this form creates a quote with each response, so its responses wait until a member with revenue write saves its mapping again'
+        );
+      }
+    }
+    return null;
   }
 
   /** Apply mapping to a single response, creating/updating a contact (and optional opportunity). */
@@ -469,14 +532,30 @@ export class GoogleFormsMappingService {
   }
 
   /**
+   * W9-FORMS-QUOTE-GATE: a request run of a mapping that creates quotes, by a
+   * member who may not create them (formQuoteRefusal), is refused with 403
+   * before any response is read: nothing is applied or written (no quote, no
+   * contact, no processed id, no watermark, no lastBackfillAt), so every
+   * response stays pending for a run by a member who may. Review CR-W9FQG-2:
+   * the refusal is a 403, not a 201 with zero counts, so a caller that checks
+   * for an error (the web forms drawer's backfill) shows why.
+   */
+  private async assertRequestMayRun(mapping: MappingRow, caller: string | null): Promise<void> {
+    const refusal = await this.formQuoteRefusal(mapping, { kind: 'request', caller });
+    if (refusal) throw new ForbiddenException(refusal);
+  }
+
+  /**
    * Process all responses since the mapping's lastSeenResponseTime.
    * W9-FORMS-QUOTE-GATE: `actorUserId` is the member whose request runs it
-   * (the route's caller); quotes are created only if they hold revenue:write.
+   * (the route's caller); see assertRequestMayRun.
    */
   async processNewResponses(businessId: string, formId: string, actorUserId?: string | null): Promise<ProcessResult> {
     const record = await this.getMapping(businessId, formId);
     if (!record) throw new NotFoundException('No mapping configured for this form');
-    return this.runProcess(this.toRow(record), { onlyNew: true, member: actorUserId ?? null });
+    const mapping = this.toRow(record);
+    await this.assertRequestMayRun(mapping, actorUserId ?? null);
+    return this.runProcess(mapping, { onlyNew: true });
   }
 
   /**
@@ -486,7 +565,9 @@ export class GoogleFormsMappingService {
   async backfill(businessId: string, formId: string, actorUserId?: string | null): Promise<ProcessResult> {
     const record = await this.getMapping(businessId, formId);
     if (!record) throw new NotFoundException('No mapping configured for this form');
-    const result = await this.runProcess(this.toRow(record), { onlyNew: false, member: actorUserId ?? null });
+    const mapping = this.toRow(record);
+    await this.assertRequestMayRun(mapping, actorUserId ?? null);
+    const result = await this.runProcess(mapping, { onlyNew: false });
     await this.prisma.client.googleFormMapping.update({
       where: { id: record.id },
       data: { lastBackfillAt: new Date() },
@@ -496,18 +577,14 @@ export class GoogleFormsMappingService {
 
   private async runProcess(
     mapping: MappingRow,
-    opts: { onlyNew: boolean; member: string | null },
+    opts: { onlyNew: boolean },
   ): Promise<ProcessResult> {
-    // W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up; D-46, D-93): decided once,
-    // for the run's member, before any response is read.
-    const refusal = await this.formQuoteRefusal(mapping, opts.member);
     const result: ProcessResult = {
       responsesProcessed: 0,
       responsesSkipped: 0,
       contactsCreated: 0,
       opportunitiesCreated: 0,
       errors: [],
-      opportunityRefusal: refusal,
     };
 
     const seen = new Set(mapping.processedResponseIds);
@@ -531,16 +608,6 @@ export class GoogleFormsMappingService {
           }
         }
         if (seen.has(response.responseId)) {
-          result.responsesSkipped += 1;
-          continue;
-        }
-        if (refusal) {
-          // W9-FORMS-QUOTE-GATE: a member who may not create its quote applies
-          // nothing of the response (no contact either): it is not marked
-          // processed and lastSeenResponseTime does not pass it, so a run by a
-          // member with revenue:write applies it whole. Applying the contact
-          // alone would lose the quote (a processed response is never applied
-          // again) or, applied again later, duplicate a contact with no email.
           result.responsesSkipped += 1;
           continue;
         }
@@ -588,13 +655,23 @@ export class GoogleFormsMappingService {
     const mappings = await this.prisma.client.googleFormMapping.findMany({
       where: { businessId: payload.businessId, autoCreate: true },
     });
-    // W9-FORMS-QUOTE-GATE (D-93): no member starts the poller, so it runs as
-    // the business owner, and creates quotes only while the owner's
-    // Membership holds revenue:write.
-    const owner = mappings.length ? await this.businessOwnerId(payload.businessId) : null;
     for (const record of mappings) {
       try {
-        await this.runProcess(this.toRow(record), { onlyNew: true, member: owner });
+        const mapping = this.toRow(record);
+        // W9-FORMS-QUOTE-GATE (D-93) and review SEC-W9FQG-1/2: a sync a
+        // member's request starts runs each form as that member; only a run no
+        // member starts runs as the configuring member, else the business
+        // owner; and the configuring member bounds every run. A run that may
+        // not create the mapping's quotes reads and writes nothing (no quote,
+        // no contact, no processed id, no watermark): the responses stay
+        // pending for a run that may. Applying the contact alone would lose
+        // the quote (a processed response is never applied again).
+        const refusal = await this.formQuoteRefusal(mapping, { kind: 'poller' });
+        if (refusal) {
+          this.logger.warn(`Auto-process held for form ${record.formId} (business ${payload.businessId}): ${refusal}`);
+          continue;
+        }
+        await this.runProcess(mapping, { onlyNew: true });
       } catch (err: any) {
         this.logger.warn(
           `Auto-process failed for form ${record.formId} (business ${payload.businessId}): ${(err as Error).message}`,

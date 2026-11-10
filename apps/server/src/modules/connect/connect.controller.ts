@@ -141,6 +141,11 @@ export class ConnectController {
     return this.formsMapping.getMapping(businessId, formId);
   }
 
+  /**
+   * W9-FORMS-QUOTE-GATE review SEC-W9FQG-1 (D-46): a mapping that creates
+   * quotes is saved only by a member with revenue:write, whom the mapping
+   * records as its configuring member, so the route passes its caller.
+   */
   @Post('businesses/:businessId/forms/:formId/mapping')
   saveFormMapping(
     @Param('businessId') businessId: string,
@@ -152,6 +157,7 @@ export class ConnectController {
       opportunityDefaults?: OpportunityDefaults | null;
       autoCreate?: boolean;
     },
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!Array.isArray(body?.fieldMappings)) {
       throw new BadRequestException('fieldMappings array is required');
@@ -163,6 +169,7 @@ export class ConnectController {
       fieldMappings: body.fieldMappings,
       opportunityDefaults: body.opportunityDefaults ?? null,
       autoCreate: body.autoCreate,
+      actorUserId: req.user?.id ?? null,
     });
   }
 
@@ -176,9 +183,10 @@ export class ConnectController {
 
   /**
    * W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up; D-46): a run creates the quotes
-   * its mapping asks for only as a member with revenue:write, so both routes
-   * pass their caller (AuthGuard's user); a run whose caller may not applies
-   * no response of such a mapping and says why (opportunityRefusal).
+   * its mapping asks for only as a member with revenue:write (and while the
+   * mapping's configuring member holds it), so both routes pass their caller
+   * (AuthGuard's user); a run whose caller may not is refused with 403 before
+   * any response is read (review CR-W9FQG-2: not a 201 with zero counts).
    */
   @Post('businesses/:businessId/forms/:formId/backfill')
   backfillFormResponses(
