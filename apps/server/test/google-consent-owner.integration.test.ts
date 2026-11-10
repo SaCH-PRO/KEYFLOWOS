@@ -48,8 +48,19 @@
  * it would sync), with controls [V94D-G01]..[V94D-G02]. POST
  * .../contacts/sync stays it.todo ([V94D-T05]): connect-sync-actor.integration.
  * test.ts (outside the write set) pins STAFF-started Google Contacts syncs.
+ *
+ * W9-GOOGLE-DOORS-SERVER review repairs (D-99): DELETE /connectors/businesses/
+ * :b/credentials/:type for the same Google Suite connections ([V94D-H01],
+ * control [V94D-H02]; SEC-W9GD-1): it marks the connector row disconnected,
+ * which takes the connection out of the nightly and background sync while its
+ * Google tokens stay. Three Google sync doors outside the write set stay open
+ * to every member and are it.todo: POST .../contacts/sync ([V94D-T05];
+ * SEC-W9GD-2), POST /drive/businesses/:b/sync with the KEY tool
+ * connect.scanDrive ([V94D-T06]; CRR-W9GD-1) and POST /calendar/businesses/:b/
+ * sync/google/temporal-flow ([V94D-T07]; SEC-W9GD-3).
  * For these cases the connector registry behind ConnectorController is a
- * stand-in recording what reaches it, the Google Contacts sync is the real
+ * stand-in recording what reaches it, its credential store is the real
+ * ConnectorCredentialsService, the Google Contacts sync is the real
  * GoogleContactsSyncService with its provider run (sync) replaced by a
  * recording stand-in (its disconnect is real), ContactSyncService.syncAll is
  * real, and the Outlook Contacts sync is a recording stand-in.
@@ -153,6 +164,8 @@ const connectorRegistry = {
   disconnectConnector: vi.fn(async (_type: string, _businessId: string) => undefined),
   reconnectConnector: vi.fn(async (_type: string, _businessId: string) => ({ connected: false })),
   testConnector: vi.fn(async (_type: string, _businessId: string) => ({ success: true })),
+  // W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1: DELETE credentials/:type looks the connector up first.
+  get: vi.fn((type: string) => ({ meta: { type, name: type } })),
 };
 
 /** W9-GOOGLE-DOORS-SERVER: the Outlook Contacts sync (Microsoft, outside D-99), a recording stand-in. */
@@ -352,7 +365,9 @@ beforeAll(async () => {
       // and the collaborators no case here reaches.
       { provide: ConnectorRegistryService, useValue: connectorRegistry },
       { provide: ConnectorHealthMonitorService, useValue: {} },
-      { provide: ConnectorCredentialsService, useValue: {} },
+      // W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1: the real credential store
+      // (connector_statuses), reached only by DELETE credentials/:type ([V94D-H01], [V94D-H02]).
+      ConnectorCredentialsService,
       // ConnectController: the real Google Contacts sync (its provider run spied
       // below; CrmService and ContactAuditService are reached only by that run),
       // the real cross-source syncAll, the Outlook stand-in, and the collaborators
@@ -496,6 +511,36 @@ function clearContactSyncs() {
   googleContactsSync.mockClear();
   outlookContacts.sync.mockClear();
   outlookContacts.disconnect.mockClear();
+}
+
+/** W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1: DELETE /connectors/businesses/:b/credentials/:type (ConnectorCredentialsService.clearCredentials). */
+const deleteConnectorCredentials = (businessId: string, type: string, actor: string | undefined) =>
+  as(agent().delete(`/connectors/businesses/${businessId}/credentials/${type}`), actor);
+/** When each seeded connector row was connected (fixed, so a case can compare it as stored). */
+const ROW_CONNECTED_AT = new Date('2026-01-02T03:04:05.000Z');
+/** Write a connected connector_statuses row for `type` on `businessId` (its account names the business and the type). */
+async function seedConnectorRow(businessId: string, type: string) {
+  await db.connectorStatus.upsert({
+    where: { businessId_connectorType: { businessId, connectorType: type } },
+    create: { businessId, connectorType: type, status: 'connected', connectedAccount: `${businessId}-${type}@test.local`, connectedAt: ROW_CONNECTED_AT },
+    update: { status: 'connected', connectedAccount: `${businessId}-${type}@test.local`, connectedAt: ROW_CONNECTED_AT },
+  });
+}
+/** The connector row of `type` on `businessId`, as stored. */
+async function connectorRowOf(businessId: string, type: string) {
+  const rows: Array<{ status: string; connected_account: string | null; connected_at: Date | null }> = await db.$queryRawUnsafe(
+    `SELECT status, connected_account, connected_at FROM connector_statuses WHERE business_id = $1 AND connector_type = $2`,
+    businessId, type,
+  );
+  return rows[0];
+}
+/** The connector types of `businessId` the nightly sync selects (ConnectorSyncScheduler ELIGIBLE_STATUSES). */
+async function nightlySyncTypesOf(businessId: string): Promise<string[]> {
+  const rows: Array<{ connector_type: string }> = await db.$queryRawUnsafe(
+    `SELECT connector_type FROM connector_statuses WHERE business_id = $1 AND status IN ('connected', 'syncing') ORDER BY connector_type`,
+    businessId,
+  );
+  return rows.map((r) => r.connector_type);
 }
 
 /** The three Google OAuth callbacks a Drive or calendar state can be landed at. */
@@ -880,8 +925,49 @@ describe('W9-GOOGLE-DOORS-SERVER: the Google Contacts source doors are the busin
   });
 });
 
+describe('W9-GOOGLE-DOORS-SERVER review repair: clearing a Google Suite connection\'s connector credentials is the business owner\'s (D-99; SEC-W9GD-1)', () => {
+  it('[V94D-H01] RED-BEFORE (D-99; SEC-W9GD-1): DELETE /connectors/businesses/:b/credentials/:type for google_calendar, google_drive, google_contacts, google_forms and google_business_profile, which marks the connector row disconnected and clears its account and connection time, answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY before anything is written: each row stays connected with its account and connection time and the nightly sync still selects it', async () => {
+    for (const type of GOOGLE_SUITE_CONNECTORS) await seedConnectorRow(ID.biz, type);
+    for (const type of GOOGLE_SUITE_CONNECTORS) {
+      for (const member of REFUSED) expectGoogleOwnerOnly(await deleteConnectorCredentials(ID.biz, type, member), `${member} delete credentials ${type}`);
+    }
+    for (const type of GOOGLE_SUITE_CONNECTORS) {
+      expect(await connectorRowOf(ID.biz, type), type).toEqual({ status: 'connected', connected_account: `${ID.biz}-${type}@test.local`, connected_at: ROW_CONNECTED_AT });
+    }
+    expect(await nightlySyncTypesOf(ID.biz)).toEqual([...GOOGLE_SUITE_CONNECTORS].sort());
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1`, ID.biz);
+  });
+
+  it('[V94D-H02] control (D-99, SEC-W9GD-1): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN clear each Google Suite connection\'s connector credentials (row disconnected, account and connection time cleared); an ADMIN and a STAFF member still clear a non-Google connector\'s (typeform); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with the row unchanged', async () => {
+    for (const [businessId, actor] of [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]]) {
+      for (const type of GOOGLE_SUITE_CONNECTORS) {
+        await seedConnectorRow(businessId, type);
+        const res = await deleteConnectorCredentials(businessId, type, actor);
+        expect(res.status, `${actor} ${type} ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body).toEqual({ success: true });
+        expect(await connectorRowOf(businessId, type), `${actor} ${type}`).toEqual({ status: 'disconnected', connected_account: null, connected_at: null });
+      }
+    }
+    for (const member of [ID.admin, ID.staff]) {
+      await seedConnectorRow(ID.biz, NON_GOOGLE_CONNECTOR);
+      const res = await deleteConnectorCredentials(ID.biz, NON_GOOGLE_CONNECTOR, member);
+      expect(res.status, `${member} ${JSON.stringify(res.body)}`).toBe(200);
+      expect(await connectorRowOf(ID.biz, NON_GOOGLE_CONNECTOR), member).toEqual({ status: 'disconnected', connected_account: null, connected_at: null });
+    }
+    await seedConnectorRow(ID.biz, 'google_calendar');
+    expect((await deleteConnectorCredentials(ID.biz, 'google_calendar', ID.stranger)).status, 'stranger').toBe(403);
+    expect((await deleteConnectorCredentials(ID.biz, 'google_calendar', undefined)).status, 'anonymous').toBe(401);
+    expect(await connectorRowOf(ID.biz, 'google_calendar')).toEqual({ status: 'connected', connected_account: `${ID.biz}-google_calendar@test.local`, connected_at: ROW_CONNECTED_AT });
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  });
+});
+
 describe('W8-GOOGLE-CONSENT-OWNER: Google doors outside this packet\'s write set (D-99 follow-up)', () => {
-  it.todo('[V94D-T05] needs apps/server/test/connect-sync-actor.integration.test.ts (outside the W9-GOOGLE-DOORS-SERVER write set): POST /connect/businesses/:b/contacts/sync (the Google Contacts sync) answers an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced; the owner keeps it. Gating it in connect.controller.ts turns red the five Google Contacts cases of that suite in which a STAFF member starts the sync (SEC-D92R-2 x2, SEC-W6CTM-2 x2, CR-CTM-3), which D-99 supersedes and which must be re-pointed at the owner or the Outlook source in the same change (D-99)');
+  it.todo('[V94D-T05] needs apps/server/test/connect-sync-actor.integration.test.ts (outside the W9-GOOGLE-DOORS-SERVER write set): POST /connect/businesses/:b/contacts/sync (the Google Contacts sync) answers an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced; the owner keeps it. While it is open it runs the same GoogleContactsSyncService.sync that [V94D-T03] refuses at contact-sources/google_contacts/resync and sync-all, so a member bypasses that gate with one request (review SEC-W9GD-2). Gating it in connect.controller.ts turns red the five Google Contacts cases of that suite in which a STAFF member starts the sync (SEC-D92R-2 x2, SEC-W6CTM-2 x2, CR-CTM-3), which D-99 supersedes and which must be re-pointed at the owner or the Outlook source in the same change (D-99)');
+
+  it.todo('[V94D-T06] needs apps/server/src/modules/commerce/drive-intake.controller.ts and apps/server/src/modules/ai/key-tool-registry.service.ts (outside the W9-GOOGLE-DOORS-SERVER write set; review CRR-W9GD-1): POST /drive/businesses/:b/sync (DriveIntakeController.sync) and the KEY tool connect.scanDrive both run ConnectorIntelligenceService.syncGoogleDrive (the Drive API pull that writes intake rows) for any member; they answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY (the KEY tool refuses a non-owner run) with syncGoogleDrive not called; the owner keeps them. This is the Drive sync the web starts (key-connect handleSync): POST /connectors/.../sync/google_drive, gated by [V94D-T02], is PULL_SYNC_NOT_IMPLEMENTED for Drive (D-99)');
+
+  it.todo('[V94D-T07] needs apps/server/src/modules/calendar/calendar.controller.ts (outside the W9-GOOGLE-DOORS-SERVER write set; review SEC-W9GD-3): POST /calendar/businesses/:b/sync/google/temporal-flow (GoogleCalendarTemporalSyncService.syncBusiness, which pulls the coming events from the business Google Calendar) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with syncBusiness not called, as its sibling .../sync/google/resync does ([V94D-D01]); the owner keeps it (D-99)');
 
   it.todo('[V94D-T04] needs the web (outside the write set; review CR-W8GCO-1): apps/web/src/app/app/profile/components/google-drive-browser.tsx handleDisconnect and handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx show the GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect and GET .../auth-url to an ADMIN or STAFF member and keep the Drive connection shown as connected (today the browser clears it as if disconnected) (D-99)');
 });

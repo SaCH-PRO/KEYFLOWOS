@@ -2468,7 +2468,7 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearGmailConnector(ID.biz);
   });
 
-  it('[R0-CMF6-M01] review SEC-CMF6-1 RED-BEFORE: DELETE /connectors/businesses/:b/credentials/gmail, which marks the gmail connector row disconnected and clears its account, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before anything is written: the row stays connected with its account and connection time, the nightly sync still selects it and the mailbox stays; a non-member 403, anonymous 401; the owner and a SUPER_ADMIN still clear it, and a STAFF member still clears another connector\'s credentials (google_calendar control)', async () => {
+  it('[R0-CMF6-M01] review SEC-CMF6-1 RED-BEFORE: DELETE /connectors/businesses/:b/credentials/gmail, which marks the gmail connector row disconnected and clears its account, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before anything is written: the row stays connected with its account and connection time, the nightly sync still selects it and the mailbox stays; a non-member 403, anonymous 401; the owner and a SUPER_ADMIN still clear it, and a STAFF member still clears another connector\'s credentials (a non-Google control connector, typeform; D-99 makes clearing a Google connection\'s credentials the owner\'s, W9-GOOGLE-DOORS-SERVER review SEC-W9GD-1)', async () => {
     await clearPending(ID.biz);
     await clearGmailConnector(ID.biz);
     await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
@@ -2500,23 +2500,25 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
         expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected', connected_account: null })]);
       }
 
-      // Control: another connector is not gated by the mailbox rule.
+      // Control: another connector is not gated by the mailbox rule. W9-GOOGLE-DOORS-SERVER review
+      // SEC-W9GD-1 (D-99): a non-Google one (typeform), since clearing a Google Suite connection's
+      // credentials is now the owner's (google-consent-owner [V94D-H01]).
       await db.connectorStatus.upsert({
-        where: { businessId_connectorType: { businessId: ID.biz, connectorType: 'google_calendar' } },
-        create: { businessId: ID.biz, connectorType: 'google_calendar', status: 'connected', connectedAccount: `${P}calendar` },
-        update: { status: 'connected', connectedAccount: `${P}calendar` },
+        where: { businessId_connectorType: { businessId: ID.biz, connectorType: 'typeform' } },
+        create: { businessId: ID.biz, connectorType: 'typeform', status: 'connected', connectedAccount: `${P}forms` },
+        update: { status: 'connected', connectedAccount: `${P}forms` },
       });
-      const calendar = await deleteCredentials(ID.biz, 'google_calendar', ID.staff);
-      expect(calendar.status, JSON.stringify(calendar.body)).toBe(200);
-      const [calendarRow] = await db.$queryRawUnsafe(
-        `SELECT status, connected_account FROM connector_statuses WHERE business_id = $1 AND connector_type = 'google_calendar'`,
+      const forms = await deleteCredentials(ID.biz, 'typeform', ID.staff);
+      expect(forms.status, JSON.stringify(forms.body)).toBe(200);
+      const [formsRow] = await db.$queryRawUnsafe(
+        `SELECT status, connected_account FROM connector_statuses WHERE business_id = $1 AND connector_type = 'typeform'`,
         ID.biz,
       );
-      expect(calendarRow).toEqual({ status: 'disconnected', connected_account: null });
+      expect(formsRow).toEqual({ status: 'disconnected', connected_account: null });
     } finally {
       registry.get.mockImplementation(() => undefined);
     }
-    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'google_calendar'`, ID.biz);
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'typeform'`, ID.biz);
     await clearGmailConnector(ID.biz);
     await clearMailbox(ID.biz);
   });
