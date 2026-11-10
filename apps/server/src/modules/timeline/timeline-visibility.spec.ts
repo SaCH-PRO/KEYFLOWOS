@@ -85,15 +85,26 @@ const OPAQUE_WRITERS: Record<string, string> = {};
  * set contactId (then it leaves this list, and TV-07 fails until it does).
  * Detection is a heuristic (CONTACT_TEXT in title / detail); entries the
  * heuristic cannot see are listed by hand and marked so.
+ *
+ * Empty since W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2, owner ruling D-63):
+ * the two follow-ups V1-84 listed now carry the contactId of the contact they
+ * name, proven on a real database by timeline-scope TS-13a..c:
+ *   - KEY send_invoice ('Invoice <n> sent to <contactName>', module commerce,
+ *     FlowOrchestratorService.executeToolAction): contactId: invoice.contactId;
+ *   - message_intake.approved (detail = the intake plan's summary of the
+ *     inbound message, module communications,
+ *     MessageIntakeOrchestrator.executePlan): the intake's contactId. It was
+ *     listed by hand (the heuristic cannot see a summary's content), so TV-07
+ *     cannot see it regress; TS-13b does.
+ * The list judges writers, not stored rows: rows these two writers stored
+ * before the packet keep contactId null and are still served to a member who
+ * may not open the contact they name (review SEC-W9TO-1, D-63), a follow-up
+ * outside the packet's write set recorded as timeline-scope TS-13d (it.todo).
+ * A new entry is a writer that genuinely cannot name its contact, with why.
  */
-const TEXT_ONLY_CONTACT_WRITERS: Record<string, string> = {
-  'modules/ai/flow-orchestrator.service.ts#FlowOrchestratorService.executeToolAction':
-    "KEY send_invoice: 'Invoice <n> sent to <contactName>' (module commerce) carries no contactId; follow-up: set contactId: invoice.contactId.",
-  'modules/communications/message-intake-orchestrator.service.ts#MessageIntakeOrchestrator.executePlan':
-    "message_intake.approved: detail is the intake plan's summary of an inbound message (module communications), no contactId; follow-up: set the intake's contactId. Listed by hand: the heuristic cannot see a summary's content.",
-};
-/** Entries above the heuristic does not flag, kept on purpose. */
-const TEXT_ONLY_BY_HAND = new Set(['modules/communications/message-intake-orchestrator.service.ts#MessageIntakeOrchestrator.executePlan']);
+const TEXT_ONLY_CONTACT_WRITERS: Record<string, string> = {};
+/** Entries above the heuristic does not flag, kept on purpose (none since W9-TEXT-ONLY-CONTACT-WRITERS). */
+const TEXT_ONLY_BY_HAND = new Set<string>();
 
 /** The writer implementations: they pass the caller's module through. */
 const PASS_THROUGH = new Set([

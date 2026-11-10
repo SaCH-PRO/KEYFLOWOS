@@ -37,7 +37,7 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
@@ -63,7 +63,7 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
-import { CallLogService } from '../call-tasks/call-log.service';
+import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
@@ -302,6 +302,32 @@ export interface FlowPageContext {
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
+  /**
+   * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): the holder of a
+   * membership-backed staff position, as JobRolePolicyService.holderForPosition resolved it; null
+   * or absent for a contact-only position. Read only by chatToolAction.
+   */
+  positionHolderUserId?: string | null;
+}
+
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88). The dispatch context of
+ * one model tool call in chat()'s turn: `base` (the surface's own: its principal, crew, source and
+ * session), and for call_create_task (JobRolePolicyService HOLDER_ONLY_TOOLS) on a staff position's
+ * turn, which has no principal, the position's holder as onBehalfOfUserId. call_create_task records
+ * the member the command runs for as the caller (contactBindMember), so on WhatsApp/SMS it now runs
+ * as the holder, never as the member the model names; a contact-only position has no holder and is
+ * refused before anything is written, as before. Every other tool, and a turn with a principal,
+ * keeps `base` unchanged: the holder is never a principal and grants nothing. Governance still decides
+ * whether the call runs: a call it holds for a quick confirmation is not run on a turn with no
+ * member, since no confirmation is bound for one (review SEC-W9KDI-2 / CR-W9KDI-2, a known limitation).
+ * Pinned through the real chat() in test/staff-bridge-boundary.integration.test.ts (CR-W7CTC-2,
+ * SEC-W9KDI-1) and by flow-chat-tool-action.spec.ts.
+ */
+export function chatToolAction(base: ActionContext, toolName: string, server?: FlowServerContext): KeyDispatchAction {
+  const holder = server?.positionHolderUserId;
+  if (!holder || base.principalUserId || !HOLDER_ONLY_TOOLS.includes(toolName)) return base;
+  return { ...base, onBehalfOfUserId: holder };
 }
 
 /**
@@ -2212,13 +2238,15 @@ ${triage.standingContext}`;
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
           const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
-          return this.governToolCall(businessId, tc, decision, {
+          // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
+          // runs for its holder (chatToolAction); every other call keeps this context.
+          return this.governToolCall(businessId, tc, decision, chatToolAction({
             surface: 'CHAT',
             principalUserId: userId ?? null,
             crew,
             sourceId: tc.id,
             sessionId: effectiveSessionId,
-          });
+          }, tc.name, server));
         }),
       );
 
@@ -3534,6 +3562,40 @@ ${triage.standingContext}`;
       return (await systemPlanMember(this.prisma, businessId, action.planId)) ?? undefined;
     }
     return undefined;
+  }
+
+  /**
+   * W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88; V1-84 review ST-2). The member the command
+   * runs for (contactBindMember) as the viewer the call-log routes take from the session
+   * (CallLogViewer: their id and their User row's role, as AuthMiddleware attaches it), so KEY's
+   * call-log tools reach only the call logs and contacts that member may open, as the routes do.
+   * Undefined for a run with no member, whose call-log tools read the business's call logs as before.
+   */
+  private async callLogViewer(businessId: string, action?: KeyDispatchAction): Promise<CallLogViewer | undefined> {
+    const userId = await this.contactBindMember(businessId, action);
+    if (!userId) return undefined;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return { userId, role: user?.role ?? null };
+  }
+
+  /**
+   * W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-1, SEC-W9KOC-2; owner rulings D-64, D-88). Refuses the
+   * call unless the row ids a call-log tool names (`fields` of `args`) are what its schema declares:
+   * present, non-empty strings. The chat path checks them in validateToolInput before dispatch, but an
+   * execute_custom_logic inner call reaches the dispatcher through executeToolByName, which does not:
+   * a missing contactId was no contact check while contact.findFirst({ id: undefined }) read any
+   * contact of the business into the script's prompt, and a Prisma filter passed the member's check
+   * on the visible row it matched first while the service read or wrote every row it matched
+   * (completeCall's updateMany). Refused before any lookup, in validateToolInput's words, so the inner
+   * call answers as the chat call does. The cases then read the ids from `args`, so the tool-family
+   * analysis still follows them as the model's (job-role-tool-families.spec.ts, DD8-1).
+   */
+  private assertCallLogToolIds(toolName: string, args: Record<string, unknown>, fields: string[]): void {
+    const missing = fields.filter((field) => args[field] === undefined || args[field] === null || args[field] === '');
+    if (missing.length > 0) throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+    for (const field of fields) {
+      if (typeof args[field] !== 'string') throw new Error(`Field "${field}" for ${toolName} must be a string`);
+    }
   }
 
   /**
@@ -5885,7 +5947,16 @@ ${triage.standingContext}`;
         // that was never written. The business is handed over: CallLogService looks the call log
         // up within it, since on the staff bridge no ambient tenant binds a bare id (V1-21b
         // review 8 DD8-1).
-        const completed = await this.getCallLog().completeCall(businessId, args.callLogId, {
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): KEY acts as the member the command runs for, so a
+        // call log on a contact that member may not open answers 404 'Call log not found', exactly as
+        // an unknown id and as POST calls/:id/complete answers them (getVisibleCallLog). No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), and the row completed is the
+        // row checked, so no filter passes the check on one call log and completes others.
+        this.assertCallLogToolIds('call_log_outcome', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
+        const viewer = await this.callLogViewer(businessId, action);
+        const checkedId = viewer ? (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id : callLogId;
+        const completed = await this.getCallLog().completeCall(businessId, checkedId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
@@ -5898,9 +5969,26 @@ ${triage.standingContext}`;
         };
       }
       case 'call_generate_script': {
-        const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): for the member the command runs for, the contact and
+        // the call log must be ones they may open, as POST calls/:id/generate-script requires; each
+        // hidden row answers as an unknown one, in the order CallScriptService looks them up (the
+        // contact, then the call log), so no answer tells a hidden row from a missing one. No member:
+        // as before.
+        // Review SEC-W9KOC-1: both ids are strings (assertCallLogToolIds), so a missing contact is no
+        // longer no check while the script reads any contact, and no filter passes the check on a
+        // visible contact while the script reads a hidden one. The script is made for the call log checked.
+        this.assertCallLogToolIds('call_generate_script', args, ['callLogId', 'contactId']);
+        const callLogId: string = args.callLogId;
+        const contactId: string = args.contactId;
+        const viewer = await this.callLogViewer(businessId, action);
+        let checkedId = callLogId;
+        if (viewer) {
+          await this.getCallLog().assertContactVisibleTo(businessId, contactId, viewer);
+          checkedId = (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id;
+        }
+        const script = await this.getCallScript().generateScript(businessId, checkedId, contactId);
         return {
-          callLogId: args.callLogId,
+          callLogId: checkedId,
           greeting: script.greeting,
           talkingPoints: script.talkingPoints,
           ask: script.ask,
@@ -5910,12 +5998,19 @@ ${triage.standingContext}`;
       }
       case 'call_schedule_followup': {
         // within the business, as call_log_outcome (V1-21b review 8 DD8-1)
-        const task = await this.getCallLog().createFollowUpTask(businessId, args.callLogId, {
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): and on a call log the member the command runs for may
+        // open, as POST calls/:id/follow-up requires: handed that member, createFollowUpTask looks the
+        // call log up with getVisibleCallLog in place of its own lookup. No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), as for call_log_outcome.
+        this.assertCallLogToolIds('call_schedule_followup', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
+        const viewer = await this.callLogViewer(businessId, action);
+        const task = await this.getCallLog().createFollowUpTask(businessId, callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
           assigneeId: args.assigneeId,
-        }, 'key_ai');
+        }, 'key_ai', viewer);
         return { taskId: task.id, title: args.title };
       }
 
@@ -6095,12 +6190,18 @@ ${triage.standingContext}`;
 
       // === HELPDESK ===
       case 'command_list_due_obligations': {
-        const due = await this.getCommandService().findDue(businessId, {
+        const window = {
           windowDays: args.windowDays as number | undefined,
           includeOverdue: args.includeOverdue as boolean | undefined,
           limit: args.limit as number | undefined,
-        });
-        return due;
+        };
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88: KEY acts as the member the command runs for): the
+        // member goes to findDue as GET items/due hands it the session member, so an obligation that
+        // names a contact they may not open is left out (FOLLOW3-D10). No member: the list as before.
+        const member = await this.contactBindMember(businessId, action);
+        return member
+          ? this.getCommandService().findDue(businessId, window, member)
+          : this.getCommandService().findDue(businessId, window);
       }
 
       case 'command_discharge_obligation': {
@@ -6111,11 +6212,14 @@ ${triage.standingContext}`;
         // already has sixteen writers across twelve modules; this handler is
         // not going to be the seventeenth. discharge() also scopes by
         // businessId via findOne, so a foreign id cannot be discharged here.
-        const out = await this.getCommandService().discharge(
-          businessId,
-          id,
-          (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation',
-        );
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88): and with the member the command runs for, as POST
+        // items/:id/discharge hands it the session member, so an obligation that names a contact they
+        // may not open answers 404 'Command item not found', exactly as an unknown id. No member: as before.
+        const dischargeRef = (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation';
+        const member = await this.contactBindMember(businessId, action);
+        const out = member
+          ? await this.getCommandService().discharge(businessId, id, dischargeRef, member)
+          : await this.getCommandService().discharge(businessId, id, dischargeRef);
         return {
           id: out.id,
           title: out.title,
@@ -7182,6 +7286,10 @@ ${triage.standingContext}`;
           action: 'invoice_sent',
           entityType: 'invoice',
           entityId: invoice.id,
+          // W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2, owner ruling D-63): the title names the
+          // invoice's contact, so the row carries its contactId; the timeline rule then serves it
+          // only to members who may open that contact (timeline-scope TS-13a).
+          contactId: invoice.contactId,
           title: `Invoice ${invoice.invoiceNumber} sent to ${contactName}`,
           tone: 'success',
         });

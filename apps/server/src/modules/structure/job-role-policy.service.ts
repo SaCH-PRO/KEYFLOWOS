@@ -476,6 +476,44 @@ function isHoldersMembershipHere(position: StaffPosition, membership: HolderMemb
   return !position.userId || position.userId === membership.userId;
 }
 
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88). The member a staff
+ * position's KEY turn runs call_create_task for: the holder of a membership-backed position, whose
+ * membership HTTP reads in the position's business (isHoldersMembershipHere) and whose account may
+ * sign in (holderMayAuthenticate), the rows envelopeForPosition and approvalTierForPosition cap the
+ * position by. call_create_task records the member the command runs for as the caller (D-73, D-88),
+ * and the bridge's chat turn has no principal, so StaffChatBridgeService hands chat() this member,
+ * which dispatches the call with it as onBehalfOfUserId (chatToolAction). null for a contact-only
+ * position, which has no member, and for a holder HTTP does not let in here (fail closed): such a
+ * position is not offered the tool (envelopeForPosition), and the dispatcher refuses a call with no
+ * member before anything is written.
+ */
+export function positionHolder(position: StaffPosition | null | undefined): string | null {
+  const membership = position?.membership;
+  if (!position || !membership) return null;
+  if (!isHoldersMembershipHere(position, membership) || !holderMayAuthenticate(membership)) return null;
+  return membership.userId ?? null;
+}
+
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; D-73, D-88): the tools that record the member the
+ * command runs for, and so run on the staff bridge only for a position's holder (positionHolder).
+ * A position with no holder is not offered them: the model is never handed a tool the dispatcher
+ * always refuses it.
+ */
+export const HOLDER_ONLY_TOOLS: readonly string[] = ['call_create_task'];
+
+/** `envelope` with HOLDER_ONLY_TOOLS blocked (a new issued envelope when it offered one). */
+function withoutHolderOnlyTools(envelope: JobRoleEnvelope): JobRoleEnvelope {
+  const offered = HOLDER_ONLY_TOOLS.filter((tool) => !envelope.blockedTools.includes(tool) && matches(envelope.approvedTools, tool));
+  if (!offered.length) return envelope;
+  return issue({
+    ...envelope,
+    approvedTools: [...envelope.approvedTools],
+    blockedTools: [...envelope.blockedTools, ...offered],
+  });
+}
+
 /** Whether `membership` is a member's row in the position's business, with its user given (fail closed otherwise). */
 function isMembershipHere(position: StaffPosition, membership: HolderMembership): boolean {
   const businessId = position.businessId;
@@ -600,6 +638,10 @@ export class JobRolePolicyService {
    * who files a contact-only position on their own phone, or a contact later invited with it,
    * is narrowed over KEY when HTTP narrows them. A phone member not shown to be a member of the
    * position's business with an active account caps it to the baseline (fail closed).
+   *
+   * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; D-73, D-88): a position with no holder
+   * (positionHolder: a contact-only position) is not offered HOLDER_ONLY_TOOLS, which record the
+   * member the command runs for; its JobRole map is otherwise its whole scope, as before.
    */
   envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
     const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
@@ -619,7 +661,13 @@ export class JobRolePolicyService {
         this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
       );
     }
-    return envelope === scoped ? scoped : issue(envelope);
+    const capped = envelope === scoped ? scoped : issue(envelope);
+    return positionHolder(position) ? capped : withoutHolderOnlyTools(capped);
+  }
+
+  /** The member a staff position's KEY turn runs call_create_task for, or null (positionHolder; CR-W7CTC-2, D-73, D-88). */
+  holderForPosition(position: StaffPosition | null | undefined): string | null {
+    return positionHolder(position);
   }
 
   /** Same wildcard semantics as RoleEngine: exact match or trailing-* prefix. */

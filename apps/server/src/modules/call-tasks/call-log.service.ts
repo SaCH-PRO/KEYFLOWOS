@@ -453,13 +453,22 @@ export class CallLogService {
     return canOpen ? calls.filter((c: { contactId: string | null }) => !c.contactId || canOpen(c.contactId)) : calls;
   }
 
+  /**
+   * `viewer` (W9-KEY-OBLIGATIONS-CALLS; owner rulings D-64, D-88): the member a KEY command runs for.
+   * With one, the call log is looked up as GET calls/:id looks it up for them (getVisibleCallLog), so
+   * one on a contact they may not open answers 404 'Call log not found', exactly as an unknown id.
+   * Without one, as before; POST calls/:id/follow-up checks its session member before it calls this.
+   */
   async createFollowUpTask(
     businessId: string,
     callLogId: string,
     input: CreateFollowUpInput,
     createdBy: string,
+    viewer?: CallLogViewer,
   ) {
-    const callLog = await this.getCallLog(businessId, callLogId);
+    const callLog = viewer
+      ? await this.getVisibleCallLog(businessId, callLogId, viewer)
+      : await this.getCallLog(businessId, callLogId);
 
     if (!callLog.contactId) {
       throw new BadRequestException(
@@ -477,18 +486,20 @@ export class CallLogService {
         priority: input.priority ?? 'NORMAL',
         source: 'call_follow_up',
         assigneeId: input.assigneeId ?? callLog.callerId,
-        callLogId,
+        // W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-2): the row looked up (and, with a viewer,
+        // checked) is the row written, never the argument it was found by.
+        callLogId: callLog.id,
       },
     });
 
     await this.prisma.client.callLog.update({
-      where: { id: callLogId },
+      where: { id: callLog.id },
       data: { followUpTaskId: task.id },
     });
 
     this.emitter.emit('call_log.follow_up_created', {
       businessId: callLog.businessId,
-      callLogId,
+      callLogId: callLog.id,
       taskId: task.id,
       contactId: callLog.contactId,
       createdBy,

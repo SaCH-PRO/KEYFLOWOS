@@ -146,7 +146,18 @@ export class StaffChatBridgeService {
     // by the holder's Membership scopes, which HTTP enforces (review 4 IC3-1),
     // read as HTTP reads them (review 7 INP4-2), and every position by the
     // members whose phone it is (review 7 INP4-3).
-    const envelope = this.getJobRolePolicy().envelopeForPosition(assignment);
+    const policy = this.getJobRolePolicy();
+    const envelope = policy.envelopeForPosition(assignment);
+    // W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): this turn has no
+    // principal, so call_create_task, which records the member the command runs for as the caller,
+    // runs for the holder of a membership-backed position (assignment.userId, when HTTP lets that
+    // member in here): chat() dispatches it with them as onBehalfOfUserId. A contact-only position
+    // has none, is not offered the tool (envelopeForPosition), and is refused it at dispatch.
+    // Review SEC-W9KDI-2 / CR-W9KDI-2 (D-73, D-88): chat() runs it only where the business runs
+    // call_create_task (tier 2) without a quick confirmation. A confirmation is bound to the member
+    // it is issued to (bindFlowConfirmation) and this turn has none, so under a policy that asks for
+    // one the call is proposed and never run. Known limitation; bridge confirmations are a follow-up.
+    const holderUserId = policy.holderForPosition(assignment);
 
     const hints = [
       `You are talking to ${displayName}, a staff member${assignment.jobRole ? ` (position: ${assignment.jobRole.name})` : ''} over ${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}, not the in-app chat. Keep replies short and text-message appropriate.`,
@@ -173,8 +184,8 @@ export class StaffChatBridgeService {
       sessionId,
       undefined,
       // The envelope travels as chat()'s server-only argument, never in pageContext, which is
-      // the shape a member's client sends (V1-21b review 7 ENV-FORGE).
-      { jobRoleEnvelope: envelope },
+      // the shape a member's client sends (V1-21b review 7 ENV-FORGE); so does the holder (CR-W7CTC-2).
+      { jobRoleEnvelope: envelope, positionHolderUserId: holderUserId },
     );
 
     if (!assignment.activeFlowSessionId && result.sessionId) {
