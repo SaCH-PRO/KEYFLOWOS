@@ -124,8 +124,21 @@ export class LivekitService {
     return { token, wsUrl: this.wsUrl, roomName, sessionId: session.id };
   }
 
-  /** Active rooms belonging to this business (metadata-tagged). */
+  /**
+   * Active rooms belonging to this business (metadata-tagged).
+   *
+   * W9-LIVEKIT-VOICE (RV-VOICE-1, D-17): this is the KEY chat shell's voice
+   * availability probe, and it shows the live voice control only when the
+   * probe answers. With KEY switched off (KEY_DISABLED, read per call) every
+   * session is refused, so the probe answers the same KEY-disabled 503 first,
+   * before any LiveKit client: the shell settles on a structured
+   * provider_not_configured 503 and hides the mic. listParticipants reads this
+   * first and is refused the same way. The check is here and not in
+   * assertConfigured, which handleWebhook also calls: the signature-verified
+   * webhook keeps ending VoiceSession rows on room_finished while KEY is off.
+   */
   async listRooms(businessId: string) {
+    if (keyDisabled()) throw keyDisabledRefusal();
     const rooms = await this.roomClient().listRooms();
     return rooms
       .filter((r) => {

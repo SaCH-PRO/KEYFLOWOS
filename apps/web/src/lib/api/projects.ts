@@ -13,19 +13,47 @@ import type { ProjectTask } from "@/lib/client";
 
 const enc = encodeURIComponent;
 
-/** GET /projects/businesses/:bid/projects/:pid/budget (ProjectsService.getProjectBudget). Amounts are in the business currency. */
+/**
+ * GET /projects/businesses/:bid/projects/:pid/budget (ProjectsService.getProjectBudget). Amounts are in the business currency.
+ *
+ * W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): for a member who does not
+ * read expenses the route answers 200 with the costs withheld: totalCost, timeCost, expenseCost,
+ * remainingBudget, percentUsed and status are null. The budget and the hours burn are always numbers.
+ */
 export interface ProjectBudget {
   projectId: string;
   budgetAmount: number;
   budgetHours: number;
+  totalCost: number | null;
+  timeCost: number | null;
+  expenseCost: number | null;
+  trackedHours: number;
+  remainingBudget: number | null;
+  percentUsed: number | null;
+  percentHoursUsed: number;
+  status: "HEALTHY" | "WARNING" | "AT_RISK" | "OVER_BUDGET" | string | null;
+}
+
+/** The budget with its costs, as the route serves it to a member who reads expenses. */
+export type ProjectBudgetWithCosts = ProjectBudget & {
   totalCost: number;
   timeCost: number;
   expenseCost: number;
-  trackedHours: number;
   remainingBudget: number;
   percentUsed: number;
-  percentHoursUsed: number;
-  status: "HEALTHY" | "WARNING" | "AT_RISK" | "OVER_BUDGET" | string;
+  status: string;
+};
+
+/** Whether the route served the costs (CR-W9PS-1): any withheld (null) cost field means it did not. */
+export function budgetHasCosts(b: ProjectBudget): b is ProjectBudgetWithCosts {
+  return (
+    b.totalCost !== null &&
+    b.timeCost !== null &&
+    b.expenseCost !== null &&
+    b.remainingBudget !== null &&
+    b.percentUsed !== null &&
+    b.status !== null
+  );
 }
 
 export function getProjectBudget(businessId: string, projectId: string) {

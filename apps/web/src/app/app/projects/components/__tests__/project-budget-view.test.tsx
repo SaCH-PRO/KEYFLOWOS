@@ -166,7 +166,8 @@ describe("the Revenue tab shows the project's budget (F7b)", () => {
  * the budget card this packet mounts. The web half: a refused budget read (403) is a denial state,
  * and the Revenue tab shows the budget card's money only to a member the project's expense list
  * answers; one it refuses (403) sees the denial and the budget is not requested. The server half
- * (gating the route's cost fields on expenses/finance read) is outside this packet's write set.
+ * (gating the route's cost fields on expenses read) landed with W9-PROJECTS-SERVER: see the pointer
+ * at the end of this block.
  */
 describe("a member refused the project's costs is not shown them (SEC-W196-2)", () => {
   it("a 403 on the budget read is a denial state with no amounts, distinct from 'No budget set'", async () => {
@@ -188,7 +189,53 @@ describe("a member refused the project's costs is not shown them (SEC-W196-2)", 
     expect(screen.queryByText(/777/)).toBeNull();
   });
 
-  it.todo(
-    "server: GET /projects/businesses/:bid/projects/:pid/budget withholds expenseCost, timeCost and totalCost from a member without expenses/finance read — projects.controller.ts is outside PR196-PROJECTS-WEB's write set (server follow-up)",
-  );
+  // The server half (was it.todo here) is proved by W9-PROJECTS-SERVER in
+  // apps/server/test/projects-budget-assignee-scope.integration.test.ts ("SEC-W196-2 (was it.todo): ..."):
+  // GET /projects/businesses/:bid/projects/:pid/budget serves expenseCost, timeCost and totalCost (and
+  // remainingBudget, percentUsed, status) as null to a member without expenses read, the member the
+  // project's expense list refuses, so the Revenue tab above never requests the budget for them.
+});
+
+/**
+ * W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): the budget route answers 200
+ * with the costs withheld (null) to a member who does not read expenses. The view read
+ * `data.status.replace(...)` and crashed ("Cannot read properties of null"), unmounting the whole
+ * Revenue tab, which requests the budget whenever the expense list was not refused with a 403 (a 5xx
+ * or a network failure on that list included). A withheld budget is the denial state.
+ */
+describe("a budget served with its costs withheld is the denial state, not a crash (CR-W9PS-1, D-100)", () => {
+  const WITHHELD = {
+    projectId: PROJECT,
+    budgetAmount: 5000,
+    budgetHours: 40,
+    totalCost: null,
+    timeCost: null,
+    expenseCost: null,
+    trackedHours: 10,
+    remainingBudget: null,
+    percentUsed: null,
+    percentHoursUsed: 25,
+    status: null,
+  };
+
+  it("CR-W9PS-1: ProjectBudgetView given the withheld budget shows the denial state and no amount", async () => {
+    stubApi(() => jsonResponse(200, WITHHELD));
+    const { container } = render(<ProjectBudgetView businessId={BIZ} projectId={PROJECT} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/don.t have access/i);
+    expect(container.textContent).not.toMatch(/TTD|NaN|null/);
+    expect(screen.queryByText(/No budget set/i)).toBeNull();
+  });
+
+  it.each([
+    ["a 500 on the expense list", () => jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error")],
+    ["a network failure on the expense list", () => { throw new TypeError("Failed to fetch"); }],
+  ])("CR-W9PS-1: the Revenue tab stays mounted and shows the denial when %s leads it to request a withheld budget", async (_case, expenses) => {
+    const api = stubApi(() => jsonResponse(200, WITHHELD), expenses as () => Response);
+    render(<RevenueTab businessId={BIZ} projectId={PROJECT} />);
+    // a network failure is retried with backoff (lib/fetch-with-retry) before the tab gives up on the list
+    expect(await screen.findByText(/don.t have access/i, {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(api.budgetCalls().map((c) => new URL(c.url).pathname)).toContain(BUDGET_PATH);
+    expect(document.body.textContent).not.toMatch(/NaN/);
+    expect(document.body.textContent?.trim().length).toBeGreaterThan(0);
+  }, 15_000);
 });

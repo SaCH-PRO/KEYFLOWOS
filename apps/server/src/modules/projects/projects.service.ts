@@ -5,6 +5,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { TimelineService } from '../timeline/timeline.service';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
@@ -59,6 +60,16 @@ function feedActorType(actorId: string | null | undefined): 'USER' | 'AI' | 'SYS
  */
 function goalOfBusiness<G extends { businessId: string }>(businessId: string, goal: G | null): G | null {
   return goal && goal.businessId === businessId ? goal : null;
+}
+
+/**
+ * W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2; D-100's withholding rule): who a project
+ * budget is read for. `viewerUserId` is the member who will see it (the HTTP caller, or the member KEY
+ * runs for); null when there is none, which reads no costs. Required on getProjectBudget, so a new
+ * caller cannot leave it out and be served every cost.
+ */
+export interface ProjectBudgetViewer {
+  viewerUserId: string | null;
 }
 
 @Injectable()
@@ -547,7 +558,24 @@ export class ProjectsService {
     return results;
   }
 
-  async getProjectBudget(projectId: string, businessId: string) {
+  /**
+   * The project's budget against its costs.
+   *
+   * W9-PROJECTS-SERVER (review SEC-W196-2; D-100's rule that a member without a module's read sees
+   * none of its money, the figures worked out from it included): the costs are expense and spend
+   * totals, and the project's expense list (GET .../expenses/by-project/:projectId) needs
+   * expenses:read. A `viewer` who does not read expenses is served expenseCost, timeCost and
+   * totalCost as null, and remainingBudget, percentUsed and status null too: with budgetAmount they
+   * give totalCost back. The budget and the hours burn are the project's own fields and stay. A
+   * viewer with no member id reads no costs.
+   *
+   * W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2): the viewer is required. KEY's
+   * projects_get_budget used to pass none and was served every cost, so a member with projects read
+   * and no expenses read, whom the route refuses them, read them through KEY. The dispatcher now
+   * passes the member KEY runs for, and a caller that passes no viewer at all (a JavaScript caller,
+   * a test) reads no costs: it fails closed.
+   */
+  async getProjectBudget(projectId: string, businessId: string, viewer: ProjectBudgetViewer) {
     const project = await this.prisma.client.project.findFirst({
       where: { id: projectId, businessId },
       include: {
@@ -558,6 +586,28 @@ export class ProjectsService {
     });
     if (!project) throw new NotFoundException('Project not found');
 
+    const budgetAmount = project.budgetAmount ?? 0;
+    const budgetHours = project.budgetHours ?? 0;
+    const trackedHours = project.tasks.reduce((sum, t) => sum + (t.trackedHours ?? 0), 0);
+    const percentHoursUsed = budgetHours > 0 ? Math.round((trackedHours / budgetHours) * 100) : 0;
+
+    if (!(await this.viewerReadsProjectCosts(businessId, viewer?.viewerUserId ?? null))) {
+      // SEC-W196-2: no expense row is read for a member who may not see them.
+      return {
+        projectId: project.id,
+        budgetAmount,
+        budgetHours,
+        totalCost: null,
+        timeCost: null,
+        expenseCost: null,
+        trackedHours,
+        remainingBudget: null,
+        percentUsed: null,
+        percentHoursUsed,
+        status: null,
+      };
+    }
+
     const expenses = await this.prisma.client.expense.findMany({
       where: { projectId, businessId, deletedAt: null },
     });
@@ -566,9 +616,6 @@ export class ProjectsService {
       sum + ((e.durationMinutes ?? 0) / 60) * (e.hourlyRate ?? project.hourlyRate ?? 0), 0);
     const expenseCost = expenses.reduce((sum: number, e: { amount: number }) => sum + e.amount, 0);
     const totalCost = timeCost + expenseCost;
-    const budgetAmount = project.budgetAmount ?? 0;
-    const budgetHours = project.budgetHours ?? 0;
-    const trackedHours = project.tasks.reduce((sum, t) => sum + (t.trackedHours ?? 0), 0);
 
     return {
       projectId: project.id,
@@ -580,12 +627,30 @@ export class ProjectsService {
       trackedHours,
       remainingBudget: Math.max(0, budgetAmount - totalCost),
       percentUsed: budgetAmount > 0 ? Math.round((totalCost / budgetAmount) * 100) : 0,
-      percentHoursUsed: budgetHours > 0 ? Math.round((trackedHours / budgetHours) * 100) : 0,
+      percentHoursUsed,
       status: budgetAmount > 0 && totalCost > budgetAmount ? 'OVER_BUDGET'
         : budgetAmount > 0 && totalCost > budgetAmount * 0.9 ? 'AT_RISK'
         : budgetAmount > 0 && totalCost > budgetAmount * 0.75 ? 'WARNING'
         : 'HEALTHY',
     };
+  }
+
+  /**
+   * W9-PROJECTS-SERVER (SEC-W196-2): whether `viewerUserId` reads the project's costs, by the rule
+   * ModuleScopeGuard applies to the project's expense list (expenses:read: the membership's explicit
+   * scope map, else its role defaults; a key absent from an explicit map is none), through the
+   * resolver the money views use (resolveTimelineViewer: a platform SUPER_ADMIN, and a business
+   * owner BusinessGuard admits with no Membership row, read every module). No member id, a system
+   * actor, or someone the resolver refuses reads no costs (fails closed; the route still answers).
+   */
+  private async viewerReadsProjectCosts(businessId: string, viewerUserId: string | null): Promise<boolean> {
+    if (!viewerUserId || isSystemActor(viewerUserId)) return false;
+    try {
+      return (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('expenses');
+    } catch (err) {
+      if (err instanceof ForbiddenException) return false;
+      throw err;
+    }
   }
 
   async getProjectTimeline(projectId: string, businessId: string) {
