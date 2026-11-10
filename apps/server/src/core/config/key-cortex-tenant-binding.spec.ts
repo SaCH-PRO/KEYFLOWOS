@@ -45,11 +45,11 @@
  * for the OpenAI SDK and a value that is not a key.
  */
 import 'reflect-metadata';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import * as ts from 'typescript';
-import { HttpException, ServiceUnavailableException } from '@nestjs/common';
+import { HttpException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 
 const SERVER_SRC = resolve(__dirname, '../..');
 const KEY_CORTEX_DIR = join(SERVER_SRC, 'modules/key-cortex');
@@ -116,11 +116,15 @@ function stringArg(d: Decorator | undefined): string | undefined {
   return a0 && (ts.isStringLiteral(a0) || ts.isNoSubstitutionTemplateLiteral(a0)) ? a0.text : undefined;
 }
 
-/** Every route handler of every BusinessGuard-guarded controller class in modules/key-cortex. */
-function guardedKeyCortexHandlers(): { controllers: string[]; handlers: Handler[] } {
+/**
+ * Every route handler of every BusinessGuard-guarded controller class in
+ * modules/key-cortex (or, W7-KEY-CONNECTOR-TENANT, in the module directory
+ * `dir` names).
+ */
+function guardedKeyCortexHandlers(dir: string = KEY_CORTEX_DIR): { controllers: string[]; handlers: Handler[] } {
   const controllers: string[] = [];
   const handlers: Handler[] = [];
-  const files = readdirSync(KEY_CORTEX_DIR).filter((f) => f.endsWith('.controller.ts')).map((f) => join(KEY_CORTEX_DIR, f));
+  const files = readdirSync(dir).filter((f) => f.endsWith('.controller.ts')).map((f) => join(dir, f));
   for (const file of files) {
     const text = readFileSync(file, 'utf8');
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -320,10 +324,364 @@ describe('KEY cortex controllers bind the tenant BusinessGuard checked (R0-34b, 
     });
   });
 
-  it.todo(
-    "key-connector/key-connector.controller.ts reads @Query('businessId') in 10 handlers behind BusinessGuard (the same split) - " +
-      'outside the R0-34b write set (KEY cortex controllers only); a follow-up packet binds it with @GuardedBusinessId()',
-  );
+});
+
+/* ------------------------------------------------------------------ */
+/*  W7-KEY-CONNECTOR-TENANT: KeyConnectorController, the same split   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * W7-KEY-CONNECTOR-TENANT (R0-34b parked it here as an it.todo, outside its
+ * write set). KeyConnectorController is mounted at `/key-connector` (no
+ * `:businessId` segment) behind AuthGuard and BusinessGuard, and at the base
+ * its 10 handlers read `@Query('businessId')`. BusinessGuard checks the tenant
+ * resolveRequestBusinessId resolves (params, then body, then query), so a
+ * member of A sending the JSON body {businessId: A} with ?businessId=B passed
+ * the guard for A and the handler acted on B; and SUPER_ADMIN, whom the guard
+ * admits naming no tenant, reached the service with `undefined`, which the
+ * service's Prisma reads drop (`where: { businessId: undefined }` is no
+ * filter): every tenant's connections. The fix is the R0-34b pattern: every
+ * handler takes `@GuardedBusinessId()` and refuses a request that named none.
+ *
+ * The real-route cases run the real controller, the real AuthGuard and
+ * BusinessGuard, Nest's routing, body parser and the production
+ * ValidationPipe over HTTP. Two things stand in: the membership lookup the
+ * guard runs (A's owner belongs to A only, B's owner to B only) and
+ * KeyConnectorService, which records the tenant every call is handed and
+ * holds rows of both tenants, answering, as the real service's Prisma reads
+ * do, every tenant's rows for an undefined tenant.
+ */
+const KEY_CONNECTOR_DIR = join(SERVER_SRC, 'modules/key-connector');
+const KEY_CONNECTOR_HANDLERS = [
+  'getProviders', 'getProviderDetail', 'connectProvider', 'disconnectProvider', 'getConnections',
+  'getHealth', 'triggerSync', 'getSyncHistory', 'executeAiCommand', 'getAuditLog',
+];
+
+const KC = {
+  bizA: 'k34b_kc_biz_a',
+  bizB: 'k34b_kc_biz_b',
+  ownerA: 'k34b_kc_owner_a',
+  ownerB: 'k34b_kc_owner_b',
+  superAdmin: 'k34b_kc_super_admin',
+  connA: 'k34b_kc_conn_a',
+  connB: 'k34b_kc_conn_b',
+};
+const KC_USER_HEADER = 'x-k34b-kc-user';
+const KC_USERS: Record<string, { id: string; role: string }> = {
+  [KC.ownerA]: { id: KC.ownerA, role: 'USER' },
+  [KC.ownerB]: { id: KC.ownerB, role: 'USER' },
+  [KC.superAdmin]: { id: KC.superAdmin, role: 'SUPER_ADMIN' },
+};
+const KC_OWNERS: Record<string, string> = { [KC.bizA]: KC.ownerA, [KC.bizB]: KC.ownerB };
+/** Every row of B carries this; no response to a caller acting on A may. */
+const KC_B_MARKER = 'k34b-kc-tenant-B-row';
+const KC_A_MARKER = 'k34b-kc-tenant-A-row';
+const KC_PROVIDER = 'k34b-kc-provider';
+
+interface KcRow { id: string; businessId: string | undefined; kind: 'connection' | 'sync' | 'audit'; providerKey: string; marker: string }
+
+const kcSeed = (): KcRow[] => [
+  { id: KC.connA, businessId: KC.bizA, kind: 'connection', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
+  { id: KC.connB, businessId: KC.bizB, kind: 'connection', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
+  { id: 'k34b_kc_sync_a', businessId: KC.bizA, kind: 'sync', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
+  { id: 'k34b_kc_sync_b', businessId: KC.bizB, kind: 'sync', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
+  { id: 'k34b_kc_audit_a', businessId: KC.bizA, kind: 'audit', providerKey: KC_PROVIDER, marker: KC_A_MARKER },
+  { id: 'k34b_kc_audit_b', businessId: KC.bizB, kind: 'audit', providerKey: KC_PROVIDER, marker: KC_B_MARKER },
+];
+
+/**
+ * KeyConnectorService stand-in: records the tenant each call is handed and
+ * answers from rows of both tenants. An undefined tenant matches every
+ * tenant's rows, as `where: { businessId: undefined }` does in the real
+ * service's Prisma reads.
+ */
+class RecordingKeyConnectorService {
+  handed: Array<{ method: string; businessId: unknown }> = [];
+  rows: KcRow[] = kcSeed();
+
+  reset() {
+    this.handed = [];
+    this.rows = kcSeed();
+  }
+
+  private of(businessId: unknown, kind: KcRow['kind']) {
+    return this.rows.filter((r) => r.kind === kind && (businessId === undefined || r.businessId === businessId));
+  }
+
+  private connection(businessId: unknown, id: string) {
+    const row = this.of(businessId, 'connection').find((r) => r.id === id);
+    if (!row) throw new NotFoundException(`Connection "${id}" not found for this business`);
+    return row;
+  }
+
+  private note(method: string, businessId: unknown) {
+    this.handed.push({ method, businessId });
+  }
+
+  async getProviders(businessId: unknown) {
+    this.note('getProviders', businessId);
+    return this.of(businessId, 'connection').map((c) => ({ provider: { key: c.providerKey }, connection: c }));
+  }
+
+  async getProviderDetail(businessId: unknown, providerKey: string) {
+    this.note('getProviderDetail', businessId);
+    return { provider: { key: providerKey }, connection: this.of(businessId, 'connection').find((c) => c.providerKey === providerKey) };
+  }
+
+  async connectProvider(businessId: unknown, _userId: string, providerKey: string) {
+    this.note('connectProvider', businessId);
+    const row: KcRow = {
+      id: `k34b_kc_conn_new_${this.rows.length}`,
+      businessId: businessId as string | undefined,
+      kind: 'connection',
+      providerKey,
+      marker: businessId === KC.bizB ? KC_B_MARKER : 'k34b-kc-new-row',
+    };
+    this.rows.push(row);
+    return row;
+  }
+
+  async disconnectProvider(businessId: unknown, connectionId: string) {
+    this.note('disconnectProvider', businessId);
+    const row = this.connection(businessId, connectionId);
+    this.rows = this.rows.filter((r) => r !== row);
+  }
+
+  async getConnections(businessId: unknown) {
+    this.note('getConnections', businessId);
+    return this.of(businessId, 'connection');
+  }
+
+  async getConnectionHealth(businessId: unknown) {
+    this.note('getConnectionHealth', businessId);
+    return this.of(businessId, 'connection').map((c) => ({ connectionId: c.id, providerKey: c.providerKey, healthy: true, marker: c.marker }));
+  }
+
+  async triggerSync(businessId: unknown, connectionId: string, direction: string) {
+    this.note('triggerSync', businessId);
+    const row = this.connection(businessId, connectionId);
+    return { connectionId: row.id, direction, status: 'scheduled', marker: row.marker };
+  }
+
+  async getSyncHistory(businessId: unknown) {
+    this.note('getSyncHistory', businessId);
+    return this.of(businessId, 'sync');
+  }
+
+  async processAiCommand(businessId: unknown, _userId: string, command: { businessId?: unknown }) {
+    this.note('processAiCommand', businessId);
+    this.note('processAiCommand(command.businessId)', command?.businessId);
+    return { success: true, data: this.of(businessId, 'connection') };
+  }
+
+  async getAuditLog(businessId: unknown) {
+    this.note('getAuditLog', businessId);
+    return this.of(businessId, 'audit');
+  }
+}
+
+/** BusinessGuard's membership lookup (userCanAccessBusiness): the owner of each business, and no one else, belongs to it. */
+const kcMembershipPrisma = {
+  client: {
+    business: {
+      findFirst: async ({ where }: { where: { id?: unknown; OR?: Array<{ ownerId?: unknown; members?: { some?: { userId?: unknown } } }> } }) => {
+        const userId = where.OR?.find((o) => o.ownerId !== undefined)?.ownerId ?? where.OR?.find((o) => o.members)?.members?.some?.userId;
+        const id = typeof where.id === 'string' ? where.id : undefined;
+        return id && KC_OWNERS[id] !== undefined && KC_OWNERS[id] === userId ? { id, ownerId: userId } : null;
+      },
+    },
+  },
+};
+
+interface KcRoute {
+  name: string;
+  verb: 'get' | 'post' | 'delete';
+  path: (connectionId: string) => string;
+  body?: Record<string, unknown>;
+}
+
+/** The 10 routes, the DELETE last so a positive control still finds A's connection for the sync trigger. */
+const KC_ROUTES: KcRoute[] = [
+  { name: 'GET providers', verb: 'get', path: () => '/key-connector/providers' },
+  { name: 'GET providers/:key', verb: 'get', path: () => `/key-connector/providers/${KC_PROVIDER}` },
+  {
+    name: 'POST providers/:key/connect',
+    verb: 'post',
+    path: () => '/key-connector/providers/k34b-kc-provider-new/connect',
+    body: { providerKey: 'k34b-kc-provider-new', authData: {} },
+  },
+  { name: 'GET connections', verb: 'get', path: () => '/key-connector/connections' },
+  { name: 'GET health', verb: 'get', path: () => '/key-connector/health' },
+  { name: 'POST sync/:id/trigger', verb: 'post', path: (id) => `/key-connector/sync/${id}/trigger` },
+  { name: 'GET sync', verb: 'get', path: () => '/key-connector/sync' },
+  { name: 'POST ai/command', verb: 'post', path: () => '/key-connector/ai/command', body: { command: 'k34b-kc list my connections' } },
+  { name: 'GET audit', verb: 'get', path: () => '/key-connector/audit' },
+  { name: 'DELETE connections/:id', verb: 'delete', path: (id) => `/key-connector/connections/${id}` },
+];
+
+describe('KeyConnectorController binds the tenant BusinessGuard checked (W7-KEY-CONNECTOR-TENANT, the R0-34b pattern)', () => {
+  const service = new RecordingKeyConnectorService();
+  let app: { getHttpServer(): unknown; close(): Promise<void> } | undefined;
+
+  beforeAll(async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { KeyConnectorController } = await import('../../modules/key-connector/key-connector.controller');
+    const { KeyConnectorService } = await import('../../modules/key-connector/key-connector.service');
+    const { PrismaService } = await import('../prisma/prisma.service');
+    const { AuthGuard } = await import('../auth/auth.guard');
+    const { BusinessGuard } = await import('../auth/business.guard');
+    // The production build (tsc, emitDecoratorMetadata) records the
+    // controller's constructor parameter type and Nest injects by it; vitest's
+    // esbuild transform emits no metadata, so this writes what tsc emits.
+    if (!Reflect.getMetadata('design:paramtypes', KeyConnectorController)) {
+      Reflect.defineMetadata('design:paramtypes', [KeyConnectorService], KeyConnectorController);
+    }
+    const moduleRef = await Test.createTestingModule({
+      controllers: [KeyConnectorController],
+      providers: [
+        AuthGuard,
+        BusinessGuard,
+        { provide: PrismaService, useValue: kcMembershipPrisma },
+        { provide: KeyConnectorService, useValue: service },
+      ],
+    }).compile();
+    const nest = moduleRef.createNestApplication({ logger: false });
+    // Identity attachment only. No guard is overridden.
+    nest.use((req: { headers: Record<string, unknown>; user?: unknown }, _res: unknown, next: () => void) => {
+      const header = req.headers[KC_USER_HEADER];
+      if (typeof header === 'string' && KC_USERS[header]) req.user = { ...KC_USERS[header] };
+      next();
+    });
+    // The same pipe as app-bootstrap.ts.
+    nest.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await nest.init();
+    app = nest;
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  beforeEach(() => service.reset());
+
+  const call = async (route: KcRoute, opts: { user?: string; query?: string; body?: Record<string, unknown>; connectionId: string }) => {
+    const { default: request } = await import('supertest');
+    const url = route.path(opts.connectionId) + (opts.query ? `?businessId=${opts.query}` : '');
+    let req = request(app!.getHttpServer() as Parameters<typeof request>[0])[route.verb](url);
+    if (opts.user) req = req.set(KC_USER_HEADER, opts.user);
+    const body = { ...(route.body ?? {}), ...(opts.body ?? {}) };
+    return Object.keys(body).length > 0 ? req.send(body) : req;
+  };
+  const rowsOfB = () => service.rows.filter((r) => r.businessId === KC.bizB);
+
+  it("key-connector/key-connector.controller.ts: none of its 10 BusinessGuard-guarded handlers reads @Query('businessId'), @Body('businessId') or a whole-object @Query(), and every one takes @GuardedBusinessId() (W7-KEY-CONNECTOR-TENANT)", () => {
+    const { controllers, handlers } = guardedKeyCortexHandlers(KEY_CONNECTOR_DIR);
+    expect(controllers).toEqual(['modules/key-connector/key-connector.controller.ts KeyConnectorController']);
+    expect(handlers.map((h) => h.name).sort()).toEqual([...KEY_CONNECTOR_HANDLERS].sort());
+
+    const readsRequestField = handlers
+      .filter((h) => h.params.some((p) => p.decorators.some((d) => (d.name === 'Query' || d.name === 'Body') && stringArg(d) === 'businessId')))
+      .map(label);
+    expect(readsRequestField).toEqual([]);
+
+    const readsWholeQuery = handlers
+      .filter((h) => h.params.some((p) => p.decorators.some((d) => d.name === 'Query' && d.args.length === 0) && readsBusinessIdOf(h.body, p.name)))
+      .map(label);
+    expect(readsWholeQuery).toEqual([]);
+
+    const readsWholeBody = handlers
+      .filter((h) => h.params.some((p) => p.decorators.some((d) => d.name === 'Body' && d.args.length === 0) && readsBusinessIdOf(h.body, p.name)))
+      .map(label);
+    expect(readsWholeBody).toEqual([]);
+
+    const missing = handlers.filter((h) => !h.params.some((p) => p.decorators.some((d) => d.name === 'GuardedBusinessId'))).map(label);
+    expect(missing).toEqual([]);
+  });
+
+  it("a member of A sending the JSON body {businessId: A} with ?businessId=B acts on A only on each of the 10 routes: no service is handed B, no response carries a row of B, and B's connection survives (W7-KEY-CONNECTOR-TENANT)", async () => {
+    const statuses: Record<string, number> = {};
+    for (const route of KC_ROUTES) {
+      const res = await call(route, { user: KC.ownerA, query: KC.bizB, body: { businessId: KC.bizA }, connectionId: KC.connB });
+      statuses[route.name] = res.status;
+      expect(JSON.stringify(res.body ?? null), route.name).not.toContain(KC_B_MARKER);
+    }
+    expect(statuses).toEqual({
+      'GET providers': 200,
+      'GET providers/:key': 200,
+      'POST providers/:key/connect': 201,
+      'GET connections': 200,
+      'GET health': 200,
+      // A has no connection with B's id: the handler looked in A.
+      'POST sync/:id/trigger': 404,
+      'GET sync': 200,
+      'POST ai/command': 200,
+      'GET audit': 200,
+      'DELETE connections/:id': 404,
+    });
+    expect(service.handed.filter((h) => h.businessId !== KC.bizA)).toEqual([]);
+    expect([...new Set(service.handed.map((h) => h.method))].sort()).toEqual([
+      'connectProvider', 'disconnectProvider', 'getAuditLog', 'getConnectionHealth', 'getConnections', 'getProviderDetail',
+      'getProviders', 'getSyncHistory', 'processAiCommand', 'processAiCommand(command.businessId)', 'triggerSync',
+    ]);
+    // Nothing of B was written, moved or removed; the new connection is A's.
+    expect(rowsOfB()).toEqual(kcSeed().filter((r) => r.businessId === KC.bizB));
+    expect(service.rows.filter((r) => r.providerKey === 'k34b-kc-provider-new').map((r) => r.businessId)).toEqual([KC.bizA]);
+  });
+
+  it('SUPER_ADMIN naming no tenant is refused 403 on each of the 10 routes, and no service is handed undefined, which reads every tenant (W7-KEY-CONNECTOR-TENANT)', async () => {
+    const statuses: Record<string, number> = {};
+    for (const route of KC_ROUTES) {
+      const res = await call(route, { user: KC.superAdmin, connectionId: KC.connB });
+      statuses[route.name] = res.status;
+      expect(JSON.stringify(res.body ?? null), route.name).not.toContain(KC_B_MARKER);
+      expect(JSON.stringify(res.body ?? null), route.name).not.toContain(KC_A_MARKER);
+    }
+    expect(statuses).toEqual(Object.fromEntries(KC_ROUTES.map((r) => [r.name, 403])));
+    expect(service.handed).toEqual([]);
+    expect(service.rows).toEqual(kcSeed());
+  });
+
+  it('a caller the guard refuses reaches no service on any of the 10 routes: no identity is 401, a member of A naming B in the query only is 403 (negative control)', async () => {
+    const statuses: Record<string, [number, number]> = {};
+    for (const route of KC_ROUTES) {
+      const anonymous = await call(route, { query: KC.bizB, connectionId: KC.connB });
+      const outsider = await call(route, { user: KC.ownerA, query: KC.bizB, connectionId: KC.connB });
+      statuses[route.name] = [anonymous.status, outsider.status];
+    }
+    expect(statuses).toEqual(Object.fromEntries(KC_ROUTES.map((r) => [r.name, [401, 403]])));
+    expect(service.handed).toEqual([]);
+    expect(service.rows).toEqual(kcSeed());
+  });
+
+  it("A's owner naming A in the query (as the web client does) acts on A on each of the 10 routes and reads A's rows (positive control)", async () => {
+    const statuses: Record<string, number> = {};
+    const bodies: Record<string, string> = {};
+    for (const route of KC_ROUTES) {
+      const res = await call(route, { user: KC.ownerA, query: KC.bizA, connectionId: KC.connA });
+      statuses[route.name] = res.status;
+      bodies[route.name] = JSON.stringify(res.body ?? null);
+      expect(bodies[route.name], route.name).not.toContain(KC_B_MARKER);
+    }
+    expect(statuses).toEqual({
+      'GET providers': 200,
+      'GET providers/:key': 200,
+      'POST providers/:key/connect': 201,
+      'GET connections': 200,
+      'GET health': 200,
+      'POST sync/:id/trigger': 202,
+      'GET sync': 200,
+      'POST ai/command': 200,
+      'GET audit': 200,
+      'DELETE connections/:id': 200,
+    });
+    for (const name of ['GET providers', 'GET connections', 'GET health', 'POST sync/:id/trigger', 'GET sync', 'POST ai/command', 'GET audit']) {
+      expect(bodies[name], name).toContain(KC_A_MARKER);
+    }
+    expect(service.handed.filter((h) => h.businessId !== KC.bizA)).toEqual([]);
+    expect(service.rows.some((r) => r.id === KC.connA)).toBe(false);
+    expect(rowsOfB()).toEqual(kcSeed().filter((r) => r.businessId === KC.bizB));
+  });
 });
 
 /* ------------------------------------------------------------------ */
