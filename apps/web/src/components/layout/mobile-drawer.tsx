@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { NavItem, NavSection } from "@/lib/nav-config";
 import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
+import { navItemsForOperationsAccess, sectionsForOperationsAccess, useOperationsAccess } from "./operations-nav";
 
 interface MobileDrawerProps {
   mobileDrawerOpen: boolean;
@@ -137,9 +138,9 @@ export function MobileDrawer({
   displayName,
   initials,
   avatarUrl,
-  visibleOperateSections,
-  visibleBuildSections,
-  visibleMoreNav,
+  visibleOperateSections: operateSectionsIn,
+  visibleBuildSections: buildSectionsIn,
+  visibleMoreNav: moreNavIn,
   isSecondaryActive,
   isFeatureLocked,
   connectorAlertCount,
@@ -148,6 +149,11 @@ export function MobileDrawer({
   handleLogout,
 }: MobileDrawerProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
+  // W7-WEB-OPS-SCOPE (D-40): no Purchasing entry for a member the server refuses operations; the cockpit stays (D-96).
+  const operationsAccess = useOperationsAccess();
+  const visibleOperateSections = sectionsForOperationsAccess(operateSectionsIn, operationsAccess);
+  const visibleBuildSections = sectionsForOperationsAccess(buildSectionsIn, operationsAccess);
+  const visibleMoreNav = navItemsForOperationsAccess(moreNavIn, operationsAccess);
 
   useEffect(() => {
     const handler = () => {

@@ -1,12 +1,49 @@
 "use client";
 
 import { useState } from "react";
-import { Filter, RefreshCw, Loader2, Inbox } from "lucide-react";
+import { Filter, RefreshCw, Loader2, Inbox, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui-v2/button";
 import type { CommandItem } from "@/lib/api/command";
 import { CommandCardV2 } from "./command-card-v2";
+
+/**
+ * W7-WEB-OPS-SCOPE (owner rulings D-40 and D-96; OPS-T02): the member's
+ * 'operations' level in this business, as the server last stated it.
+ *
+ * Every command-item route needs operations (R0-13g, D-40): read to list, write
+ * for every action (complete, approve, dismiss, execute, assign, snooze,
+ * reopen). The web cannot read a STAFF member's own scope map, so the level is
+ * read the way the other module gates read scope, from the server's answer:
+ * ModuleScopeGuard refuses with 403 "Insufficient permissions: operations
+ * requires <level> access (you have <level>)". The list read cannot tell read
+ * from write, so until a refusal names the level it is "unknown" and the
+ * actions are offered (D-85's pattern: learn from the 403, then withdraw them).
+ * The cockpit around the queue stays open to every member, each tile filtered
+ * by the member's own permissions (D-96).
+ */
+export type OperationsLevel = "none" | "read" | "write" | "admin" | "unknown";
+
+const OPERATIONS_REFUSAL = /\boperations requires (?:none|read|write|admin) access \(you have (none|read|write|admin)\)/;
+
+/**
+ * The operations level a refused request names, or null when the answer is not ModuleScopeGuard's
+ * operations refusal (success, another 403 such as BusinessGuard's "Unable to verify business
+ * access", a 5xx): those say nothing about the member's level.
+ */
+export function operationsLevelFromAnswer(res: { error?: string | null; status?: number } | null | undefined): OperationsLevel | null {
+  if (!res || res.status !== 403) return null;
+  const named = OPERATIONS_REFUSAL.exec(res.error ?? "");
+  return named ? (named[1] as OperationsLevel) : null;
+}
+
+/** Why a member at `level` cannot act on command items, or null when the actions are offered. */
+export function commandActionsDisabledReason(level: OperationsLevel | undefined): string | null {
+  if (level === "none") return "No operations access in this business: command items can't be viewed or acted on.";
+  if (level === "read") return "View only: completing, approving or dismissing needs operations write access.";
+  return null;
+}
 
 interface CommandQueueProps {
   items: CommandItem[];
@@ -22,6 +59,8 @@ interface CommandQueueProps {
   onAssign?: (id: string) => Promise<void>;
   onSnooze?: (id: string) => Promise<void>;
   onReopen?: (id: string) => Promise<void>;
+  /** W7-WEB-OPS-SCOPE (D-40): below write the item actions are disabled, with the reason shown once above the list. */
+  operationsLevel?: OperationsLevel;
 }
 
 const CATEGORIES = [
@@ -60,9 +99,11 @@ export function CommandQueueV2({
   onAssign,
   onSnooze,
   onReopen,
+  operationsLevel = "unknown",
 }: CommandQueueProps) {
   const [filter, setFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const actionsDisabledReason = commandActionsDisabledReason(operationsLevel);
 
   const filtered = items
     .filter((i) => (filter === "ALL" ? true : i.category === filter))
@@ -120,12 +161,26 @@ export function CommandQueueV2({
         )}
       </div>
 
+      {actionsDisabledReason && (
+        <p
+          data-testid="command-actions-withheld"
+          role="note"
+          className="flex items-center gap-1.5 rounded-lg bg-surface-muted px-2.5 py-1.5 text-xs text-muted-foreground"
+        >
+          <Lock className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
+          {actionsDisabledReason}
+        </p>
+      )}
+
       {filtered.length === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title="No command items"
+          icon={operationsLevel === "none" ? Lock : Inbox}
+          title={operationsLevel === "none" ? "No access" : "No command items"}
           description={
-            filter === "ALL" && statusFilter === "ALL"
+            // A member refused the list read has no queue to call clear.
+            operationsLevel === "none"
+              ? "The command queue needs operations access in this business."
+              : filter === "ALL" && statusFilter === "ALL"
               ? "Your queue is clear. Great work!"
               : "No items match the current filters."
           }
@@ -160,6 +215,7 @@ export function CommandQueueV2({
               onAssign={onAssign}
               onSnooze={onSnooze}
               onReopen={onReopen}
+              actionsDisabledReason={actionsDisabledReason}
             />
           ))}
         </div>
