@@ -176,7 +176,7 @@ const ROWS: Row[] = [
   // B's own pre-W9 row, linked only by a run that includes B
   invoiceRow('oldBInv', ID.bizB, INV.b, 'v96o-INV-B1', 'v96o B Payer'),
   // controls
-  { ...invoiceRow('ctlW9Inv', ID.bizA, INV.priv, 'v96o-INV-1', HIDDEN_NAME), contactId: ID.cTeam },
+  { ...invoiceRow('ctlW9Inv', ID.bizA, INV.team, 'v96o-INV-2', 'v96o Team Payer'), contactId: ID.cTeam },
   { ...intakeRow('ctlW9In', ID.bizA, INTAKE.team, `${P}team-payer@test.local`, 'v96o team question'), contactId: ID.cTeam },
   { key: 'ctlInvPaid', businessId: ID.bizA, module: 'commerce', action: 'invoice_paid', entityType: 'invoice', entityId: INV.gone, title: 'Invoice v96o-INV-9 paid' },
   { key: 'ctlCrm', businessId: ID.bizA, module: 'crm', action: 'note_added', entityType: 'v96o_entity', entityId: null, title: 'v96o crm note' },
