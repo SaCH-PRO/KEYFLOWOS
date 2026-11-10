@@ -1362,7 +1362,7 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
     }
   });
 
-  it("CV-08l-b RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review CR-EXL-2; D-74): the rows FlowOrchestratorService.executePlan writes for a plan itself (plan:start, plan:complete: module planner, no tool, its objective) are no plan step and are served with the plan, to whoever may read it: the STAFF member's plan's rows reach that member and the ADMIN, the OWNER's plan's rows the ADMIN and not the STAFF member; a KEY-cortex command of a module the plan read rule maps to nothing (genome) is still served to the OWNER only, the member who ran it included (CONTROL, KEY-R3a review SEC-R3a-1); KeyCortexLifecycleService.recordExecution writes no KEY chat tool row here (AiExecutionLog has no startedAt column, so its create is refused)", async () => {
+  it("CV-08l-b RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review CR-EXL-2; D-74): the rows FlowOrchestratorService.executePlan writes for a plan itself (plan:start, plan:complete: module planner, no tool, its objective) are no plan step and are served with the plan, to whoever may read it: the STAFF member's plan's rows reach that member and the ADMIN, the OWNER's plan's rows the ADMIN and not the STAFF member; a KEY-cortex command of a module the plan read rule maps to nothing (genome) is still served to the OWNER only, the member who ran it included (CONTROL, KEY-R3a review SEC-R3a-1); KeyCortexLifecycleService.recordExecution writes the KEY chat tool row, naming the member who ran it, and the OWNER is served it (W9-KEY-CORTEX-AUDIT: its create no longer names startedAt, which AiExecutionLog has no column for)", async () => {
     const executionLog = queue.executionLog;
     // The plans, with the rows FlowOrchestratorService.executePlan writes for each plan itself.
     const staffPlan = `${P}cv08lb_staff_plan`;
@@ -1383,7 +1383,8 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
     const genome = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, toolName: 'genome.get_dna', userId: ID.staffOwned } });
     expect(genome).toBeTruthy();
     // A KEY chat tool call, recorded by the real KeyCortexLifecycleService as KeyCortexToolLoopService
-    // records it: its execution log row is refused, so no such row reaches GET ai/execution-logs.
+    // records it. Its execution log row was refused (the create named startedAt, which AiExecutionLog
+    // has no column for) until W9-KEY-CORTEX-AUDIT: it is now written, once, naming the member who ran it.
     const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
     const lifecycle = new KeyCortexLifecycleService(prisma, {} as any, { emit() {} } as any, {} as any);
     await expect(
@@ -1392,8 +1393,10 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
         toolName: 'cortex.create_task', module: 'workflow', riskTier: 1, requiresApproval: false, input: { title: 'v89k call back' },
         output: { taskId: `${P}cv08lb_task` }, success: true, durationMs: 4, startedAt: new Date(), completedAt: new Date(),
       } as any),
-    ).rejects.toThrow(/startedAt/);
-    expect(await db.aiExecutionLog.count({ where: { businessId: ID.biz, correlationId: `${P}cv08lb_corr` } })).toBe(0);
+    ).resolves.toBeUndefined();
+    const chatRows = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz, correlationId: `${P}cv08lb_corr` } });
+    expect(chatRows).toHaveLength(1);
+    expect(chatRows[0]).toMatchObject({ userId: ID.staffOwned, toolName: 'cortex.create_task', module: 'workflow', planId: null, actor: 'key_cortex' });
 
     const shown = (logs: any[]) => ({
       staffStart: logs.some((r) => r.planId === staffPlan && r.action === 'plan:start'),
@@ -1416,6 +1419,8 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
     const owner = await executionLogs(ID.owner);
     expect(shown(owner.logs)).toEqual({ staffStart: true, staffComplete: true, ownerStart: true, ownerComplete: true, genome: true });
     expect(owner.logs.find((r: any) => r.id === genome.id)).toEqual(JSON.parse(JSON.stringify(genome)));
+    // W9-KEY-CORTEX-AUDIT: the KEY chat tool row reaches the OWNER, who sees every run.
+    expect(owner.logs.some((r: any) => r.id === chatRows[0].id)).toBe(true);
   });
 
   it("CV-08l-c RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review CR-EXL-1): GET ai/execution-logs pages and counts only the rows it serves: for the STAFF member and the ADMIN every page holds `limit` rows while more exist, `total` is the number of rows served, and the pages together are the whole listing in order, though the newest rows of the business are ones they are not served", async () => {

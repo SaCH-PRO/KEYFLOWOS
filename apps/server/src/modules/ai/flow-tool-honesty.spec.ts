@@ -70,7 +70,9 @@ describe('every declared tool has a handler', () => {
     const body = orchestrator.slice(start);
 
     expect(body).toMatch(/if \(isCortexBridgedTool\(toolName\)\) \{/);
-    expect(body).toMatch(/executeBridgedCortexTool\(businessId, toolName, args\)/);
+    // W9-KEY-CORTEX-AUDIT: the dispatch's action rides along, so the organ tool's audit row names its
+    // actor and command thread.
+    expect(body).toMatch(/executeBridgedCortexTool\(businessId, toolName, args, action\)/);
 
     for (const [flowName, cortexName] of Object.entries(CORTEX_TOOL_BRIDGE)) {
       expect(cortexName, `${flowName} maps to itself`).not.toBe(flowName);

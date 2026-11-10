@@ -176,7 +176,9 @@ export class KeyCortexActionsService implements OnModuleInit {
     requiresApproval: boolean,
     required: string[],
     properties: Record<string, unknown>,
-    legacyHandler: (params: Record<string, unknown>, businessId: string) => Promise<KeyCortexToolResult>,
+    // W9-KEY-CORTEX-AUDIT: the call's context rides along for a handler that hands the call on
+    // (handleExecuteTool), so the call it makes names the same actor and command thread.
+    legacyHandler: (params: Record<string, unknown>, businessId: string, ctx: KeyCortexToolContext) => Promise<KeyCortexToolResult>,
   ): KeyCortexToolDefinition {
     return {
       name,
@@ -185,7 +187,7 @@ export class KeyCortexActionsService implements OnModuleInit {
       riskTier,
       requiresApproval,
       parameters: { type: 'object', properties, required },
-      handler: async (ctx, input) => legacyHandler(input, ctx.businessId),
+      handler: async (ctx, input) => legacyHandler(input, ctx.businessId, ctx),
     };
   }
 
@@ -769,10 +771,30 @@ export class KeyCortexActionsService implements OnModuleInit {
     }
   }
 
-  private async handleExecuteTool(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
+  private async handleExecuteTool(
+    params: Record<string, unknown>,
+    businessId: string,
+    ctx?: KeyCortexToolContext,
+  ): Promise<KeyCortexToolResult> {
     const { toolName, toolParams = {} } = params;
     // Phase 3 Skeleton: delegate to canonical registry instead of old AI-module registry.
-    return this.keyCortexToolRegistry.execute(String(toolName), { businessId, autonomyLevel: 2 }, toolParams as Record<string, unknown>);
+    //
+    // W9-KEY-CORTEX-AUDIT: the tool this call runs is part of this call, so it names the same actor
+    // and command thread (its CortexActionLog row is attributed outside a request too). Only the
+    // identity is handed on: not preApproved (the named tool meets its own autonomy gate, at level 2
+    // as before), and not the idempotency key or saga, which this call has claimed for itself.
+    const thread: Partial<KeyCortexToolContext> = {
+      ...(ctx?.userId ? { userId: ctx.userId } : {}),
+      ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
+      ...(ctx?.commandId ? { commandId: ctx.commandId } : {}),
+      ...(ctx?.correlationId ? { correlationId: ctx.correlationId } : {}),
+      ...(ctx?.proposalId ? { proposalId: ctx.proposalId } : {}),
+    };
+    return this.keyCortexToolRegistry.execute(
+      String(toolName),
+      { businessId, autonomyLevel: 2, ...thread },
+      toolParams as Record<string, unknown>,
+    );
   }
 
   private async handleQueryDatabase(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {

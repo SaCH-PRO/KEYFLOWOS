@@ -991,9 +991,24 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     };
   }
 
-  /** An access token of a session that signed in at `authenticatedAt`, minted at `iat`. */
+  /**
+   * An access token of a session that signed in with `method` at
+   * `authenticatedAt`, minted at `iat`, with GoTrue's server-set app_metadata
+   * for a user holding a password and a linked Google identity. D-101
+   * (W9-RISC-PASSWORD-CUTOFF) reads it to name the OAuth provider: GoTrue's
+   * amr entry never does.
+   */
+  const signInToken = (
+    method: string,
+    authenticatedAt: number,
+    iat: number,
+    sessionId = 's-f7',
+    appMetadata: Record<string, unknown> = { provider: 'email', providers: ['email', 'google'] },
+  ) =>
+    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', iat, exp: iat + 3600, amr: [{ method, timestamp: authenticatedAt }], app_metadata: appMetadata })}.c2ln`;
+  /** An access token of a Google session that signed in at `authenticatedAt`, minted at `iat`. */
   const sessionToken = (authenticatedAt: number, iat: number, sessionId = 's-f7') =>
-    `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: USER, session_id: sessionId, role: 'authenticated', iat, exp: iat + 3600, amr: [{ method: 'oauth', timestamp: authenticatedAt }] })}.c2ln`;
+    signInToken('oauth', authenticatedAt, iat, sessionId);
 
   /**
    * The request POST /identity/bootstrap sees after AuthMiddleware verified its
@@ -1443,5 +1458,119 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     h.risc.onApplicationBootstrap();
     expect(h.warn.mock.calls.filter((c) => String(c[0]).startsWith('RISC: '))).toEqual([]);
     expect(h.gt.calls).toEqual([]);
+  });
+
+  /**
+   * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, narrows D-97 review
+   * SEC-W8RSC-4: review SEC-W9RPC-2). D-97 leaves the pre-event refresh
+   * token alive at GoTrue, and a hijacker who knows (or, with that token,
+   * sets) the password could open a NEW password session after the cutoff,
+   * which D-97 admitted. Now, after a cutoff, the real AuthMiddleware admits
+   * only a new sign-in made with Google or an emailed link until one such
+   * sign-in has CLEARED the restriction (User.metaData.signInCutoffClearedAt,
+   * written once under the User row lock RiscService takes, dated when it is
+   * recorded or at the sign-in if later: review CR-W9RPC-3). The clearing
+   * sign-ins below are dated 20s after the event, ahead of this server's
+   * clock however slow the run, so the clearing is dated at them. From then
+   * on a session authenticated after the clearing is admitted by any method;
+   * the password session authenticated between the cutoff and the clearing
+   * (the hijacker's) stays refused. A later RISC event re-arms it.
+   */
+  it("D-101 (W9-RISC-PASSWORD-CUTOFF): after account-disabled/hijacking a password session authenticated after the cutoff is refused by the real AuthMiddleware; a Google session after the cutoff is admitted and records signInCutoffClearedAt once under the User row lock; then a password session authenticated after the clearing is admitted, while the password session authenticated between the cutoff and the clearing stays refused", async () => {
+    const h = build();
+    const attached = realMiddleware(h);
+    await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
+    const cutoff = h.userRow.metaData.signInCutoffAt as number;
+    expect(typeof cutoff).toBe('number');
+
+    // The hijacker opens a new password session after the event: refused.
+    const hijackerPassword = signInToken('password', cutoff + 1, cutoff + 1, 's-hijacker-password');
+    expect(await attached(hijackerPassword)).toBeNull();
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBeUndefined();
+
+    // The real user signs in with Google: admitted, and the restriction is cleared at that sign-in (the later of it and now).
+    const writesBefore = h.prisma.client.user.update.mock.calls.length;
+    const locksBefore = h.prisma.client.$queryRaw.mock.calls.length;
+    const google = signInToken('oauth', cutoff + 20, cutoff + 20, 's-real-google');
+    expect(await attached(google)).toBe(USER);
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
+    expect(h.prisma.client.user.update.mock.calls.length).toBe(writesBefore + 1);
+    const lock = h.prisma.client.$queryRaw.mock.calls[locksBefore] as unknown as [TemplateStringsArray, ...unknown[]];
+    expect(lock[0].join('?').replace(/\s+/g, ' ').trim()).toBe('SELECT id FROM users WHERE id = ? FOR NO KEY UPDATE');
+    expect(lock.slice(1)).toEqual([USER]);
+    // Written once: the same session again (and a refresh of it) writes nothing.
+    expect(await attached(google)).toBe(USER);
+    expect(await attached(signInToken('oauth', cutoff + 20, cutoff + 600, 's-real-google'))).toBe(USER);
+    expect(h.prisma.client.user.update.mock.calls.length).toBe(writesBefore + 1);
+    // The cutoff itself and the flag the event wrote are kept.
+    expect(h.userRow.metaData).toMatchObject({ signInCutoffAt: cutoff, googleSignInDisabled: true });
+
+    // A password session the real user opens after the clearing is admitted ...
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-real-password'))).toBe(USER);
+    // ... while the hijacker's, opened between the cutoff and the clearing, stays refused, refreshed or not.
+    expect(await attached(hijackerPassword)).toBeNull();
+    expect(await attached(signInToken('password', cutoff + 1, cutoff + 600, 's-hijacker-password'))).toBeNull();
+  });
+
+  it.each([
+    ['a magic link in the implicit flow (amr otp)', 'otp'],
+    ['a magic link in the PKCE flow (amr magiclink)', 'magiclink'],
+  ])(
+    'D-101 (W9-RISC-PASSWORD-CUTOFF): after sessions-revoked an emailed-link session — %s — clears the restriction like Google',
+    async (_name, method) => {
+      const h = build();
+      const attached = realMiddleware(h);
+      await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED));
+      const cutoff = h.userRow.metaData.signInCutoffAt as number;
+      expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password'))).toBeNull();
+
+      const emailOnly = { provider: 'email', providers: ['email'] };
+      expect(await attached(signInToken(method, cutoff + 20, cutoff + 20, 's-link', emailOnly))).toBe(USER);
+      expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
+      expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-2'))).toBe(USER);
+      expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password'))).toBeNull();
+    },
+  );
+
+  it.each([
+    ['an amr method GoTrue does not define', 'carrier-pigeon'],
+    ['anonymous', 'anonymous'],
+    ['sso/saml', 'sso/saml'],
+  ])(
+    'D-101 (W9-RISC-PASSWORD-CUTOFF): after tokens-revoked a session opened by %s is refused (fail closed) and clears nothing',
+    async (_name, method) => {
+      const h = build();
+      const attached = realMiddleware(h);
+      await h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.TOKENS_REVOKED));
+      const cutoff = h.userRow.metaData.signInCutoffAt as number;
+      const writes = h.prisma.client.user.update.mock.calls.length;
+      expect(await attached(signInToken(method, cutoff + 2, cutoff + 2, 's-other'))).toBeNull();
+      expect(h.userRow.metaData.signInCutoffClearedAt).toBeUndefined();
+      expect(h.prisma.client.user.update.mock.calls.length).toBe(writes);
+      expect(await attached(signInToken('password', cutoff + 3, cutoff + 3, 's-password'))).toBeNull();
+    },
+  );
+
+  it('D-101 (W9-RISC-PASSWORD-CUTOFF): a new RISC event re-arms the restriction — it records the new cutoff and removes the cleared marker, so a password session after it is refused until a Google sign-in clears it again', async () => {
+    const h = build();
+    const attached = realMiddleware(h);
+    const now = Math.floor(Date.now() / 1000);
+    // An earlier event, already cleared by a Google sign-in an hour ago.
+    h.userRow.metaData = { signInCutoffAt: now - 7200, signInCutoffClearedAt: now - 3600, keep: 'me' };
+    const before = signInToken('password', now - 1800, now - 1800, 's-password-before');
+    expect(await attached(before)).toBe(USER);
+
+    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.TOKEN_REVOKED))).resolves.toEqual({ status: 202, processed: true });
+    const cutoff = h.userRow.metaData.signInCutoffAt as number;
+    expect(cutoff).toBeGreaterThanOrEqual(now);
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBeUndefined();
+    expect(h.userRow.metaData.keep).toBe('me');
+
+    expect(await attached(before)).toBeNull();
+    expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
+    expect(await attached(signInToken('oauth', cutoff + 20, cutoff + 20, 's-google-after'))).toBe(USER);
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-later'))).toBe(USER);
+    expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
   });
 });

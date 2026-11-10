@@ -936,6 +936,57 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   stays empty (R0-SEC-02). `account-enabled`,
   `account-credential-change-required`, `verification` and
   `account-disabled` for any other reason record no cutoff.
+- **After a cutoff, only a Google or emailed-link sign-in until it clears**
+  (owner ruling D-101, W9-RISC-PASSWORD-CUTOFF; narrows SEC-W8RSC-4, see the
+  residuals below). A
+  session opened after the cutoff is admitted only when its ORIGINAL sign-in
+  (its earliest `amr` entry; a later MFA step-up does not count) was:
+  - Google: `amr` method `oauth`. GoTrue never names the OAuth provider in
+    the entry (it sets `provider` only for `sso/saml`), so the token's
+    server-set `app_metadata` must name Google as the user's only external
+    provider (`provider`/`providers`, ignoring `email` and `phone`); an entry
+    that names another provider, or a user with another OAuth identity too,
+    is refused. The web's only OAuth door is `provider=google`.
+  - an emailed link: `otp` (the implicit flow: GoTrue's `/verify` issues
+    every magic-link, email-code, signup, invite and recovery session with
+    `models.OTP`), only for a user whose `app_metadata` lists no `phone`
+    identity, since GoTrue stamps an SMS code `otp` too; or `magiclink`,
+    `email/signup`, `recovery`, `invite` (the PKCE flow's emailed links). A
+    password-recovery link counts as an emailed link: GoTrue sends it only to
+    the account's address and marks its session `recovery` (PKCE) or `otp`
+    (implicit, the same as a magic link). Only a session presented to this
+    API as a bearer is judged, and the shipped password reset does not
+    present one: see "The password reset does not clear the restriction"
+    below.
+  - Anything else is refused with the middleware's ordinary 401 (fail closed):
+    `password`, `totp`, `mfa/*`, `sso/saml`, `anonymous`, `web3`, `passkey`,
+    `token_refresh`, `email_change` (its link goes to the NEW address), a
+    method GoTrue adds later, a string-only `amr`, or a token with no `amr`.
+
+  The first such session CLEARS the restriction: the middleware records the
+  clearing as `users.meta_data.signInCutoffClearedAt`, dated when it records
+  it, or at that session's sign-in when the provider dates it later (review
+  CR-W9RPC-3: dated at the sign-in alone, a password session opened after the
+  real user's Google sign-in at GoTrue, but before that Google session first
+  reached this API, was refused until then and admitted after), written
+  once, under the same User row lock the RISC writes take (the bag is read
+  again under the lock, so concurrent requests write it once; a cutoff a RISC
+  event raised past the session meanwhile is not cleared and that session is
+  refused). From then on a session authenticated AFTER the clearing is
+  admitted by any method, while a session authenticated between the cutoff
+  and the clearing still has to be Google or an emailed link, so the
+  hijacker's password session stays refused, refreshed or not. If the write
+  fails, the qualifying session is still admitted and the next qualifying
+  request retries it. Every later session-ending event re-arms the
+  restriction: its cutoff write removes the marker (the cutoff is still never
+  lowered). A marker that is not after the current cutoff is ignored. No
+  schema change, no provider call, `SUPABASE_JWT_SECRET` stays empty.
+- **Rollout of D-101** (review CR-W9RPC-2). The rule applies to cutoffs
+  already recorded under D-97: from the deploy, a user whose row holds a
+  cutoff and no `signInCutoffClearedAt`, and who signed in again with a
+  password after the event (which D-97 admitted), is refused on the next
+  request until they sign in with Google (the shipped flows offer no other
+  clearing sign-in: see the residuals below).
 - The cutoff and the `googleSignInDisabled` flag share `users.meta_data`;
   each RISC write takes the User row lock before it reads the bag, so two
   events for the same user handled together never write back each other's
@@ -948,26 +999,106 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   SEC-W8RSC-2).
 - Residuals of D-97, not closed by W8-RISC-SIGNIN-CUTOFF:
   - **Accounts with no `UserIdentity` row** (SEC-W8RSC-3). Nothing wrote
-    that table before this packet and there is no backfill, so an account
-    last signed in with Google before the deploy is not reached by any RISC
-    event (`no_matching_user`: no cutoff, no 24h cutoff, no ban) until its
-    owner signs in again and bootstrap writes the row. Such an event is logged
-    (`SECURITY: RISC ... matched no user`) with the Google sub, so the
-    operator can find the account in GoTrue and act on it (dashboard ban,
-    password reset). A backfill from GoTrue's admin user list (identities,
-    never the user-editable `user_metadata`) is a separate operator task.
+    that table before this packet, so an account last signed in with Google
+    before the deploy is not reached by any RISC event (`no_matching_user`:
+    no cutoff, no 24h cutoff, no ban) until its owner signs in again and
+    bootstrap writes the row, or the operator runs the backfill. Such an
+    event is logged (`SECURITY: RISC ... matched no user`) with the Google
+    sub, so the operator can find the account in GoTrue and act on it
+    (dashboard ban, password reset). The backfill
+    (W9-IDENTITY-BACKFILL-SCRIPT): `pnpm backfill:google-identities` in
+    `apps/server` (`apps/server/scripts/backfill-google-identities.ts`)
+    pages GoTrue's admin user list (`GET /auth/v1/admin/users`,
+    service-role key, through `SupabaseAdminService.listUsersPage`) only to
+    enumerate the user ids: GoTrue does not load identities on the list
+    (`models.FindUsersInAudience` has no `Eager()`, so each listed user
+    carries `identities: null`; review CR-W9IBS-1). It reads each user's
+    RECORD (`GET /auth/v1/admin/users/{id}`,
+    `SupabaseAdminService.getUserRecord`, identities eager-loaded: the
+    record bootstrap reads), takes its `identities[]` with provider
+    `google` (the provider id, else `identity_data.sub`; never the
+    user-editable `user_metadata`) and writes bootstrap's `UserIdentity`
+    row for the local User with that id. A record whose identities are not
+    loaded, or a GoTrue read that fails, stops the run with exit 1: it is
+    never counted as a user without a Google identity. Dry run by default
+    (counts only: no email, sub, user id or key); `--apply` writes;
+    idempotent. A sub already mapped to another local user is a counted
+    conflict and is never re-pointed, also when another writer maps it
+    between the script's read and its write (review SEC-W9IBS-2); a GoTrue
+    user with no local User row is skipped and counted. Run it after the W8
+    deploy (and again whenever a dry run counts `would_write` above 0);
+    until it has run with `--apply`, such accounts stay unreached.
+  - **RISC events that arrived before the backfill are not replayed**
+    (review SEC-W9IBS-1). Google answered a session-ending event for an
+    unmapped sub with 202 (`no_matching_user`) and does not send it again;
+    mapping the sub afterwards does NOT apply that event's cutoff, so the
+    account holds no sign-in cutoff for it. The backfill counts such events
+    (`unapplied_risc_events`, `unapplied_risc_accounts`: session-ending
+    rows of `risc_events` with no user and action `no_matching_user` whose
+    sub now resolves, or in a dry run would after `--apply`) and prints a
+    NOTE when there are any. The operator lists those accounts with the
+    query in `docs/development/risc-setup.md` ("RISC events that arrived
+    before the backfill") and acts on each by hand, as for a live
+    `no_matching_user` event (Supabase dashboard sign-out or ban, password
+    reset, contact the owner). Until then such an account is NOT covered.
   - **A pre-event GoTrue session can mint a post-cutoff sign-in**
-    (SEC-W8RSC-4, owner ruling needed; not reproduced: needs a real GoTrue).
-    D-97 leaves the pre-event refresh token alive at GoTrue. With it a
-    hijacker can set a password (`PUT /auth/v1/user`, when secure password
-    change is off or the session is under 24h old) and then open a new
-    password session, whose `amr` is after the cutoff and is admitted. For
-    hijacking this works once the 65-minute ban lapses; sessions-revoked,
-    tokens-revoked and token-revoked set no ban. GoTrue's admin password
-    update ends every session of the user with the service-role key alone
-    (see `identity-password.service.ts`), so a provider-wide logout may not
-    need `SUPABASE_JWT_SECRET` after all; whether to use it (it replaces the
-    user's password) is for the owner (D-39/D-97).
+    (SEC-W8RSC-4): narrowed by D-101 above, not closed (review
+    SEC-W9RPC-2). D-97 leaves the pre-event refresh token alive at GoTrue,
+    and with it (or a known password) a hijacker can open a new password
+    session after the cutoff; that session is now refused until the real
+    user has signed in with Google or an emailed link, and one opened before
+    that clearing stays refused after it. The pre-event GoTrue session
+    outlives the clearing too, and with it the hijacker can set the password
+    (`PUT /auth/v1/user`); a password session opened AFTER the clearing is
+    admitted by any method, as D-101 words it, and the real user's first
+    Google sign-in typically comes minutes after the event. For the owner:
+    should the clearing require or trigger a password reset? GoTrue's admin
+    password update ends every session of the user with the service-role key
+    alone (see `identity-password.service.ts`), the pre-event one included;
+    it is a provider call, which W9-RISC-PASSWORD-CUTOFF may not make.
+- Residuals of D-101:
+  - **The password reset does not clear the restriction** (review
+    SEC-W9RPC-1 / CR-W9RPC-1; the fix is outside W9-RISC-PASSWORD-CUTOFF's
+    write set, follow-up). The product's only emailed link is the recovery
+    link, and the web posts its session in the BODY of
+    `POST /identity/reset-password`, never as a bearer, so the middleware
+    never judges it, and `completeReset` records no clearing (it writes the
+    logout cutoff). After "Password updated. Please sign in." the new
+    password session is refused on every request. The web offers no
+    magic-link sign-in, so Google is the only way back in; after
+    `account-disabled/hijacking`, until Google has recovered the account,
+    the user has none. The follow-up has `completeReset` call
+    `recordSignInCutoffCleared` (`core/auth/auth.middleware.ts`) once the
+    password is updated: the reset ends every GoTrue session, the
+    hijacker's included, which makes it the safest clearing. Until then an
+    operator who has verified the user can record the clearing by hand
+    (`signInCutoffClearedAt` = the current epoch seconds).
+  - **Login answers `authenticated` for a session the API then refuses**
+    (review CR-W9RPC-2; `identity.controller.ts` is outside the write set,
+    follow-up). After a cutoff, `POST /identity/login` and
+    `/identity/refresh` still answer `authenticated` and audit
+    `login_success` for a password session the middleware refuses on every
+    request; the web stores the token, its bootstrap gets a 401 and it shows
+    a generic error, never "sign in with Google".
+  - **Secure email change.** With the pre-event GoTrue session (or a password
+    session, which GoTrue itself still issues) a hijacker can ask GoTrue to
+    change the account's email. In the implicit flow the confirmation session
+    carries `otp`, the same method as a magic link, and from then on magic
+    links go to the new address. GoTrue's "Secure email change" (on by
+    default) requires the OLD address to confirm too, which the hijacker
+    cannot; keep it on.
+  - **Other OAuth providers or phone sign-in.** An `oauth` session counts as
+    Google only while Google is the user's only external identity, and an
+    `otp` session as an emailed link only while the user has no phone
+    identity. Enabling another provider or phone sign-in in the Supabase
+    dashboard keeps this fail-closed (a user with another OAuth identity
+    clears with an emailed link; a user with a phone identity clears with
+    Google or a PKCE emailed link, not an implicit-flow `otp`), but the allow
+    list must be revisited before either is offered.
+  - **The Google account itself.** A Google sign-in clears the restriction,
+    as the ruling says; after `account-disabled/hijacking` this relies on
+    Google having recovered the account (`googleSignInDisabled` is recorded
+    but nothing enforces it).
 
 See `docs/development/risc-setup.md` for GCP configuration and the
 `pnpm configure:risc` registration script.

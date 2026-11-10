@@ -691,6 +691,79 @@ describe('RiscService', () => {
         },
       );
 
+      // D-101 (W9-RISC-PASSWORD-CUTOFF): after a cutoff only a Google or
+      // emailed-link sign-in is admitted until one clears the restriction
+      // (AuthMiddleware records User.metaData.signInCutoffClearedAt). A later
+      // session-ending event sets the restriction again: its cutoff write
+      // removes the cleared marker, in the same locked read-modify-write.
+      it.each(ending)(
+        'D-101 (W9-RISC-PASSWORD-CUTOFF): %s re-arms the restriction — the cutoff write removes signInCutoffClearedAt and raises the cutoff, in one transaction that first takes the User row lock',
+        async (_name, eventType, reason) => {
+          const steps: string[] = [];
+          prisma.client.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+            steps.push('begin');
+            const out = await fn(prisma.client);
+            steps.push('commit');
+            return out;
+          });
+          prisma.client.$queryRaw.mockImplementation(async () => {
+            steps.push('lock');
+            return [];
+          });
+          const earlier = Math.floor(Date.now() / 1000) - 7200;
+          // One stored row: each locked read sees the previous write.
+          let stored: Record<string, unknown> = { signInCutoffAt: earlier, signInCutoffClearedAt: earlier + 60, keep: 'me' };
+          prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+          prisma.client.user.findUnique.mockImplementation(async () => {
+            steps.push('read');
+            return { metaData: { ...stored } };
+          });
+          prisma.client.user.update.mockImplementation(async (args: { data: { metaData?: Record<string, unknown> } }) => {
+            steps.push('write');
+            if (args.data.metaData) stored = { ...args.data.metaData };
+            return undefined;
+          });
+          const before = Math.floor(Date.now() / 1000);
+          await service.receiveEvent(await makeToken(makeRiscPayload(eventType, { sub: 'google-sub-f7' }, reason)));
+
+          // The cutoff write is the event's first metaData transaction.
+          const first = cutoffWrites()[0];
+          expect(first.data.metaData).not.toHaveProperty('signInCutoffClearedAt');
+          expect(first.data.metaData).toMatchObject({ keep: 'me' });
+          expect(first.data.metaData?.signInCutoffAt as number).toBeGreaterThanOrEqual(before);
+          expect(steps.slice(0, 5)).toEqual(['begin', 'lock', 'read', 'write', 'commit']);
+          expect(stored).not.toHaveProperty('signInCutoffClearedAt');
+          expect(stored.signInCutoffAt as number).toBeGreaterThanOrEqual(before);
+        },
+      );
+
+      it('D-101 (W9-RISC-PASSWORD-CUTOFF): re-arming never lowers the cutoff — a later cutoff already recorded stays, and the cleared marker is still removed', async () => {
+        const later = Math.floor(Date.now() / 1000) + 3600;
+        prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+        prisma.client.user.findUnique.mockResolvedValue({ metaData: { signInCutoffAt: later, signInCutoffClearedAt: later + 60 } });
+        await service.receiveEvent(await makeToken(makeRiscPayload(RISC_EVENT_TYPES.SESSIONS_REVOKED, { sub: 'google-sub-f7' })));
+        const writes = cutoffWrites();
+        expect(writes).toHaveLength(1);
+        expect(writes[0].data.metaData).toEqual({ signInCutoffAt: later });
+        expect(persisted()?.actionTaken).toBe('sessions_terminated');
+      });
+
+      it.each([
+        ['account-enabled', RISC_EVENT_TYPES.ACCOUNT_ENABLED, undefined],
+        ['account-disabled/bulk-account', RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'bulk-account'],
+      ] as Array<[string, string, string | undefined]>)(
+        'D-101 (W9-RISC-PASSWORD-CUTOFF) negative control: %s ends no session and leaves the cutoff and the cleared marker where they were',
+        async (_name, eventType, reason) => {
+          const stored = { signInCutoffAt: 1_700_000_000, signInCutoffClearedAt: 1_700_000_600 };
+          prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });
+          prisma.client.user.findUnique.mockResolvedValue({ metaData: { ...stored } });
+          await service.receiveEvent(await makeToken(makeRiscPayload(eventType, { sub: 'google-sub-f7' }, reason)));
+          const metaWrites = prisma.client.user.update.mock.calls.map((c) => (c[0] as { data: { metaData?: Record<string, unknown> } }).data.metaData);
+          expect(metaWrites.length).toBeGreaterThan(0);
+          for (const m of metaWrites) expect(m).toMatchObject(stored);
+        },
+      );
+
       it('D-97 review SEC-W8RSC-2: the redelivery of an event whose cutoff did not hold is processed again, not dropped as a duplicate — the row is updated and the event answered 202 once the cutoff holds', async () => {
         stubLogger();
         prisma.client.userIdentity.findUnique.mockResolvedValue({ userId: USER });

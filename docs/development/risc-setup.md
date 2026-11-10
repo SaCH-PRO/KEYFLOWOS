@@ -63,6 +63,49 @@ pnpm configure:risc
 
 This creates or updates the RISC stream config in Google to point at `RISC_RECEIVER_URL` and subscribes to the supported event types.
 
+## Backfill Google identities (accounts that last signed in before W8)
+
+`POST /identity/bootstrap` has written the Google `sub` -> user link at every Google sign-in since W8-RISC-SIGNIN-CUTOFF (D-97), from the verified provider record. An account whose owner last signed in with Google before that deploy has no `UserIdentity` row, so a RISC event for it matches no user (`no_matching_user`, logged as `SECURITY: RISC ... matched no user`) and ends no session (D-97 residual SEC-W8RSC-3). Backfill those rows from GoTrue's admin user list:
+
+```bash
+cd apps/server
+pnpm backfill:google-identities           # dry run: prints counts, writes nothing
+pnpm backfill:google-identities --apply   # writes the missing rows
+```
+
+It reads `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` from the repo-root `.env`, and:
+
+- pages `GET /auth/v1/admin/users` with the service-role key (`SupabaseAdminService.listUsersPage`) only to enumerate the user ids; a page that fails stops the run with exit 1 (it is never read as the end of the list). GoTrue does not load identities on the list (`models.FindUsersInAudience` has no `Eager()`: every listed user carries `identities: null`; review CR-W9IBS-1);
+- reads each listed user's record, `GET /auth/v1/admin/users/{id}` (`SupabaseAdminService.getUserRecord`, identities eager-loaded: the record bootstrap reads), one request per user, one after another. A record that fails, names another id, or whose `identities` is not a list (not loaded) stops the run with exit 1: it is never counted as a user without a Google identity;
+- takes the record's `identities[]` entries with provider `google` (the identity's provider id, else `identity_data.sub`, the rule bootstrap uses) and NEVER `user_metadata`, which the user can edit;
+- writes the row bootstrap writes (`provider: google`, `providerSubject`, the identity's email, `userId` = the GoTrue user id) only for a GoTrue user that has a local `User` row, as an upsert on `(provider, providerSubject)`; re-running is safe (idempotent);
+- skips and counts: users with no Google identity, GoTrue users with no local `User` row, subs already mapped to the same user, and subs already mapped to a DIFFERENT local user (a conflict: the existing row is never re-pointed, also when another writer maps the sub between the script's read and its write, review SEC-W9IBS-2; resolve it by hand, or the real owner's next Google sign-in re-points it through bootstrap);
+- counts the RISC events that arrived before the backfill (`unapplied_risc_events`, `unapplied_risc_accounts`; see below) and prints a NOTE when there are any;
+- prints counts only: never an email, a Google sub, a user id or a key. Exit status: 0 done, 1 a GoTrue read, a write or the RISC event count failed (re-run), 2 bad arguments or the admin client is not configured.
+
+Run the dry run first, then `--apply` once after deploying W8 or later. It makes no change at Google or GoTrue (read-only there).
+
+### RISC events that arrived before the backfill (review SEC-W9IBS-1)
+
+The backfill maps the sub for every LATER event; it does not replay an earlier one. A session-ending event (`sessions-revoked`, `tokens-revoked`, `token-revoked`, or `account-disabled` with reason `hijacking`) for a sub that was not mapped yet was answered 202 and stored as `no_matching_user`, and Google does not send it again. So such an account holds NO sign-in cutoff for that event, and its sessions (possibly the attacker's) were not ended. `unapplied_risc_events` counts those events whose sub now resolves (in a dry run: or would after `--apply`), and `unapplied_risc_accounts` the accounts. When either is above 0, list the accounts (operator database access; the script itself prints counts only):
+
+```sql
+SELECT ui.user_id, e.event_type, e.payload->>'reason' AS reason, e.received_at
+FROM risc_events e
+JOIN user_identities ui ON ui.provider = 'google' AND ui.provider_subject = e.provider_subject
+WHERE e.user_id IS NULL
+  AND e.action_taken = 'no_matching_user'
+  AND (e.event_type IN (
+         'https://schemas.openid.net/secevent/risc/event-type/sessions-revoked',
+         'https://schemas.openid.net/secevent/oauth/event-type/tokens-revoked',
+         'https://schemas.openid.net/secevent/oauth/event-type/token-revoked')
+       OR (e.event_type = 'https://schemas.openid.net/secevent/risc/event-type/account-disabled'
+           AND e.payload->>'reason' = 'hijacking'))
+ORDER BY e.received_at;
+```
+
+and act on each account by hand, as for a live `no_matching_user` event: end its sessions and, for `hijacking`, ban it for a while in the Supabase dashboard, have the owner reset the password, and contact the owner. Until then such an account is NOT covered by the backfill.
+
 ## Testing
 
 You can request a verification token from Google with:
@@ -88,6 +131,7 @@ A `verification` event should arrive at `/webhooks/risc` and be written to `Auth
 - Validation & event handling: `apps/server/src/modules/risc/risc.service.ts`
 - Google `sub` capture: `apps/server/src/modules/identity/identity.service.ts` (`persistUserIdentities`)
 - Stream registration script: `scripts/configure-risc.ts`
+- Google identity backfill (operator): `apps/server/scripts/backfill-google-identities.ts` (`pnpm backfill:google-identities` in `apps/server`)
 
 ## GDPR / data protection notes
 
