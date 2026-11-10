@@ -1725,17 +1725,110 @@ describe('Review repairs (R0-SEC3): the record-payment route projects the invoic
     expect(secrets.filter((s) => JSON.stringify(read.body).includes(s)), 'operator read').toEqual([]);
   });
 
-  // R0-SEC3 review SEC3-ST-2: the same disclosure through KEY, outside this
-  // packet's write set. Kept visible so the deferral is in the run output.
-  it.todo(
-    'RR-SEC3-02 (SEC3-ST-2): the KEY tool commerce_mark_invoice_paid answers a revenue:write member with no bookings or CRM ' +
-      'scope without the linked Booking row or the whole Contact row. DEFERRED: follow-up packet (outside the ' +
-      'R0-SEC3-INVOICE-WRITE-PROJECTION write set) — FlowOrchestratorService.executeToolAction case ' +
-      "'commerce_mark_invoice_paid' returns { invoice } straight from CommerceService.markInvoicePaid, whose reload " +
-      'includes booking: true and contact: true; wrapToolResult and executeTool pass it through, and the chat path sends ' +
-      'toolResults to the model, to the HTTP client and into the FlowSession. The fix belongs in flow-orchestrator.service.ts ' +
-      '(project the tool result) or commerce.service.ts, neither in this write set.',
-  );
+  // W7-KEY-MARK-PAID-PROJECTION (R0-SEC3 review SEC3-ST-2): the same
+  // disclosure through KEY. FlowOrchestratorService.executeToolAction, the
+  // dispatcher every KEY surface reaches (member chat, plans, monitors, the
+  // staff bridge), runs commerce_mark_invoice_paid as
+  // CommerceService.markInvoicePaid(invoiceId, KEY, businessId), whose reload
+  // includes `booking: true` and `contact: true` (the invoice listeners need
+  // both). executeTool wraps that answer (wrapToolResult) and hands it to the
+  // model, to the chat HTTP client, into the FlowSession and to the execution
+  // log GET ai/execution-logs serves every member. The tool answers the write
+  // projection PATCH .../paid answers since R0-SEC3 (toInvoiceWriteResponse):
+  // no booking, the contact's id, businessId, email, firstName and lastName.
+  // Real CommerceService, InvoiceWorkflowService, RevenuePostingService and
+  // PostingService (the app's); the dispatcher is the real prototype method
+  // (as test/key-dispatcher-tenant.integration.test.ts composes it) with the
+  // collaborators off the path recorded: the execution log keeps the
+  // envelope it was handed, no row is written.
+  describe('W7-KEY-MARK-PAID-PROJECTION: the KEY tool answers the write projection (SEC3-ST-2)', () => {
+    let keyDispatcher: any;
+    const loggedEnvelopes: any[] = [];
+
+    beforeAll(async () => {
+      const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+      const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      keyDispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+        prisma: app.get(PrismaService),
+        moduleRef: { get: (token: unknown) => (token === CommerceService ? commerce : undefined) },
+        governance: { getToolTier: () => 3 },
+        executionLog: {
+          logToolExecution: async (_businessId: string, _tool: string, _args: unknown, envelope: unknown) => {
+            loggedEnvelopes.push(envelope);
+            return undefined;
+          },
+        },
+        businessGraph: { invalidateCache: () => undefined },
+        logger: { error: () => undefined, warn: () => undefined, log: () => undefined },
+      });
+    }, 180_000);
+
+    it('RR-SEC3-02 (SEC3-ST-2): the KEY tool commerce_mark_invoice_paid answers a revenue:write member with no bookings or CRM scope with the invoice write projection PATCH /commerce/invoices/:invoiceId/paid answers (no linked Booking row; the contact projected to id, businessId, email, firstName and lastName, no notesInternal, phone, ownerId or visibility), in the tool result and in the envelope the execution log keeps; the invoice is PAID with one payment and the booking and contact rows are unchanged', async () => {
+      // rva_staffWriteA's scope map is explicit ({ revenue: 'write' }), so bookings and crm are the absent-key default none.
+      const actor = ID.staffWriteA;
+      const service = `${P}svc_sec3_02`;
+      await db.service.create({ data: { id: service, businessId: ID.bizA, name: 'RVA sec3-02 consultation', duration: 30, price: 100 } });
+      const BOOKING = {
+        notes: `${PRIV_CANARY}booking notes: gate code 7720`,
+        location: `${PRIV_CANARY}booking location: 9 Private Lane`,
+        calendarEventId: `${PRIV_CANARY}cal_sec3_02`,
+      };
+      /** A SENT copy on the PRIVATE contact with a linked booking; returns the copy and its booking id. */
+      const privateCopy = async (tag: string) => {
+        const copy = await createCopy(`rr_sec3_02_${tag}`, { status: 'SENT' });
+        await db.invoice.update({ where: { id: copy }, data: { contactId: PRIV.contact } });
+        const booking = `${P}bkg_sec3_02_${tag}`;
+        await db.booking.create({
+          data: {
+            id: booking, businessId: ID.bizA, contactId: PRIV.contact, serviceId: service, invoiceId: copy, status: 'CONFIRMED',
+            startTime: new Date('2026-03-03T14:00:00.000Z'), endTime: new Date('2026-03-03T14:30:00.000Z'), ...BOOKING,
+          },
+        });
+        return { copy, booking };
+      };
+      const secrets = [PRIV_CANARY, PRIV.notesInternal, PRIV.phone, ...Object.values(BOOKING)];
+      const CONTACT = { id: PRIV.contact, businessId: ID.bizA, email: 'rva.private@test.local', firstName: 'Rva', lastName: 'Private' };
+
+      // The reference: PATCH .../paid by the same member on a copy shaped the same way.
+      const viaHttp = await privateCopy('http');
+      const http = await markPaid(actor, viaHttp.copy, { businessId: ID.bizA });
+      expect(http.status, JSON.stringify(http.body)).toBe(200);
+      expect(http.body).toMatchObject({ id: viaHttp.copy, status: 'PAID' });
+      expect(http.body).not.toHaveProperty('booking');
+      expect(http.body.contact).toEqual(CONTACT);
+
+      // The KEY tool, through executeTool (the envelope the chat path, the FlowSession and the execution log receive).
+      const viaKey = await privateCopy('key');
+      loggedEnvelopes.length = 0;
+      const out = await keyDispatcher.executeToolDirectly(ID.bizA, 'commerce_mark_invoice_paid', { invoiceId: viaKey.copy }, undefined, {
+        surface: 'CHAT',
+        principalUserId: actor,
+      });
+      expect(out.id).toBe(viaKey.copy);
+      expect(out.invoice).toMatchObject({ id: viaKey.copy, businessId: ID.bizA, contactId: PRIV.contact, status: 'PAID' });
+      expect(Array.isArray(out.invoice.items)).toBe(true);
+      expect(out.invoice).not.toHaveProperty('booking');
+      expect(Object.keys(out.invoice.contact ?? {}).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+      expect(out.invoice.contact).toEqual(CONTACT);
+      // The same projection as the HTTP write: the same invoice keys and the same contact.
+      expect(Object.keys(JSON.parse(JSON.stringify(out.invoice))).sort()).toEqual(Object.keys(http.body).sort());
+      expect(out.invoice.contact).toEqual(http.body.contact);
+      expect(secrets.filter((s) => JSON.stringify(out).includes(s)), 'KEY tool result').toEqual([]);
+      // The execution log row is written from the same envelope: nothing private there either.
+      expect(loggedEnvelopes).toHaveLength(1);
+      expect(loggedEnvelopes[0].result).toBe(out);
+      expect(secrets.filter((s) => JSON.stringify(loggedEnvelopes).includes(s)), 'execution log envelope').toEqual([]);
+
+      // The write landed once, and only the answer changed: the booking and contact rows keep their fields.
+      expect(await invoiceStatus(viaKey.copy)).toBe('PAID');
+      expect(await paymentCount(viaKey.copy)).toBe(1);
+      expect(await db.booking.findUnique({ where: { id: viaKey.booking }, select: { invoiceId: true, notes: true, location: true, calendarEventId: true } }))
+        .toEqual({ invoiceId: viaKey.copy, ...BOOKING });
+      expect(await db.contact.findUnique({ where: { id: PRIV.contact }, select: { notesInternal: true, phone: true, ownerId: true, visibility: true } }))
+        .toEqual({ notesInternal: PRIV.notesInternal, phone: PRIV.phone, ownerId: ID.ownerA, visibility: 'PRIVATE' });
+    }, 60_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
