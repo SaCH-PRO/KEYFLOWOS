@@ -6825,7 +6825,14 @@ ${triage.standingContext}`;
         return { id: booking.id, status: booking.status };
       }
       case 'projects_get_budget': {
-        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId);
+        // W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2; D-100's withholding rule): the
+        // budget is read for the member KEY runs for (contactBindMember: the surface's principal, else
+        // the member it runs the call for, else a plan's member), so a member without expenses read
+        // gets the costs withheld as GET .../projects/:pid/budget withholds them. The graph-action
+        // authority and the chat menu hold this tool to projects read only. A run with no member (an
+        // inbound conversation, an undeclared caller) reads no costs.
+        const viewerUserId = (await this.contactBindMember(businessId, action)) ?? null;
+        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId, { viewerUserId });
         return { budget };
       }
       case 'projects_get_timeline': {

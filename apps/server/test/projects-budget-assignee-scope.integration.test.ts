@@ -22,6 +22,18 @@
  *               on team:read would take the assignee picker from STAFF, who may assign tasks).
  *               (was it.todo in apps/web/.../project-detail-tabs/__tests__/tasks-tab.test.tsx)
  *
+ * Review repairs (W9-PROJECTS-SERVER repair):
+ *   SEC-W9PS-1 / CR-W9PS-2  KEY's projects_get_budget called getProjectBudget with no viewer, so a
+ *               member with projects read and no expenses read (whom the route above refuses the
+ *               costs) passed the graph-action authority and read them through KEY. The dispatcher
+ *               now passes the member KEY runs for, the viewer is required, and a call with no
+ *               viewer or no member reads no costs (fails closed).
+ *   SEC-W9PS-2  inviteTeamMember stores the email's local part as the placeholder's name, and
+ *               adoption at sign-up keeps it: the options list showed it to every member. A name
+ *               that is the member's email local part is not a name.
+ *   SEC-W9PS-3  KEY's people_workload (TaskAssignmentService.workloadSummary) still named a member
+ *               with no name by their email; it names members as the options list does.
+ *
  * Nothing on the authorization boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * RateLimitGuard (real Redis at REDIS_URL), ProjectsService, TaskAssignmentService are real
  * against DATABASE_URL. The stand-ins: identity attachment from an `x-test-user` header (as the
@@ -55,6 +67,7 @@ const ID = {
   memberNoName: `${P}member_7f3a`, // name null, no first/last name
   memberEmailName: `${P}member_9c2e`, // name is its own email (as account bootstrap writes it)
   memberFirstLast: `${P}member_first`, // name null, first and last name set
+  memberLocalName: `${P}member_5d1b`, // name is its email's local part (an adopted invite keeps it)
   bizA: `${P}bizA`,
   bizC: `${P}bizC`,
   staffA: `${P}staffA`, // bizA booking staff
@@ -66,6 +79,15 @@ const EMAIL = {
   memberNoName: `${P}private.noname@test.local`,
   memberEmailName: `${P}private.emailname@test.local`,
   memberFirstLast: `${P}private.firstlast@test.local`,
+  memberLocalName: `${P}lee.private@test.local`,
+  // inviteTeamMember writes the placeholder (a generated id) under this address (SEC-W9PS-2)
+  invited: `${P}jane.private@personal.example`,
+};
+
+/** What inviteTeamMember and adoption leave as the name: the email's local part. */
+const LOCAL_PART = {
+  memberLocalName: `${P}lee.private`,
+  invited: `${P}jane.private`,
 };
 
 /** The project's money: 2 h at the project rate 150 (timeCost 300) and two expenses 777 + 23 (expenseCost 800). */
@@ -77,6 +99,12 @@ const TOTAL_COST = TIME_COST + EXPENSE_COST;
 let db: any;
 let app: any;
 let redis: any;
+/** The real KEY dispatcher (FlowOrchestratorService.executeToolAction) over this suite's real services. */
+let dispatcher: any;
+let projectsSvc: any;
+let prismaSvc: any;
+/** The User row inviteTeamMember created for EMAIL.invited (SEC-W9PS-2). */
+let invitedId: string;
 
 async function cleanup() {
   for (const sql of [
@@ -87,8 +115,10 @@ async function cleanup() {
     `DELETE FROM projects WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM staff_members WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
+    // the invited placeholder has a generated id; its address carries the prefix
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)} OR email LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -187,6 +217,19 @@ beforeAll(async () => {
   });
   await app.init();
 
+  // The real KEY dispatcher, as call-log-visibility.integration.test.ts builds it: its lazy
+  // collaborators resolve to this module's real services.
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  prismaSvc = moduleRef.get(PrismaService);
+  projectsSvc = moduleRef.get(ProjectsService);
+  const taskAssignmentSvc = moduleRef.get(TaskAssignmentService);
+  dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    prisma: prismaSvc,
+    moduleRef: {
+      get: (token: unknown) => (token === ProjectsService ? projectsSvc : token === TaskAssignmentService ? taskAssignmentSvc : undefined),
+    },
+  });
+
   await cleanup(); // in case a prior run aborted
 
   for (const id of [ID.owner, ID.admin, ID.staffDefault, ID.staffNoExpenses, ID.staffProjectsOnly, ID.ownerNoMembership]) {
@@ -199,6 +242,8 @@ beforeAll(async () => {
     data: { id: ID.memberFirstLast, email: EMAIL.memberFirstLast, name: null, firstName: 'Grace', lastName: 'Hopper', role: 'USER' },
   });
 
+  await db.user.create({ data: { id: ID.memberLocalName, email: EMAIL.memberLocalName, name: LOCAL_PART.memberLocalName, role: 'USER' } });
+
   await db.business.create({ data: { id: ID.bizA, name: 'V95R Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizC, name: 'V95R Biz C', ownerId: ID.ownerNoMembership } });
   const m = (user: string, role: string, permissionScopes?: Record<string, string>) =>
@@ -208,7 +253,13 @@ beforeAll(async () => {
   await m(ID.staffDefault, 'STAFF');
   await m(ID.staffNoExpenses, 'STAFF', { projects: 'read', expenses: 'none', team: 'none' });
   await m(ID.staffProjectsOnly, 'STAFF', { projects: 'write' });
-  for (const member of [ID.memberNamed, ID.memberNoName, ID.memberEmailName, ID.memberFirstLast]) await m(member, 'STAFF');
+  for (const member of [ID.memberNamed, ID.memberNoName, ID.memberEmailName, ID.memberFirstLast, ID.memberLocalName]) await m(member, 'STAFF');
+
+  // SEC-W9PS-2: an invitation not yet accepted, through the real IdentityService.inviteTeamMember
+  // (its BlueprintService and DefaultTriggersService are not called by an invite).
+  const { IdentityService } = await import('../src/modules/identity/identity.service');
+  const identity = new IdentityService(moduleRef.get(PrismaService), {} as never, {} as never);
+  invitedId = (await identity.inviteTeamMember(ID.bizA, EMAIL.invited, 'STAFF', ID.owner)).userId;
 
   await db.staffMember.create({ data: { id: ID.staffA, businessId: ID.bizA, name: 'V95R Sam Staff' } });
 
@@ -371,5 +422,112 @@ describe('SEC-W196-3 (W9-PROJECTS-SERVER, D-87): GET .../task-assignments/option
 
   it('a non-member is refused the list (BusinessGuard)', async () => {
     expect((await get(ID.ownerNoMembership, optionsUrl())).status).toBe(403);
+  });
+});
+
+// ─── Review repairs: the sibling doors (KEY) and the email's local part ──────
+
+const KEY_BUDGET_KEPT = { projectId: ID.projectA, budgetAmount: BUDGET_AMOUNT, budgetHours: 40, trackedHours: 10, percentHoursUsed: 25 };
+
+/** KEY's projects_get_budget through the real dispatcher, for the surface and member `action` names. */
+async function keyBudget(action: Record<string, unknown> | undefined) {
+  const result = await dispatcher.executeToolByName(ID.bizA, 'projects_get_budget', { projectId: ID.projectA }, action);
+  return result.budget;
+}
+
+describe('SEC-W9PS-1 / CR-W9PS-2 (W9-PROJECTS-SERVER repair, D-100 withholding rule): KEY\'s projects_get_budget serves the costs only when the member KEY runs for reads expenses, as the route does', () => {
+  it('SEC-W9PS-1: a member with projects read and expenses none passes the graph-action authority for projects_get_budget, and KEY serves them the budget with the costs withheld (null) on every surface that carries them, as the route does', async () => {
+    const { assertMayRunGraphAction } = await import('../src/modules/ai/graph-actions.controller');
+    await expect(assertMayRunGraphAction(prismaSvc, ID.bizA, { id: ID.staffNoExpenses }, 'projects_get_budget', ID.staffNoExpenses)).resolves.toBeUndefined();
+    const route = (await get(ID.staffNoExpenses, budgetUrl())).body;
+    const cases: Array<Record<string, unknown>> = [
+      { surface: 'GRAPH_ACTION', principalUserId: ID.staffNoExpenses },
+      { surface: 'CHAT', principalUserId: ID.staffNoExpenses },
+      { surface: 'CHAT_STREAM', principalUserId: ID.staffProjectsOnly },
+      { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.staffNoExpenses },
+      { surface: 'PROPOSAL', onBehalfOfUserId: ID.staffProjectsOnly },
+      { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: ID.staffNoExpenses },
+    ];
+    for (const action of cases) {
+      const label = `${String(action.surface)} ${String(action.principalUserId ?? action.onBehalfOfUserId)}`;
+      const budget = await keyBudget(action);
+      expect(budget, label).toMatchObject(KEY_BUDGET_KEPT);
+      for (const field of COST_FIELDS) expect(budget[field], `${label} ${field}`).toBeNull();
+      if (action.principalUserId === ID.staffNoExpenses) expect(budget, label).toEqual(route);
+    }
+  });
+
+  it('SEC-W9PS-1: the OWNER, an ADMIN and a STAFF member who reads expenses are served the costs through KEY, as the route serves them', async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      [ID.owner, { surface: 'CHAT', principalUserId: ID.owner }],
+      [ID.admin, { surface: 'GRAPH_ACTION', principalUserId: ID.admin }],
+      [ID.staffDefault, { surface: 'PROPOSAL', onBehalfOfUserId: ID.staffDefault }],
+    ];
+    for (const [actor, action] of cases) {
+      const budget = await keyBudget(action);
+      expect(budget, actor).toMatchObject({ ...KEY_BUDGET_KEPT, timeCost: TIME_COST, expenseCost: EXPENSE_COST, totalCost: TOTAL_COST, status: 'HEALTHY' });
+      expect(budget, actor).toEqual((await get(actor, budgetUrl())).body);
+    }
+  });
+
+  it('SEC-W9PS-1: a KEY run with no member (an inbound conversation, a caller that declares nothing) reads no costs: it fails closed', async () => {
+    for (const action of [{ surface: 'INBOUND_CONVERSATION' }, { surface: 'PHONE_STREAM' }, undefined]) {
+      const budget = await keyBudget(action);
+      expect(budget, String(action?.surface)).toMatchObject(KEY_BUDGET_KEPT);
+      for (const field of COST_FIELDS) expect(budget[field], `${String(action?.surface)} ${field}`).toBeNull();
+    }
+  });
+
+  it('SEC-W9PS-1: getProjectBudget called with no viewer (a new caller that forgets it) reads no costs: it fails closed', async () => {
+    const budget = await projectsSvc.getProjectBudget(ID.projectA, ID.bizA);
+    expect(budget).toMatchObject(KEY_BUDGET_KEPT);
+    for (const field of COST_FIELDS) expect(budget[field], field).toBeNull();
+  });
+});
+
+describe('SEC-W9PS-2 (W9-PROJECTS-SERVER repair, D-87): the options list does not show a member\'s email local part as their name', () => {
+  const userOption = (body: any[], id: string) => body.find((o) => o.type === 'User' && o.id === id);
+
+  it('SEC-W9PS-2: an invitation not yet accepted (inviteTeamMember stores the email\'s local part as the name) is offered under a neutral label to a STAFF member refused the team list (team: none)', async () => {
+    const invited = await db.user.findUnique({ where: { id: invitedId }, select: { name: true, email: true } });
+    expect(invited).toEqual({ name: LOCAL_PART.invited, email: EMAIL.invited }); // the premise
+    const res = await get(ID.staffNoExpenses, optionsUrl());
+    expect(res.status).toBe(200);
+    expect(userOption(res.body, invitedId)).toEqual({ type: 'User', id: invitedId, name: `Unnamed member (…${invitedId.slice(-4)})` });
+    expect(JSON.stringify(res.body)).not.toContain('jane.private');
+  });
+
+  it('SEC-W9PS-2: a signed-up member whose name is still their email\'s local part (adoption keeps the placeholder\'s name) is offered under a neutral label', async () => {
+    const res = await get(ID.staffDefault, optionsUrl());
+    expect(res.status).toBe(200);
+    expect(userOption(res.body, ID.memberLocalName)).toEqual({ type: 'User', id: ID.memberLocalName, name: 'Unnamed member (…5d1b)' });
+    expect(JSON.stringify(res.body)).not.toContain('lee.private');
+  });
+});
+
+describe('SEC-W9PS-3 (W9-PROJECTS-SERVER repair, D-87): KEY\'s people_workload names members as the options list does, never by their email', () => {
+  it('SEC-W9PS-3: KEY people_workload for a STAFF member with team none names a member with no name, one named by their email and one named by its local part under the neutral label, and carries no email', async () => {
+    const summary = await dispatcher.executeToolByName(ID.bizA, 'people_workload', {}, { surface: 'CHAT', principalUserId: ID.staffNoExpenses });
+    const person = (id: string) => summary.people.find((p: any) => p.assignableType === 'User' && p.assignableId === id);
+    expect(person(ID.memberNoName)?.name).toBe('Unnamed member (…7f3a)');
+    expect(person(ID.memberEmailName)?.name).toBe('Unnamed member (…9c2e)');
+    expect(person(ID.memberLocalName)?.name).toBe('Unnamed member (…5d1b)');
+    expect(person(invitedId)?.name).toBe(`Unnamed member (…${invitedId.slice(-4)})`);
+    expect(person(ID.memberFirstLast)?.name).toBe('Grace Hopper');
+    expect(person(ID.memberNamed)?.name).toBe('V95R Ada Member');
+    const text = JSON.stringify(summary);
+    for (const email of Object.values(EMAIL)) expect(text).not.toContain(email);
+    for (const local of Object.values(LOCAL_PART)) expect(text).not.toContain(local);
+    for (const p of summary.people) expect(p.name).not.toMatch(/@/);
+  });
+
+  it('SEC-W9PS-3: the workload and the options list name every member alike', async () => {
+    const summary = await dispatcher.executeToolByName(ID.bizA, 'people_workload', {}, { surface: 'CHAT', principalUserId: ID.staffNoExpenses });
+    const options = (await get(ID.staffNoExpenses, optionsUrl())).body as Array<{ type: string; id: string; name: string }>;
+    const workloadNames = Object.fromEntries(
+      summary.people.filter((p: any) => p.assignableType === 'User').map((p: any) => [p.assignableId, p.name]),
+    );
+    const optionNames = Object.fromEntries(options.filter((o) => o.type === 'User').map((o) => [o.id, o.name]));
+    expect(workloadNames).toEqual(optionNames);
   });
 });

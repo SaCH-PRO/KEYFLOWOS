@@ -62,6 +62,16 @@ function goalOfBusiness<G extends { businessId: string }>(businessId: string, go
   return goal && goal.businessId === businessId ? goal : null;
 }
 
+/**
+ * W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2; D-100's withholding rule): who a project
+ * budget is read for. `viewerUserId` is the member who will see it (the HTTP caller, or the member KEY
+ * runs for); null when there is none, which reads no costs. Required on getProjectBudget, so a new
+ * caller cannot leave it out and be served every cost.
+ */
+export interface ProjectBudgetViewer {
+  viewerUserId: string | null;
+}
+
 @Injectable()
 export class ProjectsService {
   constructor(
@@ -554,13 +564,18 @@ export class ProjectsService {
    * W9-PROJECTS-SERVER (review SEC-W196-2; D-100's rule that a member without a module's read sees
    * none of its money, the figures worked out from it included): the costs are expense and spend
    * totals, and the project's expense list (GET .../expenses/by-project/:projectId) needs
-   * expenses:read. Given a `viewer` (the HTTP route always passes one), a member who does not read
-   * expenses is served expenseCost, timeCost and totalCost as null, and remainingBudget,
-   * percentUsed and status null too: with budgetAmount they give totalCost back. The budget and the
-   * hours burn are the project's own fields and stay. A viewer with no member id reads no costs.
-   * Internal callers that pass no viewer (KEY's projects_get_budget) are unchanged.
+   * expenses:read. A `viewer` who does not read expenses is served expenseCost, timeCost and
+   * totalCost as null, and remainingBudget, percentUsed and status null too: with budgetAmount they
+   * give totalCost back. The budget and the hours burn are the project's own fields and stay. A
+   * viewer with no member id reads no costs.
+   *
+   * W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2): the viewer is required. KEY's
+   * projects_get_budget used to pass none and was served every cost, so a member with projects read
+   * and no expenses read, whom the route refuses them, read them through KEY. The dispatcher now
+   * passes the member KEY runs for, and a caller that passes no viewer at all (a JavaScript caller,
+   * a test) reads no costs: it fails closed.
    */
-  async getProjectBudget(projectId: string, businessId: string, viewer?: { viewerUserId: string | null }) {
+  async getProjectBudget(projectId: string, businessId: string, viewer: ProjectBudgetViewer) {
     const project = await this.prisma.client.project.findFirst({
       where: { id: projectId, businessId },
       include: {
@@ -576,7 +591,7 @@ export class ProjectsService {
     const trackedHours = project.tasks.reduce((sum, t) => sum + (t.trackedHours ?? 0), 0);
     const percentHoursUsed = budgetHours > 0 ? Math.round((trackedHours / budgetHours) * 100) : 0;
 
-    if (viewer && !(await this.viewerReadsProjectCosts(businessId, viewer.viewerUserId))) {
+    if (!(await this.viewerReadsProjectCosts(businessId, viewer?.viewerUserId ?? null))) {
       // SEC-W196-2: no expense row is read for a member who may not see them.
       return {
         projectId: project.id,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { DollarSign, Clock, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
-import { getProjectBudget, type ProjectBudget } from "@/lib/api/projects";
+import { budgetHasCosts, getProjectBudget, type ProjectBudget } from "@/lib/api/projects";
 import { getCachedBusiness } from "@/lib/workspace";
 import { formatCurrency } from "@/lib/currency";
 
@@ -60,6 +60,11 @@ export function ProjectBudgetView({ businessId, projectId, currency }: { busines
       </div>
     );
   }
+  // W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): the route answers 200
+  // with the costs withheld (null) to a member who does not read expenses. The Revenue tab can still
+  // request it for them (its expense list failed with something other than a 403), so a withheld
+  // budget is the denial state, not a crash on its null status and totals.
+  if (!budgetHasCosts(state.data)) return <BudgetAccessDenied />;
   const data = state.data;
   if (!data.budgetAmount) return (
     <div className="p-8 text-center">

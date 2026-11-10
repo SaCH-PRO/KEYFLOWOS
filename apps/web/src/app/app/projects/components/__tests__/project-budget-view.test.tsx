@@ -195,3 +195,47 @@ describe("a member refused the project's costs is not shown them (SEC-W196-2)", 
   // remainingBudget, percentUsed, status) as null to a member without expenses read, the member the
   // project's expense list refuses, so the Revenue tab above never requests the budget for them.
 });
+
+/**
+ * W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): the budget route answers 200
+ * with the costs withheld (null) to a member who does not read expenses. The view read
+ * `data.status.replace(...)` and crashed ("Cannot read properties of null"), unmounting the whole
+ * Revenue tab, which requests the budget whenever the expense list was not refused with a 403 (a 5xx
+ * or a network failure on that list included). A withheld budget is the denial state.
+ */
+describe("a budget served with its costs withheld is the denial state, not a crash (CR-W9PS-1, D-100)", () => {
+  const WITHHELD = {
+    projectId: PROJECT,
+    budgetAmount: 5000,
+    budgetHours: 40,
+    totalCost: null,
+    timeCost: null,
+    expenseCost: null,
+    trackedHours: 10,
+    remainingBudget: null,
+    percentUsed: null,
+    percentHoursUsed: 25,
+    status: null,
+  };
+
+  it("CR-W9PS-1: ProjectBudgetView given the withheld budget shows the denial state and no amount", async () => {
+    stubApi(() => jsonResponse(200, WITHHELD));
+    const { container } = render(<ProjectBudgetView businessId={BIZ} projectId={PROJECT} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/don.t have access/i);
+    expect(container.textContent).not.toMatch(/TTD|NaN|null/);
+    expect(screen.queryByText(/No budget set/i)).toBeNull();
+  });
+
+  it.each([
+    ["a 500 on the expense list", () => jsonResponse(500, { statusCode: 500, message: "Internal server error" }, "Internal Server Error")],
+    ["a network failure on the expense list", () => { throw new TypeError("Failed to fetch"); }],
+  ])("CR-W9PS-1: the Revenue tab stays mounted and shows the denial when %s leads it to request a withheld budget", async (_case, expenses) => {
+    const api = stubApi(() => jsonResponse(200, WITHHELD), expenses as () => Response);
+    render(<RevenueTab businessId={BIZ} projectId={PROJECT} />);
+    // a network failure is retried with backoff (lib/fetch-with-retry) before the tab gives up on the list
+    expect(await screen.findByText(/don.t have access/i, {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(api.budgetCalls().map((c) => new URL(c.url).pathname)).toContain(BUDGET_PATH);
+    expect(document.body.textContent).not.toMatch(/NaN/);
+    expect(document.body.textContent?.trim().length).toBeGreaterThan(0);
+  }, 15_000);
+});
