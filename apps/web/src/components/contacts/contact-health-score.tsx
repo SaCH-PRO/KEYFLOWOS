@@ -13,7 +13,8 @@ import {
 
 export interface HealthMetrics {
   engagement: number;
-  payment: number;
+  /** Left out for a member without revenue read (W8-MONEY-SIGNALS, D-100; review CR-W8MS-1). */
+  payment?: number;
   responsiveness: number;
   relationship: number;
 }
@@ -38,10 +39,12 @@ const METRIC_CONFIG = [
 ] as const;
 
 export function ContactHealthScore({ metrics, tip }: ContactHealthScoreProps) {
+  // W8-MONEY-SIGNALS (D-100; review CR-W8MS-1): only the metrics served.
+  const served = useMemo(() => METRIC_CONFIG.filter(({ key }) => typeof metrics[key] === "number"), [metrics]);
   const overallScore = useMemo(() => {
-    const values = Object.values(metrics);
-    return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
-  }, [metrics]);
+    if (served.length === 0) return 0;
+    return Math.round(served.reduce((sum, { key }) => sum + (metrics[key] ?? 0), 0) / served.length);
+  }, [metrics, served]);
 
   const healthLevel = useMemo(() => {
     return HEALTH_LEVELS.find((l) => overallScore >= l.min) || HEALTH_LEVELS[HEALTH_LEVELS.length - 1];
@@ -69,8 +72,8 @@ export function ContactHealthScore({ metrics, tip }: ContactHealthScoreProps) {
       </div>
 
       <div className="space-y-3">
-        {METRIC_CONFIG.map(({ key, label, icon: Icon }) => {
-          const value = metrics[key];
+        {served.map(({ key, label, icon: Icon }) => {
+          const value = metrics[key] ?? 0;
           const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
 
           return (

@@ -19,7 +19,8 @@ import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service'
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { DATA_QUALITY_KINDS, type DataQualityKind } from './crm-data-quality.util';
 import { CrmTimelineService } from './crm-timeline.service';
-import { CrmService, type AuditContext } from './crm.service';
+import { CrmService, withoutListMoney, withoutStoredMoney, type AuditContext } from './crm.service';
+import { crmRowCarriesMoney, resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { CrmSavedViewsService } from './crm-saved-views.service';
 import {
   CONTACT_RELATIONSHIP_HEALTH_VALUES,
@@ -56,6 +57,45 @@ import {
   type CrmAccess,
 } from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
+
+type FlowHighlights = Awaited<ReturnType<CrmStatsService['flowHighlights']>>;
+
+/**
+ * W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): GET
+ * .../highlights as a member without revenue read is served it. The payload
+ * (CrmStatsService.flowHighlights, cached for the whole business) is read as
+ * it is and projected here, so the cache never holds the withheld view and an
+ * owner's read never gets it:
+ * - overdueReminders (picked and ranked by the outstanding balance) and
+ *   highPotential (ranked by the lead score with its invoice terms, each card
+ *   carrying that score, the balance and the unpaid count) are empty;
+ * - serviceAffinity keeps its bookings, its revenue figure is 0;
+ * - the 'cold-with-unpaid' segment (its members are the contacts with an
+ *   unpaid invoice) is left out, and every other segment's contacts are
+ *   served as GET contacts serves that member a row (withoutListMoney);
+ * - the timeline drops its invoice rows ('Total <amount> <currency>') and the
+ *   ContactEvent rows of a money type (crmRowCarriesMoney, the feed's rule);
+ * - nextActions drops the unpaid-invoice follow-ups, aiNextActions the
+ *   payment reminders.
+ */
+function withoutHighlightsMoney(payload: FlowHighlights): FlowHighlights {
+  return {
+    ...payload,
+    highlights: {
+      highPotential: [],
+      overdueReminders: [],
+      serviceAffinity: payload.highlights.serviceAffinity.map((service) => ({ ...service, revenue: 0 })),
+    },
+    segments: payload.segments
+      .filter((segment) => segment.key !== 'cold-with-unpaid')
+      .map((segment) => ({ ...segment, contacts: segment.contacts.map((contact) => withoutListMoney(contact)) })),
+    timeline: payload.timeline.filter(
+      (entry) => entry.type !== 'invoice' && !(entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title })),
+    ),
+    nextActions: payload.nextActions.filter((action) => action.trigger !== 'invoice-unpaid'),
+    aiNextActions: payload.aiNextActions.filter((action) => action.type !== 'payment_reminder'),
+  };
+}
 
 /**
  * The PATCH contacts/bulk body. status, relationshipType, priority and favorite
@@ -138,6 +178,38 @@ export class CrmController {
       throw new UnauthorizedException('Authentication required');
     }
     return actorUserId;
+  }
+
+  /**
+   * W8-MONEY-SIGNALS review repairs (owner ruling D-100): whether the session
+   * member reads revenue, by the module rule every W7 money view applies
+   * (resolveTimelineViewer). A request without a member is 401.
+   */
+  private async readsRevenue(businessId: string, req: { user?: { id?: string } } | undefined): Promise<boolean> {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.requireActorUserId(req));
+    return viewer.readable.has('revenue');
+  }
+
+  /**
+   * W8-MONEY-SIGNALS review repairs SEC-W8MS-1 / SEC-W8MS-4 (owner ruling
+   * D-100): CrmStatsService.contactDetail withholds the stored amounts and the
+   * invoice-derived signals from a member without revenue read (V55-13h /
+   * V55-13i) and works out meta with no invoice read, but serves the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice), and the other stored fields worked out from the invoices
+   * (nextBestAction, followUpPriority, conversionProbability,
+   * referralLikelihood, responsivenessScore). For that member the contact is
+   * served as GET contacts serves its row (withoutStoredMoney), its leadScore
+   * the meta.leadScore of the same response. GET contacts/:contactId and the
+   * dossier; the owner and a member with revenue read get the detail as it is.
+   */
+  private async detailFor<D extends Awaited<ReturnType<CrmStatsService['contactDetail']>>>(
+    businessId: string,
+    req: { user?: { id?: string } } | undefined,
+    detail: D,
+  ): Promise<D> {
+    if (!detail?.contact || (await this.readsRevenue(businessId, req))) return detail;
+    return { ...detail, contact: withoutStoredMoney(detail.contact, detail.meta?.leadScore ?? null) };
   }
 
   /**
@@ -586,7 +658,7 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId')
-  getContactDetail(
+  async getContactDetail(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
@@ -598,7 +670,9 @@ export class CrmController {
     if (!actorUserId) {
       throw new UnauthorizedException('Authentication required');
     }
-    return this.crmStats.contactDetail({ businessId, contactId, actorUserId });
+    // W8-MONEY-SIGNALS review repairs SEC-W8MS-1 / SEC-W8MS-4 (D-100): the
+    // stored lead score and invoice-derived fields as the list serves them.
+    return this.detailFor(businessId, req, await this.crmStats.contactDetail({ businessId, contactId, actorUserId }));
   }
 
   // Declared before its contacts/:contactId sibling: Express answers the first
@@ -940,8 +1014,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/segments')
-  segmentSummary(@Param('businessId') businessId: string) {
-    return this.crmStats.segmentSummary({ businessId });
+  async segmentSummary(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    const summary = await this.crmStats.segmentSummary({ businessId });
+    // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): the
+    // unpaid count (contacts with a SENT or OVERDUE invoice) is a money
+    // signal; a member without revenue read is served it as 0, the shape and
+    // every other count kept. Projected after the business-wide cache.
+    return (await this.readsRevenue(businessId, req)) ? summary : { ...summary, unpaid: 0 };
   }
 
   // -- Relationship-health (auto-warn) ----------------------------------
@@ -1057,8 +1136,11 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/highlights')
-  flowHighlights(@Param('businessId') businessId: string) {
-    return this.crmStats.flowHighlights({ businessId });
+  async flowHighlights(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    const payload = await this.crmStats.flowHighlights({ businessId });
+    // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): a member
+    // without revenue read gets no amount and no ranking by money.
+    return (await this.readsRevenue(businessId, req)) ? payload : withoutHighlightsMoney(payload);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1774,16 +1856,19 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/predictive-revenue')
-  getPredictiveRevenue(@Param('businessId') businessId: string) {
-    return this.revenue.getPredictiveRevenue(businessId);
+  getPredictiveRevenue(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-1): read for the session
+    // member, so one without revenue read gets the shape with no figure in it.
+    return this.revenue.getPredictiveRevenue(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/financial-growth')
-  getFinancialGrowth(@Param('businessId') businessId: string) {
-    return this.revenue.getFinancialGrowth(businessId);
+  getFinancialGrowth(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-1): as predictive-revenue.
+    return this.revenue.getFinancialGrowth(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1810,8 +1895,10 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.journey.getContactHealthMetrics(businessId, contactId);
+    const { actorUserId } = await this.assertVisibleContact(businessId, contactId, req);
+    // W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-3): the reading member, so
+    // a member without revenue read gets no payment-health ratio.
+    return this.journey.getContactHealthMetrics(businessId, contactId, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1901,15 +1988,17 @@ export class CrmController {
     // W7-CONTACT-MONEY-VIEWS (V55-13f / V55-13h; D-90 / D-63): every part is
     // read for this member, so one without revenue read gets no money row and no
     // money figure in the contact, meta, timeline, summary or insight.
-    // Not withheld yet (review SEC-W7CMV-3, follow-up): health.payment, the
-    // paid / total invoice ratio, which GET .../health-metrics also serves. It
-    // is a ratio, not an amount; withholding it on both routes needs a value
-    // the web HealthMetrics contract (a number, averaged into the score) accepts.
-    const detail = await this.crmStats.contactDetail({ businessId, contactId, actorUserId });
+    // W8-MONEY-SIGNALS (owner ruling D-100; review SEC-W7CMV-3): so is
+    // health.payment, the paid / total invoice ratio GET .../health-metrics
+    // also serves: it is left out for that member (the web readers average and
+    // draw the metrics served, review repair CR-W8MS-1). Review repairs
+    // SEC-W8MS-1 / SEC-W8MS-4: the contact's stored lead score and
+    // invoice-derived fields as GET contacts/:contactId serves them (detailFor).
+    const detail = await this.detailFor(businessId, req, await this.crmStats.contactDetail({ businessId, contactId, actorUserId }));
     const [story, insight, health] = await Promise.all([
       this.journey.getContactCrossJourney(businessId, contactId, actorUserId),
       this.journey.generateAiInsight(businessId, contactId, actorUserId),
-      this.journey.getContactHealthMetrics(businessId, contactId),
+      this.journey.getContactHealthMetrics(businessId, contactId, actorUserId),
     ]);
     return {
       generatedAt: new Date().toISOString(),

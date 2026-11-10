@@ -5,7 +5,8 @@ import { contactWhereWithId } from './crm.helpers';
 
 type HealthMetrics = {
   engagement: number;
-  payment: number;
+  /** Left out for a member without revenue read (W8-MONEY-SIGNALS, D-100; see getContactHealthMetrics). */
+  payment?: number;
   responsiveness: number;
   relationship: number;
 };
@@ -113,13 +114,9 @@ export class CrmJourneyService {
    * fail-open. A caller that names no member gets full disclosure, so it is
    * correct only for a caller that serves no member. The crm.controller.ts
    * routes this packet changed name their member (journey, cross-journey,
-   * story, dossier). Not every member route does yet: GET .../ai-insight
-   * (crm-ai.controller.ts) serves a member with crm read and calls
-   * generateAiInsight with no member, so that member still gets the payment
-   * sentence and the 'high-value' tag. That route is outside this packet's
-   * write set; passing the member from it, and making the no-member default
-   * explicit (a required system sentinel, so a route that forgets the member
-   * fails closed), is a follow-up.
+   * story, dossier). W8-MONEY-SIGNALS (D-100; SEC-W7CMV-2): so do GET
+   * .../ai-insight and .../health-metrics, and the ai-insight route refuses a
+   * request without a member (401) rather than call this with none.
    */
   private async viewerOf(businessId: string, viewerUserId?: string | null): Promise<TimelineViewer | null> {
     return viewerUserId ? resolveTimelineViewer(this.prisma, businessId, viewerUserId) : null;
@@ -152,41 +149,61 @@ export class CrmJourneyService {
     return page.map((row) => row.event);
   }
 
-  async getContactHealthMetrics(businessId: string, contactId: string): Promise<HealthMetrics> {
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-3): `viewerUserId` is the
+   * reading member (GET .../health-metrics and the dossier's health). For one
+   * without revenue read the payment-health ratio (the contact's paid / total
+   * invoices) is withheld, as amounts are (D-63, D-90): the contact's invoices
+   * are not read and the `payment` entry is left out, so no figure stands in
+   * for it (a 0 would read as a contact who never pays); the other three
+   * metrics are served as before. With no viewer (system context), the owner
+   * and a member with revenue read, every metric, as before.
+   */
+  async getContactHealthMetrics(businessId: string, contactId: string, viewerUserId?: string | null): Promise<HealthMetrics> {
     await this.assertContact(businessId, contactId);
+    const readsRevenue = this.readsRevenue(await this.viewerOf(businessId, viewerUserId));
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const [contact, recentEvents, paidInvoices, totalInvoices, recentNotes] = await Promise.all([
+    const [contact, recentEvents, invoiceCounts, recentNotes] = await Promise.all([
       this.db.contact.findFirst({
         where: contactWhereWithId(businessId, contactId),
       }),
       this.db.contactEvent.count({
         where: { businessId, contactId, createdAt: { gte: thirtyDaysAgo } },
       }),
-      this.db.invoice.count({
-        where: { businessId, contactId, status: 'PAID' },
-      }),
-      this.db.invoice.count({
-        where: { businessId, contactId },
-      }),
+      readsRevenue
+        ? Promise.all([
+            this.db.invoice.count({
+              where: { businessId, contactId, status: 'PAID' },
+            }),
+            this.db.invoice.count({
+              where: { businessId, contactId },
+            }),
+          ])
+        : null,
       this.db.contactNote.count({
         where: { businessId, contactId, createdAt: { gte: thirtyDaysAgo } },
       }),
     ]);
 
     const engagement = Math.min(100, recentEvents * 10 + recentNotes * 5);
-    const payment = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 100;
     const responsiveness = Math.min(100, 50 + recentEvents * 5);
     const relationship = contact?.updatedAt && (now.getTime() - new Date(contact.updatedAt).getTime()) < 14 * 24 * 60 * 60 * 1000
       ? 80
       : 50;
 
+    const clamp = (value: number) => Math.max(0, Math.min(100, value));
+    if (!invoiceCounts) {
+      return { engagement: clamp(engagement), responsiveness: clamp(responsiveness), relationship: clamp(relationship) };
+    }
+    const [paidInvoices, totalInvoices] = invoiceCounts;
+    const payment = totalInvoices > 0 ? Math.round((paidInvoices / totalInvoices) * 100) : 100;
     return {
-      engagement: Math.max(0, Math.min(100, engagement)),
-      payment: Math.max(0, Math.min(100, payment)),
-      responsiveness: Math.max(0, Math.min(100, responsiveness)),
-      relationship: Math.max(0, Math.min(100, relationship)),
+      engagement: clamp(engagement),
+      payment: clamp(payment),
+      responsiveness: clamp(responsiveness),
+      relationship: clamp(relationship),
     };
   }
 
@@ -631,12 +648,10 @@ export class CrmJourneyService {
    * Review repair SEC-W7CMV-2 / CR-W7CMV-1: GET .../ai-insight
    * (crm-ai.controller.ts) is NOT a system context. It is a member's HTTP read
    * (crm read plus the ai_tools flag, behind assertContactVisible), and the web
-   * contact page calls it. It calls this method with no member, so a member
-   * without revenue read still gets the payment sentence with its amount and
-   * the 'high-value' tag there. That route is outside this packet's write set
-   * and is a follow-up. So is GET .../insight-card on the same controller
-   * (ContactInsightService.getSnapshot), which serves lifetimeValue,
-   * openDeals.value and 'Lifetime value of TTD <amount>' on crm read alone.
+   * contact page calls it. W8-MONEY-SIGNALS (owner ruling D-100): it passes
+   * the session member, so that member gets no payment sentence or
+   * 'high-value' tag there either; GET .../insight-card serves that member the
+   * money-free card (ContactInsightService.getSnapshot).
    */
   async generateAiInsight(businessId: string, contactId: string, viewerUserId?: string | null): Promise<AiInsight> {
     const readsRevenue = this.readsRevenue(await this.viewerOf(businessId, viewerUserId));

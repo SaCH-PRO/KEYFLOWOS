@@ -140,7 +140,8 @@
  *         view and the token pay page remaining 50, the token view amountDue 50 (base: 404 /
  *         not_found). Another business's APPLIED note and payment row on it move nothing (D-75).
  *         The token money routes behind payLinkInvoice (status poll, gateways, checkout) stay
- *         closed 404: their readers are credit-unaware and outside the write set (it.todo below)
+ *         closed 404: their readers are credit-unaware and outside the write set (an it.todo
+ *         then, live since W5-CREDIT-AWARE-PAY, below; W8-HOUSEKEEPING)
  *   CN-33 RED-BEFORE the token offline intent is accepted on it and capped at the 50 net of
  *         credits (INTENT_PAYABLE_STATUSES); no status move, no posting
  *   CN-34 RED-BEFORE mark-paid records exactly the 50 the credits leave owing (one SUCCESSFUL
@@ -833,8 +834,13 @@ describe('statuses owned by the workflow', () => {
 /**
  * V1-44 review repairs. The packet made apply reach the ledger, which turned
  * five latent gaps into live ones; these pin the repairs inside the write set
- * (credit-note.service.ts, invoice-workflow.service.ts) and keep the halves
- * outside it as it.todo.
+ * (credit-note.service.ts, invoice-workflow.service.ts) and kept the halves
+ * outside it as it.todo; none is left in this file. Of its four todos,
+ * V1-44b-CREDIT-NOTE-ROUTES-AND-INTAKE closed three: SEC-V44-1 route half
+ * (CN-17), SEC-V44-5 route half (CN-18) and SEC-V44-3 (CN-19), in the V1-44b
+ * describe below; CR-V44-1 (reader half) went to W4-CREDIT-AWARE-READERS
+ * (CN-32..CN-35), which left its rest to W5-CREDIT-AWARE-PAY (CAP-*)
+ * (W8-HOUSEKEEPING).
  */
 describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, collecting what a credit leaves owing', () => {
   it('CN-13 SEC-V44-1 / SEC-V44-4: apply needs a member with revenue:write; revenue:read, revenue:none, placeholders, no actor and a non-member are refused 403 and nothing is written', async () => {

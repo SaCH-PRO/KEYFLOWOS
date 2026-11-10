@@ -490,10 +490,16 @@ export class IdentityService {
     // The row is locked first (FOR NO KEY UPDATE: the lock GmailService takes on
     // it, and the one the UPDATE takes anyway), then read and written in the
     // same transaction, so a concurrent writer's UPDATE waits for this one and
-    // this read sees every write committed before it. A writer that reads
-    // without the lock and writes its whole copy back afterwards (the public
-    // storefront event among them) can still undo this write; that fix belongs
-    // to those writers (it.todo SEC2c-C03).
+    // this read sees every write committed before it. A writer that read
+    // without the lock and wrote its whole copy back afterwards (the public
+    // storefront event among them) could still undo this write; that fix
+    // belonged to those writers, and FOLLOW3-D12-METADATA-LOCKED-WRITES made it:
+    // each takes this lock first (lockBusinessMeta, core/prisma/business-meta.ts)
+    // or writes one atomic statement, the census in
+    // core/prisma/business-meta-writers.spec.ts names one that does neither, and
+    // the storefront event is the live case SEC2c-C03 in
+    // test/payment-secrets-write-only.integration.test.ts (W8-HOUSEKEEPING: this
+    // comment called it an it.todo).
     const { oldBusiness: previous, result } = await this.prisma.client.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`;
       const oldBusiness = await tx.business.findUnique({ where: { id: businessId } });
@@ -1258,10 +1264,11 @@ export class IdentityService {
         // placeholder, and every rule writer records the authenticated member as the creator, so through
         // the API these match no row today; they keep this re-key complete. A real account moves to a new
         // subject only by the manual operator step in docs/auth-pathway.md ("Fixed by R0-SEC-01", step 4),
-        // which has to run these same two statements with the old and the new id, or that member's rules
-        // keep the deleted id: their plans fail on the user foreign key and the member gets 403
-        // AGENT_TRIGGER_CREATOR_ONLY on their own rule (it.todo RK-03 in
-        // test/identity-rekey-creator.integration.test.ts until that step names them).
+        // which runs these same two statements with the old and the new id; without them that member's
+        // rules keep the deleted id: their plans fail on the user foreign key and the member gets 403
+        // AGENT_TRIGGER_CREATOR_ONLY on their own rule. Since W7-AUTH-DOCS-REKEY (D-73) the step names
+        // them, and the live case RK-03 in test/identity-rekey-creator.integration.test.ts runs them as
+        // written (W8-HOUSEKEEPING: this comment called RK-03 an it.todo).
         await tx.$executeRaw`UPDATE agent_triggers
           SET condition = jsonb_set(condition, ARRAY[${TRIGGER_CREATOR_KEY}::text], to_jsonb(${newId}::text))
           WHERE condition ->> ${TRIGGER_CREATOR_KEY}::text = ${oldId}::text`;

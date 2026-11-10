@@ -778,6 +778,11 @@
       "packet": "V1-94 (W8-GOOGLE-CONSENT-OWNER)"
     },
     {
+      "prefix": "v94e_",
+      "owner": "apps/server/test/money-signals.integration.test.ts",
+      "packet": "V1-94 (W8-MONEY-SIGNALS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

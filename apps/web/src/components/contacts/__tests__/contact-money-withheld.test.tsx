@@ -12,6 +12,14 @@
  * renders, prints no amount, and the client's schemas accept every body (a
  * schema miss would only be logged, so the cases watch that log).
  *
+ * W8-MONEY-SIGNALS (owner ruling D-100; review repairs CR-W8MS-1 / CR-W8MS-2):
+ * the dossier's health and GET .../health-metrics carry no `payment` entry
+ * for that member (apps/server/test/money-signals.integration.test.ts asserts
+ * the key is absent), so the bodies below leave it out as the server does; the
+ * client accepts the body without a schema miss, and the Timeline tab and the
+ * AI insights page average and draw the three metrics served (no Payment tile
+ * or row, the Health average over three, not four).
+ *
  * The contact screen is mounted the way Next mounts it (the [contactId] layout
  * with the overview page) on the real ContactDetailProvider and client; only
  * `fetch` and the Next router hooks are stubbed. The Timeline tab panel (which
@@ -24,12 +32,14 @@ import type { ReactNode } from "react";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import ContactDetailLayout from "@/app/app/crm/contacts/[contactId]/layout";
 import ContactOverviewPage from "@/app/app/crm/contacts/[contactId]/overview/page";
+import ContactAiInsightsPage from "@/app/app/crm/contacts/[contactId]/ai-insights/page";
 import { TimelineTabPanel } from "../timeline-tab-panel";
 import type { ContactDetailData } from "../contact-detail";
 import {
   fetchContactCrossJourney,
   fetchContactDetail,
   fetchContactDossier,
+  fetchContactHealthMetrics,
   type CrossJourneyResponse,
   type ContactDetail,
 } from "@/lib/client";
@@ -128,7 +138,8 @@ const WITHHELD_DOSSIER = {
   notes: WITHHELD_DETAIL.notes,
   tasks: [],
   meta: WITHHELD_DETAIL.meta,
-  health: { engagement: 30, payment: 33, responsiveness: 60, relationship: 80 },
+  // D-100 (CR-W8MS-2): no payment entry for that member, as the server serves it.
+  health: { engagement: 30, responsiveness: 60, relationship: 80 },
   insight: {
     summary: "Ada is a client with 4 interactions and 1 notes.",
     nextBestAction: "Check in to ensure satisfaction and explore upsell opportunities",
@@ -163,6 +174,7 @@ function stubReads() {
     if (pathname.endsWith(`/crm/businesses/${BUSINESS}/contacts/c_1`)) return jsonResponse(200, WITHHELD_DETAIL);
     if (pathname.endsWith(`/crm/businesses/${BUSINESS}/contacts/c_1/cross-journey`)) return jsonResponse(200, WITHHELD_JOURNEY);
     if (pathname.endsWith(`/crm/businesses/${BUSINESS}/contacts/c_1/dossier`)) return jsonResponse(200, WITHHELD_DOSSIER);
+    if (pathname.endsWith(`/crm/businesses/${BUSINESS}/contacts/c_1/health-metrics`)) return jsonResponse(200, WITHHELD_DOSSIER.health);
     return jsonResponse(404, { message: "Not stubbed" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -206,6 +218,11 @@ describe("contact detail and dossier with money withheld (W7-CONTACT-MONEY-VIEWS
     const dossier = await fetchContactDossier("c_1", BUSINESS);
     expect(dossier.error).toBeNull();
     expect((dossier.data as typeof WITHHELD_DOSSIER).insight.summary).not.toMatch(/payment/i);
+    expect((dossier.data as typeof WITHHELD_DOSSIER).health).not.toHaveProperty("payment");
+    // D-100 (CR-W8MS-1 / CR-W8MS-2): GET .../health-metrics serves that member the same health, no payment entry.
+    const health = await fetchContactHealthMetrics("c_1", BUSINESS);
+    expect(health.error).toBeNull();
+    expect(health.data).toEqual(WITHHELD_DOSSIER.health);
     expect(schemaMisses(errorSpy)).toEqual([]);
   });
 
@@ -277,5 +294,56 @@ describe("contact detail and dossier with money withheld (W7-CONTACT-MONEY-VIEWS
     fireEvent.click(screen.getByRole("button", { name: "Expand timeline" }));
     expect(document.body.textContent ?? "").toMatch(MONEY_TEXT);
     expect(screen.getByText("Revenue").parentElement?.parentElement?.textContent ?? "").not.toContain("—");
+  });
+
+  /** The Health chip of the Timeline tab's summary row, as it reads. */
+  const healthChip = () => screen.getByText("Health").parentElement?.parentElement?.textContent ?? "";
+
+  it("D-100 web (W8-MONEY-SIGNALS review CR-W8MS-1): GET .../health-metrics without the payment entry is accepted as it is (no schema miss), and the Timeline tab averages and draws the three metrics served, compact and expanded: Health 80% for 80 / 80 / 80, no Payment tile, no '%' without a value", async () => {
+    const body = { engagement: 80, responsiveness: 80, relationship: 80 };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, body)));
+    const res = await fetchContactHealthMetrics("c_1", BUSINESS);
+    expect(res.error).toBeNull();
+    expect(res.data).toEqual(body);
+    expect(schemaMisses(errorSpy)).toEqual([]);
+
+    render(
+      <TimelineTabPanel
+        contact={WITHHELD_DETAIL.contact as unknown as ContactDetailData}
+        events={WITHHELD_DETAIL.events as ContactDetail["events"]}
+        healthMetrics={res.data}
+      />,
+    );
+    for (const view of ["compact", "expanded"]) {
+      expect(healthChip(), view).toBe("Health80%");
+      expect(screen.queryByText("Payment"), view).not.toBeInTheDocument();
+      expect(screen.getByText("Response"), view).toBeInTheDocument();
+      expect(document.body.textContent ?? "", view).not.toMatch(/[^0-9]%/);
+      if (view === "compact") fireEvent.click(screen.getByRole("button", { name: "Expand timeline" }));
+    }
+  });
+
+  it("control (CR-W8MS-1): with the payment entry (the owner's body) the Timeline tab draws the Payment tile and averages all four metrics", () => {
+    render(
+      <TimelineTabPanel
+        contact={WITHHELD_DETAIL.contact as unknown as ContactDetailData}
+        events={WITHHELD_DETAIL.events as ContactDetail["events"]}
+        healthMetrics={{ engagement: 80, payment: 40, responsiveness: 80, relationship: 80 }}
+      />,
+    );
+    expect(healthChip()).toBe("Health70%");
+    expect(screen.getByText("Payment").parentElement?.textContent).toContain("40%");
+  });
+
+  it("D-100 web (W8-MONEY-SIGNALS review CR-W8MS-1): the AI insights page draws the three health metrics served and no Payment row (no 'Payment /100')", async () => {
+    stubReads();
+    render(<ContactAiInsightsPage />);
+    expect(await screen.findByText("Health Metrics")).toBeInTheDocument();
+    for (const label of ["Engagement", "Responsiveness", "Relationship"]) {
+      expect(screen.getByText(label), label).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Payment")).not.toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/\D\/100/);
+    expect(schemaMisses(errorSpy)).toEqual([]);
   });
 });

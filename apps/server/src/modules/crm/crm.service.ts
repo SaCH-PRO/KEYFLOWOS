@@ -20,6 +20,7 @@ import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -173,6 +174,91 @@ const LIFECYCLE_SOURCE = 'lifecycle-automation';
 const LIFECYCLE_FOLLOW_UP_TITLE = 'Post-payment customer check-in & follow-up';
 const LIFECYCLE_FOLLOW_UP_DUE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): the stored Contact
+ * riskFlags / opportunities entries derived from the contact's invoices and
+ * quotes (revenue rows, D-63), which GET contacts/:contactId already withholds
+ * from a member without revenue read (CrmStatsService.contactDetail,
+ * REVENUE_RISK_FLAGS / REVENUE_OPPORTUNITIES in crm-stats.service.ts,
+ * SEC-W7CMV-3). The list withholds the same entries;
+ * test/money-signals.integration.test.ts pins the two reads to agree.
+ */
+const LIST_REVENUE_RISK_FLAGS: ReadonlySet<string> = new Set(['unpaid_invoices', 'poor_payment_history', 'declining_engagement']);
+const LIST_REVENUE_OPPORTUNITIES: ReadonlySet<string> = new Set(['pending_quotes', 'upsell_ready']);
+
+/** A stored riskFlags / opportunities list without the `revenue` entries; any other stored value as it is. */
+function withoutRevenueEntries(value: Prisma.JsonValue | null, revenue: ReadonlySet<string>): Prisma.JsonValue | null {
+  return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
+}
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100): a stored Contact row as a member
+ * without revenue read is served it. Every stored field worked out from the
+ * contact's invoices or quotes is withheld:
+ * - CR-W7CMV-2 (GET contacts/:contactId's rule, V55-13h / V55-13i): the stored
+ *   amounts (lifetimeValue, averageSpend) and the paid / total invoice score
+ *   (paymentReliability) null, riskFlags / opportunities without their revenue
+ *   entries;
+ * - review repair SEC-W8MS-1: the stored leadScore, which carries the invoice
+ *   terms (CrmStatsService.attachContactStats writes +10 a paid and -5 an
+ *   unpaid invoice; ContactInsightService.computeContactIntelligenceFields
+ *   scores the paid total), is `moneyFreeLeadScore`: the score worked out with
+ *   no invoice read (meta.leadScore of the same response), or null where the
+ *   response has none, so `leadScore - meta.leadScore` gives nothing back;
+ * - review repair SEC-W8MS-4: the other fields computeContactIntelligenceFields
+ *   works out from the invoices (nextBestAction 'Send invoice reminder' and
+ *   followUpPriority 'URGENT' for an unpaid invoice, conversionProbability its
+ *   lead score, referralLikelihood and responsivenessScore with paid-total and
+ *   paid-invoice terms) null.
+ * Every other stored field is served as it is.
+ */
+export function withoutStoredMoney<T extends Contact>(contact: T, moneyFreeLeadScore: number | null): T {
+  return {
+    ...contact,
+    lifetimeValue: null,
+    averageSpend: null,
+    paymentReliability: null,
+    riskFlags: withoutRevenueEntries(contact.riskFlags, LIST_REVENUE_RISK_FLAGS),
+    opportunities: withoutRevenueEntries(contact.opportunities, LIST_REVENUE_OPPORTUNITIES),
+    leadScore: moneyFreeLeadScore,
+    conversionProbability: null,
+    nextBestAction: null,
+    followUpPriority: null,
+    referralLikelihood: null,
+    responsivenessScore: null,
+  };
+}
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): a GET contacts row as a
+ * member without revenue read is served it: the stored fields as
+ * withoutStoredMoney serves them, and, with includeStats, meta's invoice
+ * figures 0 (null for the oldest unpaid due date) and its lead score without
+ * the invoice terms (+10 a paid, -5 an unpaid invoice), as the detail's meta
+ * is worked out with no invoice read; the row's leadScore is that score
+ * (review repair SEC-W8MS-1), null without includeStats. Deal figures (open
+ * deals, top open deal) are CRM pipeline rows the deal routes serve on crm
+ * read and stay. Also the rows of GET .../highlights' segments (SEC-W8MS-3,
+ * crm.controller.ts).
+ */
+export function withoutListMoney(contact: ContactWithStats): ContactWithStats {
+  const meta: ContactMeta | undefined = contact.meta
+    ? {
+        ...contact.meta,
+        leadScore: contact.meta.leadScore - contact.meta.paidInvoices * 10 + contact.meta.unpaidInvoices * 5,
+        outstandingBalance: 0,
+        unpaidInvoices: 0,
+        paidInvoices: 0,
+        oldestUnpaidInvoiceDueAt: null,
+        totalRevenue: 0,
+        invoiceCount: 0,
+      }
+    : undefined;
+  const served = withoutStoredMoney(contact, meta ? meta.leadScore : null);
+  if (meta) served.meta = meta;
+  return served;
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -285,12 +371,44 @@ export class CrmService {
     return contact;
   }
 
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): for a member without
+   * revenue read (`actorUserId` whose module scopes do not read revenue, the
+   * rule resolveTimelineViewer applies to every W7 money view) the revenue
+   * sort (sortBy 'revenue', either sortOrder) and the revenue filters
+   * (minRevenue, hasUnpaidInvoices) are ignored: the list keeps the order,
+   * membership and cursor paging it has without them, so neither tells that
+   * member who pays or who owes. Review repair SEC-W8MS-2 (D-100): so is the
+   * score sort (sortBy 'score', either sortOrder): it orders by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice), so its order ranks the same thing. Its rows carry no revenue
+   * field (withoutListMoney). The owner, a member with revenue read and a
+   * caller that names no actor (KEY, internal jobs) are served as before.
+   */
   async listContacts(input: ContactListOptions) {
     let access: CrmAccess | null = null;
     if (input.actorUserId) {
       access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
     }
+    const visClause = access && input.actorUserId ? visibilityClause(access, input.actorUserId) : null;
+    const readsRevenue = !input.actorUserId
+      || (await resolveTimelineViewer(this.prisma, input.businessId, input.actorUserId)).readable.has('revenue');
+    if (!readsRevenue) {
+      const moneySort = input.sortBy === 'revenue' || input.sortBy === 'score';
+      const { contacts, ...page } = await this.listContactRows({
+        ...input,
+        minRevenue: undefined,
+        hasUnpaidInvoices: undefined,
+        sortBy: moneySort ? undefined : input.sortBy,
+        sortOrder: moneySort ? undefined : input.sortOrder,
+      }, visClause);
+      return { ...page, contacts: (contacts as ContactWithStats[]).map((contact) => withoutListMoney(contact)) };
+    }
+    return this.listContactRows(input, visClause);
+  }
 
+  /** The list as listContacts reads it; `visClause` is the actor's CRM visibility clause (none: tenant only). */
+  private async listContactRows(input: ContactListOptions, visClause: ReturnType<typeof visibilityClause> | null) {
     const ownerFilter = input.ownedByActor && input.actorUserId
       ? input.actorUserId
       : input.ownerId;
@@ -365,11 +483,8 @@ export class CrmService {
       }
     }
 
-    if (access && input.actorUserId) {
-      const visClause = visibilityClause(access, input.actorUserId);
-      if (visClause) {
-        where.AND = [...(where.AND ?? []), visClause];
-      }
+    if (visClause) {
+      where.AND = [...(where.AND ?? []), visClause];
     }
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);

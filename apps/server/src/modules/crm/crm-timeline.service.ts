@@ -197,12 +197,14 @@ export class CrmTimelineService {
    * included, on crm read alone. A read that names no member is refused: there
    * is no one to judge the events for.
    *
-   * This route only. The contact's sibling reads still serve the same events
-   * and amounts on crm read without this filter (review SEC-W6CEM-1,
-   * SEC-W6CEM-2, CR-W6CEM-1; it.todo V55-13f..h in
-   * test/evidence-feed.integration.test.ts): CrmStatsService.contactDetail,
-   * CrmJourneyService.getContactCrossJourney / getContactJourney and
-   * CrmRevenueService.getContactRevenueSummary.
+   * W6-CONTACT-EVENTS-MONEY covered this route only. The contact's sibling
+   * reads (CrmStatsService.contactDetail, CrmJourneyService
+   * .getContactCrossJourney / getContactJourney and CrmRevenueService
+   * .getContactRevenueSummary; review SEC-W6CEM-1, SEC-W6CEM-2, CR-W6CEM-1)
+   * withhold the same money events and figures from a member without revenue
+   * read since W7-CONTACT-MONEY-VIEWS (D-90, D-63): the live cases V55-13f..h
+   * in test/evidence-feed.integration.test.ts (W8-HOUSEKEEPING: this comment
+   * called them an it.todo and said those reads still served them).
    */
   async listContactEvents(params: { businessId: string; contactId: string; limit?: number; viewerUserId?: string | null }) {
     await this.assertContact(params.businessId, params.contactId);

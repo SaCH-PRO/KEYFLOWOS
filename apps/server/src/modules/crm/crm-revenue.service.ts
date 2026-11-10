@@ -353,18 +353,47 @@ export class CrmRevenueService {
     return found.filter((row) => !isRefundRow(row));
   }
 
+  /** The six month labels getFinancialGrowth buckets by, oldest first, labelled as it labels them. */
+  private monthBuckets(now: Date): string[] {
+    const labels: string[] = [];
+    for (let i = 5; i >= 0; i--) {
+      labels.push(new Date(now.getFullYear(), now.getMonth() - i, 1).toLocaleDateString('en-TT', { month: 'short', year: '2-digit' }));
+    }
+    return labels;
+  }
+
   /**
-   * Not under W7-CONTACT-MONEY-VIEWS (review SEC-W7CMV-1, follow-up; it needs
-   * an owner ruling): this and getFinancialGrowth read the business's quotes,
-   * invoices and payments with no member. Their routes, GET
-   * /crm/businesses/:b/predictive-revenue and .../financial-growth
-   * (crm.controller.ts, RequireModuleScope('crm', 'read') only), serve the
-   * business-wide collected, invoiced, pipeline and average-client figures to
-   * a member with crm read and revenue 'none'. That is the member the
-   * contact-scoped reads above withhold one contact's figures from under D-90
-   * / D-63. Those handlers are outside this packet's write set.
+   * Whether `viewerUserId` reads revenue rows (W8-MONEY-SIGNALS, D-100); a
+   * caller that names no member (system context) does, as
+   * getContactRevenueSummary reads it.
    */
-  async getPredictiveRevenue(businessId: string): Promise<RevenueData> {
+  private async viewerReadsRevenue(businessId: string, viewerUserId?: string | null): Promise<boolean> {
+    return !viewerUserId || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
+  }
+
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; review SEC-W7CMV-1, was a W7
+   * follow-up): this and getFinancialGrowth read the business's quotes,
+   * invoices and payments. Their routes, GET
+   * /crm/businesses/:b/predictive-revenue and .../financial-growth
+   * (crm.controller.ts, RequireModuleScope('crm', 'read')), served the
+   * business-wide collected, invoiced, pipeline and average-client figures to
+   * a member with crm read and revenue 'none'. They now pass the reading
+   * member (`viewerUserId`), and one without revenue read gets the response's
+   * shape with every figure 0: no quote, invoice or payment row is read. With
+   * no viewer (system context), the owner and a member with revenue read,
+   * every figure, as before.
+   */
+  async getPredictiveRevenue(businessId: string, viewerUserId?: string | null): Promise<RevenueData> {
+    if (!(await this.viewerReadsRevenue(businessId, viewerUserId))) {
+      return {
+        fromActivePipeline: 0,
+        fromRecurringClients: 0,
+        fromColdLeads: 0,
+        expiringQuotes: { count: 0, value: 0 },
+        overdueInvoices: { count: 0, value: 0 },
+      };
+    }
     const now = new Date();
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
@@ -414,9 +443,33 @@ export class CrmRevenueService {
     };
   }
 
-  async getFinancialGrowth(businessId: string): Promise<FinancialGrowthData> {
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; SEC-W7CMV-1): see
+   * getPredictiveRevenue. For a member without revenue read the six months are
+   * served with nothing collected or invoiced, every money figure (totals,
+   * collection rate, average client value, growth, days to payment, revenue at
+   * risk) is 0 and topServices is empty (it ranks services by revenue); no
+   * invoice, quote or booking row is read. clientCount, a count of CLIENT
+   * contacts (CRM rows, no amount), is kept.
+   */
+  async getFinancialGrowth(businessId: string, viewerUserId?: string | null): Promise<FinancialGrowthData> {
     const now = new Date();
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    if (!(await this.viewerReadsRevenue(businessId, viewerUserId))) {
+      const clientCount = await this.db.contact.count({ where: { ...contactWhereBase(businessId), status: 'CLIENT' } });
+      return {
+        monthlyRevenue: this.monthBuckets(now).map((month) => ({ month, collected: 0, invoiced: 0 })),
+        totalCollected: 0,
+        totalInvoiced: 0,
+        collectionRate: 0,
+        avgClientValue: 0,
+        clientCount,
+        revenueGrowthPct: 0,
+        avgDaysToPayment: 0,
+        topServices: [],
+        revenueAtRisk: 0,
+      };
+    }
 
     const [allInvoices, clients, bookingsWithService, overdueInvoices, expiringQuotes] = await Promise.all([
       this.db.invoice.findMany({

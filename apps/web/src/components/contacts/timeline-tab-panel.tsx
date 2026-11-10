@@ -524,7 +524,16 @@ export function TimelineTabPanel({
   const engagementColor = summary.engagementLevel === "high" ? "text-[hsl(var(--kf-success))]" : summary.engagementLevel === "medium" ? "text-[hsl(var(--kf-warning))]" : "text-[hsl(var(--kf-error))]";
   const engagementLabel = summary.engagementLevel === "high" ? "High" : summary.engagementLevel === "medium" ? "Medium" : "Low";
 
-  const healthAvg = healthMetrics ? Math.round(Object.values(healthMetrics).reduce((s, v) => s + v, 0) / 4) : null;
+  // W8-MONEY-SIGNALS (owner ruling D-100; review CR-W8MS-1): the metrics the
+  // server served. A member without revenue read is served no payment entry,
+  // so the average and the tiles use the metrics present.
+  const servedHealthMetrics = healthMetrics
+    ? HEALTH_METRICS_CONFIG.filter(({ key }) => typeof healthMetrics[key] === "number")
+    : [];
+  const healthAvg = healthMetrics && servedHealthMetrics.length > 0
+    ? Math.round(servedHealthMetrics.reduce((s, { key }) => s + (healthMetrics[key] ?? 0), 0) / servedHealthMetrics.length)
+    : null;
+  const healthGridCols = servedHealthMetrics.length === 3 ? "grid-cols-3" : "grid-cols-4";
 
   if (entries.length === 0 && !healthMetrics && !aiInsight && !conversationContext) {
     return (
@@ -763,9 +772,9 @@ export function TimelineTabPanel({
 
         {healthMetrics && (
           <div className="rounded-xl bg-muted/30 border border-border/50 p-2.5">
-            <div className="grid grid-cols-4 gap-2">
-              {HEALTH_METRICS_CONFIG.map(({ key, label, icon: Icon }) => {
-                const value = healthMetrics[key];
+            <div className={`grid ${healthGridCols} gap-2`}>
+              {servedHealthMetrics.map(({ key, label, icon: Icon }) => {
+                const value = healthMetrics[key] ?? 0;
                 const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
                 return (
                   <div key={key} className="space-y-0.5">
@@ -850,9 +859,9 @@ export function TimelineTabPanel({
 
       {healthMetrics && (
         <div className="rounded-xl bg-muted/30 border border-border/50 p-2.5">
-          <div className="grid grid-cols-4 gap-2">
-            {HEALTH_METRICS_CONFIG.map(({ key, label, icon: Icon }) => {
-              const value = healthMetrics[key];
+          <div className={`grid ${healthGridCols} gap-2`}>
+            {servedHealthMetrics.map(({ key, label, icon: Icon }) => {
+              const value = healthMetrics[key] ?? 0;
               const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
               return (
                 <div key={key} className="space-y-0.5">
