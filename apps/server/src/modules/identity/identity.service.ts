@@ -16,6 +16,7 @@ import {
   rankOf,
 } from '../../core/authority/module-vocabulary';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import { draftPayloadFollowingBusinessSlug } from '../site/presence/presence.service';
 import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
 
 /**
@@ -583,6 +584,30 @@ export class IdentityService {
         where: { id: businessId },
         data,
       });
+
+      // W7-SLUG-PRESENCE-DRAFT (owner ruling D-11, review CR-1): a presence
+      // draft saved before this PATCH still carries an older slug, and the
+      // owner's next presence publish copies the draft's slug onto
+      // Business.slug, which put the replaced address back. When the PATCH
+      // moves the slug, the draft's slug follows it in this transaction (a
+      // draft with no slug stays without one; see
+      // draftPayloadFollowingBusinessSlug). A PATCH that keeps the slug leaves
+      // the draft untouched.
+      // Repair SEC-W7SPD-1: the draft row is locked (FOR UPDATE) before it is
+      // read, so no draft write lands between this read and the write below;
+      // PresenceService.saveDraft also takes FOR SHARE on the business row this
+      // transaction holds FOR NO KEY UPDATE, so a member's save waits for the
+      // PATCH (and the PATCH for a save already in flight) instead of putting
+      // the replaced slug back or being overwritten by the older draft.
+      // Repair SEC-W7SPD-2 / CRR-1: the draft remembers the replaced slugs
+      // (the draft's and oldBusiness.slug), so a non-owner's editor still
+      // sending one of them keeps saving content.
+      if (typeof data.slug === 'string' && data.slug !== oldBusiness.slug) {
+        await tx.$queryRaw`SELECT id FROM site_page_drafts WHERE business_id = ${businessId} FOR UPDATE`;
+        const draft = await tx.sitePageDraft.findUnique({ where: { businessId }, select: { payload: true } });
+        const followed = draft ? draftPayloadFollowingBusinessSlug(draft.payload, data.slug, oldBusiness.slug) : undefined;
+        if (followed) await tx.sitePageDraft.update({ where: { businessId }, data: { payload: followed } });
+      }
       return { oldBusiness, result };
     }, PROFILE_PATCH_TX_OPTIONS);
 

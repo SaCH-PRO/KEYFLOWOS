@@ -54,6 +54,10 @@ function makeOrchestrator(plan: DriveIntakePlan) {
       aiApprovalItem: { findFirst: vi.fn().mockResolvedValue(null) },
       // V1-44b (SEC-V44-3): no credit note carries the plan step's number yet.
       creditNote: { findFirst: vi.fn().mockResolvedValue(null) },
+      // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (D-46): executePlan
+      // checks a human approver's Membership first; the approvers of the cases
+      // above hold revenue:write (DIO-17 below varies it).
+      membership: { findUnique: vi.fn().mockResolvedValue({ role: 'STAFF', permissionScopes: { revenue: 'write' } }) },
     },
   };
   const commerce = {
@@ -449,5 +453,116 @@ describe('V1-44b review: the credit step answers only its own amount; the approv
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(false);
     expect(result.results).toEqual([]);
+  });
+});
+
+/**
+ * W7-DRIVE-INTAKE-SCOPE review repairs (SEC-W7DI-1, SEC-W7DI-2; the R0-02 rule;
+ * owner ruling D-46).
+ *
+ *   DIO-17 SEC-W7DI-1 executePlan holds every caller to the drive approve
+ *          route's rule, not only that route: a human approver needs a
+ *          Membership holding revenue:write (scope map, else role defaults).
+ *          Below it, the guard's message; no Membership (a SUPER_ADMIN who is
+ *          not a member), 'Not authorized to update this invoice'. Refused
+ *          first: the intake is not read, claimed or flipped and no step runs.
+ *          The no-human placeholders are not looked up (PA-18b unchanged).
+ *   DIO-18 SEC-W7DI-2 rejectIntakeFile is a compare-and-set that never
+ *          relabels an approved intake: refused 400, nothing resolved.
+ * The HTTP halves (the data-inbox approve route, the reject route) are
+ * test/payments-actor.integration.test.ts PA-18g..h.
+ */
+describe('W7-DRIVE-INTAKE-SCOPE review repairs: executePlan checks the approver itself; reject never relabels an approved intake (SEC-W7DI-1, SEC-W7DI-2; D-46)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  for (const [membership, level, held] of [
+    [{ role: 'STAFF', permissionScopes: { revenue: 'read', operations: 'write' } }, 'read', 'operations:write with revenue:read'],
+    [{ role: 'STAFF', permissionScopes: { crm: 'read' } }, 'none', 'a scope map of crm:read only'],
+    [{ role: 'STAFF', permissionScopes: null }, 'read', 'the STAFF role defaults'],
+  ] as const) {
+    it(`DIO-17 (SEC-W7DI-1): an approver whose Membership holds revenue:${level} (${held}) is refused 403 with the guard's message before the intake is read; nothing is claimed, no step runs`, async () => {
+      const { orchestrator, prisma, paymentEvidence, commerce } = makeOrchestrator(
+        paymentPlan({ invoiceId: 'inv_dio', amount: 15, method: 'cash' }, [{ type: 'create_invoice', payload: { items: [], currency: 'TTD' } }]),
+      );
+      prisma.client.membership.findUnique.mockResolvedValueOnce(membership);
+      // RED-BEFORE (W7-DRIVE-INTAKE-SCOPE head): success, an invoice created and a PENDING payment recorded by this approver.
+      await expect(orchestrator.executePlan(BIZ, INTAKE, 'user_dio_ops')).rejects.toMatchObject({
+        status: 403,
+        message: `Insufficient permissions: revenue requires write access (you have ${level})`,
+      });
+      expect(prisma.client.membership.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId_businessId: { userId: 'user_dio_ops', businessId: BIZ } } }),
+      );
+      expect(prisma.client.driveIntakeFile.findFirst).not.toHaveBeenCalled();
+      expect(prisma.client.driveIntakeFile.updateMany).not.toHaveBeenCalled();
+      expect(prisma.client.driveIntakeFile.update).not.toHaveBeenCalled();
+      expect(commerce.createInvoice).not.toHaveBeenCalled();
+      expect(paymentEvidence.recordPendingPayment).not.toHaveBeenCalled();
+    });
+  }
+
+  it("DIO-17 (SEC-W7DI-1, D-46): an approver with no Membership in the business (a platform SUPER_ADMIN who is not a member) is refused 403 'Not authorized to update this invoice'; nothing is read, claimed or run", async () => {
+    const { orchestrator, prisma, paymentEvidence, commerce } = makeOrchestrator(
+      paymentPlan({ invoiceId: 'inv_dio', amount: 15, method: 'cash' }, [{ type: 'create_invoice', payload: { items: [], currency: 'TTD' } }]),
+    );
+    prisma.client.membership.findUnique.mockResolvedValueOnce(null);
+    // RED-BEFORE: success; the plan's invoice created and finalized, the payment recorded by the non-member.
+    await expect(orchestrator.executePlan(BIZ, INTAKE, 'user_dio_super')).rejects.toMatchObject({
+      status: 403,
+      message: 'Not authorized to update this invoice',
+    });
+    expect(prisma.client.driveIntakeFile.findFirst).not.toHaveBeenCalled();
+    expect(prisma.client.driveIntakeFile.updateMany).not.toHaveBeenCalled();
+    expect(commerce.createInvoice).not.toHaveBeenCalled();
+    expect(paymentEvidence.recordPendingPayment).not.toHaveBeenCalled();
+  });
+
+  it('DIO-17 (SEC-W7DI-1): an approver holding revenue:write (explicit, or OWNER and ADMIN role defaults) runs the plan, checked once before the claim', async () => {
+    for (const membership of [
+      { role: 'STAFF', permissionScopes: { revenue: 'write' } },
+      { role: 'OWNER', permissionScopes: null },
+      { role: 'ADMIN', permissionScopes: null },
+    ]) {
+      const { orchestrator, prisma, paymentEvidence } = makeOrchestrator(paymentPlan({ invoiceId: 'inv_dio', amount: 15, method: 'cash' }));
+      prisma.client.membership.findUnique.mockResolvedValueOnce(membership);
+      expect((await orchestrator.executePlan(BIZ, INTAKE, APPROVER)).success, membership.role).toBe(true);
+      expect(prisma.client.membership.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.client.membership.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.client.driveIntakeFile.updateMany.mock.invocationCallOrder[0],
+      );
+      expect(paymentEvidence.recordPendingPayment.mock.calls[0][3]).toEqual({ actorId: APPROVER });
+    }
+  });
+
+  for (const placeholder of ['system', 'user']) {
+    it(`DIO-17 (SEC-W7DI-1): a plan run with no human approver ("${placeholder}") is not looked up as a member (PA-18b: the ingestion auto-execute still records its PENDING payment with no actor)`, async () => {
+      const { orchestrator, prisma, paymentEvidence } = makeOrchestrator(paymentPlan({ invoiceId: 'inv_dio', amount: 5, method: 'cash' }));
+      expect((await orchestrator.executePlan(BIZ, INTAKE, placeholder)).success).toBe(true);
+      expect(prisma.client.membership.findUnique).not.toHaveBeenCalled();
+      expect(paymentEvidence.recordPendingPayment).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('DIO-18 (SEC-W7DI-2): rejectIntakeFile flips the intake to rejected compare-and-set, never from approved', async () => {
+    const { orchestrator, prisma } = makeOrchestrator(paymentPlan({ invoiceId: 'inv_dio', amount: 5, method: 'cash' }));
+    await orchestrator.rejectIntakeFile(BIZ, INTAKE, APPROVER);
+    expect(prisma.client.driveIntakeFile.updateMany).toHaveBeenCalledWith({
+      where: { id: INTAKE, businessId: BIZ, status: { not: 'approved' } },
+      data: { status: 'rejected', processedAt: expect.any(Date) },
+    });
+    expect(prisma.client.driveIntakeFile.update).not.toHaveBeenCalled();
+  });
+
+  it('DIO-18 (SEC-W7DI-2): an approved intake (its plan claimed: its money written or being written) is refused 400 and stays approved; nothing is resolved', async () => {
+    const { orchestrator, prisma } = makeOrchestrator(paymentPlan({ invoiceId: 'inv_dio', amount: 5, method: 'cash' }));
+    prisma.client.driveIntakeFile.findFirst.mockResolvedValueOnce({ id: INTAKE, businessId: BIZ, status: 'approved' });
+    prisma.client.driveIntakeFile.updateMany.mockResolvedValueOnce({ count: 0 });
+    // RED-BEFORE (W7-DRIVE-INTAKE-SCOPE head): update to 'rejected' while the payment stayed.
+    await expect(orchestrator.rejectIntakeFile(BIZ, INTAKE, APPROVER)).rejects.toMatchObject({
+      status: 400,
+      message: 'This intake plan has already been executed; it cannot be rejected',
+    });
+    expect(prisma.client.driveIntakeFile.update).not.toHaveBeenCalled();
+    expect(prisma.client.aiApprovalItem.findFirst).not.toHaveBeenCalled();
   });
 });

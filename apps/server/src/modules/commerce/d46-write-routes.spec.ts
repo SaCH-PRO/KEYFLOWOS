@@ -86,6 +86,16 @@
  * raw query the extension does not rewrite (the D46-S09g follow-up: the
  * owner's listing shows trashed invoices and quotes). The HTTP half is
  * d46-commerce-writes D95-*.
+ *
+ * W7-DRIVE-INTAKE-SCOPE (R0-CMF2 review SEC-CMF2-3; D-46): approving a drive
+ * intake plan (POST drive/businesses/:businessId/intake/:id/approve) needs
+ * revenue:write, as every payment-writing route has since R0-02, so
+ * DriveIntakeController.approve joins the census as GUARDED: an approved plan
+ * creates invoices, records payments and applies credit notes, so D-46 refuses
+ * a non-member SUPER_ADMIN there too. The HTTP half is
+ * test/payments-actor.integration.test.ts PA-18e..f. Its review repair
+ * SEC-W7DI-2 adds DriveIntakeController.reject (revenue:write, GUARDED): a
+ * rejected plan can no longer be approved (HTTP half PA-18h).
  */
 import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'fs';
@@ -168,6 +178,23 @@ const LEVERAGE_TIME = 'time-cost entries (minutes and cost rate logged against a
 const RECURRING_GUARDED =
   'GUARDED (W3-D46-CREATE-AND-RECURRING, D-46; was OPEN, review SEC-A1-2): an invoice schedule the scheduler turns into real invoices. ' +
   'RecurringInvoiceController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
+/**
+ * W7-DRIVE-INTAKE-SCOPE (R0-CMF2 review SEC-CMF2-3; the R0-02 rule; D-46):
+ * DriveIntakeController.approve became a revenue:write handler of the commerce
+ * module, so D-46 applies to it as to every other one: an approved plan
+ * creates and finalizes invoices, records payments and applies credit notes.
+ */
+const DRIVE_INTAKE_GUARDED =
+  'GUARDED (W7-DRIVE-INTAKE-SCOPE, D-46): approving a drive intake plan runs its create_invoice, record_payment and apply_credit_note steps. ' +
+  'DriveIntakeController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
+/**
+ * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2 (D-46): rejecting a drive
+ * intake plan decides its money as approving it does, so reject needs
+ * revenue:write and joins approve as GUARDED.
+ */
+const DRIVE_INTAKE_REJECT_GUARDED =
+  'GUARDED (W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2, D-46): rejecting a drive intake plan stops its create_invoice, record_payment and apply_credit_note steps from ever running. ' +
+  'DriveIntakeController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
 
 /**
  * Review repair SEC-A1-2: the census covers every revenue:write handler of
@@ -199,11 +226,18 @@ const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: s
     resume: { kind: 'GUARDED', why: RECURRING_GUARDED },
     cancel: { kind: 'GUARDED', why: RECURRING_GUARDED },
   },
+  DriveIntakeController: {
+    approve: { kind: 'GUARDED', why: DRIVE_INTAKE_GUARDED },
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2 (D-46): reject became a
+    // revenue:write handler too (a rejected plan can no longer be approved).
+    reject: { kind: 'GUARDED', why: DRIVE_INTAKE_REJECT_GUARDED },
+  },
 };
 
 /** The constructor dependencies of each other controller with GUARDED writes, by name, in order. */
 const OTHER_CONSTRUCTOR_DEPS: Record<string, string[]> = {
   RecurringInvoiceController: ['service', 'prisma'],
+  DriveIntakeController: ['connectorIntelligence', 'orchestrator', 'prisma'],
 };
 
 const BIZ = 'biz_d46';
@@ -377,8 +411,14 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
         Object.entries(handlers).filter(([, v]) => v.kind === kind).map(([h]) => `${name}.${h}`),
       );
     expect(ofKind('OPEN')).toEqual([]);
+    // W7-DRIVE-INTAKE-SCOPE (D-46): DriveIntakeController.approve joins them;
+    // its review repair SEC-W7DI-2: and DriveIntakeController.reject.
     expect(ofKind('GUARDED').sort()).toEqual(
-      ['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`),
+      [
+        'DriveIntakeController.approve',
+        'DriveIntakeController.reject',
+        ...['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`),
+      ],
     );
   });
 
@@ -392,7 +432,14 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
         const deps = OTHER_CONSTRUCTOR_DEPS[name];
         expect(cls, name).toBeDefined();
         expect(deps, `${name}: list its constructor dependencies in OTHER_CONSTRUCTOR_DEPS`).toBeDefined();
-        expect(String(Reflect.getMetadata(PATH_METADATA, cls.prototype[handler])), handler).toMatch(/^businesses\/:businessId\//);
+        // W7-DRIVE-INTAKE-SCOPE: DriveIntakeController binds the tenant in its
+        // controller path (drive/businesses/:businessId), so its handler paths
+        // are read below that prefix; every other controller's handler path
+        // names :businessId itself.
+        const controllerPath = String(Reflect.getMetadata(PATH_METADATA, cls) ?? '');
+        const handlerPath = String(Reflect.getMetadata(PATH_METADATA, cls.prototype[handler]));
+        const tenantPath = controllerPath.endsWith('businesses/:businessId') ? `businesses/:businessId/${handlerPath}` : handlerPath;
+        expect(tenantPath, handler).toMatch(/^businesses\/:businessId\//);
         const sa = { id: USER_ID, role: 'SUPER_ADMIN' };
 
         const none = await callOn(cls, deps!, handler, sa, null);

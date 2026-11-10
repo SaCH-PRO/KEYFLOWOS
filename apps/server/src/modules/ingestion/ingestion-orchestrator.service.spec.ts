@@ -371,3 +371,64 @@ describe('IngestionOrchestrator', () => {
     );
   });
 });
+
+/**
+ * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (the R0-02 rule; D-46): a
+ * google_drive item's plan is a Drive intake plan, so execute() asks
+ * DriveIntakeOrchestrator.assertApproverMayRunPlan before the legacy intake is
+ * read or created and outside its error-catching try: a refusal is answered
+ * as the 403 it is, nothing is written and the item is not marked 'error'.
+ * The real route and rows are test/payments-actor.integration.test.ts PA-18g.
+ */
+describe('IngestionOrchestrator.execute on a google_drive item checks the approver first (W7-DRIVE-INTAKE-SCOPE SEC-W7DI-1; D-46)', () => {
+  function build(assert: () => Promise<void>) {
+    const item = {
+      id: 'item_drive',
+      businessId: 'biz_1',
+      sourceType: 'google_drive',
+      status: 'reviewing',
+      rawPayload: { driveFileId: 'file_1' },
+      proposedActions: { intakeFileId: 'intake_1', actions: [{ type: 'record_payment', payload: { invoiceId: 'inv_1', amount: 15, method: 'cash' } }] },
+    };
+    const prisma = {
+      client: {
+        ingestionItem: { findUnique: vi.fn().mockResolvedValue(item), update: vi.fn().mockResolvedValue({ ...item, status: 'approved' }) },
+        driveIntakeFile: { findUnique: vi.fn().mockResolvedValue({ id: 'intake_1' }), create: vi.fn() },
+      },
+    };
+    const drive = {
+      assertApproverMayRunPlan: vi.fn().mockImplementation(assert),
+      executePlan: vi.fn().mockResolvedValue({ success: true, results: [] }),
+    };
+    const service = new IngestionOrchestrator(
+      prisma as unknown as PrismaService,
+      {} as EntityResolutionService,
+      {} as AiOversightService,
+      drive as unknown as DriveIntakeOrchestrator,
+      {} as KeyInboxService,
+      {} as KeyInboxActionExecutorService,
+    );
+    return { service, prisma, drive };
+  }
+
+  it('SEC-W7DI-1: an approver refused by assertApproverMayRunPlan gets the 403; the legacy intake is not read or created, no plan runs and the item is not marked error', async () => {
+    const refusal = Object.assign(new Error('Insufficient permissions: revenue requires write access (you have read)'), { status: 403 });
+    const { service, prisma, drive } = build(async () => {
+      throw refusal;
+    });
+    // RED-BEFORE (W7-DRIVE-INTAKE-SCOPE head): executePlan ran the plan as this approver.
+    await expect(service.execute('item_drive', 'user_ops')).rejects.toBe(refusal);
+    expect(drive.assertApproverMayRunPlan).toHaveBeenCalledWith('biz_1', 'user_ops');
+    expect(prisma.client.driveIntakeFile.findUnique).not.toHaveBeenCalled();
+    expect(prisma.client.driveIntakeFile.create).not.toHaveBeenCalled();
+    expect(drive.executePlan).not.toHaveBeenCalled();
+    expect(prisma.client.ingestionItem.update).not.toHaveBeenCalled();
+  });
+
+  it('SEC-W7DI-1: an approver it admits runs the plan as before, checked before the legacy intake is read', async () => {
+    const { service, prisma, drive } = build(async () => undefined);
+    await service.execute('item_drive', 'user_writer');
+    expect(drive.executePlan).toHaveBeenCalledWith('biz_1', 'intake_1', 'user_writer', expect.objectContaining({ intakeFileId: 'intake_1' }));
+    expect(drive.assertApproverMayRunPlan.mock.invocationCallOrder[0]).toBeLessThan(prisma.client.driveIntakeFile.findUnique.mock.invocationCallOrder[0]);
+  });
+});
