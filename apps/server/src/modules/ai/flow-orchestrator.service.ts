@@ -398,6 +398,29 @@ function operationsLevelFor(toolName: string): 'read' | 'write' | 'admin' | unde
 /** The surfaces a member's own chat turn arrives on (E1 to E3); their principal is that member. */
 const MEMBER_CHAT_SURFACES: ReadonlySet<string> = new Set(['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']);
 
+/**
+ * W8-KEY-REVENUE-GATE (owner ruling D-98: "when a member drives KEY (chat or a plan)"): the member whose
+ * own revenue write KEY's money-writing tools need on this call (memberScopeRefusal), or null:
+ *   - a member's own chat turn (MEMBER_CHAT_SURFACES): its principal;
+ *   - an approved plan run over HTTP (PLAN_HTTP, POST ai/businesses/:b/flow/execute-plan/:planId, which
+ *     only AuthGuard and BusinessGuard guard): the calling member, its principal. Review SEC-W8KRG-1: a
+ *     revenue:read member who ran an approved plan had KEY mark an invoice PAID as them;
+ *   - a KEY-cortex turn's bridged flow tool (CORTEX_BRIDGE, KeyCortexEfferentBridgeService): the member
+ *     the turn runs for (onBehalfOfUserId). Review SEC-W8KRG-2: at TRUSTED_AUTOPILOT a revenue:read
+ *     member's cortex chat ran a tier-2 money tool directly. The id is never a principal and grants
+ *     nothing; here it can only refuse.
+ * Every other surface answers null: the plan queue, an approved proposal and the Pro Auto monitor hold
+ * their member to every module scope before dispatch (memberToolRunAuthority, D-71; D-73 with no
+ * member), the graph route holds its caller (assertMayRunGraphAction), an inner execute_custom_logic
+ * call is held through its outer turn's context, and the staff bridge by its envelope.
+ */
+function memberRevenueGateMember(action?: KeyDispatchAction): string | null {
+  if (!action) return null;
+  if (MEMBER_CHAT_SURFACES.has(action.surface) || action.surface === 'PLAN_HTTP') return action.principalUserId || null;
+  if (action.surface === 'CORTEX_BRIDGE') return action.onBehalfOfUserId || null;
+  return null;
+}
+
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
 function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
   if (!ctx || typeof ctx !== 'object') return ctx;
@@ -1599,19 +1622,21 @@ export class FlowOrchestratorService {
     // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
     // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
     // W8-KEY-REVENUE-GATE (owner ruling D-98): likewise a money-writing tool is offered only when the
-    // member's revenue level reaches what its routes require (keyRevenueWriteLevel, the rule
-    // memberScopeRefusal refuses a call with).
+    // member's revenue level reaches what its routes require (keyRevenueMenuLevel, the rule
+    // memberScopeRefusal refuses a call with). Review CR-W8KRG-1: a tool whose money write depends on
+    // its arguments (update_status_with_confirmation, which also moves contact statuses) stays offered,
+    // and its call is judged by its arguments when it runs.
     if (!envelope && principalUserId) {
       const level = await this.memberOperationsLevel(businessId, principalUserId);
       // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-      const { keyRevenueWriteLevel, memberRevenueLevel } = await import('./plan-step-authority');
-      const revenue = candidates.some((t) => keyRevenueWriteLevel(t.function.name))
+      const { keyRevenueMenuLevel, memberRevenueLevel } = await import('./plan-step-authority');
+      const revenue = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
         ? await memberRevenueLevel(this.prisma, businessId, principalUserId)
         : 'none';
       candidates = candidates.filter((t) => {
         const required = operationsLevelFor(t.function.name);
         if (required && rankOf(level) < LEVEL_RANK[required]) return false;
-        const money = keyRevenueWriteLevel(t.function.name);
+        const money = keyRevenueMenuLevel(t.function.name);
         return !money || rankOf(revenue) >= LEVEL_RANK[money];
       });
     }
@@ -2862,8 +2887,9 @@ ${triage.standingContext}`;
     // neither proposed for confirmation nor filed for approval. It goes to the executor, which
     // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
     // member and the model are told why. W8-KEY-REVENUE-GATE (D-98): so is a money-writing call
-    // the member's revenue scope does not reach (memberScopeRefusal).
-    if (await this.memberScopeRefusal(businessId, tc.name, ctx)) {
+    // the member's revenue scope does not reach (memberScopeRefusal; judged with the call's arguments,
+    // review CR-W8KRG-1).
+    if (await this.memberScopeRefusal(businessId, tc.name, ctx, tc.arguments)) {
       return {
         tc,
         decision: { ...legacy, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false },
@@ -3270,8 +3296,11 @@ ${triage.standingContext}`;
     try {
       // V1-84 (FOLLOW3-D16, D-40): read when the call runs, as the route reads it per request, so a
       // confirmation issued before the member's operations scope was lowered runs nothing either.
-      // W8-KEY-REVENUE-GATE (D-98): and the revenue write KEY's money-writing tools need.
-      const refusal = await this.memberScopeRefusal(businessId, toolName, action);
+      // W8-KEY-REVENUE-GATE (D-98): and the revenue write KEY's money-writing tools need, on every
+      // surface a member drives KEY on (memberRevenueGateMember: member chat, a plan run over HTTP, a
+      // KEY-cortex turn's bridged call; review SEC-W8KRG-1, SEC-W8KRG-2), judged with these arguments
+      // (review CR-W8KRG-1).
+      const refusal = await this.memberScopeRefusal(businessId, toolName, action, args);
       if (refusal) throw new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
@@ -3421,26 +3450,37 @@ ${triage.standingContext}`;
   }
 
   /**
-   * Why a member's own chat call may not run `toolName`: the operations scope (D-40,
+   * Why a member's call may not run `toolName`: the operations scope on the member's own chat (D-40,
    * operationsScopeRefusal), then W8-KEY-REVENUE-GATE (owner ruling D-98; review residuals
    * SEC-W7IAR-2, SEC-W7KMP-2): KEY's money-writing tools (keyRevenueWriteLevel: mark an invoice
    * paid, update, send or bulk-move an invoice, the other revenue writes the routes govern) need the
-   * member's own revenue write, read as PATCH .../paid reads it (memberRevenueWriteRefusal, the rule
-   * plan-step-authority.ts shares with the plan queue and approved proposals). A revenue:read member
-   * had KEY mark an invoice PAID that the route refuses them. null for every other tool, for a member
-   * whose scopes reach it, and for a call with no member or from another surface, exactly as D-40:
-   * the staff bridge (its issued envelope already bounds the holder), the support desk and the system
-   * surfaces are unchanged; a plan or a monitor with no member writes no money at all (D-73).
+   * driving member's own revenue write, read as PATCH .../paid reads it (memberRevenueWriteRefusal, the
+   * rule plan-step-authority.ts shares with the plan queue and approved proposals). A revenue:read
+   * member had KEY mark an invoice PAID that the route refuses them. The driving member is
+   * memberRevenueGateMember's: a member chat turn's principal, the caller who runs an approved plan
+   * over HTTP (review SEC-W8KRG-1), the member a KEY-cortex turn's bridged call runs for (review
+   * SEC-W8KRG-2). `args`: the call's arguments, so a tool whose money write depends on them
+   * (update_status_with_confirmation moving contacts) is judged by them (review CR-W8KRG-1). null for
+   * every other tool, for a member whose scopes reach it, and for a call with no such member: the staff
+   * bridge (its issued envelope already bounds the holder), the support desk and the system surfaces
+   * are unchanged; the plan queue, an approved proposal and the monitor are held before dispatch
+   * (memberToolRunAuthority, D-71), and a plan or a monitor with no member writes no money (D-73).
    * Checked when the call runs (executeTool), before it is proposed (governToolCall), for each inner
    * call of an execute_custom_logic snippet, and on the tool menu (selectToolsForRequest).
    */
-  private async memberScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
+  private async memberScopeRefusal(
+    businessId: string,
+    toolName: string,
+    action?: KeyDispatchAction,
+    args?: unknown,
+  ): Promise<string | null> {
     const operations = await this.operationsScopeRefusal(businessId, toolName, action);
     if (operations) return operations;
-    if (!action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
+    const memberId = memberRevenueGateMember(action);
+    if (!memberId) return null;
     // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
     const { memberRevenueWriteRefusal } = await import('./plan-step-authority');
-    return memberRevenueWriteRefusal(this.prisma, businessId, action.principalUserId, toolName);
+    return memberRevenueWriteRefusal(this.prisma, businessId, memberId, toolName, args);
   }
 
   /**
@@ -6822,8 +6862,8 @@ ${triage.standingContext}`;
         // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
         // inner call itself still arrives on CUSTOM_LOGIC. W8-KEY-REVENUE-GATE (D-98): and the
         // revenue write a money-writing inner call needs (memberScopeRefusal).
-        const withinMemberScope = async (bizId: string, name: string): Promise<void> => {
-          const refusal = await this.memberScopeRefusal(bizId, name, action);
+        const withinMemberScope = async (bizId: string, name: string, toolArgs?: unknown): Promise<void> => {
+          const refusal = await this.memberScopeRefusal(bizId, name, action, toolArgs);
           if (refusal) throw new Error(refusal);
         };
         // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
@@ -6835,7 +6875,7 @@ ${triage.standingContext}`;
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name, toolArgs).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
         });
         return result;
       }

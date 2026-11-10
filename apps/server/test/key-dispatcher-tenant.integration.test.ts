@@ -152,6 +152,7 @@ async function cleanup() {
     byBiz('contact_audit_entries'),
     byBiz('idempotency_keys'),
     byBiz('contacts'),
+    byBiz('ai_plans'), // W8-KEY-REVENUE-GATE review: the plans executePlan runs (their steps cascade)
     byBiz('memberships'),
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -636,7 +637,8 @@ describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and 
       "commerce_update_invoice {status: 'PAID'}, update_status_with_confirmation to PAID) only with revenue:write, as " +
       'PATCH /commerce/invoices/:invoiceId/paid requires: a STAFF member on role defaults (revenue read) and a user with no ' +
       'membership in the business are refused on CHAT, CHAT_STREAM and CHAT_CONFIRM before anything is written, and are not ' +
-      'offered the tools; the owner and a revenue:write member are offered them and run them',
+      'offered the tools every call of which writes money (update_status_with_confirmation, which also moves contacts, stays ' +
+      'offered: CR-W8KRG-1); the owner and a revenue:write member are offered them and run them',
     async () => {
       const refusal = (level: string) => new RegExp(`^Insufficient permissions: revenue requires write access \\(you have ${level}\\).*\\(D-98\\)`);
       for (const surface of ['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']) {
@@ -656,7 +658,9 @@ describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and 
       expect(await db.invoice.findUnique({ where: { id: SENT }, select: { status: true, paidAt: true } })).toEqual({ status: 'SENT', paidAt: null });
       expect(await db.payment.count({ where: { invoiceId: SENT } })).toBe(0);
 
-      // The menu: a member below revenue write is not offered the money-writing tools (reads stay).
+      // The menu: a member below revenue write is not offered the tools every call of which writes money
+      // (reads stay). W8-KEY-REVENUE-GATE review CR-W8KRG-1: update_status_with_confirmation also moves
+      // contact statuses (no money), so it stays offered; its invoice moves are refused when they run (above).
       const menu = async (who: string): Promise<string[]> =>
         ((await chat.selectToolsForRequest(ID.bizA, [], 'mark the invoice paid, update the invoice, record the payment', undefined, who)) as Array<{
           function: { name: string };
@@ -664,7 +668,10 @@ describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and 
       for (const who of [ID.memberA, ID.ownerB]) {
         const offered = await menu(who);
         expect(offered, who).toContain('commerce_list_invoices');
-        for (const [tool] of MONEY_TOOLS) expect(offered, `${who} ${tool}`).not.toContain(tool);
+        expect(offered, `${who} update_status_with_confirmation`).toContain('update_status_with_confirmation');
+        for (const [tool] of MONEY_TOOLS.filter(([name]) => name !== 'update_status_with_confirmation')) {
+          expect(offered, `${who} ${tool}`).not.toContain(tool);
+        }
       }
       for (const who of [ID.ownerA, memberWriteA]) {
         expect(await menu(who), who).toEqual(expect.arrayContaining(['commerce_mark_invoice_paid', 'commerce_update_invoice']));
@@ -675,6 +682,192 @@ describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and 
         const out = await chat.executeToolDirectly(ID.bizA, 'commerce_mark_invoice_paid', { invoiceId: ID.invOwnPaid }, undefined, turn('CHAT', who));
         expect(out.invoice, who).toMatchObject({ id: ID.invOwnPaid, status: 'PAID' });
       }
+    },
+  );
+});
+
+// ─── W8-KEY-REVENUE-GATE review: every surface a member drives KEY on, and the bulk status tool on contacts ───
+//
+// Owner ruling D-98: "When a member drives KEY (chat or a plan), KEY's money-writing tools ... need that
+// member's own revenue write permission, as the web routes do". The review found two surfaces the gate
+// missed and one over-narrowing, each reproduced on a real database:
+//   SEC-W8KRG-1: an approved plan run over HTTP (POST ai/businesses/:b/flow/execute-plan/:planId:
+//     FlowOrchestratorService.executePlan, surface PLAN_HTTP with the caller as principal) ran its money
+//     steps for a revenue:read member;
+//   SEC-W8KRG-2: a KEY-cortex turn's bridged flow tool (KeyCortexEfferentBridgeService.dispatch, surface
+//     CORTEX_BRIDGE with the turn's member as onBehalfOfUserId) ran a money tool for a revenue:read member;
+//   CR-W8KRG-1: update_status_with_confirmation was refused to a member below revenue:write even when it
+//     only moved contact statuses (PATCH crm contacts/bulk needs crm:write alone), and left their menu.
+// The plan run is the real executePlan over this suite's dispatcher (the planner's status writes, the
+// governance decision, the execution log and the graph cache are stubs off the boundary; governance
+// allows the tier-2 steps, as an approved plan's quick-confirm does). The bridge is the real
+// KeyCortexEfferentBridgeService over the same dispatcher. CrmService.bulkUpdateContacts is a stub that
+// counts the contacts it is handed.
+
+describe('W8-KEY-REVENUE-GATE review — an approved plan run over HTTP, a KEY-cortex turn, and the bulk status tool on contacts (D-98)', () => {
+  /** A SENT invoice of A on A's contact that no case here may move. */
+  const SENT = `${P}inv_w8krg_sent`;
+  /** A STAFF member of A whose explicit scope map holds revenue write. */
+  const revWrite = `${P}w8krgRevWrite`;
+  /** A STAFF member of A with crm write and no revenue scope (PATCH crm contacts/bulk lets them move statuses). */
+  const crmWrite = `${P}w8krgCrmWrite`;
+  /** An approved plan of the owner's whose three steps would mark SENT paid; one whose step re-marks A's PAID invoice. */
+  const PLAN_SENT = `${P}plan_w8krg_sent`;
+  const PLAN_PAID = `${P}plan_w8krg_paid`;
+  const MONEY_STEPS: Array<[string, Record<string, unknown>]> = [
+    ['commerce_mark_invoice_paid', { invoiceId: SENT }],
+    ['commerce_update_invoice', { invoiceId: SENT, status: 'PAID' }],
+    ['update_status_with_confirmation', { entityType: 'invoice', ids: [SENT], newStatus: 'PAID' }],
+  ];
+  const refusal = (level: string) => new RegExp(`^Insufficient permissions: revenue requires write access \\(you have ${level}\\).*\\(D-98\\)`);
+  let key: any;
+  let bridge: any;
+  let bulkContacts: ReturnType<typeof vi.fn>;
+
+  const untouched = async () => {
+    expect(await db.invoice.findUnique({ where: { id: SENT }, select: { status: true, paidAt: true } })).toEqual({ status: 'SENT', paidAt: null });
+    expect(await db.payment.count({ where: { invoiceId: SENT } })).toBe(0);
+  };
+
+  beforeAll(async () => {
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { KeyCortexEfferentBridgeService } = await import('../src/modules/key-cortex/key-cortex-efferent-bridge.service');
+    bulkContacts = vi.fn(async ({ contactIds }: { contactIds: string[] }) => ({ updated: contactIds.length }));
+    const crm = { bulkUpdateContacts: bulkContacts };
+    const quiet = { log: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
+    // executeTool's and executePlan's collaborators off the boundary; everything else is the suite's dispatcher.
+    key = Object.assign(Object.create(dispatcher), {
+      moduleRef: { get: (token: unknown, opts?: unknown) => (token === CrmService ? crm : dispatcher.moduleRef.get(token, opts)) },
+      governance: {
+        getToolTier: () => 'MEDIUM',
+        evaluate: async () => ({ allowed: true, tier: 2, requiresQuickConfirm: true, requiresFormalApproval: false, requiresAdminApproval: false }),
+        createApprovalItem: async () => null,
+      },
+      executionLog: { logToolExecution: async () => null, log: async () => null },
+      businessGraph: { invalidateCache: () => undefined },
+      planner: { updatePlanStatus: async () => undefined, updateStepStatus: async () => undefined },
+      logger: quiet,
+    });
+    bridge = new KeyCortexEfferentBridgeService({ register: () => undefined } as any, { get: () => key } as any);
+
+    for (const [id, permissionScopes] of [
+      [revWrite, { revenue: 'write' }],
+      [crmWrite, { crm: 'write', ai: 'write' }],
+    ] as const) {
+      await db.user.create({ data: { id, email: `${id}@${P}test.local`, role: 'USER' } });
+      await db.membership.create({ data: { id: m(id), userId: id, businessId: ID.bizA, role: 'STAFF', permissionScopes } });
+    }
+    await db.invoice.create({ data: { id: SENT, businessId: ID.bizA, contactId: ID.contactA, invoiceNumber: `${P}INV-W8KRG`, total: 45, status: 'SENT' } });
+    const plan = (id: string, steps: Array<[string, Record<string, unknown>]>) =>
+      db.aiPlan.create({
+        data: {
+          id,
+          businessId: ID.bizA,
+          userId: ID.ownerA,
+          status: 'approved',
+          objective: `${id} objective`,
+          maxRiskTier: 2,
+          steps: {
+            create: steps.map(([toolName, inputPayload], order) => ({ id: `${id}_s${order}`, order, toolName, action: toolName, riskTier: 2, inputPayload })),
+          },
+        },
+      });
+    await plan(PLAN_SENT, MONEY_STEPS);
+    await plan(PLAN_PAID, [['commerce_mark_invoice_paid', { invoiceId: ID.invOwnPaid }]]);
+  });
+
+  it(
+    'W8KRG-01 (SEC-W8KRG-1; D-98): an approved plan run over HTTP (executePlan, PLAN_HTTP) by a member below revenue:write ' +
+      '(STAFF on role defaults: read; a crm:write member with no revenue scope: none) runs none of its money steps ' +
+      '(commerce_mark_invoice_paid, commerce_update_invoice PAID, update_status_with_confirmation to PAID): each fails with the ' +
+      'D-98 refusal and nothing is written; the owner and a revenue:write member run the same kind of step',
+    async () => {
+      for (const [who, level] of [
+        [ID.memberA, 'read'],
+        [crmWrite, 'none'],
+      ] as const) {
+        const out = await key.executePlan(ID.bizA, PLAN_SENT, who);
+        expect(out, who).toMatchObject({ planId: PLAN_SENT, status: 'partial', stepsExecuted: 0, stepsFailed: MONEY_STEPS.length, stepsSkipped: 0 });
+        for (const [i, [tool]] of MONEY_STEPS.entries()) {
+          expect(out.results[i], `${who} ${tool}`).toMatchObject({ stepId: `${PLAN_SENT}_s${i}`, status: 'failed' });
+          expect(out.results[i].error, `${who} ${tool}`).toMatch(refusal(level));
+        }
+      }
+      await untouched();
+
+      // The control: the owner and the revenue:write member run the plan's step (A's PAID invoice, answered as it is).
+      for (const who of [ID.ownerA, revWrite]) {
+        expect(await key.executePlan(ID.bizA, PLAN_PAID, who), who).toMatchObject({ status: 'completed', stepsExecuted: 1, stepsFailed: 0 });
+      }
+    },
+  );
+
+  it(
+    "W8KRG-02 (SEC-W8KRG-2; D-98): a KEY-cortex turn's bridged money tool (KeyCortexEfferentBridgeService.dispatch, " +
+      'CORTEX_BRIDGE for the turn\'s member) runs only with that member\'s revenue:write: a STAFF member on role defaults and a ' +
+      'user with no membership are refused with the D-98 answer and nothing is written; the owner and a revenue:write member run it',
+    async () => {
+      for (const [who, level] of [
+        [ID.memberA, 'read'],
+        [ID.ownerB, 'none'],
+      ] as const) {
+        for (const [tool, args] of MONEY_STEPS) {
+          const out = await bridge.dispatch(tool, { businessId: ID.bizA, userId: who }, { ...args });
+          expect(out, `${who} ${tool}`).toMatchObject({ success: false });
+          expect(out.error, `${who} ${tool}`).toMatch(refusal(level));
+        }
+      }
+      await untouched();
+
+      for (const who of [ID.ownerA, revWrite]) {
+        const out = await bridge.dispatch('commerce_mark_invoice_paid', { businessId: ID.bizA, userId: who }, { invoiceId: ID.invOwnPaid });
+        expect(out.success, `${who}: ${out.error}`).toBe(true);
+        expect(out.data.invoice, who).toMatchObject({ id: ID.invOwnPaid, status: 'PAID' });
+      }
+    },
+  );
+
+  it(
+    'W8KRG-03 (CR-W8KRG-1; D-98): update_status_with_confirmation moving contact statuses writes no money, so a crm:write ' +
+      'member with no revenue scope runs it on CHAT, CHAT_STREAM and CHAT_CONFIRM and is offered it, as PATCH crm contacts/bulk ' +
+      'lets them; the same member\'s invoice move with the same tool, or a call naming no contact entity type, is still refused (D-98)',
+    async () => {
+      bulkContacts.mockClear();
+      for (const surface of ['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']) {
+        const out = await key.executeToolDirectly(
+          ID.bizA,
+          'update_status_with_confirmation',
+          { entityType: 'contact', ids: [ID.contactA], newStatus: 'CLIENT' },
+          undefined,
+          { surface, principalUserId: crmWrite },
+        );
+        expect(out, surface).toEqual({ entityType: 'contact', updatedCount: 1, newStatus: 'CLIENT' });
+      }
+      expect(bulkContacts.mock.calls).toEqual(
+        Array.from({ length: 3 }, () => [{ businessId: ID.bizA, contactIds: [ID.contactA], status: 'CLIENT' }]),
+      );
+
+      // The arguments decide: an invoice move, or no entity type at all (read as money, fail closed), is refused.
+      for (const args of [
+        { entityType: 'invoice', ids: [SENT], newStatus: 'PAID' },
+        { entityType: 'invoice', ids: [SENT], newStatus: 'VOID' },
+        { ids: [SENT], newStatus: 'PAID' },
+      ]) {
+        await expect(
+          key.executeToolDirectly(ID.bizA, 'update_status_with_confirmation', args, undefined, { surface: 'CHAT', principalUserId: crmWrite }),
+          JSON.stringify(args),
+        ).rejects.toThrow(refusal('none'));
+      }
+      await untouched();
+      expect(bulkContacts).toHaveBeenCalledTimes(3);
+
+      // The menu offers the tool to the crm:write member, and still not the tools every call of which writes money.
+      const offered = ((await key.selectToolsForRequest(ID.bizA, [], 'move these contacts to client', undefined, crmWrite)) as Array<{
+        function: { name: string };
+      }>).map((t) => t.function.name);
+      expect(offered).toContain('update_status_with_confirmation');
+      expect(offered).not.toContain('commerce_mark_invoice_paid');
+      expect(offered).not.toContain('commerce_update_invoice');
     },
   );
 });
