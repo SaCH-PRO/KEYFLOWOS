@@ -835,8 +835,11 @@ describe('statuses owned by the workflow', () => {
  * V1-44 review repairs. The packet made apply reach the ledger, which turned
  * five latent gaps into live ones; these pin the repairs inside the write set
  * (credit-note.service.ts, invoice-workflow.service.ts) and kept the halves
- * outside it as it.todo; none is left in this file: the later packets in the
- * header (W3-CREDIT-RECONCILE-BIND through W5-CREDIT-AWARE-PAY) closed them
+ * outside it as it.todo; none is left in this file. Of its four todos,
+ * V1-44b-CREDIT-NOTE-ROUTES-AND-INTAKE closed three: SEC-V44-1 route half
+ * (CN-17), SEC-V44-5 route half (CN-18) and SEC-V44-3 (CN-19), in the V1-44b
+ * describe below; CR-V44-1 (reader half) went to W4-CREDIT-AWARE-READERS
+ * (CN-32..CN-35), which left its rest to W5-CREDIT-AWARE-PAY (CAP-*)
  * (W8-HOUSEKEEPING).
  */
 describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, collecting what a credit leaves owing', () => {
