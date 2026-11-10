@@ -69,6 +69,7 @@ import { SignatureParserService } from '../src/modules/connect/signature-parser.
 import { GoogleBusinessProfileService } from '../src/modules/connect/google-business-profile.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { PrismaService } from '../src/core/prisma/prisma.service';
 import { CONTACT_STATUSES, isContactStatus } from '../src/modules/crm/crm.constants';
 
 type Row = Record<string, any>;
@@ -254,6 +255,9 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         { provide: ContactSyncService, useValue: {} },
         { provide: SignatureParserService, useValue: {} },
         { provide: GoogleBusinessProfileService, useValue: {} },
+        // W7-RECENT-CONTACTS-VISIBILITY: the controller reads CRM access for its
+        // recent lists (routes not used here); the same in-memory store.
+        { provide: PrismaService, useValue: prisma },
       ],
     })
       .overrideGuard(AuthGuard)

@@ -52,8 +52,34 @@
  *     imported, and the rows are linked to their contacts.
  *   - ST-4 RECORDS: GET imports/:importId/records lists a row linked to a
  *     contact only to a member who may open that contact.
- *   - ST-1 (POST google/import) is outside this packet's write set; it is kept
- *     as an it.todo hand-off at the end of the file.
+ *   - ST-1 (POST google/import) was outside this packet's write set; it was
+ *     kept as an it.todo hand-off at the end of the file.
+ *
+ * W7-GOOGLE-IMPORT-SCOPE (review finding ST-1, the it.todo hand-off made
+ * live): CrmGoogleController and a real CrmGoogleService are mounted beside
+ * CrmController. POST google/import needs crm write (as the CSV import does
+ * since R0-13) and CrmGoogleService.importGoogleContacts takes the importing
+ * member as the actor: a member who may not create contacts is refused before
+ * Google is called, and every person goes through findOrCreateContact with
+ * that actor (the edit and visibility door W6-CONNECT-TAG-MERGE applies to a
+ * sync's existing contacts), so it is merged only into a contact the member
+ * may edit and every contact write records the member. GET google/auth-url,
+ * which starts the Google import the OAuth callback completes, needs crm
+ * write too. The People API is global fetch stood in for one fixed URL (any
+ * other URL throws, so no provider traffic leaves the process).
+ *
+ * W7-GOOGLE-IMPORT-SCOPE review repairs (SEC-GIS-1, SEC-GIS-2, SEC-GIS-3,
+ * CR-W7G-1): the web UI imports through GET google/auth-url and then the public
+ * GET crm/google/callback, not POST google/import. The signed OAuth state now
+ * carries the CRM flow tag and the member it was issued to; the callback
+ * refuses any other state signed with GOOGLE_STATE_SECRET (a bookings calendar
+ * or Drive state, or one naming no member), accepts a state once, re-checks the
+ * member when it lands, and imports as that member through the same door and
+ * audit actor as POST google/import. GET google/auth-url is issued only to a
+ * member the import admits (crm_edit 'none' is refused). The harness sets fake
+ * GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_STATE_SECRET and
+ * GOOGLE_REDIRECT_URI values for this file (restored in afterAll), and the
+ * Google token endpoint is stood in beside the People API (one fixed URL each).
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, the rows,
  * CrmRateLimitGuard, AuthGuard, BusinessGuard, ModuleScopeGuard, the global
@@ -83,6 +109,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { promises as dnsPromises } from 'node:dns';
+import { createHmac } from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -126,6 +153,20 @@ const MAIL = {
 
 const LINK_URL_DENIED = 'https://k13b-import.example.test/denied.csv';
 const LINK_URL_OWNER = 'https://k13b-import.example.test/owner.csv';
+
+/**
+ * W7-GOOGLE-IMPORT-SCOPE review repairs: obviously fake Google OAuth settings,
+ * so GET google/auth-url mints a real signed state and the callback verifies
+ * it. CrmGoogleService reads the client settings when it is constructed, so
+ * they are set before the testing module compiles and restored in afterAll.
+ */
+const GOOGLE_ENV: Record<string, string> = {
+  GOOGLE_CLIENT_ID: 'k13b-fake-client-id',
+  GOOGLE_CLIENT_SECRET: 'k13b-fake-client-secret-not-real',
+  GOOGLE_STATE_SECRET: 'k13b-fake-state-secret-not-real',
+  GOOGLE_REDIRECT_URI: 'http://localhost:3000/api/crm/google/callback',
+};
+const savedGoogleEnv: Record<string, string | undefined> = {};
 
 let db: any;
 let app: any;
@@ -308,6 +349,10 @@ async function expectRefusedWithNothingWritten(
 }
 
 beforeAll(async () => {
+  for (const [key, value] of Object.entries(GOOGLE_ENV)) {
+    savedGoogleEnv[key] = process.env[key];
+    process.env[key] = value;
+  }
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
 
@@ -352,11 +397,14 @@ beforeAll(async () => {
   const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+  // W7-GOOGLE-IMPORT-SCOPE: the Google contact import routes, real.
+  const { CrmGoogleController } = await import('../src/modules/crm/crm-google.controller');
+  const { CrmGoogleService } = await import('../src/modules/crm/crm-google.service');
 
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController],
+    controllers: [CrmController, CrmGoogleController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -373,6 +421,7 @@ beforeAll(async () => {
       // The importer and the matcher findOrCreateContact consults are real.
       CrmImportService,
       EntityResolutionService,
+      CrmGoogleService,
       { provide: AiUsageService, useValue: { trackVision } },
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       // CrmTimelineService's side channels: the unified activity ledger,
@@ -455,6 +504,10 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
+  for (const [key, value] of Object.entries(savedGoogleEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 // W4-IMPORT-SSRF-PIN (ST-38c-2): the link host resolves to a public address
@@ -976,6 +1029,402 @@ describe('GET imports/:importId/records lists a row linked to a contact only to 
   });
 });
 
-describe('hand-off outside this packet (review finding ST-1)', () => {
-  it.todo("FOLLOW-UP PACKET: POST crm/businesses/:businessId/google/import (crm-google.controller.ts) runs under AuthGuard and BusinessGuard only (no ModuleScopeGuard, no crm write), and CrmGoogleService.importGoogleContacts (crm-google.service.ts) calls findOrCreateContact without the actor, so a crm read-only STAFF member can merge Google data into the owner's PRIVATE contact. Both files are outside this packet's write set; the follow-up adds the crm write scope and passes req.user.id as the actor.");
+// ---- W7-GOOGLE-IMPORT-SCOPE (review finding ST-1) ------------------------------
+
+describe('W7-GOOGLE-IMPORT-SCOPE (review finding ST-1): the Google contact import needs crm write and records the importing member as the actor', () => {
+  const G = {
+    staffRead: `${P}staffRead`,               // STAFF, crm: read (no crm write)
+    cPrivGoogle: `${P}cPrivGoogle`,           // PRIVATE, owned by owner: no STAFF member here may write it
+    cTeamGoogle: `${P}cTeamGoogle`,           // TEAM, owned by owner: staffWrite may edit it
+    cPrivGoogleOwner: `${P}cPrivGoogleOwner`, // PRIVATE, owned by owner: the owner's own Google import merges into it
+    // W7-GOOGLE-IMPORT-SCOPE review repairs (the OAuth callback):
+    staffLowered: `${P}staffLowered`,         // STAFF, crm: write; lowered after its auth URLs are issued
+    cTeamCallback: `${P}cTeamCallback`,       // TEAM, owned by owner: staffWrite's callback import merges into it
+  };
+  const GMAIL = {
+    priv: `${P}priv-google@test.local`,
+    team: `${P}team-google@test.local`,
+    privOwner: `${P}priv-google-owner@test.local`,
+    readNew: `${P}google-read-new@test.local`,
+    noEditNew: `${P}google-noedit-new@test.local`,
+    staffNew: `${P}google-staff-new@test.local`,
+    ownerNew: `${P}google-owner-new@test.local`,
+    teamCallback: `${P}team-google-callback@test.local`,
+    foreignNew: `${P}google-foreign-new@test.local`,
+    callbackNew: `${P}google-callback-new@test.local`,
+    replayFirst: `${P}google-replay-first@test.local`,
+    replaySecond: `${P}google-replay-second@test.local`,
+    loweredNew: `${P}google-lowered-new@test.local`,
+  };
+  // Obviously fake access tokens: the People API stand-in serves one list per token.
+  const TOKEN = {
+    read: 'k13b-fake-google-token-read',
+    noEdit: 'k13b-fake-google-token-noedit',
+    staff: 'k13b-fake-google-token-staff',
+    owner: 'k13b-fake-google-token-owner',
+    foreign: 'k13b-fake-google-token-foreign',
+    callback: 'k13b-fake-google-token-callback',
+    replayFirst: 'k13b-fake-google-token-replay-first',
+    replaySecond: 'k13b-fake-google-token-replay-second',
+    lowered: 'k13b-fake-google-token-lowered',
+  };
+  // Obviously fake authorization codes: the token endpoint stand-in trades each
+  // for the access token of the same name.
+  const CODE = {
+    foreign: 'k13b-fake-google-code-foreign',
+    callback: 'k13b-fake-google-code-callback',
+    replayFirst: 'k13b-fake-google-code-replay-first',
+    replaySecond: 'k13b-fake-google-code-replay-second',
+    lowered: 'k13b-fake-google-code-lowered',
+  };
+  const ACCESS_FOR_CODE: Record<string, string> = Object.fromEntries(
+    Object.entries(CODE).map(([name, code]) => [code, (TOKEN as Record<string, string>)[name]]),
+  );
+  const PEOPLE_URL = 'https://people.googleapis.com/v1/people/me/connections?';
+  const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+  const person = (ref: string, given: string, family: string, email: string, org?: string) => ({
+    resourceName: `people/${ref}`,
+    names: [{ givenName: given, familyName: family }],
+    emailAddresses: [{ value: email }],
+    ...(org ? { organizations: [{ name: org }] } : {}),
+  });
+  const PEOPLE: Record<string, unknown[]> = {
+    [TOKEN.read]: [
+      person('k13bRead1', `${P}Ignored`, 'Leaked', GMAIL.priv, `${P}LeakCo`),
+      person('k13bRead2', `${P}GoogleRead`, 'New', GMAIL.readNew),
+    ],
+    [TOKEN.noEdit]: [
+      person('k13bNoEdit1', `${P}Ignored`, 'Leaked', GMAIL.priv, `${P}LeakCo`),
+      person('k13bNoEdit2', `${P}GoogleNoEdit`, 'New', GMAIL.noEditNew),
+    ],
+    [TOKEN.staff]: [
+      person('k13bStaff1', `${P}Ignored`, 'Leaked', GMAIL.priv, `${P}LeakCo`),
+      person('k13bStaff2', `${P}Ignored`, 'GoogleMerged', GMAIL.team, `${P}GoogleCo`),
+      person('k13bStaff3', `${P}GoogleStaff`, 'New', GMAIL.staffNew),
+    ],
+    [TOKEN.owner]: [
+      person('k13bOwner1', `${P}Ignored`, 'OwnerMerged', GMAIL.privOwner, `${P}OwnerCo`),
+      person('k13bOwner2', `${P}GoogleOwner`, 'New', GMAIL.ownerNew),
+    ],
+    [TOKEN.foreign]: [
+      person('k13bForeign1', `${P}Ignored`, 'ForeignLeaked', GMAIL.priv, `${P}ForeignLeakCo`),
+      person('k13bForeign2', `${P}GoogleForeign`, 'New', GMAIL.foreignNew),
+    ],
+    [TOKEN.callback]: [
+      person('k13bCallback1', `${P}Ignored`, 'CallbackLeaked', GMAIL.priv, `${P}CallbackLeakCo`),
+      person('k13bCallback2', `${P}Ignored`, 'CallbackMerged', GMAIL.teamCallback, `${P}CallbackCo`),
+      person('k13bCallback3', `${P}GoogleCallback`, 'New', GMAIL.callbackNew),
+    ],
+    [TOKEN.replayFirst]: [person('k13bReplay1', `${P}GoogleReplay`, 'First', GMAIL.replayFirst)],
+    [TOKEN.replaySecond]: [person('k13bReplay2', `${P}GoogleReplay`, 'Second', GMAIL.replaySecond)],
+    [TOKEN.lowered]: [
+      person('k13bLowered1', `${P}Ignored`, 'LoweredLeaked', GMAIL.priv, `${P}LoweredLeakCo`),
+      person('k13bLowered2', `${P}GoogleLowered`, 'New', GMAIL.loweredNew),
+    ],
+  };
+
+  const events = (contactId: string): Promise<Array<{ type: string; actor_type: string | null; actor_id: string | null }>> =>
+    db.$queryRawUnsafe('SELECT type, actor_type, actor_id FROM contact_events WHERE contact_id = $1 ORDER BY created_at', contactId);
+  const audits = (contactId: string): Promise<Array<{ action: string; actor: any; changed_fields: string[] }>> =>
+    db.$queryRawUnsafe('SELECT action, actor, changed_fields FROM contact_audit_entries WHERE contact_id = $1 ORDER BY created_at', contactId);
+
+  function googleImport(actor: string | null, accessToken: string) {
+    const req = request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/google/import`)
+      .set('x-forwarded-for', nextIp());
+    if (actor) req.set('x-test-user', actor);
+    return req.send({ accessToken });
+  }
+
+  function googleAuthUrl(actor: string) {
+    return request(app.getHttpServer())
+      .get(`/crm/businesses/${ID.bizA}/google/auth-url`)
+      .set('x-test-user', actor)
+      .set('x-forwarded-for', nextIp());
+  }
+
+  /** The public OAuth callback, as the web proxy calls it: no session, no member header. */
+  function googleCallback(state: string, code: string) {
+    return request(app.getHttpServer())
+      .get('/crm/google/callback')
+      .query({ code, state })
+      .set('x-forwarded-for', nextIp());
+  }
+
+  /** The state of an auth URL GET google/auth-url answered for `actor` (200). */
+  async function issuedState(actor: string): Promise<string> {
+    const res = await googleAuthUrl(actor);
+    expect(res.status).toBe(200);
+    const state = new URL(res.body.url).searchParams.get('state');
+    expect(typeof state).toBe('string');
+    return state as string;
+  }
+
+  /** A state's signed payload, read as the web proxy reads it (base64(payload.hmac)). */
+  function statePayload(state: string): Record<string, unknown> {
+    const decoded = Buffer.from(state, 'base64').toString('utf-8');
+    return JSON.parse(decoded.substring(0, decoded.lastIndexOf('.')));
+  }
+
+  /** A state signed with the harness's GOOGLE_STATE_SECRET, in the format every Google flow uses. */
+  function signedWithSharedSecret(payload: Record<string, unknown>): string {
+    const json = JSON.stringify(payload);
+    const signature = createHmac('sha256', GOOGLE_ENV.GOOGLE_STATE_SECRET).update(json).digest('hex');
+    return Buffer.from(`${json}.${signature}`).toString('base64');
+  }
+
+  const tokenCalls = () => fetchSpy.mock.calls.filter(([input]: any[]) => String(input) === TOKEN_URL).length;
+
+  /**
+   * A refused callback: the redirect names `error`, Google is never called (no
+   * code exchange, no People API), nothing is written for the tenant, and the
+   * owner's PRIVATE contact the Google data matches is left exactly as it was.
+   */
+  async function expectCallbackRefused(state: string, code: string, error: string) {
+    await settle();
+    const before = await traceCounts();
+    const privBefore = await contactTraces(G.cPrivGoogle);
+    fetchSpy.mockClear();
+    const res = await googleCallback(state, code);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe(`/app/crm/contacts?google_error=${error}`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await settle();
+    expect(await traceCounts()).toEqual(before);
+    expect(await contactTraces(G.cPrivGoogle)).toEqual(privBefore);
+  }
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeAll(async () => {
+    // A crm read-only member and three Google-matched contacts, seeded here so
+    // the suite's fixture sanity case keeps its counts.
+    await db.user.create({ data: { id: G.staffRead, email: `${P}staffRead@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_staffRead`, userId: G.staffRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read' } },
+    });
+    const c = async (id: string, email: string, visibility: string) =>
+      db.contact.create({
+        data: { id, businessId: ID.bizA, firstName: `${P}${id.slice(P.length)}`, email, emailNormalized: email, visibility, ownerId: ID.owner },
+      });
+    await c(G.cPrivGoogle, GMAIL.priv, 'PRIVATE');
+    await c(G.cTeamGoogle, GMAIL.team, 'TEAM');
+    await c(G.cPrivGoogleOwner, GMAIL.privOwner, 'PRIVATE');
+    await c(G.cTeamCallback, GMAIL.teamCallback, 'TEAM');
+    // A crm write member (view all, edit any) whose scope map the callback
+    // cases lower after its auth URLs are issued.
+    await db.user.create({ data: { id: G.staffLowered, email: `${P}staffLowered@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_staffLowered`, userId: G.staffLowered, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write' } },
+    });
+
+    // The People API, stood in: one fixed URL, a list per fake token; and the
+    // Google token endpoint (the OAuth callback's code exchange), one fixed
+    // URL trading a fake code for the fake token of the same name. Any other
+    // outbound fetch throws, so no provider traffic leaves the process.
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : String(input?.href ?? input?.url);
+      if (url === TOKEN_URL) {
+        const code = new URLSearchParams(String(init?.body ?? '')).get('code') ?? '';
+        if (code in ACCESS_FOR_CODE) {
+          return new Response(JSON.stringify({ access_token: ACCESS_FOR_CODE[code], token_type: 'Bearer' }), {
+            status: 200, headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response('{"error":"invalid_grant"}', { status: 400 });
+      }
+      if (url.startsWith(PEOPLE_URL)) {
+        const token = String(init?.headers?.Authorization ?? '').replace(/^Bearer /, '');
+        if (token in PEOPLE) {
+          return new Response(JSON.stringify({ connections: PEOPLE[token] }), {
+            status: 200, headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response('{"error":"unauthenticated"}', { status: 401 });
+      }
+      throw new Error(`unexpected outbound fetch in a test: ${url}`);
+    }) as any);
+  });
+
+  afterAll(() => fetchSpy?.mockRestore());
+
+  it("W7-GOOGLE-IMPORT-SCOPE NEGATIVE CONTROL: a crm read-only STAFF member's POST google/import answers 403 (crm requires write) before Google is called, writes nothing, and leaves the owner's PRIVATE contact its Google data matches exactly as it was; an unauthenticated call answers 401 alike", async () => {
+    await settle();
+    const privBefore = await contactTraces(G.cPrivGoogle);
+    fetchSpy.mockClear();
+    const res = await expectRefusedWithNothingWritten(() => googleImport(G.staffRead, TOKEN.read), 403);
+    expect(String(res.body.message)).toMatch(/crm requires write/i);
+    await expectRefusedWithNothingWritten(() => googleImport(null, TOKEN.read), 401);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await contactTraces(G.cPrivGoogle)).toEqual(privBefore);
+    expect(await rawContact(G.cPrivGoogle)).toMatchObject({ visibility: 'PRIVATE', last_name: null, company_name: null });
+    expect(await contactIdsWithEmail(GMAIL.readNew)).toEqual([]);
+  });
+
+  it('W7-GOOGLE-IMPORT-SCOPE NEGATIVE CONTROL: STAFF with crm write but crm_edit none is refused 403 (no permission to create contacts) before Google is called, as the CSV import is since R0-13, and nothing is written', async () => {
+    await settle();
+    const privBefore = await contactTraces(G.cPrivGoogle);
+    fetchSpy.mockClear();
+    const res = await expectRefusedWithNothingWritten(() => googleImport(ID.staffNoEdit, TOKEN.noEdit), 403);
+    expect(String(res.body.message)).toMatch(/permission to create contacts/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await contactTraces(G.cPrivGoogle)).toEqual(privBefore);
+    expect(await contactIdsWithEmail(GMAIL.noEditNew)).toEqual([]);
+  });
+
+  it("W7-GOOGLE-IMPORT-SCOPE: STAFF (view all, edit any) importing from Google: the person matching the owner's PRIVATE contact is skipped and that contact is left exactly as it was; the person matching the owner's TEAM contact is merged with an 'updated' audit entry naming the member; a new person is created with its contact.created event and created audit entry naming the member", async () => {
+    await settle();
+    const privBefore = await contactTraces(G.cPrivGoogle);
+    expect(await audits(G.cTeamGoogle)).toEqual([]);
+    const res = await googleImport(ID.staffWrite, TOKEN.staff);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ totalFetched: 3, imported: 2, skipped: 1 });
+    await settle();
+
+    // The PRIVATE holder: neither merged nor duplicated.
+    expect(await contactTraces(G.cPrivGoogle)).toEqual(privBefore);
+    expect(await contactIdsWithEmail(GMAIL.priv)).toEqual([G.cPrivGoogle]);
+
+    // The TEAM contact the member may edit: merged, and the audit names the member.
+    expect(await rawContact(G.cTeamGoogle)).toMatchObject({
+      visibility: 'TEAM', owner_id: ID.owner, last_name: 'GoogleMerged', company_name: `${P}GoogleCo`,
+    });
+    const merged = await audits(G.cTeamGoogle);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ action: 'updated', actor: { type: 'USER', id: ID.staffWrite } });
+    expect(merged[0].changed_fields).toEqual(expect.arrayContaining(['lastName', 'companyName']));
+
+    // The new person: created, and its event and audit entry name the member.
+    const ids = await contactIdsWithEmail(GMAIL.staffNew);
+    expect(ids).toHaveLength(1);
+    expect(await rawContact(ids[0])).toMatchObject({ source: 'google_contacts', source_detail: 'people/k13bStaff3', deleted_at: null });
+    expect(await events(ids[0])).toEqual([{ type: 'contact.created', actor_type: 'USER', actor_id: ID.staffWrite }]);
+    expect(await audits(ids[0])).toMatchObject([{ action: 'created', actor: { type: 'USER', id: ID.staffWrite } }]);
+  });
+
+  it("W7-GOOGLE-IMPORT-SCOPE positive control: the owner's Google import still merges into the owner's own PRIVATE contact and creates a new one, and both writes record the owner as the actor", async () => {
+    const res = await googleImport(ID.owner, TOKEN.owner);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ totalFetched: 2, imported: 2, skipped: 0 });
+    await settle();
+
+    expect(await rawContact(G.cPrivGoogleOwner)).toMatchObject({
+      visibility: 'PRIVATE', owner_id: ID.owner, last_name: 'OwnerMerged', company_name: `${P}OwnerCo`,
+    });
+    expect(await audits(G.cPrivGoogleOwner)).toMatchObject([{ action: 'updated', actor: { type: 'USER', id: ID.owner } }]);
+
+    const ids = await contactIdsWithEmail(GMAIL.ownerNew);
+    expect(ids).toHaveLength(1);
+    expect(await events(ids[0])).toEqual([{ type: 'contact.created', actor_type: 'USER', actor_id: ID.owner }]);
+    expect(await audits(ids[0])).toMatchObject([{ action: 'created', actor: { type: 'USER', id: ID.owner } }]);
+  });
+
+  it('W7-GOOGLE-IMPORT-SCOPE: GET google/auth-url, which starts the Google contact import the OAuth callback completes, needs crm write too: a crm read-only STAFF member gets 403 (crm requires write); a crm write member passes the scope gate', async () => {
+    const denied = await googleAuthUrl(G.staffRead);
+    expect(denied.status).toBe(403);
+    expect(String(denied.body.message)).toMatch(/crm requires write/i);
+
+    // Past the gate the handler runs: the harness configures a (fake) Google
+    // client, so it answers 200 with the auth URL (without one it would answer
+    // 400 'Google OAuth not configured').
+    const allowed = await googleAuthUrl(ID.staffWrite);
+    expect([200, 400]).toContain(allowed.status);
+    if (allowed.status === 400) expect(String(allowed.body.message)).toMatch(/Google OAuth not configured/i);
+    expect(allowed.status).toBe(200);
+  });
+
+  // ---- review repairs: the OAuth callback the web UI imports through ----------
+
+  it('W7-GOOGLE-IMPORT-SCOPE review repair SEC-GIS-2 NEGATIVE CONTROL: STAFF with crm write but crm_edit none is refused 403 on GET google/auth-url (no permission to create contacts), as on POST google/import, so it is never issued a state', async () => {
+    const res = await googleAuthUrl(ID.staffNoEdit);
+    expect(res.status).toBe(403);
+    expect(String(res.body.message)).toMatch(/permission to create contacts/i);
+    expect(res.body).not.toHaveProperty('url');
+  });
+
+  it("W7-GOOGLE-IMPORT-SCOPE review repair SEC-GIS-1 NEGATIVE CONTROL: GET crm/google/callback refuses every state signed with the shared GOOGLE_STATE_SECRET that the CRM auth-url did not mint (a bookings calendar state any member can get, a Drive state, and a CRM-flow state naming no member): each redirects google_error=invalid_state before Google is called, writes nothing, and leaves the owner's PRIVATE contact exactly as it was", async () => {
+    const { CalendarService } = await import('../src/modules/bookings/calendar.service');
+    const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
+    const calendarState = new URL(new CalendarService({} as any).getAuthUrl(ID.bizA)).searchParams.get('state') as string;
+    const driveState = new URL(new GoogleDriveService({} as any).getAuthUrl(ID.bizA)).searchParams.get('state') as string;
+    expect(statePayload(calendarState)).toMatchObject({ businessId: ID.bizA });
+    expect(statePayload(driveState)).toMatchObject({ businessId: ID.bizA, flow: 'drive' });
+    const noMember = signedWithSharedSecret({
+      flow: 'crm-google-contacts', businessId: ID.bizA, nonce: 'k13b-fake-nonce-no-member', exp: Date.now() + 60_000,
+    });
+
+    for (const state of [calendarState, driveState, noMember]) {
+      await expectCallbackRefused(state, CODE.foreign, 'invalid_state');
+    }
+    expect(await rawContact(G.cPrivGoogle)).toMatchObject({ visibility: 'PRIVATE', owner_id: ID.owner, last_name: null, company_name: null });
+    expect(await contactIdsWithEmail(GMAIL.foreignNew)).toEqual([]);
+  });
+
+  it("W7-GOOGLE-IMPORT-SCOPE review repair CR-W7G-1: the OAuth callback imports as the member its state names (STAFF view all, edit any): GET google/auth-url answers 200 with a state naming that member and the CRM flow; the callback redirects google_success imported=2; the person matching the owner's PRIVATE contact is skipped and that contact left exactly as it was; the TEAM contact is merged with an 'updated' audit entry naming the member; the new contact's contact.created event and created audit entry name the member", async () => {
+    const state = await issuedState(ID.staffWrite);
+    expect(statePayload(state)).toMatchObject({ flow: 'crm-google-contacts', businessId: ID.bizA, memberId: ID.staffWrite });
+
+    await settle();
+    const privBefore = await contactTraces(G.cPrivGoogle);
+    expect(await audits(G.cTeamCallback)).toEqual([]);
+    fetchSpy.mockClear();
+    const res = await googleCallback(state, CODE.callback);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/app/crm/contacts?google_success=true&imported=2');
+    expect(tokenCalls()).toBe(1);
+    await settle();
+
+    // The PRIVATE holder: neither merged nor duplicated.
+    expect(await contactTraces(G.cPrivGoogle)).toEqual(privBefore);
+    expect(await contactIdsWithEmail(GMAIL.priv)).toEqual([G.cPrivGoogle]);
+
+    // The TEAM contact the member may edit: merged, and the audit names the member.
+    expect(await rawContact(G.cTeamCallback)).toMatchObject({
+      visibility: 'TEAM', owner_id: ID.owner, last_name: 'CallbackMerged', company_name: `${P}CallbackCo`,
+    });
+    const merged = await audits(G.cTeamCallback);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ action: 'updated', actor: { type: 'USER', id: ID.staffWrite } });
+
+    // The new person: created, and its event and audit entry name the member.
+    const ids = await contactIdsWithEmail(GMAIL.callbackNew);
+    expect(ids).toHaveLength(1);
+    expect(await rawContact(ids[0])).toMatchObject({ source: 'google_contacts', source_detail: 'people/k13bCallback3', deleted_at: null });
+    expect(await events(ids[0])).toEqual([{ type: 'contact.created', actor_type: 'USER', actor_id: ID.staffWrite }]);
+    expect(await audits(ids[0])).toMatchObject([{ action: 'created', actor: { type: 'USER', id: ID.staffWrite } }]);
+  });
+
+  it('W7-GOOGLE-IMPORT-SCOPE review repair SEC-GIS-3 NEGATIVE CONTROL: a state is good for one callback: the first callback imports (google_success imported=1); replaying the same state with another authorization code redirects google_error=invalid_state before Google is called, and nothing is written', async () => {
+    const state = await issuedState(ID.staffWrite);
+    const first = await googleCallback(state, CODE.replayFirst);
+    expect(first.status).toBe(302);
+    expect(first.headers.location).toBe('/app/crm/contacts?google_success=true&imported=1');
+    await settle();
+    expect(await contactIdsWithEmail(GMAIL.replayFirst)).toHaveLength(1);
+
+    await expectCallbackRefused(state, CODE.replaySecond, 'invalid_state');
+    expect(await contactIdsWithEmail(GMAIL.replaySecond)).toEqual([]);
+  });
+
+  it("W7-GOOGLE-IMPORT-SCOPE review repair SEC-GIS-2 NEGATIVE CONTROL: the callback re-checks the member its state names when it lands: after the auth URLs were issued, a member lowered to crm_edit none, then to crm read, then removed from the business is refused (google_error=forbidden) before Google is called each time, nothing is written, and the owner's PRIVATE contact is left exactly as it was", async () => {
+    const states = [
+      await issuedState(G.staffLowered),
+      await issuedState(G.staffLowered),
+      await issuedState(G.staffLowered),
+    ];
+    const lower = (permissionScopes: Record<string, string>) =>
+      db.membership.update({ where: { id: `${P}m_staffLowered` }, data: { permissionScopes } });
+
+    await lower({ crm: 'write', crm_edit: 'none' });
+    await expectCallbackRefused(states[0], CODE.lowered, 'forbidden');
+
+    await lower({ crm: 'read' });
+    await expectCallbackRefused(states[1], CODE.lowered, 'forbidden');
+
+    await db.membership.delete({ where: { id: `${P}m_staffLowered` } });
+    await expectCallbackRefused(states[2], CODE.lowered, 'forbidden');
+
+    expect(await rawContact(G.cPrivGoogle)).toMatchObject({ visibility: 'PRIVATE', owner_id: ID.owner, last_name: null, company_name: null });
+    expect(await contactIdsWithEmail(GMAIL.loweredNew)).toEqual([]);
+  });
 });

@@ -30,6 +30,14 @@ export class GoogleSuiteController {
    * D-11; GmailService.assertConnectAuthority: OWNER membership,
    * Business.ownerId or SUPER_ADMIN, else 403 GMAIL_OWNER_ONLY), and the state
    * names the caller so the Gmail grant is only staged for them to confirm.
+   *
+   * A consent without gmail stays open to members (R0-CMF5 review 2, CMF5R-2:
+   * the web key-connect sign-in retries without gmail on GMAIL_OWNER_ONLY).
+   * W7-RECENT-CONTACTS-VISIBILITY review CR-RCV-1: the owner rule for every
+   * service is held for an owner ruling (recorded D-94 names Google Analytics
+   * and Search Console only); it must land with the web follow-up and the same
+   * rule on GET bookings calendar/auth-url and GET drive auth-url, which give
+   * any member a consent URL too (SEC-W7RCV-2, CR-RCV-2).
    */
   @Post('businesses/:businessId/auth-url')
   @UseGuards(AuthGuard, BusinessGuard)

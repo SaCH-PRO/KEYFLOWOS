@@ -763,6 +763,11 @@
       "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
     },
     {
+      "prefix": "v93e_",
+      "owner": "apps/server/test/connect-recent-visibility.integration.test.ts",
+      "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
