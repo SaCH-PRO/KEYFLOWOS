@@ -1461,14 +1461,17 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
   });
 
   /**
-   * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, closes D-97 review
-   * SEC-W8RSC-4). D-97 leaves the pre-event refresh token alive at GoTrue,
-   * and a hijacker who knows (or, with that token, sets) the password could
-   * open a NEW password session after the cutoff, which D-97 admitted. Now,
-   * after a cutoff, the real AuthMiddleware admits only a new sign-in made
-   * with Google or an emailed link until one such sign-in has CLEARED the
-   * restriction (User.metaData.signInCutoffClearedAt, its authentication
-   * time, written once under the User row lock RiscService takes). From then
+   * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, narrows D-97 review
+   * SEC-W8RSC-4: review SEC-W9RPC-2). D-97 leaves the pre-event refresh
+   * token alive at GoTrue, and a hijacker who knows (or, with that token,
+   * sets) the password could open a NEW password session after the cutoff,
+   * which D-97 admitted. Now, after a cutoff, the real AuthMiddleware admits
+   * only a new sign-in made with Google or an emailed link until one such
+   * sign-in has CLEARED the restriction (User.metaData.signInCutoffClearedAt,
+   * written once under the User row lock RiscService takes, dated when it is
+   * recorded or at the sign-in if later: review CR-W9RPC-3). The clearing
+   * sign-ins below are dated 20s after the event, ahead of this server's
+   * clock however slow the run, so the clearing is dated at them. From then
    * on a session authenticated after the clearing is admitted by any method;
    * the password session authenticated between the cutoff and the clearing
    * (the hijacker's) stays refused. A later RISC event re-arms it.
@@ -1485,25 +1488,25 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     expect(await attached(hijackerPassword)).toBeNull();
     expect(h.userRow.metaData.signInCutoffClearedAt).toBeUndefined();
 
-    // The real user signs in with Google: admitted, and the restriction is cleared at that sign-in.
+    // The real user signs in with Google: admitted, and the restriction is cleared at that sign-in (the later of it and now).
     const writesBefore = h.prisma.client.user.update.mock.calls.length;
     const locksBefore = h.prisma.client.$queryRaw.mock.calls.length;
-    const google = signInToken('oauth', cutoff + 2, cutoff + 2, 's-real-google');
+    const google = signInToken('oauth', cutoff + 20, cutoff + 20, 's-real-google');
     expect(await attached(google)).toBe(USER);
-    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 2);
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
     expect(h.prisma.client.user.update.mock.calls.length).toBe(writesBefore + 1);
     const lock = h.prisma.client.$queryRaw.mock.calls[locksBefore] as unknown as [TemplateStringsArray, ...unknown[]];
     expect(lock[0].join('?').replace(/\s+/g, ' ').trim()).toBe('SELECT id FROM users WHERE id = ? FOR NO KEY UPDATE');
     expect(lock.slice(1)).toEqual([USER]);
     // Written once: the same session again (and a refresh of it) writes nothing.
     expect(await attached(google)).toBe(USER);
-    expect(await attached(signInToken('oauth', cutoff + 2, cutoff + 600, 's-real-google'))).toBe(USER);
+    expect(await attached(signInToken('oauth', cutoff + 20, cutoff + 600, 's-real-google'))).toBe(USER);
     expect(h.prisma.client.user.update.mock.calls.length).toBe(writesBefore + 1);
     // The cutoff itself and the flag the event wrote are kept.
     expect(h.userRow.metaData).toMatchObject({ signInCutoffAt: cutoff, googleSignInDisabled: true });
 
     // A password session the real user opens after the clearing is admitted ...
-    expect(await attached(signInToken('password', cutoff + 3, cutoff + 3, 's-real-password'))).toBe(USER);
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-real-password'))).toBe(USER);
     // ... while the hijacker's, opened between the cutoff and the clearing, stays refused, refreshed or not.
     expect(await attached(hijackerPassword)).toBeNull();
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 600, 's-hijacker-password'))).toBeNull();
@@ -1522,9 +1525,9 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
       expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password'))).toBeNull();
 
       const emailOnly = { provider: 'email', providers: ['email'] };
-      expect(await attached(signInToken(method, cutoff + 2, cutoff + 2, 's-link', emailOnly))).toBe(USER);
-      expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 2);
-      expect(await attached(signInToken('password', cutoff + 3, cutoff + 3, 's-password-2'))).toBe(USER);
+      expect(await attached(signInToken(method, cutoff + 20, cutoff + 20, 's-link', emailOnly))).toBe(USER);
+      expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
+      expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-2'))).toBe(USER);
       expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password'))).toBeNull();
     },
   );
@@ -1565,9 +1568,9 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
 
     expect(await attached(before)).toBeNull();
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
-    expect(await attached(signInToken('oauth', cutoff + 2, cutoff + 2, 's-google-after'))).toBe(USER);
-    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 2);
-    expect(await attached(signInToken('password', cutoff + 3, cutoff + 3, 's-password-later'))).toBe(USER);
+    expect(await attached(signInToken('oauth', cutoff + 20, cutoff + 20, 's-google-after'))).toBe(USER);
+    expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-later'))).toBe(USER);
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
   });
 });

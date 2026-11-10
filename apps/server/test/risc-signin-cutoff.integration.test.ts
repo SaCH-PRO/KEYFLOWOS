@@ -616,14 +616,17 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
   });
 
   /**
-   * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, closes D-97 review
-   * SEC-W8RSC-4): after a cutoff the account accepts only a new sign-in made
-   * with Google or an emailed link. A password session opened after the
-   * cutoff (the hijacker's, with the password they know or set through the
-   * pre-event GoTrue session) is refused until the real user signs in once
-   * with Google or the emailed link; that session clears the restriction
-   * (users.meta_data.signInCutoffClearedAt, its authentication time), written
-   * once under the User row lock RiscService takes.
+   * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, narrows D-97 review
+   * SEC-W8RSC-4: review SEC-W9RPC-2): after a cutoff the account accepts only
+   * a new sign-in made with Google or an emailed link. A password session
+   * opened after the cutoff (the hijacker's, with the password they know or
+   * set through the pre-event GoTrue session) is refused until the real user
+   * signs in once with Google or the emailed link; that session clears the
+   * restriction (users.meta_data.signInCutoffClearedAt), written once under
+   * the User row lock RiscService takes, dated when it is recorded or at the
+   * sign-in if later (review CR-W9RPC-3). The clearing sign-ins below are
+   * dated 20s or more after the event, ahead of this server's clock however
+   * slow the run, so the clearing is dated at them.
    */
   it('D-101 (W9-RISC-PASSWORD-CUTOFF): against Postgres, after a RISC cutoff a password session is refused; a Google session is admitted and records signInCutoffClearedAt; a password session authenticated after the clearing is admitted while the one between the cutoff and the clearing stays refused; a new RISC event re-arms the restriction', async () => {
     expect((await bootstrap('d101')).status).toBe(201);
@@ -635,13 +638,13 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     expect((await me(hijacker)).status).toBe(401);
     expect((await metaOf(ID.d101)).signInCutoffClearedAt).toBeUndefined();
 
-    const google = await accessToken('d101', cutoff + 2, cutoff + 2, 'd101-google');
+    const google = await accessToken('d101', cutoff + 20, cutoff + 20, 'd101-google');
     const admitted = await me(google);
     expect(admitted.status).toBe(200);
     expect(admitted.body).toMatchObject({ id: ID.d101 });
-    expect(await metaOf(ID.d101)).toMatchObject({ signInCutoffAt: cutoff, signInCutoffClearedAt: cutoff + 2, googleSignInDisabled: true });
+    expect(await metaOf(ID.d101)).toMatchObject({ signInCutoffAt: cutoff, signInCutoffClearedAt: cutoff + 20, googleSignInDisabled: true });
 
-    expect((await me(await accessToken('d101', cutoff + 3, cutoff + 3, 'd101-password', 'password'))).status).toBe(200);
+    expect((await me(await accessToken('d101', cutoff + 21, cutoff + 21, 'd101-password', 'password'))).status).toBe(200);
     expect((await me(hijacker)).status).toBe(401);
     // A refresh of the hijacker's session: new iat (verifyLocal refuses one more than 60s ahead), same original sign-in.
     expect((await me(await accessToken('d101', cutoff + 1, cutoff + 30, 'd101-hijacker', 'password'))).status).toBe(401);
@@ -653,8 +656,8 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     const next = rearmed.signInCutoffAt as number;
     expect(next).toBeGreaterThanOrEqual(cutoff);
     expect((await me(await accessToken('d101', next + 4, next + 4, 'd101-password-2', 'password'))).status).toBe(401);
-    expect((await me(await accessToken('d101', next + 5, next + 5, 'd101-google-2'))).status).toBe(200);
-    expect((await metaOf(ID.d101)).signInCutoffClearedAt).toBe(next + 5);
+    expect((await me(await accessToken('d101', next + 20, next + 20, 'd101-google-2'))).status).toBe(200);
+    expect((await metaOf(ID.d101)).signInCutoffClearedAt).toBe(next + 20);
   });
 
   it('D-101 (W9-RISC-PASSWORD-CUTOFF): the cleared marker is written once, under the User row lock — two Google sessions queued behind a held lock write it once (the first in the queue; the second re-reads it under the lock), and a later qualifying session leaves the row untouched', async () => {
@@ -662,8 +665,8 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     await riscEvent(GSUB.d101Race, RISC_EVENT_TYPES.SESSIONS_REVOKED);
     const cutoff = (await cutoffOf(ID.d101Race)) as number;
     expect(typeof cutoff).toBe('number');
-    const first = await accessToken('d101Race', cutoff + 10, cutoff + 10, 'd101-race-first');
-    const second = await accessToken('d101Race', cutoff + 20, cutoff + 20, 'd101-race-second');
+    const first = await accessToken('d101Race', cutoff + 30, cutoff + 30, 'd101-race-first');
+    const second = await accessToken('d101Race', cutoff + 40, cutoff + 40, 'd101-race-second');
 
     let release!: () => void;
     const released = new Promise<void>((r) => (release = r));
@@ -689,17 +692,48 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     const [a, b] = await Promise.all([firstRes, secondRes]);
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
-    // Unlocked, or without the re-read, the second would have overwritten it with cutoff + 20.
-    expect((await metaOf(ID.d101Race)).signInCutoffClearedAt).toBe(cutoff + 10);
+    // Unlocked, or without the re-read, the second would have overwritten it with cutoff + 40.
+    expect((await metaOf(ID.d101Race)).signInCutoffClearedAt).toBe(cutoff + 30);
 
     const xminOf = async () => {
       const [{ xmin }] = await db.$queryRaw`SELECT xmin::text AS xmin FROM users WHERE id = ${ID.d101Race}`;
       return xmin as string;
     };
     const settled = await xminOf();
-    expect((await me(await accessToken('d101Race', cutoff + 30, cutoff + 30, 'd101-race-third'))).status).toBe(200);
+    expect((await me(await accessToken('d101Race', cutoff + 50, cutoff + 50, 'd101-race-third'))).status).toBe(200);
     expect((await me(second)).status).toBe(200);
     expect(await xminOf()).toBe(settled);
-    expect((await metaOf(ID.d101Race)).signInCutoffClearedAt).toBe(cutoff + 10);
+    expect((await metaOf(ID.d101Race)).signInCutoffClearedAt).toBe(cutoff + 30);
   });
+
+  /**
+   * D-101 review SEC-W9RPC-1 / CR-W9RPC-1 (confirmed; the fix is outside
+   * W9-RISC-PASSWORD-CUTOFF's write set). The product's only emailed link is
+   * the password-recovery link, and the web posts its session in the BODY of
+   * POST /identity/reset-password, never as a bearer, so AuthMiddleware never
+   * judges it and IdentityPasswordService.completeReset records no clearing.
+   * completeReset then writes the logout cutoff, and the password sign-in the
+   * web sends the user to ("Password updated. Please sign in.") is refused on
+   * every request; after account-disabled/hijacking, when Google sign-in waits
+   * on Google recovering the account, the user has no way in. Follow-up:
+   * completeReset calls recordSignInCutoffCleared (core/auth/auth.middleware.ts)
+   * with the recovery session's authentication time once the password is
+   * updated, and this case runs against Postgres with the real
+   * IdentityPasswordService.
+   */
+  it.todo(
+    'D-101 review SEC-W9RPC-1 / CR-W9RPC-1: after a RISC cutoff, a completed POST /identity/reset-password (the recovery session in the body, as the web sends it) records signInCutoffClearedAt, so the password session the user then opens is admitted while the hijacker\'s earlier one stays refused',
+  );
+
+  /**
+   * D-101 review CR-W9RPC-2 (confirmed; outside the write set): after a
+   * cutoff, POST /identity/login (and /identity/refresh) still answer status
+   * 'authenticated' and audit login_success for a password session
+   * AuthMiddleware refuses on every request; the web stores the token, its
+   * bootstrap gets a 401 and it shows a generic error. Follow-up in
+   * identity.controller.ts.
+   */
+  it.todo(
+    'D-101 review CR-W9RPC-2: after a RISC cutoff, POST /identity/login (and /identity/refresh) neither answers authenticated nor audits login_success for a password session AuthMiddleware refuses, and says to sign in with Google or an emailed link',
+  );
 });

@@ -937,7 +937,8 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   `account-credential-change-required`, `verification` and
   `account-disabled` for any other reason record no cutoff.
 - **After a cutoff, only a Google or emailed-link sign-in until it clears**
-  (owner ruling D-101, W9-RISC-PASSWORD-CUTOFF; closes SEC-W8RSC-4). A
+  (owner ruling D-101, W9-RISC-PASSWORD-CUTOFF; narrows SEC-W8RSC-4, see the
+  residuals below). A
   session opened after the cutoff is admitted only when its ORIGINAL sign-in
   (its earliest `amr` entry; a later MFA step-up does not count) was:
   - Google: `amr` method `oauth`. GoTrue never names the OAuth provider in
@@ -953,14 +954,21 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     `email/signup`, `recovery`, `invite` (the PKCE flow's emailed links). A
     password-recovery link counts as an emailed link: GoTrue sends it only to
     the account's address and marks its session `recovery` (PKCE) or `otp`
-    (implicit, the same as a magic link).
+    (implicit, the same as a magic link). Only a session presented to this
+    API as a bearer is judged, and the shipped password reset does not
+    present one: see "The password reset does not clear the restriction"
+    below.
   - Anything else is refused with the middleware's ordinary 401 (fail closed):
     `password`, `totp`, `mfa/*`, `sso/saml`, `anonymous`, `web3`, `passkey`,
     `token_refresh`, `email_change` (its link goes to the NEW address), a
     method GoTrue adds later, a string-only `amr`, or a token with no `amr`.
 
-  The first such session CLEARS the restriction: the middleware records its
-  authentication time as `users.meta_data.signInCutoffClearedAt`, written
+  The first such session CLEARS the restriction: the middleware records the
+  clearing as `users.meta_data.signInCutoffClearedAt`, dated when it records
+  it, or at that session's sign-in when the provider dates it later (review
+  CR-W9RPC-3: dated at the sign-in alone, a password session opened after the
+  real user's Google sign-in at GoTrue, but before that Google session first
+  reached this API, was refused until then and admitted after), written
   once, under the same User row lock the RISC writes take (the bag is read
   again under the lock, so concurrent requests write it once; a cutoff a RISC
   event raised past the session meanwhile is not cleared and that session is
@@ -973,6 +981,12 @@ authenticity is verified with Google's JWKS inside `RiscService`.
   restriction: its cutoff write removes the marker (the cutoff is still never
   lowered). A marker that is not after the current cutoff is ignored. No
   schema change, no provider call, `SUPABASE_JWT_SECRET` stays empty.
+- **Rollout of D-101** (review CR-W9RPC-2). The rule applies to cutoffs
+  already recorded under D-97: from the deploy, a user whose row holds a
+  cutoff and no `signInCutoffClearedAt`, and who signed in again with a
+  password after the event (which D-97 admitted), is refused on the next
+  request until they sign in with Google (the shipped flows offer no other
+  clearing sign-in: see the residuals below).
 - The cutoff and the `googleSignInDisabled` flag share `users.meta_data`;
   each RISC write takes the User row lock before it reads the bag, so two
   events for the same user handled together never write back each other's
@@ -993,13 +1007,45 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     operator can find the account in GoTrue and act on it (dashboard ban,
     password reset). A backfill from GoTrue's admin user list (identities,
     never the user-editable `user_metadata`) is a separate operator task.
-  - **A pre-event GoTrue session could mint a post-cutoff sign-in**
-    (SEC-W8RSC-4): closed by D-101 above. D-97 leaves the pre-event refresh
-    token alive at GoTrue, and with it (or a known password) a hijacker can
-    open a new password session after the cutoff; that session is now refused
-    until the real user has signed in with Google or an emailed link, and one
-    opened before that clearing stays refused after it.
-- Residuals of D-101 (they rest on GoTrue settings, not on this API):
+  - **A pre-event GoTrue session can mint a post-cutoff sign-in**
+    (SEC-W8RSC-4): narrowed by D-101 above, not closed (review
+    SEC-W9RPC-2). D-97 leaves the pre-event refresh token alive at GoTrue,
+    and with it (or a known password) a hijacker can open a new password
+    session after the cutoff; that session is now refused until the real
+    user has signed in with Google or an emailed link, and one opened before
+    that clearing stays refused after it. The pre-event GoTrue session
+    outlives the clearing too, and with it the hijacker can set the password
+    (`PUT /auth/v1/user`); a password session opened AFTER the clearing is
+    admitted by any method, as D-101 words it, and the real user's first
+    Google sign-in typically comes minutes after the event. For the owner:
+    should the clearing require or trigger a password reset? GoTrue's admin
+    password update ends every session of the user with the service-role key
+    alone (see `identity-password.service.ts`), the pre-event one included;
+    it is a provider call, which W9-RISC-PASSWORD-CUTOFF may not make.
+- Residuals of D-101:
+  - **The password reset does not clear the restriction** (review
+    SEC-W9RPC-1 / CR-W9RPC-1; the fix is outside W9-RISC-PASSWORD-CUTOFF's
+    write set, follow-up). The product's only emailed link is the recovery
+    link, and the web posts its session in the BODY of
+    `POST /identity/reset-password`, never as a bearer, so the middleware
+    never judges it, and `completeReset` records no clearing (it writes the
+    logout cutoff). After "Password updated. Please sign in." the new
+    password session is refused on every request. The web offers no
+    magic-link sign-in, so Google is the only way back in; after
+    `account-disabled/hijacking`, until Google has recovered the account,
+    the user has none. The follow-up has `completeReset` call
+    `recordSignInCutoffCleared` (`core/auth/auth.middleware.ts`) once the
+    password is updated: the reset ends every GoTrue session, the
+    hijacker's included, which makes it the safest clearing. Until then an
+    operator who has verified the user can record the clearing by hand
+    (`signInCutoffClearedAt` = the current epoch seconds).
+  - **Login answers `authenticated` for a session the API then refuses**
+    (review CR-W9RPC-2; `identity.controller.ts` is outside the write set,
+    follow-up). After a cutoff, `POST /identity/login` and
+    `/identity/refresh` still answer `authenticated` and audit
+    `login_success` for a password session the middleware refuses on every
+    request; the web stores the token, its bootstrap gets a 401 and it shows
+    a generic error, never "sign in with Google".
   - **Secure email change.** With the pre-event GoTrue session (or a password
     session, which GoTrue itself still issues) a hijacker can ask GoTrue to
     change the account's email. In the implicit flow the confirmation session

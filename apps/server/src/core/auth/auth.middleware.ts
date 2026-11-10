@@ -119,6 +119,67 @@ export function signInCutoffOf(metaData: unknown): number | null {
 }
 
 /**
+ * D-101 (W9-RISC-PASSWORD-CUTOFF): what recordSignInCutoffCleared found under
+ * the User row lock. 'cleared' wrote the marker; 'already_cleared',
+ * 'no_cutoff' and 'no_user' wrote nothing; 'not_after_cutoff' wrote nothing
+ * because the cutoff (a RISC event that committed meanwhile) is at or after
+ * the sign-in, which D-97 then refuses.
+ */
+export type SignInCutoffClearing = 'cleared' | 'already_cleared' | 'no_cutoff' | 'not_after_cutoff' | 'no_user';
+
+/**
+ * D-101 (W9-RISC-PASSWORD-CUTOFF): record that a Google or emailed-link
+ * sign-in authenticated at `authenticatedAt` (epoch seconds) cleared the
+ * user's sign-in cutoff (User.metaData.signInCutoffClearedAt). The caller has
+ * established that the sign-in qualifies; AuthMiddleware is the one caller
+ * today. Exported for the recovery-link follow-up (D-101 review SEC-W9RPC-1 /
+ * CR-W9RPC-1): POST /identity/reset-password receives the recovery session in
+ * its body, never as a bearer, so that flow does not reach the middleware and
+ * clears nothing yet.
+ *
+ * The marker is dated when it is recorded (`nowMs`), or at the sign-in when
+ * that is later (a provider clock ahead of this one), never at the sign-in
+ * alone (D-101 review CR-W9RPC-3): a password session opened after the real
+ * user's Google sign-in at GoTrue, but before that Google session first
+ * reached this API, was refused while nothing had cleared the cutoff, and a
+ * marker dated at the Google sign-in would admit it from then on. Dated this
+ * way, every session opened before the clearing was recorded still has to be
+ * a Google or emailed-link sign-in.
+ *
+ * Written once, under the User row lock RiscService takes for the same bag
+ * (updateUserMetaLocked): the bag is read again under the lock, so a second
+ * request that read no marker before the first committed finds it and writes
+ * nothing, and a RISC event that committed in between is seen. A database
+ * error throws.
+ */
+export async function recordSignInCutoffCleared(
+  client: PrismaService['client'],
+  userId: string,
+  authenticatedAt: number,
+  nowMs: number = Date.now(),
+): Promise<SignInCutoffClearing> {
+  let outcome: SignInCutoffClearing = 'no_user';
+  const found = await updateUserMetaLocked(client, userId, (meta) => {
+    const cutoff = signInCutoffOf(meta);
+    if (cutoff === null) {
+      outcome = 'no_cutoff';
+      return null;
+    }
+    if (authenticatedAt <= cutoff) {
+      outcome = 'not_after_cutoff';
+      return null;
+    }
+    if (signInCutoffClearedAtOf(meta, cutoff) !== null) {
+      outcome = 'already_cleared';
+      return null;
+    }
+    outcome = 'cleared';
+    return { ...meta, [SIGN_IN_CUTOFF_CLEARED_META_KEY]: Math.max(authenticatedAt, Math.floor(nowMs / 1000)) };
+  });
+  return found ? outcome : 'no_user';
+}
+
+/**
  * When the SESSION behind a token the verifier has ALREADY accepted was
  * authenticated, in epoch seconds — what a logout cutoff is compared against —
  * or null when the token cannot say. The payload bytes are covered by the
@@ -211,11 +272,13 @@ function sessionAuthenticatedAt(token: string): number | null {
  *   - D-101 (W9-RISC-PASSWORD-CUTOFF): after that cutoff a session is admitted
  *     only when it signed in with Google or an emailed link, until one such
  *     session has cleared the restriction (User.metaData.signInCutoffClearedAt,
- *     its authentication time, which this middleware writes once under the
- *     User row lock); then a session authenticated after the clearing is
- *     admitted by any method. A password session opened after the cutoff by
- *     whoever knows (or, through the pre-event GoTrue session, set) the
- *     password is refused (SEC-W8RSC-4).
+ *     which this middleware writes once under the User row lock, dated when
+ *     it records it or at that session's sign-in if later: CR-W9RPC-3); then
+ *     a session authenticated after the clearing is admitted by any method. A
+ *     password session opened after the cutoff by whoever knows (or, through
+ *     the pre-event GoTrue session, set) the password is refused until the
+ *     clearing (SEC-W8RSC-4); one opened after the clearing is admitted, a
+ *     residual the D-101 wording keeps (SEC-W9RPC-2, docs/auth-pathway.md).
  *   - On success, attach `req.user = { id, email, role }`.
  *   - On any failure / missing token, leave `req.user` unset. Downstream
  *     guards/controllers decide whether the route requires authentication
@@ -362,9 +425,9 @@ export class AuthMiddleware implements NestMiddleware {
    *                          signed in with Google or an emailed link
    *                          (`opts.signedInWithGoogleOrEmailLink`), and the
    *                          first such session records the clearing
-   *                          (signInCutoffClearedAt); after the clearing, a
-   *                          session authenticated later is admitted by any
-   *                          method.
+   *                          (signInCutoffClearedAt, dated when recorded:
+   *                          CR-W9RPC-3); after the clearing, a session
+   *                          authenticated later is admitted by any method.
    *   revocation marker   -> REJECT a token whose session was authenticated at
    *                          or before the marker's revocation time
    *                          (`opts.sessionAuthenticatedAt`, or null: it cannot
@@ -494,7 +557,7 @@ export class AuthMiddleware implements NestMiddleware {
           if (!opts.signedInWithGoogleOrEmailLink?.()) {
             return null;
           }
-          if (clearedAt === null && !(await this.recordSignInCutoffCleared(userId, authenticatedAt))) {
+          if (clearedAt === null && !(await this.clearSignInCutoff(userId, authenticatedAt))) {
             return null;
           }
         }
@@ -515,47 +578,33 @@ export class AuthMiddleware implements NestMiddleware {
   }
 
   /**
-   * D-101 (W9-RISC-PASSWORD-CUTOFF): record that a Google or emailed-link
-   * session authenticated at `authenticatedAt` cleared the user's sign-in
-   * cutoff (User.metaData.signInCutoffClearedAt). Only a qualifying token
-   * reaches here, and only while the row holds no clearing for its cutoff.
+   * D-101 (W9-RISC-PASSWORD-CUTOFF): record, through recordSignInCutoffCleared
+   * (once, under the User row lock, dated when it is recorded: CR-W9RPC-3),
+   * that a Google or emailed-link session authenticated at `authenticatedAt`
+   * cleared the user's sign-in cutoff. Only a qualifying token reaches here,
+   * and only while the row holds no clearing for its cutoff.
    *
-   * Written once, under the User row lock RiscService takes for the same bag
-   * (updateUserMetaLocked): the bag is read again under the lock, so a second
-   * request that read no marker before the first committed finds it and
-   * writes nothing, and a RISC event that committed in between is seen. When
-   * that event raised the cutoff to or past this session, nothing is written
-   * and the session is refused (false), as D-97 would refuse it. Otherwise
-   * returns true: the session is admitted by the rule, whether or not the
-   * write held. A failed write is logged and the next qualifying request
-   * retries it; until it holds, a session that is not a Google or emailed-link
-   * sign-in stays refused.
+   * When a RISC event that committed meanwhile raised the cutoff to or past
+   * this session, nothing is written and the session is refused (false), as
+   * D-97 would refuse it. Otherwise returns true: the session is admitted by
+   * the rule, whether or not the write held. A failed write is logged and the
+   * next qualifying request retries it; until it holds, a session that is not
+   * a Google or emailed-link sign-in stays refused.
    */
-  private async recordSignInCutoffCleared(userId: string, authenticatedAt: number): Promise<boolean> {
-    let stillAfterCutoff = true;
-    let wrote = false;
+  private async clearSignInCutoff(userId: string, authenticatedAt: number): Promise<boolean> {
+    let outcome: SignInCutoffClearing;
     try {
-      await updateUserMetaLocked(this.prisma.client, userId, (meta) => {
-        const cutoff = signInCutoffOf(meta);
-        if (cutoff === null) return null;
-        if (authenticatedAt <= cutoff) {
-          stillAfterCutoff = false;
-          return null;
-        }
-        if (signInCutoffClearedAtOf(meta, cutoff) !== null) return null;
-        wrote = true;
-        return { ...meta, [SIGN_IN_CUTOFF_CLEARED_META_KEY]: authenticatedAt };
-      });
+      outcome = await recordSignInCutoffCleared(this.prisma.client, userId, authenticatedAt);
     } catch (err) {
       this.logger.warn(
         `D-101: sign-in cutoff clearing for ${userId} not recorded (${(err as Error).message}); the session is admitted and the next request retries`,
       );
       return true;
     }
-    if (wrote) {
+    if (outcome === 'cleared') {
       this.logger.log(`D-101: sign-in cutoff cleared for ${userId} by a Google or emailed-link sign-in at ${authenticatedAt}`);
     }
-    return stillAfterCutoff;
+    return outcome !== 'not_after_cutoff';
   }
 
   /**

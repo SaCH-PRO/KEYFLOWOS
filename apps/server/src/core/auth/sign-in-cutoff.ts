@@ -2,18 +2,22 @@ import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 
 /**
- * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, closes D-97 review
+ * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, narrows D-97 review
  * SEC-W8RSC-4): after a D-97 sign-in cutoff (User.metaData.signInCutoffAt,
  * written by RiscService on a session-ending RISC event) the account accepts
  * only a NEW sign-in made with Google or an emailed link, methods an attacker
  * cannot produce from a stolen refresh token or a password they know or set.
  * The first such session after the cutoff CLEARS the restriction: AuthMiddleware
- * records its authentication time here (epoch seconds), once, under the User
- * row lock. From then on a session authenticated after this time is admitted by
- * any method; one authenticated between the cutoff and this time is admitted
- * only when it is itself a Google or emailed-link sign-in. A later
- * session-ending event removes it with the new cutoff (RiscService), so the
- * restriction holds again.
+ * records the clearing here (epoch seconds), once, under the User row lock,
+ * dated when it is recorded or at that session's sign-in if later (review
+ * CR-W9RPC-3, recordSignInCutoffCleared in auth.middleware.ts). From then on
+ * a session authenticated after this time is admitted by any method; one
+ * authenticated between the cutoff and this time is admitted only when it is
+ * itself a Google or emailed-link sign-in. A later session-ending event
+ * removes it with the new cutoff (RiscService), so the restriction holds
+ * again. After the clearing a password the hijacker set through the pre-event
+ * GoTrue session works again: D-101 narrows SEC-W8RSC-4, it does not close it
+ * (review SEC-W9RPC-2, docs/auth-pathway.md).
  */
 export const SIGN_IN_CUTOFF_CLEARED_META_KEY = 'signInCutoffClearedAt';
 
@@ -53,6 +57,14 @@ const OTP_AMR_METHOD = 'otp';
  * session 'recovery' here or 'otp' in the implicit flow, the same as a magic
  * link. 'email_change' does not: its link goes to the NEW address, which may
  * be the attacker's.
+ *
+ * Only a session presented to this API as a bearer is judged here. The shipped
+ * password reset posts its recovery session in the BODY of POST
+ * /identity/reset-password (apps/web reset-password page) and completeReset
+ * records no clearing, so today a reset clears nothing and the password
+ * sign-in that follows stays refused (D-101 review SEC-W9RPC-1 / CR-W9RPC-1,
+ * outside W9-RISC-PASSWORD-CUTOFF's write set: the follow-up calls
+ * recordSignInCutoffCleared from completeReset; see docs/auth-pathway.md).
  */
 const EMAILED_LINK_AMR_METHODS: ReadonlySet<string> = new Set(['magiclink', 'email/signup', 'recovery', 'invite']);
 

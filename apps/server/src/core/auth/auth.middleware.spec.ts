@@ -1092,15 +1092,17 @@ describe('D-97 — the durable RISC sign-in cutoff on the User row', () => {
 });
 
 /**
- * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, closes SEC-W8RSC-4): after a
- * D-97 sign-in cutoff the account accepts only a NEW sign-in made with Google
+ * D-101 (W9-RISC-PASSWORD-CUTOFF; owner ruling, narrows SEC-W8RSC-4, review
+ * SEC-W9RPC-2): after a D-97 sign-in cutoff the account accepts only a NEW
+ * sign-in made with Google
  * or an emailed link, methods an attacker cannot produce from a stolen
  * refresh token or a known password. A session opened after the cutoff with
  * any other method (a password above all; anything not in the allow list:
  * fail closed) is refused until the real user has signed in once with Google
  * or the emailed link. That session CLEARS the restriction: the middleware
- * records User.metaData.signInCutoffClearedAt (its authentication time),
- * once, under the User row lock RiscService takes. From then on a session
+ * records User.metaData.signInCutoffClearedAt (when it records the clearing,
+ * or the session's sign-in when that is later: review CR-W9RPC-3), once,
+ * under the User row lock RiscService takes. From then on a session
  * authenticated AFTER the clearing is admitted by any method, while a session
  * authenticated between the cutoff and the clearing (the hijacker's password
  * session) stays refused.
@@ -1143,6 +1145,19 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
   const password = (at: number) => by('password', at);
   const google = (at: number) => by('oauth', at);
   const LOCK = `lock SELECT id FROM users WHERE id = ? FOR NO KEY UPDATE [${USER}]`;
+  /** A session that signed in with `method` at `t`, its token minted then too (so its authentication time is `t`). */
+  const fresh = (method: string, t: number) => signedIn([{ method, timestamp: t }], BOTH, t);
+
+  // D-101 review CR-W9RPC-3: the cleared marker is dated when the middleware
+  // records it, or at the session's sign-in when that is later. The clock is
+  // held at NOW so the recorded time is exact.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW * 1000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   /**
    * The real AuthMiddleware over one in-memory User row. Its metaData writes
@@ -1218,10 +1233,10 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF });
   });
 
-  it('D-101: a Google session authenticated after the cutoff is admitted and records signInCutoffClearedAt (its authentication time) once, in one transaction that first takes the User row lock', async () => {
+  it('D-101: a Google session authenticated after the cutoff is admitted and records signInCutoffClearedAt (the time the middleware records it, CR-W9RPC-3) once, in one transaction that first takes the User row lock', async () => {
     const h = harness({ signInCutoffAt: CUTOFF, googleSignInDisabled: true });
     expect(await h.attached(google(CUTOFF + 120))).toBe(USER);
-    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, googleSignInDisabled: true, signInCutoffClearedAt: CUTOFF + 120 });
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, googleSignInDisabled: true, signInCutoffClearedAt: NOW });
     expect(h.steps).toEqual(['begin', LOCK, 'read', 'write', 'commit']);
   });
 
@@ -1234,7 +1249,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
   ])('D-101: an emailed-link session — %s — clears the restriction like Google', async (_name, method) => {
     const h = harness({ signInCutoffAt: CUTOFF });
     expect(await h.attached(by(method, CUTOFF + 30, { provider: 'email', providers: ['email'] }))).toBe(USER);
-    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 30 });
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW });
   });
 
   it.each([
@@ -1291,7 +1306,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(stepped('password'))).toBeNull();
     expect(h.row.metaData.signInCutoffClearedAt).toBeUndefined();
     expect(await h.attached(stepped('oauth'))).toBe(USER);
-    expect(h.row.metaData.signInCutoffClearedAt).toBe(CUTOFF + 30);
+    expect(h.row.metaData.signInCutoffClearedAt).toBe(NOW);
   });
 
   it('D-101: a token with no session and no amr (its iat stands for its sign-in) is refused after the cutoff: it cannot say how it signed in', async () => {
@@ -1318,7 +1333,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(google(CUTOFF + 300))).toBe(USER);
     expect(await h.attached(by('otp', CUTOFF + 900))).toBe(USER);
     expect(h.client.user.update).toHaveBeenCalledTimes(1);
-    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 });
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW });
   });
 
   it('D-101: two qualifying requests that both read no marker write it once — the second re-reads the row under the lock and finds it', async () => {
@@ -1330,7 +1345,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(google(CUTOFF + 700))).toBe(USER);
     expect(h.client.$transaction).toHaveBeenCalledTimes(2);
     expect(h.client.user.update).toHaveBeenCalledTimes(1);
-    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 });
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW });
   });
 
   it('D-101: a cleared marker that is not after the current cutoff (left by an earlier cutoff) clears nothing — a password session after the cutoff is refused', async () => {
@@ -1338,7 +1353,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(password(CUTOFF + 30))).toBeNull();
     // A Google session then replaces it with one that belongs to this cutoff.
     expect(await h.attached(google(CUTOFF + 30))).toBe(USER);
-    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 30 });
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW });
   });
 
   it('D-101: when the clearing write fails the qualifying session is still admitted (logged), and the next request retries the write', async () => {
@@ -1349,7 +1364,7 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     // Until the marker holds, a password session is still refused.
     expect(await h.attached(password(CUTOFF + 300))).toBeNull();
     expect(await h.attached(google(CUTOFF + 120))).toBe(USER);
-    expect(h.row.metaData.signInCutoffClearedAt).toBe(CUTOFF + 120);
+    expect(h.row.metaData.signInCutoffClearedAt).toBe(NOW);
     expect(h.client.user.update).toHaveBeenCalledTimes(2);
   });
 
@@ -1358,6 +1373,31 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(google(CUTOFF + 120))).toBeNull();
     expect(h.client.user.update).not.toHaveBeenCalled();
     expect(h.row.metaData).toEqual({ signInCutoffAt: NOW + 5 });
+  });
+
+  it('D-101 review CR-W9RPC-3: the clearing is dated when the middleware records it — a password session opened after the Google sign-in at GoTrue, and refused before that Google session first reached the API, stays refused after it', async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    const hijacker = password(CUTOFF + 200);
+    expect(await h.attached(hijacker)).toBeNull();
+    // The real user's Google session signed in at CUTOFF + 100 (another
+    // device, or an app in the background) and reaches the API only now.
+    expect(await h.attached(google(CUTOFF + 100))).toBe(USER);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW });
+    // Dated at the Google sign-in (CUTOFF + 100) the marker would admit it now.
+    expect(await h.attached(hijacker)).toBeNull();
+    expect(await h.attached(signedIn([{ method: 'password', timestamp: CUTOFF + 200 }], BOTH, NOW + 30))).toBeNull();
+    expect(await h.attached(fresh('password', NOW))).toBeNull();
+    // A password session opened after the clearing was recorded is admitted.
+    expect(await h.attached(fresh('password', NOW + 1))).toBe(USER);
+    expect(h.client.user.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("D-101 review CR-W9RPC-3: a qualifying sign-in the provider dates after this server's clock dates the clearing at that sign-in (the later of the two)", async () => {
+    const h = harness({ signInCutoffAt: CUTOFF });
+    expect(await h.attached(fresh('oauth', NOW + 20))).toBe(USER);
+    expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW + 20 });
+    expect(await h.attached(fresh('password', NOW + 20))).toBeNull();
+    expect(await h.attached(fresh('password', NOW + 21))).toBe(USER);
   });
 
   it('D-101 negative control: with no cutoff on the row a password session is admitted and nothing is written', async () => {
