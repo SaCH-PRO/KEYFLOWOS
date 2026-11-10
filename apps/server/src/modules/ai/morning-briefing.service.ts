@@ -318,9 +318,38 @@ export class MorningBriefingService implements OnModuleInit {
     return { executed, failed };
   }
 
-  async skipBriefing(businessId: string, planId: string): Promise<void> {
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-2; owner ruling D-73, KEY-R3b review SEC-R3b-4): POST
+   * briefing/:planId/skip updated any plan by id alone (another business's, a journey's, a member's
+   * own plan) for any member, with no record of who did it. It is now bound as executeAllBriefingCards
+   * is: only the daily briefing (scope 'briefing', its objective and raw input) of the business the
+   * route checked is taken (anything else is refused as absent, 404), and a briefing another member
+   * runs is that member's: only it, the business OWNER or an ADMIN skips it (403). A briefing stored
+   * with no member (before D-93) is not another member's, as execute-all lets the member who runs it
+   * take it. The route records who skipped it (AiController.skipBriefing, a plan:skip execution-log row).
+   */
+  async skipBriefing(businessId: string, planId: string, userId?: string): Promise<void> {
+    if (!userId) throw new ForbiddenException('A member skips the briefing');
+    const briefing = {
+      id: planId,
+      businessId,
+      scope: { has: BRIEFING_SCOPE },
+      objective: { startsWith: BRIEFING_OBJECTIVE_PREFIX },
+      rawInput: BRIEFING_RAW_INPUT,
+    };
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true } });
+    if (!plan) throw new NotFoundException('Briefing not found');
+    if (plan.userId && plan.userId !== userId) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
+        throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin skips it');
+      }
+    }
+    await this.prisma.client.aiPlan.updateMany({
+      where: briefing,
       data: { status: 'completed' },
     });
     await this.prisma.client.aiPlanStep.updateMany({

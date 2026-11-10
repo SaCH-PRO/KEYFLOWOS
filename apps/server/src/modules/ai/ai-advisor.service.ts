@@ -1,5 +1,9 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { CanonicalModule } from '../../core/authority/module-vocabulary';
+import { visibilityClause } from '../crm/crm-permissions.helper';
+import { activityPrefilter, readVisibleActivityPage, type TimelineViewer } from '../timeline/timeline-visibility';
 import { AiUsageService } from './ai-usage.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -267,73 +271,113 @@ export class AiAdvisorService {
     }
   }
 
-  async generateDailyBriefing(businessId: string) {
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-1; owner ruling D-63, as W5-BRIEFING-SCOPE and
+   * W6-BRIEFINGS-SCOPE applied it to the morning and end-of-day briefings): GET ai/briefing answered
+   * every member the month's cashFlow {revenue, expenses, net} and built the model's prompt from every
+   * recent Activity title and every figure of the business. With a `viewer` (the member who asks) each
+   * part now follows what that member reads (filtered, not refused):
+   *   - yesterday's activity: the rows the timeline rule serves them (canReadActivityRow and contact
+   *     visibility, filterVisibleActivity), newest first, the page filled as /events fills it
+   *     (readVisibleActivityPage);
+   *   - revenue, the overdue invoices and the strategic dashboard's invoice and quote figures: revenue
+   *     figures, withheld (0, or the line left out) from a member without revenue read; expenses need
+   *     expenses read (the module EXPENSE rows map to); net needs both;
+   *   - upcoming bookings and the utilization rate: bookings read; active projects: projects read;
+   *   - stale leads: the leads the member may list (crm read and the CRM list rule, visibilityClause
+   *     M7); the dashboard's own stale-lead count (every lead) only to a member visibilityClause does
+   *     not restrict;
+   *   - the momentum score (a mix of payment, invoice, contact and booking signals): to a member who
+   *     reads revenue, crm and bookings.
+   * The answer's cashFlow is the figures served, whatever the model writes back. With no viewer (a
+   * system caller) the briefing is the business's whole briefing, as before.
+   */
+  async generateDailyBriefing(businessId: string, viewer?: TimelineViewer) {
     const context = await this.getBusinessContext(businessId);
     const businessName = context.business?.name ?? 'your business';
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yday = new Date(now);
+    yday.setDate(yday.getDate() - 1);
 
-    const [revenueThisMonth, staleLeads, strategicDashboard] = await Promise.all([
-      this.prisma.client.invoice.aggregate({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: 'PAID',
-          paidAt: { gte: startOfMonth },
-        },
-        _sum: { total: true },
-      }),
-      this.prisma.client.contact.count({
-        where: {
-          businessId,
-          deletedAt: null,
-          status: 'LEAD',
-          updatedAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
-        },
-      }),
+    const reads = (module: CanonicalModule) => !viewer || viewer.readable.has(module);
+    const readsRevenue = reads('revenue');
+    const readsExpenses = reads('expenses');
+    const readsCrm = reads('crm');
+    const readsBookings = reads('bookings');
+    const readsProjects = reads('projects');
+    const leadClause = viewer && readsCrm ? visibilityClause(viewer.crmAccess, viewer.userId) : null;
+
+    const [revenueThisMonth, staleLeads, strategicDashboard, yesterdaysTitles] = await Promise.all([
+      readsRevenue
+        ? this.prisma.client.invoice.aggregate({
+            where: {
+              businessId,
+              deletedAt: null,
+              status: 'PAID',
+              paidAt: { gte: startOfMonth },
+            },
+            _sum: { total: true },
+          })
+        : null,
+      readsCrm
+        ? this.prisma.client.contact.count({
+            where: {
+              businessId,
+              deletedAt: null,
+              status: 'LEAD',
+              updatedAt: { lt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
+              ...(leadClause ? { AND: [leadClause as Prisma.ContactWhereInput] } : {}),
+            },
+          })
+        : 0,
       this.strategic.getStrategicDashboard(businessId).catch((err) => {
         this.logger.warn('Strategic dashboard unavailable for briefing', (err as Error).message);
         return null;
       }),
+      viewer
+        ? this.visibleActivityTitlesSince(viewer, yday)
+        : context.recentActivities.filter((a) => new Date(a.createdAt) >= yday).map((a) => a.title),
     ]);
 
-    const revenue = revenueThisMonth._sum.total ?? 0;
-    const expenses = context.expenses.totalThisMonth;
-    const net = revenue - expenses;
+    const revenue = revenueThisMonth?._sum.total ?? 0;
+    const expenses = readsExpenses ? context.expenses.totalThisMonth : 0;
+    const net = readsRevenue && readsExpenses ? revenue - expenses : 0;
+    const upcomingBookings = readsBookings ? context.bookings.upcoming.length : 0;
+    const overdueInvoices = readsRevenue ? context.invoices.overdueCount : 0;
 
     let strategicBlock = '';
     if (strategicDashboard) {
-      strategicBlock = `
+      const lines = [
+        readsRevenue ? `- Overdue invoices: ${strategicDashboard.overdueInvoices} ($${strategicDashboard.overdueAmount.toLocaleString()} at risk)` : null,
+        readsRevenue ? `- Pending quotes: ${strategicDashboard.pendingQuotes} (potential $${strategicDashboard.pendingQuoteValue.toLocaleString()})` : null,
+        readsCrm && !leadClause ? `- Stale leads to re-engage: ${strategicDashboard.staleLeads}` : null,
+        readsProjects ? `- Active projects: ${strategicDashboard.activeProjects} (${strategicDashboard.overdueTaskCount} overdue tasks)` : null,
+        readsBookings ? `- Utilization rate: ${strategicDashboard.utilizationRate.toFixed(0)}%` : null,
+      ].filter(Boolean);
+      if (lines.length > 0) {
+        strategicBlock = `
 
 Strategic Intelligence:
-- Overdue invoices: ${strategicDashboard.overdueInvoices} ($${strategicDashboard.overdueAmount.toLocaleString()} at risk)
-- Pending quotes: ${strategicDashboard.pendingQuotes} (potential $${strategicDashboard.pendingQuoteValue.toLocaleString()})
-- Stale leads to re-engage: ${strategicDashboard.staleLeads}
-- Active projects: ${strategicDashboard.activeProjects} (${strategicDashboard.overdueTaskCount} overdue tasks)
-- Utilization rate: ${strategicDashboard.utilizationRate.toFixed(0)}%`;
+${lines.join('\n')}`;
+      }
     }
+    const momentumLine = readsRevenue && readsCrm && readsBookings ? `\n\nMomentum Score: ${context.momentumScore}/100` : '';
 
     const briefingPrompt = `Generate a morning business briefing for ${businessName}. Here is the current data:
 
-Yesterday's activity: ${context.recentActivities.filter((a) => {
-      const actDate = new Date(a.createdAt);
-      const yday = new Date(now);
-      yday.setDate(yday.getDate() - 1);
-      return actDate >= yday;
-    }).map((a) => a.title).join(', ') || 'No activity recorded'}
+Yesterday's activity: ${yesterdaysTitles.join(', ') || 'No activity recorded'}
 
 Today's priorities:
-- ${context.bookings.upcoming.length} upcoming bookings
-- ${context.invoices.overdueCount} overdue invoices
+- ${upcomingBookings} upcoming bookings
+- ${overdueInvoices} overdue invoices
 - ${staleLeads} stale leads (no activity in 7+ days)
 
 Cash flow this month:
 - Revenue: $${revenue.toLocaleString()} TTD
 - Expenses: $${expenses.toLocaleString()} TTD
-- Net: $${net.toLocaleString()} TTD
-
-Momentum Score: ${context.momentumScore}/100${strategicBlock}
+- Net: $${net.toLocaleString()} TTD${momentumLine}${strategicBlock}
 
 Include strategic insights in your briefing: highlight the top risk, top opportunity, and a revenue action for the day.
 
@@ -358,14 +402,15 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
 
       try {
         const parsed = JSON.parse(result.content);
-        return { ...parsed, usage: result.usage };
+        // W7-BRIEFINGS-REST (D-63): the cashFlow served is the figures this viewer reads, whatever the model wrote.
+        return viewer ? { ...parsed, cashFlow: { revenue, expenses, net }, usage: result.usage } : { ...parsed, usage: result.usage };
       } catch {
         return {
           summary: result.content,
           highlights: [],
           priorities: [
-            context.bookings.upcoming.length > 0 ? `${context.bookings.upcoming.length} upcoming bookings to prepare for` : null,
-            context.invoices.overdueCount > 0 ? `${context.invoices.overdueCount} overdue invoices need follow-up` : null,
+            upcomingBookings > 0 ? `${upcomingBookings} upcoming bookings to prepare for` : null,
+            overdueInvoices > 0 ? `${overdueInvoices} overdue invoices need follow-up` : null,
             staleLeads > 0 ? `${staleLeads} stale leads to re-engage` : null,
           ].filter(Boolean),
           cashFlow: { revenue, expenses, net },
@@ -377,6 +422,27 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
       this.logger.error(`AI briefing error: ${(error as Error).message}`);
       throw error;
     }
+  }
+
+  /**
+   * W7-BRIEFINGS-REST (D-63): the titles of the business's Activity rows since `since` that the
+   * timeline rule serves `viewer`, newest first, up to the ten the briefing names (as GET ai/briefing
+   * named the ten newest rows before): the database prefilter first, then each row judged by
+   * filterVisibleActivity, the page filled past rows the viewer may not read (readVisibleActivityPage).
+   */
+  private async visibleActivityTitlesSince(viewer: TimelineViewer, since: Date): Promise<string[]> {
+    const prefilter = activityPrefilter(viewer);
+    const where = { businessId: viewer.businessId, createdAt: { gte: since }, ...(prefilter.length ? { AND: prefilter } : {}) };
+    const rows = await readVisibleActivityPage(this.prisma, viewer, 10, (skip, take) =>
+      this.prisma.client.activity.findMany({
+        where,
+        select: { title: true, module: true, category: true, contactId: true, entityType: true, entityId: true, revenueImpact: true, action: true, type: true, data: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      }),
+    );
+    return rows.map((row) => row.title);
   }
 
   async predictCashFlow(businessId: string, days = 30) {

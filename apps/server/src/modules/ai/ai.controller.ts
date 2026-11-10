@@ -260,11 +260,18 @@ export class AiController {
     return this.advisor.chat(businessId, body.message, body.history);
   }
 
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-1; owner ruling D-63, as W5/W6 applied it to the morning and
+   * end-of-day briefings): this answered every member the month's cashFlow and built the model's prompt
+   * from every recent Activity title and every figure. The member who asks is now the briefing's viewer
+   * (AiAdvisorService.generateDailyBriefing): filtered, not refused.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai/briefing')
-  async briefing(@Param('businessId') businessId: string) {
-    return this.advisor.generateDailyBriefing(businessId);
+  async briefing(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    return this.advisor.generateDailyBriefing(businessId, viewer);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1892,14 +1899,35 @@ export class AiController {
     return this.morningBriefingSvc.executeAllBriefingCards(businessId, planId, userId);
   }
 
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-2; owner ruling D-73, KEY-R3b review SEC-R3b-4): this skipped
+   * any plan by id alone for any member and recorded nothing. MorningBriefingService.skipBriefing now
+   * takes only the business's daily briefing, for the member it runs as, the OWNER or an ADMIN (as
+   * execute-all does), and the skip is recorded as the plan's own execution-log row (PLAN_RECORD_MODULE,
+   * no tool: shown with its plan by the plan read rule) naming the member who skipped it.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/briefing/:planId/skip')
   @CrmRateLimit(10, 60_000)
   async skipBriefing(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.morningBriefingSvc.skipBriefing(businessId, planId);
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authenticated user required');
+    await this.morningBriefingSvc.skipBriefing(businessId, planId, userId);
+    await this.executionLog.log({
+      businessId,
+      action: 'plan:skip',
+      module: PLAN_RECORD_MODULE,
+      mode: 'assisted',
+      actor: 'user',
+      userId,
+      planId,
+      rationale: `Daily briefing skipped by ${userId}`,
+      success: true,
+    });
   }
 
   // ── Unified Inbox (Phase 7) ─────────────────────────────────────────────
