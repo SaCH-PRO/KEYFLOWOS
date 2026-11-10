@@ -19,6 +19,14 @@
  * Each now shows the server's refusal, as core-channels-section.tsx does with
  * its toast, and keeps the connection shown as it was.
  *
+ * Review CR-W9GW403-1 (D-99): the CRM contact import's Google tab
+ * (components/contacts/contact-import.tsx handleGoogleConnect) calls GET
+ * /crm/businesses/:b/google/auth-url, which W8 made owner-only
+ * (CrmGoogleService.getAuthUrl, 403 GOOGLE_CONNECT_OWNER_ONLY). It dropped the
+ * server's message (lib/client.ts apiGet carries it) and showed a generic
+ * toast, so an ADMIN or STAFF member was not told the step is the owner's. It
+ * now shows the server's refusal too.
+ *
  * The Key Connect connector card (Sync now, Disconnect), the Integration
  * Health table (Reconnect, Disconnect) and the Google Contacts sync settings
  * (Sync now) already showed the server's message with a toast: those cases are
@@ -58,6 +66,7 @@ import { InventoryCommandCenter } from "../marketplace/components/inventory-comm
 import { ConnectorHealthSection } from "../key-connect/components/connector-health-section";
 import { ContactSyncSettings } from "../key-connect/components/contact-sync-settings";
 import KeyConnectPage from "../key-connect/page";
+import { ContactImport } from "@/components/contacts/contact-import";
 
 const BUSINESS = "biz_1";
 const DRIVE = `/drive/businesses/${BUSINESS}`;
@@ -154,6 +163,24 @@ function renderInventoryCommandCenter() {
 }
 
 const NOT_CONNECTED_BANNER = "Connect your Google Drive account to enable Sheets sync";
+
+const CRM_GOOGLE_AUTH_URL = `/crm/businesses/${BUSINESS}/google/auth-url`;
+
+/** The CRM contact import's server: only the Google Contacts consent URL (owner-only since W8, D-99). */
+function contactImportServer(authUrl: () => Response) {
+  return stubServer((method, pathname) => {
+    if (method === "GET" && pathname.endsWith(CRM_GOOGLE_AUTH_URL)) return authUrl();
+    return undefined;
+  });
+}
+
+/** The CRM contact import card, opened on its Google tab; resolves to its Connect Google Contacts button. */
+async function openContactImportGoogleTab() {
+  render(<ContactImport businessId={BUSINESS} onImportFile={async () => {}} onImportLink={async () => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /Import Contacts/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Google" }));
+  return screen.findByRole("button", { name: "Connect Google Contacts" });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -264,6 +291,45 @@ describe("W9-GOOGLE-WEB-403 (D-99): a Google Drive owner-only refusal is shown a
     fireEvent.click(screen.getByRole("button", { name: /Connect Google Drive/ }));
     await waitFor(() => expect(window.location.hash).toBe("#inventory-consent"));
 
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("W9-GOOGLE-WEB-403 review CR-W9GW403-1 (D-99): the CRM contact import's Connect Google Contacts shows the owner-only refusal", () => {
+  it("[V94D-T04c] (W9-GOOGLE-WEB-403 review CR-W9GW403-1; D-99) RED-BEFORE: contact import Google tab, an ADMIN or STAFF member's Connect Google Contacts refused with 403 GOOGLE_CONNECT_OWNER_ONLY shows the server's refusal instead of the generic one, goes nowhere and stays on the Google tab", async () => {
+    const calls = contactImportServer(() => ownerOnly(CRM_GOOGLE_AUTH_URL));
+    const connect = await openContactImportGoogleTab();
+
+    fireEvent.click(connect);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(OWNER_ONLY_MESSAGE));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(called(calls, "GET", CRM_GOOGLE_AUTH_URL)).toHaveLength(1);
+    expect(window.location.hash).toBe("");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connect Google Contacts" })).not.toBeDisabled());
+    expect(screen.getByRole("heading", { name: "Connect Google Contacts" })).toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("[V95K-W03] control (W9-GOOGLE-WEB-403 review CR-W9GW403-1; D-99): contact import Google tab, an answer with no consent URL and no server message still shows the generic error and goes nowhere", async () => {
+    contactImportServer(() => jsonResponse(200, { notAUrl: true }));
+    const connect = await openContactImportGoogleTab();
+
+    fireEvent.click(connect);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not get Google authorization URL"));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(window.location.hash).toBe("");
+  });
+
+  it("[V95K-W04] control (W9-GOOGLE-WEB-403 review CR-W9GW403-1; D-99): the owner's Connect Google Contacts in the contact import goes to the consent URL with no error", async () => {
+    const calls = contactImportServer(() => jsonResponse(200, { url: consentUrl("contacts-import-consent") }));
+    const connect = await openContactImportGoogleTab();
+
+    fireEvent.click(connect);
+
+    await waitFor(() => expect(window.location.hash).toBe("#contacts-import-consent"));
+    expect(called(calls, "GET", CRM_GOOGLE_AUTH_URL)).toHaveLength(1);
     expect(toast.error).not.toHaveBeenCalled();
   });
 });
