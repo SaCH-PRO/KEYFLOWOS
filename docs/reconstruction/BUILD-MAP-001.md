@@ -1086,6 +1086,7 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-109 | D-95 confirmed as built: staff records map to Team write, and community posts and landing pages to Content write. | None (as built, W6). |
 | D-110 | A platform SUPER_ADMIN who is not a member of a business is refused every trash restore and permanent delete in it, as on revenue writes (D-46); support work uses the admin tools. | None (as built, W6). |
 | D-111 | Managing KEY connectors (connect, change, remove) is limited to OWNER and ADMIN members; staff may use them. Google connections stay owner-only (D-99). | None (as built). |
+| D-112 | A storefront order not created paid may be marked PAID (order status edit or the fulfilment mark-paid action) only by a member with revenue write, and only through the audited paid door (payment row, ledger posting, actor named); anyone else gets 403. Fulfilment status changes stay open as today. | W10 order paid door (STL-SEC-1, V18-T2c). |
 
 ---
 
