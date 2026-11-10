@@ -32,17 +32,32 @@
  * The OWNER and a member with revenue read keep every figure, order and
  * filter (controls).
  *
+ * W9-MONEY-RANKING (owner ruling D-100) closes the two rankings W8 left open:
+ *   - SEC-W8MS-2 residual: POST .../ai-search (CrmAiService.naturalLanguageSearch)
+ *     ordered that member's 'score' or 'revenue' search by the stored lead
+ *     score, which carries the invoice terms, and served that score. D-100:
+ *     ordered by the money-free key GET contacts uses for them (createdAt
+ *     desc), every leadScore null.
+ *   - SEC-W8MS-3 residual: GET .../highlights served that member no
+ *     high-potential card at all (W8: the cards were ranked by the stored
+ *     score). D-100: the cards ranked by the money-free lead score (the score
+ *     without its invoice terms), with no balance or unpaid count.
+ *
+ * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
+ * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
+ * 4 to ai-search; the ai-search matrix is also run on the service directly.
+ *
  * Nothing on the authorization boundary is mocked: PrismaService over the real
  * client, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard and
  * FeatureFlagGuard (the business has ai_tools on), the user / business /
  * membership / contact / invoice / quote rows, the real CrmController and
  * CrmAiController and the services the routes here call (CrmService,
  * CrmStatsService, CrmJourneyService, CrmRevenueService, ContactInsightService
- * with BestChannelService). Identity is attached by a test middleware from
+ * with BestChannelService, CrmAiService). Identity is attached by a test middleware from
  * `x-test-user` exactly as the Supabase-verifying AuthMiddleware would after
  * token verification. Stand-ins: the AI gateway (AiUsageService.callAi) is a
- * recorder whose summary repeats the lifetime value it was given (no provider
- * traffic); the CRM caches and the controllers' other collaborators, which no
+ * recorder whose summary repeats the lifetime value it was given and whose
+ * search parse is a fixed table (NL_SEARCH; no provider traffic); the CRM caches and the controllers' other collaborators, which no
  * route here calls, are empty stand-ins.
  *
  * Requires DATABASE_URL. Every seeded row has the `v94e_` prefix (or belongs to
@@ -103,11 +118,23 @@ const REVENUE_ASC = [...REVENUE_DESC].reverse();
 
 // ---- the AI gateway recorder (no provider traffic) ---------------------------
 const AI_SUMMARY_MARK = 'v94e recorded AI summary';
+/** POST ai-search (W9-MONEY-RANKING): the filters the recorded model parses out of each query. */
+const NL_SEARCH = {
+  scoreDesc: { query: 'v94e best leads first', filters: { sortBy: 'score' } },
+  scoreAsc: { query: 'v94e weakest leads first', filters: { sortBy: 'score', sortOrder: 'asc' } },
+  revenueDesc: { query: 'v94e top payers first', filters: { sortBy: 'revenue', sortOrder: 'desc' } },
+  revenueAsc: { query: 'v94e smallest payers first', filters: { sortBy: 'revenue', sortOrder: 'asc' } },
+};
 const aiCalls: Array<{ feature: string; prompt: string }> = [];
 const aiGateway = {
   callAi: async (args: { feature: string; messages?: Array<{ content: string }> }) => {
     const prompt = (args.messages ?? []).map((m) => m.content).join('\n');
     aiCalls.push({ feature: args.feature, prompt });
+    if (args.feature === 'nl_search') {
+      const query = args.messages?.[args.messages.length - 1]?.content ?? '';
+      const parsed = Object.values(NL_SEARCH).find((entry) => entry.query === query);
+      return { content: JSON.stringify({ filters: parsed?.filters ?? {}, interpretation: `v94e recorded: ${query}`, confidence: 0.9 }), model: 'v94e-recorder', usage: { creditsUsed: 1 } };
+    }
     // The summary repeats the lifetime value it was handed, as a model would.
     const ltv = /"lifetimeValue":\s*([0-9.]+)/.exec(prompt)?.[1] ?? 'none';
     return { content: JSON.stringify({ summary: `${AI_SUMMARY_MARK}: lifetime value TTD ${ltv}` }), model: 'v94e-recorder', usage: { creditsUsed: 1 } };
@@ -117,6 +144,7 @@ const aiGateway = {
 let db: any;
 let app: any;
 let contactInsight: any;
+let crmAi: any;
 
 async function cleanup() {
   for (const sql of [
@@ -191,6 +219,7 @@ beforeAll(async () => {
   const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
   const { CrmController } = await import('../src/modules/crm/crm.controller');
   const { CrmAiController } = await import('../src/modules/crm/crm-ai.controller');
+  const { CrmAiService } = await import('../src/modules/crm/crm-ai.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
   const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
@@ -215,6 +244,9 @@ beforeAll(async () => {
     prisma, events, {} as any, crmTimeline, crmStats, new CrmListsService(prisma), flowCache as any, {} as any, new ContactAuditService(prisma), {} as any,
   );
   contactInsight = new ContactInsightService(prisma, aiGateway as any, new BestChannelService(prisma), events);
+  // CrmAiService: the real natural-language search (POST ai-search) over the recorder; the
+  // sequences service is on no path here.
+  crmAi = new CrmAiService(prisma, aiGateway as any, {} as any, new CrmListsService(prisma), crmTimeline, crmService);
 
   const moduleRef = await Test.createTestingModule({
     controllers: [CrmController, CrmAiController],
@@ -231,6 +263,7 @@ beforeAll(async () => {
       { provide: CrmJourneyService, useValue: new CrmJourneyService(prisma) },
       { provide: CrmRevenueService, useValue: new CrmRevenueService(prisma) },
       { provide: ContactInsightService, useValue: contactInsight },
+      { provide: CrmAiService, useValue: crmAi },
       { provide: EventEmitter2, useValue: events },
     ],
   })
@@ -591,7 +624,7 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
     }
   });
 
-  it("SEC-W8MS-3 (D-100): GET .../segments serves that member the unpaid count as 0 (every other count as the owner's), and GET .../highlights no amount and no ranking by money: no overdue reminders, no high-potential cards (ranked by the lead score with its invoice terms), no unpaid segment, no invoice timeline row or invoice follow-up, no service revenue, each segment contact without its money fields; the owner and a member with revenue read keep them", async () => {
+  it("SEC-W8MS-3 (D-100): GET .../segments serves that member the unpaid count as 0 (every other count as the owner's), and GET .../highlights no amount and no ranking by money: no overdue reminders, no high-potential card carrying a balance or an unpaid count (W9-MONEY-RANKING ranks them by the money-free score, the case below), no unpaid segment, no invoice timeline row or invoice follow-up, no service revenue, each segment contact without its money fields; the owner and a member with revenue read keep them", async () => {
     await storeScores();
     const ownerSegments = await ok(ID.owner, 'segments');
     expect(ownerSegments.unpaid).toBe(1);
@@ -601,7 +634,10 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
     const withheld = await ok(ID.noRev, 'highlights');
     const ownerHighlights = await ok(ID.owner, 'highlights');
     expect(withheld.highlights.overdueReminders).toEqual([]);
-    expect(withheld.highlights.highPotential).toEqual([]);
+    // W8 served no card here; W9-MONEY-RANKING (D-100) serves the money-free ranking (pinned in the case below).
+    for (const card of withheld.highlights.highPotential as Array<Record<string, any>>) {
+      expect([card.outstandingBalance, card.unpaidInvoices], card.contactId).toEqual([0, 0]);
+    }
     for (const service of withheld.highlights.serviceAffinity as Array<Record<string, any>>) {
       expect(service.revenue, service.serviceId).toBe(0);
     }
@@ -629,6 +665,48 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
       expect((full.segments as Array<{ key: string }>).map((s) => s.key), user).toContain('cold-with-unpaid');
       expect((full.timeline as Array<{ type: string }>).some((entry) => entry.type === 'invoice'), user).toBe(true);
       expect((full.nextActions as Array<{ trigger: string }>).some((action) => action.trigger === 'invoice-unpaid'), user).toBe(true);
+    }
+  });
+
+  // ---- W9-MONEY-RANKING (owner ruling D-100): the rankings W8 left on the stored score ------------
+
+  /** The default list order (createdAt desc) ranked by `score` (desc, ties kept in that order), as a highlight list ranks its cards. */
+  const rankedBy = (score: Record<string, number>) => [...DEFAULT_ORDER].sort((a, b) => score[b] - score[a]);
+
+  it("SEC-W8MS-3 residual (D-100) (W9-MONEY-RANKING): GET .../highlights serves that member a non-empty highPotential ranked by the money-free lead score (the score without its invoice terms, as that member's segment rows carry it), each card with no balance and no unpaid count, so no card is placed by an invoice; the owner and a member with revenue read keep the stored-score ranking with its balances", async () => {
+    await storeScores();
+    // Money-free: the two CLIENTs (55) above the PROSPECT and the LEAD (50). Stored: cLow's paid invoice (+10) puts it above cHigh, whose overdue one costs 5.
+    const moneyFreeRanking = rankedBy(MONEY_FREE_SCORE);
+    const storedRanking = rankedBy(STORED_SCORE);
+    expect(moneyFreeRanking).toEqual([ID.cMid, ID.cHigh, ID.cLow, ID.cNone]);
+    expect(storedRanking).toEqual([ID.cMid, ID.cLow, ID.cHigh, ID.cNone]);
+
+    const withheld = await ok(ID.noRev, 'highlights');
+    const cards = withheld.highlights.highPotential as Array<Record<string, any>>;
+    expect(cards.map((card) => card.contactId)).toEqual(moneyFreeRanking);
+    for (const card of cards) {
+      const why = `revenue 'none' highPotential ${card.contactId}`;
+      expect(card.leadScore, why).toBe(MONEY_FREE_SCORE[card.contactId]);
+      expect([card.outstandingBalance, card.unpaidInvoices], why).toEqual([0, 0]);
+    }
+    // The card's score is the one that member's segment rows carry (both without the invoice terms).
+    for (const segment of withheld.segments as Array<{ key: string; contacts: Array<Record<string, any>> }>) {
+      for (const row of segment.contacts) {
+        const card = cards.find((c) => c.contactId === row.id);
+        if (card) expect(card.leadScore, `${segment.key} ${row.id}`).toBe(row.leadScore);
+      }
+    }
+    expect(withheld.highlights.overdueReminders).toEqual([]);
+    expectNoAmount(withheld, "revenue 'none' GET highlights (W9-MONEY-RANKING)");
+
+    // Controls: the stored-score ranking (with its invoice terms) and each card's balance.
+    for (const user of [ID.owner, ID.rev]) {
+      const full = (await ok(user, 'highlights')).highlights.highPotential as Array<Record<string, any>>;
+      expect(full.map((card) => card.contactId), user).toEqual(storedRanking);
+      expect(full.map((card) => card.leadScore), user).toEqual(storedRanking.map((id) => STORED_SCORE[id]));
+      const high = full.find((card) => card.contactId === ID.cHigh)!;
+      expect(high.outstandingBalance, user).toBeCloseTo(MONEY.OVERDUE_HIGH, 2);
+      expect(high.unpaidInvoices, user).toBe(1);
     }
   });
 
@@ -667,7 +745,47 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
     }
   });
 
-  it.todo(
-    "SEC-W8MS-2 residual (D-100): POST .../ai-search (CrmAiService.naturalLanguageSearch) orders a 'score' or 'revenue' search by the stored lead score, which carries the invoice terms, and serves that score, to a member without revenue read; its query is built in crm-ai.service.ts, outside the W8-MONEY-SIGNALS write set (companion packet)",
-  );
+  /** POST ai-search as `user`: the contact ids in order and each one's leadScore. */
+  async function aiSearch(user: string, query: string) {
+    const res = await request(app.getHttpServer()).post(`/crm/businesses/${ID.biz}/ai-search`).set('x-test-user', user).send({ query });
+    expect(res.status, `${user} POST ai-search '${query}': ${JSON.stringify(res.body).slice(0, 300)}`).toBe(201);
+    const contacts = res.body.contacts as Array<{ id: string; leadScore: number | null }>;
+    return { ids: contacts.map((c) => c.id), scores: contacts.map((c) => c.leadScore), body: res.body };
+  }
+
+  it("SEC-W8MS-2 residual (D-100) (W9-MONEY-RANKING, was it.todo): POST .../ai-search (CrmAiService.naturalLanguageSearch) orders a 'score' or 'revenue' search of a member without revenue read by the money-free key GET contacts uses for them (createdAt desc, whatever the sortOrder) and serves every leadScore null, not the stored lead score, which carries the invoice terms; the owner and a member with revenue read keep the stored lead score order and score", async () => {
+    await storeScores();
+    // Four route calls (the AI rate limit is 10 a minute per business; the matrix is run on the service in the case below).
+    for (const search of [NL_SEARCH.scoreDesc, NL_SEARCH.revenueAsc]) {
+      const withheld = await aiSearch(ID.noRev, search.query);
+      expect(withheld.ids, `revenue 'none' ${search.query}`).toEqual(DEFAULT_ORDER);
+      expect(withheld.scores, `revenue 'none' ${search.query}`).toEqual(DEFAULT_ORDER.map(() => null));
+      expect(withheld.body.totalResults).toBe(DEFAULT_ORDER.length);
+    }
+
+    // Controls: the stored score order (ties at 60 in either order) and the stored score.
+    for (const [user, search] of [[ID.owner, NL_SEARCH.scoreDesc], [ID.rev, NL_SEARCH.revenueDesc]] as const) {
+      const full = await aiSearch(user, search.query);
+      expect(full.scores, `${user} ${search.query}`).toEqual([65, 60, 60, 50]);
+      expect(full.ids.map((id) => STORED_SCORE[id]), `${user} ${search.query}`).toEqual([65, 60, 60, 50]);
+      expect(full.ids[0], `${user} ${search.query}`).toBe(ID.cMid);
+    }
+  });
+
+  it("SEC-W8MS-2 residual (D-100) (W9-MONEY-RANKING): CrmAiService.naturalLanguageSearch named a viewer without revenue read orders every 'score' and 'revenue' search (either sortOrder) by createdAt desc and serves no leadScore; named the owner or a member with revenue read, the stored lead score order (asc and desc) and score", async () => {
+    await storeScores();
+    for (const search of Object.values(NL_SEARCH)) {
+      const withheld = await crmAi.naturalLanguageSearch(ID.biz, search.query, null, ID.noRev);
+      expect(withheld.contacts.map((c: { id: string }) => c.id), `revenue 'none' ${search.query}`).toEqual(DEFAULT_ORDER);
+      expect(withheld.contacts.map((c: { leadScore: number | null }) => c.leadScore), `revenue 'none' ${search.query}`).toEqual(DEFAULT_ORDER.map(() => null));
+    }
+    for (const user of [ID.owner, ID.rev]) {
+      for (const search of Object.values(NL_SEARCH)) {
+        const full = await crmAi.naturalLanguageSearch(ID.biz, search.query, null, user);
+        const expected = search.filters.sortOrder === 'asc' ? [50, 60, 60, 65] : [65, 60, 60, 50];
+        expect(full.contacts.map((c: { leadScore: number | null }) => c.leadScore), `${user} ${search.query}`).toEqual(expected);
+        expect(full.contacts.map((c: { id: string }) => STORED_SCORE[c.id]), `${user} ${search.query}`).toEqual(expected);
+      }
+    }
+  });
 });
