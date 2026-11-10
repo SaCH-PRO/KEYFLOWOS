@@ -5757,14 +5757,24 @@ ${triage.standingContext}`;
             'call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)',
           );
         }
-        const log = await this.getCallLog().createCallLog({
-          businessId,
-          contactId: args.contactId,
-          callerId,
-          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
-          script: args.script ?? null,
-          notes: args.notes ?? null,
-        });
+        // Review SEC-W7CTC-1: that member is the actor, as the session member is on POST calls, so
+        // they go to createCallLog as its session (their User row's role, as AuthMiddleware attaches
+        // it), not as a callerId another writer chose. A contact they may not open then answers 404
+        // 'Contact not found', exactly as an unknown id and as POST calls answers them (no 400 that
+        // tells a restricted member a hidden contact exists, in words about a callerId the model no
+        // longer controls), and a principal who is no member (a SUPER_ADMIN, D-46) is refused 403.
+        const caller = await this.prisma.client.user.findUnique({ where: { id: callerId }, select: { role: true } });
+        const log = await this.getCallLog().createCallLog(
+          {
+            businessId,
+            contactId: args.contactId,
+            callerId,
+            scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
+            script: args.script ?? null,
+            notes: args.notes ?? null,
+          },
+          { userId: callerId, role: caller?.role ?? null },
+        );
         // The recorded caller is answered, so KEY does not report the member the model named.
         return { id: log.id, contactId: args.contactId, callerId: log.callerId };
       }

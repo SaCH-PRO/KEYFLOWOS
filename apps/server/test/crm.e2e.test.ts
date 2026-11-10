@@ -1077,8 +1077,9 @@ describe('CRM e2e', () => {
 // about CreateCallLogDto, which still requires a (now ignored) body callerId.
 class CallPrismaMock {
   memberships: MembershipSeed[] = [];
-  // The User rows resolveCrmAccess reads when a caller is not the session member
-  // (CallLogService.assertCaller with no session: the KEY call_create_task path, W7-CALL-TASK-CALLER).
+  // The User rows the KEY call_create_task path reads for the member's role, which it hands
+  // CallLogService.createCallLog as the session (W7-CALL-TASK-CALLER, review SEC-W7CTC-1), and
+  // resolveCrmAccess reads when a caller is not the session member (a direct service call).
   users: Array<{ id: string; role: string }> = [];
   contacts: any[] = [];
   callLogs: any[] = [];
@@ -1330,6 +1331,8 @@ describe('call logs take the caller from the session (V1-54)', () => {
               Promise.resolve(plans.find((p) => p.id === where.id && p.businessId === where.businessId) ?? null),
             ),
           },
+          // review SEC-W7CTC-1: the member's User row role, handed to createCallLog as the session
+          user: prisma.client.user,
         },
       },
       moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : undefined) },
