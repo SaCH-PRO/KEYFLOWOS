@@ -66,6 +66,13 @@
  *   they may not open; GET notifications serves the stored weekly financial
  *   briefing ('financial.weekly_briefing') only to a revenue reader, without the
  *   lines naming a contact they may not open, as POST weekly-briefing answers it.
+ *   TS-22d..f (W8-REVENUE-ACTIONS-SCOPE review repairs, D-63): an action's
+ *   texts are matched against every contact of the business, not only those
+ *   some action binds (SEC-W8RA-1, CR-W8RA-1), its resolution is one of them
+ *   (SEC-W8RA-2), and PATCH notifications read-all / :id/read leave the weekly
+ *   briefing alone for a member without revenue read (SEC-W8RA-3). TS-22g
+ *   (SEC-W8RA-4, CR-W8RA-2: GET finance/.../overview) is a follow-up outside
+ *   the write set (it.todo).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -1840,7 +1847,7 @@ describe('W8-REVENUE-ACTIONS-SCOPE (D-63): the revenue-actions routes and the st
     if (scopeApp) await scopeApp.close();
   });
 
-  async function call(method: 'get' | 'post', path: string, user: string, body?: object): Promise<request.Response> {
+  async function call(method: 'get' | 'post' | 'patch', path: string, user: string, body?: object): Promise<request.Response> {
     if (!scopeApp) {
       const { Test } = await import('@nestjs/testing');
       const { EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -1933,11 +1940,11 @@ describe('W8-REVENUE-ACTIONS-SCOPE (D-63): the revenue-actions routes and the st
     [ID.staffOwned]: [raId('finStaff'), raId('cash')].sort(),
   };
 
-  async function seedQueue() {
+  async function seedQueue(rows: typeof QUEUE = QUEUE) {
     await db.$executeRawUnsafe(`DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
     const base = Date.now() - 60_000;
     await db.revenueAction.createMany({
-      data: QUEUE.map((q, i) => ({
+      data: rows.map((q, i) => ({
         id: raId(q.key), businessId: ID.bizA, type: q.type, title: q.title, detail: q.detail,
         contactId: q.contactId, relatedType: q.relatedType, relatedId: q.relatedId, amountAtRisk: q.amountAtRisk,
         priority: q.priority, status: 'PENDING', recommendation: q.recommendation ?? undefined,
@@ -2146,6 +2153,184 @@ describe('W8-REVENUE-ACTIONS-SCOPE (D-63): the revenue-actions routes and the st
       await db.$executeRawUnsafe(`DELETE FROM finance_action_items WHERE id LIKE ${sqlLikePrefix(`${P}fai_`)}`);
     }
   });
+
+  it("TS-22d (W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-1, CR-W8RA-1, D-63): an action bound to no contact (a CHASE_FROM_BRIEFING with contactId null and relatedType 'briefing') whose title names a contact the member may not open is withheld from the list and the overview's top and refused as absent on complete, dismiss and snooze, though no revenue action binds that contact and it has no invoice or quote: the names matched are those of every contact of the business; a member who may open the contact named is served it", async () => {
+    // A second chase bound to nothing, naming the TEAM contact (a view-all ADMIN opens it; crm 'none' and crm_view 'owned' do not).
+    const chaseTeamNamed = {
+      key: 'chaseTeamNamed', type: 'CHASE_FROM_BRIEFING', title: 'Call Team about the deposit', detail: 'Ask for the deposit before Friday',
+      contactId: null, relatedType: 'briefing', relatedId: 'briefing:call-team-about-the-deposit', amountAtRisk: 60, priority: 2, recommendation: undefined,
+    };
+    const rows = [QUEUE.find((q) => q.key === 'chaseNamed')!, chaseTeamNamed, QUEUE.find((q) => q.key === 'cash')!];
+    try {
+      await seedQueue(rows);
+      // Only their names connect the two contacts to the queue: no action binds them, and neither has an invoice or a quote.
+      const named = [ID.cPriv, ID.cTeam];
+      expect(await db.revenueAction.count({ where: { businessId: ID.bizA, OR: [{ contactId: { in: named } }, { relatedId: { in: named } }] } })).toBe(0);
+      expect(await db.invoice.count({ where: { businessId: ID.bizA, contactId: { in: named } } })).toBe(0);
+      expect(await db.quote.count({ where: { businessId: ID.bizA, contactId: { in: named } } })).toBe(0);
+
+      const all = rows.map((r) => raId(r.key)).sort();
+      const served: Record<string, string[]> = {
+        [ID.owner]: all,
+        // view-all ADMIN: opens the TEAM contact, not the owner's PRIVATE one.
+        [ID.admin]: [raId('chaseTeamNamed'), raId('cash')].sort(),
+        [ID.staffCrmNone]: [raId('cash')],
+        [ID.staffOwned]: [raId('cash')],
+      };
+      for (const [user, expected] of Object.entries(served)) {
+        const res = await call('get', `${RA}?limit=200`, user);
+        expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        expect(itemIds(res), `${user}: the list`).toEqual(expected);
+        const overview = await call('get', `${RA}/overview`, user);
+        expect(overview.status, `${user}: ${JSON.stringify(overview.body).slice(0, 300)}`).toBe(200);
+        expect(overview.body.top.map((a: { id: string }) => a.id).sort(), `${user}: the overview's top`).toEqual(expected);
+        if (user !== ID.owner) {
+          for (const body of [res.body, overview.body]) expect(JSON.stringify(body), `${user}: the PRIVATE contact's name`).not.toContain('Priv');
+        }
+        if (user === ID.staffCrmNone || user === ID.staffOwned) {
+          for (const body of [res.body, overview.body]) expect(JSON.stringify(body), `${user}: the TEAM contact's name`).not.toContain('Call Team');
+        }
+      }
+
+      // An action the member may not be served is absent to them: nothing changed, nothing of it echoed.
+      const refused: Array<[string, string]> = [
+        [ID.admin, 'chaseNamed'],
+        [ID.staffCrmNone, 'chaseNamed'],
+        [ID.staffCrmNone, 'chaseTeamNamed'],
+        [ID.staffOwned, 'chaseTeamNamed'],
+      ];
+      for (const [user, key] of refused) {
+        for (const verb of ['complete', 'dismiss', 'snooze']) {
+          const res = await call('post', `${RA}/${raId(key)}/${verb}`, user, verb === 'snooze' ? { hours: 2 } : { resolution: 'v84a done' });
+          expect(res.status, `${user} ${verb} ${key}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(404);
+          expect(JSON.stringify(res.body)).toContain('action not found');
+          expect(JSON.stringify({ ...res.body, path: undefined })).not.toMatch(/Priv|Team about/);
+        }
+        expect(await actionState(key), `${user}: ${key} unchanged`).toEqual(PENDING_STATE);
+      }
+
+      // The ADMIN opens the TEAM contact: the chase naming it is theirs to act on.
+      const snoozed = await call('post', `${RA}/${raId('chaseTeamNamed')}/snooze`, ID.admin, { hours: 2 });
+      expect(snoozed.status, JSON.stringify(snoozed.body).slice(0, 200)).toBe(201);
+      expect(snoozed.body).toMatchObject({ id: raId('chaseTeamNamed'), status: 'SNOOZED', resolvedBy: ID.admin });
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+    }
+  });
+
+  it("TS-22e (W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-2, D-63): an action's resolution is one of the texts it is served with: a completed or dismissed action whose resolution names a contact the member may not open is withheld on ?status=COMPLETED, DISMISSED and ALL and refused as absent, and one whose resolution names none is served", async () => {
+    try {
+      await seedQueue();
+      // The OWNER resolves two rows every revenue reader of the queue was served (TS-22a): one resolution names the PRIVATE contact.
+      const completed = await call('post', `${RA}/${raId('cash')}/complete`, ID.owner, { resolution: 'Moved cash after Priv paid in person' });
+      expect(completed.status, JSON.stringify(completed.body).slice(0, 200)).toBe(201);
+      const dismissed = await call('post', `${RA}/${raId('chaseTeam')}/dismiss`, ID.owner, { resolution: 'v84a handled by phone' });
+      expect(dismissed.status, JSON.stringify(dismissed.body).slice(0, 200)).toBe(201);
+
+      // OWNER control: the resolution naming the PRIVATE contact is served to them.
+      const ownerDone = await call('get', `${RA}?status=COMPLETED&limit=200`, ID.owner);
+      expect(ownerDone.status).toBe(200);
+      expect(itemIds(ownerDone).filter((id: string) => id.startsWith(P))).toEqual([raId('cash')]);
+      expect(ownerDone.body.items.find((a: { id: string }) => a.id === raId('cash')).resolution).toBe('Moved cash after Priv paid in person');
+
+      const served: Record<string, Record<string, string[]>> = {
+        [ID.admin]: { COMPLETED: [], DISMISSED: [raId('chaseTeam')], ALL: [raId('chaseTeam')] },
+        [ID.staffCrmNone]: { COMPLETED: [], DISMISSED: [], ALL: [] },
+        [ID.staffOwned]: { COMPLETED: [], DISMISSED: [], ALL: [raId('finStaff')] },
+      };
+      for (const [user, byStatus] of Object.entries(served)) {
+        for (const [status, expected] of Object.entries(byStatus)) {
+          const res = await call('get', `${RA}?status=${status}&limit=200`, user);
+          expect(res.status, `${user} ${status}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+          expect(itemIds(res), `${user} ${status}`).toEqual(expected);
+          expect(JSON.stringify(res.body), `${user} ${status}: the PRIVATE contact's name`).not.toContain('Priv');
+        }
+      }
+      // A served resolution is served whole.
+      const adminDismissed = await call('get', `${RA}?status=DISMISSED&limit=200`, ID.admin);
+      expect(adminDismissed.body.items[0]).toMatchObject({ id: raId('chaseTeam'), resolution: 'v84a handled by phone' });
+
+      // The row whose resolution names the PRIVATE contact is absent to the ADMIN, as an id that is no action is.
+      const snooze = await call('post', `${RA}/${raId('cash')}/snooze`, ID.admin, { hours: 2 });
+      expect(snooze.status, JSON.stringify(snooze.body).slice(0, 200)).toBe(404);
+      expect(JSON.stringify(snooze.body)).toContain('action not found');
+      expect(await actionState('cash')).toMatchObject({ status: 'COMPLETED', resolvedBy: ID.owner });
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+    }
+  });
+
+  it("TS-22f (W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-3, D-63): PATCH notifications read-all and :id/read do not act on the stored weekly financial briefing for a member without revenue read (its read flag is the business's, so it stays unread for the OWNER and the revenue readers), and :id/read answers its id as it answers a missing id; a revenue reader marks it read, and the OWNER's read-all marks it read", async () => {
+    const NOTES = `/notifications/businesses/${ID.bizA}`;
+    const WEEKLY = `${P}n_weekly_rw`;
+    const OTHER = `${P}n_other_rw`;
+    const readFlag = async (id: string) => (await db.notification.findUnique({ where: { id }, select: { read: true } }))?.read;
+    const unread = async (user: string) => {
+      const res = await call('get', `${NOTES}/unread-count`, user);
+      expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body.count as number;
+    };
+    try {
+      await db.notification.create({
+        data: {
+          id: WEEKLY, businessId: ID.bizA, type: 'financial.weekly_briefing', title: 'Weekly Financial Briefing',
+          body: 'Collections held up.', data: { lastWeekRevenue: 4321 }, createdAt: new Date(Date.now() - 1000),
+        },
+      });
+      await db.notification.create({
+        data: { id: OTHER, businessId: ID.bizA, type: 'v84a.other', title: 'v84a other notification', createdAt: new Date(Date.now() - 2000) },
+      });
+
+      // :id/read on the briefing, for a revenue-none member: nothing marked, the answer of a missing id.
+      const onWeekly = await call('patch', `${NOTES}/${WEEKLY}/read`, ID.staffRevNone);
+      expect(onWeekly.status, JSON.stringify(onWeekly.body).slice(0, 200)).toBe(200);
+      const onMissing = await call('patch', `${NOTES}/${P}n_missing/read`, ID.staffRevNone);
+      expect(onMissing.status).toBe(200);
+      expect(onWeekly.body).toEqual(onMissing.body);
+      expect(onWeekly.body).toEqual({ count: 0 });
+      expect(await readFlag(WEEKLY), 'staffRevNone :id/read: the briefing stays unread').toBe(false);
+      // Their own notification is marked read as before.
+      const onOther = await call('patch', `${NOTES}/${OTHER}/read`, ID.staffRevNone);
+      expect(onOther.body).toEqual({ count: 1 });
+      expect(await readFlag(OTHER)).toBe(true);
+
+      // read-all, for a revenue-none member: every other notification, never the briefing.
+      await db.notification.update({ where: { id: OTHER }, data: { read: false } });
+      const all = await call('patch', `${NOTES}/read-all`, ID.staffRevNone);
+      expect(all.status, JSON.stringify(all.body).slice(0, 200)).toBe(200);
+      expect(await readFlag(OTHER), 'staffRevNone read-all: their notification').toBe(true);
+      expect(await readFlag(WEEKLY), 'staffRevNone read-all: the briefing stays unread').toBe(false);
+      // The OWNER and a revenue reader still count it unread (read-all left nothing else unread).
+      expect(await unread(ID.owner)).toBe(1);
+      expect(await unread(ID.admin)).toBe(1);
+
+      // A revenue reader marks it read.
+      const byAdmin = await call('patch', `${NOTES}/${WEEKLY}/read`, ID.admin);
+      expect(byAdmin.body).toEqual({ count: 1 });
+      expect(await readFlag(WEEKLY)).toBe(true);
+      expect(await unread(ID.owner)).toBe(0);
+
+      // OWNER control: read-all marks it read.
+      await db.notification.update({ where: { id: WEEKLY }, data: { read: false } });
+      const ownerAll = await call('patch', `${NOTES}/read-all`, ID.owner);
+      expect(ownerAll.status).toBe(200);
+      expect(await readFlag(WEEKLY)).toBe(true);
+
+      // Tenant control: B's member is refused A's notifications.
+      await db.notification.update({ where: { id: WEEKLY }, data: { read: false } });
+      expect((await call('patch', `${NOTES}/${WEEKLY}/read`, ID.ownerB)).status).toBe(403);
+      expect((await call('patch', `${NOTES}/read-all`, ID.ownerB)).status).toBe(403);
+      expect(await readFlag(WEEKLY)).toBe(false);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM notifications WHERE id LIKE ${sqlLikePrefix(`${P}n_`)}`);
+    }
+  });
+});
+
+describe('W8-REVENUE-ACTIONS-SCOPE review follow-up outside the write set (TS-22g)', () => {
+  it.todo(
+    "TS-22g (review SEC-W8RA-4, CR-W8RA-2, D-63): GET finance/businesses/:businessId/overview (finance.controller.ts getOverview: revenue read only, no viewer passed; FinanceOverviewService.getOverview, both outside W8-REVENUE-ACTIONS-SCOPE's write set) returns the 25 highest-risk PENDING revenue actions with their title and detail, unfiltered by the D-63 contact rule, so a view-all ADMIN, a crm 'none' or a crm_view 'owned' revenue reader is served there the actions GET revenue-actions withholds from them ('Slow payer: Priv (avg 40d)', 'Chase Priv this week', 'Slow payer: Staff'); a follow-up packet applies the revenue-actions rule (servedRevenueActions in revenue-action.controller.ts) to overview.actions",
+  );
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {

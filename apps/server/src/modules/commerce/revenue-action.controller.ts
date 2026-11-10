@@ -8,6 +8,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { visibilityClause } from '../crm/crm-permissions.helper';
+import { contactWhereBase } from '../crm/crm.helpers';
 import { resolveTimelineViewer, type TimelineViewer } from '../timeline/timeline-visibility';
 import { briefingContactRule } from './revenue-intelligence.controller';
 import { RevenueActionService } from './revenue-action.service';
@@ -19,13 +20,15 @@ import { RevenueActionService } from './revenue-action.service';
 export const REVENUE_ACTION_SCAN_LIMIT = 1000;
 
 /** The fields of a revenue action the D-63 rule reads. */
-type ScopedAction = {
+export type ScopedAction = {
   contactId: string | null;
   relatedType: string | null;
   relatedId: string | null;
   title: string;
   detail: string | null;
   recommendation: Prisma.JsonValue | null;
+  /** The free-text note complete and dismiss write (review SEC-W8RA-2): served with the row. */
+  resolution: string | null;
 };
 
 /**
@@ -43,9 +46,13 @@ function actionContacts(row: Pick<ScopedAction, 'contactId' | 'relatedType' | 'r
   return out;
 }
 
-/** Every text an action is served with: its title, detail and each string of its recommendation (its draft included). */
-function actionTexts(row: Pick<ScopedAction, 'title' | 'detail' | 'recommendation'>): string[] {
-  const out: string[] = [row.title, row.detail ?? ''];
+/**
+ * Every text an action is served with: its title, detail, resolution (review SEC-W8RA-2: the note a
+ * complete or dismiss wrote, served on ?status=COMPLETED, DISMISSED and ALL) and each string of its
+ * recommendation (its draft included).
+ */
+function actionTexts(row: Pick<ScopedAction, 'title' | 'detail' | 'recommendation' | 'resolution'>): string[] {
+  const out: string[] = [row.title, row.detail ?? '', row.resolution ?? ''];
   const walk = (value: unknown): void => {
     if (typeof value === 'string') out.push(value);
     else if (Array.isArray(value)) value.forEach(walk);
@@ -53,6 +60,71 @@ function actionTexts(row: Pick<ScopedAction, 'title' | 'detail' | 'recommendatio
   };
   walk(row.recommendation);
   return out;
+}
+
+/** Case-folds a word for the candidate prefilter: equal for any two words the rule's 'iu' match takes as equal. */
+const foldWord = (word: string): string => word.toLowerCase().toUpperCase().toLowerCase();
+
+/**
+ * The word a contact's name (its full name, display name or email, as briefingContactRule reads it)
+ * can only be matched through (review SEC-W8RA-1, CR-W8RA-1): its first run of letters and digits,
+ * case-folded. Where the rule matches the name in a text, that run stands in the text as a whole run
+ * of letters and digits (the match starts past a letter or digit, and every run of the name is
+ * bounded by a space, a non-letter or the match's end), so a contact none of whose names has its key
+ * among a text's runs is named by none of them. `undefined`: a name the rule never matches (shorter
+ * than two characters); `null`: a name without a letter or digit, never ruled out.
+ */
+function nameKey(name: string | null | undefined): string | null | undefined {
+  const joined = (name ?? '').trim().split(/\s+/).filter((w) => w.length > 0).join(' ');
+  if (joined.length < 2) return undefined;
+  const run = joined.match(/[\p{L}\p{N}]+/u);
+  return run ? foldWord(run[0]) : null;
+}
+
+/** Whether the member opens every contact of the business (crm read, and visibilityClause does not restrict them). */
+function opensEveryContact(viewer: TimelineViewer): boolean {
+  return viewer.readable.has('crm') && !visibilityClause(viewer.crmAccess, viewer.userId);
+}
+
+/**
+ * The actions of `rows` the member may be served (TS-22, D-63), in order: every contact an action
+ * names by id (actionContacts) is one the member may open, and none of its texts (actionTexts) names
+ * a contact they may not open (briefingContactRule).
+ *
+ * W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-1 / CR-W8RA-1 (D-63): the names matched were those of the
+ * contacts some revenue action binds by id, so a chase bound to nothing (CHASE_FROM_BRIEFING with
+ * relatedType 'briefing' and contactId null: the revenue briefing's model wrote it, or a member typed
+ * it through delegate-chase) naming a contact no action binds was served to a view-all ADMIN and a
+ * crm 'none' revenue reader. An action's texts are free text, so the names matched are those of
+ * every live contact of the business; the contacts whose name keys (nameKey) stand among the texts'
+ * runs of letters and digits are the only ones a text can name, and they alone are handed to the rule,
+ * which keeps its pattern small for a large business.
+ *
+ * Exported for the follow-up that applies the same rule to GET finance/.../overview (TS-22g).
+ */
+export async function servedRevenueActions<T extends ScopedAction>(
+  prisma: PrismaService,
+  viewer: TimelineViewer,
+  rows: T[],
+): Promise<T[]> {
+  if (rows.length === 0 || opensEveryContact(viewer)) return rows;
+  const words = new Set<string>();
+  for (const row of rows) {
+    for (const text of actionTexts(row)) for (const run of text.match(/[\p{L}\p{N}]+/gu) ?? []) words.add(foldWord(run));
+  }
+  const contacts = await prisma.client.contact.findMany({
+    where: contactWhereBase(viewer.businessId),
+    select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
+  });
+  const named = new Set<string>(rows.flatMap(actionContacts));
+  for (const c of contacts) {
+    const keys = [c.displayName, `${c.firstName ?? ''} ${c.lastName ?? ''}`, c.email].map(nameKey);
+    if (keys.some((key) => key === null || (key !== undefined && words.has(key)))) named.add(c.id);
+  }
+  const rule = await briefingContactRule(prisma, viewer, { id: { in: [...named] } });
+  return rows.filter(
+    (row) => actionContacts(row).every((id) => rule.opens(id)) && !actionTexts(row).some((text) => rule.namesHidden(text)),
+  );
 }
 
 /**
@@ -64,8 +136,9 @@ function actionTexts(row: Pick<ScopedAction, 'title' | 'detail' | 'recommendatio
  * that level, as POST revenue-intelligence/briefing/delegate-chase beside them does. The briefings'
  * rule then applies to the queue: an action is served (listed, in the overview's top, or acted on)
  * only when every contact it names by id (actionContacts) is one the member may open, and none of its
- * texts names one they may not (briefingContactRule: crm read and visibilityClause; a hidden contact's
- * full name, display name or email, matched over the contacts the business's actions name). An action
+ * texts (its resolution included, review SEC-W8RA-2) names one they may not (briefingContactRule: crm
+ * read and visibilityClause; a hidden contact's full name, display name or email, matched over every
+ * live contact of the business, review SEC-W8RA-1 / CR-W8RA-1: servedRevenueActions). An action
  * the member may not be served is refused as absent on complete, dismiss and snooze (404 'action not
  * found', the answer for an id that is no action of the business; D-64's absent refusal).
  */
@@ -85,43 +158,12 @@ export class RevenueActionController {
     if (!biz) throw new ForbiddenException('No access to this business');
   }
 
-  /** Whether the member opens every contact of the business (crm read, and visibilityClause does not restrict them). */
-  private opensEveryContact(viewer: TimelineViewer): boolean {
-    return viewer.readable.has('crm') && !visibilityClause(viewer.crmAccess, viewer.userId);
-  }
-
-  /** The actions of `rows` the member may be served (TS-22, D-63), in order. */
-  private async servedTo<T extends ScopedAction>(viewer: TimelineViewer, rows: T[]): Promise<T[]> {
-    if (rows.length === 0 || this.opensEveryContact(viewer)) return rows;
-    // The contacts the business's actions name: an action's own ids are judged, and its texts are
-    // matched against the names of every one of them the member may not open.
-    const [byContact, byRelation] = await Promise.all([
-      this.prisma.client.revenueAction.findMany({
-        where: { businessId: viewer.businessId, contactId: { not: null } },
-        select: { contactId: true },
-        distinct: ['contactId'],
-      }),
-      this.prisma.client.revenueAction.findMany({
-        where: { businessId: viewer.businessId, relatedType: { equals: 'contact', mode: 'insensitive' }, relatedId: { not: null } },
-        select: { relatedId: true },
-        distinct: ['relatedId'],
-      }),
-    ]);
-    const named = new Set<string>(rows.flatMap(actionContacts));
-    for (const r of byContact) if (r.contactId) named.add(r.contactId);
-    for (const r of byRelation) if (r.relatedId) named.add(r.relatedId);
-    const rule = await briefingContactRule(this.prisma, viewer, { id: { in: [...named] } });
-    return rows.filter(
-      (row) => actionContacts(row).every((id) => rule.opens(id)) && !actionTexts(row).some((text) => rule.namesHidden(text)),
-    );
-  }
-
   /** A page of the queue as the member may be served it, filled past the actions withheld (TS-22). */
   private async page(businessId: string, userId: string, status: string, limit: number) {
     const viewer = await resolveTimelineViewer(this.prisma, businessId, userId);
-    if (this.opensEveryContact(viewer)) return this.service.list(businessId, { status, limit });
+    if (opensEveryContact(viewer)) return this.service.list(businessId, { status, limit });
     const scanned = await this.service.list(businessId, { status, limit: REVENUE_ACTION_SCAN_LIMIT });
-    return (await this.servedTo(viewer, scanned)).slice(0, limit);
+    return (await servedRevenueActions(this.prisma, viewer, scanned)).slice(0, limit);
   }
 
   /**
@@ -131,11 +173,11 @@ export class RevenueActionController {
   private async ensureServed(businessId: string, id: string, userId: string) {
     const row = await this.prisma.client.revenueAction.findFirst({
       where: { id, businessId },
-      select: { contactId: true, relatedType: true, relatedId: true, title: true, detail: true, recommendation: true },
+      select: { contactId: true, relatedType: true, relatedId: true, title: true, detail: true, recommendation: true, resolution: true },
     });
     if (!row) return;
     const viewer = await resolveTimelineViewer(this.prisma, businessId, userId);
-    if ((await this.servedTo(viewer, [row])).length === 0) throw new NotFoundException('action not found');
+    if ((await servedRevenueActions(this.prisma, viewer, [row])).length === 0) throw new NotFoundException('action not found');
   }
 
   @RequireModuleScope('revenue', 'read')

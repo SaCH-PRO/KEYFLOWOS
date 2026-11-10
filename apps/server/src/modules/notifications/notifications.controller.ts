@@ -95,14 +95,22 @@ export class NotificationsController {
     return { count };
   }
 
+  /**
+   * W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-3 (D-63): the read flag is the business's, so a member
+   * who is not served the weekly briefing (no revenue read) no longer marks it read for the OWNER and
+   * the revenue readers: read-all leaves it as it is, and :id/read on its id answers as on a missing
+   * id ({ count: 0 }), as complete, dismiss and snooze refuse a revenue action withheld from them.
+   */
   @Patch('businesses/:businessId/:id/read')
-  markRead(@Param('id') id: string, @Param('businessId') businessId: string) {
-    return this.notifications.markRead(id, businessId);
+  async markRead(@Param('id') id: string, @Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, req.user.id);
+    return this.notifications.markRead(id, businessId, { excludeTypes: this.withheldTypes(viewer) });
   }
 
   @Patch('businesses/:businessId/read-all')
-  markAllRead(@Param('businessId') businessId: string) {
-    return this.notifications.markAllRead(businessId);
+  async markAllRead(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, req.user.id);
+    return this.notifications.markAllRead(businessId, { excludeTypes: this.withheldTypes(viewer) });
   }
 
   @Get('businesses/:businessId/customer-preferences')
