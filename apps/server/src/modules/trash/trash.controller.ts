@@ -97,7 +97,8 @@ const TRASH_MODULE: Readonly<Record<TrashableModel, CanonicalModule>> = {
 };
 
 /**
- * W6-TRASH-MODULE-SCOPE (W5-TRASH-LIST-500 it.todo D46-S09g follow-up): the
+ * W6-TRASH-MODULE-SCOPE (the W5-TRASH-LIST-500 D46-S09g follow-up, an it.todo
+ * then, live since in test/d46-commerce-writes.integration.test.ts): the
  * trash models the client's soft-delete extension covers (packages/db/src/
  * client.ts, softDelete([...])). Their findMany, count and findFirst overwrite
  * any deletedAt filter with null, so a Prisma read never sees their trashed

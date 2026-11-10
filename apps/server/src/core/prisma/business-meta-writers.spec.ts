@@ -5,7 +5,7 @@
  * write back whole. A writer that reads it without the business row lock and
  * writes its copy back undoes every write that committed in between: the
  * public storefront event (SiteService.trackEvent) wrote an owner's cleared
- * payment secret back (R0-SEC2c review SEC2c-ST-1, it.todo SEC2c-C03), and two
+ * payment secret back (R0-SEC2c review SEC2c-ST-1, case SEC2c-C03, was it.todo), and two
  * events in flight together recorded one. The fix is the lock
  * IdentityService.updateBusiness and GmailService already take (SELECT id
  * FROM businesses WHERE id = $1 FOR NO KEY UPDATE), taken through one helper,

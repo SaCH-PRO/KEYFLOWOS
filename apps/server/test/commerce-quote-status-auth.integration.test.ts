@@ -32,7 +32,8 @@
  *             detail's shape); the service's whole Contact row reaches the listener only
  *   R28-ST-02 under the production tenant wiring (TenantInterceptor + the Prisma tenant
  *             context provider) an object body tenant steering the ambient tenant still
- *             gets the 404; the number/array 500 is it.todo (TenantInterceptor, CF-24 / R0-L)
+ *             gets the 404; the number/array 500 was an it.todo (TenantInterceptor, CF-24 / R0-L),
+ *             live since R0-F24 as QS-15 below (W8-HOUSEKEEPING)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService and the real ledger chain
