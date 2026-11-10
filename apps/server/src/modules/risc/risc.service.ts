@@ -38,11 +38,26 @@ const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configurat
  *
  * The ban PAUSES the provider sessions; it does not revoke them (F7-SEC-2).
  * GoTrue refuses a refresh while the user is banned but keeps the refresh
- * token, and a ban does not log the user out. So once the ban lapses a
- * pre-event refresh token (the hijacker's) works at Supabase again, and its
- * tokens are refused at this API only while the local logout cutoff lasts
- * (LOGOUT_REVOCATION_TTL_SECONDS). That residual needs a follow-up: a durable
- * RISC cutoff AuthMiddleware reads, or a provider global logout.
+ * token, and a ban does not log the user out. So once the ban lapsed a
+ * pre-event refresh token (the hijacker's) worked at Supabase again.
+ * W7-RISC-REVOKE: before the ban the handler asks GoTrue to revoke every
+ * Supabase session of the user, and with them every refresh token, through
+ * SupabaseAdminService.revokeAllSessions (see terminateUserSessions). That is
+ * the provider-global-logout option of D-39, which BUILD-MAP-001 section (g)
+ * still lists as an OPEN owner decision with no ruling (review CR-W7RR-2): it
+ * is built so it can be ruled on, not on the authority of a ruling. The ban
+ * stays as the fallback when that sign-out fails; access tokens already
+ * issued, which GoTrue cannot recall, are refused at this API by the local
+ * logout cutoff.
+ *
+ * F7-SEC-2 is NOT closed under the Release 0 rule (review SEC-W7RR-1,
+ * CR-W7RR-1): that sign-out needs SUPABASE_JWT_SECRET, which a Release 0
+ * server leaves empty, so there it never runs and the residual above stands
+ * (warned at boot, named provider_signout on every hijacking event). Nor for sessions-revoked,
+ * tokens-revoked and token-revoked (review SEC-W7RR-2), which send nothing to
+ * the provider: only the 24h local cutoff holds against a pre-event refresh
+ * token. Both stay OPEN as it.todo cases in test/supabase-admin.service.test.ts
+ * under the prefix release0-index.json explains F7-SEC-2 by.
  *
  * Long enough that every live client meets it: a default Supabase access token
  * lives 1h, so a client holding one issued just before the event must refresh
@@ -58,7 +73,7 @@ const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
  * A revocation leg of a session-ending event that can fail, named as
  * POST /identity/logout names its legs in the audit reason.
  */
-type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'local_sessions' | 'provider_ban';
+type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'local_sessions' | 'provider_signout' | 'provider_ban';
 
 interface HandledEvent {
   /** What the event did; persisted on RiscEvent.actionTaken. */
@@ -95,6 +110,8 @@ export class RiscService {
   ) {}
 
   onApplicationBootstrap() {
+    this.warnIfProviderSignOutUnavailable();
+
     // Listen for true user deletion events so RISC security logs are erased
     // automatically as part of GDPR right-to-erasure flows.
     this.events.on('user.deleted', async (payload: { userId: string }) => {
@@ -107,6 +124,29 @@ export class RiscService {
         );
       }
     });
+  }
+
+  /**
+   * W7-RISC-REVOKE review SEC-W7RR-1 / CR-W7RR-1: say at boot when this
+   * server can accept a RISC event (a Google client id is set) but cannot
+   * revoke the user's Supabase refresh tokens on account-disabled/hijacking,
+   * which is the case under the Release 0 rule (SUPABASE_JWT_SECRET empty).
+   * Each such event then also names provider_signout on RiscEvent.actionTaken.
+   */
+  private warnIfProviderSignOutUnavailable(): void {
+    if (this.allowedAudiences().length === 0) return;
+    let unavailable: string | null;
+    try {
+      unavailable = this.supabaseAdmin.revokeAllSessionsUnavailable();
+    } catch (err: unknown) {
+      unavailable = err instanceof Error ? err.message : String(err);
+    }
+    if (!unavailable) return;
+    this.logger.warn(
+      `RISC: an account-disabled/hijacking event cannot revoke the user's Supabase sessions (${unavailable}). ` +
+        'Only the 65-minute provider ban and the 24h local cutoff hold, so a refresh token issued before the event ' +
+        'works again once both lapse (R0-ID-F7 F7-SEC-2 stays open here; D-39 is not ruled).',
+    );
   }
 
   /**
@@ -309,6 +349,13 @@ export class RiscService {
 
   /**
    * Map a RISC subject to a KeyFlowOS user via the `UserIdentity` table.
+   *
+   * Found by the W7-RISC-REVOKE review (open, outside this module): the table's
+   * only writer, IdentityService.persistUserIdentities, runs only when
+   * bootstrapUser is handed identities, and POST /identity/bootstrap never
+   * hands it any. So in a deployment no row exists and every event resolves
+   * to no_matching_user. The follow-up reads the identities from GoTrue on the
+   * server (admin.getUserById), never from the request body.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
@@ -376,13 +423,13 @@ export class RiscService {
 
   /**
    * Revoke the user's sessions at this API and in the local Session rows, and,
-   * for account-disabled/hijacking (`providerBan`), pause them at Supabase.
-   * Returns every leg that did not hold.
+   * for account-disabled/hijacking (`providerBan`), revoke them at Supabase and
+   * pause them there. Returns every leg that did not hold.
    *
-   * A RISC event carries no user JWT, so the provider cannot be asked to sign
-   * the user out (admin.signOut takes the user's ACCESS JWT as the bearer of
+   * A RISC event carries no user JWT, so the handler cannot hand the provider
+   * one (admin.signOut takes the user's ACCESS JWT as the bearer of
    * POST /logout; until R0-ID-F7 this passed the user id and GoTrue refused it:
-   * R0-ID-F4 review F4-C, the CR-2 shape). Instead, in this order:
+   * R0-ID-F4 review F4-C, the CR-2 shape). In this order:
    *
    *   1. The logout cutoff POST /identity/logout writes
    *      (auth:revoked:user:<id>, the revocation time in epoch seconds, for
@@ -395,11 +442,26 @@ export class RiscService {
    *      local-auth tokens issued up to now are refused too: a hijacking event
    *      revokes no less than a voluntary logout (review F7-SEC-4).
    *   3. The local Session rows.
-   *   4. With `providerBan` only: the ban at Supabase (banAtProvider), which
-   *      refuses to renew the user's sessions while it lasts. It does not
-   *      revoke them: once it lapses a pre-event refresh token works at
-   *      Supabase again (review F7-SEC-2, residual; see
-   *      RISC_PROVIDER_BAN_SECONDS).
+   *   4. With `providerBan` only: the provider global logout (W7-RISC-REVOKE;
+   *      review F7-SEC-2; the unruled provider-global-logout option of D-39,
+   *      review CR-W7RR-2): SupabaseAdminService.revokeAllSessions(userId)
+   *      mints the short-lived user JWT POST /logout needs (no session_id
+   *      claim), and GoTrue deletes every session of the user and so every
+   *      refresh token: a pre-event refresh token (the hijacker's) mints
+   *      nothing once the ban below lapses. Sent before the ban is read, so a
+   *      ban already on the account (an operator's) cannot stand in its way.
+   *      It needs SUPABASE_JWT_SECRET: under the Release 0 rule (empty) it
+   *      sends nothing and the leg is named provider_signout (SEC-W7RR-1,
+   *      CR-W7RR-1).
+   *   5. With `providerBan` only: the ban at Supabase (banAtProvider), which
+   *      refuses to renew the user's sessions while it lasts: the fallback
+   *      when the sign-out above fails (see RISC_PROVIDER_BAN_SECONDS).
+   *
+   * The other session-ending events (sessions-revoked, tokens-revoked,
+   * token-revoked) send nothing to the provider (F7-CR-1): only the local legs.
+   * Their pre-event refresh tokens stay live at Supabase, so the local cutoff
+   * is all that refuses those sessions, for its 24h (review SEC-W7RR-2: a
+   * provider sign-out on these events needs a ruling; an it.todo until then).
    *
    * Each leg's failure is logged, named in the result, and does not skip the
    * next.
@@ -430,10 +492,28 @@ export class RiscService {
       failed.push('local_sessions');
     }
 
-    if (opts.providerBan && !(await this.banAtProvider(userId))) {
-      failed.push('provider_ban');
+    if (opts.providerBan) {
+      if (!(await this.revokeAtProvider(userId))) failed.push('provider_signout');
+      if (!(await this.banAtProvider(userId))) failed.push('provider_ban');
     }
     return failed;
+  }
+
+  /**
+   * W7-RISC-REVOKE (the unruled provider-global-logout option of D-39):
+   * revoke every Supabase session of the user, and with them every refresh
+   * token, by user id. Returns whether GoTrue accepted the global sign-out;
+   * every failure is logged with the user id.
+   */
+  private async revokeAtProvider(userId: string): Promise<boolean> {
+    try {
+      if (await this.supabaseAdmin.revokeAllSessions(userId)) return true;
+      this.logger.warn(`Supabase global sign-out not done for ${userId}: its refresh tokens are not revoked`);
+      return false;
+    } catch (err: unknown) {
+      this.logger.warn(`Supabase global sign-out threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
   }
 
   /**

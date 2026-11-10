@@ -153,15 +153,93 @@ item 3 is open.
      4. In one database transaction, in a window when the user is signed out:
         free the address on the old row (set a placeholder email), create the
         new row under the new `sub` with the old row's fields (role included),
-        re-point every column that holds the old id, then delete the old row.
-        Do not rely on `reconcileUserId`'s list of references. It re-points
-        memberships, sessions, the AI log, approval and plan rows,
-        `businesses.owner_id` and `team_activity_logs.user_id`. It misses
-        `user_identities`, `contact_shares` and `push_subscriptions` (deleted
-        with the old row by cascade), `support_tickets.assigned_to_id` and
-        `users.referred_by_user_id` (set to null), and user-id columns that
-        have no foreign key. Find them in `packages/db/prisma/schema.prisma`
-        before the run.
+        re-point every reference to the old id (every column that holds it,
+        and the trigger creator and the connector configuring members
+        below), then delete the old row.
+        `reconcileUserId` (`S/modules/identity/identity.service.ts`) does
+        these steps for an invitation placeholder. Do not rely on its list of
+        references alone:
+        - It re-points the columns `memberships.user_id`, `sessions.user_id`,
+          `ai_execution_logs.user_id`, `ai_approval_items.user_id`,
+          `ai_approval_items.resolved_by_user_id`, `ai_plans.user_id`,
+          `businesses.owner_id` and `team_activity_logs.user_id`.
+        - It re-points the trigger creator (owner ruling D-73,
+          W6-IDENTITY-REKEY-CREATOR): the member a rule records under the key
+          `$createdBy` in `agent_triggers.condition` and
+          `key_cortex_trigger_rules.filter_json`, in every business. The
+          schema does not show it, because the key is inside a JSON column.
+          Run the two statements `reconcileUserId` runs, with the old and the
+          new id in place of `<old id>` and `<new id>`:
+
+          ```sql
+          UPDATE agent_triggers
+            SET condition = jsonb_set(condition, ARRAY['$createdBy'::text], to_jsonb('<new id>'::text))
+            WHERE condition ->> '$createdBy'::text = '<old id>'::text;
+          UPDATE key_cortex_trigger_rules
+            SET filter_json = jsonb_set(filter_json, ARRAY['$createdBy'::text], to_jsonb('<new id>'::text))
+            WHERE filter_json ->> '$createdBy'::text = '<old id>'::text;
+          ```
+
+          Each changes only that key and leaves the rule's own filter as it
+          is. Skip them and the member's rules keep the deleted id: every
+          plan they fire fails on the `ai_plans` user foreign key, and a
+          member who does not own the business gets 403
+          `AGENT_TRIGGER_CREATOR_ONLY` when they switch or edit their own
+          agent trigger. `T/identity-rekey-creator.integration.test.ts`
+          (RK-03) holds this step to `reconcileUserId` and runs these
+          statements, as written, against Postgres.
+        - It does not re-point the connector configuring members (owner
+          ruling D-93, W6-CONNECT-TAG-MERGE). They are keys inside another
+          JSON column, `connector_statuses.metadata`, so the schema does not
+          show them either:
+          - `rulesConfiguredBy`, the member who last saved the contact sync
+            rules, on the `google_contacts` and `outlook_contacts` rows;
+          - `mappingRules.defaultOwnerId`, the member those rules make the
+            owner of the contacts a sync creates, on the same rows;
+          - `formMappings.<form id>.configuredBy`, the member who last saved
+            each connector form mapping, on the `typeform`, `jotform` and
+            `webhook_form` rows.
+
+          Run these three statements too, with the old and the new id in
+          place of `<old id>` and `<new id>`:
+
+          ```sql
+          UPDATE connector_statuses
+            SET metadata = jsonb_set(metadata, ARRAY['rulesConfiguredBy'], to_jsonb('<new id>'::text))
+            WHERE metadata ->> 'rulesConfiguredBy' = '<old id>';
+          UPDATE connector_statuses
+            SET metadata = jsonb_set(metadata, ARRAY['mappingRules', 'defaultOwnerId'], to_jsonb('<new id>'::text))
+            WHERE metadata -> 'mappingRules' ->> 'defaultOwnerId' = '<old id>';
+          UPDATE connector_statuses
+            SET metadata = jsonb_set(metadata, ARRAY['formMappings'], (
+              SELECT jsonb_object_agg(form_id, CASE WHEN mapping ->> 'configuredBy' = '<old id>'
+                THEN jsonb_set(mapping, ARRAY['configuredBy'], to_jsonb('<new id>'::text)) ELSE mapping END)
+              FROM jsonb_each(metadata -> 'formMappings') AS form(form_id, mapping)))
+            WHERE jsonb_typeof(metadata -> 'formMappings') = 'object'
+              AND jsonb_path_exists(metadata, '$.formMappings.* ? (@.configuredBy == $old)', jsonb_build_object('old', '<old id>'));
+          ```
+
+          Each changes only that key and leaves the rest of the row as it
+          is. Skip them and every contact sync whose rules the member last
+          saved, and every backfill of a form mapping they last saved,
+          creates and updates no contact, whoever starts it, the owner and
+          system runs included. Each run checks every write for the
+          configuring member too (`syncPrincipals`,
+          `S/modules/connect/google-contacts-sync.service.ts`), and the CRM
+          refuses a deleted id. The contacts a sync creates also get no
+          default owner. Saving the rules again is not a substitute: the
+          save records whoever makes it as the configuring member, and it
+          keeps the stored default owner unless it names another.
+          `T/identity-rekey-creator.integration.test.ts` (RK-04) stores these
+          keys through the real writers, follows this step as written,
+          statements included, against Postgres, and checks the runs again.
+        - It misses `user_identities.user_id`, `contact_shares.user_id` and
+          `push_subscriptions.user_id` (deleted with the old row by cascade),
+          `support_tickets.assigned_to_id` and `users.referred_by_user_id`
+          (set to null), and user-id columns that have no foreign key. Find
+          them in `packages/db/prisma/schema.prisma` before the run. Other
+          JSON values can hold the old id too; search the JSON columns for
+          it before the run.
      5. Have the user sign in. Bootstrap then finds the row by id and answers
         201 with their existing business.
    - The stop condition this defect set (Release 0 sign-in does not open,
