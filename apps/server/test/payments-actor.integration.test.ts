@@ -50,7 +50,12 @@
  *         meant KEY, now a status change with no actor is refused 403 and KEY's
  *         tool names KEY explicitly; PA-16o (SEC-CMF1-5) the ACCRUAL
  *         invoice_finalized posting and its reversal named no creator, now they
- *         name the member who issued and the member who voided.
+ *         name the member who issued and the member who voided. Its review
+ *         repairs: PA-16p..q (SEC-W7IAR-1) the bulk route, KEY's bulk tool, the
+ *         KEY-cortex send, the drive-intake create_invoice step and KEY's
+ *         compensation voids name their actor on those rows too; PA-16r
+ *         (SEC-W7IAR-2, D-90) KEY's commerce_update_invoice keeps the member
+ *         it ran for beside KEY as data.initiatedBy.
  *   PA-17 (ST-R011-2) refunding a SUCCESSFUL payment with no payment_recorded posting
  *         records the refunder nowhere
  *         CLOSED by R0-CMF2-PAYMENT-ACTOR-GAPS: PA-17a..e below. Every manual
@@ -204,6 +209,18 @@ const ID = {
   accInvV: `${P}accInvV`,
   accInvUV: `${P}accInvUV`,
   accInvKey: `${P}accInvKey`,
+  // W7-INVOICE-ACTOR-RULES review repairs (SEC-W7IAR-1): PA-16p..q, the other
+  // Send / Void doors on the ACCRUAL business (seeded DRAFT by their describe
+  // block). SEC-W7IAR-2: PA-16r, the member KEY's status change ran for (SENT
+  // CASH-business invoices, created by the loop below).
+  accBulkV1: `${P}accBulkV1`,
+  accBulkV2: `${P}accBulkV2`,
+  accBulkKey: `${P}accBulkKey`,
+  accCortexSend: `${P}accCortexSend`,
+  accCompVoid: `${P}accCompVoid`,
+  invKeyMemberPaid: `${P}invKeyMemberPaid`,
+  invKeyMemberVoid: `${P}invKeyMemberVoid`,
+  invHumanInitVoid: `${P}invHumanInitVoid`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -1482,6 +1499,215 @@ describe('W7-INVOICE-ACTOR-RULES: an invoice status change names its actor, and 
     expect(rows.finalized[0]).toMatchObject({ status: 'REVERSED', createdById: KEY_ACTOR });
     expect(rows.reversal).toHaveLength(1);
     expect(rows.reversal[0]).toMatchObject({ reversalOfId: rows.finalized[0].id, createdById: KEY_ACTOR });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W7-INVOICE-ACTOR-RULES review repairs (SEC-W7IAR-1, SEC-W7IAR-2; owner
+// rulings D-88, D-90).
+//
+// SEC-W7IAR-1: PA-16o closed SEC-CMF1-5 on the updateInvoiceStatus door only.
+// The other Send / Void doors still called InvoiceWorkflowService.transition
+// with no actor, so on an ACCRUAL business their invoice_finalized posting and
+// its reversal still named no one: the bulk route PATCH .../invoices/bulk (the
+// controller held req.user and did not forward it), KEY's bulk status tool
+// (update_status_with_confirmation), the KEY-cortex send_invoice, the
+// drive-intake approve create_invoice step (the approver was in scope) and the
+// KEY compensation voids. Each now passes its actor: the member for the route
+// and the drive-intake approver, KEY_SYSTEM_ACTOR_ID for KEY's doors; the
+// ingestion auto-execute (no human) still records null (PA-08's rule).
+//
+// SEC-W7IAR-2: KEY's commerce_update_invoice names KEY as the actor (PA-16i,
+// R0-CMF1) and recorded the member its turn ran for nowhere. As KEY's
+// process_payment does (D-90, PA-19c; PL07-ST-3), the member is now kept beside
+// KEY as data.initiatedBy (audit data, never authority) on the payment's
+// FINANCE payment_recorded row and the invoice.payment_recorded / invoice.paid
+// / invoice.void contact entries; the recorder and actor stay KEY. KEY's
+// authority on this path is still the tenant (PA-16i): whether a member's
+// revenue scope should gate KEY's invoice tools needs an owner ruling.
+// ---------------------------------------------------------------------------
+
+/** The ContactEvents of one type the ACCRUAL business wrote for one invoice (fresh read). */
+async function accContactEventsFor(invoiceId: string, type: string): Promise<any[]> {
+  const rows = await db.contactEvent.findMany({ where: { businessId: ID.accBiz, type }, orderBy: { createdAt: 'asc' } });
+  return rows.filter((r: any) => (r.data as any)?.invoiceId === invoiceId);
+}
+
+/** One invoice_finalized posting naming `issuer` and, after a void, one reversal naming `voider`. */
+async function expectFinalizedBy(invoiceId: string, issuer: string | null, voider?: string | null) {
+  const rows = await invoiceFinalizedPostings(invoiceId);
+  expect(rows.finalized, `invoice_finalized postings for ${invoiceId}`).toHaveLength(1);
+  expect(Number(rows.finalized[0].amount), invoiceId).toBe(INVOICE_TOTAL);
+  expect(rows.finalized[0].createdById, `the issuer on ${invoiceId}'s receivable`).toBe(issuer);
+  if (voider === undefined) {
+    expect(rows.finalized[0].status, invoiceId).toBe('POSTED');
+    expect(rows.reversal, `reversals for ${invoiceId}`).toHaveLength(0);
+    return;
+  }
+  expect(rows.finalized[0].status, invoiceId).toBe('REVERSED');
+  expect(rows.reversal, `reversals for ${invoiceId}`).toHaveLength(1);
+  expect(rows.reversal[0]).toMatchObject({ type: 'REVERSAL', status: 'POSTED', reversalOfId: rows.finalized[0].id });
+  expect(rows.reversal[0].createdById, `the voider on ${invoiceId}'s reversal`).toBe(voider);
+}
+
+/** Seed an ACCRUAL-business drive intake awaiting approval whose plan creates (and issues) one invoice. */
+async function seedAccrualInvoiceIntake(id: string) {
+  await db.driveIntakeFile.create({
+    data: {
+      id,
+      businessId: ID.accBiz,
+      driveFileId: `${id}_file`,
+      name: `${id}.pdf`,
+      mimeType: 'application/pdf',
+      modifiedTime: new Date(),
+      status: 'reviewing',
+      documentType: 'invoice',
+      proposedActions: {
+        intakeFileId: id,
+        documentType: 'invoice',
+        summary: 'pya drive invoice',
+        // An invoice needs a contact. The orchestrator's follow-up task for it uses CRM
+        // collaborators this suite stubs off the boundary, so that step reports a failure
+        // of its own and the create_invoice step's result is read by action below.
+        contactId: ID.accContact,
+        actions: [
+          {
+            type: 'create_invoice',
+            payload: { items: [{ description: 'PYA drive line', quantity: 1, unitPrice: INVOICE_TOTAL }], currency: 'TTD', recordedBy: ID.userU, actorId: ID.userU },
+          },
+        ],
+      },
+    },
+  });
+}
+
+describe('W7-INVOICE-ACTOR-RULES review repairs: every Send and Void door names its actor, and KEY keeps the member it acted for (PA-16p..r; SEC-W7IAR-1, SEC-W7IAR-2; D-88, D-90)', () => {
+  beforeAll(async () => {
+    let n = 0;
+    for (const id of [ID.accBulkV1, ID.accBulkV2, ID.accBulkKey, ID.accCortexSend, ID.accCompVoid]) {
+      n += 1;
+      await db.invoice.create({
+        data: {
+          id,
+          invoiceNumber: `PYA-ACCR-${n}`,
+          status: 'DRAFT',
+          subtotal: INVOICE_TOTAL,
+          total: INVOICE_TOTAL,
+          currency: 'TTD',
+          businessId: ID.accBiz,
+          contactId: ID.accContact,
+          items: { create: [{ id: `${id}_item1`, description: `PYA accrual repair item ${n}`, quantity: 1, unitPrice: INVOICE_TOTAL, total: INVOICE_TOTAL }] },
+        },
+      });
+    }
+  });
+
+  it('PA-16p (SEC-W7IAR-1, D-88): the bulk doors name their actor on the ACCRUAL invoice_finalized posting and its reversal: V PATCH .../invoices/bulk {action:"send"} then {action:"void"} -> V on both rows of each invoice (they had null); KEY\'s bulk status tool (update_status_with_confirmation, for V\'s turn) and the KEY-cortex send_invoice -> KEY, never V and never nobody', async () => {
+    // A member through the bulk route.
+    let res = await agent()
+      .patch(`/commerce/businesses/${ID.accBiz}/invoices/bulk`)
+      .set(HEADER, ID.userV)
+      .send({ ids: [ID.accBulkV1, ID.accBulkV2], action: 'send' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ updated: 2, failedCount: 0 });
+    for (const inv of [ID.accBulkV1, ID.accBulkV2]) await expectFinalizedBy(inv, ID.userV);
+    res = await agent()
+      .patch(`/commerce/businesses/${ID.accBiz}/invoices/bulk`)
+      .set(HEADER, ID.userV)
+      .send({ ids: [ID.accBulkV1, ID.accBulkV2], action: 'void' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ updated: 2, failedCount: 0 });
+    for (const inv of [ID.accBulkV1, ID.accBulkV2]) await expectFinalizedBy(inv, ID.userV, ID.userV);
+
+    // KEY's bulk status tool through the real dispatcher, for V's turn: KEY is the actor.
+    const turn = { surface: 'CHAT', principalUserId: ID.userV };
+    let tool: any = await dispatcher.executeToolDirectly(ID.accBiz, 'update_status_with_confirmation', { entityType: 'invoice', ids: [ID.accBulkKey], newStatus: 'SENT' }, undefined, turn);
+    expect(tool).toMatchObject({ entityType: 'invoice', updatedCount: 1 });
+    await expectFinalizedBy(ID.accBulkKey, KEY_ACTOR);
+    tool = await dispatcher.executeToolDirectly(ID.accBiz, 'update_status_with_confirmation', { entityType: 'invoice', ids: [ID.accBulkKey], newStatus: 'VOID' }, undefined, turn);
+    expect(tool).toMatchObject({ entityType: 'invoice', updatedCount: 1 });
+    await expectFinalizedBy(ID.accBulkKey, KEY_ACTOR, KEY_ACTOR);
+
+    // The KEY-cortex send_invoice (CommerceAdapterService.sendInvoice, the shape KeyCortexModule wires).
+    const sent: any = await adapter.sendInvoice({ businessId: ID.accBiz, invoiceId: ID.accCortexSend });
+    expect(sent).toMatchObject({ updated: 1, failedCount: 0 });
+    expect((await invoiceRow(ID.accCortexSend)).status).toBe('SENT');
+    await expectFinalizedBy(ID.accCortexSend, KEY_ACTOR);
+  });
+
+  it('PA-16q (SEC-W7IAR-1, D-88): V approves a drive intake whose plan creates an invoice (POST /drive/businesses/:b/intake/:id/approve) -> its invoice_finalized posting names V, never a recorder named in the plan payload; the ingestion auto-execute (approver "system") records null (PA-08); KEY\'s compensation voids (commerce.void_invoice, commerce.create_invoice) name KEY on the reversal and on invoice.void', async () => {
+    const intakeV = `${P}drive_acc_inv_v`;
+    await seedAccrualInvoiceIntake(intakeV);
+    const res = await agent().post(`/drive/businesses/${ID.accBiz}/intake/${intakeV}/approve`).set(HEADER, ID.userV).send({});
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.success, JSON.stringify(res.body)).toBe(true);
+    const createStep = (results: Array<Record<string, any>>) => results.filter((r) => r.action === 'create_invoice');
+    expect(createStep(res.body.results)).toEqual([expect.objectContaining({ action: 'create_invoice', success: true })]);
+    const createdByV = createStep(res.body.results)[0].entityId as string;
+    expect(await db.invoice.findUnique({ where: { id: createdByV } })).toMatchObject({ businessId: ID.accBiz, status: 'SENT' });
+    await expectFinalizedBy(createdByV, ID.userV);
+
+    const intakeSys = `${P}drive_acc_inv_sys`;
+    await seedAccrualInvoiceIntake(intakeSys);
+    const auto = await driveOrchestrator.executePlan(ID.accBiz, intakeSys, 'system');
+    expect(auto.success, JSON.stringify(auto)).toBe(true);
+    expect(createStep(auto.results)).toEqual([expect.objectContaining({ action: 'create_invoice', success: true })]);
+    const createdBySystem = createStep(auto.results)[0].entityId as string;
+    expect(createdBySystem).not.toBe(createdByV);
+    await expectFinalizedBy(createdBySystem, null);
+    const finalizedSys = (await invoiceFinalizedPostings(createdBySystem)).finalized;
+    expect(JSON.stringify(finalizedSys)).not.toContain('"system"');
+
+    // KEY's saga compensations, through the real KeyCortexCompensationService over the real CommerceService.
+    const { KeyCortexCompensationService } = await import('../src/modules/key-cortex/key-cortex-compensation.service');
+    const compensation = new KeyCortexCompensationService({} as any, commerce, {} as any, { client: db } as any);
+    // commerce.create_invoice undoes KEY's create by voiding it (here V's drive invoice).
+    expect(await compensation.compensate('commerce.create_invoice', { businessId: ID.accBiz, output: { id: createdByV } })).toMatchObject({ compensated: true });
+    await expectFinalizedBy(createdByV, ID.userV, KEY_ACTOR);
+    // commerce.void_invoice, on an invoice V issued through the status PATCH.
+    expect((await patchAccrualInvoiceAs(ID.userV, ID.accCompVoid, { status: 'SENT' })).status).toBe(200);
+    expect(await compensation.compensate('commerce.void_invoice', { businessId: ID.accBiz, parameters: { invoiceId: ID.accCompVoid } })).toMatchObject({ compensated: true });
+    expect((await invoiceRow(ID.accCompVoid)).status).toBe('VOID');
+    await expectFinalizedBy(ID.accCompVoid, ID.userV, KEY_ACTOR);
+    const voided = await accContactEventsFor(ID.accCompVoid, 'invoice.void');
+    expect(voided).toHaveLength(1);
+    expect(voided[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM', source: 'commerce' });
+  });
+
+  it('PA-16r (SEC-W7IAR-2, D-88, D-90): KEY\'s commerce_update_invoice for V\'s turn keeps V beside KEY: PAID -> Payment.recordedBy and the posting stay KEY, the FINANCE payment_recorded row and the invoice.payment_recorded / invoice.paid entries are KEY (SYSTEM) with data.initiatedBy V; VOID -> invoice.void KEY (SYSTEM) with initiatedBy V; a human actor carries no initiatedBy (PA-15\'s rule)', async () => {
+    const turn = { surface: 'CHAT', principalUserId: ID.userV };
+    // PAID through KEY's tool.
+    const paid: any = await dispatcher.executeToolDirectly(ID.biz, 'commerce_update_invoice', { invoiceId: ID.invKeyMemberPaid, status: 'PAID' }, undefined, turn);
+    expect(paid.status).toBe('PAID');
+    const rows = await paymentsOf(ID.invKeyMemberPaid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: 'manual', amount: INVOICE_TOTAL, recordedBy: KEY_ACTOR });
+    await expectPostingBy(rows[0].id, KEY_ACTOR);
+    await expectContactEventBy(ID.invKeyMemberPaid, KEY_ACTOR, 'SYSTEM');
+    const finance = await financeActivityFor(ID.invKeyMemberPaid);
+    expect(finance[0].data).toMatchObject({ initiatedBy: ID.userV });
+    expect(((await contactEventsFor(ID.invKeyMemberPaid))[0].data as any).initiatedBy).toBe(ID.userV);
+    const paidEntries = await contactEventsFor(ID.invKeyMemberPaid, 'invoice.paid');
+    expect(paidEntries).toHaveLength(1);
+    expect(paidEntries[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM' });
+    expect((paidEntries[0].data as any).initiatedBy).toBe(ID.userV);
+
+    // VOID through KEY's tool.
+    const voided: any = await dispatcher.executeToolDirectly(ID.biz, 'commerce_update_invoice', { invoiceId: ID.invKeyMemberVoid, status: 'VOID' }, undefined, turn);
+    expect(voided.status).toBe('VOID');
+    const voidEntries = await contactEventsFor(ID.invKeyMemberVoid, 'invoice.void');
+    expect(voidEntries).toHaveLength(1);
+    expect(voidEntries[0]).toMatchObject({ actorId: KEY_ACTOR, actorType: 'SYSTEM', source: 'commerce' });
+    expect((voidEntries[0].data as any).initiatedBy).toBe(ID.userV);
+
+    // A human actor is the actor: an initiatedBy beside them is ignored (PA-15), and KEY never initiates for KEY.
+    const update = commerce.updateInvoice as unknown as (input: Record<string, unknown>, actorId?: string, options?: Record<string, unknown>) => Promise<any>;
+    expect((await update.call(commerce, { invoiceId: ID.invHumanInitVoid, businessId: ID.biz, status: 'VOID' }, ID.userU, { initiatedBy: ID.userV })).status).toBe('VOID');
+    const human = await contactEventsFor(ID.invHumanInitVoid, 'invoice.void');
+    expect(human).toHaveLength(1);
+    expect(human[0]).toMatchObject({ actorId: ID.userU, actorType: 'USER' });
+    expect((human[0].data as any).initiatedBy).toBeUndefined();
+    expect(JSON.stringify(human)).not.toContain(ID.userV);
   });
 });
 

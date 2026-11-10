@@ -11,6 +11,7 @@ import { CommandService } from '../command/command.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { AutopilotService } from '../autopilot/autopilot.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 describe('KeyCortexCompensationService', () => {
   let service: KeyCortexCompensationService;
@@ -88,7 +89,8 @@ describe('KeyCortexCompensationService', () => {
       businessId: 'b1',
       output: { id: 'i1' },
     });
-    expect(commerce.updateInvoiceStatus).toHaveBeenCalledWith({ invoiceId: 'i1', status: 'VOID', businessId: 'b1' });
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY voids, named on the reversal and the entry.
+    expect(commerce.updateInvoiceStatus).toHaveBeenCalledWith({ invoiceId: 'i1', status: 'VOID', businessId: 'b1', actorId: KEY_SYSTEM_ACTOR_ID });
   });
 
   it('compensates bookings.create_booking', async () => {

@@ -1164,7 +1164,16 @@ export class CommerceService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
-  async bulkUpdateInvoices(businessId: string, rawIds: unknown, action: 'send' | 'void' | 'delete') {
+  /**
+   * @param actorId W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): who sends
+   *   or voids: the authenticated member over PATCH .../invoices/bulk,
+   *   KEY_SYSTEM_ACTOR_ID from KEY's bulk status tool and the KEY-cortex
+   *   send_invoice. Recorded as createdById on the ACCRUAL invoice_finalized
+   *   posting each Send writes and on the reversal each Void writes (they named
+   *   no one). Audit only: the route's guards and KEY's tenant are the
+   *   authority, as before. Omitted: null, as before.
+   */
+  async bulkUpdateInvoices(businessId: string, rawIds: unknown, action: 'send' | 'void' | 'delete', actorId?: string | null) {
     // FOLLOW3-B6 review SEC-B6-2: checked before any read (requireInvoiceBulkIds).
     const ids = CommerceService.requireInvoiceBulkIds(rawIds);
     if (action === 'delete') {
@@ -1187,10 +1196,12 @@ export class CommerceService {
     const failed: Array<{ id: string; reason: string }> = [];
     for (const row of candidates) {
       try {
+        // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): the actor reaches the
+        // ACCRUAL posting and its reversal, as on the status route (PA-16o).
         await this.invoiceWorkflow.transition(
           row.id,
           target,
-          target === 'SENT' ? { sentAt: new Date() } : {},
+          target === 'SENT' ? { sentAt: new Date(), actorId: actorId ?? null } : { actorId: actorId ?? null },
         );
         updated++;
       } catch (err: any) {
@@ -1855,6 +1866,15 @@ export class CommerceService {
   }
 
   /**
+   * W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): the member a KEY action
+   * was taken for, kept beside KEY only (recordPayment's PL07-ST-3 rule): null
+   * unless the actor is KEY and the member is a person, never KEY itself.
+   */
+  private static keyInitiatedBy(actorId: string | null | undefined, initiatedBy: string | null | undefined): string | null {
+    return isSystemActor(actorId) && initiatedBy && !isSystemActor(initiatedBy) ? initiatedBy : null;
+  }
+
+  /**
    * @param businessId Tenant the caller believes this invoice belongs to.
    *   Optional for existing callers that reach this behind a BusinessGuard, and
    *   ENFORCED whenever supplied — the lookup below is by primary key alone, so
@@ -1863,6 +1883,26 @@ export class CommerceService {
    *   tenant scope its caller established, and there is nothing else to check.
    */
   async markInvoicePaid(invoiceId: string, actorId?: string | null, businessId?: string) {
+    return this.markInvoicePaidFor(invoiceId, actorId, businessId, {});
+  }
+
+  /**
+   * markInvoicePaid's body. W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90):
+   * `options.initiatedBy` is the member KEY's commerce_update_invoice ran for,
+   * kept as data.initiatedBy on the payment's FINANCE row and its
+   * invoice.payment_recorded entry (recordPayment's rule, PL07-ST-3) and on the
+   * invoice.paid entry. Audit data, never authority; ignored unless the actor is
+   * KEY, and never KEY itself. Private, so markInvoicePaid keeps its public
+   * (invoice, actor, tenant) shape (RA-G16-01's census); its only other caller
+   * is updateInvoice, which always names the tenant.
+   */
+  private async markInvoicePaidFor(
+    invoiceId: string,
+    actorId: string | null | undefined,
+    businessId: string | undefined,
+    options: { initiatedBy?: string | null },
+  ) {
+    const initiatedBy = CommerceService.keyInitiatedBy(actorId, options.initiatedBy);
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       select: { businessId: true, status: true, total: true, currency: true },
@@ -1953,6 +1993,8 @@ export class CommerceService {
           { amount, method: 'MANUAL' },
           {
             actorId: actorId ?? null,
+            // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): the member KEY acted for.
+            ...(initiatedBy ? { initiatedBy } : {}),
             provider: 'manual',
             expectRemaining: amount,
             // R0-PL-04 review (ST-PL04-1 / ST-PL04-2): a slot of mark-paid's
@@ -2039,6 +2081,8 @@ export class CommerceService {
           currency: invoice.currency,
           paidAt: invoice.paidAt,
           bookingId: invoice.booking?.id,
+          // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): beside KEY only.
+          ...(initiatedBy ? { initiatedBy } : {}),
         },
         // R0-CMF1 review SEC-CMF1-4: KEY is a SYSTEM actor here as on
         // invoice.payment_recorded; it was labelled USER, so an audit that
@@ -2614,6 +2658,13 @@ export class CommerceService {
     invoiceId: string;
     status: 'SENT' | 'OVERDUE' | 'VOID';
     actorId?: string | null;
+    /**
+     * W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): the member KEY's
+     * commerce_update_invoice ran for, kept as data.initiatedBy on the
+     * invoice.sent / .overdue / .void entry. Audit data, never authority;
+     * ignored unless the actor is KEY, and never KEY itself.
+     */
+    initiatedBy?: string | null;
     sentAt?: Date | string;
     dueDate?: Date | string | null;
     /**
@@ -2708,6 +2759,7 @@ export class CommerceService {
       throw err;
     }
 
+    const statusInitiatedBy = CommerceService.keyInitiatedBy(params.actorId, params.initiatedBy);
     if (invoice.contactId) {
       await this.crm.logContactEvent({
         businessId: invoice.businessId,
@@ -2719,6 +2771,8 @@ export class CommerceService {
           currency: invoice.currency,
           dueDate: invoice.dueDate,
           bookingId: invoice.booking?.id,
+          // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): beside KEY only.
+          ...(statusInitiatedBy ? { initiatedBy: statusInitiatedBy } : {}),
         },
         // R0-CMF1 review SEC-CMF1-4: KEY's invoice.sent / .overdue / .void are
         // SYSTEM entries (see markInvoicePaid), never a person's.
@@ -4827,12 +4881,21 @@ export class CommerceService {
    *   every caller, so a person's PATCH {status:'PAID'} was recorded as KEY's
    *   payment.
    *   W7-INVOICE-ACTOR-RULES (R0-CMF1 review SEC-CMF1-3, owner ruling D-88):
-   *   an omitted actor then still meant KEY. D-88 gave KEY's tool its member,
-   *   so every caller has an actor to pass, and a status change with none
-   *   (omitted, null or empty) is refused 403 before anything is read or
-   *   written. An edit that changes no status records no actor and still
-   *   needs none (D-88: a call naming no member keeps the OWNER's view of a
-   *   new contactId).
+   *   an omitted actor then still meant KEY. Every caller now names one (the
+   *   HTTP PATCH its member, KEY's tool KEY_SYSTEM_ACTOR_ID), and a status
+   *   change with none (omitted, null or empty) is refused 403 before anything
+   *   is read or written. An edit that changes no status records no actor and
+   *   still needs none (D-88: a call naming no member keeps the OWNER's view
+   *   of a new contactId).
+   * @param options.initiatedBy W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2,
+   *   D-88, D-90): the member KEY's tool ran for (D-88 hands the tool that
+   *   member, `input.actorUserId`). KEY stays the actor and recorder (PA-16i);
+   *   the member is kept beside it as data.initiatedBy on the payment's FINANCE
+   *   row and the invoice.* entries, as KEY's process_payment keeps it
+   *   (PA-19c). Audit data, never authority: KEY's authority on this path is
+   *   still the tenant, and the member's revenue scope is not checked here
+   *   (that needs an owner ruling). Ignored unless the actor is KEY. An option,
+   *   never part of `input`, so a request body can not name it.
    */
   async updateInvoice(input: {
     invoiceId: string;
@@ -4849,10 +4912,12 @@ export class CommerceService {
     /**
      * W3-D64-COMMERCE-CREATE (D-88): the member a KEY command runs for, whose
      * CRM view judges a new contactId (D-64). KEY's status changes stay KEY's
-     * (`actorId` omitted). Over HTTP the acting member is `actorId` itself.
+     * (`actorId` KEY_SYSTEM_ACTOR_ID; W7-INVOICE-ACTOR-RULES), with this member
+     * kept beside KEY through `options.initiatedBy` (SEC-W7IAR-2). Over HTTP
+     * the acting member is `actorId` itself.
      */
     actorUserId?: string;
-  }, actorId?: string) {
+  }, actorId?: string, options: { initiatedBy?: string | null } = {}) {
     // R0-CMF1 review SEC-CMF1-1: the DTO's @IsIn does not protect this path.
     // KEY's commerce_update_invoice calls this with the model's raw
     // args.status, so a SENT invoice was moved to PARTIALLY_PAID, PENDING or
@@ -4903,8 +4968,13 @@ export class CommerceService {
       if (!actor) {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
+      // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-2, D-90): the member KEY acted
+      // for, beside KEY only; a caller naming none makes the same call as before.
+      const initiatedBy = CommerceService.keyInitiatedBy(actor, options.initiatedBy);
       if (input.status === 'PAID') {
-        return this.markInvoicePaid(input.invoiceId, actor, input.businessId);
+        return initiatedBy
+          ? this.markInvoicePaidFor(input.invoiceId, actor, input.businessId, { initiatedBy })
+          : this.markInvoicePaid(input.invoiceId, actor, input.businessId);
       }
       return this.updateInvoiceStatus({
         invoiceId: input.invoiceId,
@@ -4912,6 +4982,7 @@ export class CommerceService {
         actorId: actor,
         businessId: input.businessId,
         dueDate: input.dueDate,
+        ...(initiatedBy ? { initiatedBy } : {}),
       });
     }
 

@@ -345,7 +345,10 @@ export class DriveIntakeOrchestrator {
             });
             createdInvoiceId = invoice.id;
             // Finalize immediately so the ledger posts (Dr AR / Cr Revenue).
-            await this.invoiceWorkflow.transition(invoice.id, 'SENT');
+            // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): the approver issues it and is
+            // named on the ACCRUAL invoice_finalized posting, as record_payment names them
+            // (R0-CMF2); the ingestion auto-execute, with no human, records null (PA-08).
+            await this.invoiceWorkflow.transition(invoice.id, 'SENT', { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
             results.push({ action: 'create_invoice', success: true, entityId: invoice.id });
             break;
           }

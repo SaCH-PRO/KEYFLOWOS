@@ -58,7 +58,9 @@ export class CommerceAdapterService {
     invoiceId: string;
     message?: string;
   }) {
-    return this.commerce.bulkUpdateInvoices(input.businessId, [input.invoiceId], 'send');
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY sends, and is named on the
+    // ACCRUAL invoice_finalized posting (it named no one).
+    return this.commerce.bulkUpdateInvoices(input.businessId, [input.invoiceId], 'send', KEY_SYSTEM_ACTOR_ID);
   }
 
   async getInvoice(input: { businessId: string; invoiceId: string }) {

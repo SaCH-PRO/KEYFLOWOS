@@ -5279,7 +5279,9 @@ ${triage.standingContext}`;
           } else {
             throw new Error(`Unsupported invoice status transition: ${newStatus}`);
           }
-          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action);
+          // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88, PA-16p): KEY sends or voids, and is
+          // named on the ACCRUAL invoice_finalized posting and its reversal.
+          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action, KEY_SYSTEM_ACTOR_ID);
           return { entityType, updatedCount: result.updated, newStatus };
         }
 
@@ -6965,6 +6967,8 @@ ${triage.standingContext}`;
         // invoice edit binds none and the stored one is not re-judged (CR-D6-2).
         // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): KEY is named explicitly; updateInvoice
         // refuses a status change with no actor rather than reading the omission as KEY.
+        // Review SEC-W7IAR-2 (D-90, PA-16r): the member the turn runs for is kept beside KEY as
+        // initiatedBy (audit data, never authority), as KEY's process_payment keeps it (PA-19c).
         const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().updateInvoice(
           {
@@ -6976,6 +6980,7 @@ ${triage.standingContext}`;
             actorUserId: bindMember,
           },
           KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy: bindMember ?? null },
         );
         return { id: invoice.id, status: invoice.status };
       }
