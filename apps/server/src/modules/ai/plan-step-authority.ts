@@ -63,8 +63,20 @@ export function noMemberToolRefusal(toolName: string): string | null {
   // caller to record. Its dispatcher case refuses such a run, but only once dispatched, where
   // ActionDispatcherService retries the refusal and counts it toward the tool's circuit breaker, which
   // it keys by tool name alone (five refusals stopped the tool for every business). Refused here, before
-  // dispatch, on every surface that reads this gate (the plan queue, the Pro Auto monitor, the
-  // proposal executor).
+  // dispatch, on every surface that reads this gate:
+  //   - the plan queue: a plan with no member that is not the daily briefing (D-93);
+  //   - the Pro Auto monitor run for no member (a business with no owner). Run for the owner (D-93) it
+  //     passes and records the owner as the caller; since this answer is not null, its execution log
+  //     row withholds the tool's arguments and answer (the owner's view, SEC-D93-2);
+  //   - the proposal executor (review CR-W8CTNM-1, a change on that surface): an AI_PLAN proposal of a
+  //     plan with no member, or with no stored plan, ran before for the member who executed it and
+  //     recorded them as the caller; it is now refused before dispatch. W4-PROPOSAL-PRINCIPAL: a plan
+  //     step's proposal runs as the plan's member, the approver neither widens nor narrows that run, and
+  //     a plan with no member has none (D-73). Any other proposal still runs for the member who executes
+  //     it (memberToolRunAuthority).
+  // Review SEC-W8CTNM-1 (open, outside this gate): only a run with no member is kept out of the breaker.
+  // A member's step whose call_create_task is refused inside dispatch (a contact they may not open: 404;
+  // an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) still counts toward it.
   if (toolName === 'call_create_task') {
     return `"${toolName}" names a contact and records the member it runs for as the caller, and a KEY plan or monitor with no member principal has no member to record (D-73)`;
   }
