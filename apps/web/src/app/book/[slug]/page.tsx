@@ -51,6 +51,14 @@ const DEFAULT_SECTIONS: StorefrontSectionKey[] = [
   "hero", "trust", "featured", "categories", "catalog", "testimonials", "faq", "contact", "policies",
 ];
 
+/**
+ * A booking (or order) the checkout made, as the confirmation shows it.
+ * CR-V28-3 (W9-WEB-COMMERCE-NAV): `invoiceUrl` is the customer's own
+ * /public/invoice/<token> link the public booking create answers (D-07: token
+ * links only), which OrderConfirmation opens as "View invoice and receipt".
+ */
+type BookingRef = { bookingId: string; invoiceId?: string; invoiceUrl?: string };
+
 function PublicBookingPageInner() {
   const params = useParams();
   const _router = useRouter();
@@ -72,7 +80,7 @@ function PublicBookingPageInner() {
   const [success, setSuccess] = useState(false);
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
-  const [bookingResults, setBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [bookingResults, setBookingResults] = useState<BookingRef[]>([]);
   const [confirmedDetails, setConfirmedDetails] = useState<{
     serviceNames: string[];
     dates: string[];
@@ -87,7 +95,7 @@ function PublicBookingPageInner() {
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
   const [confirmedEstimatedDelivery, setConfirmedEstimatedDelivery] = useState<string | null>(null);
   const [confirmedCustomerEmail, setConfirmedCustomerEmail] = useState<string | null>(null);
-  const [completedBookingResults, setCompletedBookingResults] = useState<{ bookingId: string; invoiceId?: string }[]>([]);
+  const [completedBookingResults, setCompletedBookingResults] = useState<BookingRef[]>([]);
   const [failedOrderPayload, setFailedOrderPayload] = useState<{
     items: { productId: string; quantity: number }[];
     customer: { name: string; email?: string; phone?: string };
@@ -586,7 +594,7 @@ function PublicBookingPageInner() {
 
   const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
-    bookingRefs: { bookingId: string; invoiceId?: string }[],
+    bookingRefs: BookingRef[],
     paymentMethodUI: PaymentMethod,
     shippingZoneId: string | null,
     orderPayload: typeof failedOrderPayload,
@@ -703,6 +711,8 @@ function PublicBookingPageInner() {
           const { data: resData, error: err } = await apiPost<{
             bookingId: string;
             invoiceId?: string;
+            invoiceUrl?: string;
+            depositInvoiceUrl?: string;
             success: boolean;
           }>({
             path: `/bookings/public/businesses/${business.id}`,
@@ -721,7 +731,16 @@ function PublicBookingPageInner() {
           });
 
           if (err) throw new Error(err);
-          if (resData) bookingRefs.push({ bookingId: resData.bookingId, invoiceId: resData.invoiceId });
+          // CR-V28-3: the create answers the customer's token link, invoiceUrl
+          // for a service invoiced at booking or depositInvoiceUrl for its
+          // deposit (as public/book reads it); the confirmation opens it.
+          if (resData) {
+            bookingRefs.push({
+              bookingId: resData.bookingId,
+              invoiceId: resData.invoiceId,
+              invoiceUrl: resData.invoiceUrl ?? resData.depositInvoiceUrl ?? undefined,
+            });
+          }
         }
       }
     }

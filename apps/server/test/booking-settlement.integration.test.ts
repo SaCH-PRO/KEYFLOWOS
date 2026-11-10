@@ -94,7 +94,8 @@
  *             issued right after that read waits for the forfeit (which then stands, D-26)
  *   S-19  F4  a refund landing right after the reinstatement's read of the deposit is not lost: the
  *             booking brought back from a forfeit ends UNPAID, not DEPOSIT_PAID with nothing held
- *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
+ *   DONE  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx):
+ *                    W9-WEB-COMMERCE-NAV, proven in the web suite named at the S-08b case
  *
  * V1-84 (FOLLOW3-D18-CANCEL-INITIATOR, CR-V28-4, D-65): the cancel says who cancelled; only a
  * customer cancel forfeits a paid deposit. Red at the FOLLOW3-A10 head:
@@ -1872,7 +1873,7 @@ describe('V1-28 the confirmation pages link the token receipt (D-07)', () => {
 
   // A SOURCE check (CR-V28-3): it proves what these two files contain, not
   // what a customer sees. The storefront page that renders OrderConfirmation
-  // does not pass invoiceUrl yet (todo below), so there the button is hidden.
+  // passes invoiceUrl since W9-WEB-COMMERCE-NAV (CR-V28-3, pointer below).
   it('S-08b RED-BEFORE (source check): neither confirmation page opens the authenticated receipt; each opens only an invoiceUrl token link', () => {
     for (const [name, file] of Object.entries(WEB_PAGES)) {
       const src = fs.readFileSync(file, 'utf8');
@@ -1883,10 +1884,15 @@ describe('V1-28 the confirmation pages link the token receipt (D-07)', () => {
     expect(fs.readFileSync(WEB_PAGES.publicBook, 'utf8')).toMatch(/data\?\.invoiceUrl \?\? data\?\.depositInvoiceUrl/);
   });
 
-  it.todo(
-    "CR-V28-3: the storefront /book/[slug] passes the create answer's invoiceUrl / depositInvoiceUrl into bookingResults, so its " +
-      'confirmation shows the token invoice button; book/[slug]/page.tsx is outside the V1-28 write set (it pushes only {bookingId, invoiceId})',
-  );
+  // CR-V28-3 (was it.todo here; closed by W9-WEB-COMMERCE-NAV): the storefront
+  // /book/[slug] passes the create answer's invoiceUrl / depositInvoiceUrl into
+  // bookingResults, so its confirmation shows the token invoice button. It is a
+  // browser behaviour, proven rendered (the real page and OrderConfirmation,
+  // the create answered as S-08 above shapes it) in
+  // apps/web/src/app/book/[slug]/__tests__/storefront-booking-invoice-link.test.tsx:
+  // "CR-V28-3: the storefront /book/[slug] passes the create answer's
+  // invoiceUrl / depositInvoiceUrl into bookingResults, so its confirmation
+  // shows the token invoice button (W9-WEB-COMMERCE-NAV, was it.todo)".
 });
 
 describe('V1-28 LEDGER', () => {

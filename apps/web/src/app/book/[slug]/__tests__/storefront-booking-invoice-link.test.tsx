@@ -19,7 +19,7 @@
  * hands the confirmation, which is the real OrderConfirmation. The checkout
  * form is reduced to the submit it makes (one service booked for a slot).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import type { ReactNode } from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
@@ -121,7 +121,7 @@ vi.mock("../components/checkout-flow", () => ({
 
 import PublicBookingPage from "../page";
 
-let openSpy: ReturnType<typeof vi.spyOn>;
+let openSpy: MockInstance<typeof window.open>;
 
 beforeEach(() => {
   net.posts = [];
@@ -160,6 +160,7 @@ describe("CR-V28-3: the storefront confirmation opens the token link the booking
     expect(openSpy).toHaveBeenCalledWith(TOKEN_LINK, "_blank", "noopener,noreferrer");
     cleanup();
     openSpy.mockClear();
+    net.posts = [];
     window.localStorage.setItem(`kf_cart_${SLUG}`, JSON.stringify([SERVICE]));
 
     // A deposit service: the create answers no invoiceUrl, only the deposit's token link.

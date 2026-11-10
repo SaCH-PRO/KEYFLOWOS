@@ -502,7 +502,7 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
 
 describe('the nav has a door to invoices and quotes (CF-20)', () => {
   // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
-  // which reads ?view=quotes on mount (finance-pipeline.tsx).
+  // which follows ?view, quotes included (finance-pipeline.tsx).
   const operate = (() => {
     const src = read('lib/nav-config.ts');
     return src.slice(src.indexOf('export const operateSections'), src.indexOf('export const buildSections'));

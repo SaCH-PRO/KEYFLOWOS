@@ -72,9 +72,41 @@ export interface NavItem {
   href: string;
   icon: LucideIcon;
   matchTab?: string;
+  /**
+   * With matchTab: the entry lights only on this ?view of that tab
+   * (W9-WEB-COMMERCE-NAV). Quotes is the pipeline tab's quotes view, so it
+   * stays dark on the pipeline's other views.
+   */
+  matchView?: string;
   exactMatch?: boolean;
   featureKey?: string;
   dormantFlag?: DormantFeatureFlagKey;
+}
+
+/**
+ * Whether a section entry is the page on screen (the rail's active state).
+ * An entry with matchTab lights on its path with that ?tab (and, with
+ * matchView, that ?view); an exactMatch entry on its path with no ?tab; any
+ * other on its path or below it. `search` is the current search params, read
+ * reactively by the caller so a search-param-only navigation re-lights the
+ * rail (W9-WEB-COMMERCE-NAV: the shell kept the tab it read on the last
+ * pathname change).
+ */
+export function isNavItemActive(
+  item: NavItem,
+  pathname: string,
+  search: { get(name: string): string | null } | null,
+): boolean {
+  const basePath = item.href.split("?")[0];
+  const tab = search?.get("tab") ?? null;
+  if (item.matchTab) {
+    if (pathname !== basePath || tab !== item.matchTab) return false;
+    return item.matchView ? (search?.get("view") ?? null) === item.matchView : true;
+  }
+  if (item.exactMatch) {
+    return pathname === basePath && !tab;
+  }
+  return pathname === basePath || pathname.startsWith(basePath + "/");
 }
 
 export interface NavSection {
@@ -144,12 +176,12 @@ export const operateSections: NavSection[] = [
       // hub; quotes have no page of their own and live in the pipeline tab,
       // which opens its quotes view for ?view=quotes (finance-pipeline.tsx).
       // Both are allowlisted in every disclosure mode, so the default (startup)
-      // nav shows them. The commerce page follows ?tab while mounted, so Quotes
-      // works from its other tabs too; from the pipeline itself the view still
-      // follows ?view only on mount, and matchTab lights Quotes for any pipeline
-      // view (both outside R0-08b: finance-pipeline.tsx, use-app-layout.ts).
+      // nav shows them. The commerce page follows ?tab and the pipeline ?view
+      // while mounted, so Quotes works from the other tabs and from the
+      // pipeline's other views; it lights only on the quotes view (matchView),
+      // and the rail follows the search params (W9-WEB-COMMERCE-NAV).
       { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
-      { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline" },
+      { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline", matchView: "quotes" },
       // The gateway console — transactions, links, refunds across three
       // providers — sits under /app/commerce, so the drawer reached its
       // subtree but never named it.
