@@ -944,7 +944,9 @@ export class CommerceController {
     @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
-    return this.commerce.bulkUpdateInvoices(businessId, body.ids, body.action);
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): the member who sends or
+    // voids is named on the ACCRUAL posting and its reversal.
+    return this.commerce.bulkUpdateInvoices(businessId, body.ids, body.action, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

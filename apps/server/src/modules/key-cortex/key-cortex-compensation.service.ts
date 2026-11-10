@@ -10,6 +10,7 @@ import { AutopilotService } from '../autopilot/autopilot.service';
 import { KeyInboxReplySenderService } from '../key-inbox/key-inbox-reply-sender.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 export type CompensationHandler = (input: {
   businessId: string;
@@ -181,10 +182,13 @@ export class KeyCortexCompensationService {
       // businessId is threaded through and ENFORCED. Without it the lookup is
       // by primary key alone, so an id from a saga payload would void that
       // invoice whoever owns it.
+      // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY voids, and is named on the
+      // ACCRUAL reversal and the invoice.void entry; KEY's authority is that tenant.
       await this.commerce.updateInvoiceStatus({
         invoiceId,
         status: 'VOID',
         businessId: input.businessId,
+        actorId: KEY_SYSTEM_ACTOR_ID,
       });
     });
 
@@ -195,10 +199,13 @@ export class KeyCortexCompensationService {
       // businessId is threaded through and ENFORCED. Without it the lookup is
       // by primary key alone, so an id from a saga payload would void that
       // invoice whoever owns it.
+      // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY voids, and is named on the
+      // ACCRUAL reversal and the invoice.void entry; KEY's authority is that tenant.
       await this.commerce.updateInvoiceStatus({
         invoiceId,
         status: 'VOID',
         businessId: input.businessId,
+        actorId: KEY_SYSTEM_ACTOR_ID,
       });
     });
 

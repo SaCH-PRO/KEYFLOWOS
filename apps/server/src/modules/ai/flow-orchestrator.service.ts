@@ -5294,7 +5294,9 @@ ${triage.standingContext}`;
           } else {
             throw new Error(`Unsupported invoice status transition: ${newStatus}`);
           }
-          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action);
+          // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88, PA-16p): KEY sends or voids, and is
+          // named on the ACCRUAL invoice_finalized posting and its reversal.
+          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action, KEY_SYSTEM_ACTOR_ID);
           return { entityType, updatedCount: result.updated, newStatus };
         }
 
@@ -5758,15 +5760,40 @@ ${triage.standingContext}`;
         return { items: result.items, total: result.total };
       }
       case 'call_create_task': {
-        const log = await this.getCallLog().createCallLog({
-          businessId,
-          contactId: args.contactId,
-          callerId: args.callerId,
-          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
-          script: args.script ?? null,
-          notes: args.notes ?? null,
-        });
-        return { id: log.id, contactId: args.contactId };
+        // W7-CALL-TASK-CALLER (review ST-4; owner rulings D-73, D-88): the caller is the member the
+        // command runs for, as POST calls takes it from the session (V1-54): the surface's principal,
+        // the member a surface with no principal runs for, or the queued plan's member
+        // (contactBindMember, never a value from the arguments). args.callerId, which the model
+        // chooses, is ignored. A run with no member (an inbound conversation, the staff bridge's
+        // chat, a monitor run for no one, a plan id that names no plan here) is refused before
+        // anything is written. CallLogService.assertCaller still holds that member to the caller
+        // rule: a member of the business who may open the contact.
+        const callerId = await this.contactBindMember(businessId, action);
+        if (!callerId) {
+          throw new Error(
+            'call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)',
+          );
+        }
+        // Review SEC-W7CTC-1: that member is the actor, as the session member is on POST calls, so
+        // they go to createCallLog as its session (their User row's role, as AuthMiddleware attaches
+        // it), not as a callerId another writer chose. A contact they may not open then answers 404
+        // 'Contact not found', exactly as an unknown id and as POST calls answers them (no 400 that
+        // tells a restricted member a hidden contact exists, in words about a callerId the model no
+        // longer controls), and a principal who is no member (a SUPER_ADMIN, D-46) is refused 403.
+        const caller = await this.prisma.client.user.findUnique({ where: { id: callerId }, select: { role: true } });
+        const log = await this.getCallLog().createCallLog(
+          {
+            businessId,
+            contactId: args.contactId,
+            callerId,
+            scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
+            script: args.script ?? null,
+            notes: args.notes ?? null,
+          },
+          { userId: callerId, role: caller?.role ?? null },
+        );
+        // The recorded caller is answered, so KEY does not report the member the model named.
+        return { id: log.id, contactId: args.contactId, callerId: log.callerId };
       }
       case 'call_log_outcome': {
         // `completed` used to be assigned and dropped, and the return echoed the
@@ -6951,17 +6978,25 @@ ${triage.standingContext}`;
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
         // W3-D64-COMMERCE-CREATE (D-88): the member the command runs for judges any new contact
-        // (D-64); a status change stays KEY's (no actorId, R0-CMF1). This tool forwards no contact,
-        // so KEY's invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        // (D-64); a status change stays KEY's (R0-CMF1). This tool forwards no contact, so KEY's
+        // invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): KEY is named explicitly; updateInvoice
+        // refuses a status change with no actor rather than reading the omission as KEY.
+        // Review SEC-W7IAR-2 (D-90, PA-16r): the member the turn runs for is kept beside KEY as
+        // initiatedBy (audit data, never authority), as KEY's process_payment keeps it (PA-19c).
         const bindMember = await this.contactBindMember(businessId, action);
-        const invoice = await this.getCommerce().updateInvoice({
-          invoiceId: args.invoiceId,
-          businessId,
-          status: args.status,
-          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
-          notes: args.notes ?? undefined,
-          actorUserId: bindMember,
-        });
+        const invoice = await this.getCommerce().updateInvoice(
+          {
+            invoiceId: args.invoiceId,
+            businessId,
+            status: args.status,
+            dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+            notes: args.notes ?? undefined,
+            actorUserId: bindMember,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy: bindMember ?? null },
+        );
         return { id: invoice.id, status: invoice.status };
       }
       case 'commerce_update_product': {

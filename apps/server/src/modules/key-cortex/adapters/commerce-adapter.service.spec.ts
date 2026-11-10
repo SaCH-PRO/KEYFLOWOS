@@ -50,14 +50,16 @@ describe('CommerceAdapterService', () => {
     }));
     expect(result.success).toBe(true);
     expect(commerce.createInvoice).toHaveBeenCalled();
-    expect(commerce.bulkUpdateInvoices).toHaveBeenCalledWith('biz_123', ['inv1'], 'send');
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY sends, named on the ACCRUAL posting.
+    expect(commerce.bulkUpdateInvoices).toHaveBeenCalledWith('biz_123', ['inv1'], 'send', KEY_SYSTEM_ACTOR_ID);
   });
 
   it('send_invoice delegates to bulkUpdateInvoices', async () => {
     (commerce.bulkUpdateInvoices as ReturnType<typeof vi.fn>).mockResolvedValue({ sent: 1 });
     const result = await service.execute(mkCmd('send_invoice', { invoiceId: 'inv1' }));
     expect(result.success).toBe(true);
-    expect(commerce.bulkUpdateInvoices).toHaveBeenCalledWith('biz_123', ['inv1'], 'send');
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY sends, named on the ACCRUAL posting.
+    expect(commerce.bulkUpdateInvoices).toHaveBeenCalledWith('biz_123', ['inv1'], 'send', KEY_SYSTEM_ACTOR_ID);
   });
 
   it('get_invoice returns invoice', async () => {

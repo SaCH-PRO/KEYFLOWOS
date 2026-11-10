@@ -619,6 +619,17 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
     expect(dispatchedFor(ticketStep)).toHaveLength(1);
     expect((await planRow(ticket)).steps[0].status).toBe('completed');
   });
+
+  // W7-CALL-TASK-CALLER review CR-W7CTC-1 hand-off (D-73, D-88): call_create_task now records the
+  // member the command runs for and refuses a run with no member, but only inside dispatch:
+  // noMemberToolRefusal('call_create_task') answers null, so planStepRunRefusal lets a non-system plan
+  // with no member through, ActionDispatcherService retries the plain-Error refusal (3 attempts, 4 s)
+  // and counts it toward the circuit breaker it keys by tool name alone, process-wide (5 refusals open
+  // call_create_task for every business for 60 s; reproduced with the real ActionDispatcherService
+  // and executeToolAction). The refusal is permanent, so it belongs in the pre-dispatch gate the queue,
+  // the Pro Auto monitor and the proposal executor read (noMemberToolRefusal, plan-step-authority.ts),
+  // outside W7-CALL-TASK-CALLER's write set (the call_create_task case only).
+  it.todo('QW-06 a plan with no member with call_create_task: refused before dispatch and recorded on the step, nothing dispatched, the job completes, and no refusal counts toward the tool\'s circuit breaker (review CR-W7CTC-1; plan-step-authority.ts noMemberToolRefusal)');
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */

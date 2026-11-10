@@ -292,8 +292,8 @@ async function repliesTo(businessId: string, phone: string): Promise<string[]> {
   return rows.filter((r: any) => r.whatsappContact.phoneNumber.replace(/\D/g, '') === digits).map((r: any) => r.body as string);
 }
 
-function run(businessId: string, tool: string, args: Record<string, unknown>) {
-  return dispatcher.executeToolAction(businessId, tool, args);
+function run(businessId: string, tool: string, args: Record<string, unknown>, action?: Record<string, unknown>) {
+  return dispatcher.executeToolAction(businessId, tool, args, action);
 }
 
 beforeAll(async () => {
@@ -673,20 +673,50 @@ describe("TD9-1 — projects_create_task writes only into the business's own pro
 });
 
 describe("TD9-2 — a call log names only the business's own contact, and B's script reads only B's tasks", () => {
+  // W7-CALL-TASK-CALLER (D-73, D-88): call_create_task records the member the command runs for and
+  // refuses a run with no member, so these dispatches name the member they run for (A's owner, the
+  // caller they named before) as a member's chat turn does; the contact checks below are unchanged.
+  const forOwnerA = () => ({ surface: 'CHAT', principalUserId: ID.ownerA });
+
   it("call_create_task refuses another business's contact, and no call log in A names it", async () => {
-    await expect(run(ID.bizA, 'call_create_task', { contactId: ID.contactB, callerId: ID.ownerA })).rejects.toThrow(/Contact not found/);
+    await expect(run(ID.bizA, 'call_create_task', { contactId: ID.contactB, callerId: ID.ownerA }, forOwnerA())).rejects.toThrow(/Contact not found/);
     expect(await db.callLog.count({ where: { businessId: ID.bizA, contactId: ID.contactB } })).toBe(0);
     expect(await db.contactTask.count({ where: { businessId: ID.bizA, contactId: ID.contactB } })).toBe(0);
   });
 
   it("updateCallLog (PATCH .../calls/:id) refuses another business's contact on A's own call log", async () => {
-    const own = await run(ID.bizA, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA });
+    const own = await run(ID.bizA, 'call_create_task', { contactId: ID.contactA, callerId: ID.ownerA }, forOwnerA());
     await expect(callLogs.updateCallLog(ID.bizA, own.id, { contactId: ID.contactB })).rejects.toThrow(/Contact not found/);
     expect((await db.callLog.findUnique({ where: { id: own.id } })).contactId).toBe(ID.contactA);
     // control: the follow-up on its own log lands on its own contact
     const task = await run(ID.bizA, 'call_schedule_followup', { callLogId: own.id, title: 'own follow-up' });
     expect(await db.contactTask.findUnique({ where: { id: task.taskId } })).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA });
   });
+
+  // Review CR-W7CTC-2: the cases above name A's owner as the member they run for, which the staff
+  // bridge never sends. StaffChatBridgeService calls chat() with no userId, so the bridge's own
+  // dispatch is a CHAT turn with no principal (chat()'s governToolCall context). That pins what the
+  // bridge itself does with this tool today: with no member to record as the caller, it refuses
+  // before any contact is read and writes nothing, whichever member and contact the model names.
+  const staffBridgeTurn = () => ({ surface: 'CHAT', principalUserId: null, crew: null, sourceId: 'v21b_tc_bridge', sessionId: null });
+
+  it("W7-CALL-TASK-CALLER (review CR-W7CTC-2, D-73, D-88): the staff bridge's own dispatch (a CHAT turn with no principal) refuses call_create_task before anything is written, for its own contact and another business's", async () => {
+    const before = await db.callLog.count({ where: { businessId: ID.bizA } });
+    for (const contactId of [ID.contactA, ID.contactB]) {
+      await expect(
+        run(ID.bizA, 'call_create_task', { contactId, callerId: ID.ownerA }, staffBridgeTurn()),
+        contactId,
+      ).rejects.toThrow('call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)');
+    }
+    expect(await db.callLog.count({ where: { businessId: ID.bizA } })).toBe(before);
+    expect(await db.callLog.count({ where: { contactId: ID.contactB, businessId: { not: ID.bizB } } })).toBe(0);
+  });
+
+  // Review CR-W7CTC-2 hand-off (needs an owner ruling or a follow-up packet; the change is in
+  // staff-chat-bridge.service.ts and chat()'s dispatch context, outside W7-CALL-TASK-CALLER's write
+  // set, which is the call_create_task case only): the job-role envelope still offers call_create_task
+  // to crm:write positions, so a staff member on WhatsApp or SMS is offered a tool that always fails.
+  it.todo("a staff position backed by a membership creates call tasks over WhatsApp/SMS as its holder (assignment.userId as onBehalfOfUserId), and a contact-only position is refused or not offered call_create_task (review CR-W7CTC-2; staff-chat-bridge.service.ts, job-role-policy.service.ts)");
 
   it("B's call script never reads a task another business put on B's contact (a row written before this repair)", async () => {
     await db.contactTask.create({ data: { id: `${P}legacy_task`, businessId: ID.bizA, contactId: ID.contactB, title: 'planted-via-own-log', status: 'OPEN' } });

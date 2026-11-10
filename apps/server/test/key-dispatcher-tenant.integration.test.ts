@@ -565,6 +565,36 @@ describe('V1-21d SEC3-ST-2 — a KEY commerce write answers with the write proje
   });
 });
 
+// ─── W7-KEY-MARK-PAID-PROJECTION review: what the tool does not yet do for the member a turn runs for ───
+//
+// Both findings were reproduced on a real database (keyflowos_w16, revenue-authorization's rva_
+// fixtures, a probe reverted after the run). Neither fix lies in that packet's write set (the
+// dispatcher's commerce_mark_invoice_paid case only), so they stay visible here as todos. This
+// suite is no Release 0 suite (release0-index.json), so a todo here needs no index entry.
+
+describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and the member a KEY turn runs for', () => {
+  it.todo(
+    "W7KMP-01 (SEC-W7KMP-1; D-88, D-90): commerce_mark_invoice_paid run for a member keeps that member beside KEY as " +
+      'data.initiatedBy on the invoice.payment_recorded and invoice.paid entries and the FINANCE payment_recorded row, as ' +
+      "commerce_update_invoice {status: 'PAID'} does since SEC-W7IAR-2 (payments-actor PA-16r). DEFERRED: follow-up packet " +
+      '(outside the W7-KEY-MARK-PAID-PROJECTION write set) — CommerceService.markInvoicePaid takes no initiatedBy ' +
+      '(markInvoicePaidFor is private, and the RA-G16-01 census pins every markInvoicePaid call site to three arguments), ' +
+      "update_status_with_confirmation {newStatus: 'PAID'} calls it the same way, and the chat path that runs a tool without " +
+      'confirmation hands executeTool no actorUserId, so its execution log row names no member. Reproduced: for ' +
+      'rva_staffWriteA both entries carry actorId key_ai, actorType SYSTEM and no initiatedBy; commerce_update_invoice ' +
+      'PAID for the same member records initiatedBy rva_staffWriteA.',
+  );
+  it.todo(
+    "W7KMP-02 (SEC-W7KMP-2; needs an owner ruling extending D-40 / D-71 to revenue on member chat): a member's chat turn " +
+      "runs commerce_mark_invoice_paid only with revenue:write, as PATCH /commerce/invoices/:invoiceId/paid requires. " +
+      'DEFERRED: owner ruling, then a follow-up packet — on member chat the dispatcher gates the operations module only ' +
+      '(operationsScopeRefusal, selectToolsForRequest and governToolCall, D-40), AiOversightService checks a position ' +
+      'envelope only on the staff bridge, and markInvoicePaid accepts KEY on the tenant alone. Reproduced: rva_staffNoneA ' +
+      "({ revenue: 'none', crm: 'read' }) and rva_noMember (no membership) each mark a SENT copy PAID through " +
+      "executeToolDirectly on the CHAT surface, while PATCH .../paid answers rva_staffNoneA 403.",
+  );
+});
+
 // ─── review SEC-V21D-1: a service that ignores the business gets only an id resolved inside it ───
 
 describe('V1-21d review SEC-V21D-1 — a TENANT_UNBOUND_TOOLS service is handed only ids the dispatcher resolved inside the business', () => {

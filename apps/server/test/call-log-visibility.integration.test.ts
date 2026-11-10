@@ -72,6 +72,7 @@ let db: any;
 let app: any;
 let redis: any;
 let callLogs: any; // the module's real CallLogService
+let prismaSvc: any; // the module's real PrismaService (the KEY dispatcher's, CL-06)
 const emitted: Array<[string, any]> = [];
 const scriptCalls: Array<[string, string, string]> = [];
 
@@ -171,6 +172,7 @@ beforeAll(async () => {
   }).compile();
 
   callLogs = moduleRef.get(CallLogService);
+  prismaSvc = moduleRef.get(PrismaService);
   const controller = moduleRef.get(CallTaskController) as any;
   controller.callLogs = callLogs;
   controller.callScripts = scripts;
@@ -497,6 +499,91 @@ describe('CL-04 a call is assigned only to a member who may open its contact (re
 // both outside this packet's write set.
 describe('CL-05 KEY call-log write tools (review ST-2, follow-up packet)', () => {
   it.todo("KEY call_log_outcome, call_schedule_followup, call_generate_script and call_create_task apply the acting member's CRM record visibility, or are withheld from members whose visibility is restricted (job-role-policy.service.ts / flow-orchestrator.service.ts)");
+});
+
+/**
+ * W7-CALL-TASK-CALLER review SEC-W7CTC-1 (owner rulings D-73, D-88; V1-54): KEY call_create_task
+ * records the member the command runs for as the caller, so that member is the actor, as the session
+ * member is on POST calls. The dispatcher used to hand createCallLog that member as a callerId another
+ * writer chose (no session), so a member who may not open a contact got 400 'callerId must be a
+ * member who may open this contact' for an existing hidden contact and 404 'Contact not found' for an
+ * id that names no contact: KEY told a restricted member that a hidden contact exists, in words about
+ * a callerId the model no longer controls. It now hands the member as the session (their User row's
+ * role), and KEY answers what POST calls answers the same member. The real FlowOrchestratorService
+ * dispatcher (executeToolAction) runs over this suite's real PrismaService and CallLogService.
+ */
+describe('CL-06 KEY call_create_task answers the member it runs for as POST calls answers them (review SEC-W7CTC-1, D-73, D-88)', () => {
+  const unknownContact = `${P}doesNotExist`;
+
+  async function keyCallCreateTask(action: Record<string, unknown>, contactId: string, marker: string) {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { CallLogService } = await import('../src/modules/call-tasks/call-log.service');
+    const dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma: prismaSvc,
+      moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : undefined) },
+    });
+    // the model names the OWNER as the caller: it is not read (W7-CALL-TASK-CALLER)
+    return dispatcher.executeToolAction(ID.bizA, 'call_create_task', { contactId, callerId: ID.owner, notes: marker }, action);
+  }
+
+  /** The refusal as { status, message }, or null when the call resolved. */
+  const refusalOf = (p: Promise<unknown>) =>
+    p.then(
+      () => null,
+      (err: any) => ({ status: typeof err?.getStatus === 'function' ? err.getStatus() : undefined, message: err?.message }),
+    );
+
+  it("CL-06a a member's KEY call_create_task on a contact they cannot open answers 404 'Contact not found' exactly as an unknown contact and as POST calls, and writes nothing", async () => {
+    const marker = `${P}key_hidden`;
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      // crm_view 'owned': the owner's PRIVATE and TEAM contacts are outside their book
+      [ID.staffOwned, { surface: 'CHAT', principalUserId: ID.staffOwned }, ID.cPriv],
+      [ID.staffOwned, { surface: 'CHAT', principalUserId: ID.staffOwned }, ID.cTeam],
+      // view-all: another member's PRIVATE contact, on a surface with no principal run for them
+      [ID.staffAll, { surface: 'PROPOSAL', onBehalfOfUserId: ID.staffAll }, ID.cPriv],
+      [ID.staffAll, { surface: 'CHAT', principalUserId: ID.staffAll }, ID.cShared],
+    ];
+    for (const [actor, action, contactId] of cases) {
+      const label = `${actor} ${String(action.surface)} ${contactId}`;
+      const hidden = await refusalOf(keyCallCreateTask(action, contactId, marker));
+      const unknown = await refusalOf(keyCallCreateTask(action, unknownContact, marker));
+      expect(hidden, label).toEqual({ status: 404, message: 'Contact not found' });
+      expect(unknown, label).toEqual(hidden);
+      // POST calls answers the same member the same way
+      const rest = await as(actor).post(calls, { businessId: ID.bizA, contactId, callerId: actor, notes: marker });
+      expect([rest.status, rest.body.message], label).toEqual([hidden!.status, hidden!.message]);
+    }
+    expect(await db.callLog.count({ where: { businessId: ID.bizA, notes: marker } })).toBe(0);
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-06b a non-member SUPER_ADMIN principal is refused 403 as the caller, as POST calls refuses them (CL-03c, D-46), and nothing is written', async () => {
+    const marker = `${P}key_super`;
+    const key = await refusalOf(keyCallCreateTask({ surface: 'CHAT', principalUserId: ID.superA }, ID.cTeam, marker));
+    expect(key).toEqual({ status: 403, message: 'Only a member of this business can be the caller of a call log' });
+    const rest = await as(ID.superA).post(calls, { businessId: ID.bizA, contactId: ID.cTeam, callerId: ID.owner, notes: marker });
+    expect([rest.status, rest.body.message]).toEqual([key!.status, key!.message]);
+    expect(await db.callLog.count({ where: { businessId: ID.bizA, notes: marker } })).toBe(0);
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-06c CONTROL: on a contact the member may open the call log is written with that member as the caller, whatever callerId the model sent', async () => {
+    const marker = `${P}key_control`;
+    const stored = [
+      await keyCallCreateTask({ surface: 'CHAT', principalUserId: ID.staffOwned }, ID.cMine, marker),
+      await keyCallCreateTask({ surface: 'PROPOSAL', onBehalfOfUserId: ID.staffOwned }, ID.cShared, marker),
+      await keyCallCreateTask({ surface: 'CHAT', principalUserId: ID.staffAll }, ID.cTeam, marker),
+    ];
+    expect(stored.map((out: any) => [out.callerId, out.contactId])).toEqual([
+      [ID.staffOwned, ID.cMine],
+      [ID.staffOwned, ID.cShared],
+      [ID.staffAll, ID.cTeam],
+    ]);
+    const rows = await db.callLog.findMany({ where: { businessId: ID.bizA, notes: marker }, orderBy: { createdAt: 'asc' } });
+    expect(rows.map((r: any) => [r.callerId, r.contactId]).sort()).toEqual(
+      [[ID.staffAll, ID.cTeam], [ID.staffOwned, ID.cMine], [ID.staffOwned, ID.cShared]].sort(),
+    );
+  });
 });
 
 describe('CONTROLS: what a member may open behaves as before', () => {
