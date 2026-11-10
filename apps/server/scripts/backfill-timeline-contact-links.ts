@@ -28,20 +28,41 @@
  *
  *   1. Link: a row of either writer whose contactId is empty gets the contact
  *      of the invoice / intake its entityId names, when that invoice / intake
- *      belongs to the row's business and its contact does too. Nothing else on
- *      the row changes.
+ *      belongs to the row's business and its contact does too. An invoice row
+ *      is linked only when its title names that contact (review SEC-W10DCS-2):
+ *      updateInvoice re-points a DRAFT / SENT / OVERDUE invoice's contactId,
+ *      and the title names the contact the invoice had when it was sent, so the
+ *      title must end ' sent to <the contact's name as the writer formats it>'
+ *      ('first last', or 'Customer'). A message intake's contact is never
+ *      re-pointed after approval (only set null when the contact is deleted).
+ *      Nothing else on the row changes.
  *   2. Withhold: a row whose source is gone (no invoice / intake with that id in
  *      the row's business, no entityId, or a source whose contact belongs to
- *      another business) cannot be tied to a contact, so it is served only to
- *      OWNER and ADMIN: its module becomes WITHHELD_MODULE, a module the
+ *      another business), and an invoice row whose title names someone other
+ *      than its invoice's contact (renamed, or re-pointed since), cannot be
+ *      tied to a contact, so it is served only to OWNER and ADMIN: its module
+ *      becomes WITHHELD_MODULE, a module the
  *      timeline table (ACTIVITY_MODULE_SCOPES) deliberately does not map, and
  *      the rule serves a row of an unmapped module to OWNER and ADMIN only
  *      (and SUPER_ADMIN; D-63, canReadActivityRow's readsUnmapped). The rule is
  *      not changed. An invoice row is filed under category COMMERCE (unless it
  *      already carries a revenue category), so it still needs revenue read, as
  *      its module 'commerce' required. The original module and category are
- *      kept under data.d115 ({ withheld: 'source_gone', module, category }),
- *      the row's own data merged around it; title, detail and entity stay.
+ *      kept under data.d115 ({ withheld, module, category }; withheld is
+ *      'source_gone', or 'name_mismatch' for an invoice row whose invoice is
+ *      there but names another contact), the row's own data merged around it;
+ *      title, detail and entity stay.
+ *
+ *      OPEN (review SEC-W10DCS-1 / CR-W10DCS-1, outside this packet's write
+ *      set): the unmapped branch reads the role only, so a withheld intake row
+ *      (module 'communications' before, which needed crm read) is served to an
+ *      ADMIN whose crm access is explicitly 'none', who was not served it
+ *      before. No column the rule reads ties an unmapped row to crm (only a
+ *      named contact does, and naming an id that is no contact of the
+ *      business would hide the row from every ADMIN). The smallest rule change: in canReadActivityRow, a
+ *      row of module WITHHELD_MODULE also needs read on
+ *      activityModuleScope(data.d115.module). data-cleanup-scripts DCS-T07
+ *      (it.todo) is its negative control.
  *   3. Left as is: an approved intake whose intake names no contact (the
  *      sender is no contact of the business, or the contact was deleted and
  *      the intake's link set null). The W9 writer stores exactly that row
@@ -90,10 +111,19 @@ const INTAKE_ROW =
   "a.action = 'message_intake.approved' AND lower(a.module) = 'communications' AND lower(a.entity_type) = 'message_intake'" +
   " AND (a.contact_id IS NULL OR a.contact_id = '')";
 
-/** The row's invoice (or intake) in its business, with a contact of the same business. */
-const INVOICE_LINKABLE =
-  'EXISTS (SELECT 1 FROM invoices i JOIN contacts c ON c.id = i.contact_id' +
-  ' WHERE i.id = a.entity_id AND i.business_id = a.business_id AND c.business_id = a.business_id)';
+/** The row's invoice (`i`) in its business, whose contact (`c`) is of the same business. */
+const INVOICE_SOURCE = 'i.id = a.entity_id AND i.business_id = a.business_id AND c.business_id = a.business_id';
+/**
+ * The contact's name as the KEY send_invoice writer put it in the title
+ * (FlowOrchestratorService: [firstName, lastName].filter(Boolean).join(' ') || 'Customer').
+ */
+const CONTACT_TITLE_NAME = "coalesce(nullif(concat_ws(' ', nullif(c.first_name, ''), nullif(c.last_name, '')), ''), 'Customer')";
+/** Review SEC-W10DCS-2: the row's title names `c` ('Invoice <n> sent to <name>' ends with ' sent to <name>'). */
+const TITLE_NAMES_CONTACT = `right(a.title, length(' sent to ' || ${CONTACT_TITLE_NAME})) = ' sent to ' || ${CONTACT_TITLE_NAME}`;
+/** The row's invoice is in its business with a contact of the same business (whoever the title names). */
+const INVOICE_PRESENT = `EXISTS (SELECT 1 FROM invoices i JOIN contacts c ON c.id = i.contact_id WHERE ${INVOICE_SOURCE})`;
+/** ...and the title names that contact: the row is linked to it. */
+const INVOICE_LINKABLE = `EXISTS (SELECT 1 FROM invoices i JOIN contacts c ON c.id = i.contact_id WHERE ${INVOICE_SOURCE} AND ${TITLE_NAMES_CONTACT})`;
 const INTAKE_LINKABLE =
   'EXISTS (SELECT 1 FROM message_intakes m JOIN contacts c ON c.id = m.contact_id' +
   ' WHERE m.id = a.entity_id AND m.business_id = a.business_id AND c.business_id = a.business_id)';
@@ -101,18 +131,25 @@ const INTAKE_LINKABLE =
 const INTAKE_NO_CONTACT =
   'EXISTS (SELECT 1 FROM message_intakes m WHERE m.id = a.entity_id AND m.business_id = a.business_id AND m.contact_id IS NULL)';
 
-/** The row's own data (an object, or {} / { value } for anything else) with the D-115 marker merged in. */
-const WITHHELD_DATA =
+/**
+ * The row's own data (an object, or {} / { value } for anything else) with the
+ * D-115 marker merged in; `reason` is an SQL text expression.
+ */
+const withheldData = (reason: string) =>
   "(CASE WHEN a.data IS NULL OR jsonb_typeof(a.data) = 'null' THEN '{}'::jsonb" +
   " WHEN jsonb_typeof(a.data) = 'object' THEN a.data ELSE jsonb_build_object('value', a.data) END)" +
-  " || jsonb_build_object('d115', jsonb_build_object('withheld', 'source_gone', 'module', a.module, 'category', a.category))";
+  ` || jsonb_build_object('d115', jsonb_build_object('withheld', ${reason}, 'module', a.module, 'category', a.category))`;
+/** An invoice row withheld though its invoice is there names another contact (review SEC-W10DCS-2). */
+const INVOICE_WITHHELD_REASON = `(CASE WHEN ${INVOICE_PRESENT} THEN 'name_mismatch' ELSE 'source_gone' END)`;
 
 export interface TimelineBackfillCounts {
   /** KEY send_invoice rows with no contactId. */
   invoiceUnlinked: number;
-  /** Of those, the ones whose invoice and its contact are in the row's business. */
+  /** Of those, the ones whose invoice and its contact are in the row's business and whose title names that contact. */
   invoiceLinkable: number;
-  /** Of those, the ones whose source is gone (withheld). */
+  /** Of those not linkable, the ones whose invoice is there but names another contact (review SEC-W10DCS-2; withheld). */
+  invoiceNameMismatch: number;
+  /** Of those, the ones that are withheld: source gone, or the title names another contact. */
   invoiceSourceGone: number;
   /** message_intake.approved rows with no contactId. */
   intakeUnlinked: number;
@@ -162,6 +199,7 @@ export async function countTimelineBackfill(database: Db, businessIds: string[] 
     `SELECT
        count(*) FILTER (WHERE ${INVOICE_ROW})::int AS invoice_unlinked,
        count(*) FILTER (WHERE ${INVOICE_ROW} AND ${INVOICE_LINKABLE})::int AS invoice_linkable,
+       count(*) FILTER (WHERE ${INVOICE_ROW} AND ${INVOICE_PRESENT} AND NOT ${INVOICE_LINKABLE})::int AS invoice_name_mismatch,
        count(*) FILTER (WHERE ${INTAKE_ROW})::int AS intake_unlinked,
        count(*) FILTER (WHERE ${INTAKE_ROW} AND ${INTAKE_LINKABLE})::int AS intake_linkable,
        count(*) FILTER (WHERE ${INTAKE_ROW} AND ${INTAKE_NO_CONTACT})::int AS intake_no_contact
@@ -174,6 +212,7 @@ export async function countTimelineBackfill(database: Db, businessIds: string[] 
   return {
     invoiceUnlinked: n('invoice_unlinked'),
     invoiceLinkable: n('invoice_linkable'),
+    invoiceNameMismatch: n('invoice_name_mismatch'),
     invoiceSourceGone: n('invoice_unlinked') - n('invoice_linkable'),
     intakeUnlinked: n('intake_unlinked'),
     intakeLinkable: n('intake_linkable'),
@@ -192,7 +231,7 @@ export async function applyTimelineBackfill(database: Db, businessIds: string[] 
     `UPDATE activities a SET contact_id = i.contact_id
        FROM invoices i JOIN contacts c ON c.id = i.contact_id
       WHERE ${INVOICE_ROW}
-        AND i.id = a.entity_id AND i.business_id = a.business_id AND c.business_id = a.business_id${scope.term}`,
+        AND ${INVOICE_SOURCE} AND ${TITLE_NAMES_CONTACT}${scope.term}`,
     ...scope.params,
   );
   const intakeLinked = await database.$executeRawUnsafe(
@@ -206,14 +245,14 @@ export async function applyTimelineBackfill(database: Db, businessIds: string[] 
     `UPDATE activities a
         SET module = '${WITHHELD_MODULE}',
             category = CASE WHEN upper(coalesce(a.category, '')) IN ('COMMERCE', 'PAYMENT', 'FINANCE') THEN a.category ELSE 'COMMERCE' END,
-            data = ${WITHHELD_DATA}
+            data = ${withheldData(INVOICE_WITHHELD_REASON)}
       WHERE ${INVOICE_ROW} AND NOT ${INVOICE_LINKABLE}${scope.term}`,
     ...scope.params,
   );
   const intakeWithheld = await database.$executeRawUnsafe(
     `UPDATE activities a
         SET module = '${WITHHELD_MODULE}',
-            data = ${WITHHELD_DATA}
+            data = ${withheldData("'source_gone'")}
       WHERE ${INTAKE_ROW} AND NOT ${INTAKE_LINKABLE} AND NOT ${INTAKE_NO_CONTACT}${scope.term}`,
     ...scope.params,
   );
@@ -258,6 +297,7 @@ export async function main(argv: string[], deps: { db?: Db; log?: Log; error?: L
     return 1;
   }
   log(row('invoice_sent_unlinked', counts.invoiceUnlinked));
+  log(row('invoice_sent_name_mismatch', counts.invoiceNameMismatch));
   log(row('intake_approved_unlinked', counts.intakeUnlinked));
   log(row('intake_approved_no_contact', counts.intakeNoContact));
   if (!args.apply) {

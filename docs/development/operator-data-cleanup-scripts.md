@@ -87,13 +87,23 @@ shapes and an empty `contactId`:
 
 1. **Link.** When the row's business has an invoice (or intake) with the row's
    `entityId`, and that invoice's (or intake's) contact belongs to the same
-   business, the row's `contactId` is set to that contact. Nothing else on the
-   row changes. From then on the timeline rule shows the row only to members
-   who may open that contact.
+   business, the row's `contactId` is set to that contact. An invoice row is
+   linked only when its title names that contact (review SEC-W10DCS-2): the
+   title must end with ` sent to <name>`, where `<name>` is the contact's first
+   and last name joined by a space, or `Customer` when both are empty (exactly
+   as the writer formats it). `updateInvoice` can re-point a DRAFT, SENT or
+   OVERDUE invoice to another contact, and the title names the contact at send
+   time, so a row whose title names someone else is not linked. An intake's
+   contact is never re-pointed after approval. Nothing else on the row changes.
+   From then on the timeline rule shows the row only to members who may open
+   that contact.
 2. **Withhold.** When the source is gone, the row cannot be tied to a contact.
    This covers rows with no `entityId`, rows whose invoice or intake is not in
    the row's business, and rows whose source's contact belongs to another
-   business. D-115 says such a row is served only to OWNER and ADMIN. The script
+   business. An invoice row whose title names someone other than its invoice's
+   current contact (the invoice was re-pointed, or the contact renamed) is
+   withheld too: the script cannot tell which contact it names. D-115 says such
+   a row is served only to OWNER and ADMIN. The script
    moves it to module `d115_withheld`. `ACTIVITY_MODULE_SCOPES` deliberately
    does not map that module, and the rule already serves a row of an unmapped
    module to OWNER and ADMIN only (and SUPER_ADMIN), under D-63
@@ -101,8 +111,10 @@ shapes and an empty `contactId`:
    `COMMERCE` (unless it already has a revenue category). It therefore still
    needs revenue read, as its module `commerce` required. The original module
    and category are kept in `data.d115` as
-   `{ withheld: 'source_gone', module, category }`, merged into the row's own
-   data. The title, detail and entity are unchanged.
+   `{ withheld, module, category }`, merged into the row's own data. `withheld`
+   is `source_gone`, or `name_mismatch` for an invoice row whose invoice is
+   there but names another contact. The title, detail and entity are
+   unchanged.
 3. **Left as is.** An approved intake whose intake has no contact is not
    changed. Either the sender was never a contact, or the contact was deleted
    and the intake's link was set to null. The W9 writer stores exactly this row
@@ -115,9 +127,27 @@ the mapped module.
 
 Limits of the withheld audience, as D-63's unmapped branch defines it:
 
-- An ADMIN is served a withheld row whatever their `crm` scope.
-- A withheld invoice row still needs `revenue` read.
+- A withheld invoice row still needs `revenue` read, as before the backfill.
+  An ADMIN whose `revenue` access is `none` is not served it.
 - A withheld intake row (category `AI`) needs no further scope.
+
+**Open (review SEC-W10DCS-1 / CR-W10DCS-1).** The unmapped branch checks the
+role only. Before the backfill, an intake row was in module `communications`,
+which needs `crm` read. After a withhold, an ADMIN whose `crm` access is
+explicitly `none` is served the row, including its detail
+(`<intent> from <sender> — <subject>`). That ADMIN was not served the row
+before. This conflicts with D-114's principle that explicit scopes bind
+ADMINs. No column the rule reads can tie an unmapped row to `crm`. The only
+`crm` gate is a named contact, and naming an id that is not a contact of the
+business hides the row from every ADMIN. The fix is a rule change outside this
+packet's write set: in `canReadActivityRow`, a row of module `d115_withheld`
+also needs read on `activityModuleScope(data.d115.module)`. Withheld invoice
+rows already meet that through category `COMMERCE`. Until that term lands, or
+a ruling accepts the gap, `data-cleanup-scripts` DCS-T07 stays `it.todo`.
+The gap reaches only intake rows whose source is gone. Source code never
+deletes an intake, so these are rows with no `entityId`, or whose intake or
+contact belongs to another business. Before `--apply`, an operator can check
+for ADMIN memberships with `crm` set to `none` in the affected businesses.
 
 `--apply` runs four UPDATE statements: link invoice rows, link intake rows,
 withhold invoice rows, withhold intake rows. Each is idempotent on its own. A
@@ -125,7 +155,9 @@ linked row has a `contactId` and a withheld row has another module, so neither
 matches again.
 
 **Output.** Both modes print `invoice_sent_unlinked`,
-`intake_approved_unlinked` and `intake_approved_no_contact`. A dry run adds
+`invoice_sent_name_mismatch` (unlinked invoice rows whose invoice is there but
+names another contact; part of `*_would_withhold`), `intake_approved_unlinked`
+and `intake_approved_no_contact`. A dry run adds
 `*_would_link` and `*_would_withhold`. `--apply` adds `invoice_sent_linked`,
 `invoice_sent_withheld`, `intake_approved_linked` and
 `intake_approved_withheld`.
@@ -146,4 +178,9 @@ runs both scripts' `main()` in process against Postgres. It covers:
 - TS-13d: after the backfill, `/events`, the day's summary and the legacy
   activity route no longer serve the pre-W9 rows naming a PRIVATE contact to a
   view-all ADMIN, a crm_view `owned` member or a crm `none` member, and serve
-  withheld rows to OWNER and ADMIN only.
+  withheld rows to OWNER and ADMIN only;
+- DCS-T06 (review SEC-W10DCS-2): a row naming the contact an invoice had before
+  it was re-pointed is withheld, not linked to the invoice's new contact. The
+  writer's `Customer` fallback still links;
+- DCS-T07 (`it.todo`, review SEC-W10DCS-1 / CR-W10DCS-1): the open rule term
+  above.

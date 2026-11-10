@@ -33,6 +33,13 @@
  *    is no contact (intake.contactId null) is left as the W9 writer stores it
  *    today (TS-13b).
  *
+ * Review repairs (D-115): an invoice row is linked only when its title names
+ * the invoice's contact as the writer formats it (SEC-W10DCS-2: updateInvoice
+ * re-points a SENT invoice's contact; DCS-T06, business C); a withheld intake
+ * row is served to an ADMIN whose crm access is 'none' until the timeline rule
+ * gains a D-115 term outside this packet's write set (SEC-W10DCS-1 /
+ * CR-W10DCS-1; DCS-T07, it.todo).
+ *
  * Both are dry runs by default (counts only, nothing written), write with
  * --apply, are idempotent, and accept --business=<id> (repeatable) to limit a
  * run to some businesses. Nothing here runs against a real database.
@@ -78,15 +85,23 @@ const ID = {
   staffOwned: `${P}staffOwned`,   // crm read, crm_view 'owned', revenue read
   staffCrmNone: `${P}staffCrmNone`, // crm none, revenue read
   staffFull: `${P}staffFull`,     // STAFF with crm and revenue read (view-all)
+  adminCrmNone: `${P}adminCrmNone`, // C only: ADMIN with explicit crm 'none', revenue read (D-114: explicit scopes bind ADMINs)
   ownerB: `${P}ownerB`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   /** A business with no rows at all: a run limited to it counts nothing. */
   bizNone: `${P}bizNone`,
+  /** Review repairs (SEC-W10DCS-2): an invoice re-pointed to another contact after it was sent. */
+  bizC: `${P}bizC`,
   cPriv: `${P}cPriv`, // A, PRIVATE, owned by the owner (ADMIN, staffOwned, staffCrmNone may not open it)
   cTeam: `${P}cTeam`, // A, TEAM, owned by the owner
   cB: `${P}cB`,       // B
+  cCPriv: `${P}cCPriv`,         // C, PRIVATE, owned by the owner: the contact the invoice was sent to
+  cCTeam: `${P}cCTeam`,         // C, TEAM: the invoice's contact now (re-pointed by updateInvoice)
+  cCNameless: `${P}cCNameless`, // C, TEAM, no first or last name: the writer titles it 'Customer'
 };
+const C_PRIV_NAME = 'v96o Private Payee';
+const C_TEAM_NAME = 'v96o Current Payer';
 
 const HIDDEN_NAME = 'v96o Hidden Payer';
 const HIDDEN_EMAIL = `${P}hidden-payer@test.local`;
@@ -99,6 +114,8 @@ const INV = {
   b: `${P}invB`,
   crossContact: `${P}invCrossContact`,
   gone: `${P}invGone`, // no row
+  repointed: `${P}invRepointed`, // C: sent to cCPriv, now cCTeam's
+  nameless: `${P}invNameless`,   // C: cCNameless's
 };
 /** Message intakes: A's (PRIVATE contact, TEAM contact, no contact), B's, and one that is gone. */
 const INTAKE = {
@@ -180,6 +197,10 @@ const ROWS: Row[] = [
   { ...intakeRow('ctlW9In', ID.bizA, INTAKE.team, `${P}team-payer@test.local`, 'v96o team question'), contactId: ID.cTeam },
   { key: 'ctlInvPaid', businessId: ID.bizA, module: 'commerce', action: 'invoice_paid', entityType: 'invoice', entityId: INV.gone, title: 'Invoice v96o-INV-9 paid' },
   { key: 'ctlCrm', businessId: ID.bizA, module: 'crm', action: 'note_added', entityType: 'v96o_entity', entityId: null, title: 'v96o crm note' },
+  // C (review SEC-W10DCS-2): the title names the contact the invoice had when it was sent
+  invoiceRow('oldCInvRepointed', ID.bizC, INV.repointed, 'v96o-INV-C1', C_PRIV_NAME),
+  invoiceRow('oldCInvCurrent', ID.bizC, INV.repointed, 'v96o-INV-C1', C_TEAM_NAME),
+  invoiceRow('oldCInvCustomer', ID.bizC, INV.nameless, 'v96o-INV-C2', 'Customer'),
 ];
 const LINKED: Record<string, string> = {
   oldInvPriv: ID.cPriv,
@@ -190,6 +211,7 @@ const LINKED: Record<string, string> = {
 const WITHHELD = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact', 'oldInGone', 'oldInOtherBiz'];
 const UNTOUCHED = ['oldInNone', 'ctlW9Inv', 'ctlW9In', 'ctlInvPaid', 'ctlCrm'];
 const A_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizA).map((r) => act(r.key));
+const C_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizC).map((r) => act(r.key));
 
 /** Custom-field definitions and values. A and B both define `tier` (names are unique per business only). */
 const DEF = {
@@ -272,12 +294,13 @@ async function ids(res: request.Response | Promise<request.Response>): Promise<s
   return r.body.map((row: { id: string }) => row.id);
 }
 /** The fixture rows a member is served on /events, the day's summary and the legacy route, and the text of the three answers. */
-async function served(user: string): Promise<{ events: string[]; summary: string[]; legacy: string[]; text: string }> {
-  const ev = await agent().get(`/timeline/businesses/${ID.bizA}/events?limit=200`).set(HEADER, user);
-  const day = await agent().get(`/timeline/businesses/${ID.bizA}/summary/${DAY_PARAM}`).set(HEADER, user);
+async function served(user: string, biz: string = ID.bizA): Promise<{ events: string[]; summary: string[]; legacy: string[]; text: string }> {
+  const rowIds = biz === ID.bizC ? C_ROW_IDS : A_ROW_IDS;
+  const ev = await agent().get(`/timeline/businesses/${biz}/events?limit=200`).set(HEADER, user);
+  const day = await agent().get(`/timeline/businesses/${biz}/summary/${DAY_PARAM}`).set(HEADER, user);
   expect(day.status, `${user}: ${JSON.stringify(day.body).slice(0, 300)}`).toBe(200);
-  const leg = await agent().get(`/api/flows/businesses/${ID.bizA}/activity?limit=200&${LEGACY_CURSOR}`).set(HEADER, user);
-  const pick = (list: string[]) => list.filter((id) => A_ROW_IDS.includes(id)).sort();
+  const leg = await agent().get(`/api/flows/businesses/${biz}/activity?limit=200&${LEGACY_CURSOR}`).set(HEADER, user);
+  const pick = (list: string[]) => list.filter((id) => rowIds.includes(id)).sort();
   return {
     events: pick(await ids(ev)),
     summary: pick(day.body.events.map((e: { id: string }) => e.id)),
@@ -358,12 +381,13 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.admin, ID.staffOwned, ID.staffCrmNone, ID.staffFull, ID.ownerB]) {
+  for (const id of [ID.owner, ID.admin, ID.staffOwned, ID.staffCrmNone, ID.staffFull, ID.adminCrmNone, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}u_${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V96O Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V96O Biz B', ownerId: ID.ownerB } });
   await db.business.create({ data: { id: ID.bizNone, name: 'V96O Biz None', ownerId: ID.ownerB } });
+  await db.business.create({ data: { id: ID.bizC, name: 'V96O Biz C', ownerId: ID.owner } });
 
   const m = (user: string, biz: string, role: string, permissionScopes?: Record<string, string>) =>
     db.membership.create({ data: { id: `${P}m_${user.slice(P.length)}_${biz.slice(P.length)}`, userId: user, businessId: biz, role, permissionScopes: permissionScopes ?? undefined } });
@@ -374,10 +398,16 @@ beforeAll(async () => {
   await m(ID.staffFull, ID.bizA, 'STAFF', { crm: 'read', revenue: 'read' });
   await m(ID.ownerB, ID.bizB, 'OWNER');
   await m(ID.ownerB, ID.bizNone, 'OWNER');
+  await m(ID.owner, ID.bizC, 'OWNER');
+  await m(ID.staffFull, ID.bizC, 'STAFF', { crm: 'read', revenue: 'read' });
+  await m(ID.adminCrmNone, ID.bizC, 'ADMIN', { crm: 'none', revenue: 'read', ai: 'read' });
 
   await db.contact.create({ data: { id: ID.cPriv, businessId: ID.bizA, firstName: 'v96o', lastName: 'Hidden Payer', email: HIDDEN_EMAIL, visibility: 'PRIVATE', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cTeam, businessId: ID.bizA, firstName: 'v96o', lastName: 'Team Payer', email: `${P}team-payer@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cB, businessId: ID.bizB, firstName: 'v96o', lastName: 'B Payer', email: `${P}b-payer@test.local`, ownerId: ID.ownerB } });
+  await db.contact.create({ data: { id: ID.cCPriv, businessId: ID.bizC, firstName: 'v96o', lastName: 'Private Payee', email: `${P}c-private@test.local`, visibility: 'PRIVATE', ownerId: ID.owner } });
+  await db.contact.create({ data: { id: ID.cCTeam, businessId: ID.bizC, firstName: 'v96o', lastName: 'Current Payer', email: `${P}c-current@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
+  await db.contact.create({ data: { id: ID.cCNameless, businessId: ID.bizC, email: `${P}c-nameless@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
 
   await db.invoice.createMany({
     data: [
@@ -386,8 +416,12 @@ beforeAll(async () => {
       { id: INV.b, invoiceNumber: 'v96o-INV-B1', status: 'SENT', subtotal: 30, total: 30, currency: 'TTD', businessId: ID.bizB, contactId: ID.cB },
       // A's invoice naming B's contact: never a contact of A, so never linked.
       { id: INV.crossContact, invoiceNumber: 'v96o-INV-3', status: 'SENT', subtotal: 10, total: 10, currency: 'TTD', businessId: ID.bizA, contactId: ID.cB },
+      // C: sent to the PRIVATE contact, re-pointed below (updateInvoice re-points a SENT invoice's contactId).
+      { id: INV.repointed, invoiceNumber: 'v96o-INV-C1', status: 'SENT', subtotal: 40, total: 40, currency: 'TTD', businessId: ID.bizC, contactId: ID.cCPriv },
+      { id: INV.nameless, invoiceNumber: 'v96o-INV-C2', status: 'SENT', subtotal: 20, total: 20, currency: 'TTD', businessId: ID.bizC, contactId: ID.cCNameless },
     ],
   });
+  await db.invoice.update({ where: { id: INV.repointed }, data: { contactId: ID.cCTeam } });
   const intake = (id: string, businessId: string, contactId: string | null) =>
     db.messageIntake.create({
       data: { id, businessId, connectorType: 'gmail', sourceChannel: 'email', from: `${id}@test.local`, subject: 'v96o', body: 'v96o', contactId, status: 'approved' },
@@ -649,4 +683,65 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     const noRevenue = new Set([...everyModule].filter((m) => m !== 'revenue'));
     expect(canReadActivityRow(viewer(true, noRevenue), row), "an ADMIN whose revenue access is 'none'").toBe(false);
   });
+
+  it("[DCS-T06] (review SEC-W10DCS-2, D-115) a row is linked to its invoice's contact only when its title names that contact (the writer's 'first last', or 'Customer'): a row naming the PRIVATE contact the invoice was sent to before updateInvoice re-pointed it is withheld (data.d115 withheld 'name_mismatch'), not linked to the invoice's TEAM contact, so a view-all STAFF member reading crm and revenue is no longer served it or the PRIVATE name; an ADMIN with explicit crm 'none' is served no row it was not served before; a further dry run counts nothing left", async () => {
+    const before = await timelineState();
+    const repointed = act('oldCInvRepointed');
+
+    // The defect on this data: the row naming the PRIVATE contact is served to the view-all STAFF member.
+    const fullBefore = await served(ID.staffFull, ID.bizC);
+    expect(fullBefore.events).toContain(repointed);
+    expect(fullBefore.text).toContain(C_PRIV_NAME);
+    const adminBefore = await served(ID.adminCrmNone, ID.bizC);
+
+    const dry = await run('timeline', [`--business=${ID.bizC}`]);
+    expect(dry.code, dry.out).toBe(0);
+    expect(countOf(dry.out, 'invoice_sent_unlinked')).toBe(3);
+    expect(countOf(dry.out, 'invoice_sent_name_mismatch')).toBe(1);
+    expect(countOf(dry.out, 'invoice_sent_would_link')).toBe(2);
+    expect(countOf(dry.out, 'invoice_sent_would_withhold')).toBe(1);
+    expect(dry.out).not.toContain(P);
+    expect(dry.out).not.toContain(C_PRIV_NAME);
+    expect(await timelineState(), 'a dry run writes nothing').toEqual(before);
+
+    const res = await run('timeline', ['--apply', `--business=${ID.bizC}`]);
+    expect(res.code, res.out).toBe(0);
+    expect(countOf(res.out, 'invoice_sent_linked')).toBe(2);
+    expect(countOf(res.out, 'invoice_sent_withheld')).toBe(1);
+    expect(res.out).not.toContain(P);
+
+    const { WITHHELD_MODULE } = await import('../scripts/backfill-timeline-contact-links');
+    const after: Record<string, any> = await timelineState();
+    expect(after[act('oldCInvCurrent')]).toEqual({ ...(before[act('oldCInvCurrent')] as object), contact_id: ID.cCTeam });
+    expect(after[act('oldCInvCustomer')]).toEqual({ ...(before[act('oldCInvCustomer')] as object), contact_id: ID.cCNameless });
+    const was = before[repointed] as Record<string, any>;
+    expect(after[repointed]).toEqual({
+      ...was,
+      module: WITHHELD_MODULE,
+      category: 'COMMERCE',
+      data: { d115: { withheld: 'name_mismatch', module: 'commerce', category: null } },
+    });
+
+    const owner = await served(ID.owner, ID.bizC);
+    for (const key of READS) expect(owner[key], `owner ${key}`).toEqual([...C_ROW_IDS].sort());
+    const full = await served(ID.staffFull, ID.bizC);
+    for (const key of READS) {
+      expect(full[key], `staffFull ${key}`).toEqual([act('oldCInvCurrent'), act('oldCInvCustomer')].sort());
+    }
+    expect(full.text).not.toContain(C_PRIV_NAME);
+    // No widening for the ADMIN whose crm access is 'none' (D-114's principle): every row served after was served before.
+    const adminAfter = await served(ID.adminCrmNone, ID.bizC);
+    for (const key of READS) {
+      for (const id of adminAfter[key]) expect(adminBefore[key], `adminCrmNone ${key}`).toContain(id);
+    }
+
+    const settled = await run('timeline', [`--business=${ID.bizC}`]);
+    for (const label of ['invoice_sent_unlinked', 'invoice_sent_name_mismatch', 'invoice_sent_would_link', 'invoice_sent_would_withhold']) {
+      expect(countOf(settled.out, label), label).toBe(0);
+    }
+  });
+
+  it.todo(
+    "[DCS-T07] (review SEC-W10DCS-1 / CR-W10DCS-1, D-115 with D-114's principle) an ADMIN whose crm access is explicitly 'none' is not served a withheld message_intake.approved row (nor its sender or subject), as it was not served the row before the backfill: OPEN, the rule term is outside this packet's write set (timeline-visibility.ts canReadActivityRow: a row of module d115_withheld also needs read on the scope of its data.d115.module); no column the rule reads today ties an unmapped row to crm",
+  );
 });
