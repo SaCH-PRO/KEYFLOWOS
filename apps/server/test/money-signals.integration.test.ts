@@ -524,4 +524,150 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
     expect(card.payload.relationshipSummary).not.toContain(AI_SUMMARY_MARK);
     expectNoAmount(card, 'getSnapshot with no member');
   });
+
+  // ---- review repairs (W8-MONEY-SIGNALS review, owner ruling D-100) ---------------------------
+
+  /** Each contact's stored lead score as an includeStats read writes it (CrmStatsService.attachContactStats: +10 a paid, -5 an unpaid invoice). */
+  const STORED_SCORE: Record<string, number> = { [ID.cLow]: 50 + 10, [ID.cMid]: 50 + 10 + 5, [ID.cHigh]: 50 + 10 - 5 + 5, [ID.cNone]: 50 };
+  /** The same score without the invoice terms (the detail's meta.leadScore for that member). */
+  const MONEY_FREE_SCORE: Record<string, number> = { [ID.cLow]: 50, [ID.cMid]: 50 + 5, [ID.cHigh]: 50 + 5, [ID.cNone]: 50 };
+
+  /** Store the scores an includeStats read would write, so a background write of one changes nothing. */
+  async function storeScores() {
+    for (const [id, leadScore] of Object.entries(STORED_SCORE)) {
+      await db.contact.update({ where: { id }, data: { leadScore } });
+    }
+  }
+
+  it("SEC-W8MS-1 (D-100): the stored lead score carries the invoice terms, so that member is served the score without them: GET contacts with includeStats serves each row's leadScore as its meta.leadScore (also after its own read stored the full score), without includeStats null; GET contacts/:c and the dossier serve the contact's leadScore as their meta.leadScore; the owner and a member with revenue read keep the stored score", async () => {
+    await storeScores();
+    // Twice: the first read's background score write (attachContactStats) stores the full score again.
+    for (const pass of [1, 2]) {
+      const body = await ok(ID.noRev, 'contacts?includeStats=true');
+      for (const row of body.contacts as Array<Record<string, any>>) {
+        expect(row.leadScore, `pass ${pass} ${row.id} leadScore`).toBe(MONEY_FREE_SCORE[row.id]);
+        expect(row.meta.leadScore, `pass ${pass} ${row.id} meta.leadScore`).toBe(MONEY_FREE_SCORE[row.id]);
+      }
+    }
+    for (const row of (await ok(ID.noRev, 'contacts')).contacts as Array<Record<string, any>>) {
+      expect(row.leadScore, `${row.id} leadScore without includeStats`).toBeNull();
+    }
+    expect((await db.contact.findUnique({ where: { id: ID.cHigh }, select: { leadScore: true } })).leadScore).toBe(STORED_SCORE[ID.cHigh]);
+    for (const id of [ID.cHigh, ID.cMid, ID.cLow]) {
+      const detail = await ok(ID.noRev, `contacts/${id}`);
+      expect(detail.meta.leadScore, `${id} detail meta`).toBe(MONEY_FREE_SCORE[id]);
+      expect(detail.contact.leadScore, `${id} detail contact`).toBe(detail.meta.leadScore);
+      const dossier = await ok(ID.noRev, `contacts/${id}/dossier`);
+      expect(dossier.contact.leadScore, `${id} dossier contact`).toBe(MONEY_FREE_SCORE[id]);
+      expect(dossier.meta.leadScore, `${id} dossier meta`).toBe(MONEY_FREE_SCORE[id]);
+    }
+
+    // Controls: the stored score, with its invoice terms.
+    for (const user of [ID.owner, ID.rev]) {
+      for (const row of (await ok(user, 'contacts?includeStats=true')).contacts as Array<Record<string, any>>) {
+        expect(row.leadScore, `${user} ${row.id}`).toBe(STORED_SCORE[row.id]);
+      }
+      expect((await ok(user, `contacts/${ID.cMid}`)).contact.leadScore, `${user} detail`).toBe(STORED_SCORE[ID.cMid]);
+      expect((await ok(user, `contacts/${ID.cMid}/dossier`)).contact.leadScore, `${user} dossier`).toBe(STORED_SCORE[ID.cMid]);
+    }
+  });
+
+  it("SEC-W8MS-2 (D-100): GET contacts ignores sortBy=score (either sortOrder) for that member, as it ignores sortBy=revenue: the stored lead score it orders by carries the invoice terms; the list keeps the default order and paging; the owner and a member with revenue read get the stored score order", async () => {
+    await storeScores();
+    const plain = await listIds(ID.noRev, '');
+    const plainPage = await listIds(ID.noRev, 'take=2');
+    expect(plain.ids).toEqual(DEFAULT_ORDER);
+    for (const query of ['sortBy=score', 'sortBy=score&sortOrder=desc', 'sortBy=score&sortOrder=asc', 'sortBy=score&includeStats=true']) {
+      expect(await listIds(ID.noRev, query), `revenue 'none' ?${query}`).toEqual(plain);
+    }
+    expect(await listIds(ID.noRev, 'sortBy=score&take=2'), "revenue 'none' ?sortBy=score&take=2").toEqual(plainPage);
+
+    for (const user of [ID.owner, ID.rev]) {
+      const desc = (await listIds(user, 'sortBy=score')).ids;
+      expect(desc.map((id) => STORED_SCORE[id]), `${user} score desc`).toEqual([65, 60, 60, 50]);
+      expect(desc[0], `${user} score desc`).toBe(ID.cMid);
+      const asc = (await listIds(user, 'sortBy=score&sortOrder=asc')).ids;
+      expect(asc.map((id) => STORED_SCORE[id]), `${user} score asc`).toEqual([50, 60, 60, 65]);
+    }
+  });
+
+  it("SEC-W8MS-3 (D-100): GET .../segments serves that member the unpaid count as 0 (every other count as the owner's), and GET .../highlights no amount and no ranking by money: no overdue reminders, no high-potential cards (ranked by the lead score with its invoice terms), no unpaid segment, no invoice timeline row or invoice follow-up, no service revenue, each segment contact without its money fields; the owner and a member with revenue read keep them", async () => {
+    await storeScores();
+    const ownerSegments = await ok(ID.owner, 'segments');
+    expect(ownerSegments.unpaid).toBe(1);
+    expect(await ok(ID.noRev, 'segments')).toEqual({ ...ownerSegments, unpaid: 0 });
+    expect((await ok(ID.rev, 'segments')).unpaid).toBe(1);
+
+    const withheld = await ok(ID.noRev, 'highlights');
+    const ownerHighlights = await ok(ID.owner, 'highlights');
+    expect(withheld.highlights.overdueReminders).toEqual([]);
+    expect(withheld.highlights.highPotential).toEqual([]);
+    for (const service of withheld.highlights.serviceAffinity as Array<Record<string, any>>) {
+      expect(service.revenue, service.serviceId).toBe(0);
+    }
+    expect((withheld.segments as Array<{ key: string }>).map((s) => s.key)).toEqual(
+      (ownerHighlights.segments as Array<{ key: string }>).map((s) => s.key).filter((key) => key !== 'cold-with-unpaid'),
+    );
+    for (const segment of withheld.segments as Array<{ key: string; contacts: Array<Record<string, any>> }>) {
+      for (const row of segment.contacts) {
+        const why = `${segment.key} ${row.id}`;
+        expect([row.lifetimeValue, row.averageSpend, row.paymentReliability], why).toEqual([null, null, null]);
+        expect(row.leadScore, why).toBe(MONEY_FREE_SCORE[row.id]);
+        expect([row.meta.totalRevenue, row.meta.outstandingBalance, row.meta.paidInvoices, row.meta.unpaidInvoices], why).toEqual([0, 0, 0, 0]);
+      }
+    }
+    expect((withheld.timeline as Array<{ type: string }>).filter((entry) => entry.type === 'invoice')).toEqual([]);
+    expect((withheld.nextActions as Array<{ trigger: string }>).filter((action) => action.trigger === 'invoice-unpaid')).toEqual([]);
+    expectNoAmount(withheld, "revenue 'none' GET highlights");
+
+    // Controls: the owner's and a revenue-read member's highlights keep every figure and ranking.
+    for (const user of [ID.owner, ID.rev]) {
+      const full = user === ID.owner ? ownerHighlights : await ok(user, 'highlights');
+      expect(full.highlights.overdueReminders.map((c: { contactId: string }) => c.contactId), user).toEqual([ID.cHigh]);
+      expect(full.highlights.overdueReminders[0].outstandingBalance, user).toBeCloseTo(MONEY.OVERDUE_HIGH, 2);
+      expect(full.highlights.highPotential[0].contactId, user).toBe(ID.cMid);
+      expect((full.segments as Array<{ key: string }>).map((s) => s.key), user).toContain('cold-with-unpaid');
+      expect((full.timeline as Array<{ type: string }>).some((entry) => entry.type === 'invoice'), user).toBe(true);
+      expect((full.nextActions as Array<{ trigger: string }>).some((action) => action.trigger === 'invoice-unpaid'), user).toBe(true);
+    }
+  });
+
+  it("SEC-W8MS-4 (D-100): the stored fields ContactInsightService.computeContactIntelligenceFields works out from the contact's invoices (nextBestAction, followUpPriority, conversionProbability, referralLikelihood, responsivenessScore) are withheld (null) from that member in GET contacts, GET contacts/:c and the dossier; the owner and a member with revenue read keep them", async () => {
+    await contactInsight.computeContactIntelligenceFields(ID.biz, ID.cHigh);
+    const stored = await db.contact.findUnique({
+      where: { id: ID.cHigh },
+      select: { nextBestAction: true, followUpPriority: true, conversionProbability: true, referralLikelihood: true, responsivenessScore: true },
+    });
+    // The writer's invoice terms: an unpaid invoice is the next best action and makes the follow-up URGENT.
+    expect(stored.nextBestAction).toBe('Send invoice reminder');
+    expect(stored.followUpPriority).toBe('URGENT');
+    for (const field of ['conversionProbability', 'referralLikelihood', 'responsivenessScore'] as const) {
+      expect(stored[field], field).not.toBeNull();
+    }
+    const withheldFields = { nextBestAction: null, followUpPriority: null, conversionProbability: null, referralLikelihood: null, responsivenessScore: null };
+    const pick = (row: Record<string, any>) => ({
+      nextBestAction: row.nextBestAction,
+      followUpPriority: row.followUpPriority,
+      conversionProbability: row.conversionProbability,
+      referralLikelihood: row.referralLikelihood,
+      responsivenessScore: row.responsivenessScore,
+    });
+
+    for (const query of ['', 'includeStats=true']) {
+      const rows = (await ok(ID.noRev, `contacts${query ? `?${query}` : ''}`)).contacts as Array<Record<string, any>>;
+      expect(pick(rows.find((r) => r.id === ID.cHigh)!), `list ?${query}`).toEqual(withheldFields);
+    }
+    expect(pick((await ok(ID.noRev, `contacts/${ID.cHigh}`)).contact), 'detail').toEqual(withheldFields);
+    expect(pick((await ok(ID.noRev, `contacts/${ID.cHigh}/dossier`)).contact), 'dossier').toEqual(withheldFields);
+
+    for (const user of [ID.owner, ID.rev]) {
+      const rows = (await ok(user, 'contacts')).contacts as Array<Record<string, any>>;
+      expect(pick(rows.find((r) => r.id === ID.cHigh)!), `${user} list`).toEqual(stored);
+      expect(pick((await ok(user, `contacts/${ID.cHigh}`)).contact), `${user} detail`).toEqual(stored);
+    }
+  });
+
+  it.todo(
+    "SEC-W8MS-2 residual (D-100): POST .../ai-search (CrmAiService.naturalLanguageSearch) orders a 'score' or 'revenue' search by the stored lead score, which carries the invoice terms, and serves that score, to a member without revenue read; its query is built in crm-ai.service.ts, outside the W8-MONEY-SIGNALS write set (companion packet)",
+  );
 });

@@ -4615,7 +4615,10 @@ export type AutopilotActionData = z.infer<typeof autopilotActionSchema>;
 
 const healthMetricsSchema = z.object({
   engagement: z.number(),
-  payment: z.number(),
+  // W8-MONEY-SIGNALS (owner ruling D-100; review CR-W8MS-1): the payment-health
+  // ratio is left out for a member without revenue read; readers average and
+  // draw only the metrics served.
+  payment: z.number().optional(),
   responsiveness: z.number(),
   relationship: z.number(),
 });

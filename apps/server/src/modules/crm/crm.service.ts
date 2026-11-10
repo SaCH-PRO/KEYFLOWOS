@@ -192,38 +192,70 @@ function withoutRevenueEntries(value: Prisma.JsonValue | null, revenue: Readonly
 }
 
 /**
- * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): a GET contacts row as a
- * member without revenue read is served it, the rule GET contacts/:contactId
- * applies (V55-13h / V55-13i): the stored amounts (lifetimeValue,
- * averageSpend) and the paid / total invoice score (paymentReliability) null,
- * riskFlags / opportunities without their revenue entries, and, with
- * includeStats, meta's invoice figures 0 (null for the oldest unpaid due date)
- * and its lead score without the invoice terms (+10 a paid, -5 an unpaid
- * invoice), as the detail's meta is worked out with no invoice read. Deal
- * figures (open deals, top open deal) are CRM pipeline rows the deal routes
- * serve on crm read and stay.
+ * W8-MONEY-SIGNALS (owner ruling D-100): a stored Contact row as a member
+ * without revenue read is served it. Every stored field worked out from the
+ * contact's invoices or quotes is withheld:
+ * - CR-W7CMV-2 (GET contacts/:contactId's rule, V55-13h / V55-13i): the stored
+ *   amounts (lifetimeValue, averageSpend) and the paid / total invoice score
+ *   (paymentReliability) null, riskFlags / opportunities without their revenue
+ *   entries;
+ * - review repair SEC-W8MS-1: the stored leadScore, which carries the invoice
+ *   terms (CrmStatsService.attachContactStats writes +10 a paid and -5 an
+ *   unpaid invoice; ContactInsightService.computeContactIntelligenceFields
+ *   scores the paid total), is `moneyFreeLeadScore`: the score worked out with
+ *   no invoice read (meta.leadScore of the same response), or null where the
+ *   response has none, so `leadScore - meta.leadScore` gives nothing back;
+ * - review repair SEC-W8MS-4: the other fields computeContactIntelligenceFields
+ *   works out from the invoices (nextBestAction 'Send invoice reminder' and
+ *   followUpPriority 'URGENT' for an unpaid invoice, conversionProbability its
+ *   lead score, referralLikelihood and responsivenessScore with paid-total and
+ *   paid-invoice terms) null.
+ * Every other stored field is served as it is.
  */
-function withoutListMoney(contact: ContactWithStats): ContactWithStats {
-  const served: ContactWithStats = {
+export function withoutStoredMoney<T extends Contact>(contact: T, moneyFreeLeadScore: number | null): T {
+  return {
     ...contact,
     lifetimeValue: null,
     averageSpend: null,
     paymentReliability: null,
     riskFlags: withoutRevenueEntries(contact.riskFlags, LIST_REVENUE_RISK_FLAGS),
     opportunities: withoutRevenueEntries(contact.opportunities, LIST_REVENUE_OPPORTUNITIES),
+    leadScore: moneyFreeLeadScore,
+    conversionProbability: null,
+    nextBestAction: null,
+    followUpPriority: null,
+    referralLikelihood: null,
+    responsivenessScore: null,
   };
-  if (contact.meta) {
-    served.meta = {
-      ...contact.meta,
-      leadScore: contact.meta.leadScore - contact.meta.paidInvoices * 10 + contact.meta.unpaidInvoices * 5,
-      outstandingBalance: 0,
-      unpaidInvoices: 0,
-      paidInvoices: 0,
-      oldestUnpaidInvoiceDueAt: null,
-      totalRevenue: 0,
-      invoiceCount: 0,
-    };
-  }
+}
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): a GET contacts row as a
+ * member without revenue read is served it: the stored fields as
+ * withoutStoredMoney serves them, and, with includeStats, meta's invoice
+ * figures 0 (null for the oldest unpaid due date) and its lead score without
+ * the invoice terms (+10 a paid, -5 an unpaid invoice), as the detail's meta
+ * is worked out with no invoice read; the row's leadScore is that score
+ * (review repair SEC-W8MS-1), null without includeStats. Deal figures (open
+ * deals, top open deal) are CRM pipeline rows the deal routes serve on crm
+ * read and stay. Also the rows of GET .../highlights' segments (SEC-W8MS-3,
+ * crm.controller.ts).
+ */
+export function withoutListMoney(contact: ContactWithStats): ContactWithStats {
+  const meta: ContactMeta | undefined = contact.meta
+    ? {
+        ...contact.meta,
+        leadScore: contact.meta.leadScore - contact.meta.paidInvoices * 10 + contact.meta.unpaidInvoices * 5,
+        outstandingBalance: 0,
+        unpaidInvoices: 0,
+        paidInvoices: 0,
+        oldestUnpaidInvoiceDueAt: null,
+        totalRevenue: 0,
+        invoiceCount: 0,
+      }
+    : undefined;
+  const served = withoutStoredMoney(contact, meta ? meta.leadScore : null);
+  if (meta) served.meta = meta;
   return served;
 }
 
@@ -346,9 +378,12 @@ export class CrmService {
    * sort (sortBy 'revenue', either sortOrder) and the revenue filters
    * (minRevenue, hasUnpaidInvoices) are ignored: the list keeps the order,
    * membership and cursor paging it has without them, so neither tells that
-   * member who pays or who owes. Its rows carry no revenue field
-   * (withoutListMoney). The owner, a member with revenue read and a caller
-   * that names no actor (KEY, internal jobs) are served as before.
+   * member who pays or who owes. Review repair SEC-W8MS-2 (D-100): so is the
+   * score sort (sortBy 'score', either sortOrder): it orders by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice), so its order ranks the same thing. Its rows carry no revenue
+   * field (withoutListMoney). The owner, a member with revenue read and a
+   * caller that names no actor (KEY, internal jobs) are served as before.
    */
   async listContacts(input: ContactListOptions) {
     let access: CrmAccess | null = null;
@@ -359,12 +394,13 @@ export class CrmService {
     const readsRevenue = !input.actorUserId
       || (await resolveTimelineViewer(this.prisma, input.businessId, input.actorUserId)).readable.has('revenue');
     if (!readsRevenue) {
+      const moneySort = input.sortBy === 'revenue' || input.sortBy === 'score';
       const { contacts, ...page } = await this.listContactRows({
         ...input,
         minRevenue: undefined,
         hasUnpaidInvoices: undefined,
-        sortBy: input.sortBy === 'revenue' ? undefined : input.sortBy,
-        sortOrder: input.sortBy === 'revenue' ? undefined : input.sortOrder,
+        sortBy: moneySort ? undefined : input.sortBy,
+        sortOrder: moneySort ? undefined : input.sortOrder,
       }, visClause);
       return { ...page, contacts: (contacts as ContactWithStats[]).map((contact) => withoutListMoney(contact)) };
     }

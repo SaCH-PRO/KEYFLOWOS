@@ -116,7 +116,7 @@ interface ContactDetailProps {
   onDelete?: () => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
-  healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
+  healthMetrics?: { engagement: number; payment?: number; responsiveness: number; relationship: number } | null;
   journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
   crossJourney?: CrossJourneyResponse | null;
   conversationContext?: { lastDiscussed?: string; concerns?: string[]; preferences?: string[]; suggestedOpening?: string; sentiment?: string; engagementLevel?: string } | null;
