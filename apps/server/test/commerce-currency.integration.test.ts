@@ -81,6 +81,13 @@
  *             reports/balance-sheet (JSON, CSV, PDF) and GET revenue-reports/:preset need
  *             revenue:read: a revenue:none member gets 403 and no figure; a revenue:read member
  *             and the owner read what the services answer (RED-BEFORE: 200 with the figures).
+ *   RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT, owner ruling D-13; was it.todo) RED-BEFORE the
+ *             balance-sheet CSV and PDF exports (report-formatters.ts, served by GET
+ *             reports/balance-sheet?format=csv|pdf) carry the business-currency sheet first and then
+ *             each other currency's sheet on its own, as the Books view shows them: every CSV amount
+ *             row names its currency and equals that currency's sheet, every PDF amount is in the
+ *             currency of the sheet it sits in, and nothing is converted or added across currencies
+ *             (RED-BEFORE: the exports carried the USD sheet only and dropped byCurrency).
  *
  * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04, a V1-37 regression confirmed on
  * int/trial-I): money against a document already stored in a currency outside D-13 is still
@@ -154,6 +161,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { inflateSync } from 'zlib';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -1236,12 +1244,159 @@ describe('V1-37 review residuals (V1-37b): the balance sheet never sums across c
     }
   }, 30_000);
 
-  it.todo(
-    'RV37b-CR-03, outside the V1-37b write set: the balance-sheet CSV and PDF exports (report-formatters.ts '
-    + 'balanceSheetToCsv / balanceSheetToPdf, served by reports.controller.ts) read the top-level business-currency '
-    + 'sheet only and drop byCurrency; each other currency must be exported as its own labelled sheet, never summed. '
-    + 'Until then the Books view says beside the sheets that the export carries the business currency only',
-  );
+  /*
+   * RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT, owner ruling D-13; was it.todo): the
+   * balance-sheet CSV and PDF exports (report-formatters.ts balanceSheetToCsv /
+   * balanceSheetToPdf, served by reports.controller.ts) read the top-level
+   * business-currency sheet only and dropped byCurrency. Each other currency is
+   * now exported as its own labelled sheet after the business currency's, as the
+   * Books view shows them, and never summed. Both cases read the USD business's
+   * book (USD and TTD, RV37-02 above) through the real route as its owner.
+   */
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  async function sheetNow() {
+    const asOf = new Date(Date.now() + 60_000).toISOString();
+    const expected = JSON.parse(JSON.stringify(await reporting.getBalanceSheet(ID.bizUsd, new Date(asOf))));
+    expect(expected.currency).toBe('USD');
+    expect(Object.keys(expected.byCurrency).sort(), 'the book holds USD and TTD').toEqual(['TTD', 'USD']);
+    // The TTD sheet holds figures (the TTD invoice paid in CUR-06d), so dropping it loses money.
+    expect(expected.byCurrency.TTD.assets.lines.length, 'TTD assets').toBeGreaterThan(0);
+    return { asOf, expected };
+  }
+  /** Raw body reader for the PDF export (supertest does not buffer application/pdf). */
+  function pdfBody(res: any, cb: (err: Error | null, body: Buffer) => void) {
+    const chunks: Buffer[] = [];
+    res.on('data', (c: Buffer) => chunks.push(c));
+    res.on('end', () => cb(null, Buffer.concat(chunks)));
+  }
+  const exportOf = (format: 'csv' | 'pdf', asOf: string) => {
+    const req = request(reportsApp.getHttpServer())
+      .get(`/businesses/${ID.bizUsd}/reports/balance-sheet`)
+      .query({ asOf, format })
+      .set(HEADER, ID.owner);
+    return format === 'pdf' ? req.buffer(true).parse(pdfBody) : req;
+  };
+  /** RFC 4180 cells per line (quoted cells may hold commas and doubled quotes); an empty line is []. */
+  function parseCsv(text: string): string[][] {
+    return text.split('\n').map((line) => {
+      if (line === '') return [];
+      const cells: string[] = [];
+      let cell = '';
+      let quoted = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (quoted) {
+          if (ch === '"' && line[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') quoted = false; else cell += ch;
+        } else if (ch === '"') quoted = true;
+        else if (ch === ',') { cells.push(cell); cell = ''; } else cell += ch;
+      }
+      cells.push(cell);
+      return cells;
+    });
+  }
+  /**
+   * The text runs of a pdfkit PDF in drawing order: each FlateDecode content
+   * stream inflated, the hex strings of each TJ array joined (pdfkit's standard
+   * fonts draw one TJ per text call, split only by kerning offsets).
+   */
+  function pdfTexts(pdf: Buffer): string[] {
+    const out: string[] = [];
+    const raw = pdf.toString('latin1');
+    const streams = /(?<!end)stream\r?\n/g;
+    let m: RegExpExecArray | null;
+    while ((m = streams.exec(raw))) {
+      const start = m.index + m[0].length;
+      let content: string;
+      try {
+        content = inflateSync(pdf.subarray(start, raw.indexOf('endstream', start))).toString('latin1');
+      } catch {
+        continue;
+      }
+      for (const tj of content.matchAll(/\[([^\]]*)\]\s*TJ/g)) {
+        const hex = [...tj[1].matchAll(/<([0-9a-fA-F]*)>/g)].map((h) => h[1]).join('');
+        out.push(Buffer.from(hex, 'hex').toString('latin1').replace(/ /g, ' '));
+      }
+    }
+    return out;
+  }
+  const money = (n: number, currency: string) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'code' }).format(n).replace(/ /g, ' ');
+
+  it('RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT, was it.todo) RED-BEFORE: the CSV export carries the USD sheet, then the TTD sheet on its own; every amount row names its currency and equals that currency\'s sheet; nothing is summed (D-13)', async () => {
+    const { asOf, expected } = await sheetNow();
+    const res = await exportOf('csv', asOf);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^text\/csv/);
+    const rows = parseCsv(res.text);
+
+    // A sheet opens with its Currency row; its amount rows are the four-cell rows under its header.
+    const sheets: Array<{ currency: string; rows: string[][] }> = [];
+    for (const row of rows) {
+      if (row[0] === 'Currency' && row.length === 2) sheets.push({ currency: row[1], rows: [] });
+      else if (sheets.length && row.length === 4 && row[0] !== 'Section') sheets[sheets.length - 1].rows.push(row);
+    }
+    // RED-BEFORE: ['USD'] only (byCurrency dropped), and its rows named no currency.
+    expect(sheets.map((s) => s.currency), 'the business currency first, then each other currency').toEqual(['USD', 'TTD']);
+    expect(rows.some((r) => r.length === 1 && r[0] === 'TTD balances'), 'the TTD sheet is titled').toBe(true);
+    expect(
+      rows.some((r) => r.length === 1 && /not converted or added to the USD figures/.test(r[0])),
+      'the export says other currencies are apart',
+    ).toBe(true);
+
+    const want = (s: any) => {
+      const c = s.currency;
+      return [
+        ...s.assets.lines.map((l: any) => ['Asset', l.name, l.amount, c]),
+        ['Assets Total', '', s.assets.total, c],
+        ...s.liabilities.lines.map((l: any) => ['Liability', l.name, l.amount, c]),
+        ['Liabilities Total', '', s.liabilities.total, c],
+        ...s.equity.lines.map((l: any) => ['Equity', l.name, l.amount, c]),
+        ['Retained Earnings (period income)', '', s.netEquityFromIncome, c],
+        ['Equity Total', '', round2(s.equity.total + s.netEquityFromIncome), c],
+        ['Identity holds (A = L + E)', s.identityHolds ? 'YES' : 'NO', s.identityDelta, c],
+      ];
+    };
+    for (const { currency, rows: got } of sheets) {
+      // Every row of a currency's sheet is that currency's, equal to its sheet (RV37-02 proves each equal to Postgres).
+      expect(got.map((r) => [r[0], r[1], Number(r[2]), r[3]]), `${currency} sheet`).toEqual(want(expected.byCurrency[currency]));
+    }
+    // The USD sheet is the top level: the TTD figures are not added into it.
+    expect(sheets[0].rows.find((r) => r[0] === 'Assets Total')?.[2]).toBe(String(expected.assets.total));
+  }, 30_000);
+
+  it('RV37b-CR-03 (W9-BALANCE-SHEET-EXPORT, was it.todo) RED-BEFORE: the PDF export shows the USD sheet, then a TTD balances sheet; every amount is in the currency of the sheet it sits in and equals that sheet (D-13)', async () => {
+    const { asOf, expected } = await sheetNow();
+    const res = await exportOf('pdf', asOf);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(Buffer.isBuffer(res.body) && res.body.subarray(0, 4).toString()).toBe('%PDF');
+    const texts = pdfTexts(res.body);
+    expect(texts[0]).toBe('Balance Sheet');
+
+    // RED-BEFORE: no TTD sheet (-1).
+    const split = texts.indexOf('TTD balances');
+    expect(split, texts.join(' | ')).toBeGreaterThan(0);
+    expect(texts.filter((t) => t === 'TTD balances'), 'one TTD sheet').toHaveLength(1);
+    expect(texts.join(' '), 'the meta line names the other currency').toMatch(/not converted or added[^|]*TTD/);
+
+    const regions: Record<string, string[]> = { USD: texts.slice(0, split), TTD: texts.slice(split) };
+    for (const [currency, region] of Object.entries(regions)) {
+      const shown = region.flatMap((t) => [...t.matchAll(/\b([A-Z]{3}) -?[\d,]+\.\d{2}\b/g)].map((x) => x[1]));
+      expect(shown.length, `${currency} amounts`).toBeGreaterThan(0);
+      expect([...new Set(shown)], `every amount of the ${currency} sheet is ${currency}`).toEqual([currency]);
+
+      // Label then value, as the export draws each row.
+      const pairs = region.slice(0, -1).map((t, i) => `${t} => ${region[i + 1]}`);
+      const s = expected.byCurrency[currency];
+      for (const l of [...s.assets.lines, ...s.liabilities.lines, ...s.equity.lines]) {
+        expect(pairs, `${currency}: ${l.name}`).toContain(`${l.name} => ${money(l.amount, currency)}`);
+      }
+      expect(pairs).toContain(`Total Assets => ${money(s.assets.total, currency)}`);
+      expect(pairs).toContain(`Total Liabilities => ${money(s.liabilities.total, currency)}`);
+      expect(pairs).toContain(`Retained earnings (period) => ${money(s.netEquityFromIncome, currency)}`);
+      expect(pairs).toContain(`Total Equity => ${money(round2(s.equity.total + s.netEquityFromIncome), currency)}`);
+    }
+  }, 30_000);
 });
 
 describe('V1-37 review residuals (V1-37b): bank rules skip a row the door refuses for currency (RV37-04)', () => {
