@@ -87,8 +87,10 @@
  * there is none. For these cases the connector routes that act on a connector
  * reach a REAL ConnectorRegistryService holding the REAL GmailConnector (its
  * smoke test really sends through the stubbed Gmail API, which records every
- * message) and a google_calendar control connector; the GmailConnector's inbox
- * ingestion is a stand-in that records each inbox read.
+ * message), a google_calendar control connector and (W9-GOOGLE-DOORS-SERVER,
+ * owner ruling D-99, which makes the Google Suite connections' sync,
+ * disconnect and reconnect the owner's) a typeform control connector; the
+ * GmailConnector's inbox ingestion is a stand-in that records each inbox read.
  *
  * R0-CMF6 REVIEW REPAIRS (cases L03, M01, M02; RED-BEFORE on the packet head
  * d557acf0: L03 and M01 fail, M02 passes). DELETE .../credentials/gmail (it
@@ -295,7 +297,7 @@ let app: any;
 let realFetch: typeof fetch;
 /**
  * R0-CMF6: a real ConnectorRegistryService holding the real GmailConnector and
- * the google_calendar control connector, built in beforeAll; the stand-in below
+ * the google_calendar and typeform control connectors, built in beforeAll; the stand-in below
  * forwards the routes that act on a connector to it.
  */
 let liveRegistry: any;
@@ -370,6 +372,21 @@ const controlConnector = {
   testConnection: vi.fn(async (_businessId: string) => ({ success: true, account: `${P}calendar` })),
   smokeTest: vi.fn(async (_businessId: string) => ({ success: true, action: 'k07d control smoke', account: `${P}calendar` })),
   disconnect: vi.fn(async () => undefined),
+};
+
+/**
+ * W9-GOOGLE-DOORS-SERVER (owner ruling D-99): the R0-CMF6-K05 control, a
+ * connector that is neither the business mailbox nor a Google connection
+ * (typeform), recording what reached it. K05 used google_calendar, whose sync
+ * is now the owner's.
+ */
+const nonGoogleControlConnector = {
+  ...controlConnector,
+  meta: { ...controlConnector.meta, type: 'typeform', name: 'K07D control forms', category: 'forms', icon: 'forms' },
+  getStatus: vi.fn(async () => ({ type: 'typeform', name: 'K07D control forms', category: 'forms', status: 'connected', connectedAccount: `${P}forms` })),
+  sync: vi.fn(async (_businessId: string) => ({ success: true, itemsSynced: 0, errors: [] as string[], duration: 0 })),
+  testConnection: vi.fn(async (_businessId: string) => ({ success: true, account: `${P}forms` })),
+  smokeTest: vi.fn(async (_businessId: string) => ({ success: true, action: 'k07d control smoke', account: `${P}forms` })),
 };
 
 /**
@@ -933,6 +950,7 @@ beforeAll(async () => {
   liveRegistry = new ConnectorRegistryService(new EventEmitter2(), prismaService);
   liveRegistry.register(new GmailConnector(prismaService, new EventEmitter2(), {} as any, inboxIngestion as any));
   liveRegistry.register(controlConnector as any);
+  liveRegistry.register(nonGoogleControlConnector as any);
   // R0-CMF6b: the real inbox sync, reached only by the cases that route a sync to it.
   const { GmailIngestionService } = await import('../src/core/connectors/implementations/gmail-ingestion.service');
   realIngestion = new GmailIngestionService(prismaService, contactResolution as any, keyInboxFiling as any);
@@ -1602,9 +1620,11 @@ describe('R0-CMF5 review: the Google Suite connect and the connector routes foll
     expect((await status(ID.biz)).body).toEqual({ connected: true, email: current.email });
     expect(await pendingOf(ID.biz)).toHaveLength(1);
 
-    const calendar = await connectorOp('disconnect', ID.biz, 'google_calendar', ID.staffWrite);
-    expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
-    expect(registry.disconnectConnector).toHaveBeenCalledWith('google_calendar', ID.biz);
+    // W9-GOOGLE-DOORS-SERVER (owner ruling D-99): the control is a non-Google
+    // connector; disconnecting google_calendar is now the owner's.
+    const other = await connectorOp('disconnect', ID.biz, 'typeform', ID.staffWrite);
+    expect([200, 201], JSON.stringify(other.body)).toContain(other.status);
+    expect(registry.disconnectConnector).toHaveBeenCalledWith('typeform', ID.biz);
   });
 
   it('[R0-CMF5-I02] positive: the owner disconnects through the connector route (mailbox columns cleared, every PENDING Gmail connection removed, the registry\'s connector-level disconnect still runs) and reconnects the same way; each writes an audit row naming the owner', async () => {
@@ -1914,19 +1934,19 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearMailbox(ID.biz);
   });
 
-  it('[R0-CMF6-K05] control: other connectors are not gated by the mailbox rule: a STAFF member syncs, tests and smoke-tests google_calendar, and the registry and the connector are reached (success)', async () => {
-    controlConnector.sync.mockClear();
-    controlConnector.testConnection.mockClear();
-    controlConnector.smokeTest.mockClear();
+  it('[R0-CMF6-K05] control: other connectors are not gated by the mailbox rule: a STAFF member syncs, tests and smoke-tests a non-Google connector (typeform; D-99 makes the Google connections\' sync the owner\'s, W9-GOOGLE-DOORS-SERVER), and the registry and the connector are reached (success)', async () => {
+    nonGoogleControlConnector.sync.mockClear();
+    nonGoogleControlConnector.testConnection.mockClear();
+    nonGoogleControlConnector.smokeTest.mockClear();
     for (const op of ['sync', 'test', 'smoke'] as const) {
-      const res = await connectorOp(op, ID.biz, 'google_calendar', ID.staff);
+      const res = await connectorOp(op, ID.biz, 'typeform', ID.staff);
       expect([200, 201], `${op} ${JSON.stringify(res.body)}`).toContain(res.status);
       expect(res.body).toMatchObject({ success: true });
     }
-    expect(controlConnector.sync).toHaveBeenCalledWith(ID.biz);
-    expect(controlConnector.testConnection).toHaveBeenCalledWith(ID.biz);
-    expect(controlConnector.smokeTest).toHaveBeenCalledWith(ID.biz);
-    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'google_calendar'`, ID.biz);
+    expect(nonGoogleControlConnector.sync).toHaveBeenCalledWith(ID.biz);
+    expect(nonGoogleControlConnector.testConnection).toHaveBeenCalledWith(ID.biz);
+    expect(nonGoogleControlConnector.smokeTest).toHaveBeenCalledWith(ID.biz);
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'typeform'`, ID.biz);
   });
 
   it('[R0-CMF6-L01] RED-BEFORE: a mailbox connected through the Google Suite sign-in (its gmail connector row connected, so the nightly sync tries it) and disconnected with DELETE /commerce/businesses/:b/gmail: the row is marked disconnected in the disconnect\'s own transaction (the row, the cleared mailbox columns and the audit row carry one transaction id) and the nightly sync no longer selects it; a refused DELETE (STAFF) leaves it connected', async () => {
