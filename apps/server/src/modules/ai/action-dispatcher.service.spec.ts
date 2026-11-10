@@ -11,6 +11,9 @@
  *     the tool working, not failing: answered once, neither retried nor counted;
  *   - a genuine failure (an Error, a 5xx, a timeout, a 408 or 429) is retried and counted as before,
  *     and the fifth opens that business's circuit for that tool until CIRCUIT_TIMEOUT_MS has passed.
+ * These cases hand the dispatcher the HttpException itself. Review SEC-W9DC-1 (open): the production
+ * caller, FlowOrchestratorService.executeToolDirectly, rethrows a refusal as a plain Error today, so
+ * there the refusal is still counted, toward its own business's circuit only (QW-07b it.todo, QW-07c).
  *
  * Pure: the dispatcher over stand-ins for its collaborators (the flow orchestrator's
  * executeToolDirectly answers or throws as each case says; governance allows; the execution log,

@@ -55,6 +55,14 @@ function circuitKey(businessId: string, toolName: string): string {
  * the business, 403; an argument it does not take, 400). Asking again gets the same answer, and the
  * refusal is the tool working, not failing, so it is neither retried nor counted toward the circuit.
  * 408 Request Timeout and 429 Too Many Requests ask the caller to try again later: those stay failures.
+ *
+ * Review SEC-W9DC-1 (open, outside this packet's write set): the dispatcher reaches a tool only through
+ * FlowOrchestratorService.executeToolDirectly (its production caller is the plan queue), whose
+ * executeTool catches the tool's HttpException and rethrows it as a plain Error (the status is lost). So in
+ * production this is false for a tool's refusal today: a member's 404/403 is still retried and counted
+ * toward that business's own circuit for the tool (five of a STAFF member's refused plans hold the
+ * OWNER's for CIRCUIT_TIMEOUT_MS). Another business's circuit is never touched (circuitKey; QW-07c).
+ * The fix is for executeToolDirectly to carry the refusal's status (QW-07b, it.todo).
  */
 function isToolRefusal(err: unknown): boolean {
   if (!(err instanceof HttpException)) return false;
@@ -199,7 +207,8 @@ export class ActionDispatcherService {
           boundaryAnswer = err as { actionId?: string | null; disposition?: string };
           break;
         }
-        // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): the tool's own 4xx refusal is final too.
+        // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): the tool's own 4xx refusal is final too, when it
+        // reaches here as an HttpException (not yet through executeToolDirectly: SEC-W9DC-1, isToolRefusal).
         if (isToolRefusal(err)) {
           refused = true;
           break;
