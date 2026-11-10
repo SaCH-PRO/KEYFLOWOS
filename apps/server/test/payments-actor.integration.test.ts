@@ -65,9 +65,13 @@
  *         route names the approver; an approval with no human records null).
  *         R0-CMF2 review repairs PA-18c..d (SEC-CMF2-2): the record_payment
  *         step is keyed on the intake file and step, so two concurrent
- *         approvals, or a re-run, credit the invoice once. Still open,
- *         outside that write set (it.todo): PA-18e (SEC-CMF2-3) the approve
- *         route requires no revenue:write.
+ *         approvals, or a re-run, credit the invoice once. PA-18e
+ *         (SEC-CMF2-3, the approve route required no revenue:write) was an
+ *         it.todo outside that write set; CLOSED by W7-DRIVE-INTAKE-SCOPE:
+ *         PA-18e..f below (a member below revenue:write is refused 403 as the
+ *         manual payment route refuses them, and, owner ruling D-46, so is a
+ *         non-member SUPER_ADMIN; nothing is written and the plan stays
+ *         approvable by a member who may).
  *
  * Review repairs (R0-PL-07-PAYMENT-ACTOR-repair):
  *   PATCH /commerce/invoices/:id/paid by U (no payment yet) -> the manual row's recordedBy = U   (PL07-ST-2, PL07-CR-1)
@@ -188,6 +192,14 @@ const ID = {
   invRecordRerun: `${P}invRecordRerun`,
   invKeyInitiated: `${P}invKeyInitiated`,
   invHumanInitiated: `${P}invHumanInitiated`,
+  // W7-DRIVE-INTAKE-SCOPE (SEC-CMF2-3; D-46): PA-18e..f. The two members below
+  // revenue:write and the non-member SUPER_ADMIN are seeded by that describe
+  // block, after the fixture sanity case.
+  userDriveReader: `${P}userDriveReader`,
+  userDriveCrm: `${P}userDriveCrm`,
+  userDriveSuper: `${P}userDriveSuper`,
+  invDriveScope: `${P}invDriveScope`,
+  invDriveSuper: `${P}invDriveSuper`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -1682,17 +1694,82 @@ describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoic
   });
 });
 
-// R0-CMF2 review SEC-CMF2-3: the drive-intake approve route writes payments
-// behind AuthGuard and BusinessGuard only. The fix is a module-scope
-// requirement on DriveIntakeController (src/modules/commerce/
-// drive-intake.controller.ts), outside the R0-CMF2 write set.
-describe('open gaps found by the R0-CMF2 review (outside the R0-CMF2 write set)', () => {
-  it.todo(
-    'PA-18e (SEC-CMF2-3): a STAFF member with revenue:read, or with only crm:read, POST /drive/businesses/:b/intake/:id/approve on a plan with a ' +
-      'record_payment step -> 403 like POST .../invoices/:id/payments, and no payment is written - needs RequireModuleScope(\'revenue\', \'write\') ' +
-      'with ModuleScopeGuard on DriveIntakeController.approve (drive-intake.controller.ts); the data-inbox approve route (operations:write, and ' +
-      'correctItem rewrites proposedActions) needs the same review; outside the R0-CMF2 write set',
-  );
+// R0-CMF2 review SEC-CMF2-3: the drive-intake approve route wrote payments
+// (and, through a plan's create_invoice and apply_credit_note steps, invoices
+// and credit notes) behind AuthGuard and BusinessGuard only, so a member with
+// revenue:read, or with only crm:read, approved a plan the manual payment route
+// refuses them. W7-DRIVE-INTAKE-SCOPE makes the it.todo live: approve carries
+// ModuleScopeGuard with RequireModuleScope('revenue', 'write'), the rule every
+// payment-writing route has applied since R0-02, and, as a revenue:write
+// handler of the commerce module, owner ruling D-46 (a platform SUPER_ADMIN
+// who is not a member stays refused on tenant invoice writes;
+// d46-write-routes.spec.ts lists it GUARDED). The approver is still the
+// recorder (PA-18a). Still open, outside that write set: the data-inbox approve
+// route (operations:write, and correctItem rewrites proposedActions).
+describe('W7-DRIVE-INTAKE-SCOPE: approving a drive intake plan needs revenue:write (PA-18e, SEC-CMF2-3; D-46)', () => {
+  beforeAll(async () => {
+    // Two members below revenue:write (an explicit revenue:read, and a scope
+    // map holding only crm:read, so revenue is 'none'), and a platform
+    // SUPER_ADMIN with no membership in the business.
+    await db.user.create({ data: { id: ID.userDriveReader, email: `${ID.userDriveReader}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_userDriveReader`, userId: ID.userDriveReader, businessId: ID.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+    });
+    await db.user.create({ data: { id: ID.userDriveCrm, email: `${ID.userDriveCrm}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_userDriveCrm`, userId: ID.userDriveCrm, businessId: ID.biz, role: 'STAFF', permissionScopes: { crm: 'read' } },
+    });
+    await db.user.create({ data: { id: ID.userDriveSuper, email: `${ID.userDriveSuper}@test.local`, role: 'SUPER_ADMIN' } });
+  });
+
+  it('PA-18e (SEC-CMF2-3): a STAFF member with revenue:read, or with only crm:read, POST /drive/businesses/:b/intake/:id/approve on a plan with a record_payment step -> 403 like POST .../invoices/:id/payments, and no payment is written; the intake stays reviewing, and V (revenue:write) then approves it and is recorded as the recorder', async () => {
+    const intakeId = `${P}drive_scope`;
+    await seedDriveIntake(intakeId, ID.invDriveScope, { amount: 15, method: 'cash', reference: 'PYA-DRV-SCOPE' });
+
+    for (const [user, level] of [[ID.userDriveReader, 'read'], [ID.userDriveCrm, 'none']] as const) {
+      const res = await approveIntakeAs(user, intakeId);
+      // RED-BEFORE: 201 and a PENDING payment recorded by this member.
+      expect(res.status, `${level}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+      // The control: the manual payment route refuses this member the same way.
+      const manual = await postAs(user, ID.invDriveScope, { amount: 15, method: 'cash', reference: 'PYA-DRV-SCOPE-MANUAL' });
+      expect(manual.status, `${level}: ${JSON.stringify(manual.body)}`).toBe(403);
+      expect(manual.body.message).toBe(res.body.message);
+    }
+
+    // Refused before the claim: nothing written, the plan not used up.
+    expect(await paymentsOf(ID.invDriveScope)).toEqual([]);
+    expect(await contactEventsFor(ID.invDriveScope)).toHaveLength(0);
+    expect(await financeActivityFor(ID.invDriveScope)).toEqual([]);
+    expect(await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).toMatchObject({ status: 'reviewing', processedAt: null });
+
+    // V (STAFF, revenue:write) approves the same plan: V is the recorder (PA-18a holds).
+    const approved = await approveIntakeAs(ID.userV, intakeId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    expect(approved.body.results).toEqual([expect.objectContaining({ action: 'record_payment', success: true })]);
+    const rows = await paymentsOf(ID.invDriveScope);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: approved.body.results[0].entityId, amount: 15, status: 'PENDING', reference: 'PYA-DRV-SCOPE', recordedBy: ID.userV });
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('approved');
+  });
+
+  it('PA-18f (D-46): a platform SUPER_ADMIN with no membership in the business approves a plan with a record_payment step -> 403 \'Not authorized to update this invoice\', as the manual payment route refuses them; nothing is written and the intake stays reviewing', async () => {
+    const intakeId = `${P}drive_super`;
+    await seedDriveIntake(intakeId, ID.invDriveSuper, { amount: 18, method: 'cash', reference: 'PYA-DRV-SUPER' });
+
+    const res = await approveIntakeAs(ID.userDriveSuper, intakeId);
+    // RED-BEFORE: BusinessGuard and ModuleScopeGuard admit SUPER_ADMIN; 201.
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.message).toBe('Not authorized to update this invoice');
+    const manual = await postAs(ID.userDriveSuper, ID.invDriveSuper, { amount: 18, method: 'cash', reference: 'PYA-DRV-SUPER-MANUAL' });
+    expect(manual.status, JSON.stringify(manual.body)).toBe(403);
+    expect(manual.body.message).toBe(res.body.message);
+
+    expect(await paymentsOf(ID.invDriveSuper)).toEqual([]);
+    expect(await contactEventsFor(ID.invDriveSuper)).toHaveLength(0);
+    expect(await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).toMatchObject({ status: 'reviewing', processedAt: null });
+  });
 });
 
 // ---------------------------------------------------------------------------
