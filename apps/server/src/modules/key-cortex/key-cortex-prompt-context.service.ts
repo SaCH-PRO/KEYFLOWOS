@@ -1,4 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
@@ -26,6 +28,11 @@ export class KeyCortexPromptContextService {
     @Optional()
     @Inject(KeyCortexLearningService)
     private readonly learningService?: KeyCortexLearningService,
+    // W9-KEY-CORTEX-AUDIT: reads whether the session's user is a member of the business
+    // (episodicMemoryReader). Without it no episodic memory is read (fail closed).
+    @Optional()
+    @Inject(PrismaService)
+    private readonly prisma?: PrismaService,
   ) {}
 
   /**
@@ -133,9 +140,16 @@ export class KeyCortexPromptContextService {
 
     if (this.unifiedMemory) {
       try {
+        // W9-KEY-CORTEX-AUDIT: this block renders into one person's prompt, so its episodic memory
+        // (AiExecutionLog and CortexActionLog rows: what someone asked KEY to do, tool answers
+        // included) is that member's own (MemoryRetrievalOptions.userId), never every member's. A
+        // session that names no member of the business reads none at all (fail closed). The
+        // business-wide stores are not narrowed.
+        const reader = await this.episodicMemoryReader(businessId, session.userId);
         const fragments = await this.unifiedMemory.retrieveContext(businessId, {
           query: currentQuery,
           limit: 15,
+          ...(reader ? { userId: reader } : { includeEpisodic: false }),
         });
 
         if (fragments.length > 0) {
@@ -173,6 +187,25 @@ export class KeyCortexPromptContextService {
     }
 
     return memoryContext;
+  }
+
+  /**
+   * W9-KEY-CORTEX-AUDIT: the member whose episodic memory a prompt for this session may read: the
+   * session's user when they own the business or hold a membership in it (BusinessGuard's own
+   * predicate, userCanAccessBusiness), else nobody. No user, a user who is no member (a platform
+   * SUPER_ADMIN passes BusinessGuard without one; a removed member's session), or a check that cannot
+   * be made: nobody, so no episodic memory is read.
+   */
+  private async episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {
+    if (!userId || !this.prisma) return null;
+    try {
+      return (await userCanAccessBusiness(this.prisma, userId, businessId)) ? userId : null;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[buildMemoryContext][${businessId}] membership check failed, no episodic memory read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   formatUnifiedMemory(fragments: any[]): string {

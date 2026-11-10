@@ -860,6 +860,15 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       expect(memory).toContain('v19c memory: a business-wide fact');
     }
   });
+
+  it.todo(
+    'W9-KEY-CORTEX-AUDIT residual: POST /cortex/chat also reads episodic memory business-wide outside buildMemoryContext: ' +
+      'key-cortex-query-pipeline.service.ts processQuery (and its stream path) calls memoryRetrieval.retrieveContext ' +
+      'with { query, limit: 10 } and no userId when the route decision includes memory context, and renders the ' +
+      "fragments into the system prompt (formatMemoryContextBlock), so another member's CortexActionLog and " +
+      'AiExecutionLog rows can still reach a prompt there. Outside the W9-KEY-CORTEX-AUDIT write set: the same rule ' +
+      "(the session's member's own episodes, none for a non-member) belongs on those two calls.",
+  );
 });
 
 // ---------------------------------------------------------------------------

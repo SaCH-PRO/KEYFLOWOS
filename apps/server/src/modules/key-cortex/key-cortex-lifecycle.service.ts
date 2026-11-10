@@ -8,6 +8,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
@@ -39,6 +40,29 @@ export interface StartTurnInput {
   persona?: CortexPersona;
   provider?: CortexProvider;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * W9-KEY-CORTEX-AUDIT: a tool call's input or answer as an ai_execution_logs Json column stores it,
+ * bounded as AiExecutionLogService.sanitizePayload bounds its copy (and KeyCortexExecutor's auditJson):
+ * a JSON copy, { _truncated, _size, _preview } past 5000 characters (the first 500 kept), or a marker
+ * when it has no JSON form, so an odd payload never costs the call its row. Undefined when empty: the
+ * column is left unset (NULL), as before.
+ */
+const EXECUTION_LOG_STORED_WHOLE_MAX = 5000;
+const EXECUTION_LOG_PREVIEW_CHARS = 500;
+function executionLogJson(value: unknown): Prisma.InputJsonValue | undefined {
+  if (value === undefined || value === null) return undefined;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return undefined;
+    if (text.length > EXECUTION_LOG_STORED_WHOLE_MAX) {
+      return { _truncated: true, _size: text.length, _preview: text.slice(0, EXECUTION_LOG_PREVIEW_CHARS) };
+    }
+    return JSON.parse(text) as Prisma.InputJsonValue;
+  } catch {
+    return { _error: 'Could not serialize payload' };
+  }
 }
 
 export interface RecordExecutionInput {
@@ -335,6 +359,10 @@ export class KeyCortexLifecycleService {
     const { identity } = input;
     const now = new Date();
 
+    // W9-KEY-CORTEX-AUDIT: only columns AiExecutionLog has. The write named startedAt, which the model
+    // does not have, so Prisma refused every row, recordExecution rejected and cortex.action_executed
+    // was never emitted. The call's timing is durationMs here (and startedAt/completedAt on its
+    // CortexActionLog row). The payloads are bounded as AiExecutionLogService bounds its own copy.
     const executionLogPromise = (this.prisma.client as any).aiExecutionLog.create({
       data: {
         businessId: identity.businessId,
@@ -348,10 +376,9 @@ export class KeyCortexLifecycleService {
         riskTier: input.riskTier,
         success: input.success,
         errorMessage: input.error,
-        inputSummary: input.input as any,
-        outputSummary: input.output as any,
+        inputSummary: executionLogJson(input.input),
+        outputSummary: executionLogJson(input.output),
         durationMs: input.durationMs,
-        startedAt: input.startedAt,
         planId: input.planId ?? null,
         planStepId: input.planStepId ?? null,
         actor: 'key_cortex',

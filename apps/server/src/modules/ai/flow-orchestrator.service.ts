@@ -7414,7 +7414,7 @@ ${triage.standingContext}`;
         // through the cortex registry rather than reimplementing the handler
         // here. See CORTEX_TOOL_BRIDGE.
         if (isCortexBridgedTool(toolName)) {
-          return this.executeBridgedCortexTool(businessId, toolName, args);
+          return this.executeBridgedCortexTool(businessId, toolName, args, action);
         }
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -7439,11 +7439,17 @@ ${triage.standingContext}`;
    *
    * It does NOT bypass KeyAutonomySafetyService: the kill switch, the daily
    * action cap and the spend cap are checked before this and still apply.
+   *
+   * W9-KEY-CORTEX-AUDIT: the call names its actor and command thread from
+   * the dispatch's `action`, so the organ tool's CortexActionLog row is
+   * attributed on every surface, a job or queue worker with no request
+   * context included (V1-19c's auditActor reads the request only).
    */
   private async executeBridgedCortexTool(
     businessId: string,
     toolName: string,
     args: Record<string, any>,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     const cortexName = CORTEX_TOOL_BRIDGE[toolName];
 
@@ -7461,7 +7467,25 @@ ${triage.standingContext}`;
       throw new Error(`${toolName} is unavailable: no organ has registered ${cortexName}`);
     }
 
-    const result = await registry.execute(cortexName, { businessId, preApproved: true }, args);
+    // W9-KEY-CORTEX-AUDIT: who the call runs for and the thread it belongs to, as the dispatch knows
+    // them. Attribution only: the registry decides nothing from them (the action boundary and
+    // memberScopeRefusal already ran on this dispatch). A member's chat turn or plan run names its
+    // principal; a surface with none (an approved proposal, a KEY-cortex turn's bridged call, an inner
+    // custom-logic call, the Pro Auto monitor) the member it runs for. An approved proposal's action id
+    // is the proposal the call executes.
+    const actorId = action?.principalUserId || action?.onBehalfOfUserId || undefined;
+    const result = await registry.execute(
+      cortexName,
+      {
+        businessId,
+        preApproved: true,
+        ...(actorId ? { userId: actorId } : {}),
+        ...(action?.sessionId ? { sessionId: action.sessionId } : {}),
+        ...(action?.correlationId ? { correlationId: action.correlationId } : {}),
+        ...(action?.surface === 'PROPOSAL' && action.actionId ? { proposalId: action.actionId } : {}),
+      },
+      args,
+    );
 
     if (!result.success) {
       throw new Error(result.error ?? `${toolName} failed`);
