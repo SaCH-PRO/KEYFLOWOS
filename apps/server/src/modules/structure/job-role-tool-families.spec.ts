@@ -1924,12 +1924,24 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
      * them for a member without a principal (review SEC-W3D64-1/-3).
      */
     const HOLDER_AWARE = ['commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_update_invoice'];
-    const withheld = writes.filter((t) => !HOLDER_AWARE.includes(t));
+    /**
+     * W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88; V1-84 review ST-2), reviewed pin change: KEY's
+     * call-log write tools act as the member too. Their dispatcher cases hand CallLogService the member
+     * the command runs for as the viewer the call-log routes take from the session
+     * (FlowOrchestratorService.callLogViewer, over contactBindMember), and the clause runs for that
+     * member through getVisibleCallLog (directly, or inside createFollowUpTask when handed the viewer):
+     * holder-aware, not withheld, as the commerce tools above. A run with no member keeps the business
+     * view (D-88's convention), as the commerce tools do. Asserted below.
+     */
+    const CALL_LOG_HOLDER_AWARE = ['call_generate_script', 'call_log_outcome', 'call_schedule_followup'];
+    const withheld = writes.filter((t) => !HOLDER_AWARE.includes(t) && !CALL_LOG_HOLDER_AWARE.includes(t));
 
     it('CRM_ROW_VISIBILITY_TOOLS is exactly the granted write tools whose service reaches the clause', () => {
       // D-88: the derivation still finds the holder-aware commerce tools (their services reach the
       // clause); they are the ones asserted holder-aware below, and every other one is withheld.
       expect(writes.filter((t) => HOLDER_AWARE.includes(t))).toEqual(HOLDER_AWARE);
+      // W9-KEY-OBLIGATIONS-CALLS (D-88): and the holder-aware call-log tools, asserted below too
+      expect(writes.filter((t) => CALL_LOG_HOLDER_AWARE.includes(t))).toEqual(CALL_LOG_HOLDER_AWARE);
       expect(withheld).toEqual(['crm_delete_contact', 'crm_update_contact', 'tag_contact']);
       expect([...ROW].sort()).toEqual(withheld);
     });
@@ -1964,6 +1976,28 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       }
       // KEY's invoice edit forwards no contact, so it binds none: the stored one is never re-judged
       expect(cases.get('commerce_update_invoice')).not.toMatch(/contactId/);
+    });
+
+    it('W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): the holder-aware call-log tools hand CallLogService the member the command runs for (callLogViewer over contactBindMember), never a model value', () => {
+      const helper = memberBody(read(ORCHESTRATOR), 'callLogViewer')!;
+      expect(helper).toBeTruthy();
+      expect(helper).toContain('const userId = await this.contactBindMember(businessId, action);');
+      expect(helper).toMatch(/return \{ userId, role: user\?\.role \?\? null \};/);
+      expect(helper).not.toMatch(/args\b/);
+      for (const t of CALL_LOG_HOLDER_AWARE) {
+        const body = cases.get(t);
+        expect(body, t).toBeDefined();
+        expect(body, t).toContain('const viewer = await this.callLogViewer(businessId, action);');
+        expect(body, t).not.toMatch(/viewer = [^;]*args\./);
+      }
+      // the call log is looked up for that member before anything is written or read into a script
+      expect(cases.get('call_log_outcome')).toMatch(/if \(viewer\) await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, args\.callLogId, viewer\);\s*const completed = /);
+      expect(cases.get('call_generate_script')).toMatch(
+        /if \(viewer\) \{\s*await this\.getCallLog\(\)\.assertContactVisibleTo\(businessId, args\.contactId, viewer\);\s*await this\.getCallLog\(\)\.getVisibleCallLog\(businessId, args\.callLogId, viewer\);\s*\}\s*const script = /,
+      );
+      expect(cases.get('call_schedule_followup')).toMatch(/createFollowUpTask\(businessId, args\.callLogId, \{[\s\S]*?\}, 'key_ai', viewer\);/);
+      const followUp = serviceMethod('CallLogService.createFollowUpTask')!.body;
+      expect(followUp).toMatch(/const callLog = viewer\s*\? await this\.getVisibleCallLog\(businessId, callLogId, viewer\)\s*: await this\.getCallLog\(businessId, callLogId\);/);
     });
 
     it('D-88 (review SEC-W3D64-1/-3, CR-D64C-2): contactBindMember answers the member on every surface that runs for one, and the OWNER view only with no member', () => {

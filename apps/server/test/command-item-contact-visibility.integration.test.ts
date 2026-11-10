@@ -831,7 +831,9 @@ describe('KEY path (review ST-D10-3, CR-2; W9-KEY-OBLIGATIONS-CALLS, D-88)', () 
         expect(listIds(key), label).toEqual(listIds(rest.body));
         expect(key.total, label).toBe(rest.body.total);
         expect(key.overdueCount, label).toBe(rest.body.overdueCount);
-        expect(JSON.stringify(key), label).not.toContain(PRIVATE_NAME);
+        // no listed obligation names the PRIVATE contact through any column (an item CI-05b's assign
+        // moved off the contact keeps its old title but names no contact: the routes list it too)
+        for (const i of key.items) expect(namedContacts(i), `${label} ${i.id}`).not.toContain(ID.cPriv);
       }
     }
 

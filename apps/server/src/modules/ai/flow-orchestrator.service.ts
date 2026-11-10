@@ -63,7 +63,7 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
-import { CallLogService } from '../call-tasks/call-log.service';
+import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
@@ -3537,6 +3537,20 @@ ${triage.standingContext}`;
   }
 
   /**
+   * W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88; V1-84 review ST-2). The member the command
+   * runs for (contactBindMember) as the viewer the call-log routes take from the session
+   * (CallLogViewer: their id and their User row's role, as AuthMiddleware attaches it), so KEY's
+   * call-log tools reach only the call logs and contacts that member may open, as the routes do.
+   * Undefined for a run with no member, whose call-log tools read the business's call logs as before.
+   */
+  private async callLogViewer(businessId: string, action?: KeyDispatchAction): Promise<CallLogViewer | undefined> {
+    const userId = await this.contactBindMember(businessId, action);
+    if (!userId) return undefined;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return { userId, role: user?.role ?? null };
+  }
+
+  /**
    * V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3). The clause a member's calendar read ANDs onto `where`
    * so no event on a contact their CRM view does not open is answered (contactVisibilityFilter, the
    * GET contacts/:id rule; GET calendar events and GET calendar conflicts apply the same cascade
@@ -5885,6 +5899,11 @@ ${triage.standingContext}`;
         // that was never written. The business is handed over: CallLogService looks the call log
         // up within it, since on the staff bridge no ambient tenant binds a bare id (V1-21b
         // review 8 DD8-1).
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): KEY acts as the member the command runs for, so a
+        // call log on a contact that member may not open answers 404 'Call log not found', exactly as
+        // an unknown id and as POST calls/:id/complete answers them (getVisibleCallLog). No member: as before.
+        const viewer = await this.callLogViewer(businessId, action);
+        if (viewer) await this.getCallLog().getVisibleCallLog(businessId, args.callLogId, viewer);
         const completed = await this.getCallLog().completeCall(businessId, args.callLogId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
@@ -5898,6 +5917,16 @@ ${triage.standingContext}`;
         };
       }
       case 'call_generate_script': {
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): for the member the command runs for, the contact and
+        // the call log must be ones they may open, as POST calls/:id/generate-script requires; each
+        // hidden row answers as an unknown one, in the order CallScriptService looks them up (the
+        // contact, then the call log), so no answer tells a hidden row from a missing one. No member:
+        // as before.
+        const viewer = await this.callLogViewer(businessId, action);
+        if (viewer) {
+          await this.getCallLog().assertContactVisibleTo(businessId, args.contactId, viewer);
+          await this.getCallLog().getVisibleCallLog(businessId, args.callLogId, viewer);
+        }
         const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
         return {
           callLogId: args.callLogId,
@@ -5910,12 +5939,16 @@ ${triage.standingContext}`;
       }
       case 'call_schedule_followup': {
         // within the business, as call_log_outcome (V1-21b review 8 DD8-1)
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): and on a call log the member the command runs for may
+        // open, as POST calls/:id/follow-up requires: handed that member, createFollowUpTask looks the
+        // call log up with getVisibleCallLog in place of its own lookup. No member: as before.
+        const viewer = await this.callLogViewer(businessId, action);
         const task = await this.getCallLog().createFollowUpTask(businessId, args.callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
           assigneeId: args.assigneeId,
-        }, 'key_ai');
+        }, 'key_ai', viewer);
         return { taskId: task.id, title: args.title };
       }
 
@@ -6095,12 +6128,18 @@ ${triage.standingContext}`;
 
       // === HELPDESK ===
       case 'command_list_due_obligations': {
-        const due = await this.getCommandService().findDue(businessId, {
+        const window = {
           windowDays: args.windowDays as number | undefined,
           includeOverdue: args.includeOverdue as boolean | undefined,
           limit: args.limit as number | undefined,
-        });
-        return due;
+        };
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88: KEY acts as the member the command runs for): the
+        // member goes to findDue as GET items/due hands it the session member, so an obligation that
+        // names a contact they may not open is left out (FOLLOW3-D10). No member: the list as before.
+        const member = await this.contactBindMember(businessId, action);
+        return member
+          ? this.getCommandService().findDue(businessId, window, member)
+          : this.getCommandService().findDue(businessId, window);
       }
 
       case 'command_discharge_obligation': {
@@ -6111,11 +6150,14 @@ ${triage.standingContext}`;
         // already has sixteen writers across twelve modules; this handler is
         // not going to be the seventeenth. discharge() also scopes by
         // businessId via findOne, so a foreign id cannot be discharged here.
-        const out = await this.getCommandService().discharge(
-          businessId,
-          id,
-          (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation',
-        );
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88): and with the member the command runs for, as POST
+        // items/:id/discharge hands it the session member, so an obligation that names a contact they
+        // may not open answers 404 'Command item not found', exactly as an unknown id. No member: as before.
+        const dischargeRef = (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation';
+        const member = await this.contactBindMember(businessId, action);
+        const out = member
+          ? await this.getCommandService().discharge(businessId, id, dischargeRef, member)
+          : await this.getCommandService().discharge(businessId, id, dischargeRef);
         return {
           id: out.id,
           title: out.title,

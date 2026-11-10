@@ -453,13 +453,22 @@ export class CallLogService {
     return canOpen ? calls.filter((c: { contactId: string | null }) => !c.contactId || canOpen(c.contactId)) : calls;
   }
 
+  /**
+   * `viewer` (W9-KEY-OBLIGATIONS-CALLS; owner rulings D-64, D-88): the member a KEY command runs for.
+   * With one, the call log is looked up as GET calls/:id looks it up for them (getVisibleCallLog), so
+   * one on a contact they may not open answers 404 'Call log not found', exactly as an unknown id.
+   * Without one, as before; POST calls/:id/follow-up checks its session member before it calls this.
+   */
   async createFollowUpTask(
     businessId: string,
     callLogId: string,
     input: CreateFollowUpInput,
     createdBy: string,
+    viewer?: CallLogViewer,
   ) {
-    const callLog = await this.getCallLog(businessId, callLogId);
+    const callLog = viewer
+      ? await this.getVisibleCallLog(businessId, callLogId, viewer)
+      : await this.getCallLog(businessId, callLogId);
 
     if (!callLog.contactId) {
       throw new BadRequestException(
