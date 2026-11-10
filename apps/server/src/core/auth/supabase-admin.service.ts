@@ -3,7 +3,8 @@ import { AuthError, createClient, SupabaseClient } from '@supabase/supabase-js';
 import { SignJWT } from 'jose';
 
 /**
- * W7-RISC-REVOKE (D-39): how long the user JWT revokeAllSessions mints for
+ * W7-RISC-REVOKE (the provider-global-logout option of D-39, an OPEN owner
+ * decision, not a ruling): how long the user JWT revokeAllSessions mints for
  * POST /logout lives, in seconds. It is used once, at once; the margin only
  * covers clock skew between this server and GoTrue.
  */
@@ -148,8 +149,14 @@ export class SupabaseAdminService {
   /**
    * Revoke EVERY Supabase session of a user, and with them every refresh
    * token, by user id: for a caller that holds no access token of that user
-   * (a RISC event carries none). W7-RISC-REVOKE (D-39: the provider global
-   * logout), closing R0-ID-F7 review F7-SEC-2.
+   * (a RISC event carries none). W7-RISC-REVOKE, toward R0-ID-F7 review
+   * F7-SEC-2; it does NOT close it (below).
+   *
+   * D-39 IS NOT RULED (W7-RISC-REVOKE review CR-W7RR-2): BUILD-MAP-001
+   * section (g) lists it as an open owner decision (a schema cutoff, or a
+   * provider global logout under a server-minted user token?), and no ruling
+   * records an answer. This is the second option, built so it can be ruled
+   * on; it is not an owner-ruled design.
    *
    * The installed auth-js (2.94.0) admin API has no call that ends sessions by
    * user id: admin.signOut(jwt, scope) sends its first argument as the bearer
@@ -168,13 +175,16 @@ export class SupabaseAdminService {
    * Never throws. The minted token never leaves this method except as that
    * bearer, and is never logged.
    *
-   * NOT AVAILABLE UNDER THE RELEASE 0 RULE (W7-RISC-REVOKE review CR-W7RR-1):
+   * NOT AVAILABLE UNDER THE RELEASE 0 RULE (W7-RISC-REVOKE review SEC-W7RR-1,
+   * CR-W7RR-1):
    * docs/auth-pathway.md requires SUPABASE_JWT_SECRET to be EMPTY on a
    * Release 0 server (env.spec.ts fails on any template that sets it), so
    * there this returns false on every call and sends nothing. D-39 has no
-   * recorded owner ruling that amends that rule; until one does, R0-ID-F7
-   * F7-SEC-2 stays open in that configuration. See revokeAllSessionsUnavailable,
-   * which RiscService reads at boot to warn.
+   * recorded owner ruling that amends that rule (R0-SEC-02 took the secret
+   * off the API because it is the legacy key that also signs service_role
+   * tokens); until one does, R0-ID-F7 F7-SEC-2 stays OPEN in that
+   * configuration. See revokeAllSessionsUnavailable, which RiscService reads at
+   * boot to warn.
    */
   async revokeAllSessions(userId: string): Promise<boolean> {
     const unavailable = this.revokeAllSessionsUnavailable();
@@ -209,8 +219,8 @@ export class SupabaseAdminService {
    * Why revokeAllSessions cannot send anything on this server, or null when
    * it can try (GoTrue may still refuse a secret it does not hold). Reads the
    * environment on every call, as isConfigured does. W7-RISC-REVOKE review
-   * CR-W7RR-1 (D-39): with SUPABASE_JWT_SECRET empty, the Release 0 rule, the
-   * reason is that secret.
+   * SEC-W7RR-1 / CR-W7RR-1 (D-39 open): with SUPABASE_JWT_SECRET empty, the
+   * Release 0 rule, the reason is that secret.
    */
   revokeAllSessionsUnavailable(): string | null {
     if (!this.isConfigured()) return `${this.describeMissingConfig()} not set`;

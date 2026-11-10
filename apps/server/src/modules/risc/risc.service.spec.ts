@@ -110,7 +110,8 @@ describe('RiscService', () => {
       getClient: vi.fn().mockReturnValue(client),
       // The SupabaseAdminService wrapper (CR-2), which takes an access JWT.
       signOut: vi.fn().mockResolvedValue(false),
-      // W7-RISC-REVOKE (D-39): the by-user-id global sign-out. The service
+      // W7-RISC-REVOKE: the by-user-id global sign-out (the unruled
+      // provider-global-logout option of D-39, review CR-W7RR-2). The service
       // mints the user JWT itself; the RISC handler never holds one.
       revokeAllSessions: vi.fn(async (_uid: string): Promise<boolean> => true),
       admin: client.auth.admin,
@@ -551,14 +552,19 @@ describe('RiscService', () => {
     });
 
     /**
-     * W7-RISC-REVOKE (D-39, closes R0-ID-F7 review F7-SEC-2): the ban only
-     * pauses the provider session, so account-disabled/hijacking also revokes
-     * every Supabase session of the user (and with them every refresh token)
-     * through SupabaseAdminService.revokeAllSessions(userId), which mints the
-     * user JWT GoTrue's POST /logout needs. The other session-ending events
-     * keep no provider traffic (F7-CR-1).
+     * W7-RISC-REVOKE, toward R0-ID-F7 review F7-SEC-2: the ban only pauses
+     * the provider session, so account-disabled/hijacking also asks for every
+     * Supabase session of the user (and with them every refresh token) to be
+     * revoked through SupabaseAdminService.revokeAllSessions(userId), which
+     * mints the user JWT GoTrue's POST /logout needs. That is the
+     * provider-global-logout option of D-39, which BUILD-MAP-001 section (g)
+     * still lists as an OPEN owner decision (review CR-W7RR-2). It does not
+     * close F7-SEC-2: under the Release 0 rule SUPABASE_JWT_SECRET is empty
+     * and the sign-out never runs (review SEC-W7RR-1 / CR-W7RR-1; the OPEN
+     * it.todo cases in test/supabase-admin.service.test.ts). The other
+     * session-ending events keep no provider traffic (F7-CR-1).
      */
-    describe('W7-RISC-REVOKE (D-39) — account-disabled/hijacking revokes every provider session by user id', () => {
+    describe('W7-RISC-REVOKE (the provider-global-logout option of D-39, an open owner decision) — account-disabled/hijacking asks for every provider session to be revoked by user id', () => {
       it('asks SupabaseAdminService.revokeAllSessions(userId) after the local legs and BEFORE the ban is read; never the JWT-taking signOut', async () => {
         supabaseAdmin.revokeAllSessions.mockImplementationOnce(async () => {
           order.push('provider revokeAllSessions');
@@ -621,7 +627,7 @@ describe('RiscService', () => {
       expect(supabaseAdmin.admin.getUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.updateUserById).not.toHaveBeenCalled();
       expect(supabaseAdmin.admin.signOut).not.toHaveBeenCalled();
-      // W7-RISC-REVOKE review SEC-W7RR-2 (D-39): nor the by-user-id global
+      // W7-RISC-REVOKE (negative control): nor the by-user-id global
       // sign-out. account-enabled restores a recovered user; signing that user
       // out everywhere would undo the recovery.
       expect(supabaseAdmin.revokeAllSessions).not.toHaveBeenCalled();
