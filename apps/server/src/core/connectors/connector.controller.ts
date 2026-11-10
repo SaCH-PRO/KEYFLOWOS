@@ -12,8 +12,22 @@ import { randomBytes } from 'crypto';
 import type { ConnectorType, ConnectorCredentialField } from './connector.interface';
 import { UpdateInboxConfigDto } from '../../modules/ingestion/dto/ingestion-item.dto';
 import { resolveGmailService } from './google-suite.service';
+import { assertGoogleConnectOwner } from './google-suite.controller';
 
 type ConnectorRequest = { user?: { id: string; role?: string } };
+
+/**
+ * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T02]): the connections the
+ * Google Suite consent provisions besides gmail (GoogleSuiteService
+ * SERVICE_TO_CONNECTOR). gmail keeps its own rule (GMAIL_OWNER_ONLY, D-11).
+ */
+const GOOGLE_SUITE_CONNECTOR_TYPES: ReadonlySet<string> = new Set([
+  'google_calendar',
+  'google_drive',
+  'google_contacts',
+  'google_forms',
+  'google_business_profile',
+]);
 
 @Controller('connectors')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -64,6 +78,31 @@ export class ConnectorController {
     await gmail.assertConnectAuthority(businessId, req.user);
   }
 
+  /**
+   * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T02]): every Google
+   * connection of a business is started, synced and disconnected only by the
+   * business owner, so sync, disconnect and reconnect (which disconnects first)
+   * of a Google Suite connection follow assertGoogleConnectOwner (OWNER
+   * membership, Business.ownerId or SUPER_ADMIN, else 403
+   * GOOGLE_CONNECT_OWNER_ONLY) before the registry is reached, outside the
+   * handlers' error mapping. test, smoke, health, statuses, dashboard and
+   * authenticate are unchanged, as is every other connector.
+   *
+   * W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1 (D-99, [V94D-H01]): so does
+   * DELETE credentials/:type for these connections. It marks the connector row
+   * disconnected and clears its account and connection time while the stored
+   * Business Google tokens stay, which takes the connection out of the nightly
+   * sync (ConnectorSyncScheduler, connected/syncing rows) and the background
+   * scan (ConnectorIntelligenceService.scanBusinessConnectors), i.e. it stops
+   * that connection's sync: the SEC-CMF6-1 class already closed for gmail.
+   * POST credentials/:type and GET webhook-info/:type write nothing for them
+   * (no credential fields, no webhook: 400 before any write).
+   */
+  private async assertGoogleConnectionAuthority(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
+    if (!GOOGLE_SUITE_CONNECTOR_TYPES.has(type)) return;
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
+  }
+
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
     return this.registry.getDashboard(businessId);
@@ -96,6 +135,7 @@ export class ConnectorController {
     @Req() req: ConnectorRequest,
   ) {
     await this.assertBusinessMailboxAuthority(businessId, type, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       return await this.registry.syncConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -111,6 +151,7 @@ export class ConnectorController {
     @Req() req: ConnectorRequest,
   ) {
     if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       await this.registry.disconnectConnector(type as ConnectorType, businessId);
       return { success: true };
@@ -140,6 +181,7 @@ export class ConnectorController {
     @Req() req: ConnectorRequest,
   ) {
     if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       return await this.registry.reconnectConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -323,6 +365,8 @@ export class ConnectorController {
     @Req() req: ConnectorRequest,
   ) {
     await this.assertBusinessMailboxAuthority(businessId, type, req);
+    // W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1 (D-99, [V94D-H01]): a Google Suite connection's row is the owner's to clear.
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     const connector = this.registry.get(type as ConnectorType);
     if (!connector) throw new NotFoundException(`Connector ${type} not found`);
     await this.credentials.clearCredentials(businessId, type as ConnectorType);

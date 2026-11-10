@@ -17,6 +17,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
 import {
@@ -364,8 +365,26 @@ export class ConnectController {
     return this.contactSync.getSummary(businessId);
   }
 
+  /**
+   * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T03]): sync-all syncs
+   * Google Contacts whenever it is connected (ContactSyncService.syncAll reads
+   * contactsAccessToken), so while it is connected the run is the owner's
+   * (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY before any source
+   * is synced). The smaller of the two changes the packet allowed: refuse the
+   * run rather than skip the Google source, so syncAll is unchanged. With
+   * Google Contacts not connected it syncs no Google source and stays a
+   * member's (Outlook Contacts is a Microsoft connection, outside D-99).
+   */
   @Post('businesses/:businessId/contact-sources/sync-all')
-  syncAllSources(@Param('businessId') businessId: string) {
+  async syncAllSources(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
+  ) {
+    const google = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { contactsAccessToken: true },
+    });
+    if (google?.contactsAccessToken) await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.contactSync.syncAll(businessId);
   }
 
@@ -385,22 +404,34 @@ export class ConnectController {
     return this.contactSync.setSignatureParsingEnabled(businessId, !!body?.enabled);
   }
 
+  // W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T03]): syncing or
+  // disconnecting the Google Contacts source is the owner's
+  // (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY first, before
+  // anything is synced or cleared). The Outlook source is unchanged.
   @Post('businesses/:businessId/contact-sources/:source/resync')
-  resyncSource(
+  async resyncSource(
     @Param('businessId') businessId: string,
     @Param('source') source: string,
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    if (source === 'google_contacts') return this.contacts.sync(businessId);
+    if (source === 'google_contacts') {
+      await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
+      return this.contacts.sync(businessId);
+    }
     if (source === 'outlook_contacts') return this.outlook.sync(businessId);
     throw new BadRequestException(`Unknown source "${source}"`);
   }
 
   @Delete('businesses/:businessId/contact-sources/:source')
-  disconnectSource(
+  async disconnectSource(
     @Param('businessId') businessId: string,
     @Param('source') source: string,
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    if (source === 'google_contacts') return this.contacts.disconnect(businessId);
+    if (source === 'google_contacts') {
+      await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
+      return this.contacts.disconnect(businessId);
+    }
     if (source === 'outlook_contacts') return this.outlook.disconnect(businessId);
     throw new BadRequestException(`Unknown source "${source}"`);
   }
