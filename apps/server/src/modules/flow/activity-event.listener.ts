@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService, type CreateActivityInput } from './activity.service';
 import {
   InvoiceCreatedPayload,
@@ -38,7 +39,28 @@ function bookingStart(startTime: unknown): string | null {
 export class ActivityEventListener {
   private readonly logger = new Logger(ActivityEventListener.name);
 
-  constructor(@Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(
+    @Inject(ActivityService) private readonly activity: ActivityService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-12): `contactId` when it is a
+   * contact of `businessId` (a forgotten one in its grace period included:
+   * aggregate is the Contact read the soft-delete extension leaves as written),
+   * otherwise undefined, so a row never names another tenant's contact. A failed
+   * lookup names none.
+   */
+  private async contactOfBusiness(businessId: string, contactId: string | null | undefined): Promise<string | undefined> {
+    if (!businessId || !contactId) return undefined;
+    try {
+      const found = await this.prisma.client.contact.aggregate({ where: { id: contactId, businessId }, _count: { _all: true } });
+      return found._count._all > 0 ? contactId : undefined;
+    } catch (err) {
+      this.logger.warn(`contact lookup failed for business=${businessId}: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
 
   // -- Commerce: Invoices --
 
@@ -76,7 +98,8 @@ export class ActivityEventListener {
       icon: 'dollar-sign',
       tone: 'success',
       data: { invoiceId: inv.id, total: inv.total, currency: inv.currency },
-      contactId: inv.contactId || undefined,
+      // W9-CRM-RESIDUALS (L-12): bound to the payload's business.
+      contactId: await this.contactOfBusiness(payload.businessId, inv.contactId),
       category: 'PAYMENT',
       status: 'COMPLETED',
       revenueImpact: inv.total ? Number(inv.total) : undefined,

@@ -560,7 +560,13 @@ export class AutomationExecutorService {
     });
 
     if (payload.fromStatus && payload.toStatus && payload.fromStatus !== payload.toStatus) {
-      await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
+      // W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-13, owner ruling D-81): a
+      // paid invoice's move already wrote its one follow-up, for the owner, in
+      // the move's transaction; the built-in rule adds no second task and no
+      // tags update for it. Playbooks and flows still run on the move.
+      if (!(await this.isPaidInvoiceMove(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus))) {
+        await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
+      }
       await this.executePlaybooks(payload.businessId, 'contact.stage_changed', {
         contactId: payload.contact.id,
         fromStatus: payload.fromStatus,
@@ -573,6 +579,29 @@ export class AutomationExecutorService {
         toStatus: payload.toStatus,
         trigger: 'contact.stage_changed',
       });
+    }
+  }
+
+  /**
+   * W9-CRM-RESIDUALS (L-13, D-81): whether this status change is the D-81 move
+   * of a paid invoice: the contact's latest status.changed entry is the one
+   * CrmService.advanceToClientOnInvoicePaid writes (source
+   * 'lifecycle-automation') from `from` to `to`. A member's change writes its
+   * own entry (source 'crm'), so it is never taken for one. A failed lookup
+   * answers false: the built-in rule runs as before.
+   */
+  private async isPaidInvoiceMove(businessId: string, contactId: string, from: string, to: string): Promise<boolean> {
+    try {
+      const latest = await this.prisma.client.contactEvent.findFirst({
+        where: { businessId, contactId, type: 'status.changed' },
+        orderBy: { createdAt: 'desc' },
+        select: { source: true, data: true },
+      });
+      const data = (latest?.data ?? null) as { from?: unknown; to?: unknown } | null;
+      return latest?.source === 'lifecycle-automation' && data?.from === from && data?.to === to;
+    } catch (e) {
+      this.logger.warn(`D-81 move lookup failed for contact=${contactId}: ${(e as Error).message}`);
+      return false;
     }
   }
 

@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CrmTimelineService } from './crm-timeline.service';
-import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
 import { WonLostReasonService } from './won-lost-reason.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
@@ -42,6 +42,39 @@ export type DealListFilters = {
   skip?: number;
   take?: number;
 };
+
+/**
+ * W9-CRM-RESIDUALS (D-37): which of `contactIds` the member the
+ * TenantInterceptor bound to this call may open, by the rule GET deals applies
+ * to a deal's contact (CrmDealsService.boundMemberContactWhere, V1-89), for the
+ * deal reads outside CrmDealsService that name a deal's contact: the velocity
+ * report's outliers (DealVelocityService) and an account's deals
+ * (CrmAccountsService). Null when nothing is withheld (the OWNER, SUPER_ADMIN,
+ * or no member bound to the call, as D-88 has KEY's reads take it); a member
+ * bound to another tenant, or not a member of this business, opens none. The
+ * ids are checked by contactVisibilityFilter (the tenant predicate, deletedAt
+ * null and visibilityClause).
+ */
+export async function boundMemberOpensContacts(
+  prisma: PrismaService,
+  businessId: string,
+  contactIds: Iterable<string | null | undefined>,
+): Promise<((contactId: string | null | undefined) => boolean) | null> {
+  const ctx = getTenantContext();
+  if (!ctx?.userId) return null;
+  const opensNone = () => false;
+  if (ctx.businessId !== businessId) return opensNone;
+  let access: CrmAccess;
+  try {
+    access = await resolveCrmAccess(prisma, businessId, ctx.userId);
+  } catch (err) {
+    if (err instanceof ForbiddenException) return opensNone;
+    throw err;
+  }
+  const canOpen = await contactVisibilityFilter(prisma, businessId, access, ctx.userId, contactIds);
+  if (!canOpen) return null;
+  return (contactId) => typeof contactId === 'string' && canOpen(contactId);
+}
 
 @Injectable()
 export class CrmDealsService {
@@ -218,16 +251,48 @@ export class CrmDealsService {
     }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
 
     this.events.emit('crm.deal.created', { businessId: input.businessId, dealId: deal.id, contactId: input.contactId });
-    return deal;
+    return this.answerForBoundMember(input.businessId, deal);
   }
 
+  /**
+   * W9-CRM-RESIDUALS (D-37): GET deals/:dealId (and KEY's deals_get) serve a
+   * deal whose contact the member bound to the call cannot open as GET deals
+   * lists it: without that contact, and without the company name and account
+   * createDeal copies from it (V1-89, SEC-V89-4). The writers below read the
+   * deal through findDeal, which withholds nothing.
+   */
   async getDeal(input: { businessId: string; dealId: string }) {
+    const deal = await this.findDeal(input);
+    const openable = await this.boundMemberContactWhere(input.businessId);
+    if (!openable) return deal;
+    const opens = await this.prisma.client.contact.count({ where: { AND: [openable, { id: deal.contactId }] } });
+    return opens > 0 ? deal : { ...deal, contactId: null, contact: null, companyName: null, accountId: null };
+  }
+
+  private async findDeal(input: { businessId: string; dealId: string }) {
     const deal = await this.prisma.client.deal.findFirst({
       where: { id: input.dealId, businessId: input.businessId, deletedAt: null },
       include: { stage: true, contact: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true, companyName: true } } },
     });
     if (!deal) throw new NotFoundException('Deal not found');
     return deal;
+  }
+
+  /**
+   * W9-CRM-RESIDUALS review SEC-W9CR-3 (D-37): what a deal writer (createDeal,
+   * updateDeal, moveStage, winDeal, loseDeal; PATCH deals/:dealId, move-stage,
+   * win, lose and KEY's deal tools) answers. A deal whose contact the member
+   * bound to the call cannot open is answered as getDeal serves it: without
+   * that contact and without the company name and account createDeal copies
+   * from it. It decides only the answer: the writers read and write the deal
+   * findDeal returns, whose stored contact, company and account are kept, and
+   * the deal's timeline entries still go to its contact.
+   */
+  private async answerForBoundMember<T extends { contactId: string }>(businessId: string, deal: T) {
+    const openable = await this.boundMemberContactWhere(businessId);
+    if (!openable) return deal;
+    const opens = await this.prisma.client.contact.count({ where: { AND: [openable, { id: deal.contactId }] } });
+    return opens > 0 ? deal : { ...deal, contactId: null, contact: null, companyName: null, accountId: null };
   }
 
   async updateDeal(input: {
@@ -248,7 +313,7 @@ export class CrmDealsService {
     accountId?: string | null;
     actorId?: string;
   }) {
-    const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
+    const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
 
     const updated = await this.prisma.client.deal.update({
       where: { id: deal.id },
@@ -286,14 +351,14 @@ export class CrmDealsService {
         : 0,
     });
 
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async moveStage(input: { businessId: string; dealId: string; stageId: string; actorId?: string }) {
-    const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
+    const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
     const target = await this.prisma.client.dealStage.findFirst({ where: { id: input.stageId, businessId: input.businessId } });
     if (!target) throw new BadRequestException('Invalid stageId');
-    if (deal.stageId === target.id) return deal;
+    if (deal.stageId === target.id) return this.answerForBoundMember(input.businessId, deal);
 
     const fromStage = deal.stage;
     const newStatus: DealStatus = target.category === 'WON' ? 'WON' : target.category === 'LOST' ? 'LOST' : 'OPEN';
@@ -352,7 +417,7 @@ export class CrmDealsService {
       }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
     }
 
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   /**
@@ -403,7 +468,7 @@ export class CrmDealsService {
   }
 
   async winDeal(input: { businessId: string; dealId: string; wonAt?: string; actualValue?: number; reasonId?: string | null; reasonNotes?: string | null; actorId?: string }) {
-    const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
+    const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
     const stage = await this.prisma.client.dealStage.findFirst({
       where: { businessId: input.businessId, category: 'WON', archivedAt: null },
       orderBy: [{ position: 'asc' }],
@@ -446,11 +511,11 @@ export class CrmDealsService {
     // must emit or the conversion is recorded for some wins and not others —
     // which is worse than never recording it, because the gap looks like data.
     this.emitDealWon({ businessId: input.businessId, deal, value: updated.value, currency: updated.currency });
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async loseDeal(input: { businessId: string; dealId: string; lossReason?: string; lostAt?: string; reasonId?: string | null; reasonNotes?: string | null; actorId?: string }) {
-    const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
+    const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
     const stage = await this.prisma.client.dealStage.findFirst({
       where: { businessId: input.businessId, category: 'LOST', archivedAt: null },
       orderBy: [{ position: 'asc' }],
@@ -489,11 +554,11 @@ export class CrmDealsService {
     this.events.emit('crm.deal.stage_changed', {
       businessId: input.businessId, dealId: deal.id, contactId: deal.contactId, toStageId: stage.id, newStatus: 'LOST',
     });
-    return updated;
+    return this.answerForBoundMember(input.businessId, updated);
   }
 
   async deleteDeal(input: { businessId: string; dealId: string; actorId?: string }) {
-    const deal = await this.getDeal({ businessId: input.businessId, dealId: input.dealId });
+    const deal = await this.findDeal({ businessId: input.businessId, dealId: input.dealId });
     await this.prisma.client.deal.update({
       where: { id: deal.id },
       data: { deletedAt: new Date() },

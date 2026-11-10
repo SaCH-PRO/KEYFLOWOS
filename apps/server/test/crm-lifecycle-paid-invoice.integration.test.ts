@@ -59,6 +59,22 @@
  *                    contact moves and its one follow-up stays in the business, unassigned, with
  *                    no TaskAssignment naming the outsider
  *
+ * W9-CRM-RESIDUALS (was it.todo; RED before the packet):
+ *   L-12 a payload's timeline entry is bound to the payload's business: no ContactEvent (nor
+ *        Activity mirror, nor commerce paid row contact) for a contact of another business
+ *   L-13 (D-81) the executor's built-in stage-change rule skips the D-81 move's contact.updated
+ *        (no second follow-up, no tags update); a member's move still runs it
+ *   L-15 (SEC-L81-3, D-37) GET tasks/due lists only the tasks of contacts the member may open,
+ *        each with a contact summary (no notesInternal); L-15 mounts CrmController under the
+ *        real guards for its one route
+ *
+ * W9-CRM-RESIDUALS review repair (SEC-W9CR-1, D-37; RED before the repair):
+ *   L-16 the next-action reads beside tasks/due (GET next-actions, contact-next-actions,
+ *        autopilot-actions, ai-next-actions and its AI prompt) name only the contacts the member
+ *        may open; it seeds a business of its own (bizN) and mounts CrmController as L-15 does
+ *        (crmControllerApp) over the real CrmActionsService (the AI gateway a recorder, no
+ *        provider traffic) and CrmService
+ *
  * Nothing on the event path is mocked: PrismaService, the user, business,
  * membership, contact, invoice and task rows, the real EventEmitter2
  * (EventEmitterModule with event-bus.module.ts's options), RevenueEventListener,
@@ -78,6 +94,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
+import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
@@ -108,6 +125,20 @@ const ID = {
   gone: `${P}gone`, // L-14: was a STAFF member of bizA, removed (membership deleted)
   cGoneOwner: `${P}cGoneOwner`, // L-14: bizA's LEAD owned by the removed member
   cForeignOwner: `${P}cForeignOwner`, // L-14: bizA's PROSPECT owned by bizB's owner (no bizA membership)
+  // W9-CRM-RESIDUALS (L-12, L-13, L-15; created by those cases).
+  cBindA: `${P}cBindA`, // L-12: bizA's CLIENT, named by bizB's payloads
+  cBindB: `${P}cBindB`, // L-12: bizB's CLIENT
+  cStage: `${P}cStage`, // L-13: bizA's LEAD moved by a paid invoice (D-81)
+  cStageHuman: `${P}cStageHuman`, // L-13: bizA's LEAD a member moves to CLIENT
+  cDuePriv: `${P}cDuePriv`, // L-15: bizA's PRIVATE contact of the OWNER (rep may not open it)
+  cDueTeam: `${P}cDueTeam`, // L-15: bizA's TEAM contact of rep
+  // W9-CRM-RESIDUALS review SEC-W9CR-1 (L-16; created by that case): a business of its own, so the
+  // next-action reads list only these rows (getNextActions keeps 20, getAutopilotActions 15).
+  bizN: `${P}bizN`, // OWNER: owner; STAFF: rep
+  nxPrivTask: `${P}nxPrivTask`, // bizN's PRIVATE CLIENT of the OWNER, with an overdue and an upcoming task
+  nxTeamTask: `${P}nxTeamTask`, // bizN's TEAM CLIENT of rep, the same
+  nxPrivLead: `${P}nxPrivLead`, // bizN's PRIVATE new LEAD of the OWNER, with a SENT and a PAID invoice
+  nxTeamLead: `${P}nxTeamLead`, // bizN's TEAM new LEAD of rep, the same
 };
 
 /** The follow-up's source (as PR #196 named it). */
@@ -119,6 +150,8 @@ let db: any;
 let app: any;
 let bus: any;
 let listener: any;
+let crmService: any;
+let prismaService: any;
 const contactUpdated: any[] = [];
 const insightMarks: Array<{ businessId: string; contactId: string }> = [];
 
@@ -335,6 +368,8 @@ beforeAll(async () => {
   await app.init(); // registers the @OnEvent subscribers on the bus
   bus = moduleRef.get(EventEmitter2);
   listener = moduleRef.get(RevenueEventListener);
+  crmService = moduleRef.get(CrmService);
+  prismaService = moduleRef.get(PrismaService);
   bus.on('contact.updated', (p: any) => { contactUpdated.push(p); });
 
   await cleanup(); // in case a prior run aborted
@@ -388,6 +423,80 @@ afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
 });
+
+/**
+ * CrmController under the real guards (AuthGuard, BusinessGuard, ModuleScopeGuard, the CRM rate
+ * limit, feature flag and plan limit guards), for the routes L-15 and L-16 call. `real` names the
+ * collaborators on those routes by class name; every other one is an empty stand-in, so a route that
+ * reached one would fail. Identity is attached from `x-test-user` exactly as AuthMiddleware attaches
+ * it after token verification; no guard is overridden.
+ */
+async function crmControllerApp(real: Record<string, unknown>) {
+  const { Test } = await import('@nestjs/testing');
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+  const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+  const { CrmController } = await import('../src/modules/crm/crm.controller');
+  const { CrmService } = await import('../src/modules/crm/crm.service');
+  const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+  const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+  const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
+  const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
+  const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
+  const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
+  const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+  const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
+  const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
+  const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+  const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
+  const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
+  const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
+  const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
+  const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
+  const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
+  const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+  const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
+  const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
+  const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
+  const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+
+  const prisma = { client: db } as any;
+  const collaborators: any[] = [
+    CrmTimelineService, CrmService, CrmStatsService, CrmCacheService, EventEmitter2, CrmListsService, CrmFlowService, EntityResolutionService,
+    ContactAuditService, ContactCustomFieldValueService, CrmImportService, CrmPlaybookService, CrmActionsService, CrmRevenueService,
+    CrmJourneyService, CrmDuplicateDetectionService, CrmDataQualityService, CrmSavedViewsService, CrmRelationshipHealthService,
+    CrmCommunicationService, BestChannelService, ConversationAiService, CrmNetworkService, ContactInsightService,
+  ];
+  const moduleRef = await Test.createTestingModule({
+    controllers: [CrmController],
+    providers: [
+      { provide: PrismaService, useValue: prisma },
+      AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard, TeamAuditInterceptor,
+      ...collaborators.map((provide) => ({ provide, useValue: real[provide.name] ?? {} })),
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+    ],
+  }).compile();
+  const http = moduleRef.createNestApplication();
+  http.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers['x-test-user'];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+  await http.init();
+  return http;
+}
 
 describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT -> CLIENT (D-81)', () => {
   it('L-01 CTL wiring: RevenueEventListener is subscribed to invoice.paid on the bus', () => {
@@ -571,7 +680,279 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
 
   // Found while writing L-10 / L-11, outside D-81's move (no status, task, audit or status row is
   // written across tenants, which is what L-10 / L-11 pin).
-  it.todo("L-12 (found here, outside this packet): RevenueEventListener.log() writes every event's timeline entry (a ContactEvent and its Activity mirror) for the payload's contactId under the payload's businessId without checking the contact is in that business, so L-10 / L-11's foreign payloads still put an invoice.paid entry on the other tenant's contact (ActivityEventListener's commerce paid row likewise takes the payload's contactId); binding log() to the business changes all its handlers and the revenue-event.listener.spec.ts cases whose contact mock answers null: a separate packet");
-  it.todo("L-13 (found here, outside this packet's write set): in the full app AutomationExecutorService.onContactUpdated runs its built-in stage-change rule on this move's contact.updated, as on every status change: an unassigned 'Follow up after stage change' task (source autopilot) and a tags update with its own feed rows, beside the one D-81 follow-up for the owner; folding them needs automation-executor.service.ts");
-  it.todo("L-15 (review SEC-L81-3, outside this packet's write set, pre-existing): GET crm/businesses/:businessId/tasks/due (crm.controller.ts dueTasks, crm:read only, no actor) returns CrmTimelineService.dueTasks's rows with include { contact: true } and no visibilityClause, so a PRIVATE or unshared contact's full row (notesInternal, email, phone) reaches every crm:read member through any task due within the window. The D-81 follow-up (due in 7 days) is one such task; AutomationExecutorService's 'Send thank-you note' (due in 1 day) already put every paid invoice's contact there before this packet. Scoping the route to the actor's visibility and selecting a contact summary needs crm.controller.ts and crm-timeline.service.ts: a separate packet");
+  // W9-CRM-RESIDUALS: L-12, L-13 and L-15 were it.todo here (found by PR196-CRM-LIFECYCLE and its
+  // review, outside that packet's write set).
+  it("L-12 (W9-CRM-RESIDUALS, was it.todo): a payload's timeline entry is bound to the payload's business: RevenueEventListener writes no ContactEvent (nor its Activity mirror) for a contact of another business, and ActivityEventListener's commerce paid row names no such contact; the business's own contact still gets both", async () => {
+    const seed = (id: string, businessId: string) =>
+      db.contact.create({
+        data: {
+          id, businessId, firstName: id.slice(P.length), lastName: 'V88e', email: `${P}${id.slice(P.length)}@test.local`,
+          status: 'CLIENT', ownerId: businessId === ID.bizA ? ID.rep : ID.ownerB,
+        },
+      });
+    await seed(ID.cBindA, ID.bizA);
+    await seed(ID.cBindB, ID.bizB);
+    const invA = await paidInvoice(ID.bizA, ID.cBindA);
+    const invB = await paidInvoice(ID.bizB, ID.cBindB);
+
+    // bizB's event naming bizA's invoice (L-10's shape), bizB's own invoice with its contactId
+    // forged to bizA's contact (L-11's shape), and a bizB payment naming bizA's contact.
+    bus.emit('invoice.paid', paidEvent(invA, ID.bizB));
+    bus.emit('invoice.paid', paidEvent({ ...invB, contactId: ID.cBindA }, ID.bizB));
+    bus.emit('payment.received', { businessId: ID.bizB, contactId: ID.cBindA, amount: 5, currency: 'TTD', provider: 'stripe', externalId: `${P}pi_bind` });
+    await settle([ID.cBindA, ID.cBindB]);
+    await sleep(500);
+
+    const foreign = await lifecycleOf(ID.cBindA);
+    expect(foreign.events, "no ContactEvent on bizA's contact from bizB's payloads").toEqual([]);
+    expect(foreign.feed, "no Activity row names bizA's contact").toEqual([]);
+    const bizBPaidRows = await db.activity.findMany({ where: { businessId: ID.bizB, module: 'commerce', action: 'paid' } });
+    expect(bizBPaidRows.length, "bizB's commerce paid rows were written").toBeGreaterThan(0);
+    expect(bizBPaidRows.map((r: any) => r.contactId), "bizB's paid rows name no contact of bizA").not.toContain(ID.cBindA);
+
+    // Control: each business's own payload still writes its contact's entry and paid row.
+    bus.emit('invoice.paid', paidEvent(invA));
+    bus.emit('invoice.paid', paidEvent(invB));
+    await settle([ID.cBindA, ID.cBindB]);
+    for (const [contactId, businessId, inv] of [[ID.cBindA, ID.bizA, invA], [ID.cBindB, ID.bizB, invB]] as const) {
+      const s = await lifecycleOf(contactId);
+      expect(s.contact.status, 'a CLIENT stays CLIENT').toBe('CLIENT');
+      const paid = s.events.filter((e: any) => e.type === 'invoice.paid');
+      expect(paid, `${contactId}: one invoice.paid entry`).toHaveLength(1);
+      expect(paid[0]).toMatchObject({ businessId, actorType: 'SYSTEM' });
+      expect(paid[0].data).toMatchObject({ invoiceId: inv.id });
+      const paidRows = s.feed.filter((r: any) => r.module === 'commerce' && r.action === 'paid');
+      expect(paidRows.map((r: any) => [r.businessId, r.entityId]), `${contactId}: its commerce paid row`).toEqual([[businessId, inv.id]]);
+    }
+  });
+
+  it("L-13 (W9-CRM-RESIDUALS, was it.todo; D-81): AutomationExecutorService's built-in stage-change rule skips the D-81 move's contact.updated: no 'Follow up after stage change' task and no tags update beside the one D-81 follow-up for the owner; a member's own status change still gets the built-in follow-up", async () => {
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    for (const id of [ID.cStage, ID.cStageHuman]) {
+      await db.contact.create({
+        data: { id, businessId: ID.bizA, firstName: id.slice(P.length), lastName: 'V88e', email: `${P}${id.slice(P.length)}@test.local`, status: 'LEAD', ownerId: ID.rep },
+      });
+    }
+    // The executor as the full app builds it, over the real CrmService behind a call recorder (no
+    // playbook or flow exists for the business; no flow runner).
+    const crmCalls: Array<{ method: string; input: any }> = [];
+    const recordedCrm = new Proxy(crmService, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof prop === 'string' && typeof value === 'function') {
+          return (...args: any[]) => {
+            crmCalls.push({ method: prop, input: args[0] });
+            return value.apply(target, args);
+          };
+        }
+        return value;
+      },
+    });
+    const executor = new AutomationExecutorService(prismaService, new ActivityService(prismaService), recordedCrm, {} as never, null, null);
+
+    // The D-81 move: its contact.updated reaches the executor as the full app delivers it.
+    const inv = await paidInvoice(ID.bizA, ID.cStage);
+    bus.emit('invoice.paid', paidEvent(inv));
+    await settle([ID.cStage]);
+    const moved = contactUpdated.filter((p) => p.contact?.id === ID.cStage);
+    expect(moved, 'the D-81 move emitted contact.updated once').toHaveLength(1);
+    await executor.onContactUpdated(moved[0]);
+    await settle([ID.cStage]);
+
+    expect(crmCalls.map((c) => c.method), 'the built-in rule wrote nothing for the D-81 move').toEqual([]);
+    const s = await lifecycleOf(ID.cStage);
+    expectMovedOnce(s, 'LEAD', [inv.id], ID.rep);
+    expect(s.tasks.map((t: any) => t.source), 'the D-81 follow-up is the only task').toEqual([FOLLOW_UP_SOURCE]);
+    const row = await db.contact.findUnique({ where: { id: ID.cStage }, select: { tags: true } });
+    expect(row.tags, 'no stage-changed tag').not.toContain('stage-changed');
+
+    // Control: a member's own status change (CrmService.updateContact) still runs the built-in rule.
+    await crmService.updateContact({ businessId: ID.bizA, contactId: ID.cStageHuman, status: 'CLIENT', actorUserId: ID.owner });
+    const human = contactUpdated.filter((p) => p.contact?.id === ID.cStageHuman && p.toStatus === 'CLIENT');
+    expect(human, "the member's move emitted contact.updated").toHaveLength(1);
+    crmCalls.length = 0;
+    await executor.onContactUpdated(human[0]);
+    expect(crmCalls[0], "the member's move gets the built-in follow-up").toMatchObject({
+      method: 'addTask',
+      input: { businessId: ID.bizA, contactId: ID.cStageHuman, title: 'Follow up after stage change', source: 'autopilot' },
+    });
+  });
+
+  it("L-15 (W9-CRM-RESIDUALS, was it.todo; review SEC-L81-3, D-37): GET crm/businesses/:businessId/tasks/due lists only the due tasks of contacts the member may open, each with a contact summary (no notesInternal); the OWNER sees every due task, summarised the same way", async () => {
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+
+    const DUE_SECRET = 'v88e-internal-note-of-a-due-contact-3k9';
+    for (const [id, visibility, ownerId] of [[ID.cDuePriv, 'PRIVATE', ID.owner], [ID.cDueTeam, 'TEAM', ID.rep]] as const) {
+      await db.contact.create({
+        data: {
+          id, businessId: ID.bizA, firstName: id.slice(P.length), lastName: 'V88e', email: `${P}${id.slice(P.length)}@test.local`,
+          status: 'CLIENT', visibility, ownerId, notesInternal: `${DUE_SECRET} ${id}`,
+        },
+      });
+      await db.contactTask.create({
+        data: {
+          id: `${P}due_${id.slice(P.length)}`, businessId: ID.bizA, contactId: id, title: `V88e due task ${id.slice(P.length)}`,
+          status: 'OPEN', dueDate: new Date(Date.now() + 2 * 86_400_000),
+        },
+      });
+    }
+
+    // The real route: CrmController under the real guards, over the real CrmTimelineService.
+    const timeline = new CrmTimelineService({ client: db } as any, {} as any, {} as any, {} as any, {} as any);
+    const http = await crmControllerApp({ CrmTimelineService: timeline });
+    try {
+      const due = (actor: string) => request(http.getHttpServer()).get(`/crm/businesses/${ID.bizA}/tasks/due?windowDays=7`).set('x-test-user', actor);
+      const ours = (body: any[]) => body.filter((t) => t.contactId === ID.cDuePriv || t.contactId === ID.cDueTeam);
+      const SUMMARY_KEYS = ['displayName', 'email', 'firstName', 'id', 'lastName', 'phone', 'status'];
+
+      const rep = await due(ID.rep);
+      expect(rep.status, rep.text.slice(0, 200)).toBe(200);
+      expect(ours(rep.body).map((t) => t.contactId), "rep lists its TEAM contact's task only").toEqual([ID.cDueTeam]);
+      expect(rep.text, "the OWNER's PRIVATE contact").not.toContain(ID.cDuePriv);
+      expect(rep.text, 'notesInternal').not.toContain(DUE_SECRET);
+      for (const task of rep.body) {
+        expect(Object.keys(task.contact ?? {}).sort(), `task ${task.id}: a contact summary`).toEqual(SUMMARY_KEYS);
+      }
+
+      const owner = await due(ID.owner);
+      expect(owner.status).toBe(200);
+      expect(ours(owner.body).map((t) => t.contactId).sort(), 'the OWNER lists both').toEqual([ID.cDuePriv, ID.cDueTeam].sort());
+      expect(owner.text, 'notesInternal').not.toContain(DUE_SECRET);
+      for (const task of ours(owner.body)) {
+        expect(Object.keys(task.contact).sort()).toEqual(SUMMARY_KEYS);
+        expect(task.contact).toMatchObject({ id: task.contactId, firstName: task.contactId.slice(P.length) });
+      }
+    } finally {
+      await http.close();
+    }
+  });
+
+  it("L-16 (W9-CRM-RESIDUALS repair, review SEC-W9CR-1, D-37): the next-action reads beside GET tasks/due (GET next-actions, contact-next-actions, autopilot-actions and ai-next-actions, with the AI prompt) name only the contacts the member may open; the OWNER's lists and prompt name every contact", async () => {
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+
+    await db.business.create({ data: { id: ID.bizN, name: 'V88E Biz N', ownerId: ID.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}m_owner_bizN`, userId: ID.owner, businessId: ID.bizN, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m_rep_bizN`, userId: ID.rep, businessId: ID.bizN, role: 'STAFF' } });
+    const DAY = 86_400_000;
+    const tail = (id: string) => id.slice(P.length);
+    let phone = 0;
+    for (const [id, visibility, ownerId, status] of [
+      [ID.nxPrivTask, 'PRIVATE', ID.owner, 'CLIENT'], [ID.nxTeamTask, 'TEAM', ID.rep, 'CLIENT'],
+      [ID.nxPrivLead, 'PRIVATE', ID.owner, 'LEAD'], [ID.nxTeamLead, 'TEAM', ID.rep, 'LEAD'],
+    ] as const) {
+      await db.contact.create({
+        data: {
+          id, businessId: ID.bizN, firstName: tail(id), lastName: 'V88e', email: `${P}${tail(id).toLowerCase()}@test.local`,
+          phone: `+1868558${String(1000 + phone++)}`, status, visibility, ownerId, nextActionAt: new Date(Date.now() + DAY), nextActionType: 'call',
+        },
+      });
+    }
+    for (const id of [ID.nxPrivTask, ID.nxTeamTask]) {
+      await db.contactTask.create({
+        data: { id: `${P}nxover_${tail(id)}`, businessId: ID.bizN, contactId: id, title: `V88e overdue ${tail(id)}`, status: 'OPEN', dueDate: new Date(Date.now() - DAY) },
+      });
+      await db.contactTask.create({
+        data: { id: `${P}nxsoon_${tail(id)}`, businessId: ID.bizN, contactId: id, title: `V88e soon ${tail(id)}`, status: 'OPEN', dueDate: new Date(Date.now() + DAY) },
+      });
+    }
+    for (const id of [ID.nxPrivLead, ID.nxTeamLead]) {
+      for (const [kind, status] of [['sent', 'SENT'], ['paid', 'PAID']] as const) {
+        await db.invoice.create({
+          data: {
+            id: `${P}nxinv_${kind}_${tail(id)}`, businessId: ID.bizN, contactId: id, invoiceNumber: `${P}NX-${kind}-${tail(id)}`, status,
+            subtotal: 75, total: 75, currency: 'TTD', dueDate: new Date(Date.now() + 5 * DAY), paidAt: status === 'PAID' ? new Date() : null,
+          },
+        });
+      }
+    }
+    /** Every action of one contact pair, by its id (each read's own id scheme). */
+    const nextActionIds = (task: string, lead: string) => [
+      `task_${P}nxover_${tail(task)}`, `scheduled_${P}nxsoon_${tail(task)}`,
+      `newlead_${lead}`, `invoice_${P}nxinv_sent_${tail(lead)}`, `thankyou_${P}nxinv_paid_${tail(lead)}`,
+    ];
+    const HIDDEN = [ID.nxPrivTask, ID.nxPrivLead];
+    const hiddenMarks = HIDDEN.flatMap((id) => [tail(id), `${P}${tail(id).toLowerCase()}@test.local`]);
+
+    // The model's answer names every contact of the business; the read keeps only the ones it put in the prompt.
+    const prompts: string[] = [];
+    const aiGateway = {
+      callAi: async (args: { messages?: Array<{ content: string }> }) => {
+        prompts.push((args.messages ?? []).map((m) => m.content).join('\n'));
+        const all = [ID.nxPrivTask, ID.nxTeamTask, ID.nxPrivLead, ID.nxTeamLead];
+        return {
+          content: JSON.stringify(all.map((contactId) => ({ type: 'follow_up', contactId, contactName: tail(contactId), reason: 'v88e recorded', priority: 'high' }))),
+        };
+      },
+    };
+    const prisma = { client: db } as any;
+    const timeline = new CrmTimelineService(prisma, {} as any, {} as any, {} as any, {} as any);
+    const http = await crmControllerApp({
+      CrmTimelineService: timeline,
+      CrmActionsService: new CrmActionsService(prisma, aiGateway as any, timeline),
+      // listNextActions reads through PrismaService only.
+      CrmService: crmService,
+    });
+    try {
+      const get = (routePath: string, actor: string) =>
+        request(http.getHttpServer()).get(`/crm/businesses/${ID.bizN}/${routePath}`).set('x-test-user', actor);
+      const expectNamesNoHidden = (res: { text: string }, what: string) => {
+        for (const id of HIDDEN) expect(res.text, `${what}: ${id}`).not.toContain(id);
+        for (const mark of hiddenMarks) expect(res.text, `${what}: ${mark}`).not.toContain(mark);
+      };
+
+      // GET next-actions
+      const repNext = await get('next-actions', ID.rep);
+      expect(repNext.status, repNext.text.slice(0, 200)).toBe(200);
+      expect(repNext.body.map((a: { id: string }) => a.id).sort(), 'rep: its contacts\' actions only').toEqual(nextActionIds(ID.nxTeamTask, ID.nxTeamLead).sort());
+      expectNamesNoHidden(repNext, 'next-actions');
+      const ownerNext = await get('next-actions', ID.owner);
+      expect(ownerNext.status).toBe(200);
+      expect(ownerNext.body.map((a: { id: string }) => a.id).sort(), 'the OWNER: every action').toEqual(
+        [...nextActionIds(ID.nxTeamTask, ID.nxTeamLead), ...nextActionIds(ID.nxPrivTask, ID.nxPrivLead)].sort(),
+      );
+      expect(ownerNext.body.find((a: { id: string }) => a.id === `scheduled_${P}nxsoon_${tail(ID.nxPrivTask)}`)).toMatchObject({
+        contactId: ID.nxPrivTask, contactName: `${tail(ID.nxPrivTask)} V88e`,
+      });
+
+      // GET contact-next-actions
+      const repDue = await get('contact-next-actions?windowDays=7', ID.rep);
+      expect(repDue.status, repDue.text.slice(0, 200)).toBe(200);
+      expect(repDue.body.items.map((c: { id: string }) => c.id).sort()).toEqual([ID.nxTeamLead, ID.nxTeamTask].sort());
+      expectNamesNoHidden(repDue, 'contact-next-actions');
+      const ownerDue = await get('contact-next-actions?windowDays=7', ID.owner);
+      expect(ownerDue.status).toBe(200);
+      expect(ownerDue.body.items.map((c: { id: string }) => c.id).sort()).toEqual([ID.nxPrivLead, ID.nxPrivTask, ID.nxTeamLead, ID.nxTeamTask].sort());
+
+      // GET autopilot-actions
+      const repAuto = await get('autopilot-actions', ID.rep);
+      expect(repAuto.status, repAuto.text.slice(0, 200)).toBe(200);
+      const autoIds = (res: { body: Array<{ id: string }> }) => res.body.map((a) => a.id).sort();
+      expect(autoIds(repAuto)).toEqual([`autowelcome_${ID.nxTeamLead}`, `pending_${P}nxsoon_${tail(ID.nxTeamTask)}`].sort());
+      expectNamesNoHidden(repAuto, 'autopilot-actions');
+      const ownerAuto = await get('autopilot-actions', ID.owner);
+      expect(ownerAuto.status).toBe(200);
+      expect(autoIds(ownerAuto)).toEqual([
+        `autowelcome_${ID.nxPrivLead}`, `autowelcome_${ID.nxTeamLead}`, `pending_${P}nxsoon_${tail(ID.nxPrivTask)}`, `pending_${P}nxsoon_${tail(ID.nxTeamTask)}`,
+      ].sort());
+
+      // GET ai-next-actions: the prompt and the answer
+      prompts.length = 0;
+      const repAi = await get('ai-next-actions', ID.rep);
+      expect(repAi.status, repAi.text.slice(0, 200)).toBe(200);
+      expect(prompts).toHaveLength(1);
+      for (const id of HIDDEN) expect(prompts[0], `the prompt names ${id}`).not.toContain(id);
+      for (const id of [ID.nxTeamTask, ID.nxTeamLead]) expect(prompts[0]).toContain(id);
+      expect(repAi.body.map((a: { contactId: string }) => a.contactId).sort()).toEqual([ID.nxTeamLead, ID.nxTeamTask].sort());
+      expectNamesNoHidden(repAi, 'ai-next-actions');
+      prompts.length = 0;
+      const ownerAi = await get('ai-next-actions', ID.owner);
+      expect(ownerAi.status).toBe(200);
+      for (const id of HIDDEN) expect(prompts[0], 'the OWNER\'s prompt').toContain(id);
+      expect(ownerAi.body.map((a: { contactId: string }) => a.contactId).sort()).toEqual([ID.nxPrivLead, ID.nxPrivTask, ID.nxTeamLead, ID.nxTeamTask].sort());
+    } finally {
+      await http.close();
+    }
+  });
 });

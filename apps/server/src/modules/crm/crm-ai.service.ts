@@ -10,6 +10,7 @@ import { CrmService } from './crm.service';
 import { isContactStatus } from './crm.constants';
 import { normalizeContactEventType } from '@keyflow/shared';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
 import { buildChurnDetectionPrompt } from './prompts/churn-detection.prompt';
@@ -758,7 +759,20 @@ Respond in valid JSON:
     }
   }
 
-  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope) {
+  /**
+   * W9-MONEY-RANKING (owner ruling D-100; review residual SEC-W8MS-2): for a
+   * `viewerUserId` without revenue read (resolveTimelineViewer, the rule GET
+   * contacts applies) a 'score' or 'revenue' search is ordered by the
+   * money-free key GET contacts uses for that member when it ignores those
+   * sorts (createdAt desc, whatever the sortOrder): both ordered by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice). Every row's leadScore is withheld (null), as GET contacts
+   * serves it without includeStats (withoutStoredMoney). The owner, a member
+   * with revenue read and a call that names no viewer are served as before.
+   */
+  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = !viewerUserId
+      || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
     const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
       where: this.contactWhere(businessId, scope),
@@ -838,7 +852,9 @@ Respond in valid JSON:
           } : {}),
         },
         take: 50,
-        orderBy: cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+        // D-100 (W9-MONEY-RANKING): no stored-score order for a member without revenue read.
+        orderBy: !readsRevenue && (cleanFilters.sortBy === 'score' || cleanFilters.sortBy === 'revenue') ? { createdAt: 'desc' }
+          : cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'revenue' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'newest' ? { createdAt: 'desc' }
           : cleanFilters.sortBy === 'oldest' ? { createdAt: 'asc' }
@@ -852,7 +868,8 @@ Respond in valid JSON:
       });
 
       return {
-        contacts,
+        // D-100 (W9-MONEY-RANKING): the stored lead score is withheld from a member without revenue read.
+        contacts: readsRevenue ? contacts : contacts.map((contact) => ({ ...contact, leadScore: null })),
         filters: cleanFilters,
         interpretation: parsed.interpretation ?? '',
         confidence: Number(parsed.confidence) || 0.5,
@@ -1154,6 +1171,30 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
+  /**
+   * W9-CRM-RESIDUALS (D-37): each sequence's enrollments and each contact
+   * list's members among the contacts `scope` lets the member open (the tenant
+   * predicate, deletedAt null and the visibility scope), for ai-command's
+   * prompt, which otherwise names counts that include contacts the member
+   * cannot open.
+   */
+  private async visibleEnrollmentAndMemberCounts(
+    businessId: string,
+    scope: Prisma.ContactWhereInput,
+    sequenceIds: string[],
+    listIds: string[],
+  ): Promise<{ enrolled: Map<string, number>; members: Map<string, number> }> {
+    const contact = this.contactWhere(businessId, scope);
+    const [enrolled, members] = await Promise.all([
+      this.db.crmSequenceEnrollment.groupBy({ by: ['sequenceId'], where: { sequenceId: { in: sequenceIds }, contact }, _count: { _all: true } }),
+      this.db.contactListMember.groupBy({ by: ['listId'], where: { listId: { in: listIds }, contact }, _count: { _all: true } }),
+    ]);
+    return {
+      enrolled: new Map(enrolled.map((r) => [r.sequenceId, r._count._all])),
+      members: new Map(members.map((r) => [r.listId, r._count._all])),
+    };
+  }
+
   async interpretCommand(businessId: string, command: string, scope?: ContactScope) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const [contacts, sequencesList, contactLists] = await Promise.all([
@@ -1175,12 +1216,19 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
 
+    // W9-CRM-RESIDUALS (D-37): for a member whose view is scoped, the counts are
+    // over the contacts the member may open; the OWNER's are listSequences' and
+    // listContactLists' own.
+    const visible = scope
+      ? await this.visibleEnrollmentAndMemberCounts(businessId, scope, sequencesList.map((s: { id: string }) => s.id), contactLists.map((l) => l.id))
+      : null;
+
     const sequenceSummary = sequencesList.length > 0
-      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${s.enrollmentCount} enrolled`).join('\n')
+      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${visible ? visible.enrolled.get(s.id) ?? 0 : s.enrollmentCount} enrolled`).join('\n')
       : undefined;
 
     const listSummary = contactLists.length > 0
-      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${l.memberCount ?? 0} members`).join('\n')
+      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${visible ? visible.members.get(l.id) ?? 0 : l.memberCount ?? 0} members`).join('\n')
       : undefined;
 
     const systemPrompt = buildCommandInterpreterPrompt(contactSummary, sequenceSummary, listSummary);

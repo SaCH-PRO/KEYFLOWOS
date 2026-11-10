@@ -1,7 +1,9 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereBase } from './crm.helpers';
 import { TimelineService } from '../timeline/timeline.service';
 import { readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
@@ -575,7 +577,14 @@ export class CrmTimelineService {
     return { processed, aliased, flagged };
   }
 
-  async dueTasks(input: { businessId: string; windowDays?: number }) {
+  /**
+   * W9-CRM-RESIDUALS (review SEC-L81-3, D-37): `visibility` is the caller's CRM
+   * visibility clause (GET tasks/due passes the member's; null or absent for the
+   * OWNER, SUPER_ADMIN and internal callers): with one, only tasks of live
+   * contacts of the business the member may open are listed. Every task carries
+   * a contact summary, never the full row (notesInternal, custom fields).
+   */
+  async dueTasks(input: { businessId: string; windowDays?: number; visibility?: Prisma.ContactWhereInput | null }) {
     const windowDays = input.windowDays ?? 7;
     const now = new Date();
     const soon = new Date();
@@ -589,9 +598,12 @@ export class CrmTimelineService {
             { dueDate: { lte: soon } },
             { remindAt: { lte: soon } },
           ],
+          ...(input.visibility ? { contact: { ...contactWhereBase(input.businessId), AND: [input.visibility] } } : {}),
         },
       orderBy: { dueDate: 'asc' },
-      include: { contact: true },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true, status: true } },
+      },
       take: 50,
     });
   }

@@ -14,13 +14,13 @@ import type { ContactRelationshipEdgeType } from '@keyflow/shared';
 import { CrmPlaybookService } from './crm-playbook.service';
 import { CrmRevenueService } from './crm-revenue.service';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
-import { CrmStatsService } from './crm-stats.service';
+import { CrmStatsService, timelineEntryCarriesMoney } from './crm-stats.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { DATA_QUALITY_KINDS, type DataQualityKind } from './crm-data-quality.util';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmService, withoutListMoney, withoutStoredMoney, type AuditContext } from './crm.service';
-import { crmRowCarriesMoney, resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { CrmSavedViewsService } from './crm-saved-views.service';
 import {
   CONTACT_RELATIONSHIP_HEALTH_VALUES,
@@ -66,32 +66,35 @@ type FlowHighlights = Awaited<ReturnType<CrmStatsService['flowHighlights']>>;
  * (CrmStatsService.flowHighlights, cached for the whole business) is read as
  * it is and projected here, so the cache never holds the withheld view and an
  * owner's read never gets it:
- * - overdueReminders (picked and ranked by the outstanding balance) and
- *   highPotential (ranked by the lead score with its invoice terms, each card
- *   carrying that score, the balance and the unpaid count) are empty;
+ * - overdueReminders (picked and ranked by the outstanding balance) is empty;
+ * - highPotential is the one CrmStatsService.flowHighlights ranked for that
+ *   member (readsRevenue false; W9-MONEY-RANKING, D-100): by the money-free
+ *   lead score, from the contacts that member may open (review repair
+ *   SEC-W9MR-1), each card with no balance or unpaid count (W8 served it
+ *   empty: the cached cards are ranked by the score with its invoice terms);
  * - serviceAffinity keeps its bookings, its revenue figure is 0;
  * - the 'cold-with-unpaid' segment (its members are the contacts with an
  *   unpaid invoice) is left out, and every other segment's contacts are
  *   served as GET contacts serves that member a row (withoutListMoney);
  * - the timeline drops its invoice rows ('Total <amount> <currency>') and the
- *   ContactEvent rows of a money type (crmRowCarriesMoney, the feed's rule);
- * - nextActions drops the unpaid-invoice follow-ups, aiNextActions the
- *   payment reminders.
+ *   ContactEvent rows of a money type (timelineEntryCarriesMoney); flowHighlights
+ *   already left them out before its cut to 20 (SEC-W9MR-2);
+ * - nextActions drops the unpaid-invoice follow-ups (flowHighlights already
+ *   worked them out with none before its cap of 6, SEC-W9MR-2), aiNextActions
+ *   the payment reminders.
  */
 function withoutHighlightsMoney(payload: FlowHighlights): FlowHighlights {
   return {
     ...payload,
     highlights: {
-      highPotential: [],
+      highPotential: payload.highlights.highPotential,
       overdueReminders: [],
       serviceAffinity: payload.highlights.serviceAffinity.map((service) => ({ ...service, revenue: 0 })),
     },
     segments: payload.segments
       .filter((segment) => segment.key !== 'cold-with-unpaid')
       .map((segment) => ({ ...segment, contacts: segment.contacts.map((contact) => withoutListMoney(contact)) })),
-    timeline: payload.timeline.filter(
-      (entry) => entry.type !== 'invoice' && !(entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title })),
-    ),
+    timeline: payload.timeline.filter((entry) => !timelineEntryCarriesMoney(entry)),
     nextActions: payload.nextActions.filter((action) => action.trigger !== 'invoice-unpaid'),
     aiNextActions: payload.aiNextActions.filter((action) => action.type !== 'payment_reminder'),
   };
@@ -1137,24 +1140,48 @@ export class CrmController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/highlights')
   async flowHighlights(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
-    const payload = await this.crmStats.flowHighlights({ businessId });
     // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): a member
-    // without revenue read gets no amount and no ranking by money.
-    return (await this.readsRevenue(businessId, req)) ? payload : withoutHighlightsMoney(payload);
+    // without revenue read gets no amount and no ranking by money; W9-MONEY-RANKING
+    // (D-100): the viewer's revenue read is passed, so their highPotential is
+    // ranked by the money-free lead score; its review repairs SEC-W9MR-1 / SEC-W9MR-2
+    // pass the viewer too, so their cards and next actions come from the contacts
+    // they may open, with no invoice follow-up before the cap.
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    const payload = await this.crmStats.flowHighlights({ businessId, readsRevenue, viewerUserId: this.requireActorUserId(req) });
+    return readsRevenue ? payload : withoutHighlightsMoney(payload);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/tasks/due')
-  dueTasks(
+  async dueTasks(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('windowDays') windowDays?: string,
   ) {
+    // W9-CRM-RESIDUALS (review SEC-L81-3, D-37): only the tasks of contacts the
+    // member may open by the rule GET contacts/:contactId applies.
     return this.timeline.dueTasks({
       businessId,
       windowDays: windowDays ? Number(windowDays) : 7,
+      visibility: await this.memberVisibility(businessId, req),
     });
+  }
+
+  /**
+   * W9-CRM-RESIDUALS (review SEC-L81-3, SEC-W9CR-1; D-37): the session member's
+   * CRM visibility clause, by the rule GET contacts/:contactId applies
+   * (resolveCrmAccess + visibilityClause), for the business-wide reads that
+   * name contacts (tasks/due, contact-next-actions, next-actions,
+   * autopilot-actions, ai-next-actions): null for the OWNER and SUPER_ADMIN, so
+   * their reads are unchanged. A request without a member is 401, a non-member
+   * 403 (resolveCrmAccess).
+   */
+  private async memberVisibility(businessId: string, req: { user?: { id?: string } } | undefined): Promise<Prisma.ContactWhereInput | null> {
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1186,8 +1213,9 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contact-next-actions')
-  listContactNextActions(
+  async listContactNextActions(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('windowDays') windowDays?: string,
     @Query('limit') limit?: string,
   ) {
@@ -1199,11 +1227,9 @@ export class CrmController {
       }
       return n;
     };
-    return this.crm.listNextActions({
-      businessId,
-      windowDays: parseIntParam(windowDays, 'windowDays'),
-      limit: parseIntParam(limit, 'limit'),
-    });
+    const parsed = { windowDays: parseIntParam(windowDays, 'windowDays'), limit: parseIntParam(limit, 'limit') };
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): only the contacts the member may open.
+    return this.crm.listNextActions({ businessId, ...parsed, visibility: await this.memberVisibility(businessId, req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1821,16 +1847,20 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/next-actions')
-  getNextActions(@Param('businessId') businessId: string) {
-    return this.actions.getNextActions(businessId);
+  async getNextActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): the tasks, quotes, invoices,
+    // bookings, contacts and enrollments of contacts the member may open only.
+    return this.actions.getNextActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(30, 60_000)
   @Get('businesses/:businessId/ai-next-actions')
-  getAiNextActions(@Param('businessId') businessId: string) {
-    return this.actions.getAiNextActions(businessId);
+  async getAiNextActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): the prompt profiles, and so the
+    // answer, only the contacts the member may open.
+    return this.actions.getAiNextActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1848,8 +1878,9 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/autopilot-actions')
-  getAutopilotActions(@Param('businessId') businessId: string) {
-    return this.actions.getAutopilotActions(businessId);
+  async getAutopilotActions(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): only the contacts the member may open.
+    return this.actions.getAutopilotActions(businessId, await this.memberVisibility(businessId, req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

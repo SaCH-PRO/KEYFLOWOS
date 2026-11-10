@@ -116,7 +116,8 @@
  *     invoice's LEAD contact to CLIENT through a real CrmService on the feed bus
  *     (review CR-1: the stub had no such method and the move never ran here):
  *     one 'Status changed' row and one follow-up task, which writes no row; the
- *     executor's stage-change task request is pinned as characterization (CR-2)
+ *     executor's built-in stage-change rule skips that move (W9-CRM-RESIDUALS
+ *     L-13, D-81; it was pinned as characterization CR-2)
  *   flows are still dispatched: one ACTIVE published flow per trigger
  *     (contact.created, invoice.sent, invoice.paid, booking.created,
  *     booking.confirmed) runs once, through the executor, with the step's ids
@@ -1095,7 +1096,8 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     const { ActivityEventListener } = await import('../src/modules/flow/activity-event.listener');
     const { ActivityService } = await import('../src/modules/flow/activity.service');
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
-    const listener = new ActivityEventListener(new ActivityService(app.get(PrismaService)));
+    // W9-CRM-RESIDUALS: the listener reads the business's contact for the paid row (L-12).
+    const listener = new ActivityEventListener(new ActivityService(app.get(PrismaService)), app.get(PrismaService));
     await listener.onInvoicePaid(paid[0].payload);
 
     const rows = await cockpitRead(ID.ownerA, ID.bizA);
@@ -2004,11 +2006,10 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.invoiceId, r.ctx.contactId, cents(r.ctx.total)])).toEqual([
       [C.biz, 'invoice.paid', SC.invoiceId, SC.contactId, cents(INVOICE_C_TOTAL)],
     ]);
-    // The executor's built-in invoice.paid rule still runs. CHARACTERIZATION (review CR-2, the
-    // packet's L-13 todo; an owner decision): its built-in stage-change rule also runs on the D-81
-    // move's contact.updated, as on every status change, asking for a second, unassigned task.
+    // The executor's built-in invoice.paid rule still runs. W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice
+    // L-13, D-81; was a CHARACTERIZATION of review CR-2): its built-in stage-change rule no longer runs
+    // on the D-81 move's contact.updated, so the move asks for no second, unassigned follow-up task.
     expect(crmTasks.map((t) => [t.businessId, t.contactId, t.title]).sort()).toEqual([
-      [C.biz, SC.contactId, 'Follow up after stage change'],
       [C.biz, SC.contactId, 'Send thank-you note'],
     ]);
 

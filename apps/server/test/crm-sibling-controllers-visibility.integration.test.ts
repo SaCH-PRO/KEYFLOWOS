@@ -75,6 +75,21 @@
  * company and account, and matching nothing on a hidden contactId. Each of
  * these cases creates its own contacts and removes them when it ends.
  *
+ * W9-CRM-RESIDUALS turns the two V1-89 residual todos live (D-37): GET
+ * deals/:dealId and the velocity report (now the real DealVelocityService)
+ * withhold a hidden contact as GET deals does, an account's deals leave out a
+ * deal of a hidden contact as GET deals?accountId= does, and ai-command's
+ * prompt counts sequence enrollments and list members over the contacts the
+ * member may open. Each case seeds its own deals, stage, sequence or list and
+ * removes them when it ends.
+ *
+ * Its review repairs (D-37) add: SEC-W9CR-2, an account's contacts, timeline,
+ * rollup, primary contact and insight leave out a contact of the account the
+ * member cannot open (the earlier account case's hidden contact belonged to
+ * another account); SEC-W9CR-3, the deal writers (PATCH, move-stage, win,
+ * lose, and KEY's path) answer such a deal as GET deals/:dealId serves it and
+ * still write it. Both seed their own contacts and stages and remove them.
+ *
  * Requires DATABASE_URL. Every seeded row has the `v84c_` prefix (or belongs to
  * a v84c_ business) and is hard-deleted by raw SQL in beforeAll and afterAll.
  */
@@ -232,6 +247,10 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_custom_field_values WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM custom_field_definitions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM crm_sequence_enrollments WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM crm_sequences WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_list_members WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_lists WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM deals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM deal_stages WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_insight_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -460,7 +479,8 @@ beforeAll(async () => {
       { provide: ContactInsightService, useValue: recorded('contactInsight', contactInsight) },
       { provide: CrmDealsService, useValue: recorded('deals', dealsService) },
       { provide: DealForecastService, useValue: recorded('forecast', {}) },
-      { provide: DealVelocityService, useValue: recorded('velocity', {}) },
+      // W9-CRM-RESIDUALS: the real report (its outliers name each deal's contact).
+      { provide: DealVelocityService, useValue: recorded('velocity', new DealVelocityService(prisma)) },
       { provide: WonLostReasonService, useValue: recorded('reasons', reasons) },
       { provide: CrmAccountsService, useValue: recorded('accounts', new CrmAccountsService(prisma)) },
       { provide: CustomFieldDefinitionService, useValue: recorded('customFieldDefinitions', {}) },
@@ -982,10 +1002,253 @@ describe('ST-1 GET deals?contactId= holds the contacts/:contactId/deals rule', (
     expect(owner.total).toBe(1);
   });
 
-  it.todo(
-    "residual: GET deals/:dealId (CrmDealsService.getDeal), the deal velocity report and an account's deals still join the contact of a deal " +
-      'whose contact the member cannot open (outside the V1-89 write set, which holds listDeals only)',
-  );
+  // W9-CRM-RESIDUALS (was one it.todo: "GET deals/:dealId (CrmDealsService.getDeal), the deal velocity
+  // report and an account's deals still join the contact of a deal whose contact the member cannot
+  // open"): each read now holds the rule GET deals applies (V1-89, D-37).
+  it("residual (W9-CRM-RESIDUALS, was it.todo): GET deals/:dealId serves a deal whose contact the member cannot open without that contact (contact, contactId, companyName and accountId null, as GET deals lists it; D-37); a contact it may open stays joined; the OWNER's deal is unchanged", async () => {
+    const dealPath = (contactTail: string) => `deals/${P}deal_${contactTail}`;
+    for (const actor of [ID.staffOwned, ID.admin]) {
+      resetRecorders();
+      const res = await send('get', dealPath('cPriv'), actor, '');
+      expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+      expect(svcCalls(), actor).toEqual(['deals.getDeal']);
+      expect(res.body.id, `${actor}: the deal itself is served`).toBe(`${P}deal_cPriv`);
+      expect({ contactId: res.body.contactId, contact: res.body.contact, companyName: res.body.companyName, accountId: res.body.accountId }, actor).toEqual({
+        contactId: null, contact: null, companyName: null, accountId: null,
+      });
+      expect(res.text, `${actor}: the hidden contact's id or name`).not.toContain(ID.cPriv);
+      expect(res.text, `${actor}: the hidden contact's email`).not.toContain(`${P}cpriv@contacts.test`);
+
+      const team = await send('get', dealPath('cTeam'), actor, '');
+      expect(team.status, actor).toBe(200);
+      expect(team.body.contactId, actor).toBe(ID.cTeam);
+      expect(team.body.contact, actor).toMatchObject({ id: ID.cTeam, firstName: ID.cTeam });
+    }
+
+    const owner = await send('get', dealPath('cPriv'), ID.owner, '');
+    expect(owner.status).toBe(200);
+    expect(owner.body.contactId).toBe(ID.cPriv);
+    expect(owner.body.contact).toMatchObject({ id: ID.cPriv, firstName: ID.cPriv });
+  });
+
+  it("residual (W9-CRM-RESIDUALS, was it.todo): GET deals/intelligence/velocity lists an outlier deal whose contact the member cannot open without that contact (contact null; D-37); a contact it may open stays named; the OWNER's report is unchanged", async () => {
+    const stageId = `${P}vstage`;
+    const now = Date.now();
+    const dealId = (tail: string) => `${P}vdeal_${tail}`;
+    await db.dealStage.create({ data: { id: stageId, businessId: ID.bizA, name: 'V84C velocity stage', slug: `${P}velocity`, position: 9 } });
+    try {
+      // Two deals 100 days in the stage and four fresh ones: the stage averages about 33 days, so
+      // the outlier threshold is 50 days and both old deals are outliers.
+      const seed = (tail: string, contactId: string, daysAgo: number) =>
+        db.deal.create({
+          data: {
+            id: dealId(tail), businessId: ID.bizA, contactId, title: `V84C velocity ${tail}`, stageId, value: 10,
+            lastStageChangedAt: new Date(now - daysAgo * 86_400_000),
+          },
+        });
+      await seed('priv', ID.cPriv, 100);
+      await seed('team', ID.cTeam, 100);
+      for (let i = 0; i < 4; i += 1) await seed(`fresh${i}`, ID.cTeam, 0);
+      const outlierOf = (body: any, tail: string) => body.outliers.find((o: { dealId: string }) => o.dealId === dealId(tail));
+
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        resetRecorders();
+        const res = await send('get', 'deals/intelligence/velocity', actor, '');
+        expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+        expect(svcCalls(), actor).toEqual(['velocity.getReport']);
+        const hidden = outlierOf(res.body, 'priv');
+        expect(hidden, `${actor}: the hidden contact's deal is still an outlier`).toBeDefined();
+        expect(hidden.contact, actor).toBeNull();
+        expect(res.text, `${actor}: the hidden contact's id or name`).not.toContain(ID.cPriv);
+        expect(outlierOf(res.body, 'team')?.contact, actor).toMatchObject({ id: ID.cTeam, displayName: ID.cTeam });
+      }
+
+      const owner = await send('get', 'deals/intelligence/velocity', ID.owner, '');
+      expect(owner.status).toBe(200);
+      expect(outlierOf(owner.body, 'priv')?.contact).toMatchObject({ id: ID.cPriv, displayName: ID.cPriv });
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM deals WHERE stage_id = '${stageId}'`);
+      await db.$executeRawUnsafe(`DELETE FROM deal_stages WHERE id = '${stageId}'`);
+    }
+  });
+
+  it("residual (W9-CRM-RESIDUALS, was it.todo): an account's deals (GET accounts/:accountId and its insight) leave out a deal whose contact the member cannot open, as GET deals?accountId= does (SEC-V89-4, D-37); a contact it may open stays joined; the OWNER's account is unchanged", async () => {
+    const account = `${P}acct_team`;
+    const privDeal = `${P}adeal_priv`;
+    const teamDeal = `${P}adeal_team`;
+    for (const [id, contactId] of [[privDeal, ID.cPriv], [teamDeal, ID.cTeam]] as const) {
+      await db.deal.create({ data: { id, businessId: ID.bizA, contactId, accountId: account, title: `V84C account deal ${id.slice(-4)}`, stageId: ID.stage, value: 100 } });
+    }
+    try {
+      const ids = (deals: Array<{ id: string }>) => deals.map((d) => d.id).sort();
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        resetRecorders();
+        const res = await send('get', `accounts/${account}`, actor, '');
+        expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+        expect(svcCalls(), actor).toEqual(['accounts.getAccountDetail']);
+        expect(ids(res.body.deals), actor).toEqual([teamDeal]);
+        expect(res.body.deals[0].contact, actor).toMatchObject({ id: ID.cTeam, firstName: ID.cTeam });
+        expect(res.body.rollup.dealCount, actor).toBe(1);
+        expect(res.text, `${actor}: the hidden contact's id or name`).not.toContain(ID.cPriv);
+
+        const list = await send('get', `deals?accountId=${account}`, actor, '');
+        expect(ids(list.body.deals), `${actor}: GET deals?accountId= agrees`).toEqual(ids(res.body.deals));
+
+        const insight = await send('get', `accounts/${account}/insight`, actor, '');
+        expect(insight.status, actor).toBe(200);
+        expect(insight.body.dealCount, actor).toBe(1);
+      }
+
+      const owner = await send('get', `accounts/${account}`, ID.owner, '');
+      expect(owner.status).toBe(200);
+      expect(ids(owner.body.deals)).toEqual([privDeal, teamDeal].sort());
+      expect(owner.body.deals.find((d: { id: string }) => d.id === privDeal).contact).toMatchObject({ id: ID.cPriv });
+      expect(owner.body.rollup.dealCount).toBe(2);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM deals WHERE id IN ('${privDeal}', '${teamDeal}')`);
+    }
+  });
+
+  // W9-CRM-RESIDUALS review SEC-W9CR-2: the case above left a hidden contact's deal out of an account,
+  // but its contact (cPriv) belongs to another account, so it never showed that the account's contacts,
+  // timeline and rollup still named such a contact. createDeal copies the contact's account onto the
+  // deal, so in the normal case the hidden deal's contact is one of the account's contacts.
+  it("review SEC-W9CR-2 (W9-CRM-RESIDUALS repair, D-37): GET accounts/:accountId and its insight leave a contact of the account the member cannot open out of contacts, recentEvents, the rollup (contactCount, nextAction), the primary contact and the 30-day interaction count, as they leave out its deal; the OWNER's account is unchanged", async () => {
+    const account = `${P}acct_team`;
+    const kPriv = `${P}kPriv`;
+    await seedContact(kPriv, { visibility: 'PRIVATE', ownerId: ID.owner, accountId: account });
+    // The soonest next action of the account (any other contact's is later).
+    await db.contact.update({ where: { id: kPriv }, data: { nextActionAt: new Date('2000-01-01T00:00:00Z'), nextActionType: 'call' } });
+    await db.account.update({ where: { id: account }, data: { primaryContactId: kPriv } });
+    try {
+      // No member bound: the OWNER view (D-88). It copies the account and writes deal.created on kPriv's timeline.
+      const deal = await dealsService.createDeal({ businessId: ID.bizA, contactId: kPriv, title: 'v84c account contact deal', stageId: ID.stage, value: 10 });
+      expect(deal.accountId, 'fixture: the account copied from the contact').toBe(account);
+      expect(await opensFor(ID.staffOwned, kPriv), 'fixture').toBe(false);
+      expect(await opensFor(ID.admin, kPriv), 'fixture').toBe(false);
+      const kPrivEvents30d = await db.contactEvent.count({ where: { contactId: kPriv, createdAt: { gte: new Date(Date.now() - 29 * 86_400_000) } } });
+      expect(kPrivEvents30d, "fixture: kPriv's timeline").toBeGreaterThan(0);
+      const marks = [kPriv, `${P}${kPriv.slice(P.length).toLowerCase()}@contacts.test`];
+
+      const owner = await send('get', `accounts/${account}`, ID.owner, '');
+      expect(owner.status).toBe(200);
+      const ownerContacts = owner.body.contacts.map((c: { id: string }) => c.id);
+      expect(ownerContacts).toContain(kPriv);
+      expect(owner.body.rollup.contactCount).toBe(ownerContacts.length);
+      expect(owner.body.rollup.nextAction?.contactId).toBe(kPriv);
+      expect(owner.body.account.primaryContactId).toBe(kPriv);
+      expect(owner.body.recentEvents.some((e: { contact: { id: string } }) => e.contact.id === kPriv)).toBe(true);
+      const ownerInsight = await send('get', `accounts/${account}/insight`, ID.owner, '');
+      expect(ownerInsight.status).toBe(200);
+      expect(ownerInsight.body).toMatchObject({ contactCount: ownerContacts.length, primaryContactId: kPriv, nextAction: { contactId: kPriv } });
+
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        resetRecorders();
+        const res = await send('get', `accounts/${account}`, actor, '');
+        expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+        expect(svcCalls(), actor).toEqual(['accounts.getAccountDetail']);
+        const contacts = res.body.contacts.map((c: { id: string }) => c.id);
+        expect(contacts, actor).toEqual(ownerContacts.filter((id: string) => id !== kPriv));
+        expect(res.body.rollup.contactCount, actor).toBe(contacts.length);
+        expect(res.body.rollup.nextAction?.contactId ?? null, actor).not.toBe(kPriv);
+        expect(res.body.account.primaryContactId, `${actor}: the primary contact it cannot open`).toBeNull();
+        expect(res.body.deals.map((d: { id: string }) => d.id), actor).not.toContain(deal.id);
+        for (const mark of marks) expect(res.text, `${actor}: ${mark}`).not.toContain(mark);
+
+        const insight = await send('get', `accounts/${account}/insight`, actor, '');
+        expect(insight.status, actor).toBe(200);
+        expect(insight.body.contactCount, actor).toBe(contacts.length);
+        expect(insight.body.summary, actor).toContain(`has ${contacts.length} contact`);
+        expect(insight.body.primaryContactId, actor).not.toBe(kPriv);
+        expect(insight.body.nextAction?.contactId ?? null, actor).not.toBe(kPriv);
+        expect(insight.body.recentInteractionCount30d, `${actor}: kPriv's interactions are not counted`).toBe(
+          ownerInsight.body.recentInteractionCount30d - kPrivEvents30d,
+        );
+        for (const mark of marks) expect(insight.text, `${actor}: ${mark}`).not.toContain(mark);
+      }
+    } finally {
+      await db.account.update({ where: { id: account }, data: { primaryContactId: null } });
+      await dropContacts([kPriv]);
+    }
+  });
+
+  // W9-CRM-RESIDUALS review SEC-W9CR-3: the deal writers read the deal through findDeal and answered
+  // the raw row, so PATCH, move-stage (also to its current stage), win and lose served the contact,
+  // company and account GET deals/:dealId withholds.
+  it("review SEC-W9CR-3 (W9-CRM-RESIDUALS repair, D-37): PATCH deals/:dealId, POST move-stage (to another stage and to its current one), win and lose answer a deal whose contact the member cannot open as GET deals/:dealId serves it (contact, contactId, companyName and accountId null), and still write the deal, whose stored contact, company and account are kept; a contact it may open stays named; KEY's path (the member bound to the call) answers the same; the OWNER's answers are unchanged", async () => {
+    const WRITER_COMPANY = 'v84c-writer-company-8q';
+    const wPriv = `${P}wPriv`;
+    const wTeam = `${P}wTeam`;
+    const stage2 = `${P}wstage2`;
+    const won = `${P}wstageWon`;
+    const lost = `${P}wstageLost`;
+    await seedContact(wPriv, { visibility: 'PRIVATE', ownerId: ID.owner, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+    await seedContact(wTeam, { visibility: 'TEAM', ownerId: ID.staffOwned });
+    await db.dealStage.create({ data: { id: stage2, businessId: ID.bizA, name: 'V84C writer stage', slug: `${P}wstage2`, position: 20 } });
+    await db.dealStage.create({ data: { id: won, businessId: ID.bizA, name: 'V84C won', slug: `${P}wstagewon`, position: 21, category: 'WON' } });
+    await db.dealStage.create({ data: { id: lost, businessId: ID.bizA, name: 'V84C lost', slug: `${P}wstagelost`, position: 22, category: 'LOST' } });
+    try {
+      const deal = await dealsService.createDeal({ businessId: ID.bizA, contactId: wPriv, title: 'v84c writer deal', stageId: ID.stage, value: 10 });
+      const teamDeal = await dealsService.createDeal({ businessId: ID.bizA, contactId: wTeam, title: 'v84c writer team deal', stageId: ID.stage, value: 10 });
+      expect({ companyName: deal.companyName, accountId: deal.accountId }, 'fixture: copied from the contact').toEqual({ companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+      const marks = [wPriv, WRITER_COMPANY, `${P}${wPriv.slice(P.length).toLowerCase()}@contacts.test`];
+      const WITHHELD = { contactId: null, contact: null, companyName: null, accountId: null };
+      const withheldOf = (b: any) => ({ contactId: b.contactId, contact: b.contact ?? null, companyName: b.companyName, accountId: b.accountId });
+      const stored = async () => db.deal.findUnique({ where: { id: deal.id }, select: { stageId: true, status: true, contactId: true, companyName: true, accountId: true } });
+
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        const writes: Array<[string, Method, string, Record<string, unknown>, number, string, string]> = [
+          ['PATCH {}', 'patch', `deals/${deal.id}`, {}, 200, ID.stage, 'OPEN'],
+          ['move-stage to its current stage', 'post', `deals/${deal.id}/move-stage`, { stageId: ID.stage }, 201, ID.stage, 'OPEN'],
+          ['move-stage', 'post', `deals/${deal.id}/move-stage`, { stageId: stage2 }, 201, stage2, 'OPEN'],
+          ['win', 'post', `deals/${deal.id}/win`, { reasonNotes: 'v84c won it' }, 201, won, 'WON'],
+          ['lose', 'post', `deals/${deal.id}/lose`, { lossReason: 'v84c lost it' }, 201, lost, 'LOST'],
+          ['move-stage back', 'post', `deals/${deal.id}/move-stage`, { stageId: ID.stage }, 201, ID.stage, 'OPEN'],
+        ];
+        for (const [name, method, routePath, body, status, stageId, dealStatus] of writes) {
+          const res = await send(method, routePath, actor, '', body);
+          expect(res.status, `${actor} ${name}: ${res.text.slice(0, 200)}`).toBe(status);
+          expect(res.body.id, `${actor} ${name}`).toBe(deal.id);
+          expect(withheldOf(res.body), `${actor} ${name}`).toEqual(WITHHELD);
+          for (const mark of marks) expect(res.text, `${actor} ${name}: ${mark}`).not.toContain(mark);
+          // The write itself happened, and the deal keeps its contact, company and account.
+          expect(await stored(), `${actor} ${name}: the stored deal`).toEqual({
+            stageId, status: dealStatus, contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv`,
+          });
+        }
+      }
+
+      // A contact the member may open stays named.
+      const teamPatch = await send('patch', `deals/${teamDeal.id}`, ID.staffOwned, '', {});
+      expect(teamPatch.status).toBe(200);
+      expect(teamPatch.body.contactId).toBe(wTeam);
+      const teamSame = await send('post', `deals/${teamDeal.id}/move-stage`, ID.staffOwned, '', { stageId: ID.stage });
+      expect(teamSame.status).toBe(201);
+      expect(teamSame.body.contact).toMatchObject({ id: wTeam });
+
+      // KEY's path: the member the TenantInterceptor binds (D-88); no member bound keeps the OWNER view.
+      const keyMember = await runWithTenant(ID.bizA, ID.staffOwned, () => dealsService.updateDeal({ businessId: ID.bizA, dealId: deal.id }));
+      expect(withheldOf(keyMember)).toEqual(WITHHELD);
+      const keyMove = await runWithTenant(ID.bizA, ID.staffOwned, () => dealsService.moveStage({ businessId: ID.bizA, dealId: deal.id, stageId: ID.stage }));
+      expect(withheldOf(keyMove)).toEqual(WITHHELD);
+      const queue = await dealsService.moveStage({ businessId: ID.bizA, dealId: deal.id, stageId: ID.stage });
+      expect(queue.contact).toMatchObject({ id: wPriv, companyName: WRITER_COMPANY });
+
+      // The OWNER's answers are unchanged.
+      const ownerPatch = await send('patch', `deals/${deal.id}`, ID.owner, '', {});
+      expect(ownerPatch.status).toBe(200);
+      expect(ownerPatch.body).toMatchObject({ contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+      const ownerSame = await send('post', `deals/${deal.id}/move-stage`, ID.owner, '', { stageId: ID.stage });
+      expect(ownerSame.status).toBe(201);
+      expect(ownerSame.body.contact).toMatchObject({ id: wPriv, companyName: WRITER_COMPANY });
+      const ownerWin = await send('post', `deals/${deal.id}/win`, ID.owner, '', { reasonNotes: 'v84c owner won it' });
+      expect(ownerWin.status).toBe(201);
+      expect(ownerWin.body).toMatchObject({ contactId: wPriv, companyName: WRITER_COMPANY, accountId: `${P}acct_priv` });
+    } finally {
+      await dropContacts([wPriv, wTeam]);
+      await db.$executeRawUnsafe(`DELETE FROM deal_stages WHERE id IN ('${stage2}', '${won}', '${lost}')`);
+    }
+  });
 });
 
 describe('ST-2 crm-ai: a contact id in the body and the business scans hold the record-visibility rule', () => {
@@ -1346,10 +1609,43 @@ describe('ST-2 crm-ai: a contact id in the body and the business scans hold the 
     }
   });
 
-  it.todo(
-    "residual: ai-command's prompt lists the business's sequences and contact lists with their enrollment and member counts, which still count " +
-      'contacts the member cannot open (CrmSequenceService.listSequences and CrmListsService.listContactLists, outside the V1-89 write set)',
-  );
+  // W9-CRM-RESIDUALS (was it.todo: "ai-command's prompt lists the business's sequences and contact
+  // lists with their enrollment and member counts, which still count contacts the member cannot open").
+  it("residual (W9-CRM-RESIDUALS, was it.todo): ai-command's prompt counts a sequence's enrollments and a contact list's members over the contacts the member may open only (D-37); the OWNER's prompt counts every one", async () => {
+    const sequence = `${P}seq`;
+    const list = `${P}list`;
+    await db.crmSequence.create({ data: { id: sequence, businessId: ID.bizA, name: 'V84C sequence', steps: [] } });
+    await db.contactList.create({ data: { id: list, businessId: ID.bizA, name: 'V84C list' } });
+    // Two contacts STAFF_OWNED may not open (the owner's PRIVATE ones) and one it may (its TEAM contact).
+    for (const contactId of [ID.cPriv, ID.tPriv, ID.cTeam]) {
+      await db.crmSequenceEnrollment.create({ data: { sequenceId: sequence, contactId } });
+      await db.contactListMember.create({ data: { listId: list, contactId } });
+    }
+    try {
+      expect(await opensFor(ID.staffOwned, ID.cTeam), 'fixture').toBe(true);
+      expect(await opensFor(ID.staffOwned, ID.cPriv), 'fixture').toBe(false);
+      expect(await opensFor(ID.staffOwned, ID.tPriv), 'fixture').toBe(false);
+      const body = { command: 'v84c enroll my contact in the sequence' };
+
+      resetRecorders();
+      const staff = await send('post', 'ai-command', ID.staffOwned, '', body);
+      expect(staff.status, staff.text.slice(0, 200)).toBe(201);
+      expect(aiCalls.map((c) => c.feature)).toEqual(['crm_command']);
+      expect(aiCalls[0].prompt).toContain(`V84C sequence (${sequence}) [active] - 1 enrolled`);
+      expect(aiCalls[0].prompt).toContain(`V84C list (${list}) [MANUAL] - 1 members`);
+
+      resetRecorders();
+      const owner = await send('post', 'ai-command', ID.owner, '', body);
+      expect(owner.status).toBe(201);
+      expect(aiCalls[0].prompt, 'the OWNER, unchanged').toContain(`V84C sequence (${sequence}) [active] - 3 enrolled`);
+      expect(aiCalls[0].prompt, 'the OWNER, unchanged').toContain(`V84C list (${list}) [MANUAL] - 3 members`);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM crm_sequence_enrollments WHERE sequence_id = '${sequence}'`);
+      await db.$executeRawUnsafe(`DELETE FROM crm_sequences WHERE id = '${sequence}'`);
+      await db.$executeRawUnsafe(`DELETE FROM contact_list_members WHERE list_id = '${list}'`);
+      await db.$executeRawUnsafe(`DELETE FROM contact_lists WHERE id = '${list}'`);
+    }
+  });
 });
 
 describe('ST-3 / CR-1 POST forget holds the delete scope of DELETE contacts/:contactId', () => {

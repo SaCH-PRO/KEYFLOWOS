@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { contactWhereBase } from './crm.helpers';
@@ -65,7 +66,27 @@ export class CrmActionsService {
     return v?.toNumber?.() ?? v ?? 0;
   }
 
-  async getNextActions(businessId: string): Promise<NextAction[]> {
+  /**
+   * W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): the contacts the next-action
+   * reads (getNextActions, getAutopilotActions, getAiNextActions) may name. With
+   * the caller's CRM visibility clause (GET next-actions, autopilot-actions and
+   * ai-next-actions pass the session member's, as GET tasks/due does; null for
+   * the OWNER and SUPER_ADMIN), only the live contacts of the business the
+   * member may open, by the rule GET contacts/:contactId applies; without one,
+   * every live contact of the business, as before. `ofScope` is the same bound
+   * for the rows that name a contact without being read through it (quotes,
+   * invoices, sequence enrollments): added only with a clause, so the OWNER's
+   * reads are unchanged.
+   */
+  private contactScope(businessId: string, visibility?: Prisma.ContactWhereInput | null) {
+    const scope: Prisma.ContactWhereInput = visibility
+      ? { ...contactWhereBase(businessId), AND: [visibility] }
+      : contactWhereBase(businessId);
+    return { scope, ofScope: visibility ? { contact: scope } : {} };
+  }
+
+  async getNextActions(businessId: string, visibility?: Prisma.ContactWhereInput | null): Promise<NextAction[]> {
+    const { scope, ofScope } = this.contactScope(businessId, visibility);
     const now = new Date();
     const actions: NextAction[] = [];
     const seen = new Set<string>();
@@ -100,7 +121,7 @@ export class CrmActionsService {
     ] = await Promise.all([
       this.db.contactTask.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           status: { not: 'DONE' },
           dueDate: { lt: now },
         },
@@ -110,7 +131,7 @@ export class CrmActionsService {
       }),
       this.db.contactTask.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           status: { not: 'DONE' },
           dueDate: { gte: now, lte: fortyEightHoursFromNow },
         },
@@ -121,6 +142,7 @@ export class CrmActionsService {
       this.db.quote.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'SENT',
           expiryDate: { gt: now },
         },
@@ -131,6 +153,7 @@ export class CrmActionsService {
       this.db.quote.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'SENT',
           expiryDate: { gt: now, lte: new Date(now.getTime() + 3 * DAY) },
         },
@@ -141,6 +164,7 @@ export class CrmActionsService {
       this.db.invoice.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: { in: ['SENT', 'OVERDUE'] },
         },
         include: { contact: true },
@@ -148,7 +172,7 @@ export class CrmActionsService {
         orderBy: { dueDate: 'asc' },
       }),
       this.db.contact.findMany({
-        where: contactWhereBase(businessId),
+        where: scope,
         select: {
           id: true, firstName: true, lastName: true, status: true,
           createdAt: true, updatedAt: true, leadScore: true,
@@ -160,7 +184,7 @@ export class CrmActionsService {
       }),
       this.db.contactEvent.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           createdAt: { gte: thirtyDaysAgo },
         },
         select: { contactId: true, type: true, createdAt: true },
@@ -168,7 +192,7 @@ export class CrmActionsService {
       }),
       this.db.booking.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           startTime: { gte: now, lte: fortyEightHoursFromNow },
           status: { in: ['PENDING', 'CONFIRMED'] },
         },
@@ -179,6 +203,7 @@ export class CrmActionsService {
       this.db.quote.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'ACCEPTED',
           createdAt: { gte: thirtyDaysAgo },
         },
@@ -188,6 +213,7 @@ export class CrmActionsService {
       this.db.invoice.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'PAID',
           paidAt: { gte: sevenDaysAgo },
         },
@@ -495,6 +521,7 @@ export class CrmActionsService {
         status: 'active',
         nextStepAt: { lte: now },
         sequence: { businessId },
+        ...ofScope,
       },
       include: {
         contact: true,
@@ -534,7 +561,8 @@ export class CrmActionsService {
     }).slice(0, 20);
   }
 
-  async getAutopilotActions(businessId: string): Promise<AutopilotAction[]> {
+  async getAutopilotActions(businessId: string, visibility?: Prisma.ContactWhereInput | null): Promise<AutopilotAction[]> {
+    const { scope, ofScope } = this.contactScope(businessId, visibility);
     const now = new Date();
     const actions: AutopilotAction[] = [];
     const seen = new Set<string>();
@@ -566,7 +594,7 @@ export class CrmActionsService {
     ] = await Promise.all([
       this.db.contactTask.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           completedAt: { gte: oneDayAgo },
         },
         include: { contact: true },
@@ -575,7 +603,7 @@ export class CrmActionsService {
       }),
       this.db.contactTask.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           status: { not: 'DONE' },
           dueDate: { gte: now, lt: fortyEightHoursFromNow },
         },
@@ -586,6 +614,7 @@ export class CrmActionsService {
       this.db.invoice.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'OVERDUE',
           dueDate: { lt: sevenDaysAgo },
         },
@@ -595,7 +624,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           status: 'CLIENT',
           updatedAt: { lt: thirtyDaysAgo },
         },
@@ -604,7 +633,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           status: 'LEAD',
           updatedAt: { lt: fourteenDaysAgo },
         },
@@ -613,7 +642,7 @@ export class CrmActionsService {
       }),
       this.db.booking.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           status: 'COMPLETED',
           endTime: { gte: oneDayAgo, lte: now },
         },
@@ -623,7 +652,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           status: 'LEAD',
           createdAt: { gte: new Date(now.getTime() - 2 * DAY) },
         },
@@ -632,7 +661,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           status: 'PROSPECT',
           updatedAt: { lt: thirtyDaysAgo },
         },
@@ -762,6 +791,7 @@ export class CrmActionsService {
         status: 'active',
         nextStepAt: { lte: now },
         sequence: { businessId },
+        ...ofScope,
       },
       include: {
         contact: true,
@@ -945,7 +975,8 @@ export class CrmActionsService {
     }
   }
 
-  async getAiNextActions(businessId: string): Promise<AiNextAction[]> {
+  async getAiNextActions(businessId: string, visibility?: Prisma.ContactWhereInput | null): Promise<AiNextAction[]> {
+    const { scope, ofScope } = this.contactScope(businessId, visibility);
     const now = new Date();
     const DAY = 24 * 60 * 60 * 1000;
     const threeDaysAgo = new Date(now.getTime() - 3 * DAY);
@@ -964,7 +995,7 @@ export class CrmActionsService {
     ] = await Promise.all([
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           lastInteractionAt: { lte: fourteenDaysAgo },
         },
         select: {
@@ -978,7 +1009,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           leadScore: { gte: 70 },
           invoices: { none: { deletedAt: null } },
           status: { in: ['LEAD', 'PROSPECT'] },
@@ -994,7 +1025,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           invoices: { some: { status: 'OVERDUE', deletedAt: null } },
         },
         select: {
@@ -1010,7 +1041,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           createdAt: { gte: sevenDaysAgo },
           notes: { none: {} },
         },
@@ -1024,7 +1055,7 @@ export class CrmActionsService {
       }),
       this.db.booking.findMany({
         where: {
-          contact: contactWhereBase(businessId),
+          contact: scope,
           status: 'COMPLETED',
           endTime: { gte: threeDaysAgo, lte: now },
         },
@@ -1037,7 +1068,7 @@ export class CrmActionsService {
       }),
       this.db.contact.findMany({
         where: {
-          ...contactWhereBase(businessId),
+          ...scope,
           status: 'CLIENT',
           lastInteractionAt: { lte: thirtyDaysAgo },
           invoices: { some: { status: 'PAID', deletedAt: null } },
@@ -1056,6 +1087,7 @@ export class CrmActionsService {
       this.db.invoice.findMany({
         where: {
           businessId,
+          ...ofScope,
           status: 'PAID',
           paidAt: { gte: sevenDaysAgo },
         },

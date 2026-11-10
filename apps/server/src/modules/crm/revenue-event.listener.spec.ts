@@ -5,6 +5,8 @@ describe('RevenueEventListener (idempotency)', () => {
   function build(opts: {
     recentEvents?: Array<{ data?: any }>;
     invoiceContactId?: string | null;
+    /** W9-CRM-RESIDUALS (L-12): whether the payload's contact is a contact of the payload's business (default: it is). */
+    contactInBusiness?: boolean;
   } = {}) {
     const logEvent = vi.fn().mockResolvedValue(undefined);
     const markStale = vi.fn().mockResolvedValue(undefined);
@@ -13,18 +15,29 @@ describe('RevenueEventListener (idempotency)', () => {
       opts.invoiceContactId !== undefined ? { contactId: opts.invoiceContactId } : null,
     );
     const findFirstContact = vi.fn().mockResolvedValue(null);
+    const aggregateContact = vi.fn().mockResolvedValue({ _count: { _all: opts.contactInBusiness === false ? 0 : 1 } });
     const prisma: any = {
       client: {
         contactEvent: { findMany: findManyContactEvent },
         invoice: { findFirst: findFirstInvoice },
-        contact: { findFirst: findFirstContact },
+        contact: { findFirst: findFirstContact, aggregate: aggregateContact },
       },
     };
     const timeline: any = { logEvent };
     const insights: any = { markStale };
     const listener = new RevenueEventListener(prisma, timeline, insights);
-    return { listener, logEvent, markStale, findManyContactEvent, findFirstInvoice };
+    return { listener, logEvent, markStale, findManyContactEvent, findFirstInvoice, aggregateContact };
   }
+
+  it('L-12 (W9-CRM-RESIDUALS, crm-lifecycle-paid-invoice L-12): a payload naming a contact outside its business writes no timeline entry and marks no insight stale; the lookup is bound to that business', async () => {
+    const { listener, logEvent, markStale, aggregateContact } = build({ contactInBusiness: false });
+    await listener.onQuoteViewed({ businessId: 'biz_1', quote: { id: 'q_1', contactId: 'c_other_tenant' } } as any);
+    await listener.onInvoicePaid({ businessId: 'biz_1', invoice: { id: 'inv_9', contactId: 'c_other_tenant', paidAt: null } } as any);
+    await listener.onPaymentReceived({ businessId: 'biz_1', contactId: 'c_other_tenant', amount: 5, currency: 'TTD', provider: 'stripe' } as any);
+    expect(logEvent).not.toHaveBeenCalled();
+    expect(markStale).not.toHaveBeenCalled();
+    expect(aggregateContact).toHaveBeenCalledWith({ where: { id: 'c_other_tenant', businessId: 'biz_1' }, _count: { _all: true } });
+  });
 
   it('writes a timeline row for a fresh quote.viewed event', async () => {
     const { listener, logEvent, markStale } = build();
