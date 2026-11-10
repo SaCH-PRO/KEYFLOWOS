@@ -156,7 +156,19 @@ function makeHarness(opts: HarnessOptions = {}) {
   });
   const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     logger: quiet,
-    prisma: { client: { idempotencyKey: store.model, aiApprovalItem: approvalItems, aiExecutionLog: executionLogs } },
+    prisma: {
+      client: {
+        idempotencyKey: store.model,
+        aiApprovalItem: approvalItems,
+        aiExecutionLog: executionLogs,
+        // W8-KEY-REVENUE-GATE (owner ruling D-98): a member's chat call of a money-writing tool
+        // (commerce_create_invoice, payments_refund_charge, commerce_send_invoice here) reads the
+        // member's revenue scope. These cases are about the confirmation binding, so every user is
+        // an OWNER member (revenue admin); the gate itself is proved on a real database
+        // (key-dispatcher-tenant W7KMP-02, payments-actor PA-16i).
+        membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
+      },
+    },
     governance,
     executionLog,
     moduleRef: { get: (token: unknown) => (token === KeyActionBoundaryService ? boundary : undefined) },

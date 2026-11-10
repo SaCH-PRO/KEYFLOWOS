@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
-import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
+import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import {
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
@@ -220,4 +221,79 @@ export async function memberToolRunAuthority(
     if (err instanceof ForbiddenException) return { refusal: err.message, principal: false };
     throw err;
   }
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (owner ruling D-98, 2026-11-10; review residuals SEC-W7IAR-2, SEC-W7KMP-2): the
+ * revenue level the web routes require for KEY's money-writing tool `toolName`, or null for any other
+ * tool. D-98: when a member drives KEY, KEY's money-writing tools (mark an invoice paid, update an
+ * invoice, record a payment) need that member's own revenue write, as the web routes do.
+ *
+ * KEY's money-writing tools, read off the tables the routes are derived into, never chosen here:
+ *   - CANONICAL_MODULE_TOOLS.revenue at write or above (job-role-tool-families.spec.ts re-derives it
+ *     from the route decorators): commerce_mark_invoice_paid, commerce_update_invoice, the invoice and
+ *     quote create, convert and delete tools, the payment link writes and payments_refund_charge;
+ *   - a governed tool whose governed part is a revenue write (GOVERNED_UNGRANTED, with the revenue
+ *     scope graphActionRequirement gives it): commerce_send_invoice (CommerceService.updateInvoiceStatus
+ *     to SENT) and update_status_with_confirmation (bulk SENT, VOID and PAID; "needs crm AND revenue").
+ * A tool no route governs (a GRAPH_ACTION_TOOL_MODULES prefix floor such as finance_* or retainers_*)
+ * has no web route to copy, so D-98 leaves it as it was; the same narrowest reading as D-40's
+ * operations gate (CANONICAL_MODULE_TOOLS.operations only).
+ *
+ * One rule for every surface a member drives KEY on: member chat refuses with it
+ * (memberRevenueWriteRefusal, from FlowOrchestratorService's member-chat gate, its tool menu and
+ * governToolCall); a member's plan step and an approved proposal are already held to every module
+ * scope of the tool (memberToolRunAuthority: assertMayRunGraphAction, D-71), this revenue scope
+ * included; a run with no member writes no money at all (noMemberToolRefusal, D-73).
+ */
+export function keyRevenueWriteLevel(toolName: string): 'write' | 'admin' | null {
+  const own = (table: object) => Object.prototype.hasOwnProperty.call(table, toolName);
+  if (own(CANONICAL_MODULE_TOOLS.revenue)) {
+    const level = CANONICAL_MODULE_TOOLS.revenue[toolName];
+    return level === 'write' || level === 'admin' ? level : null;
+  }
+  if (!own(GOVERNED_UNGRANTED)) return null;
+  const requirement = graphActionRequirement(toolName);
+  if (!requirement || 'refused' in requirement) return null;
+  const revenue = requirement.scopes.find((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write);
+  return revenue && revenue.minLevel !== 'read' ? revenue.minLevel : null;
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (D-98): `userId`'s revenue level in `businessId`, read as the routes' money
+ * writes read it (CommerceService.assertActorMayWriteRevenue, behind ModuleScopeGuard revenue write on
+ * PATCH .../paid): the membership's explicit permissionScopes map, where a missing key is none, else
+ * its role's defaults (OWNER and ADMIN admin, STAFF read). No membership is none, a platform
+ * SUPER_ADMIN included (D-46: one who is not a member does not write the business's invoices).
+ */
+export async function memberRevenueLevel(prisma: PrismaService, businessId: string, userId: string): Promise<string> {
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return 'none';
+  const scopes: Record<string, string> =
+    membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+  return scopes.revenue || 'none';
+}
+
+/**
+ * W8-KEY-REVENUE-GATE (D-98): why KEY may not run the money-writing tool `toolName` for `memberId`
+ * in `businessId`, or null when it may (or `toolName` writes no money: keyRevenueWriteLevel). The
+ * answer starts with the words ModuleScopeGuard and the service answer the same member's PATCH
+ * .../paid with, so a member and the model read KEY's refusal as the route's.
+ */
+export async function memberRevenueWriteRefusal(
+  prisma: PrismaService,
+  businessId: string,
+  memberId: string,
+  toolName: string,
+): Promise<string | null> {
+  const required = keyRevenueWriteLevel(toolName);
+  if (!required) return null;
+  const level = await memberRevenueLevel(prisma, businessId, memberId);
+  if (rankOf(level) >= LEVEL_RANK[required]) return null;
+  return `Insufficient permissions: revenue requires ${required} access (you have ${level}); KEY runs "${toolName}" for a member only with the revenue access the routes require (D-98)`;
 }

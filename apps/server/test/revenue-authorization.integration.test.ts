@@ -1743,17 +1743,17 @@ describe('Review repairs (R0-SEC3): the record-payment route projects the invoic
   // envelope it was handed, no row is written.
   //
   // What the case does not prove (W7-KEY-MARK-PAID-PROJECTION review
-  // SEC-W7KMP-1, SEC-W7KMP-2; both reproduced, both outside this packet's
-  // write set, kept as it.todo W7KMP-01 and W7KMP-02 in
-  // test/key-dispatcher-tenant.integration.test.ts):
+  // SEC-W7KMP-1, SEC-W7KMP-2), proved since W8-KEY-REVENUE-GATE (owner ruling
+  // D-98) by W7KMP-01 and W7KMP-02 in
+  // test/key-dispatcher-tenant.integration.test.ts and payments-actor PA-16i
+  // and PA-16s:
   // - the member's { revenue: 'write' } is PATCH .../paid's precondition,
-  //   mirrored so the two answers compare like for like. The KEY path does not
-  //   check it: on member chat the dispatcher gates the operations module only
-  //   (D-40), so a revenue:none member gets the same write and the same
-  //   projection (a revenue gate there needs an owner ruling);
-  // - markInvoicePaid takes no initiatedBy, so this tool's payment entries
-  //   name KEY alone, where commerce_update_invoice {status: 'PAID'} keeps the
-  //   member beside KEY (SEC-W7IAR-2, D-90).
+  //   mirrored so the two answers compare like for like; the KEY path now
+  //   checks it on member chat too (D-98), so a revenue:read or revenue:none
+  //   member is refused there as the route refuses them;
+  // - markInvoicePaid now takes initiatedBy, so this tool's payment entries
+  //   keep the member beside KEY, as commerce_update_invoice {status: 'PAID'}
+  //   does (SEC-W7IAR-2, D-90).
   describe('W7-KEY-MARK-PAID-PROJECTION: the KEY tool answers the write projection (SEC3-ST-2)', () => {
     let keyDispatcher: any;
     const loggedEnvelopes: any[] = [];
@@ -1974,8 +1974,14 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless c
     expect(sites.length, 'the census is not vacuous').toBeGreaterThanOrEqual(4);
     expect(sites.map((s) => s.file)).not.toContain('modules/webhooks/webhooks.controller.ts');
     for (const s of sites) {
-      expect(s.args, `${s.file}: markInvoicePaid(${s.args.join(', ')})`).toHaveLength(3);
+      // W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88, D-90): KEY's commerce_mark_invoice_paid and
+      // bulk PAID hand markInvoicePaid a fourth argument, `{ initiatedBy }` (the member KEY ran for,
+      // audit data beside KEY). The census still pins the shape: actor and tenant always named, and
+      // a fourth argument only ever that options object, never one that could stand for a tenant.
+      expect(s.args.length, `${s.file}: markInvoicePaid(${s.args.join(', ')})`).toBeGreaterThanOrEqual(3);
+      expect(s.args.length, `${s.file}: markInvoicePaid(${s.args.join(', ')})`).toBeLessThanOrEqual(4);
       expect(s.args[2], `${s.file}: the tenant argument`).not.toMatch(/^(undefined|null)$/);
+      if (s.args.length === 4) expect(s.args[3], `${s.file}: the options argument`).toBe('{ initiatedBy }');
     }
   });
 

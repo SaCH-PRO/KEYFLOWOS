@@ -1598,11 +1598,21 @@ export class FlowOrchestratorService {
     // only when the member's operations level reaches the level its routes require, as
     // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
     // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
+    // W8-KEY-REVENUE-GATE (owner ruling D-98): likewise a money-writing tool is offered only when the
+    // member's revenue level reaches what its routes require (keyRevenueWriteLevel, the rule
+    // memberScopeRefusal refuses a call with).
     if (!envelope && principalUserId) {
       const level = await this.memberOperationsLevel(businessId, principalUserId);
+      // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
+      const { keyRevenueWriteLevel, memberRevenueLevel } = await import('./plan-step-authority');
+      const revenue = candidates.some((t) => keyRevenueWriteLevel(t.function.name))
+        ? await memberRevenueLevel(this.prisma, businessId, principalUserId)
+        : 'none';
       candidates = candidates.filter((t) => {
         const required = operationsLevelFor(t.function.name);
-        return !required || rankOf(level) >= LEVEL_RANK[required];
+        if (required && rankOf(level) < LEVEL_RANK[required]) return false;
+        const money = keyRevenueWriteLevel(t.function.name);
+        return !money || rankOf(revenue) >= LEVEL_RANK[money];
       });
     }
 
@@ -2851,8 +2861,9 @@ ${triage.standingContext}`;
     // V1-84 (FOLLOW3-D16, owner ruling D-40): a call the member's operations scope does not reach is
     // neither proposed for confirmation nor filed for approval. It goes to the executor, which
     // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
-    // member and the model are told why.
-    if (await this.operationsScopeRefusal(businessId, tc.name, ctx)) {
+    // member and the model are told why. W8-KEY-REVENUE-GATE (D-98): so is a money-writing call
+    // the member's revenue scope does not reach (memberScopeRefusal).
+    if (await this.memberScopeRefusal(businessId, tc.name, ctx)) {
       return {
         tc,
         decision: { ...legacy, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false },
@@ -3259,7 +3270,8 @@ ${triage.standingContext}`;
     try {
       // V1-84 (FOLLOW3-D16, D-40): read when the call runs, as the route reads it per request, so a
       // confirmation issued before the member's operations scope was lowered runs nothing either.
-      const refusal = await this.operationsScopeRefusal(businessId, toolName, action);
+      // W8-KEY-REVENUE-GATE (D-98): and the revenue write KEY's money-writing tools need.
+      const refusal = await this.memberScopeRefusal(businessId, toolName, action);
       if (refusal) throw new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
@@ -3406,6 +3418,29 @@ ${triage.standingContext}`;
     const level = await this.memberOperationsLevel(businessId, action.principalUserId);
     if (rankOf(level) >= LEVEL_RANK[required]) return null;
     return `Insufficient permissions: ${toolName} needs operations ${required} access (you have ${level})`;
+  }
+
+  /**
+   * Why a member's own chat call may not run `toolName`: the operations scope (D-40,
+   * operationsScopeRefusal), then W8-KEY-REVENUE-GATE (owner ruling D-98; review residuals
+   * SEC-W7IAR-2, SEC-W7KMP-2): KEY's money-writing tools (keyRevenueWriteLevel: mark an invoice
+   * paid, update, send or bulk-move an invoice, the other revenue writes the routes govern) need the
+   * member's own revenue write, read as PATCH .../paid reads it (memberRevenueWriteRefusal, the rule
+   * plan-step-authority.ts shares with the plan queue and approved proposals). A revenue:read member
+   * had KEY mark an invoice PAID that the route refuses them. null for every other tool, for a member
+   * whose scopes reach it, and for a call with no member or from another surface, exactly as D-40:
+   * the staff bridge (its issued envelope already bounds the holder), the support desk and the system
+   * surfaces are unchanged; a plan or a monitor with no member writes no money at all (D-73).
+   * Checked when the call runs (executeTool), before it is proposed (governToolCall), for each inner
+   * call of an execute_custom_logic snippet, and on the tool menu (selectToolsForRequest).
+   */
+  private async memberScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
+    const operations = await this.operationsScopeRefusal(businessId, toolName, action);
+    if (operations) return operations;
+    if (!action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
+    // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
+    const { memberRevenueWriteRefusal } = await import('./plan-step-authority');
+    return memberRevenueWriteRefusal(this.prisma, businessId, action.principalUserId, toolName);
   }
 
   /**
@@ -4199,7 +4234,11 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_mark_invoice_paid': {
-        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId);
+        // W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88, D-90): KEY records the payment, and the member
+        // the turn runs for is kept beside KEY as initiatedBy (audit data, never authority), as
+        // commerce_update_invoice keeps it (SEC-W7IAR-2). Who may run this at all: D-98 (memberScopeRefusal).
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
+        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId, { initiatedBy });
         // V1-21d (R0-SEC3 review SEC3-ST-2): markInvoicePaid reloads with booking: true and
         // contact: true; the model gets what PATCH .../paid answers (toInvoiceWriteResponse).
         return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id };
@@ -5275,16 +5314,20 @@ ${triage.standingContext}`;
         }
 
         if (entityType === 'invoice') {
-          let action: 'send' | 'void' | 'delete';
-          if (newStatus === 'SENT') action = 'send';
-          else if (newStatus === 'VOID') action = 'void';
+          // W8-KEY-REVENUE-GATE: named bulkAction so the dispatcher's `action` (the surface) stays in reach.
+          let bulkAction: 'send' | 'void' | 'delete';
+          if (newStatus === 'SENT') bulkAction = 'send';
+          else if (newStatus === 'VOID') bulkAction = 'void';
           else if (newStatus === 'PAID') {
             // PAID bulk transition is not supported by bulkUpdateInvoices;
             // fall back to individual mark-paid calls.
+            // W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88, D-90): the member the turn runs for is
+            // kept beside KEY on each payment, as commerce_mark_invoice_paid keeps them.
+            const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
             let updated = 0;
             for (const id of ids) {
               try {
-                await this.getCommerce().markInvoicePaid(id, KEY_SYSTEM_ACTOR_ID, businessId);
+                await this.getCommerce().markInvoicePaid(id, KEY_SYSTEM_ACTOR_ID, businessId, { initiatedBy });
                 updated++;
               } catch (err: any) {
                 this.logger.warn(`bulk mark paid skipped for ${id}: ${(err as Error).message}`);
@@ -5296,7 +5339,7 @@ ${triage.standingContext}`;
           }
           // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88, PA-16p): KEY sends or voids, and is
           // named on the ACCRUAL invoice_finalized posting and its reversal.
-          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action, KEY_SYSTEM_ACTOR_ID);
+          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, bulkAction, KEY_SYSTEM_ACTOR_ID);
           return { entityType, updatedCount: result.updated, newStatus };
         }
 
@@ -6777,9 +6820,10 @@ ${triage.standingContext}`;
         // V1-84 (FOLLOW3-D16 review SEC-D16-1, D-40): every api.callTool the snippet makes is a call
         // of the member whose chat turn ran it, so the operations scope that turn's own calls are
         // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
-        // inner call itself still arrives on CUSTOM_LOGIC.
+        // inner call itself still arrives on CUSTOM_LOGIC. W8-KEY-REVENUE-GATE (D-98): and the
+        // revenue write a money-writing inner call needs (memberScopeRefusal).
         const withinMemberScope = async (bizId: string, name: string): Promise<void> => {
-          const refusal = await this.operationsScopeRefusal(bizId, name, action);
+          const refusal = await this.memberScopeRefusal(bizId, name, action);
           if (refusal) throw new Error(refusal);
         };
         // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
