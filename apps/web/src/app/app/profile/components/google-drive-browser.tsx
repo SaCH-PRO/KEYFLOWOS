@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiGet, apiDelete } from "@/lib/api";
+import { toast } from "sonner";
 import {
   FileText,
   FolderOpen,
@@ -191,21 +192,32 @@ export default function GoogleDriveBrowser({ businessId, onSelect, allowedMimeTy
     }
   }, [checkStatus]);
 
+  // W9-GOOGLE-WEB-403 (owner ruling D-99, [V94D-T04]): only the business owner
+  // starts or disconnects the business's Google Drive; the server answers anyone
+  // else 403 GOOGLE_CONNECT_OWNER_ONLY. Show the server's refusal (as
+  // core-channels-section.tsx does) instead of doing nothing, and on a refused
+  // disconnect keep the connection shown as connected: the server kept it.
   const handleConnect = async () => {
     setConnecting(true);
     const res = await apiGet<{ url: string }>(`/drive/businesses/${businessId}/auth-url`);
     if (res.data?.url) {
       window.location.href = res.data.url;
+    } else {
+      toast.error(res.error || "Could not start Google Drive sign-in");
     }
     setConnecting(false);
   };
 
   const handleDisconnect = async () => {
     setDisconnecting(true);
-    await apiDelete(`/drive/businesses/${businessId}/disconnect`);
-    setConnected(false);
-    setEmail(null);
-    setFiles([]);
+    const res = await apiDelete(`/drive/businesses/${businessId}/disconnect`);
+    if (res.error) {
+      toast.error(res.error);
+    } else {
+      setConnected(false);
+      setEmail(null);
+      setFiles([]);
+    }
     setDisconnecting(false);
   };
 

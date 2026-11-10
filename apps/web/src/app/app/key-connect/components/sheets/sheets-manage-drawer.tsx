@@ -18,6 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
+import { toast } from "sonner";
 import { saveAs } from "@/lib/download";
 import type {
   InventorySheetStatusDto,
@@ -106,10 +107,14 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
     return () => { cancelled = true; };
   }, [businessId]);
 
+  // W9-GOOGLE-WEB-403 (owner ruling D-99, [V94D-T04]): a member who is not the
+  // business owner is refused the Drive consent URL (403
+  // GOOGLE_CONNECT_OWNER_ONLY); show the server's refusal rather than nothing.
   const handleConnectDrive = async () => {
     try {
       const res = await apiGet<{ url: string }>(`/drive/businesses/${businessId}/auth-url`);
       if (res.data?.url) window.location.href = res.data.url;
+      else toast.error(res.error || "Could not start Google Drive sign-in");
     } catch {}
   };
 
