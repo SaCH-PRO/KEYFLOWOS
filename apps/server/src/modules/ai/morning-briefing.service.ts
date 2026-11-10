@@ -29,6 +29,13 @@ export interface BriefingCard {
 export const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
 export const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
 export const BRIEFING_SCOPE = 'briefing';
+/**
+ * Review SEC-W7BR-2: the states of a briefing the plan queue still runs (PlanExecutorService runs
+ * plans 'approved' or 'executing'), and the states of a step that is done (every other step is still
+ * to run or in hand: pending, approved, executing, awaiting approval).
+ */
+const BRIEFING_OPEN_STATUSES: readonly string[] = ['approved', 'executing'];
+const BRIEFING_STEP_DONE_STATUSES: readonly string[] = ['completed', 'failed', 'skipped'];
 
 /**
  * W6-BRIEFINGS-SCOPE review SEC-W6BS-3 (owner rulings D-93, D-63): the advisory lock namespace that
@@ -318,15 +325,70 @@ export class MorningBriefingService implements OnModuleInit {
     return { executed, failed };
   }
 
-  async skipBriefing(businessId: string, planId: string): Promise<void> {
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
-      data: { status: 'completed' },
-    });
-    await this.prisma.client.aiPlanStep.updateMany({
-      where: { planId },
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-2; owner ruling D-73, KEY-R3b review SEC-R3b-4): POST
+   * briefing/:planId/skip updated any plan by id alone (another business's, a journey's, a member's
+   * own plan) for any member, with no record of who did it. It is now bound as executeAllBriefingCards
+   * is: only the daily briefing (scope 'briefing', its objective and raw input) of the business the
+   * route checked is taken (anything else is refused as absent, 404), and a briefing another member
+   * runs is that member's: only it, the business OWNER or an ADMIN skips it (403). A briefing stored
+   * with no member (before D-93) is not another member's, as execute-all lets the member who runs it
+   * take it. The route records who skipped it (AiController.skipBriefing, a plan:skip execution-log row).
+   *
+   * Review SEC-W7BR-2 (D-73): the skip set every step to 'skipped' and the plan to 'completed' whatever
+   * their state, so a step that had run (completed), failed, or been handed on to run (approved, which
+   * the plan queue still dispatches, or executing) was recorded as skipped, and every repeat wrote
+   * again and was audited again. It now skips only the steps not yet run ('pending'), leaves every
+   * other step as it is, and closes the plan (completed) only when no step is left to run or running;
+   * otherwise the plan queue finishes the steps in hand and closes it. A briefing already finished
+   * (not approved or executing, the states the plan queue runs) is left as it is. It answers how many
+   * steps it skipped and the plan's status; `changed` is false when it wrote nothing, and the route
+   * then writes no audit row, so a repeat is a no-op. The daily briefing is executing from the moment
+   * it is written (plan.approved), so an executing briefing is still skipped, not refused.
+   */
+  async skipBriefing(
+    businessId: string,
+    planId: string,
+    userId?: string,
+  ): Promise<{ skipped: number; status: string; changed: boolean }> {
+    if (!userId) throw new ForbiddenException('A member skips the briefing');
+    const briefing = {
+      id: planId,
+      businessId,
+      scope: { has: BRIEFING_SCOPE },
+      objective: { startsWith: BRIEFING_OBJECTIVE_PREFIX },
+      rawInput: BRIEFING_RAW_INPUT,
+    };
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true, status: true } });
+    if (!plan) throw new NotFoundException('Briefing not found');
+    if (plan.userId && plan.userId !== userId) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
+        throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin skips it');
+      }
+    }
+    if (!BRIEFING_OPEN_STATUSES.includes(plan.status)) {
+      return { skipped: 0, status: plan.status, changed: false };
+    }
+    const { count: skipped } = await this.prisma.client.aiPlanStep.updateMany({
+      where: { planId, status: 'pending' },
       data: { status: 'skipped' },
     });
+    const inHand = await this.prisma.client.aiPlanStep.count({
+      where: { planId, status: { notIn: [...BRIEFING_STEP_DONE_STATUSES] } },
+    });
+    let closed = 0;
+    if (inHand === 0) {
+      ({ count: closed } = await this.prisma.client.aiPlan.updateMany({
+        where: { ...briefing, status: { in: [...BRIEFING_OPEN_STATUSES] } },
+        data: { status: 'completed', completedAt: new Date() },
+      }));
+    }
+    const status = (await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { status: true } }))?.status ?? plan.status;
+    return { skipped, status, changed: skipped > 0 || closed > 0 };
   }
 
   async getTodayBriefing(businessId: string): Promise<BriefingResult | null> {
