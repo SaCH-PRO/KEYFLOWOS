@@ -36,6 +36,7 @@ import { CallTaskController } from '../src/modules/call-tasks/call-task.controll
 import { CallLogService } from '../src/modules/call-tasks/call-log.service';
 import { CallScriptService } from '../src/modules/call-tasks/call-script.service';
 import { RateLimitGuard } from '../src/core/guards/rate-limit.guard';
+import { FlowOrchestratorService, type KeyDispatchAction } from '../src/modules/ai/flow-orchestrator.service';
 
 interface MembershipSeed {
   userId: string;
@@ -1076,6 +1077,9 @@ describe('CRM e2e', () => {
 // about CreateCallLogDto, which still requires a (now ignored) body callerId.
 class CallPrismaMock {
   memberships: MembershipSeed[] = [];
+  // The User rows resolveCrmAccess reads when a caller is not the session member
+  // (CallLogService.assertCaller with no session: the KEY call_create_task path, W7-CALL-TASK-CALLER).
+  users: Array<{ id: string; role: string }> = [];
   contacts: any[] = [];
   callLogs: any[] = [];
   client: any;
@@ -1083,6 +1087,11 @@ class CallPrismaMock {
   constructor() {
     const self = this;
     self.client = {
+      user: {
+        findUnique: vi.fn(({ where }: any) =>
+          Promise.resolve(self.users.find((u) => u.id === where.id) ?? null),
+        ),
+      },
       membership: {
         findUnique: vi.fn(({ where }: any) => {
           const composite = where.userId_businessId;
@@ -1186,6 +1195,12 @@ describe('call logs take the caller from the session (V1-54)', () => {
     prisma.memberships = [
       { userId: 'user_1', businessId: 'biz_1', role: 'OWNER', permissionScopes: { crm: 'admin' } },
       { userId: 'user_2', businessId: 'biz_1', role: 'STAFF', permissionScopes: { crm: 'write' } },
+    ];
+    prisma.users = [
+      { id: 'user_1', role: 'USER' },
+      { id: 'user_2', role: 'USER' },
+      // a user of the platform who is no member of biz_1
+      { id: 'user_outsider', role: 'USER' },
     ];
     prisma.contacts = [
       { id: 'contact_1', businessId: 'biz_1', nextActionType: 'call', nextActionAt: new Date('2026-11-03T10:00:00.000Z') },
@@ -1292,13 +1307,87 @@ describe('call logs take the caller from the session (V1-54)', () => {
   // sibling reads leave out. It needs its own packet.
   // Done in FOLLOW3-D4 (V1-84): call-log routes apply CRM record visibility through the call log's contact, test/call-log-visibility.integration.test.ts (prefix v84d_).
 
-  // Review ST-4 (hand-off, not fixed here): the KEY tool call_create_task passes
-  // args.callerId, which the model chooses, to createCallLog, which stores it
-  // unchecked, so on the KEY, staff-bridge and auto-trigger paths a call log can
-  // name any member or any string as its caller. The tool contract defines
-  // callerId as the member who will make the call (an assignee), and the fix
-  // belongs in flow-orchestrator.service.ts, outside V1-54's write set.
-  it.todo('KEY call_create_task records a member of the business as the caller, never an arbitrary string (review ST-4, flow-orchestrator.service.ts)');
+  // Review ST-4, closed by W7-CALL-TASK-CALLER (owner rulings D-73, D-88): the KEY
+  // tool call_create_task passed args.callerId, which the model chooses, to
+  // createCallLog, so on the KEY, staff-bridge and auto-trigger paths a call log
+  // named whichever member the model picked (FOLLOW3-D4 then refused a non-member
+  // or an arbitrary string, but kept the model's choice). As POST calls takes the
+  // caller from the session (V1-54), the dispatcher now records the member the
+  // command runs for (D-73: a KEY plan runs as its member; D-88: the dispatcher
+  // hands the service the member the command runs for): the chat principal, the
+  // member a surface with no principal runs for (an approved proposal's executor),
+  // or the queued plan's member. args.callerId is ignored. A run with no member
+  // is refused before anything is written. The real FlowOrchestratorService
+  // dispatcher runs over this suite's real CallLogService and Prisma double.
+  function keyCallCreateTask(action: KeyDispatchAction | undefined, args: Record<string, unknown>) {
+    const callLogs = app.get(CallLogService);
+    const plans = [{ id: 'plan_user_2', businessId: 'biz_1', userId: 'user_2' }];
+    const dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma: {
+        client: {
+          aiPlan: {
+            findFirst: vi.fn(({ where }: any) =>
+              Promise.resolve(plans.find((p) => p.id === where.id && p.businessId === where.businessId) ?? null),
+            ),
+          },
+        },
+      },
+      moduleRef: { get: (token: unknown) => (token === CallLogService ? callLogs : undefined) },
+    }) as unknown as {
+      executeToolAction: (b: string, t: string, a: Record<string, unknown>, action?: KeyDispatchAction) => Promise<any>;
+    };
+    return dispatcher.executeToolAction('biz_1', 'call_create_task', args, action);
+  }
+
+  it('KEY call_create_task records a member of the business as the caller, never an arbitrary string: the member the command runs for, whatever callerId the model sends (review ST-4, D-73, D-88)', async () => {
+    const cases: Array<{ action: KeyDispatchAction; modelCallerId: string; recorded: string }> = [
+      // a member's chat turn: the session member, not the other member the model named
+      { action: { surface: 'CHAT', principalUserId: 'user_2' }, modelCallerId: 'user_1', recorded: 'user_2' },
+      // a model-chosen string that names no member is not a refusal reason either: it is not read
+      { action: { surface: 'CHAT', principalUserId: 'user_1' }, modelCallerId: 'not-a-member', recorded: 'user_1' },
+      // an approved proposal run for its executor (no principal on the surface)
+      { action: { surface: 'PROPOSAL', onBehalfOfUserId: 'user_2' }, modelCallerId: 'user_1', recorded: 'user_2' },
+      // the plan queue: the stored plan's member (D-73)
+      { action: { surface: 'PLAN_QUEUE', planId: 'plan_user_2' }, modelCallerId: 'user_1', recorded: 'user_2' },
+    ];
+    for (const [i, c] of cases.entries()) {
+      const out = await keyCallCreateTask(c.action, { contactId: 'contact_1', callerId: c.modelCallerId });
+      expect(prisma.callLogs, `${c.action.surface} #${i}`).toHaveLength(i + 1);
+      expect(prisma.callLogs[i], `${c.action.surface} #${i}`).toMatchObject({ businessId: 'biz_1', contactId: 'contact_1', callerId: c.recorded });
+      expect(out, `${c.action.surface} #${i}`).toMatchObject({ id: prisma.callLogs[i].id, contactId: 'contact_1' });
+      expect(emitter.emit).toHaveBeenLastCalledWith(
+        'call_log.created',
+        expect.objectContaining({ businessId: 'biz_1', callLogId: prisma.callLogs[i].id, callerId: c.recorded }),
+      );
+    }
+    // The member the command runs for is still held to CallLogService's caller rule: a principal
+    // who is no member of the business (a SUPER_ADMIN, D-46) is refused, and nothing is written,
+    // even when the model names a member.
+    await expect(
+      keyCallCreateTask({ surface: 'CHAT', principalUserId: 'user_outsider' }, { contactId: 'contact_1', callerId: 'user_1' }),
+    ).rejects.toThrow(/member of this business/);
+    expect(prisma.callLogs).toHaveLength(cases.length);
+  });
+
+  it('KEY call_create_task with no member to run for refuses and writes no call log, whatever callerId the model sends (review ST-4, D-73, D-88)', async () => {
+    const memberless: Array<KeyDispatchAction | undefined> = [
+      undefined,
+      { surface: 'INBOUND_CONVERSATION' },
+      { surface: 'PRO_AUTO_MONITOR' },
+      { surface: 'CHAT', principalUserId: null },
+      // a plan id that names no plan of this business
+      { surface: 'PLAN_QUEUE', planId: 'plan_unknown' },
+    ];
+    for (const action of memberless) {
+      await expect(
+        keyCallCreateTask(action, { contactId: 'contact_1', callerId: 'user_1' }),
+        JSON.stringify(action ?? null),
+      ).rejects.toThrow(/no member/);
+    }
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+    expect(prisma.callLogs).toEqual([]);
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
 
   it('GET calls keeps callerId as an optional read filter: absent, the list is the business\'s; present, it names whose calls to read', async () => {
     const agent = request(app.getHttpServer());
