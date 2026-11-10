@@ -52,6 +52,10 @@ export class GoogleDriveController {
       return res.redirect(`${returnPath}?drive=error&reason=missing_params`);
     }
 
+    // W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-1): only a
+    // Drive-tagged, single-use state getAuthUrl minted behind the owner gate
+    // passes; a calendar, CRM, Gmail, Google Suite or Outlook state signed with
+    // the same secret is refused here (invalid_state) before any code exchange.
     const oauthState = this.driveService.verifyState(state);
     if (!oauthState) {
       return res.redirect(`${returnPath}?drive=error&reason=invalid_state`);

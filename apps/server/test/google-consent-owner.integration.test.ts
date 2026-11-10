@@ -18,24 +18,40 @@
  * stored Google tokens.
  *
  * This suite covers the bookings Google Calendar doors and the Google Drive
- * doors. The Google Suite consent (POST /connect/google-suite/businesses/:b/
+ * doors, and (W8-GOOGLE-CONSENT-OWNER review repairs) the platform calendar
+ * sync doors POST /calendar/businesses/:b/sync/google/connect, .../disconnect
+ * and .../resync (SEC-W8GCO-2, [V94D-D01]..[V94D-D02]) and the OAuth states
+ * the Drive and calendar callbacks complete (SEC-W8GCO-1, [V94D-E01]..
+ * [V94D-E03]): before the repair GoogleDriveService.verifyState and
+ * CalendarService.verifyState accepted any GOOGLE_STATE_SECRET-signed state
+ * naming a business, so a member refused the Drive consent URL could land a
+ * calendar state (from the ungated sync connect) or a Microsoft Outlook state
+ * (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset) at
+ * GET /drive/callback, or at either calendar callback, and connect their own
+ * Google account as the business's. The Google Suite consent (POST /connect/google-suite/businesses/:b/
  * auth-url) is covered by connect-recent-visibility.integration.test.ts
  * ([V93E-B01]) and gmail-connect-binding.integration.test.ts ([R0-CMF5-H01]);
  * the CRM Google contact import consent (GET /crm/businesses/:b/google/auth-url)
  * and its callback by contacts-import-write-scope.integration.test.ts
  * ([V94D-C01]..[V94D-C03]). The Google doors outside this packet's write set
- * are it.todo at the end of this file ([V94D-T01]..[V94D-T03]).
+ * are it.todo at the end of this file ([V94D-T02]..[V94D-T04]).
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business and membership rows, AuthGuard, BusinessGuard,
- * BookingsController, GoogleDriveController, CalendarService (getAuthUrl,
- * getCalendarStatus, disconnectCalendar) and GoogleDriveService (getAuthUrl,
- * getConnectionStatus, disconnect) are real against DATABASE_URL, with an
+ * BookingsController, GoogleDriveController, CalendarController,
+ * MicrosoftOAuthController, CalendarService (getAuthUrl, verifyState,
+ * saveCalendarCredentials, getCalendarStatus, disconnectCalendar),
+ * CalendarSyncService (getAuthUrl, verifyState, completeOAuth, disconnect,
+ * manualResync), GoogleDriveService (getAuthUrl, verifyState,
+ * saveDriveCredentials, getConnectionStatus, disconnect) and
+ * MicrosoftOAuthService (buildAuthUrl) are real against DATABASE_URL, with an
  * obviously fake OAuth client id and state secret. The stand-ins: identity
  * attachment (a test middleware reads `x-test-user`, loads that seeded user row
  * and attaches `{ id, email, role }` as AuthMiddleware would after Supabase
- * token verification) and the two controllers' collaborators no case here
- * reaches. No provider is called.
+ * token verification), the controllers' collaborators no case here reaches,
+ * and the provider: global fetch answers Google's token exchange and userinfo
+ * with an obviously fake account and refuses anything else, so no provider is
+ * called.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v94d_` prefix and is
  * hard-deleted by raw SQL in beforeAll and afterAll. No $transaction wrapping.
@@ -79,9 +95,24 @@ const OAUTH_ENV: Record<string, string> = {
   GOOGLE_STATE_SECRET: `${P}fake-state-secret-not-real`,
   GOOGLE_REDIRECT_URI: 'http://localhost:3000/api/crm/google/callback',
   DRIVE_REDIRECT_URI: 'http://localhost:3000/api/drive/callback',
+  // SEC-W8GCO-1: the Microsoft Outlook door, configured as .env.example leaves it
+  // (MICROSOFT_STATE_SECRET empty, so its state is signed with GOOGLE_STATE_SECRET).
+  MICROSOFT_CLIENT_ID: `${P}fake-ms-client-id`,
+  MICROSOFT_REDIRECT_URI: 'http://localhost:3000/api/connect/microsoft/callback',
 };
-const OAUTH_KEYS = [...Object.keys(OAUTH_ENV), 'CALENDAR_REDIRECT_URI'];
+const OAUTH_KEYS = [...Object.keys(OAUTH_ENV), 'CALENDAR_REDIRECT_URI', 'MICROSOFT_STATE_SECRET'];
 const savedEnv: Record<string, string | undefined> = {};
+
+/**
+ * The Google account the provider stand-in answers for any code (obviously
+ * fake): what a callback stores when it completes a state.
+ */
+const PROVIDER_ACCOUNT = {
+  email: `${P}provider-account@test.local`,
+  access: `${P}fake-provider-access-not-real`,
+  refresh: `${P}fake-provider-refresh-not-real`,
+};
+const realFetch = globalThis.fetch;
 
 /** The stored Google connection a business starts each case with (obviously fake tokens). */
 function storedTokens(businessId: string) {
@@ -143,6 +174,7 @@ function connectedRow(businessId: string) {
 beforeAll(async () => {
   for (const key of OAUTH_KEYS) savedEnv[key] = process.env[key];
   delete process.env.CALENDAR_REDIRECT_URI;
+  delete process.env.MICROSOFT_STATE_SECRET;
   Object.assign(process.env, OAUTH_ENV);
 
   const dbMod = await import('@keyflow/db');
@@ -169,17 +201,31 @@ beforeAll(async () => {
   const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
   const { GeneratedDocumentService } = await import('../src/modules/google-drive/generated-document.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { CalendarController } = await import('../src/modules/calendar/calendar.controller');
+  const { CalendarSyncService } = await import('../src/modules/calendar/calendar-sync.service');
+  const { CalendarProjectionService } = await import('../src/modules/calendar/calendar-projection.service');
+  const { CalendarQueryService } = await import('../src/modules/calendar/calendar-query.service');
+  const { CalendarConflictService } = await import('../src/modules/calendar/calendar-conflict.service');
+  const { CalendarInsightService } = await import('../src/modules/calendar/calendar-insight.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+  const { GoogleCalendarTemporalSyncService } = await import('../src/modules/calendar/connectors/google-calendar-temporal-sync.service');
+  const { MicrosoftOAuthController } = await import('../src/modules/connect/microsoft-oauth.controller');
+  const { MicrosoftOAuthService } = await import('../src/modules/connect/microsoft-oauth.service');
+  const { ConnectorActivityService } = await import('../src/core/connectors/connector-activity.service');
 
   Logger.overrideLogger(false);
 
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [BookingsController, GoogleDriveController],
+    controllers: [BookingsController, GoogleDriveController, CalendarController, MicrosoftOAuthController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      // Declared by CalendarController's event routes; no case here reaches them.
+      ModuleScopeGuard,
       // Present only because the bookings controller's other routes declare them; no case here reaches them.
       PlanLimitGuard,
       PublicRateLimitGuard,
@@ -192,9 +238,21 @@ beforeAll(async () => {
       { provide: CatalogService, useValue: {} },
       { provide: GeneratedDocumentService, useValue: {} },
       { provide: TransactionalEmailService, useValue: {} },
-      // The Google Calendar and Drive connections, real (no connector: both are @Optional).
+      // CalendarController's and CalendarSyncService's collaborators no case here reaches.
+      { provide: CalendarProjectionService, useValue: {} },
+      { provide: CalendarQueryService, useValue: {} },
+      { provide: CalendarConflictService, useValue: {} },
+      { provide: CalendarInsightService, useValue: {} },
+      { provide: AiUsageService, useValue: {} },
+      { provide: GoogleCalendarTemporalSyncService, useValue: {} },
+      // MicrosoftOAuthService's activity log, reached only by its callback (no case here).
+      { provide: ConnectorActivityService, useValue: {} },
+      // The Google Calendar and Drive connections, real (no connector: both are @Optional),
+      // the platform calendar sync over the same CalendarService, and the Outlook door.
       CalendarService,
+      CalendarSyncService,
       GoogleDriveService,
+      MicrosoftOAuthService,
     ],
   }).compile();
 
@@ -236,9 +294,24 @@ beforeAll(async () => {
   }
   await connect(ID.biz);
   await connect(ID.bizOther);
+
+  // The provider stand-in (SEC-W8GCO-1 cases): Google's token exchange and
+  // userinfo answer with PROVIDER_ACCOUNT for any code; anything else is refused,
+  // so a case that reached another provider would fail rather than call out.
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith('https://oauth2.googleapis.com/token')) {
+      return new Response(JSON.stringify({ access_token: PROVIDER_ACCOUNT.access, refresh_token: PROVIDER_ACCOUNT.refresh, expires_in: 3600 }), { status: 200 });
+    }
+    if (url.startsWith('https://www.googleapis.com/oauth2/v2/userinfo')) {
+      return new Response(JSON.stringify({ email: PROVIDER_ACCOUNT.email }), { status: 200 });
+    }
+    throw new Error(`v94d_ provider stand-in: unexpected fetch ${url}`);
+  }) as typeof fetch;
 }, 120_000);
 
 afterAll(async () => {
+  globalThis.fetch = realFetch;
   if (db) await cleanup();
   if (app) await app.close();
   for (const key of OAUTH_KEYS) {
@@ -265,6 +338,34 @@ const driveDisconnect = (businessId: string, actor: string | undefined) =>
   as(agent().delete(`/drive/businesses/${businessId}/disconnect`), actor);
 const driveStatus = (businessId: string, actor: string | undefined) =>
   as(agent().get(`/drive/businesses/${businessId}/status`), actor);
+const syncConnect = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/calendar/businesses/${businessId}/sync/google/connect`), actor);
+const syncDisconnect = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/calendar/businesses/${businessId}/sync/google/disconnect`), actor);
+const syncResync = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/calendar/businesses/${businessId}/sync/google/resync`), actor);
+const microsoftAuthUrl = (businessId: string, actor: string | undefined) =>
+  as(agent().get(`/connect/microsoft/businesses/${businessId}/auth-url`), actor);
+
+/** The three Google OAuth callbacks a Drive or calendar state can be landed at. */
+const CALLBACKS = {
+  drive: '/drive/callback',
+  bookingsCalendar: '/bookings/calendar/callback',
+  syncCalendar: '/calendar/sync/google/callback',
+} as const;
+const landAt = (callback: string, state: string, code: string) => agent().get(callback).query({ state, code });
+
+/** The `state` query parameter of a consent URL. */
+const stateOf = (url: string) => String(new URL(url).searchParams.get('state'));
+
+/** The business's calendar sync settings, as stored (NULL until a resync or a settings write). */
+async function storedSyncSettings(businessId: string) {
+  const rows: Array<{ calendar_sync_settings: unknown }> = await db.$queryRawUnsafe(
+    `SELECT calendar_sync_settings FROM businesses WHERE id = $1`,
+    businessId,
+  );
+  return rows[0]?.calendar_sync_settings ?? null;
+}
 
 /** A refusal under D-99: 403 GOOGLE_CONNECT_OWNER_ONLY, and no Google consent URL anywhere in the body. */
 function expectGoogleOwnerOnly(res: { status: number; body: any }, who: string) {
@@ -300,10 +401,11 @@ describe('W8-GOOGLE-CONSENT-OWNER: starting or disconnecting the Google Calendar
   });
 
   it('[V94D-A02] control (D-99, the Gmail owner rule\'s arms): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) and a SUPER_ADMIN with no membership each get the calendar consent URL, its signed state naming the route\'s business', async () => {
-    expectConsentFor(await calendarAuthUrl(ID.biz, ID.owner), ID.biz, undefined, 'owner');
-    expectConsentFor(await calendarAuthUrl(ID.biz, ID.coOwner), ID.biz, undefined, 'coOwner');
-    expectConsentFor(await calendarAuthUrl(ID.bizOther, ID.otherOwner), ID.bizOther, undefined, 'otherOwner on bizOther');
-    expectConsentFor(await calendarAuthUrl(ID.biz, ID.superAdmin), ID.biz, undefined, 'superAdmin');
+    // SEC-W8GCO-1 (review repair): the calendar state carries a purpose tag of its own.
+    expectConsentFor(await calendarAuthUrl(ID.biz, ID.owner), ID.biz, 'google-calendar', 'owner');
+    expectConsentFor(await calendarAuthUrl(ID.biz, ID.coOwner), ID.biz, 'google-calendar', 'coOwner');
+    expectConsentFor(await calendarAuthUrl(ID.bizOther, ID.otherOwner), ID.bizOther, 'google-calendar', 'otherOwner on bizOther');
+    expectConsentFor(await calendarAuthUrl(ID.biz, ID.superAdmin), ID.biz, 'google-calendar', 'superAdmin');
   });
 
   it('[V94D-A03] RED-BEFORE (D-99): POST /bookings/businesses/:b/calendar/disconnect answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY, and the business\'s stored calendar connection (and its drive connection) stays exactly as it was', async () => {
@@ -395,10 +497,135 @@ describe('W8-GOOGLE-CONSENT-OWNER: starting or disconnecting the Google Drive co
   });
 });
 
-describe('W8-GOOGLE-CONSENT-OWNER: Google doors outside this packet\'s write set (D-99 follow-up)', () => {
-  it.todo('[V94D-T01] needs apps/server/src/modules/calendar/calendar.controller.ts (outside the W8-GOOGLE-CONSENT-OWNER write set, which names the bookings calendar routes): POST /calendar/businesses/:b/sync/google/connect (a calendar consent URL), .../sync/google/disconnect and .../sync/google/resync answer an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY with nothing changed; the owner keeps all three (D-99)');
+describe('W8-GOOGLE-CONSENT-OWNER review repair: the platform Google Calendar sync doors are the business owner\'s (D-99; SEC-W8GCO-2)', () => {
+  it('[V94D-D01] RED-BEFORE (D-99; SEC-W8GCO-2): POST /calendar/businesses/:b/sync/google/connect, .../disconnect and .../resync answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with no Google URL, the stored calendar and drive connection unchanged and no resync run', async () => {
+    await connect(ID.biz);
+    const settingsBefore = await storedSyncSettings(ID.biz);
+    for (const member of REFUSED) {
+      expectGoogleOwnerOnly(await syncConnect(ID.biz, member), `${member} connect`);
+      expectGoogleOwnerOnly(await syncDisconnect(ID.biz, member), `${member} disconnect`);
+      expectGoogleOwnerOnly(await syncResync(ID.biz, member), `${member} resync`);
+      expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
+      expect(await storedSyncSettings(ID.biz)).toEqual(settingsBefore);
+    }
+  });
 
+  it('[V94D-D02] control (D-99): the owner gets the sync consent URL (its state naming the business and the google-calendar purpose), resyncs and disconnects (calendar email, tokens, expiry, calendar id and sync settings cleared; drive untouched); the distinguished owner on their own business and a SUPER_ADMIN get the consent URL; the status read stays a member\'s', async () => {
+    const owner = await syncConnect(ID.biz, ID.owner);
+    expect([200, 201], JSON.stringify(owner.body)).toContain(owner.status);
+    expectConsentFor({ status: 200, body: owner.body }, ID.biz, 'google-calendar', 'owner sync connect');
+    for (const [businessId, actor] of [[ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]]) {
+      const res = await syncConnect(businessId, actor);
+      expect([200, 201], `${actor} ${JSON.stringify(res.body)}`).toContain(res.status);
+      expectConsentFor({ status: 200, body: res.body }, businessId, 'google-calendar', `${actor} sync connect`);
+    }
+
+    await connect(ID.biz);
+    const resync = await syncResync(ID.biz, ID.owner);
+    expect([200, 201], JSON.stringify(resync.body)).toContain(resync.status);
+    // No calendar event to push and pullExternal off by default: the cycle ran without a provider call.
+    expect(resync.body).toEqual({ pushed: 0, pulled: 0, errors: [] });
+    expect(await storedSyncSettings(ID.biz)).toMatchObject({ lastResyncAt: expect.any(String), lastResyncError: null });
+
+    const disconnect = await syncDisconnect(ID.biz, ID.owner);
+    expect([200, 201], JSON.stringify(disconnect.body)).toContain(disconnect.status);
+    expect(disconnect.body).toEqual({ success: true });
+    expect(await stored(ID.biz)).toEqual({
+      ...connectedRow(ID.biz),
+      calendar_email: null, calendar_access_token: null, calendar_refresh_token: null, calendar_expiry: false, calendar_id: null,
+    });
+    expect(await storedSyncSettings(ID.biz)).toBeNull();
+    await connect(ID.biz);
+
+    const status = await as(agent().get(`/calendar/businesses/${ID.biz}/sync/status`), ID.staff);
+    expect(status.status, JSON.stringify(status.body)).toBe(200);
+    expect(status.body).toMatchObject({ connected: true });
+  });
+});
+
+describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callbacks complete only their own single-use state (D-99; SEC-W8GCO-1)', () => {
+  it('[V94D-E01] RED-BEFORE (D-99; SEC-W8GCO-1): GET /drive/callback refuses (reason invalid_state) a bookings calendar state and a calendar sync state the owner obtained, and the Outlook state a STAFF member obtains at GET /connect/microsoft/businesses/:b/auth-url (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset); the stored drive connection stays the business\'s', async () => {
+    await connect(ID.biz);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
+    const foreign: Array<[string, string]> = [
+      ['bookings calendar state', stateOf((await calendarAuthUrl(ID.biz, ID.owner)).body.url)],
+      ['calendar sync state', stateOf((await syncConnect(ID.biz, ID.owner)).body.url)],
+      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+    ];
+    for (const [label, state] of foreign) {
+      const res = await landAt(CALLBACKS.drive, state, `${P}code-${label.length}`);
+      expect(res.status, label).toBe(302);
+      expect(res.headers.location, label).toContain('drive=error&reason=invalid_state');
+      expect(await stored(ID.biz), label).toEqual(connectedRow(ID.biz));
+    }
+  });
+
+  it('[V94D-E02] RED-BEFORE (D-99; SEC-W8GCO-1): GET /bookings/calendar/callback and GET /calendar/sync/google/callback refuse (reason invalid_state) the owner\'s Drive state and a STAFF member\'s Outlook state; the stored calendar connection stays the business\'s', async () => {
+    await connect(ID.biz);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
+    const foreign: Array<[string, string]> = [
+      ['Drive state', stateOf((await driveAuthUrl(ID.biz, ID.owner)).body.url)],
+      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+    ];
+    for (const [label, state] of foreign) {
+      for (const callback of [CALLBACKS.bookingsCalendar, CALLBACKS.syncCalendar]) {
+        const res = await landAt(callback, state, `${P}code-${label.length}`);
+        expect(res.status, `${label} at ${callback}`).toBe(302);
+        expect(res.headers.location, `${label} at ${callback}`).toContain('calendar=error&reason=invalid_state');
+        expect(await stored(ID.biz), `${label} at ${callback}`).toEqual(connectedRow(ID.biz));
+      }
+    }
+  });
+
+  it('[V94D-E03] RED-BEFORE (D-99; SEC-W8GCO-1): the owner\'s own state completes its callback once (Drive at /drive/callback, a bookings calendar state at /bookings/calendar/callback, a sync state at /calendar/sync/google/callback, each storing the provider account) and is refused invalid_state when it is landed again, at either calendar callback, with nothing stored', async () => {
+    // Drive: once, then never again.
+    await connect(ID.biz);
+    const driveState = stateOf((await driveAuthUrl(ID.biz, ID.owner)).body.url);
+    const first = await landAt(CALLBACKS.drive, driveState, `${P}code-drive-1`);
+    expect(first.headers.location, 'drive first').toContain('drive=success');
+    const afterDrive = await stored(ID.biz);
+    expect(afterDrive.drive_email).toBe(PROVIDER_ACCOUNT.email);
+    expect(afterDrive.drive_access_token).not.toBe(connectedRow(ID.biz).drive_access_token);
+    // Only the drive columns moved: the calendar connection is untouched.
+    expect({ ...afterDrive, drive_email: null, drive_access_token: null, drive_refresh_token: null })
+      .toEqual({ ...connectedRow(ID.biz), drive_email: null, drive_access_token: null, drive_refresh_token: null });
+    await connect(ID.biz);
+    const replay = await landAt(CALLBACKS.drive, driveState, `${P}code-drive-2`);
+    expect(replay.headers.location, 'drive replay').toContain('drive=error&reason=invalid_state');
+    expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
+
+    // Calendar: a bookings calendar state, once, then at neither calendar callback again.
+    const calendarState = stateOf((await calendarAuthUrl(ID.biz, ID.owner)).body.url);
+    const calendarFirst = await landAt(CALLBACKS.bookingsCalendar, calendarState, `${P}code-cal-1`);
+    expect(calendarFirst.headers.location, 'calendar first').toContain('calendar=success');
+    const afterCalendar = await stored(ID.biz);
+    expect(afterCalendar.calendar_email).toBe(PROVIDER_ACCOUNT.email);
+    expect(afterCalendar.calendar_access_token).not.toBe(connectedRow(ID.biz).calendar_access_token);
+    await connect(ID.biz);
+    for (const callback of [CALLBACKS.bookingsCalendar, CALLBACKS.syncCalendar]) {
+      const res = await landAt(callback, calendarState, `${P}code-cal-2`);
+      expect(res.headers.location, `calendar replay at ${callback}`).toContain('calendar=error&reason=invalid_state');
+      expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
+    }
+
+    // The sync consent's state completes the platform callback (the same purpose tag).
+    const syncState = stateOf((await syncConnect(ID.biz, ID.owner)).body.url);
+    const syncFirst = await landAt(CALLBACKS.syncCalendar, syncState, `${P}code-sync-1`);
+    expect(syncFirst.headers.location, 'sync first').toContain('calendar=success');
+    expect((await stored(ID.biz)).calendar_email).toBe(PROVIDER_ACCOUNT.email);
+    await connect(ID.biz);
+    const syncReplay = await landAt(CALLBACKS.syncCalendar, syncState, `${P}code-sync-2`);
+    expect(syncReplay.headers.location, 'sync replay').toContain('calendar=error&reason=invalid_state');
+    expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
+  });
+});
+
+describe('W8-GOOGLE-CONSENT-OWNER: Google doors outside this packet\'s write set (D-99 follow-up)', () => {
   it.todo('[V94D-T02] needs apps/server/src/core/connectors/connector.controller.ts (outside the write set): POST /connectors/businesses/:b/sync/:type, .../disconnect/:type and .../reconnect/:type for google_calendar, google_drive, google_contacts, google_forms and google_business_profile (the connections the Google Suite consent provisions) answer an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY before the registry is reached; the owner keeps them; R0-CMF6-K05 (a STAFF member syncs, tests and smoke-tests google_calendar) is retitled with gmail-connect-binding.json in the same change (D-99)');
 
   it.todo('[V94D-T03] needs apps/server/src/modules/connect/connect.controller.ts (outside the write set): POST /connect/businesses/:b/contacts/sync, POST .../contact-sources/google_contacts/resync, DELETE .../contact-sources/google_contacts and POST .../contact-sources/sync-all (which syncs Google Contacts) answer an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced or cleared; the owner keeps them (D-99)');
+
+  it.todo('[V94D-T04] needs the web (outside the write set; review CR-W8GCO-1): apps/web/src/app/app/profile/components/google-drive-browser.tsx handleDisconnect and handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx show the GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect and GET .../auth-url to an ADMIN or STAFF member and keep the Drive connection shown as connected (today the browser clears it as if disconnected) (D-99)');
 });

@@ -501,7 +501,12 @@ export class BookingsController {
    * Google Calendar connection is the business owner's to start and to
    * disconnect (assertGoogleConnectOwner: OWNER membership, Business.ownerId
    * or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY, first). The status
-   * read and the event routes stay open to members.
+   * read and the event routes stay open to members. Review repairs: the
+   * platform twins of these doors (POST /calendar/businesses/:b/sync/google/
+   * connect, disconnect and resync) follow the same rule (SEC-W8GCO-2), and the
+   * state this URL carries is tagged for the Google Calendar connection and
+   * good for one callback (CalendarService.verifyState, SEC-W8GCO-1), so no
+   * other door's state completes the calendar callback below.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/auth-url')

@@ -46,6 +46,8 @@ import { CalendarConflictService } from './calendar-conflict.service';
 import { CalendarInsightService } from './calendar-insight.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { GoogleCalendarTemporalSyncService } from './connectors/google-calendar-temporal-sync.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -68,6 +70,8 @@ export class CalendarController {
     private readonly aiUsage: AiUsageService,
     @Inject(GoogleCalendarTemporalSyncService)
     private readonly temporalSync: GoogleCalendarTemporalSyncService,
+    @Inject(PrismaService)
+    private readonly prisma: PrismaService,
   ) {}
 
   // ----- Google Calendar sync (platform connection) ---------------------
@@ -123,22 +127,48 @@ export class CalendarController {
     return this.sync.listAvailableCalendars(businessId);
   }
 
+  /**
+   * W8-GOOGLE-CONSENT-OWNER review repair (owner ruling D-99; SEC-W8GCO-2):
+   * the platform Google Calendar connection is the business owner's to start,
+   * sync and disconnect, as on its bookings twin routes
+   * (GET /bookings/businesses/:b/calendar/auth-url and POST .../calendar/disconnect):
+   * connect builds the same CalendarService consent URL and disconnect clears
+   * the same Business.calendar* tokens, so a member refused there was not to be
+   * admitted here. assertGoogleConnectOwner (OWNER membership,
+   * Business.ownerId or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY) runs
+   * first, before a URL is built or anything is read or written. The status,
+   * settings and calendar-list reads stay open to members.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/connect')
-  syncConnect(@Param('businessId') businessId: string) {
+  async syncConnect(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return { url: this.sync.getAuthUrl(businessId) };
   }
 
+  // W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-2): disconnecting is the owner's, as connecting is.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/disconnect')
-  async syncDisconnect(@Param('businessId') businessId: string) {
+  async syncDisconnect(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     await this.sync.disconnect(businessId);
     return { success: true };
   }
 
+  // W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-2): a manual push/pull resync of the Google connection is the owner's too.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/resync')
-  async syncResync(@Param('businessId') businessId: string) {
+  async syncResync(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.sync.manualResync(businessId);
   }
 
