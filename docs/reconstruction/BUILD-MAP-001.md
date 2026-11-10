@@ -1070,6 +1070,7 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-98 | When a member drives KEY (chat or a plan), KEY's money-writing tools (mark an invoice paid, update an invoice, record a payment) need that member's own revenue write permission, as the web routes do; a read-only member gets a refusal from KEY too. | W8 KEY revenue gate (SEC-W7IAR-2, SEC-W7KMP-2). |
 | D-99 | Every Google connection for a business (Calendar, Drive, Contacts, Gmail, Analytics, Search Console) is started, synced and disconnected only by the business owner. | W8 Google consent doors (CR-RCV-1, SEC-W7RCV-2). |
 | D-100 | A member without revenue read sees no money signals at all: revenue sorts and filters on the contact list are ignored, and the payment-health ratio is withheld, as amounts are (D-63, D-90). | W8 money-signal packet (CR-W7CMV-2, SEC-W7CMV-3, SEC-W7CMV-1). |
+| D-101 | After a D-97 sign-in cutoff, the account accepts only a new sign-in with Google or an emailed link (methods the attacker cannot produce from a stolen refresh token); a password sign-in made after the cutoff is refused until the real user has signed in once with Google or the emailed link, which clears the restriction. | W9 RISC password-route packet (SEC-W8RSC-4). |
 
 ---
 

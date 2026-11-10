@@ -1618,10 +1618,17 @@
       "suite": "test/supabase-admin.service.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet",
-      "reason": "OPEN, ruled: owner ruling D-97 (D-39 resolved) is a durable per-user sign-in cutoff with no new secret; W7-RISC-REVOKE's provider global logout needs SUPABASE_JWT_SECRET, which R0-SEC-02 forbids, and UserIdentity is never written so RISC events resolve no user (SEC-W7RR-1); queued as the W8 RISC durable cutoff packet.",
-      "owner": "R0-ID-F7-RISC-SIGNOUT-SHAPE (parked it, under R0-05-ID-REALDB-TENANT-ALIGN); follow-up packet not yet queued in BUILD-MAP",
-      "status": "OPEN",
-      "followUp": "D-97"
+      "reason": "CLOSED by W8-RISC-SIGNIN-CUTOFF under owner ruling D-97: a RISC hijacking or revocation event writes a durable per-user sign-in cutoff and the API refuses any token whose original sign-in predates it, even after a refresh, with SUPABASE_JWT_SECRET empty (R0-SEC-02); bootstrap persists UserIdentity from the verified provider record so RISC events resolve the user. Follow-ups outside F7-SEC-2: D-101 (password route after a cutoff), the UserIdentity backfill for accounts not signed in since deploy.",
+      "owner": "W8-RISC-SIGNIN-CUTOFF",
+      "status": "CLOSED",
+      "followUp": "D-97",
+      "ruling": "D-97",
+      "closedBy": [
+        {
+          "file": "apps/server/test/supabase-admin.service.test.ts",
+          "contains": "it(\"R0-ID-F7 review F7-SEC-2, closed by D-97"
+        }
+      ]
     },
     {
       "suite": "test/stripe-ops-tenancy.integration.test.ts",
