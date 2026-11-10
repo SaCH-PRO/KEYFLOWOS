@@ -58,6 +58,16 @@ export function noMemberToolRefusal(toolName: string): string | null {
   if (graphActionBoundByContactVisibility(toolName)) {
     return `"${toolName}" reads the business's contacts (only a member principal's visibility bounds them), and a KEY plan or monitor with no member principal reads no contacts (D-73, D-93)`;
   }
+  // W8-CALL-TASK-NO-MEMBER (D-73; review CR-W7CTC-1): call_create_task names a contact and records the
+  // member the run is for as its caller (W7-CALL-TASK-CALLER, D-88), so a run with no member has no
+  // caller to record. Its dispatcher case refuses such a run, but only once dispatched, where
+  // ActionDispatcherService retries the refusal and counts it toward the tool's circuit breaker, which
+  // it keys by tool name alone (five refusals stopped the tool for every business). Refused here, before
+  // dispatch, on every surface that reads this gate (the plan queue, the Pro Auto monitor, the
+  // proposal executor).
+  if (toolName === 'call_create_task') {
+    return `"${toolName}" names a contact and records the member it runs for as the caller, and a KEY plan or monitor with no member principal has no member to record (D-73)`;
+  }
   const money = requirement.scopes.find(
     (s) => (s.module === 'revenue' || s.module === 'expenses') && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write,
   );
