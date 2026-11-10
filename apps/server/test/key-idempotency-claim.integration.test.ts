@@ -1300,6 +1300,25 @@ describe('the consumer of the claim: a stranded claim is taken over after 15 min
     expect(await takeoverLogs(key)).toHaveLength(1);
   });
 
+  it("D-103: inside a tenant context (as the tool registry runs in a request), two concurrent retries of a stranded claim still yield exactly one takeover and one 'pending', and one log entry (W10-CLAIM-LEASE)", async () => {
+    const key = freshKey('lease_tenant');
+    const stranded = await service.check(req(key, 'hash_t'));
+    await ageClaim(ID.biz, key, LEASE_MINUTES + 1);
+
+    const results = await tenant.runWithTenant(ID.biz, ID.owner, () =>
+      race([
+        () => service.check(req(key, 'hash_t')),
+        () => service.check(req(key, 'hash_t')),
+      ]),
+    );
+    expect(results.map((r: any) => (r.error ? `threw ${describeError(r.error)}` : null))).toEqual([null, null]);
+    expect(results.map((r: any) => r.answer.status).sort()).toEqual(['new', 'pending']);
+    const taker = results.find((r: any) => r.answer.status === 'new').answer;
+    expect(await claimRow(ID.biz, key)).toMatchObject({ id: taker.claimId, status: 'pending', requestHash: 'hash_t' });
+    expect(taker.claimId).not.toBe(stranded.claimId);
+    expect(await takeoverLogs(key)).toHaveLength(1);
+  });
+
   it("D-103: a claim open 14 minutes is not taken over: the retry is answered 'pending', the holder's claimId still settles it, and nothing is logged (W10-CLAIM-LEASE)", async () => {
     const key = freshKey('lease_young');
     const holder = await service.check(req(key, 'hash_1'));
