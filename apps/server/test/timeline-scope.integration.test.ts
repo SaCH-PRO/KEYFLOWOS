@@ -46,7 +46,10 @@
  *   the message_intake.approved row (detail = the plan's summary of the
  *   sender's message) carry the contactId of the contact they name, written
  *   here through the real writers, so the rule withholds them from a member
- *   who may not open that contact.
+ *   who may not open that contact. TS-13d (SEC-W9TO-1: the rows those writers
+ *   stored before, contactId null) and TS-13e (SEC-W9TO-2: the KEY chat
+ *   prompt's recent Activity titles) are follow-ups outside that write set
+ *   (it.todo).
  *   TS-14 (ST-3) is live since W5-BRIEFING-SCOPE (D-63): the morning briefing
  *   (AiController.morningBriefing) reads through the same rule.
  *   TS-15..TS-17 (W6-BRIEFINGS-SCOPE, D-63; reviews SEC-W5BS-1, SEC-W5BS-2,
@@ -881,6 +884,23 @@ describe('W9-TEXT-ONLY-CONTACT-WRITERS (D-63): rows that name a contact only in 
     expect((await ids(events(ID.owner, `limit=50&contactId=${C.team}`))).sort()).toEqual([ROW.invTeam, ROW.inTeam].sort());
     expect(await ids(events(ID.admin, `limit=50&contactId=${C.priv}`))).toEqual([]);
   });
+});
+
+/**
+ * W9-TEXT-ONLY-CONTACT-WRITERS review (SEC-W9TO-1, SEC-W9TO-2; owner ruling
+ * D-63): two follow-ups outside the packet's write set, reproduced on the real
+ * database before they were recorded here (a temporary case in the TS-13
+ * describe, removed): rows the two writers stored before the packet, and the
+ * KEY chat prompt. The packet changes what the writers store, not the timeline
+ * rule; each needs a decision the packet does not carry.
+ */
+describe('W9-TEXT-ONLY-CONTACT-WRITERS review follow-ups outside the write set (TS-13d, TS-13e)', () => {
+  it.todo(
+    "TS-13d (review SEC-W9TO-1, D-63): rows the two writers stored before W9-TEXT-ONLY-CONTACT-WRITERS keep contactId null, so a KEY invoice_sent row ({ module 'commerce', entityType 'invoice', entityId <invoice>, title 'Invoice <n> sent to <PRIVATE contact name>' }) is still served on /events, the day's summary and the legacy route to a view-all ADMIN, a crm_view 'owned' and a crm 'none' revenue reader, and a message_intake.approved row ({ module 'communications', entityType 'message_intake', entityId <intake>, detail '<intent> from <sender email> — <subject>' }) to ADMIN and the crm_view 'owned' member, none of whom may open that contact (namedContacts reads contactId, and entityId only for entityType 'contact'); the treatment is not in the packet's write set or authority: a backfill of activities.contact_id from invoices.contact_id / message_intakes.contact_id on the same business (a data change), the rule resolving these two entity types to their contact at read time (timeline-visibility.ts, which the packet may not change), or an owner ruling that accepts the stored rows",
+  );
+  it.todo(
+    "TS-13e (review SEC-W9TO-2, D-63): POST /ai/businesses/:businessId/ai/chat (AiController.chat: AuthGuard + BusinessGuard, no viewer; AiAdvisorService.chat and getBusinessContext, outside the packet's write set) puts the business's 10 newest Activity titles in the model's system prompt unfiltered, so the KEY chat of a view-all ADMIN, a crm 'none' member and a revenue 'none' member carries 'Invoice <n> sent to <PRIVATE contact name>' (and money titles such as 'Payment recorded: TTD 150') whatever the row's contactId, with the business's revenue, outstanding and expense figures; a follow-up packet passes the member as a TimelineViewer and builds the prompt from the rows the timeline rule serves them and the figures they read, as W7-BRIEFINGS-REST did for generateDailyBriefing (TS-20a)",
+  );
 });
 
 /**

@@ -96,6 +96,10 @@ const OPAQUE_WRITERS: Record<string, string> = {};
  *     MessageIntakeOrchestrator.executePlan): the intake's contactId. It was
  *     listed by hand (the heuristic cannot see a summary's content), so TV-07
  *     cannot see it regress; TS-13b does.
+ * The list judges writers, not stored rows: rows these two writers stored
+ * before the packet keep contactId null and are still served to a member who
+ * may not open the contact they name (review SEC-W9TO-1, D-63), a follow-up
+ * outside the packet's write set recorded as timeline-scope TS-13d (it.todo).
  * A new entry is a writer that genuinely cannot name its contact, with why.
  */
 const TEXT_ONLY_CONTACT_WRITERS: Record<string, string> = {};
