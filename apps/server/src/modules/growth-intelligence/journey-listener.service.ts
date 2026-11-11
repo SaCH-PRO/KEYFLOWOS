@@ -157,8 +157,9 @@ export class JourneyListenerService {
    * W10-STORE-ORDER-PAID (V18-T2b, review STL-SEC-2 / CR-W9SPL-1; D-112, D-18):
    * the order_paid CONVERSION touchpoint is recorded only for an order stored
    * PAID in the event's business, as the W9 listeners read it. PATCH
-   * .../orders/:id/status 'paid' alone (open to any member) emits
-   * store_order.paid for a STANDARD order stored UNPAID, and a queued or forged
+   * .../orders/:id/status 'paid' alone (open to any member) emitted
+   * store_order.paid for a STANDARD order stored UNPAID (no longer since the
+   * W10-STORE-ORDER-PAID review, SEC-SOP-2), and a queued or forged
    * copy can name an unpaid order or another business's order; each recorded a
    * conversion of the order total. Nothing is recorded otherwise.
    */

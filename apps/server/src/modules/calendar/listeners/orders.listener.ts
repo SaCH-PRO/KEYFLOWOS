@@ -37,8 +37,9 @@ export class CalendarOrdersListener {
    * W10-STORE-ORDER-PAID (V18-T2b, review STL-SEC-2 / CR-W9SPL-1; D-112, D-18):
    * a paid order is projected only when it is stored PAID in the event's
    * business, and from its stored row, as the W9 listeners read it. PATCH
-   * .../orders/:id/status 'paid' alone (open to any member) emits
-   * store_order.paid for a STANDARD order stored UNPAID, and a queued or forged
+   * .../orders/:id/status 'paid' alone (open to any member) emitted
+   * store_order.paid for a STANDARD order stored UNPAID (no longer since the
+   * W10-STORE-ORDER-PAID review, SEC-SOP-2), and a queued or forged
    * copy can name an unpaid order or another business's order, which was
    * projected into the business the event named. Nothing is projected otherwise.
    */
