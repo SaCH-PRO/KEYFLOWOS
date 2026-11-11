@@ -159,6 +159,12 @@ export const LOW_RUNWAY_LISTED_CURRENCY_LIMIT = 5;
  * LOW_RUNWAY_LISTED_CURRENCY_LIMIT of them (D-13's currencies first, then the others in code order;
  * listed in code order), and counts the rest: a label that is not a code is never echoed (its
  * amount is counted, never added to another), and the text stays bounded whatever the labels are.
+ *
+ * Review CR-W10LR-1 (D-107, never a silent alarm): every web reader shows this text on one
+ * truncated line (the overview's action queue, the revenue-actions queue), so the figures come right
+ * after the runway, before any explanation: "~1.5 months at current burn (TTD cash only). Not
+ * counted: USD 625.00." The figures are in their own currency, never converted. Letting the line
+ * wrap is a web follow-up outside this packet.
  */
 export function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
   const runway = `~${runwayMonths.toFixed(1)} months at current burn`;
@@ -180,8 +186,9 @@ export function lowRunwayDetail(runwayMonths: number, cashCurrency: string, othe
       : `${unlabelled} amounts held under labels that are not currency codes (labels not shown)`);
   }
   // The business currency is normalized Business.currency: named only when it is a code too.
-  const from = LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : "the business currency's cash";
-  return `${runway}, from ${from} only. Cash in other currencies, not included and not converted: ${parts.join('; ')}.`;
+  const from = LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : 'business-currency cash';
+  // CR-W10LR-1: the figures first, so a one-line (truncated) reader still shows them.
+  return `${runway} (${from} only). Not counted: ${parts.join('; ')}.`;
 }
 
 /**

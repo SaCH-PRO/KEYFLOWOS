@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { LOW_RUNWAY_LISTED_CURRENCY_LIMIT, lowRunwayDetail } from './finance-overview.service';
 
-const HEAD = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: ';
+const HEAD = '~1.5 months at current burn (TTD cash only). Not counted: ';
 
 describe('W10-LOW-RUNWAY review SEC-W10LR-1 (D-107): the LOW_RUNWAY text names only currency codes', () => {
   it('SEC-W10LR-1 (D-107): with no other-currency cash the text is the runway alone; three-letter codes are listed in code order, unconverted', () => {
@@ -51,10 +51,26 @@ describe('W10-LOW-RUNWAY review SEC-W10LR-1 (D-107): the LOW_RUNWAY text names o
     expect(text).not.toMatch(/label \d|xxx/i);
   });
 
+  // Review CR-W10LR-1 (D-107, never a silent alarm): the web readers show the text on one truncated
+  // line (the Finance overview's action queue holds about 95 characters). The text was 118 characters
+  // with its first figure at character 107, so the ellipsis fell before the figures. The figures now
+  // follow the runway directly.
+  it('CR-W10LR-1 (D-107): the other-currency figures come right after the runway, so a one-line truncated reader still shows them', () => {
+    const one = lowRunwayDetail(1.5, 'TTD', [{ currency: 'USD', amount: 625 }]);
+    expect(one).toBe('~1.5 months at current burn (TTD cash only). Not counted: USD 625.00.');
+    expect(one.indexOf('USD 625.00')).toBeLessThan(60);
+    const two = lowRunwayDetail(1.5, 'TTD', [{ currency: 'EUR', amount: 12 }, { currency: 'USD', amount: 635 }]);
+    expect(two.length, 'two currencies fit the overview line whole').toBeLessThanOrEqual(90);
+    // A counted label comes after the listed figures, never before them.
+    const labelled = lowRunwayDetail(1.5, 'TTD', [{ currency: 'pay now', amount: 5 }, { currency: 'USD', amount: 625 }]);
+    expect(labelled.indexOf('USD 625.00')).toBeLessThan(60);
+    expect(labelled.indexOf('USD 625.00')).toBeLessThan(labelled.indexOf('label'));
+  });
+
   it('SEC-W10LR-1 (D-107): the business currency is named only when it is a code', () => {
     expect(lowRunwayDetail(1.5, 'USD', [{ currency: 'TTD', amount: 40 }]))
-      .toBe('~1.5 months at current burn, from USD cash only. Cash in other currencies, not included and not converted: TTD 40.00.');
+      .toBe('~1.5 months at current burn (USD cash only). Not counted: TTD 40.00.');
     expect(lowRunwayDetail(1.5, 'PAY NOW', [{ currency: 'TTD', amount: 40 }]))
-      .toBe("~1.5 months at current burn, from the business currency's cash only. Cash in other currencies, not included and not converted: TTD 40.00.");
+      .toBe('~1.5 months at current burn (business-currency cash only). Not counted: TTD 40.00.');
   });
 });

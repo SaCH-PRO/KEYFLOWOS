@@ -146,7 +146,9 @@
  *          through the account routes). The text lists only cash held under a
  *          three-letter code, at most five (D-13's currencies first), and
  *          counts the rest without echoing a label: bounded, never a sentence
- *          a member typed for a currency
+ *          a member typed for a currency. Review CR-W10LR-1: the web readers
+ *          truncate the text to one line, so the figures follow the runway
+ *          directly (CP-18 pins that wording)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1400,7 +1402,7 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
       expect.objectContaining({
         title: 'Low cash runway',
         amountAtRisk: 150,
-        detail: '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: USD 625.00.',
+        detail: '~1.5 months at current burn (TTD cash only). Not counted: USD 625.00.',
       }),
     ]);
     expect(numbersIn(read.overview).filter(([, n]) => n === 775 || n === 7.8), 'no figure adds USD to TTD').toEqual([]);
@@ -1418,7 +1420,7 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     expect(await ledgerCashByCurrency(ID.bizI)).toEqual({ EUR: 12, TTD: 150, USD: 635 });
     read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
     expect(read.overview.otherCurrencyCash).toEqual([{ currency: 'EUR', amount: 12 }, { currency: 'USD', amount: 635 }]);
-    const detail = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: EUR 12.00, USD 635.00.';
+    const detail = '~1.5 months at current burn (TTD cash only). Not counted: EUR 12.00, USD 635.00.';
     expect(lowRunway(read.overview).map((a: any) => [a.amountAtRisk, a.detail])).toEqual([[150, detail]]);
     expect((await db.revenueAction.findUnique({ where: { id: row.id } }))?.detail, 'the persisted row is not stale').toBe(detail);
 
@@ -1439,7 +1441,7 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     const j = await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
     expect(j.overview).toMatchObject({ cashCurrency: 'USD', cashRunwayMonths: 1.5, otherCurrencyCash: [{ currency: 'TTD', amount: 40 }] });
     expect(lowRunway(j.overview).map((a: any) => [a.amountAtRisk, a.detail])).toEqual([
-      [300, '~1.5 months at current burn, from USD cash only. Cash in other currencies, not included and not converted: TTD 40.00.'],
+      [300, '~1.5 months at current burn (USD cash only). Not counted: TTD 40.00.'],
     ]);
 
     // A business whose cash is in its own currency alone: nothing to state; the text is as it was.
@@ -1472,7 +1474,7 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     };
     const persisted = async () =>
       (await db.revenueAction.findFirst({ where: { businessId: ID.bizI, type: 'LOW_RUNWAY', relatedType: 'business', relatedId: ID.bizI } }))?.detail;
-    const head = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: ';
+    const head = '~1.5 months at current burn (TTD cash only). Not counted: ';
 
     // I holds TTD 150 beside EUR 12 and USD 635 (CP-18). A CASH account on the inventory row, its
     // opening never posted, holds 5 under a sentence for a currency (create upper-cases it).
