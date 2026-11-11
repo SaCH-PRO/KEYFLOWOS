@@ -77,7 +77,8 @@ export class SubscriptionsService {
     });
     if (membership?.role === 'OWNER') return { actor, standing: 'OWNER' };
     const owned = await this.db.business.findFirst({
-      where: { id: businessId, ownerId: actor.id },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
       select: { id: true },
     });
     if (owned) return { actor, standing: 'OWNER' };

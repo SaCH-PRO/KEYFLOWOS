@@ -168,8 +168,9 @@ export class FinanceController {
   // cashflow forecast) carry the same gate. Review SEC-A5A6-04: each of these
   // reads also runs ensureAccess, so a non-member SUPER_ADMIN (whom
   // BusinessGuard and ModuleScopeGuard pass) is refused on every one.
-  // ModuleScopeGuard refuses a distinguished owner (Business.ownerId) with no
-  // Membership row, as GET trial-balance already did (review CR-A6-02, open).
+  // A distinguished owner (Business.ownerId) with no Membership row is refused
+  // by BusinessGuard and ensureAccess (owner ruling D-104, W10-OWNER-MEMBERSHIP;
+  // review CR-A6-02, BRS-12).
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('general-ledger')
@@ -251,7 +252,8 @@ export class FinanceController {
 
   private async ensureAccess(userId: string, businessId: string) {
     const biz = await this.prisma.client.business.findFirst({
-      where: { id: businessId, OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+      where: { id: businessId, members: { some: { userId } } },
       select: { id: true },
     });
     if (!biz) throw new ForbiddenException('No access to this business');

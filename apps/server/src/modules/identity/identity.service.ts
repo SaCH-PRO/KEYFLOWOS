@@ -194,11 +194,11 @@ export class IdentityService {
    * were plainly a member of. Membership is the ordinary authenticated-human to
    * Business relationship, so it leads the predicate.
    *
-   * `ownerId` stays as the second arm on purpose. It is distinguished-owner
-   * compatibility metadata, and until the founding-Membership backfill has run
-   * everywhere it is the only thing keeping pre-existing legitimate owners
-   * discoverable. It is a compatibility fallback, not a second source of truth,
-   * and it is not removed by this packet.
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP): Membership is the single rule.
+   * The `ownerId` compatibility arm is gone: an owner recorded only as
+   * Business.ownerId is refused by BusinessGuard, so listing them a workspace
+   * they cannot open helped no one. scripts/backfill-owner-memberships.ts
+   * (operator, dry run by default) writes their OWNER Membership.
    *
    * Tenant scoping: `Business` is the tenant root and carries no businessId, so
    * it is absent from BUSINESS_ID_MODELS and the S0 isolation extension injects
@@ -212,13 +212,7 @@ export class IdentityService {
   async listBusinesses(userId: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
     const items = await this.prisma.client.business.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { members: { some: { userId } } },
-          { ownerId: userId },
-        ],
-      },
+      where: { deletedAt: null, members: { some: { userId } } },
     });
     return items.map((b) => sanitizeBusiness(b));
   }
@@ -395,7 +389,8 @@ export class IdentityService {
     });
     if (membership?.role === 'OWNER') return;
     const owned = await this.prisma.client.business.findFirst({
-      where: { id: businessId, ownerId: actor.id },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
       select: { id: true },
     });
     if (owned) return;

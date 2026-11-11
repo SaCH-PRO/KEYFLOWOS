@@ -145,9 +145,8 @@ interface CommandViewer {
 }
 
 /**
- * SUPER_ADMIN, and a Business.ownerId BusinessGuard admits without a
- * Membership (CR-V109b-1): every row, every module, every contact. The
- * latter writes no module (commandViewer), as ModuleScopeGuard refuses it.
+ * SUPER_ADMIN: every row, every module, every contact. (A Business.ownerId
+ * without a Membership is refused since owner ruling D-104.)
  */
 const EVERY_ROW_EVERY_READ: CommandViewer = { seesAllRows: true, reads: () => true, writes: () => true, contactScope: null, unrestricted: true };
 
@@ -680,8 +679,8 @@ export class KeyCommandService {
    * thread (sessionId, correlationId): such a row reads `rawInput: ''` and is
    * marked `dataWithheld: true` (SEC-V109b-1); a caller keeps their own.
    * Withheld data is marked `dataWithheld: true`. Fails closed: an unknown
-   * user or a non-member is refused; the Business.ownerId BusinessGuard
-   * admits without a membership reads every row (CR-V109b-1).
+   * user or a non-member is refused, a Business.ownerId without a Membership
+   * row included (owner ruling D-104).
    */
   async listCommands(businessId: string, userId: string | undefined, take = 50): Promise<ListedKeyCommand[]> {
     if (!userId) throw new ForbiddenException('Authentication required');
@@ -742,12 +741,10 @@ export class KeyCommandService {
     if (user.role === 'SUPER_ADMIN') return EVERY_ROW_EVERY_READ;
     const member = await this.memberScopes(businessId, userId);
     if (!member) {
-      // CR-V109b-1: BusinessGuard (userCanAccessBusiness) also admits the
-      // Business.ownerId without a Membership row (businesses created before
-      // the founding OWNER membership was written with them). That owner
-      // listed every row before V1-09b and still does. Anyone else is refused.
-      const owned = await this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId }, select: { id: true } });
-      if (owned) return { ...EVERY_ROW_EVERY_READ, writes: () => false };
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP), replacing CR-V109b-1: a
+      // Membership is the one access rule, so a Business.ownerId with no
+      // Membership row is refused as anyone else is (BusinessGuard refuses it
+      // too; scripts/backfill-owner-memberships.ts writes its OWNER row).
       throw new ForbiddenException('Not a member of this business');
     }
     const crm = await resolveCrmAccess(this.prisma, businessId, userId);

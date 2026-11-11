@@ -223,14 +223,9 @@ export class CommerceController {
   ) {}
 
   private async verifyBusinessAccess(userId: string, businessId: string) {
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
     const business = await this.prisma.client.business.findFirst({
-      where: {
-        id: businessId,
-        OR: [
-          { ownerId: userId },
-          { members: { some: { userId } } },
-        ],
-      },
+      where: { id: businessId, members: { some: { userId } } },
     });
     if (!business) {
       throw new ForbiddenException('You do not have access to this resource');

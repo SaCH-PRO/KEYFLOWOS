@@ -337,6 +337,10 @@ beforeAll(async () => {
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K34A Biz A', ownerId: ID.ownerA } });
   await db.business.create({ data: { id: ID.bizB, name: 'K34A Biz B', ownerId: ID.ownerB } });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): each owner holds its OWNER
+  // Membership, the row BusinessGuard admits it by (fixture change).
+  await db.membership.create({ data: { id: `${P}m_ownerA_bizA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_staffA_bizA`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF' } });
 
   const verdict = (id: string, businessId: string, allowed: boolean, requiresApproval: boolean, reason: string, createdAt?: Date) =>

@@ -224,7 +224,8 @@ export async function memberToolRunAuthority(
   toolName: string,
   options: { asPrincipal?: boolean } = {},
 ): Promise<{ refusal: string | null; principal: boolean }> {
-  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: memberId }, select: { id: true } });
+  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: memberId, members: { some: { userId: memberId } } }, select: { id: true } });
   if (owned) {
     const requirement = graphActionRequirement(toolName);
     const refusal = requirement && 'refused' in requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;

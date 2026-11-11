@@ -105,7 +105,7 @@ const ID = {
   coOwner: `${P}coowner`, // OWNER membership of biz, not its Business.ownerId
   admin: `${P}admin`, // ADMIN of biz, role defaults
   staff: `${P}staff`, // STAFF of biz, bookings write
-  otherOwner: `${P}otherowner`, // Business.ownerId of bizOther (no membership row there); STAFF of biz
+  otherOwner: `${P}otherowner`, // Business.ownerId of bizOther with its OWNER membership (D-104); STAFF of biz
   superAdmin: `${P}super`, // SUPER_ADMIN, no membership
   stranger: `${P}stranger`, // no membership anywhere
   biz: `${P}biz`,
@@ -430,6 +430,10 @@ beforeAll(async () => {
       data: { id: `${P}m_${userId}`, userId, businessId: ID.biz, role, ...(permissionScopes ? { permissionScopes } : {}) },
     });
   }
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): the distinguished owner of
+  // bizOther holds the OWNER Membership the operator backfill writes; an owner
+  // recorded only as Business.ownerId is refused everywhere (fixture change).
+  await db.membership.create({ data: { id: `${P}m_${ID.otherOwner}_other`, userId: ID.otherOwner, businessId: ID.bizOther, role: 'OWNER' } });
   await connect(ID.biz);
   await connect(ID.bizOther);
 
@@ -584,9 +588,9 @@ function expectConsentFor(res: { status: number; body: any }, businessId: string
 }
 
 describe('W8-GOOGLE-CONSENT-OWNER fixture sanity (real rows)', () => {
-  it('[V94D-X01] seeded two businesses: biz with its owner (OWNER and Business.ownerId), a co-owner (OWNER membership only), an ADMIN, a STAFF member and the distinguished owner of bizOther as a STAFF member; bizOther with no membership row; both hold a stored Google Calendar and Drive connection', async () => {
+  it('[V94D-X01] seeded two businesses: biz with its owner (OWNER and Business.ownerId), a co-owner (OWNER membership only), an ADMIN, a STAFF member and the distinguished owner of bizOther as a STAFF member; bizOther with only the OWNER membership of its distinguished owner (D-104); both hold a stored Google Calendar and Drive connection', async () => {
     expect(await db.membership.count({ where: { businessId: ID.biz } })).toBe(5);
-    expect(await db.membership.count({ where: { businessId: ID.bizOther } })).toBe(0);
+    expect(await db.membership.count({ where: { businessId: ID.bizOther } })).toBe(1);
     expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
     expect(await stored(ID.bizOther)).toEqual(connectedRow(ID.bizOther));
   });
@@ -597,7 +601,7 @@ describe('W8-GOOGLE-CONSENT-OWNER: starting or disconnecting the Google Calendar
     for (const member of REFUSED) expectGoogleOwnerOnly(await calendarAuthUrl(ID.biz, member), member);
   });
 
-  it('[V94D-A02] control (D-99, the Gmail owner rule\'s arms): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) and a SUPER_ADMIN with no membership each get the calendar consent URL, its signed state naming the route\'s business', async () => {
+  it('[V94D-A02] control (D-99, the Gmail owner rule\'s arms): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) and a SUPER_ADMIN with no membership each get the calendar consent URL, its signed state naming the route\'s business', async () => {
     // SEC-W8GCO-1 (review repair): the calendar state carries a purpose tag of its own.
     expectConsentFor(await calendarAuthUrl(ID.biz, ID.owner), ID.biz, 'google-calendar', 'owner');
     expectConsentFor(await calendarAuthUrl(ID.biz, ID.coOwner), ID.biz, 'google-calendar', 'coOwner');
@@ -649,7 +653,7 @@ describe('W8-GOOGLE-CONSENT-OWNER: starting or disconnecting the Google Drive co
     for (const member of REFUSED) expectGoogleOwnerOnly(await driveAuthUrl(ID.biz, member), member);
   });
 
-  it('[V94D-B02] control (D-99, the Gmail owner rule\'s arms): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) and a SUPER_ADMIN with no membership each get the drive consent URL, its signed state naming the route\'s business and the drive flow', async () => {
+  it('[V94D-B02] control (D-99, the Gmail owner rule\'s arms): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) and a SUPER_ADMIN with no membership each get the drive consent URL, its signed state naming the route\'s business and the drive flow', async () => {
     expectConsentFor(await driveAuthUrl(ID.biz, ID.owner), ID.biz, 'drive', 'owner');
     expectConsentFor(await driveAuthUrl(ID.biz, ID.coOwner), ID.biz, 'drive', 'coOwner');
     expectConsentFor(await driveAuthUrl(ID.bizOther, ID.otherOwner), ID.bizOther, 'drive', 'otherOwner on bizOther');
@@ -832,7 +836,7 @@ describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suit
     expect(connectorRegistry.reconnectConnector).not.toHaveBeenCalled();
   });
 
-  it('[V94D-F01] control (D-99, W9-GOOGLE-DOORS-SERVER): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) on their own business and a SUPER_ADMIN with no membership sync, disconnect and reconnect each Google Suite connection, and the registry is reached with the route\'s business', async () => {
+  it('[V94D-F01] control (D-99, W9-GOOGLE-DOORS-SERVER): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) on their own business and a SUPER_ADMIN with no membership sync, disconnect and reconnect each Google Suite connection, and the registry is reached with the route\'s business', async () => {
     for (const [businessId, actor] of [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]]) {
       for (const type of GOOGLE_SUITE_CONNECTORS) {
         for (const op of CONNECTOR_DOORS) {

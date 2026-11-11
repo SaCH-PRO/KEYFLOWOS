@@ -150,7 +150,8 @@ export class KeyConnectorController {
       allowed = !!membership && CONNECTOR_WRITER_ROLES.has(membership.role);
       if (!allowed) {
         const owned = await this.prisma.client.business.findFirst({
-          where: { id: businessId, ownerId: user.id },
+          // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+          where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id } } },
           select: { id: true },
         });
         allowed = !!owned;

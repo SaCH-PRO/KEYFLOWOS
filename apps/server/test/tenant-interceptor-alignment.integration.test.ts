@@ -308,6 +308,10 @@ beforeAll(async () => {
   }
   await db.business.create({ data: { id: ID.bizA, name: 'K24A Biz A', ownerId: ID.ownerA } });
   await db.business.create({ data: { id: ID.bizB, name: 'K24A Biz B', ownerId: ID.ownerB } });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): each owner holds its OWNER
+  // Membership, the row BusinessGuard admits it by (fixture change).
+  await db.membership.create({ data: { id: `${P}m_ownerA_bizA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_staffA_bizA`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF' } });
   for (const id of A_CONTACTS) await db.contact.create({ data: { id, businessId: ID.bizA, firstName: id } });
   for (const id of B_CONTACTS) await db.contact.create({ data: { id, businessId: ID.bizB, firstName: id } });
@@ -497,7 +501,8 @@ describe('F1: the real AuthGuard-only bootstrap route writes nothing into a tena
   it('bootstrap repeated by A’s owner naming B is idempotent and still writes only into A', async () => {
     const res = await request(server()).post(`/identity/bootstrap?businessId=${ID.bizB}`).set('x-test-user', ID.ownerA).send({});
     expect({ status: res.status, business: res.body?.business?.id }).toEqual({ status: 201, business: ID.bizA });
-    expect((await membershipsOf(ID.bizB)).map((m: { userId: string }) => m.userId)).toEqual([]);
+    // B's own OWNER row only (W10-OWNER-MEMBERSHIP fixture): nothing of A's.
+    expect((await membershipsOf(ID.bizB)).map((m: { userId: string }) => m.userId)).toEqual([ID.ownerB]);
   });
 });
 

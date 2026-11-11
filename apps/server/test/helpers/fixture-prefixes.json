@@ -798,6 +798,11 @@
       "packet": "V1-95 (W9-PROJECTS-SERVER)"
     },
     {
+      "prefix": "v96c_",
+      "owner": "apps/server/test/owner-membership-backfill.integration.test.ts",
+      "packet": "V1-96 (W10-OWNER-MEMBERSHIP)"
+    },
+    {
       "prefix": "v96o_",
       "owner": "apps/server/test/data-cleanup-scripts.integration.test.ts",
       "packet": "V1-96 (W10-DATA-CLEANUP-SCRIPTS)"

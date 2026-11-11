@@ -237,17 +237,19 @@ describe('workspace discovery — real DB', () => {
     expect(strangerSees.map((b: any) => b.id)).not.toContain(business.id);
   });
 
-  it('keeps a legacy owner with no Membership discoverable via the compatibility arm', async () => {
-    // The reason ownerId stays in the predicate. This row is what the backfill
-    // has not reached yet; discovery must not blank out while it waits.
+  it('a legacy owner with no Membership is not discoverable until the founding OWNER row is written (W10-OWNER-MEMBERSHIP, D-104; was: kept discoverable via the compatibility arm)', async () => {
+    // D-104: Membership is the single rule; the ownerId compatibility arm is
+    // gone. The operator backfill writes the missing OWNER row, after which
+    // the business is listed.
     const owner = await seedUser('disc_legacy');
     const legacy = await db.business.create({
       data: { id: `${P}b_legacy`, name: `${P}Legacy`, ownerId: owner },
     });
 
-    const seen = await identity.listBusinesses(owner);
+    expect((await identity.listBusinesses(owner)).map((b: any) => b.id)).not.toContain(legacy.id);
 
-    expect(seen.map((b: any) => b.id)).toContain(legacy.id);
+    await db.membership.create({ data: { userId: owner, businessId: legacy.id, role: 'OWNER' } });
+    expect((await identity.listBusinesses(owner)).map((b: any) => b.id)).toContain(legacy.id);
   });
 
   it('excludes soft-deleted workspaces', async () => {

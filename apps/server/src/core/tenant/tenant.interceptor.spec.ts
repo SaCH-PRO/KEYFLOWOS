@@ -53,18 +53,18 @@ const EVERY_NAMED = [A, B, 'p_biz', 'b_biz', 'q_biz'];
 
 /**
  * A fake PrismaService whose `business.findFirst` answers BusinessGuard's
- * membership predicate (`{ id, OR: [{ ownerId }, { members: { some: { userId } } }] }`)
- * for USER as a member of `memberOf`, recording every id it was asked about.
+ * membership predicate (`{ id, members: { some: { userId } } }`, owner ruling
+ * D-104) for USER as a member of `memberOf`, recording every id it was asked about.
  */
 function membershipPrisma(memberOf: string[], opts: { fail?: boolean } = {}) {
   const lookups: unknown[] = [];
   const prisma = {
     client: {
       business: {
-        findFirst: async ({ where }: { where: { id: unknown; OR?: Array<Record<string, unknown>> } }) => {
+        findFirst: async ({ where }: { where: { id: unknown; members?: Record<string, unknown> } }) => {
           lookups.push(where.id);
           if (opts.fail) throw new Error('connection terminated');
-          const asks = JSON.stringify(where.OR ?? []);
+          const asks = JSON.stringify(where.members ?? {});
           const forUser = asks.includes(JSON.stringify(USER));
           return forUser && typeof where.id === 'string' && memberOf.includes(where.id) ? { id: where.id } : null;
         },

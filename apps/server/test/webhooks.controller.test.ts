@@ -47,7 +47,7 @@ class WebhooksPrismaMock {
   ];
   // R0-20b review (SEC-R020B-3); R0-20d: the route keeps no refusal row itself (the door binding keeps it).
   webhookEvents: any[] = [];
-  businessAccess: BusinessAccess[] = [{ businessId: 'biz_1', ownerId: 'user_1' }];
+  businessAccess: BusinessAccess[] = [{ businessId: 'biz_1', ownerId: 'user_1', memberIds: ['user_1'] }];
   client: any;
 
   constructor() {
@@ -108,23 +108,14 @@ class WebhooksPrismaMock {
         }),
       },
       business: {
+        // BusinessGuard's predicate { id, members: { some: { userId } } }:
+        // owner ruling D-104 (W10-OWNER-MEMBERSHIP), a Membership is the one rule.
         findFirst: vi.fn(({ where }: any) => {
           const id: string = where?.id;
-          const orClauses: Array<any> = where?.OR ?? [];
           const access = self.businessAccess.find((b) => b.businessId === id);
           if (!access) return Promise.resolve(null);
-          for (const clause of orClauses) {
-            if (clause.ownerId && access.ownerId === clause.ownerId) {
-              return Promise.resolve({ id });
-            }
-            if (
-              clause.members?.some?.userId &&
-              access.memberIds?.includes(clause.members.some.userId)
-            ) {
-              return Promise.resolve({ id });
-            }
-          }
-          return Promise.resolve(null);
+          const userId = where?.members?.some?.userId;
+          return Promise.resolve(userId && access.memberIds?.includes(userId) ? { id } : null);
         }),
       },
     };
@@ -189,7 +180,7 @@ describe('WebhooksController', () => {
   beforeEach(() => {
     currentUserId = 'user_1';
     prismaMock.webhooks = [];
-    prismaMock.businessAccess = [{ businessId: 'biz_1', ownerId: 'user_1' }];
+    prismaMock.businessAccess = [{ businessId: 'biz_1', ownerId: 'user_1', memberIds: ['user_1'] }];
     markInvoicePaid.mockClear();
     handleStripeWebhook.mockClear();
     emitPaymentReceived.mockClear();
@@ -267,7 +258,7 @@ describe('WebhooksController', () => {
   });
 
   it('rejects CRUD when the user does not have access to the business', async () => {
-    prismaMock.businessAccess = [{ businessId: 'biz_other', ownerId: 'user_1' }];
+    prismaMock.businessAccess = [{ businessId: 'biz_other', ownerId: 'user_1', memberIds: ['user_1'] }];
     await request(app.getHttpServer())
       .get('/webhooks/businesses/biz_1/webhooks')
       .expect(403);

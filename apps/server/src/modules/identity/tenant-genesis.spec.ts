@@ -193,23 +193,20 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
 // ── Discovery ──────────────────────────────────────────────────────────────
 
 describe('IdentityService.listBusinesses — Membership-first discovery', () => {
-  it('matches on Membership as well as ownerId', async () => {
+  it('matches on Membership only: the ownerId compatibility arm is gone (W10-OWNER-MEMBERSHIP, D-104)', async () => {
     const findMany = vi.fn(async () => []);
     const service = buildIdentity({ business: { findMany } });
 
     await service.listBusinesses('user-1');
 
     const where = findMany.mock.calls[0][0].where;
-    expect(where.deletedAt).toBeNull();
-    expect(where.OR).toEqual([
-      { members: { some: { userId: 'user-1' } } },
-      { ownerId: 'user-1' },
-    ]);
+    expect(where).toEqual({ deletedAt: null, members: { some: { userId: 'user-1' } } });
   });
 
   it('no longer filters on ownerId alone', async () => {
     // The pre-packet predicate was `{ ownerId, deletedAt: null }` with no OR at
-    // all, which returned an empty list for every non-owner member.
+    // all, which returned an empty list for every non-owner member. Since D-104
+    // ownerId is no arm at all.
     const findMany = vi.fn(async () => []);
     const service = buildIdentity({ business: { findMany } });
 
@@ -217,7 +214,8 @@ describe('IdentityService.listBusinesses — Membership-first discovery', () => 
 
     const where = findMany.mock.calls[0][0].where;
     expect(where.ownerId).toBeUndefined();
-    expect(Array.isArray(where.OR)).toBe(true);
+    expect(where.OR).toBeUndefined();
+    expect(where.members).toEqual({ some: { userId: 'user-1' } });
   });
 
   it('still refuses an empty userId', async () => {
