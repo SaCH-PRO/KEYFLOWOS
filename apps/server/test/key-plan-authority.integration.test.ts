@@ -879,7 +879,9 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // open for tool "call_create_task"', while bizB ran (QW-07c pins that half).
   // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): executeToolDirectly rethrows the tool's HttpException, its
   // status and message, so W9's non-retryable-4xx rule (isToolRefusal) runs in production; the envelope
-  // executeTool answers its other callers keeps its shape. Here the queue's dispatcher calls the REAL
+  // executeTool answers its other callers keeps its shape. Review CR-W10DS-1 (D-73): a 400 or 409 stays the
+  // plain Error it was (a provider outage reported as 400, a conflict that asks to try again; retried and
+  // counted), pinned in src/modules/ai/flow-orchestrator-dispatch-status.spec.ts. Here the queue's dispatcher calls the REAL
   // executeToolDirectly and executeTool over the harness's orchestrator (call_create_task its own case,
   // over the real CallLogService), on a worker of the case's own (its own ActionDispatcherService, so no
   // circuit leaks into other cases), with the job's retryCount 2 as PlanExecutorService enqueues it.

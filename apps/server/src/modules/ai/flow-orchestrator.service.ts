@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, HttpException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -187,6 +187,19 @@ export interface FlowToolResult {
  * the tool (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
  */
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
+
+/**
+ * W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): the statuses executeToolDirectly does not hand the
+ * dispatcher as the tool's HttpException, because in this codebase they do not say that asking again
+ * gets the same answer. A 409 is also the optimistic-concurrency conflict that tells the caller to try
+ * again (ProjectsService.updateTask's ConflictException, reached by projects_complete_task and
+ * projects_update_task), and a 400 is also a provider that did not answer (GmailService.searchMessages'
+ * BadRequestException('Gmail search failed (503)'), reached by reconcile_sweep_statements; the Drive,
+ * Google and Graph clients do the same). The dispatcher takes every 4xx but 408 and 429 as final
+ * (isToolRefusal), so these reach it as the plain Error they did before this packet: retried, and
+ * counted toward that business's circuit for the tool, with the HttpException as the Error's cause.
+ */
+const TOOL_STATUSES_RETRIED: ReadonlySet<number> = new Set([HttpStatus.BAD_REQUEST, HttpStatus.CONFLICT]);
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -3312,10 +3325,11 @@ ${triage.standingContext}`;
       }
       // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the tool's own HttpException, its status and its
       // message (result.error), so the dispatcher answers a 4xx refusal once and counts it toward no
-      // circuit (isToolRefusal). Anything else stays the plain Error it was.
+      // circuit (isToolRefusal). Review CR-W10DS-1 (D-73): a 400 or 409 (TOOL_STATUSES_RETRIED) and
+      // anything else stay the plain Error they were, a 400 or 409 with the HttpException as its cause.
       const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
-      if (httpException) throw httpException;
-      throw new Error(result.error ?? `Tool ${toolName} failed`);
+      if (httpException && !TOOL_STATUSES_RETRIED.has(httpException.getStatus())) throw httpException;
+      throw new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
     }
     return result.result;
   }
