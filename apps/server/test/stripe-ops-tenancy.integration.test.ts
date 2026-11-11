@@ -60,6 +60,16 @@
  *   SOT-10  OWN REFUND of a payment recorded under its charge id: one POST, one
  *           negative row linked to the payment, and Stripe's refund.created
  *           writes no second row
+ *   SOT-10b W10-REFUND-CHARGE-DOOR (D-14, V1-29 refund convention): that
+ *           refund is recorded through the refund door by refundCharge itself:
+ *           the linked negative row and its posting (here the reversal of the
+ *           whole payment) in one transaction, and the invoice reopens (SENT,
+ *           paidAt cleared), before Stripe's refund.created, which then writes
+ *           and posts nothing; the ledger agrees
+ *   SOT-10c the same through KEY's call (PaymentsOpsService.refundCharge, a
+ *           partial refund): refund.created, a charge.refunded listing the
+ *           refund and a charge.refunded carrying only the cumulative
+ *           amount_refunded each post nothing more (posted once in total)
  *   SOT-11  FORGED CLAIM: a row of B that names A's charge (a reference B could
  *           sign for itself with its own webhook secret) does not make A's
  *           charge B's: B's refund is 404 with no write (the one call is the
@@ -171,6 +181,9 @@ const ID = {
   staffA: `${P}staffA`,
   invA8: `${P}invA8`,
   invA9: `${P}invA9`,
+  // W10-REFUND-CHARGE-DOOR (SOT-10b/10c): A's invoices paid by charges recorded under their charge ids.
+  invA10: `${P}invA10`,
+  invA11: `${P}invA11`,
 };
 
 /** Stripe-shaped ids (the prefix inside, so every globally unique value carries it). */
@@ -188,6 +201,8 @@ const S = {
   chBlink: `ch_${P}Blink`, piBlink: `pi_${P}Blink`,
   chA8: `ch_${P}A8`, piA8: `pi_${P}A8`,
   capA9: `cap_${P}A9`,
+  chA10: `ch_${P}A10`, piA10: `pi_${P}A10`,
+  chA11: `ch_${P}A11`, piA11: `pi_${P}A11`,
 };
 
 const A_EMAIL = `alice.of.a.${P}@example.test`;
@@ -200,6 +215,8 @@ const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 let db: any;
 let app: any;
 let paymentsSvc: any;
+/** The PaymentsOpsService the container built (KEY's payments_refund_charge calls its refundCharge directly). */
+let opsSvc: any;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
 let realFetch: typeof fetch;
 const savedEnv: Record<string, string | undefined> = {};
@@ -606,15 +623,24 @@ beforeAll(async () => {
       ChartOfAccountsSeederService,
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
+      // W10-REFUND-CHARGE-DOOR (SOT-10b, D-14): the refund door payments-ops refundCharge records through is the
+      // webhook's own, one instance in the container (built as before: no Stripe connector, the pre-D-56 binding).
+      {
+        provide: PaymentsService,
+        useFactory: (prisma: any, workflow: any, revenue: any) =>
+          new PaymentsService(
+            prisma,
+            {} as any, // CommerceService: used on the pay-link paths only, never by the Stripe webhook door.
+            workflow,
+            revenue,
+          ),
+        inject: [PrismaService, workflowMod.InvoiceWorkflowService, RevenuePostingService],
+      },
     ],
   }).compile();
   const prisma = moduleRef.get(PrismaService);
-  paymentsSvc = new PaymentsService(
-    prisma,
-    {} as any, // CommerceService: used on the pay-link paths only, never by the Stripe webhook door.
-    moduleRef.get(workflowMod.InvoiceWorkflowService),
-    moduleRef.get(RevenuePostingService),
-  );
+  paymentsSvc = moduleRef.get(PaymentsService);
+  opsSvc = moduleRef.get(PaymentsOpsService);
 
   app = moduleRef.createNestApplication();
   app.use(async (req: any, _res: any, next: any) => {
@@ -903,13 +929,86 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
     ]);
   }, 60_000);
 
-  it.todo(
-    'SOT-10b: the refund of a payment recorded under its charge id posts and reopens the invoice: payments-ops refundCharge ' +
-      'writes that row itself, unposted, before Stripe\'s refund.created, which then finds the row by its refund id and posts ' +
-      'nothing (money-state-writer-inventory PAYMENTS_MODULE_WRITERS: refundCharge "unposted", owner V1-29-DM-REFUND-CONVENTION). ' +
-      'Routing it through the door needs PaymentsService.createRefundWithPosting (payments.service.ts, owned by V1-05) or ' +
-      'removing the writer (money-state-writer-inventory.spec.ts): both outside the V1-15d write set',
-  );
+  /**
+   * W10-REFUND-CHARGE-DOOR: an invoice of A paid by a tagged platform charge, recorded under its charge id through the
+   * webhook door (as ch_A1 is), PAID with its payment posted once.
+   */
+  async function paidUnderChargeId(invoiceId: string, n: number, chargeId: string, pi: string, totalMinor: number) {
+    const total = totalMinor / 100;
+    await db.invoice.create({
+      data: {
+        id: invoiceId, invoiceNumber: `V15D-RCD-${n}`, status: 'SENT', subtotal: total, total, currency: 'TTD',
+        businessId: ID.bizA, contactId: ID.contactA,
+        items: { create: [{ id: `${invoiceId}_item1`, description: `V15D refund door item ${n}`, quantity: 1, unitPrice: total, total }] },
+      },
+    });
+    accounts[PLATFORM_KEY].charges.push(charge(chargeId, totalMinor, { pi, name: 'Alice Customer-of-A', email: A_EMAIL, invoiceId }));
+    await stripeEvent(`${chargeId}_succeeded`, 'charge.succeeded', {
+      id: chargeId, amount: totalMinor, currency: 'ttd', payment_intent: pi, metadata: { invoiceId, businessId: ID.bizA },
+    });
+    const payment = await paymentBy(chargeId);
+    expect(payment).toMatchObject({ businessId: ID.bizA, invoiceId, status: 'SUCCESSFUL', amount: total, reference: pi });
+    expect(await postingsOf(payment.id)).toEqual([`INCOME:POSTED:${total}`]);
+    expect((await invoiceRow(invoiceId)).status).toBe('PAID');
+    return payment;
+  }
+
+  it('SOT-10b: the refund of a payment recorded under its charge id posts and reopens the invoice (W10-REFUND-CHARGE-DOOR, D-14, was it.todo): refundCharge writes the linked negative row and reverses the posting in one transaction, before Stripe\'s refund.created, which then writes and posts nothing; the ledger agrees', async () => {
+    const pay = await paidUnderChargeId(ID.invA10, 10, S.chA10, S.piA10, 20000);
+    const mark = calls.length;
+    const res = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA10, reason: 'requested_by_customer' });
+    expect(res.status, flat(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ chargeId: S.chA10, amount: 200, currency: 'TTD', provider: 'stripe' });
+    expect(calls.slice(mark).filter((c) => c.method === 'POST').map((c) => `${c.path} ${c.auth}`)).toEqual([`/v1/refunds Bearer ${PLATFORM_KEY}`]);
+
+    // Before Stripe's event: the refund door already recorded and posted it, and the invoice reopened (D-14: SENT, paidAt cleared).
+    const rows = [`stripe:${S.chA10}:SUCCESSFUL:200:${S.piA10}`, `stripe:${res.body.id}:REFUNDED:-200:${S.chA10}`];
+    // RED-BEFORE: the row was written unposted (INCOME:POSTED:200 alone) and the invoice stayed PAID.
+    expect(await rowsOf(ID.invA10)).toEqual(rows);
+    expect(await postingsOf(pay.id)).toEqual(['INCOME:REVERSED:200', 'REVERSAL:POSTED:200']);
+    let inv = await invoiceRow(ID.invA10);
+    expect(inv.status).toBe('SENT');
+    expect(inv.paidAt).toBeNull();
+    await expectLedgerAgrees(ID.invA10, 0);
+
+    // Stripe's refund.created finds the row by its refund id: nothing more is written or posted.
+    await deliverRefundEvents();
+    expect(await rowsOf(ID.invA10)).toEqual(rows);
+    expect(await postingsOf(pay.id)).toEqual(['INCOME:REVERSED:200', 'REVERSAL:POSTED:200']);
+    inv = await invoiceRow(ID.invA10);
+    expect(inv.status).toBe('SENT');
+    expect(inv.paidAt).toBeNull();
+    await expectLedgerAgrees(ID.invA10, 0);
+  }, 60_000);
+
+  it('SOT-10c (W10-REFUND-CHARGE-DOOR, D-14): after KEY\'s refundCharge recorded and posted a partial refund, Stripe\'s refund.created, a charge.refunded listing it and a charge.refunded carrying only the cumulative amount_refunded post nothing more: the refund is posted once in total', async () => {
+    const pay = await paidUnderChargeId(ID.invA11, 11, S.chA11, S.piA11, 10000);
+    // As KEY's payments_refund_charge calls it (flow-orchestrator: getPaymentsOps().refundCharge).
+    const refund = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA11, amount: 30, reason: 'requested_by_customer' });
+    expect(refund).toMatchObject({ chargeId: S.chA11, amount: 30, currency: 'TTD', provider: 'stripe' });
+
+    const rows = [`stripe:${S.chA11}:SUCCESSFUL:100:${S.piA11}`, `stripe:${refund.id}:REFUNDED:-30:${S.chA11}`];
+    const posted = ['INCOME:POSTED:100', 'REFUND:POSTED:30'];
+    const expectOnce = async (when: string) => {
+      expect(await rowsOf(ID.invA11), when).toEqual(rows);
+      // RED-BEFORE: INCOME:POSTED:100 alone (the row unposted, and no event posts it).
+      expect(await postingsOf(pay.id), when).toEqual(posted);
+      expect((await invoiceRow(ID.invA11)).status, when).toBe('PARTIALLY_PAID');
+      await expectLedgerAgrees(ID.invA11, 70);
+    };
+    await expectOnce('after refundCharge');
+
+    await deliverRefundEvents();
+    await expectOnce('after refund.created');
+
+    const chargeNow = accounts[PLATFORM_KEY].charges.find((c) => c.id === S.chA11)!;
+    const refundNow = accounts[PLATFORM_KEY].refunds.find((r) => r.id === refund.id)!;
+    expect(chargeNow.amount_refunded).toBe(3000);
+    await stripeEvent(`${S.chA11}_refunded_listed`, 'charge.refunded', { ...chargeNow, refunds: { object: 'list', data: [{ ...refundNow }] } });
+    await expectOnce('after charge.refunded listing the refund');
+    await stripeEvent(`${S.chA11}_refunded_cumulative`, 'charge.refunded', { ...chargeNow });
+    await expectOnce('after charge.refunded with the cumulative amount_refunded only');
+  }, 60_000);
 });
 
 describe('SOT-11: a row of B naming A\'s charge does not make it B\'s', () => {
