@@ -182,13 +182,44 @@ export class AiAdvisorService {
     };
   }
 
+  /**
+   * W10-ADVISOR-TIMELINE (review SEC-W9TO-2; owner ruling D-63, with D-100 for the money signals;
+   * timeline-scope TS-13e): POST ai/chat built the system prompt from the business's ten newest
+   * Activity titles and every figure for any member. With a `viewer` (the member who asks) each part
+   * now follows what that member reads (filtered, not refused), as generateDailyBriefing does:
+   *   - recent activity: the ten newest rows the timeline rule serves them (canReadActivityRow and
+   *     contact visibility), the page filled past the rows withheld (readVisibleActivityPage);
+   *   - revenue collected, outstanding and overdue, and the genome's monthly revenue target: revenue
+   *     read; expenses: expenses read; bookings: bookings read;
+   *   - the contact count: crm read, the contacts the member may list (visibilityClause, M7);
+   *   - the momentum score (payment, invoice, contact and booking signals): revenue, crm and bookings
+   *     read, in the prompt and in the answer's context (null otherwise).
+   * With no viewer the prompt is the business's whole prompt, as before; the OWNER's is the same.
+   */
   async chat(
     businessId: string,
     message: string,
     conversationHistory?: Array<{ role: string; content: string }>,
+    viewer?: TimelineViewer,
   ) {
     const context = await this.getBusinessContext(businessId);
     const businessName = context.business?.name ?? 'your business';
+
+    const reads = (module: CanonicalModule) => !viewer || viewer.readable.has(module);
+    const readsRevenue = reads('revenue');
+    const readsExpenses = reads('expenses');
+    const readsCrm = reads('crm');
+    const readsBookings = reads('bookings');
+    const readsMomentum = readsRevenue && readsCrm && readsBookings;
+    const contactClause = viewer && readsCrm ? visibilityClause(viewer.crmAccess, viewer.userId) : null;
+    const [contactTotal, recentTitles] = await Promise.all([
+      contactClause
+        ? this.prisma.client.contact.count({
+            where: { businessId, deletedAt: null, AND: [contactClause as Prisma.ContactWhereInput] },
+          })
+        : context.contacts.total,
+      viewer ? this.visibleActivityTitles(viewer) : context.recentActivities.map((a) => a.title),
+    ]);
 
     const blueprintContext = await this.blueprint.getBlueprintContext(businessId).catch((err) => {
       this.logger.warn(`Failed to load blueprint context for advisor chat: ${(err as Error).message}`);
@@ -205,22 +236,23 @@ export class AiAdvisorService {
           blueprintContext.brand.voice ? `Brand voice: ${blueprintContext.brand.voice}` : null,
           blueprintContext.brand.tone ? `Brand tone: ${blueprintContext.brand.tone}` : null,
           blueprintContext.constraints.riskTolerance ? `Risk tolerance: ${blueprintContext.constraints.riskTolerance}` : null,
-          blueprintContext.financials.monthlyTarget ? `Monthly revenue target: $${blueprintContext.financials.monthlyTarget.toLocaleString()}` : null,
+          readsRevenue && blueprintContext.financials.monthlyTarget ? `Monthly revenue target: $${blueprintContext.financials.monthlyTarget.toLocaleString()}` : null,
         ].filter(Boolean)
       : [];
 
+    // W10-ADVISOR-TIMELINE (D-63, D-100): only the figures and rows this viewer reads.
     const contextSnapshot = [
       `Business: ${businessName}`,
       context.business?.industry ? `Industry: ${context.business.industry}` : null,
       context.business?.archetype ? `Archetype: ${context.business.archetype}` : null,
       context.business?.revenueModel ? `Revenue Model: ${context.business.revenueModel}` : null,
-      `Contacts: ${context.contacts.total} total`,
-      `Revenue: $${context.invoices.totalRevenue.toLocaleString()} TTD collected`,
-      `Outstanding: $${context.invoices.outstandingAmount.toLocaleString()} TTD (${context.invoices.outstandingCount} invoices, ${context.invoices.overdueCount} overdue)`,
-      `Bookings: ${context.bookings.upcoming.length} upcoming, ${context.bookings.completedThisMonth} completed this month`,
-      `Expenses this month: $${context.expenses.totalThisMonth.toLocaleString()} TTD`,
-      `Momentum Score: ${context.momentumScore}/100`,
-      `Recent Activity: ${context.recentActivities.map((a) => a.title).join('; ')}`,
+      readsCrm ? `Contacts: ${contactTotal} total` : null,
+      readsRevenue ? `Revenue: $${context.invoices.totalRevenue.toLocaleString()} TTD collected` : null,
+      readsRevenue ? `Outstanding: $${context.invoices.outstandingAmount.toLocaleString()} TTD (${context.invoices.outstandingCount} invoices, ${context.invoices.overdueCount} overdue)` : null,
+      readsBookings ? `Bookings: ${context.bookings.upcoming.length} upcoming, ${context.bookings.completedThisMonth} completed this month` : null,
+      readsExpenses ? `Expenses this month: $${context.expenses.totalThisMonth.toLocaleString()} TTD` : null,
+      readsMomentum ? `Momentum Score: ${context.momentumScore}/100` : null,
+      `Recent Activity: ${recentTitles.join('; ')}`,
       ...(blueprintSnapshot.length > 0 ? ['', 'BUSINESS GENOME:', ...blueprintSnapshot] : []),
     ]
       .filter(Boolean)
@@ -260,7 +292,8 @@ export class AiAdvisorService {
       return {
         reply: result.content || 'I was unable to generate a response. Please try again.',
         context: {
-          momentumScore: context.momentumScore,
+          // W10-ADVISOR-TIMELINE (D-100): the momentum score is a money signal, withheld as in the prompt.
+          momentumScore: readsMomentum ? context.momentumScore : null,
           businessName,
         },
         usage: result.usage,
@@ -337,7 +370,7 @@ export class AiAdvisorService {
         return null;
       }),
       viewer
-        ? this.visibleActivityTitlesSince(viewer, yday)
+        ? this.visibleActivityTitles(viewer, yday)
         : context.recentActivities.filter((a) => new Date(a.createdAt) >= yday).map((a) => a.title),
     ]);
 
@@ -425,14 +458,19 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
   }
 
   /**
-   * W7-BRIEFINGS-REST (D-63): the titles of the business's Activity rows since `since` that the
-   * timeline rule serves `viewer`, newest first, up to the ten the briefing names (as GET ai/briefing
-   * named the ten newest rows before): the database prefilter first, then each row judged by
+   * W7-BRIEFINGS-REST (D-63): the titles of the business's Activity rows (since `since`, when given)
+   * that the timeline rule serves `viewer`, newest first, up to the ten the briefing and the chat name
+   * (as GET ai/briefing and POST ai/chat named the ten newest rows before; W10-ADVISOR-TIMELINE reads
+   * the chat's through here with no `since`): the database prefilter first, then each row judged by
    * filterVisibleActivity, the page filled past rows the viewer may not read (readVisibleActivityPage).
    */
-  private async visibleActivityTitlesSince(viewer: TimelineViewer, since: Date): Promise<string[]> {
+  private async visibleActivityTitles(viewer: TimelineViewer, since?: Date): Promise<string[]> {
     const prefilter = activityPrefilter(viewer);
-    const where = { businessId: viewer.businessId, createdAt: { gte: since }, ...(prefilter.length ? { AND: prefilter } : {}) };
+    const where = {
+      businessId: viewer.businessId,
+      ...(since ? { createdAt: { gte: since } } : {}),
+      ...(prefilter.length ? { AND: prefilter } : {}),
+    };
     const rows = await readVisibleActivityPage(this.prisma, viewer, 10, (skip, take) =>
       this.prisma.client.activity.findMany({
         where,
