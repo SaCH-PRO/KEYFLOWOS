@@ -1685,8 +1685,9 @@ export class IdentityService {
               const oldestMembership = await tx.membership.findFirst(
                 skipTenantIsolation({
                   where: { userId, business: { deletedAt: null } },
-                  orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-                  select: { business: true },
+                  // `as const`: skipTenantIsolation's generic widens the literal to `string`.
+                  orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+                  select: { business: true as const },
                 }),
               );
               if (oldestMembership) return { business: oldestMembership.business, isNewBusiness: false };
