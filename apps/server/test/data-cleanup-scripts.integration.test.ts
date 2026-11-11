@@ -752,6 +752,28 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     const { WITHHELD_MODULE } = await import('../scripts/backfill-timeline-contact-links');
     const { canReadActivityRow, D115_WITHHELD_MODULE } = await import('../src/modules/timeline/timeline-visibility');
     expect(D115_WITHHELD_MODULE, 'the rule and the script name the same marker').toBe(WITHHELD_MODULE);
+
+    // Over the real routes. The backfill is idempotent, so this case runs it itself and stands alone (as TS-13d does).
+    const res = await run('timeline', ['--apply', ...SCOPE]);
+    expect(res.code, res.out).toBe(0);
+    const withheldIntakes = ['oldInGone', 'oldInOtherBiz', 'oldInCrossContact'].map(act);
+    const withheldInvoices = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact'].map(act);
+    const state: Record<string, any> = await timelineState();
+    for (const id of [...withheldIntakes, ...withheldInvoices]) expect(state[id]?.module, `${id} is withheld`).toBe(WITHHELD_MODULE);
+    // The same ADMIN shape as C's, given a membership of A.
+    await db.membership.create({
+      data: { id: `${P}m_adminCrmNone_bizA`, userId: ID.adminCrmNone, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { crm: 'none', revenue: 'read', ai: 'read' } },
+    });
+    const seen = await served(ID.adminCrmNone, ID.bizA);
+    for (const key of READS) {
+      for (const id of withheldIntakes) expect(seen[key], `adminCrmNone ${key}`).not.toContain(id);
+      expect(seen[key], `adminCrmNone ${key}`).toEqual(expect.arrayContaining(withheldInvoices));
+    }
+    for (const text of [`${P}gone-sender@test.local`, 'v96o gone subject', `${P}b-sender@test.local`, 'v96o B subject', `${P}cross-sender@test.local`, 'v96o cross subject']) {
+      expect(seen.text, text).not.toContain(text);
+    }
+
+    // The rule itself, on the row shapes before and after the backfill.
     const crmAccess = { isOwner: false, isSuperAdmin: false, viewAll: true, editScope: 'any', reassign: false, deleteScope: 'none', level: 'read' } as any;
     const adminCrmNone = { businessId: ID.bizA, userId: ID.adminCrmNone, readsUnmapped: true, readable: new Set(['revenue', 'ai'] as any), crmAccess };
     const staffEvery = { ...adminCrmNone, readsUnmapped: false, readable: new Set(['crm', 'revenue', 'ai'] as any) };
@@ -761,20 +783,5 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(canReadActivityRow(adminCrmNone, withheldIntake), 'after the backfill: the same row, withheld').toBe(false);
     expect(canReadActivityRow(staffEvery, withheldIntake), 'a STAFF member reading crm').toBe(false);
     expect(canReadActivityRow({ ...adminCrmNone, readable: new Set(['crm', 'revenue', 'ai'] as any) }, withheldIntake), 'an ADMIN reading crm').toBe(true);
-
-    // Over the real routes: the same ADMIN shape as C's, given a membership of A (whose rows DCS-T02 backfilled).
-    await db.membership.create({
-      data: { id: `${P}m_adminCrmNone_bizA`, userId: ID.adminCrmNone, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { crm: 'none', revenue: 'read', ai: 'read' } },
-    });
-    const withheldIntakes = ['oldInGone', 'oldInOtherBiz', 'oldInCrossContact'].map(act);
-    const withheldInvoices = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact'].map(act);
-    const seen = await served(ID.adminCrmNone, ID.bizA);
-    for (const key of READS) {
-      for (const id of withheldIntakes) expect(seen[key], `adminCrmNone ${key}`).not.toContain(id);
-      expect(seen[key], `adminCrmNone ${key}`).toEqual(expect.arrayContaining(withheldInvoices));
-    }
-    for (const text of [`${P}gone-sender@test.local`, 'v96o gone subject', `${P}b-sender@test.local`, 'v96o B subject', `${P}cross-sender@test.local`, 'v96o cross subject']) {
-      expect(seen.text, text).not.toContain(text);
-    }
   });
 });
