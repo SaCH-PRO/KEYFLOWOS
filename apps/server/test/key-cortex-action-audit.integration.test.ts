@@ -164,7 +164,7 @@ const ID = {
   flowBiz: `${P}biz_flow`,
   /**
    * W10-CORTEX-CHAT-SCOPE review (SEC-W10CCS-R1): a business whose chat runs the model's tool calls (owned by
-   * ID.owner, no membership row; ID.member is a STAFF member with revenue none).
+   * ID.owner, who holds its OWNER membership (D-104); ID.member is a STAFF member with revenue none).
    */
   toolBiz: `${P}biz_tools`,
 };
