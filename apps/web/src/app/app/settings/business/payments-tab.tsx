@@ -66,6 +66,16 @@ function readConfigured(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "";
 }
 
+/**
+ * W10-PAYPAL-CURRENCY (owner ruling D-106): the currencies PayPal supports.
+ * A copy of PAYPAL_SUPPORTED_CURRENCIES (apps/server/src/modules/payments/
+ * paypal-currency.ts), the server's one list, which leaves PayPal out of the
+ * payer's methods for any other currency; paypal-currency.spec.ts fails if the
+ * two differ. Read here only to say why PayPal is missing for the business
+ * currency.
+ */
+const PAYPAL_CURRENCIES: readonly string[] = ["AUD", "BRL", "CAD", "CNY", "CZK", "DKK", "EUR", "HKD", "HUF", "ILS", "JPY", "MYR", "MXN", "TWD", "NZD", "NOK", "PHP", "PLN", "GBP", "SGD", "SEK", "CHF", "THB", "USD"];
+
 type PaymentSettings = {
   wipayAccountNumber: string;
   paypalClientId: string;
@@ -455,6 +465,8 @@ export function PaymentsTab() {
   const [settings, setSettings] = useState<PaymentSettings>({ ...defaultSettings });
   const [secrets, setSecrets] = useState<Record<SecretKey, SecretState>>(emptySecrets);
   const [businessAddress, setBusinessAddress] = useState("");
+  // W10-PAYPAL-CURRENCY (D-106): the business currency, to say why PayPal is missing when PayPal does not support it.
+  const [businessCurrency, setBusinessCurrency] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
@@ -469,7 +481,7 @@ export function PaymentsTab() {
     const load = async () => {
       const businessId = getStoredBusinessId();
       if (!businessId) return;
-      const res = await apiGet<{ metaData: Record<string, unknown>; address?: string }>(`/identity/businesses/${businessId}`);
+      const res = await apiGet<{ metaData: Record<string, unknown>; address?: string; currency?: string }>(`/identity/businesses/${businessId}`);
       if (res.data) {
         const meta = (res.data.metaData || {}) as Record<string, unknown>;
         const str = (k: string) => (typeof meta[k] === "string" ? (meta[k] as string) : "");
@@ -491,6 +503,7 @@ export function PaymentsTab() {
           cashEnabled: bool("cashEnabled"),
         });
         setBusinessAddress(res.data.address || str("address"));
+        setBusinessCurrency(typeof res.data.currency === "string" ? res.data.currency.trim().toUpperCase() : "");
       }
     };
     load();
@@ -599,6 +612,9 @@ export function PaymentsTab() {
     ? "connected"
     : "disabled";
 
+  // W10-PAYPAL-CURRENCY (D-106): PayPal is not offered for amounts in a currency PayPal does not support.
+  const paypalMissingForCurrency = businessCurrency !== "" && !PAYPAL_CURRENCIES.includes(businessCurrency);
+
   const statusLabel = (s: "connected" | "partial" | "disabled") =>
     s === "connected" ? "Connected" : s === "partial" ? "Partial" : "Not configured";
 
@@ -689,6 +705,20 @@ export function PaymentsTab() {
         }
       >
         <div className="grid gap-3">
+          {/* W10-PAYPAL-CURRENCY (D-106): why PayPal is missing for the business currency when PayPal does not support it. */}
+          {paypalMissingForCurrency && (
+            <div
+              data-testid="paypal-currency-note"
+              className="flex items-start gap-2 rounded-xl border border-orange-400/30 bg-orange-400/[0.06] px-3 py-2.5 text-xs text-orange-200"
+            >
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                PayPal does not support {businessCurrency}, your business currency, so your invoices, pay links and
+                storefront orders in {businessCurrency} are not offered PayPal: payers see your other payment methods.
+                PayPal is offered only for amounts in a currency it supports, such as USD.
+              </span>
+            </div>
+          )}
           <SecretField
             label="Client ID"
             value={settings.paypalClientId}

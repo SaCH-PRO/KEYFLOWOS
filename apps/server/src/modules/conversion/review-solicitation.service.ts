@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
-import { BookingCompletedPayload, InvoicePaidPayload } from '../../core/event-bus/events.types';
+import { BookingCompletedPayload, InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
@@ -39,9 +39,86 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
     await this.scheduleReviewRequest(payload.businessId, payload.booking.id, 'booking', payload.contact);
   }
 
+  /**
+   * W10-REOPEN-REVERSALS review repair CR-REOPEN-1 (owner ruling D-102; the
+   * SEC-A9-1 pattern of RevenueActionService): the invoice is read PAID before
+   * the request is scheduled (or re-armed) and again after. A stale delivery
+   * (the invoice reopened since) schedules nothing; a request written after the
+   * refund's reopen handler ran (and found nothing PENDING to cancel) is
+   * cancelled here by the same compare-and-set on PENDING.
+   */
   @OnEvent('invoice.paid')
   async onInvoicePaid(payload: InvoicePaidPayload) {
-    await this.scheduleReviewRequest(payload.businessId, payload.invoice.id, 'invoice', payload.invoice.contact);
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    if ((await this.invoiceStatus(businessId, invoiceId)) !== 'PAID') return;
+    const written = await this.scheduleReviewRequest(businessId, invoiceId, 'invoice', payload.invoice.contact);
+    if (written && (await this.invoiceStatus(businessId, invoiceId)) !== 'PAID') {
+      await this.cancelUnsentInvoiceRequest(businessId, invoiceId);
+    }
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS (owner ruling D-102): a refund's reopen of a paid
+   * invoice cancels its review request while it is not yet sent: the PENDING
+   * job becomes CANCELLED by a compare-and-set on PENDING, which the runner's
+   * claim (PENDING -> COMPLETED before it sends, V1-35) also takes, so the two
+   * never both win. A request already sent (COMPLETED) is a message already
+   * sent and stays; a re-delivered reopen finds nothing PENDING. Nobody is
+   * messaged. Paying the invoice again re-arms the job (scheduleReviewRequest);
+   * if it is PAID again by the time this ran, the job is re-armed here.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const status = await this.invoiceStatus(businessId, invoiceId);
+      if (status == null || status === 'PAID') return;
+      if (!(await this.cancelUnsentInvoiceRequest(businessId, invoiceId))) return;
+      const now = await this.invoiceNow(businessId, invoiceId);
+      if (now?.status === 'PAID') {
+        // Review repair SEC-W10RR-2: re-armed for the invoice's contact now (read here), not the reopen payload's.
+        await this.scheduleReviewRequest(businessId, invoiceId, 'invoice', now.contact ?? undefined);
+      }
+    } catch (e) {
+      this.logger.warn(`D-102 review request cancel failed for invoice ${invoiceId}: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS (D-102): the invoice's PENDING review request becomes
+   * CANCELLED (a compare-and-set on PENDING, which the runner's claim also
+   * takes). Returns whether one was cancelled.
+   */
+  private async cancelUnsentInvoiceRequest(businessId: string, invoiceId: string): Promise<boolean> {
+    const cancelled = await this.prisma.client.scheduledAgentJob.updateMany({
+      where: {
+        businessId,
+        entityId: invoiceId,
+        checkpoint: `review_invoice_${invoiceId}`,
+        jobType: 'review_solicitation',
+        status: 'PENDING',
+      },
+      data: { status: 'CANCELLED' },
+    });
+    if (cancelled.count === 0) return false;
+    this.logger.log(`D-102: cancelled the unsent review request of reopened invoice ${invoiceId}`);
+    return true;
+  }
+
+  private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {
+    return (await this.invoiceNow(businessId, invoiceId))?.status ?? null;
+  }
+
+  /** The invoice's status and its contact now, in this business (null when it is not this business's invoice). */
+  private async invoiceNow(businessId: string, invoiceId: string) {
+    return this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { status: true, contact: { select: { id: true, firstName: true, lastName: true, email: true } } },
+    });
   }
 
   private async scheduleReviewRequest(
@@ -49,16 +126,39 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
     entityId: string,
     entityType: 'booking' | 'invoice',
     contact: { id?: string; firstName?: string | null; lastName?: string | null; email?: string | null } | undefined,
-  ) {
-    if (!contact?.email) return;
+  ): Promise<boolean> {
+    if (!contact?.email) return false;
 
     const checkpoint = `review_${entityType}_${entityId}`;
     const existing = await this.prisma.client.scheduledAgentJob.findFirst({
       where: { businessId, entityId, checkpoint },
     });
-    if (existing) return;
-
     const scheduledFor = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+    const payload = {
+      contactId: contact.id,
+      contactEmail: contact.email,
+      contactName: [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Valued Customer',
+      entityType,
+    };
+    if (existing) {
+      // W10-REOPEN-REVERSALS (D-102): an invoice paid again after its reopen cancelled the
+      // request gets it re-armed (CANCELLED -> PENDING); a sent or pending request stays as it is.
+      // Review repair SEC-W10RR-2: the re-armed request is addressed to the contact paying now
+      // (its payload is rewritten), not the one the first payment stored: the invoice may have
+      // moved to another contact while SENT, or the contact's email may have changed.
+      if (existing.status === 'CANCELLED' && entityType === 'invoice') {
+        const rearmed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: existing.id, status: 'CANCELLED' },
+          data: { status: 'PENDING', scheduledFor, executedAt: null, payload },
+        });
+        if (rearmed.count === 1) {
+          this.logger.log(`Re-armed review request for invoice ${entityId} at ${scheduledFor.toISOString()}`);
+          return true;
+        }
+      }
+      return false;
+    }
+
     await this.prisma.client.scheduledAgentJob.create({
       data: {
         businessId,
@@ -67,16 +167,12 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
         checkpoint,
         status: 'PENDING',
         scheduledFor,
-        payload: {
-          contactId: contact.id,
-          contactEmail: contact.email,
-          contactName: [contact.firstName, contact.lastName].filter(Boolean).join(' ') || 'Valued Customer',
-          entityType,
-        },
+        payload,
       },
     });
 
     this.logger.log(`Scheduled review request for ${entityType} ${entityId} at ${scheduledFor.toISOString()}`);
+    return true;
   }
 
   /**

@@ -101,6 +101,20 @@
  * insight, webhooks and revenue actions are cases since FOLLOW3-A9). The Payments tab's
  * own Send Reminder (review CR-V42C-1) is a todo in the web test: it is outside the write set.
  *
+ * W10-REOPEN-REVERSALS (owner ruling D-102) turns the ten remaining census todos into cases. The money
+ * effects of a paid invoice are undone when a full refund reopens it (each RED before the packet): the
+ * referral reward credit (ReferralRewardService), the referrer's lead-score bump (CrmNetworkService, with a
+ * referral.deal_reopened note and no message), the projects' paid advance (ProjectRevenueListener), the
+ * margin snapshot (MarginOnPaymentListener: marked reversed, never deleted) and a review request not yet sent
+ * (ReviewSolicitationService). Each reversal is idempotent (a re-delivered reopen reverses nothing more) and
+ * skipped when the paid effect never ran. These five run as real providers on the real bus. What D-102 keeps
+ * is pinned live (green on the base, no source change): attribution history, the first-sale flag, the
+ * booking confirmation and paid notifications, the messages already sent, and the AI listeners (no
+ * invoice.reopened trigger). Those listeners message the customer or write the feed on invoice.paid, which
+ * the other cases here must not see, so each pin subscribes its listeners' own @OnEvent handlers to the real
+ * bus for that case only (wireOnBus reads the metadata the Nest event-emitter loader reads), over real rows
+ * where they write rows and recording stubs where they would message someone.
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * CommerceService, InvoiceWorkflowService, RevenuePostingService, PostingService,
  * ChartOfAccountsSeederService, the real EventEmitter2 (EventEmitterModule), the real
@@ -168,6 +182,48 @@ const ID = {
   invA9RaceWrite: `${P}invA9RaceWrite`,
   invA9RaceRepay: `${P}invA9RaceRepay`,
   invA9Repay: `${P}invA9Repay`,
+  // W10-REOPEN-REVERSALS (D-102): the reversals and the keep pins
+  contactD102Referrer: `${P}contactD102Referrer`,
+  contactD102Referred: `${P}contactD102Referred`,
+  contactD102NetReferrer: `${P}contactD102NetReferrer`,
+  contactD102NetReferred: `${P}contactD102NetReferred`,
+  contactD102NetLate: `${P}contactD102NetLate`,
+  contactD102Msg: `${P}contactD102Msg`,
+  invD102Referral: `${P}invD102Referral`,
+  invD102Referral2: `${P}invD102Referral2`,
+  invD102Network: `${P}invD102Network`,
+  invD102NetLate: `${P}invD102NetLate`,
+  invD102Project: `${P}invD102Project`,
+  invD102ProjectOther: `${P}invD102ProjectOther`,
+  invD102Margin: `${P}invD102Margin`,
+  invD102MarginPart: `${P}invD102MarginPart`,
+  invD102Review: `${P}invD102Review`,
+  invD102ReviewSent: `${P}invD102ReviewSent`,
+  invD102KeepAttr: `${P}invD102KeepAttr`,
+  invD102KeepGame: `${P}invD102KeepGame`,
+  invD102KeepFlow: `${P}invD102KeepFlow`,
+  invD102KeepMsg: `${P}invD102KeepMsg`,
+  invD102KeepAi: `${P}invD102KeepAi`,
+};
+
+/** W10-REOPEN-REVERSALS (D-102) fixtures beside the invoices: a product, a service, bookings, projects. */
+const D102 = {
+  product: `${P}prod_d102`,
+  service: `${P}svc_d102`,
+  bookingAttr: `${P}bk_d102_attr`,
+  bookingFlow: `${P}bk_d102_flow`,
+  prjAdvance: `${P}prj_d102_advance`,
+  prjAlready: `${P}prj_d102_already`,
+  prjMoved: `${P}prj_d102_moved`,
+  prjOther: `${P}prj_d102_other`,
+  trigPaid: `${P}trig_d102_paid`,
+  trigReopened: `${P}trig_d102_reopened`,
+};
+
+/** The invoices whose one line item is the D-102 product (MarginOnPaymentListener snapshots product lines). */
+const PRODUCT_OF: Record<string, string> = {
+  [ID.invD102Margin]: D102.product,
+  [ID.invD102MarginPart]: D102.product,
 };
 
 /** FOLLOW3-A9 tenant negative control: another business, its owner, contact, webhook and action rows. */
@@ -182,6 +238,11 @@ const CONTACT_OF: Record<string, string> = {
   [ID.invRemindFails]: ID.contactMailFails,
   [ID.invA9Crm]: ID.contactA9Crm,
   [ID.invA9Stripe]: ID.contactA9Stripe,
+  [ID.invD102Referral]: ID.contactD102Referred,
+  [ID.invD102Referral2]: ID.contactD102Referred,
+  [ID.invD102Network]: ID.contactD102NetReferred,
+  [ID.invD102NetLate]: ID.contactD102NetLate,
+  [ID.invD102KeepMsg]: ID.contactD102Msg,
 };
 
 /** FOLLOW3-A9 outbound webhooks: the dispatcher's fetch is recorded for these URLs; any other URL throws (no network). */
@@ -216,6 +277,14 @@ const insightMarks: Array<{ businessId: string; contactId: string; reason: strin
  */
 const lifecycleMoves: Array<{ businessId: string; contactId: string; invoiceId: string; invoiceNumber?: string | null }> = [];
 
+/**
+ * W10-REOPEN-REVERSALS (D-102): every customer email a TransactionalEmailService stub was asked to send
+ * (the review-request runner's, and in the keep pins the flow listeners'); recorded, never sent.
+ */
+const transactionalSends: Array<{ businessId: string; type: string; recipientEmail?: string; dedupeKey?: string; templateData?: any }> = [];
+
+/** W10-REOPEN-REVERSALS keep pins: a handler of a listener wired by wireOnBus that threw (none may). */
+const wiredErrors: string[] = [];
 const STATUS_OF: Record<string, string> = {
   [ID.invRemindOverdue]: 'OVERDUE',
 };
@@ -232,6 +301,16 @@ let workflow: any;
 let revenueActions: any;
 let revenueEvents: any;
 let calendarListener: any;
+// W10-REOPEN-REVERSALS (D-102): the bus, the real services the keep pins build their listeners over, and
+// the five reversal providers (their reopen handlers are re-delivered directly).
+let bus: any;
+let prismaSvc: any;
+let commerceSvc: any;
+let referralRewards: any;
+let crmNetwork: any;
+let projectRevenue: any;
+let marginListener: any;
+let reviewSolicitation: any;
 
 const WAIT = { timeout: 4_000, interval: 50 };
 
@@ -272,6 +351,18 @@ const settle = (ms = 500) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function cleanup() {
   for (const sql of [
+    // W10-REOPEN-REVERSALS (D-102): bookings first (they hold invoices, contacts and the service).
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM margin_snapshots WHERE product_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM scheduled_agent_jobs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM projects WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM revenue_attributions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM journey_touchpoints WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM customer_journeys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_relationships WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM calendar_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_insight_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -284,6 +375,8 @@ async function cleanup() {
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -293,6 +386,54 @@ async function cleanup() {
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
+}
+
+/**
+ * W10-REOPEN-REVERSALS (D-102 keep pins): subscribes a listener instance's own @OnEvent handlers to the
+ * real bus, as the Nest event-emitter loader does (it reads the same EVENT_LISTENER_METADATA from each
+ * method), for one case only. Returns the event names it subscribed and the unsubscribe; a handler that
+ * throws is recorded in wiredErrors (the loader's suppressErrors would log it).
+ */
+function wireOnBus(instance: object): { events: string[]; unwire: () => void } {
+  const proto = Object.getPrototypeOf(instance);
+  const subs: Array<[string, (...args: any[]) => Promise<void>]> = [];
+  for (const key of Object.getOwnPropertyNames(proto)) {
+    if (key === 'constructor') continue;
+    const fn = (proto as Record<string, unknown>)[key];
+    if (typeof fn !== 'function') continue;
+    const meta: Array<{ event: string | string[] }> = Reflect.getMetadata('EVENT_LISTENER_METADATA', fn) ?? [];
+    for (const { event } of meta) {
+      for (const name of Array.isArray(event) ? event : [event]) {
+        const handler = async (...args: any[]) => {
+          try {
+            await fn.apply(instance, args);
+          } catch (e) {
+            wiredErrors.push(`${instance.constructor.name}.${key} on ${name}: ${(e as Error).message}`);
+          }
+        };
+        bus.on(name, handler);
+        subs.push([name, handler]);
+      }
+    }
+  }
+  return { events: subs.map(([n]) => n), unwire: () => { for (const [n, h] of subs) bus.off(n, h); } };
+}
+
+/** The reopen payload of an invoice on the bus (recorded since `emitted` was last cleared). */
+function reopenPayload(invoiceId: string): any {
+  const e = emitted.find((x) => x.name === 'invoice.reopened' && x.payload?.invoice?.id === invoiceId);
+  expect(e, `invoice.reopened for ${invoiceId}`).toBeDefined();
+  return e!.payload;
+}
+
+/** A full manual refund that reopens the invoice: 201, SENT, and one invoice.reopened. */
+async function fullRefund(inv: string, paymentId: string, reason: string) {
+  emitted.length = 0;
+  const res = await refund(paymentId, reason);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+  expect(eventsFor(inv)).toEqual(['invoice.reopened']);
+  return reopenPayload(inv);
 }
 
 function agent() {
@@ -415,6 +556,15 @@ beforeAll(async () => {
   const { RevenueActionService } = await import('../src/modules/commerce/revenue-action.service');
   const { ModelGatewayService } = await import('../src/modules/ai/model-gateway.service');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+  // W10-REOPEN-REVERSALS (D-102): the five reversal listeners under test, over real rows.
+  const { ReferralRewardService } = await import('../src/modules/conversion/referral-reward.service');
+  const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
+  const { ReputationService } = await import('../src/modules/community/reputation.service');
+  const { ProjectRevenueListener } = await import('../src/modules/projects/project-revenue.listener');
+  const { MarginOnPaymentListener } = await import('../src/modules/commerce/margin-on-payment.listener');
+  const { LandedCostEngine } = await import('../src/modules/commerce/landed-cost-engine.service');
+  const { ReviewSolicitationService } = await import('../src/modules/conversion/review-solicitation.service');
+  const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
 
   // The dispatcher's outbound POSTs: recorded and answered 200 for the fixture URLs; anything else is refused (no network).
   vi.stubGlobal('fetch', async (input: unknown, init?: { headers?: Record<string, string>; body?: unknown }) => {
@@ -480,6 +630,24 @@ beforeAll(async () => {
         provide: AiUsageService,
         useValue: { trackAndComplete: async () => { throw new Error('v42c: no AI in this suite'); } },
       },
+      // W10-REOPEN-REVERSALS (D-102): the reversal listeners (real), the reputation recalculation a
+      // stub off the boundary, the review-request email recorded. LandedCostEngine and
+      // MarginOnPaymentListener are built by factory: their constructors name types without @Inject.
+      ReferralRewardService,
+      CrmNetworkService,
+      { provide: ReputationService, useValue: { recalculate: async () => null } },
+      ProjectRevenueListener,
+      { provide: LandedCostEngine, useFactory: (p: any) => new LandedCostEngine(p), inject: [PrismaService] },
+      {
+        provide: MarginOnPaymentListener,
+        useFactory: (p: any, engine: any) => new MarginOnPaymentListener(p, engine),
+        inject: [PrismaService, LandedCostEngine],
+      },
+      ReviewSolicitationService,
+      {
+        provide: TransactionalEmailService,
+        useValue: { send: async (a: any) => { transactionalSends.push(a); return { sent: true }; } },
+      },
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       {
         provide: CrmService,
@@ -515,6 +683,14 @@ beforeAll(async () => {
   revenueActions = moduleRef.get(RevenueActionService);
   revenueEvents = moduleRef.get(RevenueEventListener);
   calendarListener = moduleRef.get(CalendarCommerceListener);
+  bus = moduleRef.get(EventEmitter2);
+  prismaSvc = moduleRef.get(PrismaService);
+  commerceSvc = moduleRef.get(CommerceService);
+  referralRewards = moduleRef.get(ReferralRewardService);
+  crmNetwork = moduleRef.get(CrmNetworkService);
+  projectRevenue = moduleRef.get(ProjectRevenueListener);
+  marginListener = moduleRef.get(MarginOnPaymentListener);
+  reviewSolicitation = moduleRef.get(ReviewSolicitationService);
 
   // Record every reason the insight listener marks a snapshot stale (the call itself is the real one).
   const insightListener = moduleRef.get(ContactInsightListener) as any;
@@ -569,6 +745,18 @@ beforeAll(async () => {
   for (const h of Object.values(HOOK)) {
     await db.webhook.create({ data: { id: h.id, businessId: h.businessId, name: h.id, url: h.url, events: h.events, secret: h.secret, isActive: true } });
   }
+  // W10-REOPEN-REVERSALS (D-102): the referral pair (the referred contact names its referrer in custom),
+  // the network pair (a referred_by edge; NetLate's edge is added by its case after its payment), the
+  // keep-pin customer with a phone, and the product the margin invoices sell.
+  await db.contact.create({ data: { id: ID.contactD102Referrer, businessId: ID.biz, firstName: 'V42c', lastName: 'Referrer', email: `${P}d102referrer@test.local`, custom: {} } });
+  await db.contact.create({ data: { id: ID.contactD102Referred, businessId: ID.biz, firstName: 'V42c', lastName: 'Referred', email: `${P}d102referred@test.local`, custom: { referralSourceId: ID.contactD102Referrer } } });
+  await db.contact.create({ data: { id: ID.contactD102NetReferrer, businessId: ID.biz, firstName: 'V42c', lastName: 'NetReferrer', email: `${P}d102netreferrer@test.local`, leadScore: 20 } });
+  await db.contact.create({ data: { id: ID.contactD102NetReferred, businessId: ID.biz, firstName: 'V42c', lastName: 'NetReferred', email: `${P}d102netreferred@test.local` } });
+  await db.contact.create({ data: { id: ID.contactD102NetLate, businessId: ID.biz, firstName: 'V42c', lastName: 'NetLate', email: `${P}d102netlate@test.local` } });
+  await db.contact.create({ data: { id: ID.contactD102Msg, businessId: ID.biz, firstName: 'V42c', lastName: 'Msg', email: `${P}d102msg@test.local`, phone: '+18685550142' } });
+  await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: ID.contactD102NetReferred, toContactId: ID.contactD102NetReferrer, type: 'referred_by' } });
+  await db.product.create({ data: { id: D102.product, businessId: ID.biz, name: 'V42C D102 product', price: TOTAL, currency: 'TTD' } });
+  await db.service.create({ data: { id: D102.service, businessId: ID.biz, name: 'V42C D102 service', duration: 60, price: TOTAL } });
 
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
@@ -585,10 +773,21 @@ beforeAll(async () => {
         currency: 'TTD',
         businessId: ID.biz,
         contactId: CONTACT_OF[id] ?? ID.contact,
-        items: { create: [{ id: `${id}_item1`, description: `V42C item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
+        items: { create: [{ id: `${id}_item1`, description: `V42C item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL, productId: PRODUCT_OF[id] ?? null }] },
       },
     });
   }
+  // W10-REOPEN-REVERSALS (D-102): the projects of the project invoice (and one of another invoice) and the
+  // bookings of the two keep-pin invoices that belong to a visit.
+  const project = (id: string, status: string, invoiceId: string) =>
+    db.project.create({ data: { id, businessId: ID.biz, name: id, status, invoiceId, contactId: ID.contact } });
+  await project(D102.prjAdvance, 'ACTIVE', ID.invD102Project);
+  await project(D102.prjAlready, 'IN_PROGRESS', ID.invD102Project);
+  await project(D102.prjMoved, 'ACTIVE', ID.invD102Project);
+  await project(D102.prjOther, 'ACTIVE', ID.invD102ProjectOther);
+  const visit = { startTime: new Date(Date.now() + 2 * 86_400_000), endTime: new Date(Date.now() + 2 * 86_400_000 + 3_600_000) };
+  await db.booking.create({ data: { id: D102.bookingAttr, businessId: ID.biz, contactId: ID.contact, serviceId: D102.service, invoiceId: ID.invD102KeepAttr, status: 'CONFIRMED', ...visit } });
+  await db.booking.create({ data: { id: D102.bookingFlow, businessId: ID.biz, contactId: ID.contact, serviceId: D102.service, invoiceId: ID.invD102KeepFlow, status: 'PENDING', ...visit } });
 }, 180_000);
 
 afterAll(async () => {
@@ -605,6 +804,8 @@ beforeEach(() => {
   hookDeliveries.length = 0;
   insightMarks.length = 0;
   lifecycleMoves.length = 0;
+  transactionalSends.length = 0;
+  wiredErrors.length = 0;
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -821,12 +1022,226 @@ describe('VR-05: a refund that reopens an invoice emits a status event its liste
   // todo for a follow-up packet, in order of what a pay-then-full-refund leaves behind. FOLLOW3-A9 made
   // the CRM RevenueEventListener / ContactInsightListener, WebhookDispatcherService and RevenueActionService
   // ones cases (A9-* below, in their todos' place).
-  it.todo('VR-05 census (value credit, first): ReferralRewardService.onInvoicePaid (conversion/referral-reward.service.ts:42-100) credits the referrer custom.referralRewardBalance (+referrerReward) and referralRewardsEarned and marks the referred contact referralRewardEarned; after a full refund the credit stays (pay, refund leaves value behind). It must reverse the award on invoice.reopened when the reopened invoice was the one that earned it');
-  it.todo('VR-05 census: CrmNetworkService.onInvoicePaid (crm/crm-network.service.ts:396) bumps the referrer lead score and logs referral.deal_won on its timeline; neither is undone by the reopen');
-  it.todo('VR-05 census: ProjectRevenueListener.onInvoicePaid (projects/project-revenue.listener.ts:36) advances the invoice projects fromStatus -> toStatusOnInvoicePaid; a reopen leaves them advanced');
-  it.todo('VR-05 census: MarginOnPaymentListener.onInvoicePaid (commerce/margin-on-payment.listener.ts:29) captures the invoice margin snapshot; it stays for a refunded sale');
-  it.todo('VR-05 census: StorefrontInvoiceAttributionListener.handleInvoicePaid (commerce/storefront-invoice-attribution.listener.ts:30) and JourneyListenerService.onInvoicePaid (growth-intelligence/journey-listener.service.ts:117) record revenue attribution / a CONVERSION touchpoint with the invoice value; neither is reversed');
-  it.todo('VR-05 census: GamificationListener.handleInvoicePaid (gamification/gamification.listener.ts:12) sets business metaData.firstSaleMade; a refund of the only sale leaves it set (a ruling, not necessarily a reversal)');
+  // W10-REOPEN-REVERSALS (owner ruling D-102): the six census todos above the A9 cases are cases (converted
+  // in place). The reopen undoes the paid invoice's money effects; what the ruling keeps is pinned live.
+  it('VR-05 census (value credit, first) (W10-REOPEN-REVERSALS, D-102, was it.todo): ReferralRewardService.onInvoicePaid credits the referrer custom.referralRewardBalance (+10) and referralRewardsEarned (+1) and marks the referred contact referralRewardEarned; the full refund that reopens the invoice which earned it reverses all three (the referral itself stays); a re-delivered reopen reverses nothing more; a second paid invoice of the same contact earned nothing, so its reopen reverses nothing; paying again earns it again and the next reopen reverses it once more; nobody is messaged', async () => {
+    const custom = async (id: string) => ((await db.contact.findUnique({ where: { id } })).custom ?? {}) as Record<string, any>;
+    const credit = async () => {
+      const c = await custom(ID.contactD102Referrer);
+      return { balance: c.referralRewardBalance ?? 0, earned: c.referralRewardsEarned ?? 0 };
+    };
+
+    const p1 = await paid(ID.invD102Referral, 100, 'V42C-D102-REF-1');
+    await vi.waitFor(async () => expect(await credit()).toEqual({ balance: 10, earned: 1 }), WAIT);
+    expect(await custom(ID.contactD102Referred)).toMatchObject({ referralSourceId: ID.contactD102Referrer, referralRewardEarned: true });
+
+    // The same contact's second paid invoice earns nothing (the reward is once per referred contact) ...
+    const p2 = await paid(ID.invD102Referral2, 100, 'V42C-D102-REF-2');
+    await settle();
+    expect(await credit()).toEqual({ balance: 10, earned: 1 });
+    // ... so its reopen reverses nothing: the paid effect never ran for it.
+    await fullRefund(ID.invD102Referral2, p2.id, 'v42c d102 second invoice');
+    await settle();
+    expect(await credit(), 'the reward the second invoice did not earn stays').toEqual({ balance: 10, earned: 1 });
+    expect(await custom(ID.contactD102Referred)).toMatchObject({ referralRewardEarned: true });
+
+    // RED before: the credit and the mark stayed after the refund of the invoice that earned them.
+    const reopen = await fullRefund(ID.invD102Referral, p1.id, 'v42c d102 first invoice');
+    await vi.waitFor(async () => expect(await credit()).toEqual({ balance: 0, earned: 0 }), WAIT);
+    const referred = await custom(ID.contactD102Referred);
+    expect(referred.referralRewardEarned ?? false, 'the referred contact may earn it again').toBe(false);
+    expect(referred.referralSourceId, 'the referral itself stays').toBe(ID.contactD102Referrer);
+
+    // A re-delivered reopen reverses nothing more.
+    await referralRewards.onInvoiceReopened(reopen);
+    await settle();
+    expect(await credit()).toEqual({ balance: 0, earned: 0 });
+
+    // Paying again earns it again; the next reopen reverses it once more.
+    const p3 = await paid(ID.invD102Referral, 100, 'V42C-D102-REF-3');
+    await vi.waitFor(async () => expect(await credit()).toEqual({ balance: 10, earned: 1 }), WAIT);
+    await fullRefund(ID.invD102Referral, p3.id, 'v42c d102 first invoice again');
+    await vi.waitFor(async () => expect(await credit()).toEqual({ balance: 0, earned: 0 }), WAIT);
+    await settle();
+    expect(await credit()).toEqual({ balance: 0, earned: 0 });
+    expect(sentEmails, 'the reopen messages no one').toHaveLength(0);
+    await expectLedgerBalanced(ID.invD102Referral);
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102, was it.todo): CrmNetworkService.onInvoicePaid bumps the referrer lead score (+15) and logs referral.deal_won on its timeline; the reopen takes the bump back and logs one referral.deal_reopened note on the referrer timeline (nobody is messaged); a re-delivered reopen changes nothing; an invoice paid before its contact named the referrer moved no score, so its reopen moves none', async () => {
+    const referrer = ID.contactD102NetReferrer;
+    const score = async () => (await db.contact.findUnique({ where: { id: referrer }, select: { leadScore: true } })).leadScore;
+    const notes = async (inv: string) =>
+      (await db.contactEvent.findMany({
+        where: { businessId: ID.biz, contactId: referrer, type: 'note.created', data: { path: ['invoiceId'], equals: inv } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      })) as any[];
+    expect(await score()).toBe(20);
+
+    const p = await paid(ID.invD102Network, 100, 'V42C-D102-NET');
+    await vi.waitFor(async () => expect(await score()).toBe(35), WAIT);
+    await vi.waitFor(async () => expect((await notes(ID.invD102Network)).map((e) => e.data.kind)).toEqual(['referral.deal_won']), WAIT);
+
+    // Control: NetLate's invoice is paid before NetLate names the referrer, so no bump ran for it ...
+    const late = await paid(ID.invD102NetLate, 100, 'V42C-D102-NET-LATE');
+    await settle();
+    expect(await score()).toBe(35);
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: ID.contactD102NetLate, toContactId: referrer, type: 'referred_by' } });
+    // ... and its reopen (the edge exists now) takes nothing back and logs nothing.
+    await fullRefund(ID.invD102NetLate, late.id, 'v42c d102 late referral');
+    await settle();
+    expect(await score(), 'a bump that never ran is not taken back').toBe(35);
+    expect(await notes(ID.invD102NetLate)).toEqual([]);
+
+    // RED before: the score stayed bumped and the timeline ended on referral.deal_won.
+    const reopen = await fullRefund(ID.invD102Network, p.id, 'v42c d102 network');
+    await vi.waitFor(async () => expect(await score()).toBe(20), WAIT);
+    await vi.waitFor(async () => expect((await notes(ID.invD102Network)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']), WAIT);
+    const reopened = (await notes(ID.invD102Network))[1];
+    expect(reopened).toMatchObject({ businessId: ID.biz, contactId: referrer, source: 'crm-network' });
+    expect(reopened.data).toMatchObject({ kind: 'referral.deal_reopened', referredContactId: ID.contactD102NetReferred, invoiceId: ID.invD102Network });
+
+    // A re-delivered reopen changes nothing.
+    await crmNetwork.onInvoiceReopened(reopen);
+    await settle();
+    expect(await score()).toBe(20);
+    expect((await notes(ID.invD102Network)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']);
+    expect(sentEmails, 'the reopen messages no one').toHaveLength(0);
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102, was it.todo): ProjectRevenueListener.onInvoicePaid advances the invoice projects ACTIVE -> IN_PROGRESS; the reopen steps the ones it moved back to ACTIVE; a project already IN_PROGRESS before the payment, one the operator moved on since (COMPLETED) and another invoice\'s project are left; a re-delivered reopen moves nothing (not even a project the operator advanced again); paying again advances it again and the next reopen steps it back once more', async () => {
+    const status = async (id: string) => (await db.project.findUnique({ where: { id } })).status;
+    const p = await paid(ID.invD102Project, 100, 'V42C-D102-PRJ');
+    await vi.waitFor(async () => {
+      expect(await status(D102.prjAdvance)).toBe('IN_PROGRESS');
+      expect(await status(D102.prjMoved)).toBe('IN_PROGRESS');
+    }, WAIT);
+    expect(await status(D102.prjAlready)).toBe('IN_PROGRESS');
+    expect(await status(D102.prjOther)).toBe('ACTIVE');
+    // The operator moves one of the advanced projects on.
+    await db.project.update({ where: { id: D102.prjMoved }, data: { status: 'COMPLETED' } });
+
+    // RED before: the reopen left the advanced project IN_PROGRESS.
+    const reopen = await fullRefund(ID.invD102Project, p.id, 'v42c d102 project');
+    await vi.waitFor(async () => expect(await status(D102.prjAdvance)).toBe('ACTIVE'), WAIT);
+    await settle();
+    expect(await status(D102.prjAlready), 'IN_PROGRESS before the payment: the paid move never ran for it').toBe('IN_PROGRESS');
+    expect(await status(D102.prjMoved), 'moved on since the paid move: left').toBe('COMPLETED');
+    expect(await status(D102.prjOther)).toBe('ACTIVE');
+
+    // A re-delivered reopen moves nothing, not even a project the operator has advanced again.
+    await db.project.update({ where: { id: D102.prjAdvance }, data: { status: 'IN_PROGRESS' } });
+    await projectRevenue.onInvoiceReopened(reopen);
+    await settle();
+    expect(await status(D102.prjAdvance), 'the reopen was already reversed once').toBe('IN_PROGRESS');
+    expect(await status(D102.prjAlready)).toBe('IN_PROGRESS');
+    expect(await status(D102.prjMoved)).toBe('COMPLETED');
+
+    // Paying again advances it again; the next reopen steps it back once more.
+    await db.project.update({ where: { id: D102.prjAdvance }, data: { status: 'ACTIVE' } });
+    const p2 = await paid(ID.invD102Project, 100, 'V42C-D102-PRJ-2');
+    await vi.waitFor(async () => expect(await status(D102.prjAdvance)).toBe('IN_PROGRESS'), WAIT);
+    await fullRefund(ID.invD102Project, p2.id, 'v42c d102 project again');
+    await vi.waitFor(async () => expect(await status(D102.prjAdvance)).toBe('ACTIVE'), WAIT);
+    await settle();
+    expect(await status(D102.prjAlready)).toBe('IN_PROGRESS');
+    expect(await status(D102.prjMoved)).toBe('COMPLETED');
+    expect(sentEmails).toHaveLength(0);
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102, was it.todo): MarginOnPaymentListener.onInvoicePaid captures one margin snapshot per product line (snapshotReason invoice_paid); the reopen marks it reversed (snapshotReason invoice_paid_reversed) and keeps the row and its figures; a re-delivered reopen writes nothing more; paying again restores the same snapshot (no second row); a PARTIALLY_PAID product invoice refunded to SENT had no snapshot and gets none', async () => {
+    const snaps = async (inv: string) => (await db.marginSnapshot.findMany({ where: { invoiceId: inv }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })) as any[];
+    const reasons = async (inv: string) => (await snaps(inv)).map((s) => [s.id, s.snapshotReason]);
+
+    const p = await paid(ID.invD102Margin, 100, 'V42C-D102-MARGIN');
+    await vi.waitFor(async () => expect((await snaps(ID.invD102Margin)).map((s) => s.snapshotReason)).toEqual(['invoice_paid']), WAIT);
+    const [snap] = await snaps(ID.invD102Margin);
+    expect(snap).toMatchObject({ productId: D102.product, sellingPrice: TOTAL, quantity: 1 });
+
+    // RED before: the snapshot stayed invoice_paid for the refunded sale.
+    const reopen = await fullRefund(ID.invD102Margin, p.id, 'v42c d102 margin');
+    await vi.waitFor(async () => expect(await reasons(ID.invD102Margin)).toEqual([[snap.id, 'invoice_paid_reversed']]), WAIT);
+    const reversed = (await snaps(ID.invD102Margin))[0];
+    const figures = (s: any) => ({ productId: s.productId, sourceCost: s.sourceCost, sellingPrice: s.sellingPrice, landedCostEstimate: s.landedCostEstimate, grossMargin: s.grossMargin, grossProfit: s.grossProfit, quantity: s.quantity, createdAt: s.createdAt });
+    expect(figures(reversed), 'marked, never deleted or rewritten').toEqual(figures(snap));
+
+    // A re-delivered reopen writes nothing more.
+    await marginListener.onInvoiceReopened(reopen);
+    await settle();
+    expect(await reasons(ID.invD102Margin)).toEqual([[snap.id, 'invoice_paid_reversed']]);
+
+    // Paying again restores the same snapshot.
+    await paid(ID.invD102Margin, 100, 'V42C-D102-MARGIN-2');
+    await vi.waitFor(async () => expect(await reasons(ID.invD102Margin)).toEqual([[snap.id, 'invoice_paid']]), WAIT);
+
+    // Control: a PARTIALLY_PAID product invoice never captured a snapshot; its reopen to SENT writes none.
+    const forty = await paid(ID.invD102MarginPart, 40, 'V42C-D102-MARGIN-P40');
+    expect((await invoiceRow(ID.invD102MarginPart)).status).toBe('PARTIALLY_PAID');
+    await fullRefund(ID.invD102MarginPart, forty.id, 'v42c d102 margin partial');
+    await settle();
+    expect(await snaps(ID.invD102MarginPart)).toEqual([]);
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102 keep, was it.todo): StorefrontInvoiceAttributionListener.handleInvoicePaid and JourneyListenerService.onInvoicePaid record the paid booking invoice\'s revenue attribution and its CONVERSION payment touchpoint; by D-102 attribution history stays: neither listens to invoice.reopened, and the full refund leaves both rows as they were and adds none', async () => {
+    const { StorefrontInvoiceAttributionListener } = await import('../src/modules/commerce/storefront-invoice-attribution.listener');
+    const { RevenueAttributionService } = await import('../src/modules/commerce/revenue-attribution.service');
+    const { JourneyListenerService } = await import('../src/modules/growth-intelligence/journey-listener.service');
+    const { CustomerJourneyService } = await import('../src/modules/growth-intelligence/customer-journey.service');
+    const inv = ID.invD102KeepAttr;
+    const attributions = async () => db.revenueAttribution.findMany({ where: { businessId: ID.biz, revenueId: inv }, orderBy: { id: 'asc' } });
+    const touchpoints = async () =>
+      db.journeyTouchpoint.findMany({ where: { businessId: ID.biz, metadata: { path: ['invoiceId'], equals: inv } }, orderBy: { id: 'asc' } });
+
+    const attr = wireOnBus(new StorefrontInvoiceAttributionListener(prismaSvc, new RevenueAttributionService(prismaSvc)));
+    const journey = wireOnBus(new JourneyListenerService(new CustomerJourneyService(prismaSvc)));
+    try {
+      expect(attr.events).toEqual(['invoice.paid']);
+      expect(journey.events).toContain('invoice.paid');
+      expect(journey.events, 'no reopen handler: the history is kept').not.toContain('invoice.reopened');
+
+      const p = await paid(inv, 100, 'V42C-D102-KEEP-ATTR');
+      await vi.waitFor(async () => expect(await attributions()).toHaveLength(1), WAIT);
+      await vi.waitFor(async () => expect((await touchpoints()).map((t: any) => t.touchpointType)).toContain('payment'), WAIT);
+      await settle();
+      const attrRows = await attributions();
+      const tpRows = await touchpoints();
+      expect(attrRows[0]).toMatchObject({ revenueType: 'INVOICE', amount: TOTAL, source: 'storefront', sourceDetail: `booking:${D102.bookingAttr}`, contactId: ID.contact });
+      expect(tpRows.find((t: any) => t.touchpointType === 'payment')).toMatchObject({ stageHint: 'CONVERSION', source: 'commerce', contactId: ID.contact });
+
+      await fullRefund(inv, p.id, 'v42c d102 keep attribution');
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect(await attributions(), 'the revenue attribution stays as it was').toEqual(attrRows);
+      expect(await touchpoints(), 'the CONVERSION touchpoint stays, none added').toEqual(tpRows);
+      expect(wiredErrors).toEqual([]);
+    } finally {
+      attr.unwire();
+      journey.unwire();
+    }
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102 keep, was it.todo): GamificationListener.handleInvoicePaid sets the business metaData.firstSaleMade; by D-102 the first-sale flag stays: it has no invoice.reopened handler and a full refund of the sale that set it leaves it set', async () => {
+    const { GamificationListener } = await import('../src/modules/gamification/gamification.listener');
+    const inv = ID.invD102KeepGame;
+    const flag = async () => ((await db.business.findUnique({ where: { id: ID.biz }, select: { metaData: true } })).metaData ?? {} as any).firstSaleMade;
+    expect(await flag(), 'not set before this sale (the listener is wired for this case only)').toBeFalsy();
+
+    const game = wireOnBus(new GamificationListener(prismaSvc));
+    try {
+      expect(game.events).toContain('invoice.paid');
+      expect(game.events).not.toContain('invoice.reopened');
+      const p = await paid(inv, 100, 'V42C-D102-KEEP-GAME');
+      await vi.waitFor(async () => expect(await flag()).toBe(true), WAIT);
+
+      await fullRefund(inv, p.id, 'v42c d102 keep first sale');
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect(await flag(), 'the first-sale flag stays').toBe(true);
+      expect(wiredErrors).toEqual([]);
+    } finally {
+      game.unwire();
+    }
+  }, 30_000);
   // FOLLOW3-A9-REOPEN-LISTENERS (V1-81): the three census todos on the CRM timeline / insight, the outbound
   // webhooks and the revenue actions are the cases below (converted in place), with the Stripe path, the
   // COMPLETED / DISMISSED action control and the partial-refund control.
@@ -1035,10 +1450,198 @@ describe('VR-05: a refund that reopens an invoice emits a status event its liste
     expect(await receiptAction(inv)).toMatchObject({ id: before.id, status: 'PENDING' });
     expect(sentEmails).toHaveLength(0);
   });
-  it.todo('VR-05 census: ReviewSolicitationService.onInvoicePaid (conversion/review-solicitation.service.ts:42) schedules a review-request job to the customer; the reopen does not cancel it');
-  it.todo('VR-05 census: FlowListener (flow/flow.listener.ts:110 confirms the linked booking and notifies "Invoice Paid"; :324 revenue milestone notification; :483 payment_receipt to the customer), ActivityEventListener (flow/activity-event.listener.ts:58) and AutomationExecutorService.onInvoicePaid (flow/automation-executor.service.ts:650, playbooks / flows on trigger invoice.paid, and AutomationService rule invoice.paid -> "Send thank-you note" task): the booking stays confirmed and no invoice.reopened trigger or activity exists');
-  it.todo('VR-05 census: InvoiceReceiptListener (commerce/invoice-receipt.listener.ts:31) and WhatsappNotificationsListener (whatsapp/whatsapp-notifications.listener.ts:73) message the customer on paid; by this packet ruling the reopen messages nobody, so a follow-up rules whether the customer is told of a refund');
-  it.todo('VR-05 census: AiListener.onInvoicePaid (ai/ai.listener.ts:36) and AgentTriggerService (onAny, exact eventPattern, no cooldown; default trigger invoice.paid in ai/default-triggers.constants.ts:62) have no invoice.reopened trigger; a business trigger on it fires once per event, which SEC-V42C-1 below keeps to one per reopen');
+  // W10-REOPEN-REVERSALS (owner ruling D-102): the last four census todos are cases (converted in place).
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102, was it.todo): ReviewSolicitationService.onInvoicePaid schedules a PENDING review-request job to the customer; the reopen cancels it before it is sent (CANCELLED: the runner only takes PENDING jobs); a re-delivered reopen changes nothing; paying again re-arms it; a request the runner already sent (COMPLETED) is a message already sent and stays; nobody is messaged by the reopen', async () => {
+    const job = async (inv: string) =>
+      db.scheduledAgentJob.findFirst({ where: { businessId: ID.biz, entityId: inv, checkpoint: `review_invoice_${inv}` } });
+
+    const p = await paid(ID.invD102Review, 100, 'V42C-D102-REVIEW');
+    await vi.waitFor(async () => expect(await job(ID.invD102Review)).toMatchObject({ jobType: 'review_solicitation', status: 'PENDING' }), WAIT);
+    const scheduled = await job(ID.invD102Review);
+    expect(scheduled.payload).toMatchObject({ contactId: ID.contact, contactEmail: `${P}c@test.local`, entityType: 'invoice' });
+
+    // RED before: the job stayed PENDING, so the refunded customer was asked for a review three days later.
+    const reopen = await fullRefund(ID.invD102Review, p.id, 'v42c d102 review');
+    await vi.waitFor(async () => expect(await job(ID.invD102Review)).toMatchObject({ id: scheduled.id, status: 'CANCELLED', executedAt: null }), WAIT);
+    const cancelled = await job(ID.invD102Review);
+
+    // A re-delivered reopen changes nothing.
+    await reviewSolicitation.onInvoiceReopened(reopen);
+    await settle();
+    expect(await job(ID.invD102Review)).toMatchObject({ id: scheduled.id, status: 'CANCELLED', updatedAt: cancelled.updatedAt });
+
+    // Paying again re-arms the same job.
+    await paid(ID.invD102Review, 100, 'V42C-D102-REVIEW-2');
+    await vi.waitFor(async () => expect(await job(ID.invD102Review)).toMatchObject({ id: scheduled.id, status: 'PENDING', executedAt: null }), WAIT);
+    expect(new Date((await job(ID.invD102Review)).scheduledFor).getTime()).toBeGreaterThan(Date.now());
+
+    // A request already sent stays: the runner claims a due job by writing COMPLETED before it sends (V1-35).
+    const s = await paid(ID.invD102ReviewSent, 100, 'V42C-D102-REVIEW-SENT');
+    await vi.waitFor(async () => expect(await job(ID.invD102ReviewSent)).toMatchObject({ status: 'PENDING' }), WAIT);
+    const executedAt = new Date();
+    await db.scheduledAgentJob.update({ where: { id: (await job(ID.invD102ReviewSent)).id }, data: { status: 'COMPLETED', executedAt } });
+    await fullRefund(ID.invD102ReviewSent, s.id, 'v42c d102 review sent');
+    await waitForCalendar('invoice', ID.invD102ReviewSent, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+    await settle();
+    expect(await job(ID.invD102ReviewSent), 'a request already sent is the customer\'s message: left').toMatchObject({ status: 'COMPLETED', executedAt });
+    expect(transactionalSends, 'the reopen sends nothing').toEqual([]);
+    expect(sentEmails).toHaveLength(0);
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102 keep, was it.todo): FlowListener (confirms the linked booking, the "Invoice Paid" notification, the revenue milestone check, the payment_receipt to the customer), ActivityEventListener and AutomationExecutorService.onInvoicePaid (playbooks / flows on invoice.paid, the "Send thank-you note" task): by D-102 the booking confirmation and the notifications stay; none of them listens to invoice.reopened, and the full refund leaves the booking CONFIRMED, adds no notification, activity, task or customer email', async () => {
+    const { FlowListener } = await import('../src/modules/flow/flow.listener');
+    const { ActivityEventListener } = await import('../src/modules/flow/activity-event.listener');
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { BookingsService } = await import('../src/modules/bookings/bookings.service');
+    const inv = ID.invD102KeepFlow;
+    const activities: any[] = [];
+    const tasks: any[] = [];
+    const milestones: any[] = [];
+    const activityStub = { log: async (a: any) => { activities.push(a); return null; } };
+    const emailStub = { send: async (a: any) => { transactionalSends.push(a); return { sent: true }; } };
+    // The real confirmation (BookingsService.confirmBookingForPaidInvoice) over the real booking row; its
+    // contact-timeline write is the suite's recording CrmService stub; the rest of BookingsService is unused.
+    const bookings = new BookingsService(prismaSvc, bus, { logContactEvent: async (e: any) => { timeline.push(e); return null; } } as any, commerceSvc, {} as any, {} as any, emailStub as any, {} as any, {} as any);
+    const flow = new FlowListener(bookings, prismaSvc, { checkRevenueMilestoneOnPayment: async (...a: any[]) => { milestones.push(a); return null; } } as any, emailStub as any, commerceSvc);
+    const activity = new ActivityEventListener(activityStub as any, prismaSvc);
+    const automation = new AutomationExecutorService(prismaSvc, activityStub as any, { addTask: async (t: any) => { tasks.push(t); return null; } } as any, emailStub as any, null, null);
+    const notifications = async () => db.notification.findMany({ where: { businessId: ID.biz, data: { path: ['invoiceId'], equals: inv } }, orderBy: { id: 'asc' } });
+    const booking = async () => db.booking.findUnique({ where: { id: D102.bookingFlow } });
+
+    const wired = [wireOnBus(flow), wireOnBus(activity), wireOnBus(automation)];
+    try {
+      for (const w of wired) {
+        expect(w.events).toContain('invoice.paid');
+        expect(w.events, 'no reopen handler').not.toContain('invoice.reopened');
+      }
+      expect((await booking()).status).toBe('PENDING');
+
+      const p = await paid(inv, 100, 'V42C-D102-KEEP-FLOW');
+      await vi.waitFor(async () => expect((await booking()).status).toBe('CONFIRMED'), WAIT);
+      await vi.waitFor(async () => expect((await notifications()).map((n: any) => n.type)).toEqual(['invoice.paid']), WAIT);
+      await vi.waitFor(() => {
+        expect(transactionalSends.filter((s) => s.type === 'payment_receipt' && s.dedupeKey === `receipt_invoice_${inv}`)).toHaveLength(1);
+        expect(activities.filter((a) => a.entityId === inv && a.action === 'paid')).toHaveLength(1);
+        expect(tasks.map((t) => t.title)).toEqual(['Send thank-you note']);
+        expect(milestones).toHaveLength(1);
+      }, WAIT);
+      await settle();
+      const before = { notifications: await notifications(), sends: transactionalSends.length, activities: activities.length, tasks: tasks.length, milestones: milestones.length };
+
+      await fullRefund(inv, p.id, 'v42c d102 keep flow');
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect((await booking()).status, 'the booking stays confirmed').toBe('CONFIRMED');
+      expect(await notifications(), 'no notification added or removed').toEqual(before.notifications);
+      expect({ sends: transactionalSends.length, activities: activities.length, tasks: tasks.length, milestones: milestones.length }, 'no email, activity, task or milestone check for the reopen').toEqual({
+        sends: before.sends, activities: before.activities, tasks: before.tasks, milestones: before.milestones,
+      });
+      expect(sentEmails).toHaveLength(0);
+      expect(wiredErrors).toEqual([]);
+    } finally {
+      for (const w of wired) w.unwire();
+    }
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102 keep, was it.todo): InvoiceReceiptListener and WhatsAppNotificationsListener message the customer once on paid (the receipt email, the WhatsApp payment confirmation); by D-102 messages already sent stay and the reopen messages no one: neither listens to invoice.reopened and the full refund sends nothing', async () => {
+    const { InvoiceReceiptListener } = await import('../src/modules/commerce/invoice-receipt.listener');
+    const { WhatsAppNotificationsListener } = await import('../src/modules/whatsapp/whatsapp-notifications.listener');
+    const inv = ID.invD102KeepMsg;
+    const receipts: any[] = [];
+    const whatsapps: any[] = [];
+    const receipt = wireOnBus(new InvoiceReceiptListener(commerceSvc, { sendEmail: async (a: any) => { receipts.push(a); return { messageId: `${P}d102_receipt_${receipts.length}` }; } } as any));
+    const whatsapp = wireOnBus(new WhatsAppNotificationsListener({ sendMessage: async (b: string, m: any) => { whatsapps.push({ businessId: b, ...m }); return { success: true }; } } as any));
+    try {
+      expect(receipt.events).toEqual(['invoice.paid']);
+      expect(whatsapp.events).toContain('invoice.paid');
+      expect(whatsapp.events).not.toContain('invoice.reopened');
+
+      const p = await paid(inv, 100, 'V42C-D102-KEEP-MSG');
+      await vi.waitFor(() => {
+        expect(receipts.map((r) => r.to)).toEqual([`${P}d102msg@test.local`]);
+        expect(whatsapps.map((w) => w.to)).toEqual(['+18685550142']);
+      }, WAIT);
+      await settle();
+
+      await fullRefund(inv, p.id, 'v42c d102 keep messages');
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect(receipts, 'no receipt or refund email from the reopen').toHaveLength(1);
+      expect(whatsapps, 'no WhatsApp message from the reopen').toHaveLength(1);
+      expect(sentEmails).toHaveLength(0);
+      expect(wiredErrors).toEqual([]);
+    } finally {
+      receipt.unwire();
+      whatsapp.unwire();
+    }
+  }, 30_000);
+
+  it('VR-05 census (W10-REOPEN-REVERSALS, D-102 keep, was it.todo): AiListener.onInvoicePaid invalidates the business graph and AgentTriggerService (onAny) runs the business\'s invoice.paid trigger (the default "Payment Received -> Thank You") once on paid; by D-102 no invoice.reopened trigger fires a message: no default trigger or journey template listens to invoice.reopened, AiListener has no reopen handler, and the full refund starts no plan; a trigger the business itself adds on invoice.reopened runs once per reopen', async () => {
+    const { AiListener } = await import('../src/modules/ai/ai.listener');
+    const { AgentTriggerService } = await import('../src/modules/ai/agent-trigger.service');
+    const { DEFAULT_AGENT_TRIGGERS } = await import('../src/modules/ai/default-triggers.constants');
+    const { getTemplatesForEvent } = await import('../src/modules/ai/journey-templates');
+    const inv = ID.invD102KeepAi;
+    expect(DEFAULT_AGENT_TRIGGERS.map((t: any) => t.eventPattern)).not.toContain('invoice.reopened');
+    expect(getTemplatesForEvent('invoice.reopened')).toEqual([]);
+    const paidDefault = DEFAULT_AGENT_TRIGGERS.find((t: any) => t.eventPattern === 'invoice.paid')!;
+    await db.agentTrigger.create({ data: { id: D102.trigPaid, businessId: ID.biz, name: paidDefault.name, eventPattern: 'invoice.paid', objective: paidDefault.objective, enabled: true } });
+
+    const invalidated: string[] = [];
+    const plans: any[] = [];
+    const journeyEvents: string[] = [];
+    const ai = wireOnBus(new AiListener({ invalidateCache: (b: string) => { invalidated.push(b); } } as any, bus));
+    // AgentTriggerService subscribes with onAny in onModuleInit: the real onModuleInit runs against a bus
+    // facade that hands its listener over, and that listener goes on the real bus for this case only.
+    let onAnyListener: ((name: string, payload: any) => void) | undefined;
+    const triggers = new AgentTriggerService(
+      prismaSvc,
+      { onAny: (l: any) => { onAnyListener = l; }, emit: (...a: any[]) => bus.emit(...a) } as any,
+      { evaluateAutoApproval: async () => ({ autoApproved: false }) } as any,
+      { createPlan: async (_b: string, input: any) => { plans.push(input); return null; } } as any,
+      {} as any,
+      { log: async () => null } as any,
+      { handleEvent: async (name: string) => { journeyEvents.push(name); return []; } } as any,
+    );
+    triggers.onModuleInit();
+    expect(onAnyListener).toBeDefined();
+    bus.onAny(onAnyListener);
+    const forInvoice = (input: any) => String(input?.rawInput ?? '');
+    try {
+      expect(ai.events).toContain('invoice.paid');
+      expect(ai.events, 'AiListener has no reopen handler').not.toContain('invoice.reopened');
+
+      const p = await paid(inv, 100, 'V42C-D102-KEEP-AI');
+      await vi.waitFor(() => expect(plans.map((x) => x.objective)).toEqual([paidDefault.objective]), WAIT);
+      expect(forInvoice(plans[0])).toContain('invoice.paid');
+      expect(invalidated).toContain(ID.biz);
+      await settle();
+      const before = { plans: plans.length, invalidated: invalidated.length };
+
+      journeyEvents.length = 0;
+      const reopen = await fullRefund(inv, p.id, 'v42c d102 keep ai');
+      await vi.waitFor(() => expect(journeyEvents).toContain('invoice.reopened'), WAIT);
+      await settle();
+      expect(plans.length, 'no plan (no message) for the reopen').toBe(before.plans);
+      expect(invalidated.length, 'AiListener does not act on the reopen').toBe(before.invalidated);
+
+      expect(reopen).toMatchObject({ businessId: ID.biz, previousStatus: 'PAID' });
+
+      // A trigger the business itself adds on invoice.reopened runs once per reopen (one event, SEC-V42C-1).
+      await db.agentTrigger.create({ data: { id: D102.trigReopened, businessId: ID.biz, name: 'V42C D102 own reopen rule', eventPattern: 'invoice.reopened', objective: 'v42c d102 owner rule', enabled: true } });
+      const p2 = await paid(inv, 100, 'V42C-D102-KEEP-AI-2');
+      await vi.waitFor(() => expect(plans.map((x) => x.objective)).toEqual([paidDefault.objective, paidDefault.objective]), WAIT);
+      await fullRefund(inv, p2.id, 'v42c d102 keep ai again');
+      await vi.waitFor(() => expect(plans.map((x) => x.objective)).toEqual([paidDefault.objective, paidDefault.objective, 'v42c d102 owner rule']), WAIT);
+      await settle();
+      expect(plans.filter((x) => x.objective === 'v42c d102 owner rule'), 'once per reopen').toHaveLength(1);
+      expect(wiredErrors).toEqual([]);
+    } finally {
+      ai.unwire();
+      bus.offAny(onAnyListener);
+      await db.agentTrigger.deleteMany({ where: { id: { in: [D102.trigPaid, D102.trigReopened] } } });
+    }
+  }, 30_000);
 });
 
 /**
@@ -1391,4 +1994,339 @@ describe('SEC-V42C-1: one reopen, one invoice.reopened (the reconcile reads unde
     expect(await invoiceRow(inv)).toMatchObject({ status: 'PAID' });
     expect(eventsFor(inv)).toEqual([]);
   });
+});
+
+/**
+ * W10-REOPEN-REVERSALS review repairs (owner ruling D-102), each RED before the repair:
+ *   SEC-W10RR-1  the referral award and its reversal write the referrer under its row lock (they were
+ *                read-modify-writes of the whole custom object): eight invoices of eight contacts the
+ *                same referrer referred, paid, then reopened, with their handlers run together, earn
+ *                80 / 8 and give all of it back (0 / 0); every referred contact loses its mark
+ *   SEC-W10RR-2  a cancelled review request re-armed by a new payment is addressed to the contact who
+ *                paid now (the invoice moved to another contact while SENT, or the contact's email
+ *                changed), not the refunded recipient the first payment stored
+ *   SEC-W10RR-3  the lead-score ledger is the crm-network's own referral notes (source crm-network, no
+ *                USER actor): notes of the same kind a crm:write member logs through POST
+ *                .../contacts/:contactId/events neither stop a payment's bump, nor shield it from the
+ *                reversal, nor take 15 from a bystander
+ *   CR-REOPEN-1  each of the five paid handlers reads PAID before its write and again after it, and
+ *                undoes its own write when the invoice was reopened meanwhile (the SEC-A9-1 pattern of
+ *                RevenueActionService): a paid handler that finishes after the reopen handler leaves no
+ *                referral credit, lead-score bump, project advance, invoice_paid margin snapshot or
+ *                PENDING review request on the SENT invoice; a stale invoice.paid delivered after the
+ *                reopen writes nothing
+ *   CR-REOPEN-2  the reopen takes back the bump the payment applied (recorded on its referral.deal_won
+ *                note), not a fixed 15: a referrer at 95 is bumped to 100 (the cap) and goes back to 95
+ */
+describe('W10-REOPEN-REVERSALS review repairs (owner ruling D-102)', () => {
+  let rrSeq = 0;
+
+  async function rrContact(id: string, extra: Record<string, unknown> = {}) {
+    return db.contact.create({
+      data: { id, businessId: ID.biz, firstName: 'V42c', lastName: id.slice(P.length), email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, ...extra },
+    });
+  }
+
+  async function rrInvoice(id: string, contactId: string, productId: string | null = null) {
+    rrSeq += 1;
+    return db.invoice.create({
+      data: {
+        id,
+        invoiceNumber: `V42C-RR-${String(rrSeq).padStart(3, '0')}`,
+        status: 'SENT',
+        sentAt: new Date(PAST_DUE.getTime() - 14 * 24 * 60 * 60 * 1000),
+        dueDate: PAST_DUE,
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        businessId: ID.biz,
+        contactId,
+        items: { create: [{ id: `${id}_item1`, description: `V42C RR item ${rrSeq}`, quantity: 1, unitPrice: TOTAL, total: TOTAL, productId }] },
+      },
+    });
+  }
+
+  const customOf = async (id: string) => ((await db.contact.findUnique({ where: { id } })).custom ?? {}) as Record<string, any>;
+  const creditOf = async (id: string) => {
+    const c = await customOf(id);
+    return { balance: c.referralRewardBalance ?? 0, earned: c.referralRewardsEarned ?? 0 };
+  };
+  const scoreOf = async (id: string) => (await db.contact.findUnique({ where: { id }, select: { leadScore: true } })).leadScore;
+  /** The crm-network's own referral notes on a contact for an invoice (the ledger), oldest first. */
+  const networkNotes = async (contactId: string, inv: string) =>
+    (await db.contactEvent.findMany({
+      where: { businessId: ID.biz, contactId, type: 'note.created', source: 'crm-network', data: { path: ['invoiceId'], equals: inv } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    })) as any[];
+  const reviewJob = async (inv: string) =>
+    db.scheduledAgentJob.findFirst({ where: { businessId: ID.biz, entityId: inv, checkpoint: `review_invoice_${inv}` } });
+
+  /** A gate: everything awaiting `opened` waits until open() is called. */
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return { opened, open };
+  }
+
+  it('SEC-W10RR-1 (D-102, RED before): eight invoices of eight contacts the same referrer referred are paid, their award handlers run together, then each is fully refunded and the reversals run together -> the referrer earns 80 / 8 and gives all of it back, 0 / 0 (the award and the reversal write it under its row lock); every referred contact loses its mark and keeps its referral', async () => {
+    const N = 8;
+    const referrer = `${P}rrRefReferrer`;
+    await rrContact(referrer, { custom: {} });
+    const referred = Array.from({ length: N }, (_, i) => `${P}rrRef${i}`);
+    const invoices = Array.from({ length: N }, (_, i) => `${P}invRrRef${i}`);
+    for (let i = 0; i < N; i += 1) {
+      await rrContact(referred[i], { custom: { referralSourceId: referrer } });
+      await rrInvoice(invoices[i], referred[i]);
+    }
+    const svc = referralRewards as any;
+    const proto = Object.getPrototypeOf(svc);
+    const paidGate = gate();
+    const reopenGate = gate();
+    const paidRuns: Promise<unknown>[] = [];
+    const reopenRuns: Promise<unknown>[] = [];
+    // Each handler delivery for these invoices is held until all N have arrived, then all run at once.
+    svc.onInvoicePaid = (payload: any) => {
+      if (!invoices.includes(payload?.invoice?.id)) return proto.onInvoicePaid.call(svc, payload);
+      const run = paidGate.opened.then(() => proto.onInvoicePaid.call(svc, payload));
+      paidRuns.push(run);
+      return run;
+    };
+    svc.onInvoiceReopened = (payload: any) => {
+      if (!invoices.includes(payload?.invoice?.id)) return proto.onInvoiceReopened.call(svc, payload);
+      const run = reopenGate.opened.then(() => proto.onInvoiceReopened.call(svc, payload));
+      reopenRuns.push(run);
+      return run;
+    };
+    try {
+      const payments: any[] = [];
+      for (let i = 0; i < N; i += 1) payments.push(await paid(invoices[i], 100, `V42C-RR-REF-${i}`));
+      await vi.waitFor(() => expect(paidRuns).toHaveLength(N), WAIT);
+      paidGate.open();
+      await Promise.all(paidRuns);
+      expect(await creditOf(referrer), 'every award is credited').toEqual({ balance: 10 * N, earned: N });
+      for (const id of referred) expect(await customOf(id)).toMatchObject({ referralRewardEarned: true });
+
+      for (let i = 0; i < N; i += 1) await fullRefund(invoices[i], payments[i].id, `v42c rr referral ${i}`);
+      await vi.waitFor(() => expect(reopenRuns).toHaveLength(N), WAIT);
+      reopenGate.open();
+      await Promise.all(reopenRuns);
+      // RED before: each reversal read the referrer, then wrote its balance less 10 over the others' writes (40 / 4, 60 / 6).
+      expect(await creditOf(referrer), 'every credit is taken back').toEqual({ balance: 0, earned: 0 });
+      for (const id of referred) {
+        const c = await customOf(id);
+        expect(c.referralRewardEarned ?? false, `${id} may earn it again`).toBe(false);
+        expect(c.referralRewardInvoiceId, `${id}: no award left to reverse`).toBeUndefined();
+        expect(c.referralSourceId, 'the referral itself stays').toBe(referrer);
+      }
+      await settle();
+      expect(await creditOf(referrer)).toEqual({ balance: 0, earned: 0 });
+    } finally {
+      paidGate.open();
+      reopenGate.open();
+      delete svc.onInvoicePaid;
+      delete svc.onInvoiceReopened;
+    }
+  }, 60_000);
+
+  it('SEC-W10RR-2 (D-102, RED before): a refunded invoice moved to another contact while SENT (updateInvoice refuses only PAID / PARTIALLY_PAID) and paid again re-arms its review request addressed to the contact who paid now; a contact whose email changed is asked at the new address; the runner sends to them and never to the refunded recipient', async () => {
+    const oldC = `${P}rrRvOld`;
+    const newC = `${P}rrRvNew`;
+    const inv = `${P}invRrReview`;
+    const oldEmail = `${oldC.toLowerCase()}@test.local`;
+    const newEmail = `${newC.toLowerCase()}@test.local`;
+    const movedEmail = `${P}rrrvnew_moved@test.local`;
+    await rrContact(oldC);
+    await rrContact(newC);
+    await rrInvoice(inv, oldC);
+
+    const p1 = await paid(inv, 100, 'V42C-RR-RV-1');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'PENDING' }), WAIT);
+    const first = await reviewJob(inv);
+    expect(first.payload).toMatchObject({ contactId: oldC, contactEmail: oldEmail });
+    await fullRefund(inv, p1.id, 'v42c rr review old');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ id: first.id, status: 'CANCELLED' }), WAIT);
+
+    // The SENT invoice is moved to another contact, and that contact pays it.
+    await db.invoice.update({ where: { id: inv }, data: { contactId: newC } });
+    const p2 = await paid(inv, 100, 'V42C-RR-RV-2');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ id: first.id, status: 'PENDING' }), WAIT);
+    // RED before: the re-armed job kept the first payment's payload (the refunded contact's address).
+    expect((await reviewJob(inv)).payload).toMatchObject({
+      contactId: newC,
+      contactEmail: newEmail,
+      contactName: `V42c ${newC.slice(P.length)}`,
+      entityType: 'invoice',
+    });
+
+    // The paying contact's email changes before the next refund and payment: the re-arm reads it again.
+    await fullRefund(inv, p2.id, 'v42c rr review new');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'CANCELLED' }), WAIT);
+    await db.contact.update({ where: { id: newC }, data: { email: movedEmail } });
+    await paid(inv, 100, 'V42C-RR-RV-3');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'PENDING' }), WAIT);
+    expect((await reviewJob(inv)).payload).toMatchObject({ contactId: newC, contactEmail: movedEmail });
+
+    // The runner sends the request, once due, to the contact who paid, at their address now.
+    await db.scheduledAgentJob.update({ where: { id: first.id }, data: { scheduledFor: new Date(Date.now() - 60_000) } });
+    await reviewSolicitation.processPendingJobs();
+    const sent = transactionalSends.filter((s) => s.type === 'review_request' && [oldEmail, newEmail, movedEmail].includes(String(s.recipientEmail)));
+    expect(sent.map((s) => s.recipientEmail)).toEqual([movedEmail]);
+    expect(await reviewJob(inv)).toMatchObject({ status: 'COMPLETED' });
+  }, 40_000);
+
+  it('SEC-W10RR-3 (D-102, RED before): the lead-score reversal reads only the crm-network\'s own referral notes (source crm-network, no USER actor): a referral.deal_won note a crm:write member logs on the referrer before the payment does not stop its bump; a referral.deal_reopened note logged on the referrer does not shield the bump from the refund; a referral.deal_won note logged on a bystander takes nothing from them', async () => {
+    const referrer = `${P}rrNetReferrer`;
+    const referredC = `${P}rrNetReferred`;
+    const victim = `${P}rrNetVictim`;
+    const inv = `${P}invRrNet`;
+    await rrContact(referrer, { leadScore: 20 });
+    await rrContact(referredC);
+    await rrContact(victim, { leadScore: 50 });
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: referredC, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, referredC);
+    const timelineSvc = (crmNetwork as any).timeline;
+    // What POST crm/businesses/:businessId/contacts/:contactId/events writes (crm.controller createEvent).
+    const memberNote = (contactId: string, kind: string) =>
+      timelineSvc.logContactEvent({
+        businessId: ID.biz,
+        contactId,
+        type: 'note.created',
+        data: { description: 'v42c member note', kind, invoiceId: inv, referredContactId: referredC },
+        actorType: 'USER',
+        actorId: ID.owner,
+        source: 'crm',
+      });
+
+    await memberNote(referrer, 'referral.deal_won');
+    const p = await paid(inv, 100, 'V42C-RR-NET');
+    await vi.waitFor(async () => expect(await scoreOf(referrer), 'the member note does not stop the payment\'s bump').toBe(35), WAIT);
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won']), WAIT);
+
+    await memberNote(referrer, 'referral.deal_reopened');
+    await memberNote(victim, 'referral.deal_won');
+    await fullRefund(inv, p.id, 'v42c rr network');
+    // RED before: { referrer: 35, victim: 35 } (the member notes shielded the bump and moved the bystander).
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']), WAIT);
+    await settle();
+    expect({ referrer: await scoreOf(referrer), victim: await scoreOf(victim) }).toEqual({ referrer: 20, victim: 50 });
+    expect(await networkNotes(victim, inv), 'the bystander gets no system note').toEqual([]);
+  }, 30_000);
+
+  it('CR-REOPEN-2 (D-102, RED before): the reopen takes back the bump the payment applied, recorded on its referral.deal_won note: a referrer at 95 is bumped to 100 (the cap) and goes back to 95, not 85; paying again bumps it again and the next reopen takes that back', async () => {
+    const referrer = `${P}rrCapReferrer`;
+    const referredC = `${P}rrCapReferred`;
+    const inv = `${P}invRrCap`;
+    await rrContact(referrer, { leadScore: 95 });
+    await rrContact(referredC);
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: referredC, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, referredC);
+
+    const p = await paid(inv, 100, 'V42C-RR-CAP');
+    await vi.waitFor(async () => expect(await scoreOf(referrer)).toBe(100), WAIT);
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => [e.data.kind, e.data.bump])).toEqual([['referral.deal_won', 5]]), WAIT);
+    await fullRefund(inv, p.id, 'v42c rr cap');
+    // RED before: 85 (a fixed 15 taken back).
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']), WAIT);
+    expect(await scoreOf(referrer)).toBe(95);
+
+    await db.contact.update({ where: { id: referrer }, data: { leadScore: 30 } });
+    const p2 = await paid(inv, 100, 'V42C-RR-CAP-2');
+    await vi.waitFor(async () => expect(await scoreOf(referrer)).toBe(45), WAIT);
+    await fullRefund(inv, p2.id, 'v42c rr cap again');
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened', 'referral.deal_won', 'referral.deal_reopened']), WAIT);
+    expect(await scoreOf(referrer)).toBe(30);
+  }, 30_000);
+
+  it('CR-REOPEN-1 (D-102, RED before): the five paid handlers each pass their PAID check and are held before their write while the full refund\'s reopen handlers run and find nothing to undo; released, each writes, reads the invoice SENT and undoes its own write: no referral credit, no lead-score bump, the project back to ACTIVE, the margin snapshot invoice_paid_reversed, the review request CANCELLED (the runner sends nothing); the stale invoice.paid delivered again to each writes nothing', async () => {
+    const referrer = `${P}rrLateReferrer`;
+    const late = `${P}rrLate`;
+    const inv = `${P}invRrLate`;
+    const project = `${P}prj_rr_late`;
+    await rrContact(referrer, { leadScore: 20, custom: {} });
+    await rrContact(late, { custom: { referralSourceId: referrer } });
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: late, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, late, D102.product);
+    await db.project.create({ data: { id: project, businessId: ID.biz, name: project, status: 'ACTIVE', invoiceId: inv, contactId: late } });
+
+    const release = gate();
+    const held: string[] = [];
+    const paidRuns: Promise<unknown>[] = [];
+    // [service, its write step (held once for this invoice), whether a call of that step is this invoice's]
+    const holds: Array<[any, string, (...a: any[]) => boolean]> = [
+      [referralRewards, 'checkAndAwardReward', (...a) => a[3] === inv],
+      [crmNetwork, 'bumpOnDealWon', (...a) => a[3] === inv],
+      [projectRevenue, 'transition', (...a) => a[1] === project],
+      [marginListener, 'captureForInvoice', (...a) => a[1] === inv],
+      [reviewSolicitation, 'scheduleReviewRequest', (...a) => a[1] === inv],
+    ];
+    for (const [svc, step, mine] of holds) {
+      const proto = Object.getPrototypeOf(svc);
+      let once = false;
+      svc[step] = async (...args: any[]) => {
+        if (mine(...args) && !once) {
+          once = true;
+          held.push(`${svc.constructor.name}.${step}`);
+          await release.opened;
+        }
+        return proto[step].apply(svc, args);
+      };
+      svc.onInvoicePaid = (payload: any) => {
+        const run = proto.onInvoicePaid.call(svc, payload);
+        if (payload?.invoice?.id === inv) paidRuns.push(run);
+        return run;
+      };
+    }
+    try {
+      const p = await paid(inv, 100, 'V42C-RR-LATE');
+      const paidPayload = emitted.find((e) => e.name === 'invoice.paid' && e.payload?.invoice?.id === inv)!.payload;
+      await vi.waitFor(() => expect([...held].sort()).toEqual([
+        'CrmNetworkService.bumpOnDealWon',
+        'MarginOnPaymentListener.captureForInvoice',
+        'ProjectRevenueListener.transition',
+        'ReferralRewardService.checkAndAwardReward',
+        'ReviewSolicitationService.scheduleReviewRequest',
+      ]), WAIT);
+      await fullRefund(inv, p.id, 'v42c rr late');
+      // The reopen's handlers ran first and found nothing to undo.
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect(await reviewJob(inv)).toBeNull();
+      expect(await scoreOf(referrer)).toBe(20);
+
+      release.open();
+      expect(paidRuns).toHaveLength(5);
+      await Promise.all(paidRuns);
+      await settle();
+      expect((await invoiceRow(inv)).status).toBe('SENT');
+      // RED before: credit 10 / 1, score 35, IN_PROGRESS, ['invoice_paid'], PENDING.
+      expect(await creditOf(referrer), 'no referral credit for the reopened invoice').toEqual({ balance: 0, earned: 0 });
+      expect((await customOf(late)).referralRewardEarned ?? false).toBe(false);
+      expect(await scoreOf(referrer), 'no lead-score bump').toBe(20);
+      expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']);
+      expect((await db.project.findUnique({ where: { id: project } })).status, 'the advance is stepped back').toBe('ACTIVE');
+      const snaps = await db.marginSnapshot.findMany({ where: { invoiceId: inv } });
+      expect(snaps.map((s: any) => s.snapshotReason), 'the snapshot is marked reversed').toEqual(['invoice_paid_reversed']);
+      expect(await reviewJob(inv), 'the review request is cancelled').toMatchObject({ status: 'CANCELLED' });
+      await db.scheduledAgentJob.updateMany({ where: { businessId: ID.biz, entityId: inv }, data: { scheduledFor: new Date(Date.now() - 60_000) } });
+      await reviewSolicitation.processPendingJobs();
+      expect(transactionalSends.filter((s) => s.recipientEmail === `${late.toLowerCase()}@test.local`), 'nobody is asked for a review').toEqual([]);
+
+      // A stale invoice.paid delivered again after the reopen: each paid handler reads SENT and writes nothing.
+      for (const [svc] of holds) await Object.getPrototypeOf(svc).onInvoicePaid.call(svc, paidPayload);
+      await settle();
+      expect(await creditOf(referrer)).toEqual({ balance: 0, earned: 0 });
+      expect(await scoreOf(referrer)).toBe(20);
+      expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']);
+      expect((await db.project.findUnique({ where: { id: project } })).status).toBe('ACTIVE');
+      expect((await db.marginSnapshot.findMany({ where: { invoiceId: inv } })).map((s: any) => s.snapshotReason)).toEqual(['invoice_paid_reversed']);
+      expect(await reviewJob(inv), 'the CANCELLED request is not re-armed').toMatchObject({ status: 'CANCELLED' });
+      expect(sentEmails).toHaveLength(0);
+    } finally {
+      release.open();
+      for (const [svc, step] of holds) {
+        delete svc[step];
+        delete svc.onInvoicePaid;
+      }
+    }
+  }, 40_000);
 });

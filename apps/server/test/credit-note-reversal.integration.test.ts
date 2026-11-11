@@ -302,7 +302,8 @@ let invoiceSeq = 0;
 async function seedInvoice(
   key: string,
   status: 'SENT' | 'PAID' | 'VOID',
-  opts: { businessId?: string; contactId?: string } = {},
+  // W10-PAYPAL-CURRENCY (D-106): `currency` lets a PayPal case use a currency PayPal supports (TTD by default).
+  opts: { businessId?: string; contactId?: string; currency?: string } = {},
 ): Promise<string> {
   const businessId = opts.businessId ?? ID.biz;
   const id = `${P}inv_${key}`;
@@ -316,7 +317,7 @@ async function seedInvoice(
       status: 'DRAFT',
       subtotal: TOTAL,
       total: TOTAL,
-      currency: 'TTD',
+      currency: opts.currency ?? 'TTD',
       dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       items: { create: [{ description: `v44a ${key}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
     },
@@ -2013,8 +2014,8 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
   }
 
   /** A 100 invoice with a live pay link, `paid` recorded through the operator route, then `credited` applied. */
-  async function seedCreditedWithLink(key: string, paid: number, credited: number): Promise<{ inv: string; token: string }> {
-    const inv = await seedInvoice(key, 'SENT');
+  async function seedCreditedWithLink(key: string, paid: number, credited: number, currency = 'TTD'): Promise<{ inv: string; token: string }> {
+    const inv = await seedInvoice(key, 'SENT', { currency });
     const link = await createLink(inv);
     expect(link.status, JSON.stringify(link.body)).toBe(201);
     if (paid > 0) {
@@ -2286,11 +2287,16 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
       STRIPE_PUBLISHABLE_KEY: `${P}stripe_publishable_fake`,
       STRIPE_WEBHOOK_SECRET: `${P}stripe_webhook_fake`,
       PUBLIC_URL_ALLOWLIST: 'https://pay.v44a.test',
-      WIPAY_API_KEY: `${P}wipay_key_fake`,
-      WIPAY_ACCOUNT_NUMBER: '4400000000',
       PAYPAL_CLIENT_ID: `${P}paypal_client_fake`,
       PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake`,
     };
+    /**
+     * W10-WIPAY-KEY (D-105): the invoice business's own WiPay key and account (business.metaData), set for this
+     * describe only. WiPay is offered only to a business with its own key; the platform pair (WIPAY_API_KEY,
+     * WIPAY_ACCOUNT_NUMBER) this describe set before D-105 serves no tenant.
+     */
+    const WIPAY_PAIR = { wipayApiKey: `${P}wipay_key_fake`, wipayAccountNumber: '4400000000' };
+    let previousBizMeta: unknown;
     const previousEnv: Record<string, string | undefined> = {};
     const RETURN_URL = 'https://pay.v44a.test/pay/link/return';
     const STRIPE_BODY = { gateway: 'stripe', successUrl: `${RETURN_URL}?stripe=success`, cancelUrl: `${RETURN_URL}?stripe=cancel` };
@@ -2337,13 +2343,20 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
         process.env[k] = v;
       }
       globalThis.fetch = providerFetch as typeof fetch;
+      // W10-WIPAY-KEY (D-105): the invoice business connects its own WiPay pair.
+      previousBizMeta = (await db.business.findUnique({ where: { id: ID.biz }, select: { metaData: true } }))?.metaData ?? null;
+      const meta = previousBizMeta && typeof previousBizMeta === 'object' ? (previousBizMeta as Record<string, unknown>) : {};
+      await db.business.update({ where: { id: ID.biz }, data: { metaData: { ...meta, ...WIPAY_PAIR } } });
       const { PaymentsService } = await import('../src/modules/payments/payments.service');
       paypalSpy = vi.spyOn(commerceApp.get(PaymentsService) as any, 'getPaypalClient').mockImplementation(() => ({ client: {}, ordersController: paypalOrders }));
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       globalThis.fetch = realFetch;
       paypalSpy?.mockRestore();
+      // The pair is removed again (the business had no WiPay setting before this describe).
+      const restored = previousBizMeta && typeof previousBizMeta === 'object' ? previousBizMeta : {};
+      await db.business.update({ where: { id: ID.biz }, data: { metaData: restored } }).catch(() => undefined);
       for (const [k, v] of Object.entries(previousEnv)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
@@ -2370,7 +2383,7 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
           status: 'success',
           total: requested.toFixed(2),
           // WiPay's keyed proof: md5(transaction_id + the total this server requested + the API key) (V1-05, D-19).
-          hash: createHash('md5').update(`${txn}${requested.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex'),
+          hash: createHash('md5').update(`${txn}${requested.toFixed(2)}${WIPAY_PAIR.wipayApiKey}`).digest('hex'),
         });
     const lastCall = (match: (url: string) => boolean) => providerCalls.filter((p) => match(p.url)).at(-1)!;
     const stripeAmount = () => new URLSearchParams(lastCall((u) => u.startsWith('https://api.stripe.com/')).body).get('line_items[0][price_data][unit_amount]');
@@ -2379,6 +2392,10 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     it("CAP-01 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-13, D-75): a 100 invoice with 20 paid and 30 credited: the token status poll, the bare-id status poll and the receipt state 50 due and the 30 credited; the gateway list answers; the Stripe, WiPay and PayPal checkouts ask for 50, not 100; another business's note and payment on it move nothing; a checkout records nothing", async () => {
       const X = await seedCreditedWithLink('cap_due', 20, 30);
       expect((await invoiceRow(X.inv)).status).toBe('PARTIALLY_CREDITED');
+      // W10-PAYPAL-CURRENCY (D-106): PayPal does not support TTD, so the PayPal checkout is shown on the same position
+      // in USD, a currency PayPal supports (seeded here, before the ledger is counted).
+      const U = await seedCreditedWithLink('cap_due_usd', 20, 30, 'USD');
+      expect((await invoiceRow(U.inv)).status).toBe('PARTIALLY_CREDITED');
       // D-75: another business's APPLIED note and SUCCESSFUL payment naming this invoice are not its money.
       await db.creditNote.create({
         data: { id: `${P}cn_foreign_cap_due`, businessId: ID.bizF, invoiceId: X.inv, creditNoteNumber: `${P}CN-F-CAP`, status: 'APPLIED', amount: 10, appliedAt: new Date() },
@@ -2402,7 +2419,8 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
 
       const gateways = await tokenGateways(X.token);
       expect(gateways.status, JSON.stringify(gateways.body)).toBe(200);
-      expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['paypal', 'stripe', 'wipay']);
+      // W10-PAYPAL-CURRENCY (D-106): PayPal does not support TTD, so the TTD invoice is not offered PayPal.
+      expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['stripe', 'wipay']);
 
       const stripe = await checkout(X.token, STRIPE_BODY);
       expect(stripe.status, JSON.stringify(stripe.body)).toBe(201);
@@ -2410,9 +2428,12 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
       const wipay = await checkout(X.token, WIPAY_BODY);
       expect(wipay.status, JSON.stringify(wipay.body)).toBe(201);
       expect(wipayTotal()).toBe('50.00');
-      const paypal = await checkout(X.token, PAYPAL_BODY);
+      // The PayPal checkout of the USD position (100, 20 paid, 30 credited) asks for 50 USD.
+      await clearRateLimits();
+      const paypal = await checkout(U.token, PAYPAL_BODY);
       expect(paypal.status, JSON.stringify(paypal.body)).toBe(201);
-      expect(paypalOrderBook.get(paypal.body.orderId)).toEqual([expect.objectContaining({ customId: X.inv, amount: { currencyCode: 'TTD', value: '50.00' } })]);
+      expect(paypalOrderBook.get(paypal.body.orderId)).toEqual([expect.objectContaining({ customId: U.inv, amount: { currencyCode: 'USD', value: '50.00' } })]);
+      expect((await paymentsOf(U.inv)).map((p) => [Number(p.amount), p.status])).toEqual([[20, 'SUCCESSFUL']]);
 
       // A checkout records nothing: the provider's callback or the capture does.
       expect((await paymentsOf(X.inv)).filter((p) => p.businessId === ID.biz).map((p) => [Number(p.amount), p.status])).toEqual([[20, 'SUCCESSFUL']]);
@@ -2461,9 +2482,10 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     });
 
     it("CAP-03 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-78): the token PayPal capture captures only the order made for the 50 the credits leave owing and records 50 (never invoice.total); an order for the whole 100 is refused 400 before PayPal captures anything", async () => {
-      const X = await seedCreditedWithLink('cap_paypal', 20, 30);
+      // W10-PAYPAL-CURRENCY (D-106): a USD invoice (PayPal does not support TTD).
+      const X = await seedCreditedWithLink('cap_paypal', 20, 30, 'USD');
       const whole = `${P}order_whole_total`;
-      paypalOrderBook.set(whole, [{ customId: X.inv, referenceId: X.inv, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]);
+      paypalOrderBook.set(whole, [{ customId: X.inv, referenceId: X.inv, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]);
       const captures = paypalOrders.captureOrder.mock.calls.length;
       const refused = await capture(X.token, whole);
       expect(refused.status, JSON.stringify(refused.body)).toBe(400);

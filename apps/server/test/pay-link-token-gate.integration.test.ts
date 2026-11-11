@@ -90,6 +90,13 @@
  * (contact timeline, stats cache, Gmail / AI / Drive, the producers' email
  * senders) are stubs.
  *
+ * W10-PAYPAL-CURRENCY (owner ruling D-106): PayPal does not support TTD, so a
+ * TTD invoice's token gateway list offers no PayPal and its PayPal checkout is
+ * refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called (TG-14,
+ * TG-16). The PayPal orders and captures of TG-14, TG-14b, TG-14d and TG-16 are
+ * made for USD invoices (invCapture, invCaptureBind, invUsdA, invUsdB); every
+ * other invoice is TTD.
+ *
  * Fixtures: prefix `v46a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping. Literals in globally unique columns embed the prefix.
@@ -129,14 +136,18 @@ const PROVIDER_ENV: Record<string, string> = {
   STRIPE_PUBLISHABLE_KEY: `${P}pk_test`,
   STRIPE_WEBHOOK_SECRET: `${P}whsec`,
   PUBLIC_URL_ALLOWLIST: 'https://pay.v46a.test',
-  WIPAY_API_KEY: `${P}wipay_key`,
-  WIPAY_ACCOUNT_NUMBER: '4600000000',
   PAYPAL_CLIENT_ID: `${P}pp_client`,
   PAYPAL_CLIENT_SECRET: `${P}pp_secret`,
   PAYPAL_WEBHOOK_ID: `${P}pp_webhook`,
   PAYPAL_ENVIRONMENT: 'sandbox',
 };
 const PREVIOUS_PROVIDER_ENV: Record<string, string | undefined> = {};
+/**
+ * W10-WIPAY-KEY (D-105): business A's own WiPay key and account (business.metaData). WiPay is offered only to a
+ * business with its own key; the platform pair (WIPAY_API_KEY, WIPAY_ACCOUNT_NUMBER) this suite set before D-105
+ * serves no tenant, so it is no longer set.
+ */
+const WIPAY_PAIR = { wipayApiKey: `${P}wipay_key`, wipayAccountNumber: '4600000000' };
 
 const RETURN_URL = 'https://pay.v46a.test/pay/link/return';
 const STRIPE_REDIRECT = 'https://checkout.v46a.test/stripe-session';
@@ -189,6 +200,26 @@ const ID = {
   invAutoNoEmail: `${P}invAutoNoEmail`,
   invCaptureBind: `${P}invCaptureBind`,
   invWipayRevoked: `${P}invWipayRevoked`,
+  // W10-PAYPAL-CURRENCY (D-106): PayPal does not support TTD, so the PayPal legs use USD invoices (after the earlier
+  // ones, so their invoice numbers are unchanged): one of tenant A, one of tenant B.
+  invUsdA: `${P}invUsdA`,
+  invUsdB: `${P}invUsdB`,
+};
+
+/**
+ * W10-PAYPAL-CURRENCY (D-106): the invoices a PayPal order is made or captured for are in USD, a currency PayPal
+ * supports (every other invoice is TTD). PayPal is not offered, and its checkout and capture are refused, for TTD.
+ */
+const CURRENCY_OF: Record<string, string> = {
+  [ID.invCapture]: 'USD',
+  [ID.invCaptureBind]: 'USD',
+  [ID.invUsdA]: 'USD',
+  [ID.invUsdB]: 'USD',
+};
+/** W10-PAYPAL-CURRENCY (D-106): the refusal of a PayPal checkout for a TTD invoice. */
+const PAYPAL_TTD_REFUSAL = {
+  code: 'PAYPAL_CURRENCY_UNSUPPORTED',
+  message: 'PayPal does not support TTD: this invoice cannot be paid with PayPal. Choose another payment method.',
 };
 
 /** Seeded PaymentLink rows (every other link is minted by the real route). */
@@ -398,7 +429,7 @@ function bareCheckout(invoiceId: string) {
 }
 
 function bizOf(invoiceId: string) {
-  return invoiceId === ID.invB ? ID.bizB : ID.bizA;
+  return invoiceId === ID.invB || invoiceId === ID.invUsdB ? ID.bizB : ID.bizA;
 }
 
 function ownerOf(biz: string) {
@@ -692,7 +723,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.ownerA, email: `${P}ownerA@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
   await db.business.create({
-    data: { id: ID.bizA, name: 'V46A Biz A', ownerId: ID.ownerA, currency: 'TTD', email: `${P}billing@test.local`, metaData: { bankAccountNumber: `${CANARY}acct` } },
+    data: { id: ID.bizA, name: 'V46A Biz A', ownerId: ID.ownerA, currency: 'TTD', email: `${P}billing@test.local`, metaData: { bankAccountNumber: `${CANARY}acct`, ...WIPAY_PAIR } },
   });
   await db.business.create({ data: { id: ID.bizB, name: 'V46A Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_ownerA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
@@ -720,7 +751,7 @@ beforeAll(async () => {
         status: startStatus[id] ?? 'SENT',
         subtotal: TOTAL,
         total: TOTAL,
-        currency: 'TTD',
+        currency: CURRENCY_OF[id] ?? 'TTD',
         notes: 'Thank you for your business',
         businessId: biz,
         contactId: biz === ID.bizB ? ID.contactB : ID.contactA,
@@ -735,7 +766,7 @@ beforeAll(async () => {
   for (const inv of [
     ID.invLive, ID.invIntent, ID.invPartial, ID.invPaid, ID.invRevoke, ID.invBare, ID.invLedger, ID.invResolver, ID.invB,
     ID.invTokPay, ID.invCapture, ID.invKeySend, ID.invWhStripe, ID.invWhPaypal, ID.invWhWipay,
-    ID.invAutoRevoked, ID.invCaptureBind, ID.invWipayRevoked,
+    ID.invAutoRevoked, ID.invCaptureBind, ID.invWipayRevoked, ID.invUsdA, ID.invUsdB,
   ]) {
     await mintLink(inv);
   }
@@ -1041,7 +1072,8 @@ describe('the payment routes are keyed by the token (V1-46b)', () => {
 
     const gateways = await tokGateways(token);
     expect(gateways.status, JSON.stringify(gateways.body)).toBe(200);
-    expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['paypal', 'stripe', 'wipay']);
+    // W10-PAYPAL-CURRENCY (D-106): no PayPal for the TTD invoice (at 71a97cb1: ['paypal', 'stripe', 'wipay']).
+    expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['stripe', 'wipay']);
 
     const stripe = await tokCheckout(token, CHECKOUT_BODIES[0]);
     expect(stripe.status, JSON.stringify(stripe.body)).toBe(201);
@@ -1056,18 +1088,34 @@ describe('the payment routes are keyed by the token (V1-46b)', () => {
     const wipayCall = providerCalls.filter((c) => c.url.includes('wipayfinancial.com')).pop()!;
     expect(new URLSearchParams(wipayCall.body).get('order_id')).toBe(ID.invTokPay);
 
-    const paypal = await tokCheckout(token, CHECKOUT_BODIES[2]);
+    // W10-PAYPAL-CURRENCY (D-106): the TTD invoice's PayPal checkout is refused before PayPal is called (at 71a97cb1:
+    // 201 and a TTD order, which real PayPal refuses); the PayPal checkout is shown through a USD invoice's live link.
+    const orders = paypalOrders.createOrder.mock.calls.length;
+    const refused = await tokCheckout(token, CHECKOUT_BODIES[2]);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(refused.body).toMatchObject(PAYPAL_TTD_REFUSAL);
+    expect(paypalOrders.createOrder.mock.calls.length, 'no PayPal order for the TTD invoice').toBe(orders);
+
+    await clearRateLimits();
+    const usdToken = LINK_OF[ID.invUsdA].token;
+    const usdGateways = await tokGateways(usdToken);
+    expect(usdGateways.body.map((g: { id: string }) => g.id).sort(), 'USD: PayPal, no WiPay (D-69)').toEqual(['paypal', 'stripe']);
+    const paypal = await tokCheckout(usdToken, CHECKOUT_BODIES[2]);
     expect(paypal.status, JSON.stringify(paypal.body)).toBe(201);
     expect(paypal.body).toEqual({ type: 'paypal_order', orderId: expect.stringContaining(P) });
     const order = paypalOrders.createOrder.mock.calls.at(-1)![0];
-    expect(order.body.purchaseUnits[0].customId).toBe(ID.invTokPay);
+    expect(order.body.purchaseUnits[0].customId).toBe(ID.invUsdA);
+    expect(order.body.purchaseUnits[0].amount).toEqual({ currencyCode: 'USD', value: TOTAL.toFixed(2) });
 
     // A checkout records nothing: the provider's webhook or the capture does.
-    expect(await paymentsOf(ID.invTokPay)).toHaveLength(0);
-    expect((await invoiceRow(ID.invTokPay)).status).toBe('SENT');
+    for (const inv of [ID.invTokPay, ID.invUsdA]) {
+      expect(await paymentsOf(inv)).toHaveLength(0);
+      expect((await invoiceRow(inv)).status).toBe('SENT');
+    }
   });
 
   it("TG-14b: the PayPal capture through a live link records one SUCCESSFUL row against the token's invoice; an invoiceId in the body naming another invoice is ignored", async () => {
+    // W10-PAYPAL-CURRENCY (D-106): invCapture is a USD invoice (PayPal does not support TTD).
     const token = LINK_OF[ID.invCapture].token;
     const liveBefore = await paymentsOf(ID.invLive);
     // The order is the one the token checkout made for this invoice (review SEC-V46B-3: only such an order is captured).
@@ -1100,8 +1148,9 @@ describe('the payment routes are keyed by the token (V1-46b)', () => {
       expect(res.status, `${inv}: checkout ${JSON.stringify(res.body)}`).toBe(201);
       return res.body.orderId as string;
     };
-    const otherInvoiceOrder = await orderOf(ID.invLive);
-    const otherTenantOrder = await orderOf(ID.invB);
+    // W10-PAYPAL-CURRENCY (D-106): the other invoices are USD (a TTD invoice gets no PayPal order).
+    const otherInvoiceOrder = await orderOf(ID.invUsdA);
+    const otherTenantOrder = await orderOf(ID.invUsdB);
     const wrongAmountOrder = `${P}order_wrong_amount`;
     paypalOrderBook.set(wrongAmountOrder, [{ customId: ID.invCaptureBind, referenceId: ID.invCaptureBind, amount: { currencyCode: 'USD', value: '1.00' } }]);
     const twoUnitOrder = `${P}order_two_units`;
@@ -1113,8 +1162,8 @@ describe('the payment routes are keyed by the token (V1-46b)', () => {
 
     const before = {
       bind: await paymentsOf(ID.invCaptureBind),
-      live: await paymentsOf(ID.invLive),
-      b: await paymentsOf(ID.invB),
+      live: await paymentsOf(ID.invUsdA),
+      b: await paymentsOf(ID.invUsdB),
       ledgerA: await ledgerCounts(ID.bizA),
       ledgerB: await ledgerCounts(ID.bizB),
     };
@@ -1137,11 +1186,11 @@ describe('the payment routes are keyed by the token (V1-46b)', () => {
 
     expect(paypalOrders.captureOrder.mock.calls.length, 'PayPal captured nothing').toBe(captures);
     expect(await paymentsOf(ID.invCaptureBind), 'no SUCCESSFUL or FAILED row').toEqual(before.bind);
-    expect(await paymentsOf(ID.invLive)).toEqual(before.live);
-    expect(await paymentsOf(ID.invB)).toEqual(before.b);
+    expect(await paymentsOf(ID.invUsdA)).toEqual(before.live);
+    expect(await paymentsOf(ID.invUsdB)).toEqual(before.b);
     expect((await invoiceRow(ID.invCaptureBind)).status).toBe('SENT');
-    expect((await invoiceRow(ID.invLive)).status).toBe('SENT');
-    expect((await invoiceRow(ID.invB)).status).toBe('SENT');
+    expect((await invoiceRow(ID.invUsdA)).status).toBe('SENT');
+    expect((await invoiceRow(ID.invUsdB)).status).toBe('SENT');
     expect(await ledgerCounts(ID.bizA)).toEqual(before.ledgerA);
     expect(await ledgerCounts(ID.bizB)).toEqual(before.ledgerB);
 
@@ -1259,11 +1308,19 @@ describe('revocation holds on the bare-id routes (V1-46b, ST-1)', () => {
       ['status', await tokStatus(token)],
       ['gateways', await tokGateways(token)],
       ['stripe checkout', await tokCheckout(token, CHECKOUT_BODIES[0])],
-      ['paypal checkout', await tokCheckout(token, CHECKOUT_BODIES[2])],
     ] as const) {
       expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
       expect(JSON.stringify(res.body), label).not.toContain(ID.invLive);
     }
+    // W10-PAYPAL-CURRENCY (D-106): the TTD invoice's PayPal checkout is a refusal that names no invoice either, and a
+    // USD invoice's PayPal checkout answers its order without the invoice id.
+    const refused = await tokCheckout(token, CHECKOUT_BODIES[2]);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(refused.body).toMatchObject(PAYPAL_TTD_REFUSAL);
+    expect(JSON.stringify(refused.body), 'paypal refusal').not.toContain(ID.invLive);
+    const usd = await tokCheckout(LINK_OF[ID.invUsdA].token, CHECKOUT_BODIES[2]);
+    expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+    expect(JSON.stringify(usd.body), 'paypal checkout').not.toContain(ID.invUsdA);
   });
 
   it("TG-16b (review SEC-V46B-4): the WiPay checkout is the one token answer that carries the invoice id, as WiPay's order_id (its hosted page and callback are keyed by it); once the link is revoked, that id opens no bare-id route and no token route", async () => {
@@ -1778,7 +1835,7 @@ describe('provider webhooks and callbacks keep working (V1-46b)', () => {
   it('TG-21: a WiPay success callback records the payment for an invoice whose link has been revoked', async () => {
     const q = { transaction_id: `${P}wipay_tx`, order_id: ID.invWhWipay, status: 'success', total: TOTAL.toFixed(2) };
     // V1-05 (D-19): WiPay's keyed proof over the requested total (the invoice's), which is the amount recorded.
-    const hash = createHash('md5').update(`${q.transaction_id}${TOTAL.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex');
+    const hash = createHash('md5').update(`${q.transaction_id}${TOTAL.toFixed(2)}${WIPAY_PAIR.wipayApiKey}`).digest('hex');
     const res = await agent().get('/payments/wipay/callback').query({ ...q, hash });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ success: true });

@@ -10,10 +10,15 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereWithId } from './crm.helpers';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ReputationService } from '../community/reputation.service';
-import type { InvoicePaidPayload } from '../../core/event-bus/events.types';
+import type { Prisma } from '@prisma/client';
+import type { InvoicePaidPayload, InvoiceStatusPayload } from '../../core/event-bus/events.types';
 
 const REFERRER_BUMP_ON_REFER = 5;
 const REFERRER_BUMP_ON_DEAL_WON = 15;
+/** W10-REOPEN-REVERSALS (D-102): the crm-network's referral note kinds (note.created data.kind) and its source. */
+const DEAL_WON = 'referral.deal_won';
+const DEAL_REOPENED = 'referral.deal_reopened';
+const NETWORK_SOURCE = 'crm-network';
 
 export type RelationshipFilter = {
   type?: ContactRelationshipEdgeType;
@@ -374,15 +379,21 @@ export class CrmNetworkService {
     return { relationship: edge, targetContactId: targetId };
   }
 
+  /**
+   * W10-REOPEN-REVERSALS review repair (owner ruling D-102; the SEC-W10RR-1
+   * class): the score is read and written under the contact's row lock, the
+   * lock the deal-won bump and its reversal take, so none overwrites another.
+   */
   private async bumpLeadScore(businessId: string, contactId: string, by: number) {
     try {
-      const c = await this.db.contact.findFirst({
-        where: contactWhereWithId(businessId, contactId),
-        select: { id: true, leadScore: true },
+      await this.db.$transaction(async (rawTx) => {
+        const tx = rawTx as unknown as Prisma.TransactionClient;
+        const locked = await tx.$queryRaw<Array<{ id: string; lead_score: number | null }>>`
+          SELECT id, lead_score FROM contacts WHERE id = ${contactId} AND business_id = ${businessId} AND deleted_at IS NULL FOR UPDATE`;
+        if (locked.length === 0) return;
+        const next = Math.max(0, Math.min(100, (locked[0].lead_score ?? 0) + by));
+        await tx.contact.update({ where: { id: contactId }, data: { leadScore: next } });
       });
-      if (!c) return;
-      const next = Math.max(0, Math.min(100, (c.leadScore ?? 0) + by));
-      await this.db.contact.update({ where: { id: c.id }, data: { leadScore: next } });
     } catch (err: any) {
       this.logger.warn(`bumpLeadScore failed for ${contactId}: ${(err as Error).message}`);
     }
@@ -392,36 +403,37 @@ export class CrmNetworkService {
    * When a paid invoice is attributed to a contact who was referred by another
    * contact (edge: referred_by), bump the referrer's lead score to reflect a
    * deal won via their network.
+   *
+   * W10-REOPEN-REVERSALS review repairs (owner ruling D-102):
+   * - CR-REOPEN-2: each bump and the referral.deal_won note that records it are
+   *   written in one transaction under the referrer's row lock, and the note
+   *   carries the points actually applied (`bump`: less than 15 when the score
+   *   was capped at 100); that is what the reopen takes back.
+   * - CR-REOPEN-1 (the SEC-A9-1 pattern of RevenueActionService): the invoice
+   *   is read PAID before the bump and again after it. A stale delivery bumps
+   *   nothing; a bump written after the refund's reopen handler ran (and found
+   *   no note to take back) is taken back here, under the same lock, so it is
+   *   taken back once.
+   * - A referrer whose bump for this invoice is still outstanding (a deal_won
+   *   note no deal_reopened note closed) is not bumped again, so a re-delivered
+   *   invoice.paid bumps once.
    */
   @OnEvent('invoice.paid')
   async onInvoicePaid(payload: InvoicePaidPayload) {
     try {
       const businessId = payload?.businessId;
       const contactId = payload?.invoice?.contactId;
-      if (!businessId || !contactId) return;
-      const referrerEdges = await this.db.contactRelationship.findMany({
-        where: { businessId, fromContactId: contactId, type: 'referred_by' },
-        select: { toContactId: true },
-      });
-      for (const edge of referrerEdges) {
-        await this.bumpLeadScore(businessId, edge.toContactId, REFERRER_BUMP_ON_DEAL_WON);
-        await this.timeline.logEvent(
-          businessId,
-          edge.toContactId,
-          'note.created',
-          {
-            kind: 'referral.deal_won',
-            referredContactId: contactId,
-            invoiceId: payload?.invoice?.id,
-            total: payload?.invoice?.total,
-          },
-          { source: 'crm-network' },
-        );
+      const invoiceId = payload?.invoice?.id;
+      if (!businessId || !contactId || !invoiceId) return;
+      if ((await this.invoiceStatus(businessId, invoiceId)) !== 'PAID') return;
+      const { edges, bumped } = await this.bumpReferrersOf(businessId, contactId, invoiceId, payload?.invoice?.total);
+      if (bumped > 0 && (await this.invoiceStatus(businessId, invoiceId)) !== 'PAID') {
+        await this.takeBackDealWonBumps(businessId, invoiceId, null, payload?.invoice?.total);
       }
       // Refresh the business-level community reputation score so the
       // referrals-converted signal is reflected when contact referrals
       // generate paid revenue.
-      if (referrerEdges.length > 0) {
+      if (edges > 0) {
         try {
           await this.reputation.recalculate(businessId);
         } catch (err: any) {
@@ -432,4 +444,220 @@ export class CrmNetworkService {
       this.logger.warn(`onInvoicePaid handler failed: ${(err as Error).message}`);
     }
   }
+
+  /**
+   * W10-REOPEN-REVERSALS (owner ruling D-102): a refund's reopen of a paid
+   * invoice takes back the referrer lead-score bump its invoice.paid gave. The
+   * referrers are read from the referral.deal_won notes the paid handler wrote
+   * for this invoice (not from today's edges); a referrer whose bump is still
+   * outstanding gets it taken back, once, and one referral.deal_reopened note
+   * (a timeline note, nobody is messaged). An invoice whose payment bumped
+   * nobody takes nothing back. The check and the writes run under the
+   * referrer's row lock, so a re-delivered or concurrent reopen takes the bump
+   * back once; a re-pay's bump (a new deal_won note) is taken back by its own
+   * reopen. If the invoice is PAID again by the time this ran, its referrers
+   * are bumped again (as on invoice.paid).
+   *
+   * Review repair SEC-W10RR-3: only the crm-network's own notes are read
+   * (source crm-network, no USER actor). A note of the same kind a crm:write
+   * member logs through POST .../contacts/:contactId/events (source crm, actor
+   * USER) neither shields a bump from this reversal nor makes a bystander lose
+   * one.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload & { previousStatus?: string }) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const status = await this.invoiceStatus(businessId, invoiceId);
+      if (status == null || status === 'PAID') return;
+      const reversed = await this.takeBackDealWonBumps(businessId, invoiceId, payload?.previousStatus ?? null, payload?.invoice?.total);
+      let reapplied = 0;
+      if (reversed > 0) {
+        const now = await this.db.invoice.findFirst({
+          where: { id: invoiceId, businessId },
+          select: { status: true, contactId: true, total: true },
+        });
+        if (now?.status === 'PAID' && now.contactId) {
+          reapplied = (await this.bumpReferrersOf(businessId, now.contactId, invoiceId, now.total)).bumped;
+        }
+      }
+      if (reversed > 0 || reapplied > 0) {
+        try {
+          await this.reputation.recalculate(businessId);
+        } catch (err) {
+          this.logger.warn(`reputation.recalculate failed: ${(err as Error).message}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`onInvoiceReopened handler failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** The invoice's status in this business, or null when it is not this business's invoice. */
+  private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {
+    const inv = await this.db.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { status: true },
+    });
+    return inv?.status ?? null;
+  }
+
+  /** W10-REOPEN-REVERSALS (D-102): bumps each referrer the paying contact's referred_by edges name, once for this invoice. */
+  private async bumpReferrersOf(
+    businessId: string,
+    contactId: string,
+    invoiceId: string,
+    total: unknown,
+  ): Promise<{ edges: number; bumped: number }> {
+    const referrerEdges = await this.db.contactRelationship.findMany({
+      where: { businessId, fromContactId: contactId, type: 'referred_by' },
+      select: { toContactId: true },
+    });
+    let bumped = 0;
+    for (const edge of referrerEdges) {
+      try {
+        if (await this.bumpOnDealWon(businessId, edge.toContactId, contactId, invoiceId, total)) bumped += 1;
+      } catch (err) {
+        this.logger.warn(`deal-won bump failed for ${edge.toContactId}: ${(err as Error).message}`);
+      }
+    }
+    return { edges: referrerEdges.length, bumped };
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS review repairs CR-REOPEN-1 / CR-REOPEN-2 (D-102): one
+   * referrer's deal-won bump for an invoice, under the referrer's row lock:
+   * skipped while a bump of this invoice is outstanding; the score moves by up
+   * to 15 (capped at 100) and the referral.deal_won note records the points
+   * applied. Returns whether it bumped.
+   */
+  private async bumpOnDealWon(
+    businessId: string,
+    referrerId: string,
+    referredContactId: string,
+    invoiceId: string,
+    total: unknown,
+  ): Promise<boolean> {
+    return this.db.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      const locked = await tx.$queryRaw<Array<{ id: string; lead_score: number | null }>>`
+        SELECT id, lead_score FROM contacts WHERE id = ${referrerId} AND business_id = ${businessId} AND deleted_at IS NULL FOR UPDATE`;
+      if (locked.length === 0) return false;
+      if (await this.outstandingDealWon(tx, businessId, referrerId, invoiceId)) return false;
+      const score = locked[0].lead_score ?? 0;
+      const next = Math.max(0, Math.min(100, score + REFERRER_BUMP_ON_DEAL_WON));
+      await tx.contact.update({ where: { id: referrerId }, data: { leadScore: next } });
+      await this.timeline.logEvent(
+        businessId,
+        referrerId,
+        'note.created',
+        { kind: DEAL_WON, referredContactId, invoiceId, total, bump: next - score },
+        { source: NETWORK_SOURCE },
+        tx,
+      );
+      return true;
+    });
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS (owner ruling D-102): takes back, under each
+   * referrer's row lock, the outstanding deal-won bump of this invoice: the
+   * points its note recorded (review repair CR-REOPEN-2; a note written before
+   * they were recorded counts the fixed 15), never below 0, with one
+   * referral.deal_reopened note naming the deal_won note it closes. Returns how
+   * many referrers it took a bump back from.
+   */
+  private async takeBackDealWonBumps(
+    businessId: string,
+    invoiceId: string,
+    previousStatus: string | null,
+    total: unknown,
+  ): Promise<number> {
+    const won = await this.db.contactEvent.findMany({
+      where: networkNotesOf(businessId, invoiceId, [DEAL_WON]),
+      select: { contactId: true },
+    });
+    const referrers = Array.from(new Set(won.map((e) => e.contactId)));
+    let reversed = 0;
+    for (const referrerId of referrers) {
+      const took = await this.db.$transaction(async (rawTx) => {
+        const tx = rawTx as unknown as Prisma.TransactionClient;
+        const locked = await tx.$queryRaw<Array<{ id: string; lead_score: number | null }>>`
+          SELECT id, lead_score FROM contacts WHERE id = ${referrerId} AND business_id = ${businessId} FOR UPDATE`;
+        if (locked.length === 0) return false;
+        const open = await this.outstandingDealWon(tx, businessId, referrerId, invoiceId);
+        if (!open) return false;
+        const score = locked[0].lead_score ?? 0;
+        const next = Math.max(0, Math.min(100, score - open.bump));
+        await tx.contact.update({ where: { id: referrerId }, data: { leadScore: next } });
+        await this.timeline.logEvent(
+          businessId,
+          referrerId,
+          'note.created',
+          {
+            kind: DEAL_REOPENED,
+            referredContactId: open.referredContactId,
+            invoiceId,
+            wonEventId: open.id,
+            bump: score - next,
+            total,
+            previousStatus,
+          },
+          { source: NETWORK_SOURCE },
+          tx,
+        );
+        return true;
+      });
+      if (took) reversed += 1;
+    }
+    return reversed;
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS (D-102): the referrer's outstanding deal-won note for
+   * the invoice (read in the caller's transaction, under the referrer's lock):
+   * the oldest crm-network referral.deal_won note that no referral.deal_reopened
+   * note names (wonEventId) as closed, with the points it applied.
+   */
+  private async outstandingDealWon(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    referrerId: string,
+    invoiceId: string,
+  ): Promise<{ id: string; bump: number; referredContactId: unknown } | null> {
+    const notes = await tx.contactEvent.findMany({
+      where: { ...networkNotesOf(businessId, invoiceId, [DEAL_WON, DEAL_REOPENED]), contactId: referrerId },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, data: true },
+    });
+    const dataOf = (n: { data: Prisma.JsonValue }) =>
+      (n.data && typeof n.data === 'object' && !Array.isArray(n.data) ? n.data : {}) as Record<string, unknown>;
+    const closed = new Set(notes.filter((n) => dataOf(n).kind === DEAL_REOPENED).map((n) => dataOf(n).wonEventId));
+    const open = notes.find((n) => dataOf(n).kind === DEAL_WON && !closed.has(n.id));
+    if (!open) return null;
+    const d = dataOf(open);
+    const bump = typeof d.bump === 'number' && Number.isFinite(d.bump) ? d.bump : REFERRER_BUMP_ON_DEAL_WON;
+    return { id: open.id, bump, referredContactId: d.referredContactId ?? null };
+  }
+}
+
+/**
+ * W10-REOPEN-REVERSALS review repair SEC-W10RR-3 (D-102): the crm-network's own
+ * referral notes of these kinds for an invoice, the lead-score ledger. Source
+ * crm-network and no USER actor: the contact events route writes source crm
+ * and actor USER, so a member's note of the same kind is never one of them.
+ */
+function networkNotesOf(businessId: string, invoiceId: string, kinds: string[]): Prisma.ContactEventWhereInput {
+  return {
+    businessId,
+    type: 'note.created',
+    source: NETWORK_SOURCE,
+    AND: [
+      { OR: [{ actorType: null }, { actorType: { not: 'USER' } }] },
+      { OR: kinds.map((kind) => ({ data: { path: ['kind'], equals: kind } })) },
+      { data: { path: ['invoiceId'], equals: invoiceId } },
+    ],
+  };
 }

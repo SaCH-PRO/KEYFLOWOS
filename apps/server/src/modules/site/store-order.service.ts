@@ -16,10 +16,12 @@ import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import {
   WIPAY_CURRENCY,
+  WIPAY_KEY_REQUIRED,
   resolveWipayMerchant,
   wipayMerchantComplete,
   wipayTakesCurrency,
 } from '../../core/connectors/implementations/wipay-merchant';
+import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -347,13 +349,29 @@ export class StoreOrderService {
       // checkouts read, resolveWipayMerchant). createStorePayment refused it
       // too, but only after the order and its promo use had committed, so every
       // attempt (and every retry) left another UNPAID order.
+      // W10-WIPAY-KEY (D-105): the pair is the business's own; a store with no
+      // WiPay key of its own (it used to check out into the platform's account)
+      // is refused with code WIPAY_KEY_REQUIRED, before anything is written.
       const business = await this.prisma.client.business.findUnique({
         where: { id: input.businessId },
         select: { metaData: true },
       });
-      if (!wipayMerchantComplete(resolveWipayMerchant(business?.metaData))) {
-        throw new BadRequestException('WiPay is not configured for this business: choose another payment method');
+      const merchant = resolveWipayMerchant(business?.metaData);
+      if (!wipayMerchantComplete(merchant)) {
+        const message = 'WiPay is not configured for this business: choose another payment method';
+        throw new BadRequestException(merchant.apiKey ? message : { code: WIPAY_KEY_REQUIRED, message });
       }
+    }
+
+    // W10-PAYPAL-CURRENCY review (SEC-W10PPC-1; owner ruling D-106): a PayPal
+    // checkout of an order in a currency PayPal does not support (TTD, JMD,
+    // BBD, GYD, XCD, ...) is refused here, before the order is written and its
+    // promo use counted, as WiPay's above. createStorePayment refuses it too,
+    // but only after the order had committed, so every attempt (and every
+    // retry) left another UNPAID order and used up a limited promo code. Same
+    // 400 body as createStorePayment's (paypalCurrencyRefusal).
+    if ((input.paymentMethod ?? '').toUpperCase() === 'PAYPAL' && !paypalTakesCurrency(totals.currency)) {
+      throw new BadRequestException(paypalCurrencyRefusal(totals.currency, 'order'));
     }
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;

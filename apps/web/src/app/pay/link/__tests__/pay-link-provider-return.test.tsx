@@ -393,3 +393,30 @@ describe("W5-CREDIT-AWARE-PAY CR-AR-2 (D-78): a part-credited invoice on the tok
     expect(screen.queryByRole("heading", { name: /payment submitted/i })).toBeNull();
   });
 });
+
+describe("W10-PAYPAL-CURRENCY (D-106): the payer sees which methods can pay the invoice", () => {
+  it("W-PL-16 (W10-PAYPAL-CURRENCY, D-106): a TTD invoice, whose gateway list carries no PayPal (PayPal does not support TTD), offers no PayPal and says the methods shown are the ones that can pay it in TTD", async () => {
+    // The server's list for a TTD invoice since D-106: WiPay and Stripe, no PayPal.
+    stubApi([[200, view()]], undefined, {
+      gateways: [[200, [{ id: "wipay", name: "WiPay", currencies: ["TTD"] }, { id: "stripe", name: "Stripe", currencies: ["TTD"] }]]],
+    });
+    render(<PaymentLinkPage />);
+
+    expect(await screen.findByText("Pay with Card")).toBeInTheDocument();
+    expect(screen.getByText("Pay with Stripe")).toBeInTheDocument();
+    expect(screen.queryByText("Pay with PayPal")).toBeNull();
+    // At 71a97cb1: no such line; the payer was not told the methods shown are the ones that can pay this invoice.
+    expect(await screen.findByTestId("pay-link-methods-note")).toHaveTextContent("Methods that can pay this invoice in TTD");
+  });
+
+  it("W-PL-17 (W10-PAYPAL-CURRENCY, D-106) control: a USD invoice whose gateway list carries PayPal offers it, labelled with the invoice's currency", async () => {
+    stubApi([[200, view({ currency: "USD" })]], undefined, {
+      gateways: [[200, [{ id: "paypal", name: "PayPal", currencies: ["USD"] }, { id: "stripe", name: "Stripe", currencies: ["USD"] }]]],
+    });
+    render(<PaymentLinkPage />);
+
+    const paypal = (await screen.findByText("Pay with PayPal")).closest("button")!;
+    expect(paypal).toHaveTextContent("USD");
+    expect(await screen.findByTestId("pay-link-methods-note")).toHaveTextContent("Methods that can pay this invoice in USD");
+  });
+});

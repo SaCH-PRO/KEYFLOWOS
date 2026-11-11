@@ -64,10 +64,20 @@
  *          URL carry no key; a live checkout with no account number is 400
  *          before WiPay is called; the invoice checkout's return URL must be
  *          on an allowed origin (review V05-SEC-3)
- *   PC-11  the platform key (WIPAY_API_KEY) verifies only payables of a
- *          business that pays into the platform's account: a business with
- *          its own account number and no key of its own is refused (review
- *          V05-SEC-3); binding the proof to order_id is PC-11b (todo)
+ *   PC-11  the platform key (WIPAY_API_KEY) settles no tenant's payable: a
+ *          business with its own account number and no key of its own is
+ *          refused (review V05-SEC-3) and, since D-105, so is a business with
+ *          no WiPay setting of its own (it checked out into the platform's
+ *          account and the platform key settled it). Review SEC-W10WK-2 /
+ *          WK-CR-1 (the D-105 deploy transition): such a proof is WiPay's
+ *          genuine word that money reached the platform's account, so it is
+ *          kept as a refused claim (refused:platform-account) with the
+ *          business, which is told once; nothing is settled
+ *   PC-11b with no shared key a verified success books only against a payable
+ *          of the business whose own key proved it (W10-WIPAY-KEY, D-105; was
+ *          a todo): business A's proof is refused for business B's invoice
+ *          and storefront order, B's for A's, the platform key's for a keyless
+ *          business's invoice
  *   PC-06  PayPal capture by pay-link token: an order whose custom_id names
  *          another invoice, a wrong amount, a wrong currency (both ways) and a
  *          missing currency are refused with 400 before PayPal captures
@@ -78,11 +88,10 @@
  *          PAYMENT.CAPTURE.COMPLETED delivery of the same capture id write no
  *          second row and no second posting
  *   PC-08  createPaypalOrder asks PayPal for the invoice's own currency, never
- *          USD for a TTD invoice, and the capture checks it: against the stubbed
- *          SDK a TTD invoice's own order is captured and recorded in TTD. Real
- *          PayPal does not offer TTD, so that checkout fails closed at
- *          createOrder; refusing it up front with 400 is PC-08b (todo: review
- *          V05-COR-4 / CR-V05-4, held by TG-14 / TG-14b)
+ *          USD for a EUR invoice, and the capture checks it: against the
+ *          stubbed SDK a EUR invoice's own order is captured and recorded in
+ *          EUR (amended by W10-PAYPAL-CURRENCY: it was a TTD invoice, which
+ *          D-106 no longer lets reach PayPal)
  *   PC-09  LEDGER: every SUCCESSFUL provider payment of this suite has exactly
  *          one Payment:<id>:payment_recorded FinancialTransaction whose debits
  *          equal its credits; payments.service.ts writes no SUCCESSFUL 'paypal'
@@ -111,13 +120,50 @@
  *          with its own key and no account of its own, on a platform that has
  *          an account, is not offered WiPay and its checkouts are refused
  *          before WiPay is called (it got a live checkout into the platform's
- *          account whose callback its own key refused). Control: a business
- *          with neither checks out into the platform's account (G6RC-1)
+ *          account whose callback its own key refused). A business with
+ *          neither checked out into the platform's account (G6RC-1); since
+ *          D-105 it is refused too (amended by W10-WIPAY-KEY)
  *   PC-18  the WiPay connector reports 'connected' exactly where the gateway
  *          list offers WiPay (G6RC-7)
  *   PC-19  D-69: a WiPay checkout, invoice or storefront, for an amount not in
  *          TTD answers 400 before WiPay is called, and WiPay is not offered
  *          for it (G6ML-2)
+ *
+ * W10-WIPAY-KEY (owner ruling D-105: WiPay checkout is offered only to a
+ * business that has connected its own WiPay key; tenants no longer share the
+ * platform's WiPay account):
+ *
+ *   PC-20  with the platform's WiPay pair set, a business with no WiPay key of
+ *          its own is not offered WiPay on any gateway list (pay link, bare
+ *          id, storefront) and every WiPay checkout for it (pay link, generic
+ *          invoice and storefront checkouts, createStorePayment) is refused
+ *          400 WIPAY_KEY_REQUIRED before WiPay is called; nothing is written
+ *   PC-21  review SEC-W10WK-1: WiPay's public sandbox key ('123') saved as a
+ *          business's own key is no key: WiPay is not offered, its checkouts
+ *          are refused WIPAY_KEY_REQUIRED and a sandbox-keyed success settles
+ *          nothing (PC-21b, the refusal at the payment-secret write, is a
+ *          todo: identity.service.ts is outside this packet's write set)
+ *
+ * W10-PAYPAL-CURRENCY (owner ruling D-106: PayPal is not offered for an
+ * invoice or order in a currency PayPal does not support, TTD, JMD, BBD, GYD,
+ * XCD and any other it does not list; the payer sees which methods can pay
+ * it). Real PayPal refused createPaypalOrder's TTD order, so the payer of a
+ * TTD invoice was offered PayPal and got 500 'Failed to create PayPal order'
+ * (review V05-COR-4 / CR-V05-4):
+ *
+ *   PC-08b the pay link of a TTD invoice is not offered PayPal, and its PayPal
+ *          checkout and capture are refused 400 PAYPAL_CURRENCY_UNSUPPORTED
+ *          before PayPal is called; nothing is written (was a todo). Control:
+ *          a USD invoice's pay link is offered PayPal and makes a USD order
+ *   PC-08c the bare-id gateway list and the generic invoice checkout, the same
+ *   PC-08d the storefront: the gateway list the storefront reads offers no
+ *          PayPal for a TTD, JMD, BBD, GYD or XCD amount (nor for a TTD
+ *          business's cart in no currency), and createStorePayment and the
+ *          generic storefront checkout refuse a TTD order's PayPal order
+ *          before PayPal is called. Control: USD and EUR are offered PayPal
+ *          in their own currency
+ *   PC-15  (amended) the storefront PayPal order in its own currency is shown
+ *          on a EUR order
  *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
@@ -156,8 +202,14 @@ const WIPAY_KEY = `${P}wipay_api_key`;
 const WIPAY_SANDBOX_KEY = '123';
 /** The keyed business's own WiPay account number (developer_id of its checkouts). */
 const WIPAY_ACCOUNT = `${P}wipay_account`;
-/** A platform WiPay key, set as WIPAY_API_KEY only inside PC-11. */
+/** A platform WiPay key, set as WIPAY_API_KEY only inside the cases that test it (PC-11, PC-11b, PC-13, PC-17, PC-18, PC-20). */
 const PLATFORM_KEY = `${P}platform_key`;
+/** The platform's WiPay account number (WIPAY_ACCOUNT_NUMBER), set only inside PC-17, PC-18 and PC-20. */
+const PLATFORM_ACCOUNT = `${P}platform_account`;
+/** W10-WIPAY-KEY (D-105): the code of a WiPay refusal for a business with no WiPay key of its own. */
+const WIPAY_KEY_REQUIRED = 'WIPAY_KEY_REQUIRED';
+/** The refusal's message (wipayCheckoutTarget), unchanged since trial-N review NEW-1. */
+const NO_KEY_MESSAGE = 'WiPay is not configured for this business: no WiPay API key to verify its payments';
 /** The platform's one public origin (PUBLIC_URL_ALLOWLIST) and a pay-page return URL on it. */
 const PUBLIC_ORIGIN = 'https://pay.v05a.test';
 const RETURN_URL = `${PUBLIC_ORIGIN}/pay/link/return`;
@@ -191,9 +243,37 @@ const ID = {
   contactPaypal: `${P}contactPaypal`,
   invUsd: `${P}invUsd`, // USD 100: the matching capture
   invUsdOther: `${P}invUsdOther`, // USD 100: the invoice another order names
-  invTtd: `${P}invTtd`, // TTD 100: currency refusals
-  invTtdOwn: `${P}invTtdOwn`, // TTD 100: its own order, made in TTD
+  invTtd: `${P}invTtd`, // TTD 100: D-106, PayPal is not offered and its checkout is refused (PC-08b, PC-08c)
+  invTtdOwn: `${P}invTtdOwn`, // TTD 100: D-106, the capture of an order made in TTD is refused (PC-08b)
+  // W10-PAYPAL-CURRENCY (D-106): a EUR business (its ledger posts EUR, D-13), seeded by the PayPal describe and the
+  // cases that use them, so the fixture sanity counts are unchanged.
+  bizEur: `${P}bizEur`,
+  contactEur: `${P}contactEur`,
+  invEur: `${P}invEur`, // EUR 100: the wrong-currency and no-currency orders (PC-06)
+  invEurOwn: `${P}invEurOwn`, // EUR 100: its own order, made in EUR (PC-08)
 };
+/** W10-PAYPAL-CURRENCY (D-106): the code of a PayPal refusal for a currency PayPal does not support. */
+const PAYPAL_CURRENCY_UNSUPPORTED = 'PAYPAL_CURRENCY_UNSUPPORTED';
+const paypalRefusal = (currency: string, payable: 'invoice' | 'order') => ({
+  code: PAYPAL_CURRENCY_UNSUPPORTED,
+  message: `PayPal does not support ${currency}: this ${payable} cannot be paid with PayPal. Choose another payment method.`,
+});
+/** PayPal app credentials (env), set only inside the cases that read a gateway list for PayPal (PC-08b..PC-08d). */
+const PAYPAL_ENV = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
+
+/** Runs `fn` with PayPal configured for every business (PAYPAL_ENV), then restores the environment. */
+async function withPaypalEnv<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = Object.fromEntries(Object.keys(PAYPAL_ENV).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, PAYPAL_ENV);
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(previous)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 const TOTAL = 100;
 const STORE_TOTAL = 50;
 
@@ -254,6 +334,8 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)} OR provider_payment_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    // Review SEC-W10WK-2: the payment.refused notices PC-11 checks (the business delete cascades them too).
+    `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR token LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -380,6 +462,23 @@ async function seedInvoice(id: string, businessId: string, contactId: string, to
     },
   });
   await db.paymentLink.create({ data: { id: `${id}_link`, token: tokenOf(id), invoiceId: id, businessId, active: true } });
+}
+
+/**
+ * W10-PAYPAL-CURRENCY (D-106): the EUR business (its ledger posts EUR, D-13), its chart of accounts and its contact,
+ * seeded once. Review PPC-REV-01: every case that uses it calls this (the PayPal describe's beforeAll, PC-08d and
+ * PC-15), so a case selected on its own (-t) still has its business; seeding it only in one describe's beforeAll left
+ * PC-08d and PC-15 without it when run alone.
+ */
+let eurSeeded: Promise<void> | null = null;
+function ensureEurBusiness(): Promise<void> {
+  eurSeeded ??= (async () => {
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    await seedBusiness(ID.bizEur, 'EUR');
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizEur);
+    await db.contact.create({ data: { id: ID.contactEur, businessId: ID.bizEur, firstName: 'V05A', lastName: 'Eur', email: `${P}eur@test.local` } });
+  })();
+  return eurSeeded;
 }
 
 beforeAll(async () => {
@@ -810,58 +909,198 @@ describe('review V05-SEC-1: the WiPay checkouts never hand the API key to the pa
 });
 
 describe('review V05-SEC-3: the platform WiPay key verifies only payables that pay into the platform account', () => {
-  it("PC-11: with WIPAY_API_KEY set, a business with its own WiPay account number and no key of its own gets 400 for a callback keyed with the platform key (nothing written); a business on the platform's account is settled by it", async () => {
+  it("PC-11 (review V05-SEC-3; W10-WIPAY-KEY, D-105; review SEC-W10WK-2, WK-CR-1): with WIPAY_API_KEY set, the platform key settles no tenant's payable: for a business with no WiPay key of its own (its own account number only, or no WiPay setting at all: on the platform's account before D-105) a success proved with the platform key settles nothing and is kept as a refused claim (refused:platform-account) with that business, which is told once; the invoices and the storefront order stay unpaid and the replay adds nothing", async () => {
+    const storeNoKey = `${P}storeNoKeyPlatform`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: storeNoKey,
+        businessId: ID.bizNoKey,
+        orderNumber: `${P}SO-0021`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    storeOrders.updatePaymentStatus.mockClear();
+    wipayEvents.emitPaymentReceived.mockClear();
     process.env.WIPAY_API_KEY = PLATFORM_KEY;
     try {
+      // Review V05-SEC-3: a business with its own account number and no key of its own (its checkouts were refused
+      // since NEW-1). At the V05 head: 200 'Payment successful' and a SUCCESSFUL row.
       const own = `${P}wtx_platform_own_account`;
-      const refused = await wipay({ transaction_id: own, order_id: ID.invOwnAccount, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(own, TOTAL, PLATFORM_KEY) });
-      // At the packet head: 200 'Payment successful' and a SUCCESSFUL row (the platform key verified every keyless tenant).
-      expect(refused.status, JSON.stringify(refused.body)).toBe(400);
-      expect(await rowsOf(ID.invOwnAccount)).toEqual([]);
-      expect(await claims('wipay', own)).toBe(0);
-      expect(await invoiceStatus(ID.invOwnAccount)).toBe('SENT');
-
+      // D-105: a business with no WiPay setting of its own checked out into the platform's account until
+      // 1a9ca4fd, where this proof answered 200 'Payment successful' with a SUCCESSFUL row and the invoice PAID.
       const txn = `${P}wtx_platform`;
-      const ok = await wipay({ transaction_id: txn, order_id: ID.invPlatform, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(txn, TOTAL, PLATFORM_KEY) });
-      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-      expect(ok.body).toMatchObject({ success: true, invoiceId: ID.invPlatform, message: 'Payment successful' });
-      expect(await rowsOf(ID.invPlatform)).toEqual([`wipay:${txn}:SUCCESSFUL:${TOTAL}:TTD`]);
-      expect(await invoiceStatus(ID.invPlatform)).toBe('PAID');
+      const storeTxn = `${P}wtx_platform_store`;
+      const cases: Array<[string, string, string, number, string]> = [
+        ['own account, no key: invoice', own, ID.invOwnAccount, TOTAL, ID.bizOwnAccount],
+        ['no WiPay setting: invoice', txn, ID.invPlatform, TOTAL, ID.bizNoKey],
+        ['no WiPay setting: storefront order', storeTxn, storeNoKey, STORE_TOTAL, ID.bizNoKey],
+      ];
+      for (const [label, t, payable, total, biz] of cases) {
+        const q = { transaction_id: t, order_id: payable, status: 'success', total: total.toFixed(2), hash: keyedHash(t, total, PLATFORM_KEY) };
+        // At 332eed5c (review SEC-W10WK-2, WK-CR-1): 400 'Invalid WiPay callback signature' and nothing kept but a
+        // log line, while the money WiPay took sat in the platform's account.
+        for (const attempt of ['first', 'replay']) {
+          const res = await wipay(q);
+          expect(res.status, `${label} (${attempt}): ${JSON.stringify(res.body)}`).toBe(200);
+          expect(res.body, `${label} (${attempt})`).toMatchObject({ success: false, invoiceId: payable });
+          expect(res.body.message, `${label} (${attempt})`).toMatch(/platform's WiPay account/);
+        }
+        const kept = await db.webhookEvent.findMany({ where: { provider: 'wipay', providerEventId: t } });
+        expect(kept.map((k: any) => `${k.eventType}|${k.businessId}`), label).toEqual([`refused:platform-account|${biz}`]);
+        const told = await db.notification.findMany({
+          where: { businessId: biz, type: 'payment.refused', data: { path: ['transactionId'], equals: t } },
+        });
+        expect(told, `${label}: told once`).toHaveLength(1);
+        expect(told[0].data, label).toMatchObject({ provider: 'wipay', transactionId: t, payableId: payable, total, reason: 'platform-account' });
+        expect(told[0].body, label).toMatch(/not recorded/);
+      }
+      for (const inv of [ID.invOwnAccount, ID.invPlatform]) {
+        expect(await rowsOf(inv), inv).toEqual([]);
+        expect(await postingCount(inv), inv).toBe(0);
+        expect(await invoiceStatus(inv), inv).toBe('SENT');
+      }
+      expect(storeOrders.updatePaymentStatus, 'the storefront order is not settled').not.toHaveBeenCalled();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: storeNoKey } })).paymentStatus).toBe('UNPAID');
+      expect(wipayEvents.emitPaymentReceived, 'no payment-received event').not.toHaveBeenCalled();
       await expectBalanced(ID.bizNoKey);
+      await expectBalanced(ID.bizOwnAccount);
+
+      // Only a proof the platform key verifies over an amount this server asked for is kept: over another total it
+      // is refused 400 with nothing kept.
+      const otherTotal = `${P}wtx_platform_other_total`;
+      const res = await wipay({ transaction_id: otherTotal, order_id: ID.invPlatform, status: 'success', total: '1.00', hash: keyedHash(otherTotal, 1, PLATFORM_KEY) });
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(await claims('wipay', otherTotal)).toBe(0);
     } finally {
       delete process.env.WIPAY_API_KEY;
     }
+
+    // Without WIPAY_API_KEY nothing recognises the platform's proof: 400, nothing kept, as any unverified proof.
+    const unset = `${P}wtx_platform_unset`;
+    const noEnv = await wipay({ transaction_id: unset, order_id: ID.invPlatform, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(unset, TOTAL, PLATFORM_KEY) });
+    expect(noEnv.status, JSON.stringify(noEnv.body)).toBe(400);
+    expect(await claims('wipay', unset)).toBe(0);
+    expect(await rowsOf(ID.invPlatform)).toEqual([]);
   });
 
-  it.todo(
-    "PC-11b (review V05-SEC-3, not closable in this write set): WiPay's documented proof md5(transaction_id + total + API key) does not cover " +
-      'order_id, so a verified success can be brought back for another payable of the same total settled by the same WiPay key (one claim per ' +
-      'transaction id: it settles one payable, not both). The money is real and reached the account that key belongs to; the payable it is booked ' +
-      "against is the caller's choice. Binding the transaction to its order needs WiPay's transaction-retrieve API (not called here: D-19 reads " +
-      "WiPay's documentation, never calls it) or an owner ruling that keyless tenants stop sharing the platform's WiPay account.",
-  );
+  it("PC-11b (W10-WIPAY-KEY, D-105, was it.todo; review SEC-W10WK-2): with no shared key a verified success books only against a payable of the business whose own key proved it: a proof keyed with business A's key is refused (400, nothing written) for business B's invoice and storefront order of the same total, B's for A's, and the platform key's for A's invoice; the platform key's proof for a keyless business's invoice settles nothing (kept refused, PC-11); the same proof settles A's own invoice once", async () => {
+    // WiPay's documented proof md5(transaction_id + total + API key) (D-19) names no order_id. Before D-105 a
+    // success proved by the shared platform key could be booked against the payable of any keyless tenant of the
+    // same total. With each business on its own key (D-105) the key names the business, so a proof verifies only
+    // against that business's payables; within one business the transaction id is claimed once, and the money
+    // reached that business's own WiPay account.
+    const invA = `${P}invCrossA`; // bizKeyed: WIPAY_KEY
+    const invB = `${P}invCrossB`; // bizKeyOnly: its own key
+    const orderB = `${P}storeCrossB`;
+    const B_KEY = `${P}key_only_key`;
+    await seedInvoice(invA, ID.bizKeyed, ID.contactKeyed, TOTAL, 'TTD');
+    await seedInvoice(invB, ID.bizKeyOnly, ID.contactKeyOnly, TOTAL, 'TTD');
+    await db.marketplaceOrder.create({
+      data: {
+        id: orderB,
+        businessId: ID.bizKeyOnly,
+        orderNumber: `${P}SO-0011`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    storeOrders.updatePaymentStatus.mockClear();
+    const success = (txn: string, orderId: string, key: string) =>
+      wipay({ transaction_id: txn, order_id: orderId, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(txn, TOTAL, key) });
+
+    const txnA = `${P}wtx_cross_a`;
+    const txnB = `${P}wtx_cross_b`;
+    const txnP = `${P}wtx_cross_platform`;
+    const txnPA = `${P}wtx_cross_platform_a`;
+    process.env.WIPAY_API_KEY = PLATFORM_KEY;
+    process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
+    try {
+      const attempts: Array<[string, string, string, string]> = [
+        ["A's proof on B's invoice", txnA, invB, WIPAY_KEY],
+        ["A's proof on B's storefront order", txnA, orderB, WIPAY_KEY],
+        ["B's proof on A's invoice", txnB, invA, B_KEY],
+        // Review SEC-W10WK-2: A has its own key, so the platform key is not even read for its payables.
+        ["the platform key's proof on A's invoice", txnPA, invA, PLATFORM_KEY],
+      ];
+      for (const [label, txn, orderId, key] of attempts) {
+        const res = await success(txn, orderId, key);
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, label).not.toHaveProperty('success', true);
+      }
+      // At 1a9ca4fd: 200 'Payment successful' (the platform key verified every keyless tenant's payable). Review
+      // SEC-W10WK-2: it settles nothing and is kept refused with the keyless business (PC-11).
+      const platform = await success(txnP, ID.invNoKey, PLATFORM_KEY);
+      expect(platform.status, JSON.stringify(platform.body)).toBe(200);
+      expect(platform.body).toMatchObject({ success: false, invoiceId: ID.invNoKey });
+    } finally {
+      delete process.env.WIPAY_API_KEY;
+      delete process.env.WIPAY_ACCOUNT_NUMBER;
+    }
+    for (const inv of [invA, invB, ID.invNoKey]) {
+      expect(await rowsOf(inv), inv).toEqual([]);
+      expect(await invoiceStatus(inv), inv).toBe('SENT');
+    }
+    for (const txn of [txnA, txnB, txnPA]) expect(await claims('wipay', txn), txn).toBe(0);
+    const keptP = await db.webhookEvent.findMany({ where: { provider: 'wipay', providerEventId: txnP } });
+    expect(keptP.map((k: any) => `${k.eventType}|${k.businessId}`)).toEqual([`refused:platform-account|${ID.bizNoKey}`]);
+    expect(storeOrders.updatePaymentStatus, "B's storefront order is not settled").not.toHaveBeenCalled();
+
+    // Control: A's proof settles A's own invoice once.
+    const ok = await success(txnA, invA, WIPAY_KEY);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toMatchObject({ success: true, invoiceId: invA, message: 'Payment successful' });
+    expect(await rowsOf(invA)).toEqual([`wipay:${txnA}:SUCCESSFUL:${TOTAL}:TTD`]);
+    expect(await invoiceStatus(invA)).toBe('PAID');
+    // Brought back for B's invoice it is still refused (B's key does not verify it), never 'Duplicate callback ignored'.
+    const again = await success(txnA, invB, WIPAY_KEY);
+    expect(again.status, JSON.stringify(again.body)).toBe(400);
+    expect(await rowsOf(invB)).toEqual([]);
+    expect(await claims('wipay', txnA)).toBe(1);
+    await expectBalanced(ID.bizKeyed);
+  });
 });
 
 describe('V1-05: a PayPal capture is bound to its invoice, amount and currency and recorded through the ledger door', () => {
+  beforeAll(async () => {
+    // W10-PAYPAL-CURRENCY (D-106): a EUR business, whose EUR invoices PayPal takes and whose ledger posts EUR (D-13).
+    await ensureEurBusiness();
+  });
+
   it('PC-06: orders naming another invoice, a wrong amount, a wrong currency (both ways) or no currency get 400 before PayPal captures anything; no row, no posting', async () => {
+    // W10-PAYPAL-CURRENCY (D-106): a TTD invoice's capture is refused before its order is read (PC-08b), so the
+    // order binding's currency check is shown on a EUR invoice, a currency PayPal supports (it was the TTD invoice).
+    await seedInvoice(ID.invEur, ID.bizEur, ID.contactEur, TOTAL, 'EUR');
     const book: Array<[string, string, string, any[]]> = [
       ['custom_id of another invoice', ID.invUsd, `${P}order_other_invoice`, [{ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
       ['a wrong amount', ID.invUsd, `${P}order_wrong_amount`, [{ customId: ID.invUsd, amount: { currencyCode: 'USD', value: '1.00' } }]],
-      ['USD order for a TTD invoice', ID.invTtd, `${P}order_usd_for_ttd`, [{ customId: ID.invTtd, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
+      ['USD order for a EUR invoice', ID.invEur, `${P}order_usd_for_eur`, [{ customId: ID.invEur, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
       ['TTD order for a USD invoice', ID.invUsd, `${P}order_ttd_for_usd`, [{ customId: ID.invUsd, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]],
-      ['no currency', ID.invTtd, `${P}order_no_currency`, [{ customId: ID.invTtd, amount: { value: TOTAL.toFixed(2) } }]],
+      ['no currency', ID.invEur, `${P}order_no_currency`, [{ customId: ID.invEur, amount: { value: TOTAL.toFixed(2) } }]],
     ];
     const captures = paypalOrders.captureOrder.mock.calls.length;
     for (const [label, invoiceId, orderId, units] of book) {
       orderBook.set(orderId, units);
       await clearRateLimits();
       const res = await capture(invoiceId, orderId);
-      // At the base: 'USD order for a TTD invoice', 'TTD order for a USD invoice' and 'no currency' are captured and recorded.
+      // At the base: the wrong-currency orders (then for a TTD invoice) and 'no currency' are captured and recorded.
       expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
       expect(res.body.message, label).toBe('This PayPal order does not belong to this invoice');
     }
     expect(paypalOrders.captureOrder.mock.calls.length, 'PayPal captured nothing').toBe(captures);
-    for (const inv of [ID.invUsd, ID.invUsdOther, ID.invTtd]) {
+    for (const inv of [ID.invUsd, ID.invUsdOther, ID.invEur]) {
       expect(await rowsOf(inv), inv).toEqual([]);
       expect(await postingCount(inv), inv).toBe(0);
       expect(await invoiceStatus(inv), inv).toBe('SENT');
@@ -894,38 +1133,166 @@ describe('V1-05: a PayPal capture is bound to its invoice, amount and currency a
     await expectBalanced(ID.bizPaypal);
   });
 
-  // Review V05-COR-4 / CR-V05-4: this proves the currency binding against the stubbed SDK only; real PayPal does not offer TTD (PC-08b).
-  it("PC-08: createPaypalOrder asks PayPal for the invoice's own currency, never USD for a TTD invoice, and the capture checks it: against the stubbed SDK a TTD invoice's own order is captured and recorded in TTD", async () => {
-    const created = await paypalCheckout(ID.invTtdOwn);
+  // W10-PAYPAL-CURRENCY (D-106): the currency binding is shown on a EUR invoice; a TTD invoice no longer reaches PayPal (PC-08b).
+  it("PC-08 (amended by W10-PAYPAL-CURRENCY, D-106): createPaypalOrder asks PayPal for the invoice's own currency, never USD for a EUR invoice, and the capture checks it: against the stubbed SDK a EUR invoice's own order is captured and recorded in EUR", async () => {
+    await seedInvoice(ID.invEurOwn, ID.bizEur, ID.contactEur, TOTAL, 'EUR');
+    const created = await paypalCheckout(ID.invEurOwn);
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     expect(created.body).toMatchObject({ type: 'paypal_order' });
     const orderId = created.body.orderId as string;
-    // At the base: currencyCode 'USD' whatever the invoice's currency.
-    expect(orderBook.get(orderId)).toEqual([expect.objectContaining({ customId: ID.invTtdOwn, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } })]);
+    // At the V1-05 base: currencyCode 'USD' whatever the invoice's currency.
+    expect(orderBook.get(orderId)).toEqual([expect.objectContaining({ customId: ID.invEurOwn, amount: { currencyCode: 'EUR', value: TOTAL.toFixed(2) } })]);
 
     await clearRateLimits();
-    const res = await capture(ID.invTtdOwn, orderId);
+    const res = await capture(ID.invEurOwn, orderId);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(await rowsOf(ID.invTtdOwn)).toEqual([`paypal:${P}cap_${orderId}:SUCCESSFUL:${TOTAL}:TTD`]);
-    expect(await invoiceStatus(ID.invTtdOwn)).toBe('PAID');
-    await expectBalanced(ID.bizPaypal);
+    expect(await rowsOf(ID.invEurOwn)).toEqual([`paypal:${P}cap_${orderId}:SUCCESSFUL:${TOTAL}:EUR`]);
+    expect(await invoiceStatus(ID.invEurOwn)).toBe('PAID');
+    await expectBalanced(ID.bizEur);
+  });
+});
+
+describe('W10-PAYPAL-CURRENCY: PayPal is not offered for a currency PayPal does not support (D-106)', () => {
+  /** Every PayPal SDK call this suite's stub has answered (orders made, read, captured). */
+  const paypalCalls = () => [
+    paypalOrders.createOrder.mock.calls.length,
+    paypalOrders.getOrder.mock.calls.length,
+    paypalOrders.captureOrder.mock.calls.length,
+  ];
+  const ids = (body: unknown) => (body as Array<{ id: string }>).map((g) => g.id);
+
+  async function expectUntouched(invoiceIds: string[]) {
+    for (const inv of invoiceIds) {
+      expect(await rowsOf(inv), inv).toEqual([]);
+      expect(await postingCount(inv), inv).toBe(0);
+      expect(await invoiceStatus(inv), inv).toBe('SENT');
+    }
+  }
+
+  it("PC-08b (W10-PAYPAL-CURRENCY, D-106, was it.todo): PayPal does not support TTD (nor JMD, BBD, GYD, XCD), so the pay link of a TTD invoice is not offered PayPal, and its PayPal checkout and the capture of a TTD order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called (no order made, read or captured); nothing is written; control: a USD invoice's pay link is offered PayPal in USD and its checkout makes a USD order", async () => {
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      await clearRateLimits();
+      const listed = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invTtd))}/gateways`);
+      expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+      // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } is offered for the TTD invoice.
+      expect(ids(listed.body), 'pay-link gateway list').not.toContain('paypal');
+
+      // At 71a97cb1: 201, PayPal asked for a TTD order (real PayPal refuses it: the payer got 500 'Failed to create PayPal order').
+      const checkout = await paypalCheckout(ID.invTtd);
+      expect(checkout.status, JSON.stringify(checkout.body)).toBe(400);
+      expect(checkout.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+      expect(JSON.stringify(checkout.body), 'the refusal names no invoice').not.toContain(ID.invTtd);
+
+      // An order made in TTD (as the base made them) is not read or captured either.
+      const ttdOrder = `${P}order_ttd_own`;
+      orderBook.set(ttdOrder, [{ referenceId: ID.invTtdOwn, customId: ID.invTtdOwn, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]);
+      await clearRateLimits();
+      // At 71a97cb1: 201, the order read and captured, and 100 TTD recorded.
+      const captured = await capture(ID.invTtdOwn, ttdOrder);
+      expect(captured.status, JSON.stringify(captured.body)).toBe(400);
+      expect(captured.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      await expectUntouched([ID.invTtd, ID.invTtdOwn]);
+
+      // Control: a USD invoice's pay link is offered PayPal, in USD, and its checkout makes a USD order.
+      await clearRateLimits();
+      const usdListed = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invUsdOther))}/gateways`);
+      expect(usdListed.body.find((g: { id: string }) => g.id === 'paypal')).toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      const usd = await paypalCheckout(ID.invUsdOther);
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } })]);
+      await expectUntouched([ID.invUsdOther]);
+    });
   });
 
-  it.todo(
-    'PC-08b (review V05-COR-4 / CR-V05-4, held outside this write set): PayPal does not support TTD (nor JMD, BBD, GYD, XCD), so real PayPal ' +
-      "refuses createPaypalOrder's TTD order and the payer gets 500 'Failed to create PayPal order' (fail-closed: the base charged X USD for an " +
-      'X TTD invoice). The fix is a 400 before PayPal is called for a currency PayPal does not support, and no PayPal in the gateway list of such ' +
-      "an invoice (getGatewaysByToken / getGatewaysForInvoice). Both would break pay-link-token-gate TG-14 (PayPal listed and a 201 PayPal checkout " +
-      'for a TTD invoice) and TG-14b (a TTD PayPal order captured), bound by manifests/pay-link-token-gate.json; their fixtures need a scope ' +
-      'release (a USD invoice, or the refusal pinned).',
-  );
+  it('PC-08c (W10-PAYPAL-CURRENCY, D-106): the bare-id surface: the gateway list of a TTD invoice offers no PayPal and the generic invoice checkout of its PayPal order is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called; control: a USD invoice is offered PayPal and its generic checkout makes a USD order', async () => {
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      await clearRateLimits();
+      const listed = await agent().get(`/payments/invoice/${encodeURIComponent(ID.invTtd)}/gateways`);
+      expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+      // At 71a97cb1: PayPal is listed for the TTD invoice.
+      expect(ids(listed.body), 'bare-id gateway list').not.toContain('paypal');
+      const checkout = await agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: ID.invTtd, gateway: 'paypal' });
+      expect(checkout.status, JSON.stringify(checkout.body)).toBe(400);
+      expect(checkout.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      await expectUntouched([ID.invTtd]);
+
+      // Control: the USD invoice.
+      await clearRateLimits();
+      const usdListed = await agent().get(`/payments/invoice/${encodeURIComponent(ID.invUsdOther)}/gateways`);
+      expect(ids(usdListed.body)).toContain('paypal');
+      const usd = await agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: ID.invUsdOther, gateway: 'paypal' });
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body).toMatchObject({ type: 'paypal_order' });
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } })]);
+      await expectUntouched([ID.invUsdOther]);
+    });
+  });
+
+  it("PC-08d (W10-PAYPAL-CURRENCY, D-106): the storefront surface: the gateway list the storefront reads (getAvailableGateways, what GET /site/storefront/public/:slug/gateways answers) offers no PayPal for a TTD, JMD, BBD, GYD or XCD amount, nor for a TTD business's cart in no currency; createStorePayment and the generic storefront checkout of a TTD order's PayPal order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called, the order UNPAID; control: USD and EUR are offered PayPal in their own currency and a USD storefront order's checkout makes a USD order", async () => {
+    // Review PPC-REV-01: the EUR control's business, also when this case runs alone.
+    await ensureEurBusiness();
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } for every amount.
+      for (const code of ['TTD', 'JMD', 'BBD', 'GYD', 'XCD', 'ttd']) {
+        expect((await payments.getAvailableGateways(ID.bizPaypal, code)).map((g) => g.id), code).not.toContain('paypal');
+      }
+      expect((await payments.getAvailableGateways(ID.bizKeyed)).map((g) => g.id), 'a TTD business, no cart currency').not.toContain('paypal');
+      expect((await payments.getAvailableGateways(ID.bizPaypal)).find((g) => g.id === 'paypal'), 'a USD business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      expect((await payments.getAvailableGateways(ID.bizEur)).find((g) => g.id === 'paypal'), 'a EUR business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['EUR'] });
+
+      // At 71a97cb1: PayPal asked for a TTD order by both.
+      const direct = await payments
+        .createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'PAYPAL', businessId: ID.bizKeyed })
+        .then(() => null, (e: any) => e);
+      expect(direct?.getStatus?.(), 'createStorePayment refuses').toBe(400);
+      expect(direct.getResponse()).toMatchObject(paypalRefusal('TTD', 'order'));
+      await clearRateLimits();
+      const generic = await agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: ID.storeOrder, gateway: 'paypal' });
+      expect(generic.status, JSON.stringify(generic.body)).toBe(400);
+      expect(generic.body).toMatchObject(paypalRefusal('TTD', 'order'));
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: ID.storeOrder } })).paymentStatus).toBe('UNPAID');
+
+      // Control: a USD storefront order's PayPal checkout makes a USD order.
+      const usdOrder = `${P}storeUsdPaypal`;
+      await db.marketplaceOrder.create({
+        data: {
+          id: usdOrder,
+          businessId: ID.bizPaypal,
+          orderNumber: `${P}SO-0106`,
+          customerName: 'V05A Store Customer',
+          customerEmail: `${P}store@test.local`,
+          subtotal: STORE_TOTAL,
+          total: STORE_TOTAL,
+          currency: 'USD',
+          type: 'STOREFRONT',
+          paymentStatus: 'UNPAID',
+          paymentMethod: 'PAYPAL',
+        },
+      });
+      await clearRateLimits();
+      const usd = await agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: usdOrder, gateway: 'paypal' });
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body).toMatchObject({ type: 'paypal_order' });
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: usdOrder, amount: { currencyCode: 'USD', value: STORE_TOTAL.toFixed(2) } })]);
+    });
+  });
 });
 
 describe('V1-05: the ledger', () => {
   it('PC-09: every SUCCESSFUL provider payment of this suite has exactly one Payment:<id>:payment_recorded transaction, debits equal to credits', async () => {
     const successful = await db.payment.findMany({ where: { businessId: { startsWith: P }, status: 'SUCCESSFUL' }, orderBy: { createdAt: 'asc' } });
     expect(successful.map((p: any) => `${p.provider}:${p.invoiceId}`).sort()).toEqual(
-      [`paypal:${ID.invTtdOwn}`, `paypal:${ID.invUsd}`, `wipay:${ID.invKeyed}`, `wipay:${ID.invFailed}`, `wipay:${ID.invPlatform}`].sort(),
+      // W10-WIPAY-KEY (D-105): the platform key settles no tenant's invoice (PC-11), so invPlatform has no
+      // payment; PC-11b's control settles invCrossA with its own business's key. W10-PAYPAL-CURRENCY (D-106): PC-08's
+      // own-currency capture is a EUR invoice's (a TTD invoice reaches no PayPal capture).
+      [`paypal:${ID.invEurOwn}`, `paypal:${ID.invUsd}`, `wipay:${ID.invKeyed}`, `wipay:${ID.invFailed}`, `wipay:${P}invCrossA`].sort(),
     );
     for (const p of successful) {
       const txns = await db.financialTransaction.findMany({
@@ -1069,25 +1436,45 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
   });
 
   it("PC-15 (G6PUB-SEC-4): the storefront PayPal order is made in the order's own currency, and a CAPTURE.COMPLETED settles a storefront order only for its total in its currency, naming PayPal (G6ML-3)", async () => {
+    // W10-PAYPAL-CURRENCY (D-106): shown on a EUR order (it was the TTD storefront order, which PayPal does not
+    // support: its PayPal order is now refused before PayPal is called, PC-08d). Review PPC-REV-01: the EUR business
+    // is seeded here too, so this case runs alone.
+    await ensureEurBusiness();
+    const eurOrder = `${P}storeEur`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: eurOrder,
+        businessId: ID.bizEur,
+        orderNumber: `${P}SO-0015`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'EUR',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'PAYPAL',
+      },
+    });
     paypalOrders.createOrder.mockClear();
-    const created = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'PAYPAL', businessId: ID.bizKeyed });
+    const created = await payments.createStorePayment({ orderId: eurOrder, amount: STORE_TOTAL, currency: 'EUR', method: 'PAYPAL', businessId: ID.bizEur });
     expect(created.paymentId).toBeTruthy();
     const units = (paypalOrders.createOrder.mock.calls[0] as any[])[0].body.purchaseUnits;
-    // At 2db133a4: currencyCode 'USD' for a TTD order.
-    expect(units.map((u: any) => `${u.customId}:${u.amount.value}:${u.amount.currencyCode}`)).toEqual([`${ID.storeOrder}:${STORE_TOTAL.toFixed(2)}:TTD`]);
+    // At 2db133a4: currencyCode 'USD' for an order in another currency.
+    expect(units.map((u: any) => `${u.customId}:${u.amount.value}:${u.amount.currencyCode}`)).toEqual([`${eurOrder}:${STORE_TOTAL.toFixed(2)}:EUR`]);
 
     storeOrders.updatePaymentStatus.mockClear();
     // A capture of another amount, and one in another currency, naming the storefront order (PayPal orders can be made client-side).
-    const short = await captureWebhook(`${P}WH_store_short`, `${P}cap_store_short`, ID.storeOrder, '0.01', 'TTD');
-    const usd = await captureWebhook(`${P}WH_store_usd`, `${P}cap_store_usd`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'USD');
+    const short = await captureWebhook(`${P}WH_store_short`, `${P}cap_store_short`, eurOrder, '0.01', 'EUR');
+    const usd = await captureWebhook(`${P}WH_store_usd`, `${P}cap_store_usd`, eurOrder, STORE_TOTAL.toFixed(2), 'USD');
     expect(short.status, JSON.stringify(short.body)).toBe(201);
     expect(usd.status, JSON.stringify(usd.body)).toBe(201);
-    // At 2db133a4: updatePaymentStatus(order, 'PAID', <capture>) for each, so the order total is booked for 0.01 TTD and for USD.
+    // At 2db133a4: updatePaymentStatus(order, 'PAID', <capture>) for each, so the order total is booked for 0.01 and for USD.
     expect(storeOrders.updatePaymentStatus).not.toHaveBeenCalled();
 
-    const ok = await captureWebhook(`${P}WH_store_ok`, `${P}cap_store_ok`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'TTD');
+    const ok = await captureWebhook(`${P}WH_store_ok`, `${P}cap_store_ok`, eurOrder, STORE_TOTAL.toFixed(2), 'EUR');
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
-    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[ID.storeOrder, 'PAID', `${P}cap_store_ok`, 'paypal']]);
+    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[eurOrder, 'PAID', `${P}cap_store_ok`, 'paypal']]);
   });
 
   it('PC-16 (G6ML-4): the storefront Stripe checkout answers its session and writes no PENDING payment naming the order as an invoice', async () => {
@@ -1112,7 +1499,6 @@ describe('trial-N repair round 2: one WiPay merchant per checkout, TTD only (D-6
   /** The provider requests the checkouts made (global fetch stubbed; no network). */
   let providerRequests: Array<{ url: string; body: string }> = [];
   let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
-  const PLATFORM_ACCOUNT = `${P}platform_account`;
 
   beforeEach(() => {
     providerRequests = [];
@@ -1144,7 +1530,7 @@ describe('trial-N repair round 2: one WiPay merchant per checkout, TTD only (D-6
       .send({ gateway: 'wipay', returnUrl: RETURN_URL });
   }
 
-  it("PC-17 (G6RC-1): with the platform's WiPay pair set, a business with its own key and no account of its own is not offered WiPay and gets no checkout into the platform's account; a business with neither checks out into the platform's account", async () => {
+  it("PC-17 (G6RC-1; amended by W10-WIPAY-KEY, D-105): with the platform's WiPay pair set, a business with its own key and no account of its own is not offered WiPay and gets no checkout into the platform's account; a business with neither no longer checks out into the platform's account (D-105), and a business with its own pair checks out into its own", async () => {
     process.env.WIPAY_API_KEY = PLATFORM_KEY;
     process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
 
@@ -1167,14 +1553,24 @@ describe('trial-N repair round 2: one WiPay merchant per checkout, TTD only (D-6
     expect(await claims('wipay', txn)).toBe(0);
     expect(await invoiceStatus(ID.invKeyOnly)).toBe('SENT');
 
-    // Control: a business with no WiPay settings of its own uses the platform's pair, key and account together.
-    expect(await gatewayIds(ID.invNoKey)).toContain('wipay');
-    const platform = await wipayCheckout(ID.invNoKey);
-    expect(platform.status, JSON.stringify(platform.body)).toBe(201);
+    // D-105: a business with no WiPay settings of its own used the platform's pair (G6RC-1's control until
+    // W10-WIPAY-KEY). Tenants no longer share the platform's account: it is not offered WiPay and is refused.
+    // At 1a9ca4fd: ['wipay'] and a 201 checkout naming the platform account.
+    expect(await gatewayIds(ID.invNoKey)).not.toContain('wipay');
+    const keyless = await wipayCheckout(ID.invNoKey);
+    expect(keyless.status, JSON.stringify(keyless.body)).toBe(400);
+    expect(keyless.body).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+    expect(providerRequests, 'WiPay is never called for it').toEqual([]);
+
+    // Control: a business with its own pair checks out into its own account, never the platform's.
+    expect(await gatewayIds(ID.invCheckout)).toContain('wipay');
+    const own = await wipayCheckout(ID.invCheckout);
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
     expect(providerRequests).toHaveLength(1);
     const sent = new URLSearchParams(providerRequests[0].body);
-    expect(`${sent.get('developer_id')}|${sent.get('account_number')}`).toBe(`${PLATFORM_ACCOUNT}|${PLATFORM_ACCOUNT}`);
+    expect(`${sent.get('developer_id')}|${sent.get('account_number')}`).toBe(`${WIPAY_ACCOUNT}|${WIPAY_ACCOUNT}`);
     expect(providerRequests[0].body).not.toContain(PLATFORM_KEY);
+    expect(providerRequests[0].body).not.toContain(WIPAY_KEY);
   });
 
   it("PC-18 (G6RC-7): the WiPay connector reports 'connected' exactly where the gateway list offers WiPay, for each business and platform setting", async () => {
@@ -1254,4 +1650,182 @@ describe('trial-N repair round 2: one WiPay merchant per checkout, TTD only (D-6
     const ttd = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invCheckout))}/gateways`);
     expect(ttd.body.find((g: { id: string }) => g.id === 'wipay')).toEqual({ id: 'wipay', name: 'WiPay', currencies: ['TTD'] });
   });
+});
+
+describe("W10-WIPAY-KEY: WiPay only with the business's own key (D-105)", () => {
+  /** The provider requests the checkouts made (global fetch stubbed; no network). */
+  let providerRequests: Array<{ url: string; body: string }> = [];
+  let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeEach(() => {
+    providerRequests = [];
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
+      const url = String(input?.url ?? input);
+      providerRequests.push({ url, body: String(init?.body ?? '') });
+      if (new URL(url).host.endsWith('wipayfinancial.com')) return new Response('OK', { status: 200 });
+      throw new Error(`v05a: unexpected network call to ${url}`);
+    }) as typeof fetch);
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+    delete process.env.WIPAY_API_KEY;
+    delete process.env.WIPAY_ACCOUNT_NUMBER;
+  });
+
+  it('PC-20 (W10-WIPAY-KEY, D-105): with the platform WiPay pair set, a business with no WiPay key of its own is not offered WiPay (pay-link, bare-id and storefront gateway lists) and every WiPay checkout for it (pay link, generic invoice and storefront checkouts, createStorePayment) is refused 400 WIPAY_KEY_REQUIRED before WiPay is called; nothing is written', async () => {
+    const inv = `${P}invNoKeyD105`;
+    const order = `${P}storeNoKeyD105`;
+    await seedInvoice(inv, ID.bizNoKey, ID.contactNoKey, TOTAL, 'TTD');
+    await db.marketplaceOrder.create({
+      data: {
+        id: order,
+        businessId: ID.bizNoKey,
+        orderNumber: `${P}SO-0020`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    const requested = () => db.webhookEvent.count({ where: { provider: 'wipay-requested', businessId: ID.bizNoKey } });
+    const requestedBefore = await requested();
+    process.env.WIPAY_API_KEY = PLATFORM_KEY;
+    process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
+
+    // At 1a9ca4fd: ['wipay'] on every list (the business checked out into the platform's account).
+    await clearRateLimits();
+    const byToken = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/gateways`);
+    expect(byToken.status, JSON.stringify(byToken.body)).toBe(200);
+    expect(byToken.body.map((g: { id: string }) => g.id), 'pay-link gateway list').not.toContain('wipay');
+    const bare = await agent().get(`/payments/invoice/${encodeURIComponent(inv)}/gateways`);
+    expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+    expect(bare.body.map((g: { id: string }) => g.id), 'bare-id gateway list').not.toContain('wipay');
+    // The storefront's list (GET /site/storefront/public/:slug/gateways) is this method for the business.
+    expect((await payments.getAvailableGateways(ID.bizNoKey, 'TTD')).map((g) => g.id), 'storefront gateway list').not.toContain('wipay');
+
+    // At 1a9ca4fd: 201 redirects into the platform's account.
+    const attempts: Array<[string, () => any]> = [
+      ['pay-link checkout', () => agent().post(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/checkout`).send({ gateway: 'wipay', returnUrl: RETURN_URL })],
+      ['generic invoice checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: inv, gateway: 'wipay', returnUrl: RETURN_URL })],
+      ['generic storefront checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: order, gateway: 'wipay', returnUrl: RETURN_URL })],
+    ];
+    for (const [label, send] of attempts) {
+      await clearRateLimits();
+      const res = await send();
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body, label).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+    }
+    const direct = await payments
+      .createStorePayment({ orderId: order, amount: STORE_TOTAL, currency: 'TTD', method: 'WIPAY', businessId: ID.bizNoKey, returnUrl: RETURN_URL })
+      .then(() => null, (e: any) => e);
+    expect(direct?.getStatus?.(), 'createStorePayment refuses').toBe(400);
+    expect(direct.getResponse()).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+
+    expect(providerRequests, 'WiPay is never called').toEqual([]);
+    expect(await rowsOf(inv)).toEqual([]);
+    expect(await invoiceStatus(inv)).toBe('SENT');
+    expect(await requested(), 'no requested amount is kept').toBe(requestedBefore);
+    expect((await db.marketplaceOrder.findUnique({ where: { id: order } })).paymentStatus).toBe('UNPAID');
+
+    // Control: a business with its own key and account is still offered WiPay, for TTD.
+    expect((await payments.getAvailableGateways(ID.bizKeyed, 'TTD')).map((g) => g.id)).toContain('wipay');
+  });
+
+  it("PC-21 (W10-WIPAY-KEY review SEC-W10WK-1, D-105): WiPay's public sandbox key ('123') is no key: a business that saved it as its own key, with its own account number, is not offered WiPay (pay-link, bare-id and storefront gateway lists; its connector is not connected), every WiPay checkout for it is refused 400 WIPAY_KEY_REQUIRED before WiPay is called, and a success proved with the sandbox key settles neither its invoice nor its storefront order (400, nothing written), with or without the platform key", async () => {
+    const biz = `${P}bizSandbox`;
+    const contact = `${P}contactSandbox`;
+    const inv = `${P}invSandbox`;
+    const order = `${P}storeSandbox`;
+    await seedBusiness(biz, 'TTD', { wipayApiKey: WIPAY_SANDBOX_KEY, wipayAccountNumber: `${P}sandbox_account` });
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(biz);
+    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V05A', lastName: 'Sandbox', email: `${P}sandbox@test.local` } });
+    await seedInvoice(inv, biz, contact, TOTAL, 'TTD');
+    await db.marketplaceOrder.create({
+      data: {
+        id: order,
+        businessId: biz,
+        orderNumber: `${P}SO-0022`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    storeOrders.updatePaymentStatus.mockClear();
+    const { WiPayConnector } = await import('../src/core/connectors/implementations/wipay.connector');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const connector = new WiPayConnector(app.get(PrismaService), eventStub as any, {} as any);
+
+    for (const platformKey of [undefined, PLATFORM_KEY]) {
+      const setting = platformKey ? 'platform key set' : 'no platform key';
+      if (platformKey) process.env.WIPAY_API_KEY = platformKey;
+      else delete process.env.WIPAY_API_KEY;
+
+      // At 332eed5c: ['wipay'] on every list and the connector 'connected'.
+      await clearRateLimits();
+      const byToken = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/gateways`);
+      expect(byToken.status, JSON.stringify(byToken.body)).toBe(200);
+      expect(byToken.body.map((g: { id: string }) => g.id), `${setting}: pay-link gateway list`).not.toContain('wipay');
+      const bare = await agent().get(`/payments/invoice/${encodeURIComponent(inv)}/gateways`);
+      expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+      expect(bare.body.map((g: { id: string }) => g.id), `${setting}: bare-id gateway list`).not.toContain('wipay');
+      expect((await payments.getAvailableGateways(biz, 'TTD')).map((g) => g.id), `${setting}: storefront gateway list`).not.toContain('wipay');
+      expect((await connector.healthCheck(biz)).status, `${setting}: connector`).not.toBe('connected');
+
+      // At 332eed5c: 201 checkouts into the account it named, verified by the public key.
+      const attempts: Array<[string, () => any]> = [
+        ['pay-link checkout', () => agent().post(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/checkout`).send({ gateway: 'wipay', returnUrl: RETURN_URL })],
+        ['generic invoice checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: inv, gateway: 'wipay', returnUrl: RETURN_URL })],
+        ['generic storefront checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: order, gateway: 'wipay', returnUrl: RETURN_URL })],
+      ];
+      for (const [label, send] of attempts) {
+        await clearRateLimits();
+        const res = await send();
+        expect(res.status, `${setting}: ${label}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, `${setting}: ${label}`).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+      }
+      const direct = await payments
+        .createStorePayment({ orderId: order, amount: STORE_TOTAL, currency: 'TTD', method: 'WIPAY', businessId: biz, returnUrl: RETURN_URL })
+        .then(() => null, (e: any) => e);
+      expect(direct?.getStatus?.(), `${setting}: createStorePayment refuses`).toBe(400);
+      expect(direct.getResponse()).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+
+      // At 332eed5c (the reviewer's probe): 200 'Payment successful', the invoice PAID and the order settled, for a
+      // proof anyone computes: md5(transaction_id + total + '123').
+      const proofs: Array<[string, string, number]> = [
+        ['invoice', inv, TOTAL],
+        ['storefront order', order, STORE_TOTAL],
+      ];
+      for (const [what, payable, total] of proofs) {
+        const t = `${P}wtx_sandbox_${what === 'invoice' ? 'inv' : 'store'}_${platformKey ? 'p' : 'n'}`;
+        const res = await wipay({ transaction_id: t, order_id: payable, status: 'success', total: total.toFixed(2), hash: keyedHash(t, total, WIPAY_SANDBOX_KEY) });
+        expect(res.status, `${setting}: ${what}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, `${setting}: ${what}`).not.toHaveProperty('success', true);
+        expect(await claims('wipay', t), `${setting}: ${what}`).toBe(0);
+      }
+    }
+    delete process.env.WIPAY_API_KEY;
+
+    expect(providerRequests, 'WiPay is never called').toEqual([]);
+    expect(await rowsOf(inv)).toEqual([]);
+    expect(await postingCount(inv)).toBe(0);
+    expect(await invoiceStatus(inv)).toBe('SENT');
+    expect(storeOrders.updatePaymentStatus, 'the storefront order is not settled').not.toHaveBeenCalled();
+    expect((await db.marketplaceOrder.findUnique({ where: { id: order } })).paymentStatus).toBe('UNPAID');
+    expect(await db.notification.count({ where: { businessId: biz } }), 'no refusal notice: no proof verified').toBe(0);
+  });
+
+  it.todo(
+    "PC-21b (W10-WIPAY-KEY review SEC-W10WK-1, D-105): the owner's payment-secret write (the business profile PATCH, IdentityService applyPaymentSecretWrites) refuses WiPay's public sandbox key as the business's WiPay API key. Not in the W10-WIPAY-KEY write set (identity.service.ts); a stored '123' is already inert, read as no key everywhere (PC-21)",
+  );
 });

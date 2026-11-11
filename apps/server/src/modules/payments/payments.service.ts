@@ -16,8 +16,16 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
-import { WIPAY_CURRENCY, resolveWipayMerchant, wipayMerchantComplete, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
+import {
+  WIPAY_CURRENCY,
+  WIPAY_KEY_REQUIRED,
+  platformWipayKeyForTransition,
+  resolveWipayMerchant,
+  wipayMerchantComplete,
+  wipayTakesCurrency,
+} from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
+import { paypalCurrencyRefusal, paypalTakesCurrency } from './paypal-currency';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -153,6 +161,15 @@ function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undef
  * payment was not recorded because the invoice is VOID.
  */
 const INVOICE_VOID_REFUSAL = 'refused:invoice_void';
+
+/**
+ * W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (owner ruling D-105; the D-76
+ * `refused:<reason>` mark): the event type a WiPay transaction's
+ * webhook_events row is kept under when its success was paid into the
+ * platform's WiPay account (a checkout started before D-105) and so was not
+ * recorded on the business's payable (refuseWipayPlatformAccount).
+ */
+const WIPAY_PLATFORM_ACCOUNT_REFUSAL = 'refused:platform-account';
 
 /**
  * W3-VOID-PROVIDER-RACE review CR-VPR-1: createRefundWithPostingByInvoice's
@@ -366,12 +383,23 @@ export class PaymentsService {
    * (a manual refund, then the provider's event for the same money) is not
    * recorded twice, whichever arrives first: the manual refund answers 409
    * in the other order (CommerceService.refundableOf).
+   *
+   * W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07, R0-CMF2 ST-R011-2,
+   * D-90): `refunder` is the person (or KEY, its SYSTEM actor) who made the
+   * refund through PaymentsOpsService.refundCharge, named as the manual
+   * refund door names it: on the refund row's recordedBy, on the reversal or
+   * refund posting's createdById, and on one FINANCE payment_refunded feed
+   * row written through `tx` (auditInTransaction), so it commits with the
+   * refund, and a failed insert rolls the recording back (refundCharge logs
+   * it and the provider's refund event records the refund). A provider
+   * event names no refunder and passes none: unchanged.
    */
   private async createRefundWithPosting(
     original: RefundOriginal,
     refund: ProviderRefund,
     amountToRecord: (tx: Prisma.TransactionClient) => Promise<number>,
     alsoLinkedBy: string[] = [],
+    refunder?: { actorId: string | null },
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -399,11 +427,15 @@ export class PaymentsService {
           businessId: original.businessId,
           reference: original.providerPaymentId,
           notes: refund.notes,
+          // SEC-RCD-1 (R0-PL-07): the refunder refundCharge names.
+          ...(refunder ? { recordedBy: refunder.actorId } : {}),
         },
       });
       await this.revenuePosting.onPaymentRefunded(original.id, {
         tx: txClient,
         refund: { paymentId: created.id, amount },
+        // SEC-RCD-1 (R0-PL-07, R0-CMF2): the posting and its feed row name the refunder, in this transaction.
+        ...(refunder ? { createdById: refunder.actorId, auditInTransaction: true } : {}),
       });
       return created;
     });
@@ -525,6 +557,81 @@ export class PaymentsService {
       }
       return created;
     });
+  }
+
+  /**
+   * W10-REFUND-CHARGE-DOOR (SOT-10b; the V1-29 refund convention, owner
+   * rulings D-14 and D-102): the refund an operator or KEY made through
+   * PaymentsOpsService.refundCharge, recorded through the provider refund
+   * door. refundCharge wrote the negative REFUNDED row itself, with no
+   * reversal of the original's posting, and the provider's refund event then
+   * found the row by its refund id and posted nothing either: the refund never
+   * reached the ledger and the invoice was never reopened.
+   *
+   * The original is the business's SUCCESSFUL payment of `provider` recorded
+   * under the charge id itself, as refundCharge read it: a refund of a payment
+   * recorded under its Checkout Session or PaymentIntent id is recorded, linked
+   * and posted by the provider's refund event, as before. createRefundWithPosting
+   * writes the row (reference = the original's providerPaymentId) and
+   * RevenuePostingService.onPaymentRefunded's posting in one transaction under
+   * the invoice lock, deduped on the refund id and never more than what is
+   * left of the payment; a Stripe refund is counted against a cumulative
+   * charge.refunded row as the webhook counts it (stripeRefundToRecord). So
+   * whichever of this call and the provider's refund.created or charge.refunded
+   * comes first records and posts the refund, and the other adds nothing: it
+   * is posted once in total. The invoice is then reconciled as the provider
+   * refund door reconciles it (under 'keep'): a refund that unsettles it
+   * reopens it (D-14: SENT with paidAt cleared, or PARTIALLY_PAID), and that
+   * reopen undoes its money effects (D-102). A failed reconcile is logged, as
+   * the provider refund door logs it.
+   *
+   * Returns whether a row was recorded. A recording that fails throws, with
+   * nothing written: the provider refunded, and its refund event records it.
+   *
+   * Review SEC-RCD-1 (R0-PL-07, R0-CMF2 ST-R011-2, D-90): `actorId` is who
+   * made the refund (the authenticated user of the payments-ops route, a D-46
+   * SUPER_ADMIN member included, or KEY_SYSTEM_ACTOR_ID for KEY's
+   * payments_refund_charge), named on the refund row's recordedBy, the
+   * reversal or refund posting's createdById and one FINANCE payment_refunded
+   * feed row in the same transaction (KEY as SYSTEM, a person as USER), as
+   * the manual refund door names its refunder. A refund the provider's event
+   * records first names nobody, as before: no person is known to it.
+   */
+  async recordGatewayRefund(input: {
+    businessId: string;
+    provider: string;
+    chargeId: string;
+    refund: { id: string; amount: number; currency: string };
+    reason?: string | null;
+    actorId: string | null;
+  }): Promise<boolean> {
+    const { businessId, provider, chargeId, refund } = input;
+    if (!refund.id) return false;
+    const original: RefundOriginal | null = await this.prisma.client.payment.findFirst({
+      where: { businessId, provider, status: 'SUCCESSFUL', providerPaymentId: chargeId },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
+    });
+    if (!original) return false;
+    const amount = Math.abs(Number(refund.amount));
+    const persisted = await this.createRefundWithPosting(
+      original,
+      {
+        provider,
+        providerPaymentId: refund.id,
+        currency: (refund.currency || original.currency).toUpperCase(),
+        notes: input.reason ?? null,
+      },
+      provider === 'stripe'
+        ? (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: toCents(amount), charge: chargeId, cumulative: false })
+        : async () => amount,
+      [],
+      { actorId: input.actorId ?? null },
+    ).catch(this.refundAlreadyRecorded(provider, refund.id));
+    if (!persisted) return false;
+    await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {
+      this.logger.warn(`${provider} refund ${refund.id} reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
+    });
+    return true;
   }
 
   /**
@@ -847,7 +954,10 @@ export class PaymentsService {
     // starts and its callbacks can be verified (wipayCheckoutTarget): a key
     // that verifies this business's payments and an account number to pay
     // into, both from one source (resolveWipayMerchant; repair round 2,
-    // G6RC-1: the business's own pair or the platform's, never mixed).
+    // G6RC-1). W10-WIPAY-KEY (D-105): that source is the business's own pair;
+    // a business with no WiPay key of its own is not offered WiPay (it was
+    // offered the platform's account). This list serves the pay link, the
+    // bare-id pay page and the storefront checkout (SiteController).
     // D-69 (G6ML-2): and only for a TTD amount, until WiPay's currency
     // parameter is verified from its documentation.
     const currency = payableCurrency ?? business?.currency ?? null;
@@ -859,13 +969,16 @@ export class PaymentsService {
       });
     }
 
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): PayPal is offered only for an amount in a currency PayPal supports
+    // (paypal-currency.ts; never TTD, JMD, BBD, GYD or XCD), and in that currency: the order is made in the
+    // payable's own currency (V1-05), not USD.
     const paypalId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
     const paypalSecret = meta.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET;
-    if (paypalId && paypalSecret) {
+    if (paypalId && paypalSecret && paypalTakesCurrency(currency)) {
       gateways.push({
         id: 'paypal',
         name: 'PayPal',
-        currencies: ['USD'],
+        currencies: [normalizeCurrency(currency)],
       });
     }
 
@@ -2289,18 +2402,21 @@ export class PaymentsService {
 
   /**
    * The WiPay API key a callback is verified with: the key of the WiPay
-   * account the business's checkout pays into. That is the business's own
-   * (metaData.wipayApiKey); else, for a business that checks out into the
-   * platform's account (no WiPay setting of its own), the platform's
-   * (WIPAY_API_KEY). Review V05-SEC-3: a business with its own WiPay account
-   * but no key of its own gets null, so the platform key never settles a
-   * payable of a tenant whose money goes to another account. Nothing
-   * configured is null: the callback is refused, never checked against a
-   * default (WiPay's sandbox key is public).
+   * account the business's checkout pays into, the business's own
+   * (metaData.wipayApiKey). W10-WIPAY-KEY (D-105; SEC-V33-2, PC-11b): never
+   * the platform's (WIPAY_API_KEY). A business with no WiPay setting of its
+   * own used to check out into the platform's account and be verified by the
+   * platform key, so a success proved by that shared key could be booked
+   * against any such tenant's invoice or storefront order of the same total
+   * (WiPay's proof names no order_id). Now the key that proves a success
+   * names the business whose payable it may settle, invoice and storefront
+   * order alike. Review V05-SEC-3: a business with its own WiPay account but
+   * no key of its own gets null. Nothing configured is null: the callback is
+   * refused, never checked against a default (WiPay's sandbox key is public).
    */
   private static wipayApiKey(metaData: unknown): string | null {
-    // Trial-N repair round 2 (G6RC-1): the key of the one merchant the business resolves to, its own or the
-    // platform's (resolveWipayMerchant); the gateway list, the checkouts and the connector read the same pair.
+    // Trial-N repair round 2 (G6RC-1) and D-105: the key of the business's own merchant (resolveWipayMerchant);
+    // the gateway list, the checkouts and the connector read the same pair.
     return resolveWipayMerchant(metaData).apiKey;
   }
 
@@ -2326,6 +2442,17 @@ export class PaymentsService {
   }
 
   /**
+   * W10-PAYPAL-CURRENCY (owner ruling D-106, PC-08b): a PayPal order or capture
+   * for an invoice or storefront order in a currency PayPal does not support
+   * (paypal-currency.ts) is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before
+   * PayPal is called. The refusal names the currency, never the payable.
+   */
+  private static assertPaypalCurrency(currency: string | null | undefined, payable: 'invoice' | 'order'): void {
+    if (paypalTakesCurrency(currency)) return;
+    throw new BadRequestException(paypalCurrencyRefusal(currency, payable));
+  }
+
+  /**
    * Review V05-SEC-1: where a WiPay checkout goes and which merchant it names.
    * The API key is the secret behind the callback proof (wipayResponseHash),
    * so it never leaves this server: it used to be sent as developer_id, and so
@@ -2341,6 +2468,12 @@ export class PaymentsService {
    * the payer was charged and nothing was recorded. The keyless sandbox
    * checkout is gone with it: no key verifies a sandbox callback either (the
    * public sandbox key is never a default), so it could settle nothing.
+   *
+   * W10-WIPAY-KEY (D-105): a business with no WiPay key of its own is refused
+   * with code WIPAY_KEY_REQUIRED, every checkout alike (pay link, generic
+   * invoice, event ticket and storefront checkouts, createStorePayment). It
+   * used to check out into the platform's account (WIPAY_API_KEY,
+   * WIPAY_ACCOUNT_NUMBER), which tenants no longer share.
    */
   private static wipayCheckoutTarget(metaData: unknown): {
     apiUrl: string;
@@ -2348,12 +2481,15 @@ export class PaymentsService {
     developerId: string;
     accountNumber?: string;
   } {
-    // Trial-N repair round 2 (G6RC-1): the key and the account are one merchant's, the business's own pair or the
-    // platform's (resolveWipayMerchant). A business with its own key and no account of its own is refused here; it
-    // was sent to the platform's account, whose callback its own key then refused.
+    // Trial-N repair round 2 (G6RC-1): the key and the account are one merchant's, the business's own pair
+    // (resolveWipayMerchant; D-105: never the platform's). A business with its own key and no account of its own is
+    // refused here; it was sent to the platform's account, whose callback its own key then refused.
     const { apiKey, accountNumber } = resolveWipayMerchant(metaData);
     if (!apiKey) {
-      throw new BadRequestException('WiPay is not configured for this business: no WiPay API key to verify its payments');
+      throw new BadRequestException({
+        code: WIPAY_KEY_REQUIRED,
+        message: 'WiPay is not configured for this business: no WiPay API key to verify its payments',
+      });
     }
     if (!accountNumber) {
       throw new BadRequestException('WiPay is not configured for this business: no WiPay account number');
@@ -2467,6 +2603,17 @@ export class PaymentsService {
    * used to write a FAILED row and claim the transaction id of the caller's
    * choosing; since the packet it was a 400 the pay page showed the payer
    * as 'Invalid WiPay callback signature'.
+   *
+   * W10-WIPAY-KEY (D-105; SEC-V33-2, PC-11b): the key is the PAYABLE'S
+   * business's own (wipayApiKey), for an invoice and a storefront order alike,
+   * never the platform's. A storefront order of a business with no WiPay key
+   * of its own is settled by no callback, and a success proved with one
+   * business's key is refused for another business's payable. Review
+   * SEC-W10WK-1: WiPay's public sandbox key ('123') saved as a business's key
+   * is no key (resolveWipayMerchant). Review SEC-W10WK-2 / WK-CR-1: a success
+   * the platform key proves for a business with no key of its own (a checkout
+   * into the platform's account started before D-105) settles nothing and is
+   * kept refused and told (refuseWipayPlatformAccount), not a bare 400.
    */
   async handleWipayCallback(queryParams: WipayCallbackParams): Promise<{ success: boolean; invoiceId?: string; message: string }> {
     const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -2507,10 +2654,27 @@ export class PaymentsService {
     // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): for an invoice that is an amount a checkout of it asked for,
     // as kept when it asked (review SEC-CAP-1..3, CR-CAP-1: wipayRequestedInvoiceTotals), or the whole
     // total a checkout made before it asked for.
-    const requestedTotal = (invoice ? await this.wipayRequestedInvoiceTotals(invoice) : [Number(order!.total)]).find((t) =>
-      PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash),
-    );
+    const requestedTotals = invoice ? await this.wipayRequestedInvoiceTotals(invoice) : [Number(order!.total)];
+    const requestedTotal = requestedTotals.find((t) => PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash));
     if (requestedTotal === undefined) {
+      // W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (the D-105 deploy transition): a business with no WiPay key of
+      // its own checked out into the platform's WiPay account until D-105. A success the platform key proves for
+      // such a business's payable is WiPay's word that money reached the platform's account: it settles nothing,
+      // and is kept refused and told (refuseWipayPlatformAccount) instead of a 400 that records nothing.
+      const platformKey = apiKey ? null : platformWipayKeyForTransition();
+      const platformTotal = platformKey
+        ? requestedTotals.find((t) => PaymentsService.wipayProofVerifies(platformKey, transaction_id, t, hash))
+        : undefined;
+      if (platformTotal !== undefined) {
+        return this.refuseWipayPlatformAccount({
+          transactionId: transaction_id!,
+          payableType: invoice ? 'invoice' : 'order',
+          payableId: order_id,
+          businessId,
+          currency: invoice ? invoice.currency : order!.currency,
+          total: platformTotal,
+        });
+      }
       this.logger.error(
         `WiPay callback for ${order_id} refused: ${apiKey ? 'its hash is not WiPay\'s keyed response hash' : 'no WiPay API key is configured to verify it'}`,
       );
@@ -2684,6 +2848,96 @@ export class PaymentsService {
   }
 
   /**
+   * W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (owner ruling D-105; the D-76
+   * pattern of refuseWipayCurrency): the deploy transition. Until D-105 a
+   * business with no WiPay setting of its own checked out into the platform's
+   * WiPay account, and its success callbacks were keyed with the platform's
+   * key. A checkout started before D-105 and paid after it is therefore proved
+   * with the platform key (WIPAY_API_KEY, platformWipayKeyForTransition) for a
+   * payable of a business that now has no key verifying it: the money sits in
+   * the platform's account, not the business's. Nothing is recorded as money:
+   * no Payment row, no posting, the invoice and the storefront order as they
+   * were. The transaction's webhook_events row is kept, marked
+   * `refused:platform-account` with the payable's business, so every
+   * redelivery is a no-op, and the business is told once (a 'payment.refused'
+   * notification, reason 'platform-account'). The payer is answered
+   * { success: false }. It used to be a 400 'Invalid WiPay callback
+   * signature' with only a log line, so nothing in the system recorded the
+   * money (the review's repro: PC-11 at 332eed5c).
+   *
+   * Reconciliation (operator): the platform's WiPay account holds each such
+   * payment; webhook_events rows with provider 'wipay' and event_type
+   * 'refused:platform-account' name the transaction and the business, and the
+   * business's notification carries the payable and the amount. They are
+   * passed on or refunded by hand from the platform's WiPay account.
+   *
+   * Only a proof the platform key verifies over an amount this server asked
+   * for on that payable reaches here (the platform key is the secret behind
+   * it), and only for a business with no WiPay key of its own: a business
+   * with its own key is checked against its own key alone. WiPay's proof
+   * names no order_id, so which keyless payable such a success is kept
+   * against is the caller's choice; it is kept once, settles nothing and only
+   * names where the money went.
+   */
+  private async refuseWipayPlatformAccount(input: {
+    transactionId: string;
+    payableType: 'invoice' | 'order';
+    payableId: string;
+    businessId: string;
+    currency: string | null | undefined;
+    total: number;
+  }): Promise<{ success: boolean; invoiceId?: string; message: string }> {
+    const currency = normalizeCurrency(input.currency) || PaymentsService.WIPAY_CURRENCY;
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'wipay',
+      input.transactionId,
+      WIPAY_PLATFORM_ACCOUNT_REFUSAL,
+      input.businessId,
+    );
+    if (fresh) {
+      this.logger.error(
+        `WiPay transaction ${input.transactionId} for ${input.payableType} ${input.payableId} (business ${input.businessId}) ` +
+          `not recorded: it was paid into the platform's WiPay account by a checkout started before D-105 (proved with ` +
+          `WIPAY_API_KEY); reconcile it from the platform's WiPay account (webhook_events '${WIPAY_PLATFORM_ACCOUNT_REFUSAL}')`,
+      );
+      await this.prisma.client.notification
+        .create({
+          data: {
+            businessId: input.businessId,
+            type: 'payment.refused',
+            title: 'WiPay payment not recorded',
+            body:
+              `WiPay reported a successful payment (transaction ${input.transactionId}) of ${currency} ` +
+              `${Number(input.total).toFixed(2)} for ${input.payableType} ${input.payableId}. It was paid into the ` +
+              "platform's WiPay account, not yours, by a checkout started before WiPay needed your own key, so it was " +
+              'not recorded. Contact support to have it passed on to you or refunded, then record it by hand.',
+            data: {
+              provider: 'wipay',
+              transactionId: input.transactionId,
+              payableType: input.payableType,
+              payableId: input.payableId,
+              currency,
+              total: input.total,
+              reason: 'platform-account',
+            },
+          },
+        })
+        .catch((e: unknown) =>
+          this.logger.error(
+            `Could not notify business ${input.businessId} of WiPay platform-account transaction ${input.transactionId}: ${e instanceof Error ? e.message : e}`,
+          ),
+        );
+    }
+    return {
+      success: false,
+      invoiceId: input.payableId,
+      message:
+        `This payment was made into the platform's WiPay account, not the business's, so it was not recorded on this ` +
+        `${input.payableType}; the business has been told`,
+    };
+  }
+
+  /**
    * W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern): a verified WiPay success
    * for a VOID invoice records no money; its transaction is kept refused, the
    * owner is told once (refuseVoidInvoicePayment) and the payer is answered
@@ -2731,6 +2985,10 @@ export class PaymentsService {
     // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): the remainder net of payments and APPLIED credit notes,
     // the amount capturePaypalOrder binds the order to.
     const due = await this.checkoutAmountOf(invoice);
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): an invoice in a currency PayPal does not support is refused 400 before
+    // PayPal is called (PayPal refused the order, and the payer got 500). After the payable gate and the amount, so
+    // a settled invoice still answers 409 whatever the method.
+    PaymentsService.assertPaypalCurrency(invoice.currency, 'invoice');
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -2750,8 +3008,7 @@ export class PaymentsService {
               description: `Invoice ${invoice.invoiceNumber} - ${invoice.business.name}`,
               amount: {
                 // V1-05: the invoice's own currency (it was USD whatever the invoice's), which the capture checks.
-                // PayPal does not offer every currency (TTD among them): it refuses such an order and the checkout
-                // fails closed here; the up-front 400 is held by pay-link-token-gate TG-14/TG-14b (review V05-COR-4).
+                // W10-PAYPAL-CURRENCY (D-106): one PayPal supports (assertPaypalCurrency above).
                 currencyCode: normalizeCurrency(invoice.currency),
                 value: due.toFixed(2),
               },
@@ -2779,19 +3036,12 @@ export class PaymentsService {
     returnUrl?: string;
   }): Promise<{ paymentId?: string; redirectUrl?: string; status: string }> {
     if (input.method === 'CASH' || input.method === 'MANUAL') {
-      const payment = await this.prisma.client.payment.create({
-        data: {
-          provider: 'manual',
-          providerPaymentId: `manual_${input.orderId}_${Date.now()}`,
-          amount: input.amount,
-          currency: input.currency,
-          status: 'PENDING',
-          method: input.method.toLowerCase(),
-          invoiceId: input.orderId,
-          businessId: input.businessId,
-        },
-      });
-      return { paymentId: payment.id, status: 'PENDING_PAYMENT' };
+      // W10-STORE-PAYMENT-INTENT (D-18): no provider session and no Payment row. The PENDING intent written here
+      // put the MarketplaceOrder id in payments.invoice_id, a foreign key to invoices, so the write failed (the
+      // generic checkout answered 500), and nothing would have settled or retired it. The order row carries its
+      // payment state (paymentStatus PENDING, paymentMethod CASH / MANUAL), and the operator's offline completion
+      // (StoreOrderService.completeOfflineOrder -> completeCheckout) writes the settled row through the door.
+      return { status: 'PENDING_PAYMENT' };
     }
 
     if (input.method === 'WIPAY') {
@@ -2923,6 +3173,9 @@ export class PaymentsService {
     }
 
     if (input.method === 'PAYPAL') {
+      // W10-PAYPAL-CURRENCY (D-106, PC-08b): an order in a currency PayPal does not support is refused 400 before
+      // PayPal is called (the storefront checkout and the generic storefront checkout both come here).
+      PaymentsService.assertPaypalCurrency(input.currency, 'order');
       const business = await this.prisma.client.business.findUnique({
         where: { id: input.businessId },
         select: { metaData: true, name: true },
@@ -2944,8 +3197,8 @@ export class PaymentsService {
               amount: {
                 // Trial-N review (G6PUB-SEC-4): the order's own currency (it was USD whatever the order's), as
                 // createPaypalOrder does for an invoice; the capture webhook settles the order only for its total
-                // in that currency (maybeCompleteStorefrontOrder). PayPal refuses a currency it does not offer
-                // (TTD among them), so such a checkout fails closed here (PC-08b).
+                // in that currency (maybeCompleteStorefrontOrder). W10-PAYPAL-CURRENCY (D-106): one PayPal supports
+                // (assertPaypalCurrency above).
                 currencyCode: normalizeCurrency(input.currency),
                 value: input.amount.toFixed(2),
               },
@@ -2983,6 +3236,9 @@ export class PaymentsService {
     // net of payments and APPLIED credit notes, never invoice.total): the order must be for it, and it is
     // what is recorded.
     const due = await this.checkoutAmountOf(invoice);
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): no PayPal order exists for an invoice in a currency PayPal does not
+    // support (createPaypalOrder refuses it), so its capture is refused 400 before PayPal is called (no order read).
+    PaymentsService.assertPaypalCurrency(invoice.currency, 'invoice');
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -3259,6 +3515,13 @@ export class PaymentsService {
         businessId: order.businessId,
         returnUrl: input.returnUrl || input.successUrl,
       });
+      // W10-STORE-PAYMENT-INTENT (D-18): a cash or manual gateway starts nothing online (createStorePayment writes
+      // no intent for it); the order is paid offline and recorded by the business. A clean 400, never 500.
+      if (result.status === 'PENDING_PAYMENT') {
+        throw new BadRequestException(
+          'A cash or manual payment starts no online checkout: this order is paid offline and the business records it',
+        );
+      }
       if (result.redirectUrl) {
         return { type: 'redirect', redirectUrl: result.redirectUrl };
       }
