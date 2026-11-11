@@ -912,21 +912,20 @@ describe('W9-TEXT-ONLY-CONTACT-WRITERS (D-63): rows that name a contact only in 
  * database before they were recorded here (a temporary case in the TS-13
  * describe, removed): rows the two writers stored before the packet, and the
  * KEY chat prompt. The packet changes what the writers store, not the timeline
- * rule; each needs a decision the packet does not carry.
+ * rule; each needs a decision the packet does not carry. Both are closed now, so no case is
+ * left here (Vitest refuses a describe block with no test), only these pointers:
  */
-describe('W9-TEXT-ONLY-CONTACT-WRITERS review follow-ups outside the write set (TS-13d, TS-13e)', () => {
-  // TS-13d (review SEC-W9TO-1, D-63) is live in test/data-cleanup-scripts.integration.test.ts
-  // (W10-DATA-CLEANUP-SCRIPTS, owner ruling D-115, was it.todo): the operator script
-  // apps/server/scripts/backfill-timeline-contact-links.ts sets the stored rows' contactId from
-  // the invoice's / intake's contact in the same business, and moves a row whose source is gone
-  // to a module the table does not map (OWNER and ADMIN only, each also needing read on the
-  // row's original module: the D-115 term of canReadActivityRow, DCS-T07). Review SEC-W10AT-1:
-  // both AI prompts (POST ai/chat, GET ai/briefing) read through the same rule, so the backfill
-  // treats them too.
-  // TS-13e (review SEC-W9TO-2, D-63) is live below (W10-ADVISOR-TIMELINE, was it.todo): the KEY
-  // chat's prompt is built from the rows the timeline rule serves the member and the figures they read.
-  // Until the D-115 backfill runs, the rows of TS-13d reach that prompt too (review SEC-W10AT-1).
-});
+// TS-13d (review SEC-W9TO-1, D-63) is live in test/data-cleanup-scripts.integration.test.ts
+// (W10-DATA-CLEANUP-SCRIPTS, owner ruling D-115, was it.todo): the operator script
+// apps/server/scripts/backfill-timeline-contact-links.ts sets the stored rows' contactId from
+// the invoice's / intake's contact in the same business, and moves a row whose source is gone
+// to a module the table does not map (OWNER and ADMIN only, each also needing read on the
+// row's original module: the D-115 term of canReadActivityRow, DCS-T07). Review SEC-W10AT-1:
+// both AI prompts (POST ai/chat, GET ai/briefing) read through the same rule, so the backfill
+// treats them too.
+// TS-13e (review SEC-W9TO-2, D-63) is live below (W10-ADVISOR-TIMELINE, was it.todo): the KEY
+// chat's prompt is built from the rows the timeline rule serves the member and the figures they read.
+// Until the D-115 backfill runs, the rows of TS-13d reach that prompt too (review SEC-W10AT-1).
 
 /**
  * W10-ADVISOR-TIMELINE (review SEC-W9TO-2; owner ruling D-63, with D-100 for the money signals):
