@@ -868,21 +868,124 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
     }
   });
 
-  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73), left open: through the real
-  // FlowOrchestratorService.executeToolDirectly the refusal does not reach the dispatcher as the
-  // HttpException CallLogService throws. executeTool catches it and answers { success: false, error }
-  // with the message alone, and executeToolDirectly rethrows a plain Error(result.error), so the
-  // dispatcher sees no status and still retries and counts a member's 404/403 toward the circuit of
-  // that business and tool. QW-07 holds there (the circuit is the business's own), but five refusals
-  // stop call_create_task in biz itself for CIRCUIT_TIMEOUT_MS. executeToolDirectly must carry the
-  // refusal's status (rethrow an HttpException of it), which is FlowOrchestratorService, outside
-  // W9-DISPATCH-CIRCUIT's write set (ActionDispatcherService only).
-  // Review SEC-W9DC-1 (confirmed by running, repair round 1): over the real executeToolDirectly and
-  // executeTool, five 404 'Contact not found' refusals in biz made 15 tool calls (each retried twice)
+  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73), left open there and closed by W10-DISPATCH-STATUS (D-73):
+  // through the real FlowOrchestratorService.executeToolDirectly the refusal did not reach the dispatcher
+  // as the HttpException CallLogService throws. executeTool caught it and answered { success: false, error }
+  // with the message alone, and executeToolDirectly rethrew a plain Error(result.error), so the dispatcher
+  // saw no status and still retried and counted a member's 404/403 toward the circuit of that business
+  // and tool. Review SEC-W9DC-1 (confirmed by running, W9 repair round 1): over the real executeToolDirectly
+  // and executeTool, five 404 'Contact not found' refusals in biz made 15 tool calls (each retried twice)
   // and opened biz's circuit ({open: true, failures: 5}); biz's OWNER was then answered 'Circuit breaker
-  // open for tool "call_create_task"', while bizB ran (QW-07c pins that half). Needs a follow-up packet
-  // with FlowOrchestratorService in its write set.
-  it.todo('QW-07b W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): through the real FlowOrchestratorService.executeToolDirectly, a member\'s call_create_task refused inside dispatch (404, 403) is answered once and counts toward no circuit in its own business either: five such refusals in biz leave call_create_task running for biz\'s OWNER (executeToolDirectly rethrows a plain Error, so the dispatcher cannot see the status; FlowOrchestratorService, outside this packet\'s write set)');
+  // open for tool "call_create_task"', while bizB ran (QW-07c pins that half).
+  // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): executeToolDirectly rethrows the tool's HttpException, its
+  // status and message, so W9's non-retryable-4xx rule (isToolRefusal) runs in production; the envelope
+  // executeTool answers its other callers keeps its shape. Here the queue's dispatcher calls the REAL
+  // executeToolDirectly and executeTool over the harness's orchestrator (call_create_task its own case,
+  // over the real CallLogService), on a worker of the case's own (its own ActionDispatcherService, so no
+  // circuit leaks into other cases), with the job's retryCount 2 as PlanExecutorService enqueues it.
+  it('QW-07b W9-DISPATCH-CIRCUIT review SEC-W9DC-1 (SEC-W8CTNM-1, D-73): through the real FlowOrchestratorService.executeToolDirectly, a member\'s call_create_task refused inside dispatch (404, 403) reaches the dispatcher as an HttpException of the refusal\'s status, is answered once and counts toward no circuit in its own business either: five such refusals in biz leave call_create_task running for biz\'s OWNER, and the envelope executeTool answers keeps its shape (W10-DISPATCH-STATUS, D-73, was it.todo)', async () => {
+    const { ActionDispatcherService } = await import('../src/modules/ai/action-dispatcher.service');
+    const { QueueService } = await import('../src/modules/ai/queue.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+    const superAdmin = `${P}qw07b_sa`; // a SUPER_ADMIN who is no member of biz (D-46)
+    const ownerOnly = `${P}qw07b_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2, D-104)
+    const bizC = `${P}qw07b_bizc`;
+    const cC = `${P}qw07b_c_bizc`;
+    await db.user.create({ data: { id: superAdmin, email: `${P}qw07b_sa@test.local`, role: 'SUPER_ADMIN' } });
+    await db.user.create({ data: { id: ownerOnly, email: `${P}qw07b_owner_only@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: bizC, name: 'V87B Biz C (QW-07b)', ownerId: ownerOnly } });
+    await db.contact.create({ data: { id: cC, businessId: bizC, firstName: 'V87B C', visibility: 'TEAM', ownerId: ownerOnly } });
+    const callLogs = (businessId: string) => db.callLog.findMany({ where: { businessId, notes: { startsWith: 'v87b qw07b' } }, select: { contactId: true, callerId: true, notes: true } });
+
+    // What reached the dispatcher from the real executeToolDirectly on each failed attempt.
+    const delivered: Array<{ planStepId?: string; error: unknown }> = [];
+    const realExecuteToolDirectly = FlowOrchestratorService.prototype.executeToolDirectly;
+    const flowAsProduction = {
+      executeToolDirectly: async (businessId: string, toolName: string, args: Record<string, unknown>, planContext?: { planId: string; planStepId: string }, action?: any) => {
+        dispatched.push({ toolName, planStepId: planContext?.planStepId, principal: action?.principalUserId, surface: action?.surface });
+        try {
+          return await realExecuteToolDirectly.call(flow, businessId, toolName, args, planContext, action);
+        } catch (e) {
+          delivered.push({ planStepId: planContext?.planStepId, error: e });
+          throw e;
+        }
+      },
+    };
+    const ALLOW = { allowed: true, tier: 1, reason: 'v87b: allowed', requiresFormalApproval: false, requiresAdminApproval: false, requiresQuickConfirm: false };
+    const governance = { evaluate: async () => ({ ...ALLOW }), evaluateAutoApproval: async () => ({ ...ALLOW, autoApproved: true }), getToolTier: () => 1 };
+    const events = { emit: () => true };
+    const executionLog = new AiExecutionLogService(prisma);
+    const dispatcher = new ActionDispatcherService(prisma, events as any, executionLog, governance as any, flowAsProduction as any, { registerAction: async () => undefined } as any);
+    // Production's retry delays are 1 s and 3 s; the attempts are production's, only their spacing is not.
+    (dispatcher as unknown as { RETRY_DELAYS: number[] }).RETRY_DELAYS = [0, 0];
+    const worker = Object.create(QueueService.prototype);
+    Object.assign(worker, {
+      prisma, events, governance, executionLog, actionDispatcher: dispatcher, flowOrchestrator: flowAsProduction,
+      stateMachine: { transition: async () => undefined },
+      logger: new Logger('v87b-qw07b-queue'),
+    });
+    const CLOSED = { open: false, failures: 0, lastFailure: null };
+
+    try {
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual(CLOSED);
+      const refusals: Array<{ planId: string; userId: string; businessId: string; contactId: string; status: number; error: RegExp }> = [];
+      for (let i = 1; i <= 5; i++) {
+        refusals.push({ planId: `${P}qw07b_crmw_${i}`, userId: ID.staffCrmW, businessId: ID.biz, contactId: ID.cPriv, status: 404, error: /^Contact not found$/ });
+      }
+      refusals.push({ planId: `${P}qw07b_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, status: 403, error: /Only a member of this business/ });
+      refusals.push({ planId: `${P}qw07b_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, status: 403, error: /Only a member of this business/ });
+      for (const r of refusals) {
+        // callerId is the tool contract's (validateToolInput requires it); the dispatcher ignores it (D-88).
+        const args = { contactId: r.contactId, callerId: ID.owner, notes: `v87b qw07b ${r.planId}` };
+        const stepId = await seedQueuePlan(r.planId, r.userId, 'call_create_task', args, r.businessId);
+        // It passes the gate before dispatch (the refusal is the tool's, inside dispatch).
+        expect(await planStepRunRefusal(prisma, r.businessId, r.planId, 'call_create_task'), r.planId).toBeNull();
+        const result = await runQueueStep(r.planId, 'call_create_task', args, r.businessId, { retryCount: 2, worker });
+        expect(result.ok, r.planId).toBe(false);
+        // Answered once: a refusal is not retried.
+        expect(dispatchedFor(stepId), r.planId).toHaveLength(1);
+        // It reached the dispatcher as an HttpException of the refusal's status, with the tool's message.
+        const reached = delivered.filter((d) => d.planStepId === stepId).map((d) => d.error);
+        expect(reached, r.planId).toHaveLength(1);
+        expect(reached[0], r.planId).toBeInstanceOf(HttpException);
+        expect((reached[0] as HttpException).getStatus(), r.planId).toBe(r.status);
+        expect((reached[0] as Error).message, r.planId).toMatch(r.error);
+        const row = await planRow(r.planId);
+        expect(row.steps[0].status, r.planId).toBe('failed');
+        expect(String(row.steps[0].errorMessage), r.planId).toMatch(r.error);
+      }
+      expect(await callLogs(ID.biz)).toEqual([]);
+      expect(await callLogs(bizC)).toEqual([]);
+      // No refusal counted, in biz's own circuit either.
+      expect(dispatcher.getCircuitStatus('call_create_task', ID.biz)).toEqual(CLOSED);
+      expect(dispatcher.getCircuitStatus('call_create_task', bizC)).toEqual(CLOSED);
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual(CLOSED);
+
+      // biz's OWNER still runs call_create_task in biz: dispatched once, completed, the call log recorded.
+      const planA = `${P}qw07b_owner`;
+      const argsA = { contactId: ID.cTeam, callerId: ID.staff, notes: 'v87b qw07b biz owner' };
+      const stepA = await seedQueuePlan(planA, ID.owner, 'call_create_task', argsA);
+      const ranA = await runQueueStep(planA, 'call_create_task', argsA, ID.biz, { retryCount: 2, worker });
+      expect(ranA, JSON.stringify(ranA)).toMatchObject({ ok: true });
+      expect(dispatchedFor(stepA)).toHaveLength(1);
+      expect((await planRow(planA)).steps[0].status).toBe('completed');
+      expect(await callLogs(ID.biz)).toEqual([{ contactId: ID.cTeam, callerId: ID.owner, notes: 'v87b qw07b biz owner' }]);
+      expect(dispatcher.getCircuitStatus('call_create_task', ID.biz)).toEqual(CLOSED);
+
+      // The envelope executeTool answers its other callers (executeToolDirect here, as the plan run over
+      // HTTP and the chat read it) keeps its shape: the same keys, the tool's message as the error.
+      const planE = `${P}qw07b_envelope`;
+      const argsE = { contactId: ID.cPriv, callerId: ID.owner, notes: 'v87b qw07b envelope' };
+      const stepE = await seedQueuePlan(planE, ID.staffCrmW, 'call_create_task', argsE);
+      const envelope = await flow.executeToolDirect(ID.biz, 'call_create_task', argsE, planE, stepE, { surface: 'PLAN_QUEUE', planId: planE, planStepId: stepE });
+      expect(Object.keys(envelope).sort()).toEqual(['changedEntities', 'error', 'family', 'followOnSuggestions', 'name', 'result', 'riskTier', 'success', 'toolCallId']);
+      expect(envelope).toMatchObject({ success: false, result: null, error: 'Contact not found', name: 'call_create_task' });
+      expect(await callLogs(ID.biz)).toHaveLength(1);
+    } finally {
+      dispatcher.resetCircuit('call_create_task');
+    }
+  });
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */
