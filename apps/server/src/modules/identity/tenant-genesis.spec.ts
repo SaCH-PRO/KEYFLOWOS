@@ -128,7 +128,7 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect($transaction.mock.calls[0][1]).toEqual({ isolationLevel: 'Serializable' });
   });
 
-  it('reuses the existing bootstrap Business instead of creating a second one', async () => {
+  it('reuses the existing bootstrap Business instead of creating a second one, and writes no Membership on it (owner ruling D-104, review SEC-W10OM-3: the caller is checked to be a member)', async () => {
     const { tx, calls } = txRecorder();
     tx.business.findFirst = vi.fn(async () => {
       calls.push('business.findFirst');
@@ -142,7 +142,30 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(out.isNewBusiness).toBe(false);
     expect(out.business.id).toBe('biz-existing');
     expect(tx.business.create).not.toHaveBeenCalled();
-    expect(calls).toEqual(['business.findFirst', 'membership.upsert']);
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(calls).toEqual(['business.findFirst', 'business.findFirst']);
+    expect(tx.business.findFirst.mock.calls[1]).toEqual([{ where: { id: 'biz-existing', members: { some: { userId: 'user-1' } } }, select: { id: true } }]);
+  });
+
+  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, review SEC-W10OM-3): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership there is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
+    const { tx, calls } = txRecorder();
+    let read = 0;
+    tx.business.findFirst = vi.fn(async () => {
+      calls.push('business.findFirst');
+      read += 1;
+      return read === 1 ? { id: 'biz-existing', name: 'Existing' } : null;
+    });
+    const $transaction = vi.fn(async (fn: any) => fn(tx));
+    const service = buildIdentity({ $transaction });
+
+    const error = await ensure(service, 'user-1', 'Ignored Name').then(() => null, (e: unknown) => e);
+
+    expect((error as any)?.getStatus?.()).toBe(403);
+    expect((error as any)?.getResponse?.()).toMatchObject({ code: 'OWNER_MEMBERSHIP_REQUIRED' });
+    expect(tx.business.create).not.toHaveBeenCalled();
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(tx.membership.create).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
   });
 
   it('retries on a write conflict and converges on the winner’s Business', async () => {

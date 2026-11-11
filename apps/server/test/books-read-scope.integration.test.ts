@@ -137,6 +137,7 @@ async function cleanup() {
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -578,7 +579,7 @@ describe('FOLLOW3-A6 review SEC-A5A6-04 (BRS-11): a SUPER_ADMIN with no Membersh
 });
 
 describe('FOLLOW3-A6 review CR-A6-02 / SEC-A5A6-03 (BRS-12): the distinguished owner without a Membership row', () => {
-  it("[BRS-12] (W10-OWNER-MEMBERSHIP, D-104, was it.todo) the distinguished owner (Business.ownerId) with no Membership row is refused 403 'No access to this business' by BusinessGuard on the six Books reads, the trial balance, journal-entries, money-moves, the cashflow forecast and GET expense-breakdown (no module gate) before any service runs; after the operator backfill writes its OWNER Membership it reads the owner's figures", async () => {
+  it("[BRS-12] (W10-OWNER-MEMBERSHIP, D-104, was it.todo) the distinguished owner (Business.ownerId) with no Membership row is refused 403 'No access to this business' by BusinessGuard on the six Books reads, the trial balance, journal-entries, money-moves, the cashflow forecast and GET expense-breakdown (no module gate) before any service runs; after the operator's reviewed backfill writes its OWNER Membership (--include-conflicting: another OWNER holds this business, review SEC-W10OM-2) it reads the owner's figures", async () => {
     // The distinguished owner: Business.ownerId names them and no Membership
     // row does (ID.owner keeps its OWNER membership; it is no longer ownerId).
     // Fixture setup only; restored in `finally`.
@@ -597,10 +598,15 @@ describe('FOLLOW3-A6 review CR-A6-02 / SEC-A5A6-03 (BRS-12): the distinguished o
       for (const [name, spy] of Object.entries(SPY)) expect(spy, name).not.toHaveBeenCalled();
 
       // D-104: the operator script writes the missing OWNER Membership (scoped
-      // to this suite's business: the CLI scans every business).
+      // to this suite's business: the CLI scans every business). ID.owner holds
+      // OWNER here, so this is the with_another_owner class the default run
+      // skips (review SEC-W10OM-2): written only once reviewed.
       const { backfillOwnerMemberships } = await import('../scripts/backfill-owner-memberships');
-      const counts = await backfillOwnerMemberships({ db, apply: true, businessIds: [ID.biz] });
-      expect(counts).toMatchObject({ businessesScanned: 1, missingOwnerMembership: 1, written: 1, failed: 0 });
+      const skipped = await backfillOwnerMemberships({ db, apply: true, businessIds: [ID.biz] });
+      expect(skipped).toMatchObject({ businessesScanned: 1, missingOwnerMembership: 1, withAnotherOwner: 1, skippedWithAnotherOwner: 1, written: 0, failed: 0 });
+      expect(await db.membership.count({ where: { businessId: ID.biz, userId: ID.distOwner } })).toBe(0);
+      const counts = await backfillOwnerMemberships({ db, apply: true, includeConflicting: true, businessIds: [ID.biz] });
+      expect(counts).toMatchObject({ businessesScanned: 1, missingOwnerMembership: 1, withAnotherOwner: 1, skippedWithAnotherOwner: 0, written: 1, failed: 0 });
       const rows = await db.membership.findMany({ where: { businessId: ID.biz, userId: ID.distOwner }, select: { role: true } });
       expect(rows).toEqual([{ role: 'OWNER' }]);
 

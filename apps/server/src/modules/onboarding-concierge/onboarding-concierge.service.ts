@@ -1336,6 +1336,10 @@ EXTRACTED: archetype=service_provider`;
     const context = getTenantContext();
     const actorId = context?.businessId === businessId ? context.userId : undefined;
     if (!actorId) throw this.completionForbidden();
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review CR-W10OM-2): the actor is the
+    // user TenantInterceptor verified for this business (a Membership, or SUPER_ADMIN),
+    // so this arm admits no member-less owner over HTTP. Left as is: pinned by
+    // release0-edited-suites (ST-R032-1); a census exception in owner-membership-backfill OMB-09.
     if (ownerId && ownerId === actorId) return actorId;
 
     const [membership, user] = await Promise.all([

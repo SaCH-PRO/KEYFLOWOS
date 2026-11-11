@@ -696,7 +696,7 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // circuit is keyed by (QW-07 stayed green with one process-wide circuit per tool). QW-07 proves the
   // dispatcher's refusal branch (answered once, not counted); QW-07c pins the per-business keying end
   // to end, with failures delivered as production delivers them.
-  it('QW-07 W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (D-73): a member\'s plan whose call_create_task is refused inside dispatch (a contact the member may not open: 404; an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) counts toward no circuit breaker another business shares: five such refusals in biz leave call_create_task running for bizB (W9-DISPATCH-CIRCUIT, was it.todo)', async () => {
+  it('QW-07 W8-CALL-TASK-NO-MEMBER review SEC-W8CTNM-1 (D-73): a member\'s plan whose call_create_task is refused inside dispatch (a contact the member may not open: 404; a SUPER_ADMIN who is no member: 403) counts toward no circuit breaker another business shares: five such refusals in biz leave call_create_task running for bizB (W9-DISPATCH-CIRCUIT, was it.todo); an owner by Business.ownerId alone is refused at the run-time gate before dispatch (owner ruling D-104, W10-OWNER-MEMBERSHIP) and counts toward none either', async () => {
     const dispatcher = queue.actionDispatcher;
     const superAdmin = `${P}qw07_sa`; // a SUPER_ADMIN who is no member of biz (D-46)
     const ownerOnly = `${P}qw07_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2)
@@ -717,7 +717,14 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
         refusals.push({ planId: `${P}qw07_crmw_${i}`, userId: ID.staffCrmW, businessId: ID.biz, contactId: ID.cPriv, error: /^Contact not found$/ });
       }
       refusals.push({ planId: `${P}qw07_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, error: /Only a member of this business/ });
-      refusals.push({ planId: `${P}qw07_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, error: /Only a member of this business/ });
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): an owner by Business.ownerId alone is no member, so
+      // the run-time gate refuses the step before dispatch (it was the tool's refusal inside dispatch).
+      {
+        const ownerOnlyPlan = `${P}qw07_owner_only`;
+        const args = { contactId: cC, callerId: ID.owner, notes: `v87b qw07 ${ownerOnlyPlan}` };
+        await seedQueuePlan(ownerOnlyPlan, ownerOnly, 'call_create_task', args, bizC);
+        expect(await planStepRunRefusal(prisma, bizC, ownerOnlyPlan, 'call_create_task')).toMatch(/Not a member of this business/);
+      }
       for (const r of refusals) {
         // callerId is the tool contract's (validateToolInput requires it); the dispatcher ignores it (D-88).
         const args = { contactId: r.contactId, callerId: ID.owner, notes: `v87b qw07 ${r.planId}` };

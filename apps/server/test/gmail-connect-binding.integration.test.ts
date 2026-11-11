@@ -1046,10 +1046,11 @@ describe('R0-CMF5 starting a Gmail connection is OWNER only (ST-3, D-11)', () =>
     expect(claims.exp).toBeLessThanOrEqual(Date.now() + 10 * 60 * 1000 + 1000);
   });
 
-  it('[R0-CMF5-A04] RED-BEFORE: the distinguished owner (Business.ownerId) with no membership row gets the auth URL, and the state names them', async () => {
+  it("[R0-CMF5-A04] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: gets the auth URL): the distinguished owner (Business.ownerId) with no membership row is refused the auth URL (403 'No access to this business'), no signed state issued", async () => {
     const res = await authUrl(ID.bizDist, ID.distOwner);
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(decodeState(stateOf(res.body.url)).claims).toMatchObject({ userId: ID.distOwner, businessId: ID.bizDist });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(res.body).not.toHaveProperty('url');
   });
 
   it('[R0-CMF5-A05] RED-BEFORE: a SUPER_ADMIN with no membership keeps the platform bypass, and the state names the super admin', async () => {
@@ -1289,13 +1290,15 @@ describe('R0-CMF5 a Gmail callback links nothing; the owner who started it confi
     expect(replaced).toEqual({ gmailAccessToken: next.access, gmailRefreshToken: next.refresh });
   });
 
-  it('[R0-CMF5-B14] positive: the distinguished owner (no membership row) and a SUPER_ADMIN each start, complete and confirm their own connection', async () => {
-    const dist = googleAccount('dist');
-    const distBack = await startAndComplete(ID.bizDist, ID.distOwner, dist);
-    const distRes = await confirm(ID.bizDist, distBack.pending, ID.distOwner, dist.email);
-    expect([200, 201], JSON.stringify(distRes.body)).toContain(distRes.status);
-    expect(distRes.body).toEqual({ connected: true, email: dist.email });
-    expect((await mailboxOf(ID.bizDist)).email).toBe(dist.email);
+  it("[R0-CMF5-B14] positive: a SUPER_ADMIN starts, completes and confirms its own connection; the distinguished owner (no membership row) is refused the start and the confirm (owner ruling D-104: 403 'No access to this business'), bizDist's mailbox untouched", async () => {
+    await clearMailbox(ID.bizDist);
+    const start = await authUrl(ID.bizDist, ID.distOwner);
+    expect(start.status, JSON.stringify(start.body)).toBe(403);
+    expect(start.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    const distRes = await confirm(ID.bizDist, 'v96c-no-pending', ID.distOwner, googleAccount('dist').email);
+    expect(distRes.status, JSON.stringify(distRes.body)).toBe(403);
+    expect(distRes.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect((await mailboxOf(ID.bizDist)).email).toBeNull();
 
     await clearMailbox(ID.bizTwo);
     const platform = googleAccount('platform');
@@ -1857,7 +1860,7 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearMailbox(ID.biz);
   });
 
-  it('[R0-CMF6-K03] positive: the owner, the distinguished owner (no membership row) and a SUPER_ADMIN smoke-test and sync the business mailbox: each smoke test sends one marked self-test from and to that mailbox with its own token, each sync reads that business inbox once, and the gmail connector row records the verified account', async () => {
+  it("[R0-CMF6-K03] positive: the owner and a SUPER_ADMIN smoke-test and sync the business mailbox: each smoke test sends one marked self-test from and to that mailbox with its own token, each sync reads that business inbox once, and the gmail connector row records the verified account; the distinguished owner (no membership row) is refused both on its own business (owner ruling D-104: 403 'No access to this business'), nothing sent and its inbox not read", async () => {
     await clearGmailConnector(ID.biz);
     await clearGmailConnector(ID.bizDist);
     const mailbox = googleAccount('cmf6_owner');
@@ -1867,10 +1870,17 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     inboxIngestion.syncInbox.mockClear();
     const sentBefore = sends.length;
 
+    for (const op of ['smoke', 'sync'] as const) {
+      const refused = await connectorOp(op, ID.bizDist, 'gmail', ID.distOwner);
+      expect(refused.status, `${op}: ${JSON.stringify(refused.body)}`).toBe(403);
+      expect(refused.body, op).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    }
+    expect(sends.slice(sentBefore), 'the refused smoke test sends nothing').toEqual([]);
+    expect(inboxIngestion.syncInbox, 'the refused sync reads no inbox').not.toHaveBeenCalled();
+
     const runs: Array<[string, string, GoogleAccount]> = [
       [ID.owner, ID.biz, mailbox],
       [ID.superAdmin, ID.biz, mailbox],
-      [ID.distOwner, ID.bizDist, distMailbox],
     ];
     for (const [actor, businessId, account] of runs) {
       const smoke = await connectorOp('smoke', businessId, 'gmail', actor);
@@ -1882,14 +1892,14 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     }
 
     const sent = sends.slice(sentBefore);
-    expect(sent.map((s) => s.mailbox)).toEqual([mailbox.email, mailbox.email, distMailbox.email]);
+    expect(sent.map((s) => s.mailbox)).toEqual([mailbox.email, mailbox.email]);
     for (const [i, s] of sent.entries()) {
       const address = runs[i][2].email;
       expect(s.message).toContain(`From: ${address}\r\n`);
       expect(s.message).toContain(`To: ${address}\r\n`);
       expect(s.message).toContain('X-Keyflow-Smoke-Test: 1');
     }
-    expect(inboxIngestion.syncInbox.mock.calls.map((c) => c[0])).toEqual([ID.biz, ID.biz, ID.bizDist]);
+    expect(inboxIngestion.syncInbox.mock.calls.map((c) => c[0])).toEqual([ID.biz, ID.biz]);
     expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
 
     await clearMailbox(ID.biz);

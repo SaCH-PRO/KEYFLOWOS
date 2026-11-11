@@ -13,20 +13,36 @@
  * aligned in the same packet. Businesses created before every constructor wrote
  * its founding OWNER Membership (KF-EXEC-TENANT-001) can still have an owner
  * recorded only as ownerId: run this script, dry run first, when that alignment
- * deploys, so those owners keep the access they have today.
+ * deploys.
  *
  * WHAT IT WRITES
  *
  * For each non-deleted business whose ownerId names a User row that holds no
- * Membership on that business: the row the identity bootstrap writes
- * (IdentityService.ensureBootstrapWorkspace, createBusiness), { userId: ownerId,
- * businessId, role: 'OWNER' } with the schema defaults (no permission scopes,
- * approval tier 0). Also when another member already holds OWNER there: the
- * ownerId owner is admitted today by the ownerId arm everywhere (BusinessGuard,
- * the D-11 owner checks), so the row keeps exactly the authority D-104 would
- * otherwise take away rather than minting any; those businesses are counted
- * (with_another_owner) so an operator can review them. FoundingMembershipService
- * (KF-EXEC-TENANT-001) still reports them as conflicting.
+ * Membership on that business, and where NO other member holds OWNER (the plain
+ * legacy shape, the class FoundingMembershipService repairs deterministically):
+ * the row the identity bootstrap writes for a business it creates
+ * ({ userId: ownerId, businessId, role: 'OWNER' }, the schema defaults: no
+ * permission scopes, approval tier 0), and, in the same transaction, one
+ * TeamActivityLog row naming the grant (module 'team', action
+ * 'owner_membership_backfilled', the Membership as its entity, meta naming this
+ * script and D-104), so every grant is audited.
+ *
+ * An OWNER row is a GRANT, not a restoration of what the ownerId arm gave: it
+ * carries every module (null scopes read as the OWNER defaults) and team
+ * admin, which ModuleScopeGuard refused an ownerId-only owner before D-104, and
+ * it cannot be removed through the team routes ('Cannot remove the owner').
+ *
+ * WHAT IT DOES NOT WRITE BY DEFAULT (review SEC-W10OM-2)
+ *
+ * with_another_owner: the ownerId user holds no Membership there but another
+ * member holds OWNER. That shape also arises when the OWNER deliberately
+ * removed the ownerId user (removeTeamMember lets an OWNER remove a member
+ * whose role is not OWNER), so writing it would re-admit a removed user with an
+ * unremovable OWNER row. FoundingMembershipService (KF-EXEC-TENANT-001) keeps
+ * the same class for explicit repair (conflicting_owner_membership). These are
+ * counted (skipped_with_another_owner) and not written. Review them first:
+ * `--list-conflicting` prints their business ids (ids only), and
+ * `--apply --include-conflicting` writes them too, audited like the rest.
  *
  * WHAT IT SKIPS (counted, never written)
  *
@@ -41,38 +57,47 @@
  * Dry run by default: it reads and counts, and writes nothing unless `--apply`
  * is passed. Each write is an insert that skips a row already present on
  * @@unique([userId, businessId]) (a concurrent bootstrap, or a second run), so it
- * never duplicates, never overwrites a role and is idempotent. It never deletes
- * a Membership and never edits Business.ownerId. It prints COUNTS ONLY: never a
- * business, user, name or email, and on a failure only the error's code or
- * class, never its message (Prisma messages echo query arguments). Businesses
- * are read in id order, a page at a time, with raw SQL (no tenant extension and
- * no default row cap applies).
+ * never duplicates, never overwrites a role and is idempotent; a row found
+ * already present is not audited (nothing was granted). It never deletes a
+ * Membership and never edits Business.ownerId. It prints COUNTS by default:
+ * never a user, name or email, and on a failure only the error's code or
+ * class, never its message (Prisma messages echo query arguments); business
+ * ids are printed only with `--list-conflicting`. Businesses are read in id
+ * order, a page at a time, with raw SQL (no tenant extension and no default
+ * row cap applies).
  *
  * Usage (from apps/server; reads DATABASE_URL from the repo-root .env):
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts           # dry run: counts only
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply   # write the missing rows
+ *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts                       # dry run: counts only
+ *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --list-conflicting    # dry run + the ids to review
+ *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply               # write the plain class
+ *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply --include-conflicting  # after review
  *
  * Exit status: 0 done, 1 the scan or a write failed, 2 bad arguments.
  * docs/development/owner-membership-backfill.md is the operator note.
  */
 import { db } from '@keyflow/db';
 
-type Db = Pick<typeof db, '$queryRawUnsafe' | 'membership'>;
+type Db = Pick<typeof db, '$queryRawUnsafe' | '$transaction'>;
+
+/** The audit row's action (TeamActivityLog.action). */
+export const OWNER_MEMBERSHIP_BACKFILL_ACTION = 'owner_membership_backfilled';
 
 export interface OwnerMembershipBackfillCounts {
   /** Non-deleted businesses read. */
   businessesScanned: number;
   /** The ownerId user already holds a Membership there (any role): nothing to do. */
   ownerIsMember: number;
-  /** The ownerId names a User holding no Membership there: the D-104 class this script writes. */
+  /** The ownerId names a User holding no Membership there: the D-104 class. */
   missingOwnerMembership: number;
-  /** Of missingOwnerMembership: another member already holds OWNER there (written too; for review). */
+  /** Of missingOwnerMembership: another member already holds OWNER there (for review). */
   withAnotherOwner: number;
+  /** Of withAnotherOwner: not written, because --include-conflicting was not passed. */
+  skippedWithAnotherOwner: number;
   /** The ownerId names no User row (or is empty): never written. */
   skippedOwnerUnresolvable: number;
-  /** Dry run: rows --apply would write. */
+  /** Dry run: rows --apply (with the same flags) would write. */
   wouldWrite: number;
-  /** --apply: rows written. */
+  /** --apply: rows written, each with its audit row. */
   written: number;
   /** --apply: rows found already present at write time (written meanwhile by another writer). */
   alreadyPresent: number;
@@ -80,6 +105,8 @@ export interface OwnerMembershipBackfillCounts {
   failed: number;
   /** --apply: the error codes of the failed writes (never their messages). */
   failedCodes: string[];
+  /** The with_another_owner business ids, in id order (filled only when asked: listConflicting). */
+  conflictingBusinessIds: string[];
 }
 
 /** Businesses per page. */
@@ -121,25 +148,69 @@ function emptyCounts(): OwnerMembershipBackfillCounts {
     ownerIsMember: 0,
     missingOwnerMembership: 0,
     withAnotherOwner: 0,
+    skippedWithAnotherOwner: 0,
     skippedOwnerUnresolvable: 0,
     wouldWrite: 0,
     written: 0,
     alreadyPresent: 0,
     failed: 0,
     failedCodes: [],
+    conflictingBusinessIds: [],
   };
 }
 
 /**
+ * Write one OWNER row and its audit row, in one transaction. Returns false when
+ * the row was already there (nothing granted, nothing audited).
+ */
+async function grant(database: Db, row: BusinessRow, conflicting: boolean): Promise<boolean> {
+  return database.$transaction(async (tx) => {
+    // The bootstrap's row. skipDuplicates: a row another writer created since
+    // the read is kept as it is (its role untouched) and counted, not
+    // overwritten or duplicated.
+    const { count } = await tx.membership.createMany({
+      data: [{ userId: row.ownerId, businessId: row.businessId, role: 'OWNER' }],
+      skipDuplicates: true,
+    });
+    if (count !== 1) return false;
+    const membership = await tx.membership.findUnique({
+      where: { userId_businessId: { userId: row.ownerId, businessId: row.businessId } },
+      select: { id: true },
+    });
+    await tx.teamActivityLog.create({
+      data: {
+        businessId: row.businessId,
+        userId: row.ownerId,
+        module: 'team',
+        action: OWNER_MEMBERSHIP_BACKFILL_ACTION,
+        entityType: 'membership',
+        entityId: membership?.id ?? null,
+        title: 'Owner membership written by the operator backfill (owner ruling D-104)',
+        meta: {
+          ruling: 'D-104',
+          script: 'scripts/backfill-owner-memberships.ts',
+          role: 'OWNER',
+          withAnotherOwner: conflicting,
+        },
+      },
+    });
+    return true;
+  });
+}
+
+/**
  * Classify every non-deleted business and (with `apply`) write the missing
- * OWNER Memberships. `businessIds` restricts the scan to those businesses: a
- * test hands it its own fixtures so it never writes into rows another suite
- * owns; the CLI passes none and scans the whole estate. Throws when a page
- * cannot be read; `counts` then holds what was done before it.
+ * OWNER Memberships of the plain class, and of the with_another_owner class
+ * too when `includeConflicting`. `businessIds` restricts the scan to those
+ * businesses: a test hands it its own fixtures so it never writes into rows
+ * another suite owns; the CLI passes none and scans the whole estate. Throws
+ * when a page cannot be read; `counts` then holds what was done before it.
  */
 export async function backfillOwnerMemberships(opts: {
   db?: Db;
   apply: boolean;
+  includeConflicting?: boolean;
+  listConflicting?: boolean;
   businessIds?: readonly string[];
   counts?: OwnerMembershipBackfillCounts;
 }): Promise<OwnerMembershipBackfillCounts> {
@@ -161,20 +232,20 @@ export async function backfillOwnerMemberships(opts: {
         continue;
       }
       counts.missingOwnerMembership += 1;
-      if (row.hasOwnerMembership) counts.withAnotherOwner += 1;
+      if (row.hasOwnerMembership) {
+        counts.withAnotherOwner += 1;
+        if (opts.listConflicting) counts.conflictingBusinessIds.push(row.businessId);
+        if (!opts.includeConflicting) {
+          counts.skippedWithAnotherOwner += 1;
+          continue;
+        }
+      }
       if (!opts.apply) {
         counts.wouldWrite += 1;
         continue;
       }
       try {
-        // The bootstrap's row. skipDuplicates: a row another writer created since
-        // the read is kept as it is (its role untouched) and counted, not
-        // overwritten or duplicated.
-        const { count } = await database.membership.createMany({
-          data: [{ userId: row.ownerId, businessId: row.businessId, role: 'OWNER' }],
-          skipDuplicates: true,
-        });
-        if (count === 1) counts.written += 1;
+        if (await grant(database, row, row.hasOwnerMembership)) counts.written += 1;
         else counts.alreadyPresent += 1;
       } catch (err: unknown) {
         counts.failed += 1;
@@ -196,6 +267,7 @@ export function formatCounts(counts: OwnerMembershipBackfillCounts, apply: boole
     row('owner_is_member', counts.ownerIsMember),
     row('missing_owner_membership', counts.missingOwnerMembership),
     row('with_another_owner', counts.withAnotherOwner),
+    row('skipped_with_another_owner', counts.skippedWithAnotherOwner),
     row('skipped_owner_unresolvable', counts.skippedOwnerUnresolvable),
     ...(apply
       ? [
@@ -216,6 +288,8 @@ function describeFailure(err: unknown): string {
 
 type Log = (...args: unknown[]) => void;
 
+const FLAGS = new Set(['--apply', '--include-conflicting', '--list-conflicting']);
+
 /**
  * The CLI. Returns the exit status. `deps` lets a test hand it a database, the
  * businesses to scan and a logger; by default it uses @keyflow/db's client,
@@ -228,27 +302,38 @@ export async function main(
   const log: Log = deps.log ?? console.log;
   const error: Log = deps.error ?? console.error;
 
-  const unknown = argv.filter((a) => a !== '--apply');
+  const unknown = argv.filter((a) => !FLAGS.has(a));
   if (unknown.length > 0) {
-    error(`Unknown argument(s): ${unknown.length}. Usage: backfill-owner-memberships [--apply]`);
+    error(`Unknown argument(s): ${unknown.length}. Usage: backfill-owner-memberships [--apply] [--include-conflicting] [--list-conflicting]`);
     return 2;
   }
   const apply = argv.includes('--apply');
+  const includeConflicting = argv.includes('--include-conflicting');
+  const listConflicting = argv.includes('--list-conflicting');
 
   log(
     apply
-      ? 'Owner membership backfill (D-104) - APPLY: writing the missing OWNER memberships'
+      ? 'Owner membership backfill (D-104) - APPLY: writing the missing OWNER memberships, each audited'
       : 'Owner membership backfill (D-104) - DRY RUN: nothing is written; re-run with --apply to write',
+  );
+  log(
+    includeConflicting
+      ? 'with_another_owner businesses are INCLUDED (--include-conflicting): review them first (--list-conflicting)'
+      : 'with_another_owner businesses are skipped: review them (--list-conflicting), then pass --include-conflicting to write them',
   );
   const counts = emptyCounts();
   try {
-    await backfillOwnerMemberships({ db: deps.db, apply, businessIds: deps.businessIds, counts });
+    await backfillOwnerMemberships({ db: deps.db, apply, includeConflicting, listConflicting, businessIds: deps.businessIds, counts });
   } catch (err: unknown) {
     for (const line of formatCounts(counts, apply)) log(line);
     error(`Stopped after ${counts.businessesScanned} business(es): ${describeFailure(err)}. Re-run to finish (rows written stay; the run is idempotent).`);
     return 1;
   }
   for (const line of formatCounts(counts, apply)) log(line);
+  if (listConflicting) {
+    log(`with_another_owner business ids (${counts.conflictingBusinessIds.length}), for review:`);
+    for (const id of counts.conflictingBusinessIds) log(`  ${id}`);
+  }
   return apply && counts.failed > 0 ? 1 : 0;
 }
 

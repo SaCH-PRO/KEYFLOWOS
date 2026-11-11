@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { businessOwnerRecipient } from '../../core/auth/business.guard';
 import { FinancialCopilotService } from './financial-copilot.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
@@ -245,10 +246,9 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
           // unset; we only log a warning so the notification still lands.
           if (this.email.isConfigured()) {
             try {
-              const owner = await this.prisma.client.user.findUnique({
-                where: { id: business.ownerId },
-                select: { email: true },
-              });
+              // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the
+              // owner receives the business's figures only while a member of it.
+              const owner = await businessOwnerRecipient(this.prisma, business.id, business.ownerId);
               if (owner?.email) {
                 const html = this.buildEmailHtml({
                   businessName: business.name,

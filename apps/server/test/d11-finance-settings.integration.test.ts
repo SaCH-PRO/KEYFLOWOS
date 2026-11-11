@@ -411,13 +411,18 @@ describe('R0-09f finance settings cannot change the business tax rate for a non-
     expect(await finance(ID.bizF)).toMatchObject({ defaultTaxRate: 15, accountingBasis: 'ACCRUAL' });
   });
 
-  it('[D11F-F08] positive controls: a second OWNER membership that is not Business.ownerId (the membership arm alone) and the distinguished owner (Business.ownerId, no membership) change defaultTaxRate (200)', async () => {
-    for (const [actor, businessId, rate] of [[ID.coOwner, ID.bizF, 8.75], [ID.legacyOwner, ID.bizL, 5]] as const) {
-      await reset(businessId);
-      const res = await patchSettings(actor, businessId, { defaultTaxRate: rate });
-      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
-      expect((await finance(businessId))?.defaultTaxRate, actor).toBe(rate);
-    }
+  it("[D11F-F08] positive control: a second OWNER membership that is not Business.ownerId (the membership arm alone) changes defaultTaxRate (200); the distinguished owner (Business.ownerId, no membership) is refused (owner ruling D-104: 403 'No access to this business'), the row byte-identical", async () => {
+    await reset(ID.bizF);
+    const res = await patchSettings(ID.coOwner, ID.bizF, { defaultTaxRate: 8.75 });
+    expect(res.status, `${ID.coOwner}: ${JSON.stringify(res.body)}`).toBe(200);
+    expect((await finance(ID.bizF))?.defaultTaxRate, ID.coOwner).toBe(8.75);
+
+    await reset(ID.bizL);
+    const before = await businessRowText(ID.bizL);
+    const refused = await patchSettings(ID.legacyOwner, ID.bizL, { defaultTaxRate: 5 });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'the row is byte-identical').toBe(before);
   });
 
   it('[D11F-F09] pinned: a SUPER_ADMIN that holds a STAFF membership (so ensureAccess admits it) keeps the platform bypass and changes defaultTaxRate (200)', async () => {

@@ -23,22 +23,37 @@
  *   OMB-05  RED by absence: apps/server/scripts/backfill-owner-memberships.ts
  *           dry run counts the missing OWNER rows, writes nothing, prints counts
  *           only (no id, name or email), exit 0; an unknown argument exits 2.
- *   OMB-06  --apply writes exactly the missing OWNER rows, in the row shape the
- *           identity bootstrap writes ({ userId: ownerId, businessId, role
- *           'OWNER' }, no scopes, tier 0): one for each non-deleted business whose
- *           ownerId names a User holding no Membership there (also where another
- *           member already holds OWNER: that owner is admitted today by the ownerId
- *           arm, so the row keeps the access D-104 would otherwise take). It writes
+ *   OMB-06  --apply writes exactly the missing OWNER rows of the plain class, in
+ *           the row shape the identity bootstrap writes for a business it
+ *           creates ({ userId: ownerId, businessId, role 'OWNER' }, no scopes,
+ *           tier 0), each with one TeamActivityLog audit row in the same
+ *           transaction. Review SEC-W10OM-2: a business where another member
+ *           already holds OWNER (with_another_owner) is counted and NOT written
+ *           by default (the OWNER may have removed the ownerId user). It writes
  *           nothing for an ownerId that is already a member (any role), names no
  *           User, or a soft-deleted business; it never edits ownerId or an
  *           existing Membership.
  *   OMB-07  idempotent: a second --apply writes nothing and changes nothing.
- *   OMB-08  after the backfill the owner is admitted by BusinessGuard, scoped by
- *           TenantInterceptor and listed by discovery.
+ *   OMB-08  after the reviewed run (--apply --include-conflicting) the owner is
+ *           admitted by BusinessGuard, scoped by TenantInterceptor and listed by
+ *           discovery; that grant is audited too.
  *   OMB-09  census pin: no business access predicate under apps/server/src
- *           admits Business.ownerId without a Membership (no `OR [{ ownerId },
+ *           admits Business.ownerId without a Membership, except the listed,
+ *           referred exceptions (review CR-W10OM-2): no `OR [{ ownerId },
  *           { members }]`, no owner arm `{ id, ownerId: x }` that does not also
- *           require x's Membership).
+ *           require x's Membership, no Business.ownerId compared to a caller and
+ *           no `ownerId === actorId` arm outside the exception list.
+ *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
+ *           no Membership on a business it did not create: the ownerId-only
+ *           owner is refused 403 OWNER_MEMBERSHIP_REQUIRED and stays refused.
+ *   OMB-11  review SEC-W10OM-3: a Business.ownerId holding STAFF who signs in
+ *           keeps STAFF (the bootstrap no longer promotes to OWNER).
+ *   OMB-12  review SEC-W10OM-2: an OWNER removes the Business.ownerId member;
+ *           the default backfill does not re-admit them, and --list-conflicting
+ *           names that business (ids only) for review.
+ *   OMB-13  review SEC-W10OM-6: mail addressed to the business owner (weekly
+ *           financial briefing, quote alerts, AI usage alerts) reaches the
+ *           Business.ownerId user only while they hold a Membership.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -93,12 +108,16 @@ const ID = {
   deletedOwner: `${P}deletedOwner`,
   /** An ownerId that names no User row. */
   ghost: `${P}ghost`,
+  /** ownerId of bizRemoved, STAFF there until the co-owner removes them (OMB-12). */
+  removedOwner: `${P}removedOwner`,
   bizGuard: `${P}bizGuard`,
   bizPlain: `${P}bizPlain`,
   bizExact: `${P}bizExact`,
   bizStaffOwner: `${P}bizStaffOwner`,
   bizGhost: `${P}bizGhost`,
   bizDeleted: `${P}bizDeleted`,
+  /** OMB-12's own business, outside BUSINESSES: the co-owner removes its ownerId member. */
+  bizRemoved: `${P}bizRemoved`,
 };
 
 /** Every business of this suite: the backfill is scoped to exactly these. */
@@ -107,11 +126,13 @@ const BUSINESSES = [ID.bizGuard, ID.bizPlain, ID.bizExact, ID.bizStaffOwner, ID.
 let db: any;
 let app: any;
 let identity: any;
+let prismaSvc: any;
 /** Handler runs of the guarded probe since the last reset. */
 const runs: Array<{ businessId: string; tenant: string | null }> = [];
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -154,6 +175,15 @@ async function memberships() {
   return db.membership.findMany({
     where: { businessId: { in: BUSINESSES } },
     select: { id: true, userId: true, businessId: true, role: true, permissionScopes: true, maxApprovalTier: true },
+    orderBy: [{ businessId: 'asc' }, { userId: 'asc' }],
+  });
+}
+
+/** The backfill's audit rows on `businessIds`, in a stable order. */
+async function grantAudits(businessIds: readonly string[] = BUSINESSES) {
+  return db.teamActivityLog.findMany({
+    where: { businessId: { in: [...businessIds] }, action: 'owner_membership_backfilled' },
+    select: { businessId: true, userId: true, module: true, entityType: true, entityId: true, meta: true },
     orderBy: [{ businessId: 'asc' }, { userId: 'asc' }],
   });
 }
@@ -212,6 +242,7 @@ beforeAll(async () => {
     providers: [PrismaService, AuthGuard, BusinessGuard],
   }).compile();
   const prisma = moduleRef.get(PrismaService);
+  prismaSvc = prisma;
   identity = new IdentityService(prisma, {} as any, { seedForBusiness: async () => 0 } as any);
 
   app = moduleRef.createNestApplication();
@@ -230,7 +261,7 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.distOwner, ID.coOwner, ID.staff, ID.outsider, ID.plainOwner, ID.exactOwner, ID.staffOwner, ID.deletedOwner]) {
+  for (const id of [ID.distOwner, ID.coOwner, ID.staff, ID.outsider, ID.plainOwner, ID.exactOwner, ID.staffOwner, ID.deletedOwner, ID.removedOwner]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizGuard, name: 'V96C Guard', slug: `${P}guard`, ownerId: ID.distOwner } });
@@ -238,11 +269,14 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizStaffOwner, name: 'V96C Staff owner', ownerId: ID.staffOwner } });
   await db.business.create({ data: { id: ID.bizGhost, name: 'V96C Ghost', ownerId: ID.ghost } });
   await db.business.create({ data: { id: ID.bizDeleted, name: 'V96C Deleted', ownerId: ID.deletedOwner, deletedAt: new Date() } });
+  await db.business.create({ data: { id: ID.bizRemoved, name: 'V96C Removed', ownerId: ID.removedOwner } });
   for (const [userId, businessId, role] of [
     [ID.coOwner, ID.bizGuard, 'OWNER'],
     [ID.staff, ID.bizGuard, 'STAFF'],
     [ID.exactOwner, ID.bizExact, 'OWNER'],
     [ID.staffOwner, ID.bizStaffOwner, 'STAFF'],
+    [ID.coOwner, ID.bizRemoved, 'OWNER'],
+    [ID.removedOwner, ID.bizRemoved, 'STAFF'],
   ] as const) {
     await db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_${businessId.slice(P.length)}`, userId, businessId, role } });
   }
@@ -289,6 +323,31 @@ describe('W10-OWNER-MEMBERSHIP (D-104): an owner recorded only as Business.owner
   });
 });
 
+describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-3): the sign-in bootstrap writes no Membership on a business it did not create', () => {
+  it('[OMB-10] (D-104, SEC-W10OM-3) POST /identity/bootstrap (bootstrapUser) refuses the ownerId-only owner of a business 403 OWNER_MEMBERSHIP_REQUIRED: no Membership written, the business not answered, BusinessGuard still refuses them', async () => {
+    const before = await memberships();
+    const error = await identity
+      .bootstrapUser({ userId: ID.distOwner, email: `${P}distOwner@test.local` })
+      .then(() => null, (e: unknown) => e);
+    expect(error, 'bootstrap refused').toBeTruthy();
+    expect((error as any).getStatus?.()).toBe(403);
+    expect((error as any).getResponse?.()).toMatchObject({ code: 'OWNER_MEMBERSHIP_REQUIRED' });
+    expect(JSON.stringify((error as any).getResponse?.())).not.toContain(ID.bizGuard);
+    expect(await memberships()).toEqual(before);
+    expect(await db.business.count({ where: { ownerId: ID.distOwner } }), 'no second workspace created').toBe(1);
+    const res = await probe(ID.distOwner);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+  });
+
+  it('[OMB-11] (D-104, SEC-W10OM-3) a Business.ownerId holding STAFF who signs in keeps STAFF: the bootstrap answers their business and never promotes the role', async () => {
+    const out = await identity.bootstrapUser({ userId: ID.staffOwner, email: `${P}staffOwner@test.local` });
+    expect(out.business.id).toBe(ID.bizStaffOwner);
+    expect(out.isNewBusiness).toBe(false);
+    const rows = await db.membership.findMany({ where: { businessId: ID.bizStaffOwner }, select: { userId: true, role: true } });
+    expect(rows).toEqual([{ userId: ID.staffOwner, role: 'STAFF' }]);
+  });
+});
+
 describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing OWNER memberships', () => {
   let before: any[];
 
@@ -308,8 +367,9 @@ describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing
     expect(out).toMatch(/owner_is_member\s+2\b/);
     expect(out).toMatch(/missing_owner_membership\s+2\b/);
     expect(out).toMatch(/with_another_owner\s+1\b/);
+    expect(out).toMatch(/skipped_with_another_owner\s+1\b/);
     expect(out).toMatch(/skipped_owner_unresolvable\s+1\b/);
-    expect(out).toMatch(/would_write\s+2\b/);
+    expect(out).toMatch(/would_write\s+1\b/);
     expect(await memberships()).toEqual(before);
     expect(await ownerIds()).toEqual(owners);
 
@@ -320,11 +380,20 @@ describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing
       ownerIsMember: 2,
       missingOwnerMembership: 2,
       withAnotherOwner: 1,
+      skippedWithAnotherOwner: 1,
       skippedOwnerUnresolvable: 1,
+      wouldWrite: 1,
+      written: 0,
+      conflictingBusinessIds: [],
+    });
+    // The reviewed dry run counts the conflicting class in.
+    expect(await backfillOwnerMemberships({ db, apply: false, includeConflicting: true, businessIds: BUSINESSES })).toMatchObject({
+      skippedWithAnotherOwner: 0,
       wouldWrite: 2,
       written: 0,
     });
     expect(await memberships()).toEqual(before);
+    expect(await grantAudits()).toEqual([]);
 
     const bad = await run(['--aply']);
     expect(bad.code).toBe(2);
@@ -332,13 +401,14 @@ describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing
     expect(await memberships()).toEqual(before);
   });
 
-  it('[OMB-06] --apply writes exactly the missing OWNER memberships in the bootstrap row shape, and touches no other row', async () => {
+  it('[OMB-06] --apply writes exactly the missing OWNER memberships of the plain class in the bootstrap row shape, each with its audit row, skips the with_another_owner business (review SEC-W10OM-2), and touches no other row', async () => {
     const owners = await ownerIds();
     const { code, out } = await run(['--apply']);
     expect(code, out).toBe(0);
     expectCountsOnly(out);
     expect(out).toMatch(/APPLY/);
-    expect(out).toMatch(/written\s+2\b/);
+    expect(out).toMatch(/skipped_with_another_owner\s+1\b/);
+    expect(out).toMatch(/written\s+1\b/);
     expect(out).toMatch(/failed\s+0\b/);
 
     const after = await memberships();
@@ -346,28 +416,56 @@ describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing
     for (const row of before) expect(after).toContainEqual(row);
     const added = after.filter((row: any) => !before.some((b: any) => b.id === row.id));
     expect(added.map(({ id: _id, ...rest }: any) => rest)).toEqual([
-      { userId: ID.distOwner, businessId: ID.bizGuard, role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 },
       { userId: ID.plainOwner, businessId: ID.bizPlain, role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 },
     ]);
-    // Nothing for the soft-deleted business, the unresolvable owner, or an owner already a member.
+    // The grant is audited: one TeamActivityLog row naming the Membership written.
+    expect(await grantAudits()).toEqual([
+      {
+        businessId: ID.bizPlain,
+        userId: ID.plainOwner,
+        module: 'team',
+        entityType: 'membership',
+        entityId: added[0].id,
+        meta: { ruling: 'D-104', script: 'scripts/backfill-owner-memberships.ts', role: 'OWNER', withAnotherOwner: false },
+      },
+    ]);
+    // Nothing for the with_another_owner business (not reviewed), the soft-deleted business, the
+    // unresolvable owner, or an owner already a member.
+    expect(after.filter((m: any) => m.businessId === ID.bizGuard).map((m: any) => m.userId).sort()).toEqual([ID.coOwner, ID.staff].sort());
     for (const businessId of [ID.bizDeleted, ID.bizGhost]) {
       expect(after.filter((m: any) => m.businessId === businessId), businessId).toEqual([]);
     }
     expect(after.filter((m: any) => m.businessId === ID.bizStaffOwner).map((m: any) => [m.userId, m.role])).toEqual([[ID.staffOwner, 'STAFF']]);
     expect(await ownerIds()).toEqual(owners);
+    expect((await probe(ID.distOwner)).status, 'the skipped owner is still refused').toBe(403);
   });
 
   it('[OMB-07] idempotent: a second --apply writes nothing and changes nothing', async () => {
     const snapshot = await memberships();
+    const audits = await grantAudits();
     const { code, out } = await run(['--apply']);
     expect(code, out).toBe(0);
-    expect(out).toMatch(/missing_owner_membership\s+0\b/);
+    expect(out).toMatch(/missing_owner_membership\s+1\b/);
+    expect(out).toMatch(/skipped_with_another_owner\s+1\b/);
     expect(out).toMatch(/written\s+0\b/);
-    expect(out).toMatch(/owner_is_member\s+4\b/);
+    expect(out).toMatch(/owner_is_member\s+3\b/);
     expect(await memberships()).toEqual(snapshot);
+    expect(await grantAudits()).toEqual(audits);
   });
 
-  it('[OMB-08] (D-104) after the backfill the owner is admitted by BusinessGuard, scoped by TenantInterceptor and listed by discovery', async () => {
+  it('[OMB-08] (D-104) after the reviewed run (--apply --include-conflicting) the owner is admitted by BusinessGuard, scoped by TenantInterceptor and listed by discovery; that grant is audited too', async () => {
+    const snapshot = await memberships();
+    const { code, out } = await run(['--apply', '--include-conflicting']);
+    expect(code, out).toBe(0);
+    expectCountsOnly(out);
+    expect(out).toMatch(/skipped_with_another_owner\s+0\b/);
+    expect(out).toMatch(/written\s+1\b/);
+    const added = (await memberships()).filter((row: any) => !snapshot.some((b: any) => b.id === row.id));
+    expect(added.map(({ id: _id, ...rest }: any) => rest)).toEqual([
+      { userId: ID.distOwner, businessId: ID.bizGuard, role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 },
+    ]);
+    expect((await grantAudits([ID.bizGuard])).map((a: any) => [a.userId, a.entityId, a.meta.withAnotherOwner])).toEqual([[ID.distOwner, added[0].id, true]]);
+
     runs.length = 0;
     const res = await probe(ID.distOwner);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -379,8 +477,54 @@ describe('W10-OWNER-MEMBERSHIP (D-104): the operator backfill writes the missing
   });
 });
 
+describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is not re-admitted by default', () => {
+  it('[OMB-12] (D-104, SEC-W10OM-2) an OWNER removes the Business.ownerId member (STAFF): the default --apply does not re-admit them (with_another_owner, skipped) and audits nothing; --list-conflicting names that business for review, by id only', async () => {
+    const removed = await db.membership.findUnique({ where: { userId_businessId: { userId: ID.removedOwner, businessId: ID.bizRemoved } } });
+    await identity.removeTeamMember(ID.bizRemoved, removed.id, ID.coOwner);
+    expect((await probe(ID.removedOwner, ID.bizRemoved)).status).toBe(403);
+
+    const { main } = await script();
+    const lines: string[] = [];
+    const log = (...args: unknown[]) => lines.push(args.map(String).join(' '));
+    const code = await main(['--apply', '--list-conflicting'], { db, log, error: log, businessIds: [ID.bizRemoved] });
+    const out = lines.join('\n');
+    expect(code, out).toBe(0);
+    expect(out).toMatch(/with_another_owner\s+1\b/);
+    expect(out).toMatch(/skipped_with_another_owner\s+1\b/);
+    expect(out).toMatch(/written\s+0\b/);
+    // The review list names the business by id, and nothing else of it or its people.
+    expect(lines.filter((l) => l.includes(P))).toEqual([`  ${ID.bizRemoved}`]);
+    expect(out).not.toMatch(/@/);
+
+    expect(await db.membership.findUnique({ where: { userId_businessId: { userId: ID.removedOwner, businessId: ID.bizRemoved } } })).toBeNull();
+    expect((await probe(ID.removedOwner, ID.bizRemoved)).status, 'still refused').toBe(403);
+    expect(await grantAudits([ID.bizRemoved])).toEqual([]);
+  });
+
+  it('[OMB-13] (D-104; review SEC-W10OM-6) mail addressed to the business owner (the weekly financial briefing, the public quote alerts, the AI usage alerts) reaches the Business.ownerId user only while they hold a Membership: none for the removed ownerId member or an unresolvable owner, the member owner\'s address otherwise; the three senders read their recipient through that rule', async () => {
+    const { businessOwnerRecipient } = await import('../src/core/auth/business.guard');
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizRemoved, ID.removedOwner)).toBeNull();
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizGhost, ID.ghost)).toBeNull();
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizGuard, null)).toBeNull();
+    // A member of another business is no recipient for this one.
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizRemoved, ID.exactOwner)).toBeNull();
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizExact, ID.exactOwner)).toEqual({ email: `${P}exactOwner@test.local`, name: ID.exactOwner });
+
+    const root = path.resolve(__dirname, '../src');
+    for (const file of [
+      'modules/commerce/financial-briefing-scheduler.service.ts',
+      'modules/commerce/quote-notifications.listener.ts',
+      'modules/ai/ai-usage-alert-scheduler.service.ts',
+    ]) {
+      const text = fs.readFileSync(path.join(root, file), 'utf8').replace(/\s+/g, ' ');
+      expect(text, file).toContain('businessOwnerRecipient(this.prisma,');
+      expect(text, file).not.toMatch(/user\.findUnique\(\{ where: \{ id: (?:business\.)?ownerId/);
+    }
+  });
+});
+
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] no business access predicate under apps/server/src admits Business.ownerId without a Membership', () => {
+  it('[OMB-09] (D-104; review CR-W10OM-2) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed referred exceptions: the ACTION-001 principal basis and onboarding completion\'s ownerId arm', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -399,11 +543,31 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['members OR ownerId', /OR: \[ ?\{ members: \{ some: \{ userId[^\]]*\}, \{ ownerId: [\w.]+ \},? ?\]/],
       // An owner arm on a business read that does not also require the Membership.
       ['owner arm without membership', /business\.(?:findFirst|findMany|count)\(\{ where: \{ id: \w+, ownerId: [\w.]+ \}/],
+      // Review CR-W10OM-2: the same arm in another shape, a business row's ownerId compared to a caller.
+      ['business ownerId compared', /\b(?:business|biz|existingBusiness|rows\.business)\??\.ownerId ?[!=]==|[!=]== ?(?:business|biz|existingBusiness|rows\.business)\??\.ownerId\b/],
+      // A bare `ownerId` (the business's, handed in) against the actor; `contact.ownerId` is a contact's owner, not this.
+      ['ownerId arm on the actor', /(?<![.\w])ownerId ?[!=]== ?actorId\b|\bactorId ?[!=]== ?ownerId\b/],
     ];
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8').replace(/\s+/g, ' ');
       for (const [label, re] of patterns) if (re.test(text)) offenders.push(`${path.relative(root, file)}: ${label}`);
     }
-    expect(offenders).toEqual([]);
+    // The known exceptions, each with why it stays. The list is exact: a new arm
+    // fails this pin, and so does aligning one of these without removing it here.
+    const EXCEPTIONS: Record<string, string> = {
+      // Classifies businesses for the KF-EXEC-TENANT-001 repair report; it grants nothing.
+      'modules/identity/founding-membership.service.ts: business ownerId compared': 'repair classifier, no access decision',
+      // Referred (W10-OWNER-MEMBERSHIP deviation): ACTION-001's principal basis
+      // 'owner_without_membership' (approval tier 0) is pinned by the
+      // action-001-real-db manifest and its negative control
+      // NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES; aligning it changes both.
+      'modules/key-autonomy/action-boundary/control-clearance.ts: business ownerId compared': 'referred: ACTION-001 manifests',
+      // Referred (W10-OWNER-MEMBERSHIP deviation): resolveCompletionActor runs
+      // only under a tenant context TenantInterceptor verified (a Membership
+      // since D-104, or SUPER_ADMIN); its ownerId arm is pinned by
+      // release0-edited-suites (onboarding-concierge.service.spec ST-R032-1).
+      'modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId arm on the actor': 'referred: release0-edited-suites',
+    };
+    expect(offenders.sort()).toEqual(Object.keys(EXCEPTIONS).sort());
   });
 });

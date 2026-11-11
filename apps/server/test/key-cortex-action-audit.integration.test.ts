@@ -131,7 +131,7 @@ const ID = {
   biz2: `${P}biz2`,
   /** A business with no row: an audit insert for it fails on the business foreign key. */
   missingBiz: `${P}biz_missing`,
-  /** W9-KEY-CORTEX-AUDIT: a business whose episodic memory is read into a member's prompt (owned by ID.owner, no membership row). */
+  /** W9-KEY-CORTEX-AUDIT: a business whose episodic memory is read into a member's prompt (owned by ID.owner, who holds its OWNER membership: owner ruling D-104). */
   memBiz: `${P}biz_mem`,
   /** W9-KEY-CORTEX-AUDIT: a STAFF member of ID.memBiz. */
   member: `${P}member`,
@@ -362,6 +362,10 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.outsider, email: `${P}outsider@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.memBiz, name: 'V19C Memory Biz', ownerId: ID.owner } });
   await db.membership.create({ data: { userId: ID.member, businessId: ID.memBiz, role: 'STAFF' } });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): the owner holds the OWNER
+  // Membership the operator backfill writes; an owner recorded only as
+  // Business.ownerId is no member and reads no episodic memory (fixture change).
+  await db.membership.create({ data: { userId: ID.owner, businessId: ID.memBiz, role: 'OWNER' } });
   const episode = (userId: string, label: string) => ({
     businessId: ID.memBiz,
     userId,
@@ -1002,7 +1006,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     // Business-wide memory is not narrowed.
     expect(member).toContain('v19c memory: a business-wide fact');
 
-    // The owner by Business.ownerId (no membership row) is a member of their business: their own rows only.
+    // The owner (Business.ownerId with its OWNER membership, D-104) is a member of their business: their own rows only.
     const owner = await memoryFor(ID.owner);
     expect(owner).toContain('v19c.mem.owner_action');
     expect(owner).toContain('v19c.mem.owner_exec');

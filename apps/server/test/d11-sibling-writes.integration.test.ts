@@ -721,13 +721,17 @@ describe('R0-09b presence draft and publish cannot change Business.slug for a no
     expect((await businessRow(ID.bizS))?.slug).toBe(slugOf('super-new'));
   });
 
-  it('[D11-S08] pinned: the distinguished owner (Business.ownerId) with no membership row saves and publishes a new slug (200, 201)', async () => {
+  it("[D11-S08] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: saves and publishes): the distinguished owner (Business.ownerId) with no membership row is refused the draft save and the publish (403 'No access to this business'); Business.slug and the Business row byte-identical", async () => {
     await resetPresence(ID.bizL);
+    const before = await businessRowText(ID.bizL);
     const put = await putDraft(ID.legacyOwner, ID.bizL, payload({ slug: slugOf('legacy-new') }));
-    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(put.status, JSON.stringify(put.body)).toBe(403);
+    expect(put.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
     const pub = await publish(ID.legacyOwner, ID.bizL);
-    expect(pub.status, JSON.stringify(pub.body)).toBe(201);
-    expect((await businessRow(ID.bizL))?.slug).toBe(slugOf('legacy-new'));
+    expect(pub.status, JSON.stringify(pub.body)).toBe(403);
+    expect(pub.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect((await businessRow(ID.bizL))?.slug).toBe(LIVE[ID.bizL]);
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
   });
 
   it("[D11-S09] RED-BEFORE (review CR-1): after the OWNER moves Business.slug through the owner-only PATCH, a STAFF member (settings:none) whose draft still carries the old slug saves a content edit (200) and publishes it (201): the page goes live at the owner's address and the Business row is byte-identical", async () => {
@@ -953,13 +957,14 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     expect(row?.businessHours).toEqual(templateHours);
   });
 
-  it('[D11-C06] pinned: the distinguished owner (Business.ownerId) with no membership row auto-configures (201)', async () => {
+  it("[D11-C06] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: auto-configures): the distinguished owner (Business.ownerId) with no membership row is refused auto-configure (403 'No access to this business'), the Business row byte-identical and no product written", async () => {
     await resetConcierge(ID.bizL);
+    const before = await businessRowText(ID.bizL);
     const res = await autoConfigure(ID.legacyOwner, ID.bizL, { templateId: TEMPLATE, customBusinessName: `${P}legacy-name` });
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const row = await businessRow(ID.bizL);
-    expect(row).toMatchObject({ name: `${P}legacy-name`, storeEnabled: true });
-    expect(row?.businessHours).toEqual(templateHours);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
+    expect(await productCount(ID.bizL), 'no product created').toBe(0);
   });
 
   it('[D11-C07] RED-BEFORE (review SEC-2): STAFF on role defaults (settings:none) or every scope admin, ADMIN on role defaults and ADMIN granted settings:write chat with the concierge and get the reply (201), but their answers are not persisted: businessIntent, industry, archetype and country stay unset, the Business row is byte-identical and no blueprint inference runs', async () => {
@@ -975,14 +980,21 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
     }
   });
 
-  it("[D11-C08] positive control: the OWNER's and the distinguished owner's (Business.ownerId, no membership) concierge chats persist the intake (201): businessIntent is the message, industry and country come from the EXTRACTED lines, and the blueprint is inferred", async () => {
-    for (const [actor, businessId] of [[ID.owner, ID.bizQ], [ID.legacyOwner, ID.bizL]] as const) {
-      await resetConcierge(businessId);
-      const res = await chat(actor, businessId, `k09b ${actor} intent`);
-      expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(await intakeColumns(businessId)).toMatchObject({ businessIntent: `k09b ${actor} intent`, industry: AI_INDUSTRY, country: AI_COUNTRY });
-      expect(blueprintInferred).toEqual([businessId]);
-    }
+  it("[D11-C08] positive control: the OWNER's concierge chat persists the intake (201): businessIntent is the message, industry and country come from the EXTRACTED lines, and the blueprint is inferred; the distinguished owner (Business.ownerId, no membership) is refused the chat (owner ruling D-104: 403 'No access to this business'), nothing persisted and no blueprint inferred", async () => {
+    await resetConcierge(ID.bizQ);
+    const res = await chat(ID.owner, ID.bizQ, `k09b ${ID.owner} intent`);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await intakeColumns(ID.bizQ)).toMatchObject({ businessIntent: `k09b ${ID.owner} intent`, industry: AI_INDUSTRY, country: AI_COUNTRY });
+    expect(blueprintInferred).toEqual([ID.bizQ]);
+
+    await resetConcierge(ID.bizL);
+    const before = await businessRowText(ID.bizL);
+    const refused = await chat(ID.legacyOwner, ID.bizL, `k09b ${ID.legacyOwner} intent`);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await intakeColumns(ID.bizL)).toEqual({ businessIntent: null, industry: null, archetype: null, country: null });
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
+    expect(blueprintInferred).toEqual([]);
   });
 
   it("[D11-C09] today's rule kept (review CR-2): a STAFF member (settings:none) dismisses the concierge, snoozes a nudge and resumes (201 each): only the concierge's display-state keys of Business.metaData change; every other column and every other metaData key stays as the owner left it", async () => {
@@ -1091,14 +1103,16 @@ describe('R0-09g commerce document templates cannot change the business profile 
     expect(await documentTemplateColumns(ID.bizS)).toEqual(CHANGE);
   });
 
-  it("[D11-D07] RED-BEFORE (the route's ModuleScopeGuard refused a member-less owner): the distinguished owner (Business.ownerId) with no membership row sets the templates (200), the owner rule's second arm", async () => {
+  it("[D11-D07] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: sets the templates by the owner rule's second arm): the distinguished owner (Business.ownerId) with no membership row is refused setting and reading the templates (403 'No access to this business'), the Business row byte-identical", async () => {
     await resetDocumentTemplates(ID.bizL);
+    const before = await businessRowText(ID.bizL);
     const res = await patchDocumentTemplates(ID.legacyOwner, ID.bizL, CHANGE);
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(await documentTemplateColumns(ID.bizL)).toEqual(CHANGE);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
     const read = await getDocumentTemplates(ID.legacyOwner, ID.bizL);
-    expect(read.status, JSON.stringify(read.body)).toBe(200);
-    expect(defaultsOf(read.body)).toEqual({ invoice: ['modern'], quote: ['minimal'] });
+    expect(read.status, JSON.stringify(read.body)).toBe(403);
+    expect(read.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
   });
 
   it('[D11-D08] a foreign business id writes nothing: the owner of bizP and STAFF every scope admin (members of bizP and bizQ only) are refused bizL (403), the Business row byte-identical; an unknown business id is refused (403 or 404) and no business row appears', async () => {

@@ -390,16 +390,15 @@ describe('R0-08c the owner changes the plan, and every change is audited against
     });
   });
 
-  it('[R0-08c-O06] pinned: the distinguished owner (Business.ownerId) with no membership row records a payment (201), audited against that owner', async () => {
-    let body: any;
+  it("[R0-08c-O06] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: records a payment): the distinguished owner (Business.ownerId) with no membership row is refused (403 'No access to this business'): no subscription written and no audit row", async () => {
+    const subscriptionsBefore = await db.subscription.findMany({ where: { businessId: ID.bizC }, orderBy: { id: 'asc' } });
     const rows = await newAuditRows(ID.bizC, async () => {
       const res = await post(ID.legacyOwner, ID.bizC, 'record-payment', { plan: 'KEYFLOW', currency: 'TTD', method: 'bank_transfer' });
-      expect(res.status, JSON.stringify(res.body)).toBe(201);
-      body = res.body;
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
     });
-    expect(body).toMatchObject({ businessId: ID.bizC, plan: 'KEYFLOW', status: 'ACTIVE' });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ businessId: ID.bizC, userId: ID.legacyOwner, action: 'subscription_payment_recorded' });
+    expect(rows).toEqual([]);
+    expect(await db.subscription.findMany({ where: { businessId: ID.bizC }, orderBy: { id: 'asc' } })).toEqual(subscriptionsBefore);
   });
 
   it("[R0-08c-O07] pinned: a SUPER_ADMIN with no membership keeps the platform bypass and cancels the owner's trial (201), audited against the super admin", async () => {

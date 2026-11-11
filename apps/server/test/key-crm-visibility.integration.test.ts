@@ -1748,7 +1748,7 @@ describe('W4-PROPOSAL-PRINCIPAL review repairs (SEC-W4PP-1, CR-W4PP-1, SEC-W4PP-
     expect((owner.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id).sort()).toEqual(ALL);
   });
 
-  it("CV-13f RED-BEFORE (W4-PROPOSAL-PRINCIPAL review CR-W4PP-2; D-71, D-73): a plan whose member owns the business by Business.ownerId alone (no membership row) runs its crm_list_contacts step proposal as the plan queue runs it: admitted by planStepRunRefusal and dispatched with no principal (the owner's view is the whole book), not refused 'Not a member of this business'; that owner's own MANUAL proposal runs alike", async () => {
+  it("CV-13f (W4-PROPOSAL-PRINCIPAL review CR-W4PP-2, superseded by owner ruling D-104, W10-OWNER-MEMBERSHIP; D-71, D-73): a plan whose member owns the business by Business.ownerId alone (no membership row) is refused by planStepRunRefusal ('Not a member of this business') and its crm_list_contacts step proposal is not dispatched; that owner's own MANUAL proposal is refused alike; no contact named. With the OWNER membership the backfill writes, the plan step runs (the OWNER its principal, the whole book)", async () => {
     const ownerC = `${P}owner_c`;
     const bizC = `${P}biz_c`;
     const planC = `${P}cv13f_plan`;
@@ -1762,21 +1762,30 @@ describe('W4-PROPOSAL-PRINCIPAL review repairs (SEC-W4PP-1, CR-W4PP-1, SEC-W4PP-
       },
     });
     const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
-    expect(await planStepRunRefusal(prisma, bizC, planC, 'crm_list_contacts')).toBeNull();
+    expect(await planStepRunRefusal(prisma, bizC, planC, 'crm_list_contacts')).toMatch(/Not a member of this business/);
 
-    const step = await run(
-      filed('cv13f_plan', { sourceType: 'AI_PLAN', planId: planC, planStepId: `${planC}_s1`, approvedBy: ownerC }, {
+    const planFiled = (tag: string) =>
+      filed(tag, { sourceType: 'AI_PLAN', planId: planC, planStepId: `${planC}_s1`, approvedBy: ownerC }, {
         toolName: 'crm_list_contacts', inputPayload: { limit: 50 }, planContext: { planId: planC, planStepId: `${planC}_s1` },
-      }, bizC),
-      ownerC,
-    );
-    expect(step.sent.map((d) => [d.surface, d.principal, d.planStepId])).toEqual([['PROPOSAL', undefined, `${planC}_s1`]]);
-    expect(step.outcome.success, step.outcome.error).toBe(true);
-    expect((step.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
+      }, bizC);
+    const step = await run(planFiled('cv13f_plan'), ownerC);
+    expect(step.sent, JSON.stringify(step.sent)).toEqual([]);
+    expect(step.outcome.success).toBe(false);
+    expect(JSON.stringify(step.outcome)).not.toContain('V89KC');
 
     const manual = await run(filed('cv13f_manual', { userId: ownerC, approvedBy: ownerC }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }, bizC), ownerC);
-    expect(manual.outcome.success, manual.outcome.error).toBe(true);
-    expect((manual.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
+    expect(manual.sent, JSON.stringify(manual.sent)).toEqual([]);
+    expect(manual.outcome.success).toBe(false);
+    expect(JSON.stringify(manual.outcome)).not.toContain('V89KC');
+
+    // CONTROL: with the OWNER membership the operator backfill writes, the plan step runs (admitted,
+    // dispatched with the OWNER member as its principal: the owner's view is the whole book).
+    await db.membership.create({ data: { id: `${P}m_owner_c`, userId: ownerC, businessId: bizC, role: 'OWNER' } });
+    expect(await planStepRunRefusal(prisma, bizC, planC, 'crm_list_contacts')).toBeNull();
+    const healed = await run(planFiled('cv13f_plan_healed'), ownerC);
+    expect(healed.sent.map((d) => [d.surface, d.principal, d.planStepId])).toEqual([['PROPOSAL', ownerC, `${planC}_s1`]]);
+    expect(healed.outcome.success, healed.outcome.error).toBe(true);
+    expect((healed.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
   });
 });
 

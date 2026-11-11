@@ -20,7 +20,7 @@
     "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P07] an unauthenticated request is refused (401), row byte-identical",
     "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P08] positive control: the OWNER changes currency and timezone (200), and GET reflects them",
     "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P09] positive control: the OWNER of B edits B on B's path (200), so the cross-tenant denial is not vacuous",
-    "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P10] pinned: the distinguished owner (Business.ownerId) with no membership row edits its own business (200), as BusinessGuard admits it",
+    "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P10] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: edits its own business): the distinguished owner (Business.ownerId) with no membership row is refused by BusinessGuard (403 'No access to this business'), the timezone unchanged",
     "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P11] pinned: a SUPER_ADMIN with no membership keeps the platform bypass BusinessGuard already grants (200)",
     "R0-09 the profile write never returns Business OAuth credentials (review R09-ST-1) [R0-09-P12] RED-BEFORE: the OWNER's PATCH answers 200 with no access or refresh token in the body, and the same keys GET returns",
     "R0-09 the profile write never returns Business OAuth credentials (review R09-ST-1) [R0-09-P13] RED-BEFORE: the SUPER_ADMIN bypass PATCH and the service result the KEY settings adapter returns carry no access or refresh token",

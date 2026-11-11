@@ -425,8 +425,15 @@ describe('R0-SEC2 GET config never answers a secret value', () => {
     }
   });
 
-  it('[SEC2-C03] RED-BEFORE: the owner, a co-owner (OWNER membership arm), the distinguished owner of bizL (Business.ownerId arm) and a SUPER_ADMIN get phoneNumberId and each credential\'s last 4 characters, never the value', async () => {
-    for (const [actor, biz] of [[ID.owner, ID.bizW], [ID.coOwner, ID.bizW], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizW]]) {
+  it("[SEC2-C03] RED-BEFORE: the owner, a co-owner (OWNER membership arm) and a SUPER_ADMIN get phoneNumberId and each credential's last 4 characters, never the value; the distinguished owner of bizL (Business.ownerId, no membership) is refused (owner ruling D-104: 403 'No access to this business', no config in the body)", async () => {
+    await reset(ID.bizL);
+    const refused = await getConfig(ID.legacyOwner, ID.bizL);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(refused.body).not.toHaveProperty('data');
+    expectNoSecret(refused.body, 'legacyOwner GET config');
+    expect(JSON.stringify(refused.body).includes(PHONE_NUMBER_ID), 'legacyOwner: phoneNumberId').toBe(false);
+    for (const [actor, biz] of [[ID.owner, ID.bizW], [ID.coOwner, ID.bizW], [ID.superAdmin, ID.bizW]]) {
       await reset(biz);
       const res = await getConfig(actor, biz);
       expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
@@ -561,14 +568,21 @@ describe('R0-SEC2 PATCH config is OWNER only (D-11 sending identity)', () => {
     await reset(ID.bizW);
   });
 
-  it('[SEC2-W06] the co-owner (OWNER membership arm), the distinguished owner of bizL (Business.ownerId arm, no membership) and a SUPER_ADMIN may write the config', async () => {
-    for (const [actor, biz] of [[ID.coOwner, ID.bizW], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizW]]) {
+  it("[SEC2-W06] the co-owner (OWNER membership arm) and a SUPER_ADMIN may write the config; the distinguished owner of bizL (Business.ownerId, no membership) is refused (owner ruling D-104: 403 'No access to this business', bizL byte-identical)", async () => {
+    for (const [actor, biz] of [[ID.coOwner, ID.bizW], [ID.superAdmin, ID.bizW]]) {
       await reset(biz);
       const res = await patchConfig(actor, biz, { provider: 'meta', phoneNumberId: PHONE_NUMBER_ID, fromNumber: '+18685550500' });
       expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
       expect((await storedWhatsApp(biz))?.fromNumber, `${actor} wrote fromNumber`).toBe('+18685550500');
       await reset(biz);
     }
+    await reset(ID.bizL);
+    const before = await businessRowText(ID.bizL);
+    const refused = await patchConfig(ID.legacyOwner, ID.bizL, { provider: 'meta', phoneNumberId: '646464646464646', fromNumber: '+18685550500' });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'bizL byte-identical').toBe(before);
+    expect(fetchCalls).toEqual([]);
   });
 
   it('[SEC2-W07] RED-BEFORE (review SEC2-R1): an owner cannot store another business\'s credential ciphertext as its own: the owner of bizO PATCHes bizO with each of bizW\'s stored credentials (also with surrounding blanks): 400 WHATSAPP_CREDENTIAL_CIPHERTEXT, bizO byte-identical, no provider traffic', async () => {
@@ -631,18 +645,23 @@ describe('R0-SEC2 PATCH config is OWNER only (D-11 sending identity)', () => {
   });
 
   it('[SEC2-W09] two owners claiming the same free phoneNumberId at once: exactly one is stored, the other answers 409 (the claim is serialised)', async () => {
+    // W10-OWNER-MEMBERSHIP (owner ruling D-104): the second racer is the owner
+    // of bizX (OWNER membership and Business.ownerId). The member-less owner of
+    // bizL is refused at BusinessGuard now, which would never reach the claim.
     const id = '626262626262626';
     await reset(ID.bizO, { provider: 'mock', fromNumber: '+18685550600' });
-    await reset(ID.bizL, { provider: 'mock', fromNumber: '+18685550700' });
+    await reset(ID.bizX, { provider: 'mock', fromNumber: '+18685550700' });
     const [a, b] = await Promise.all([
       patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', phoneNumberId: id, fromNumber: '+18685550605' }),
-      patchConfig(ID.legacyOwner, ID.bizL, { provider: 'meta', phoneNumberId: id, fromNumber: '+18685550705' }),
+      patchConfig(ID.outsider, ID.bizX, { provider: 'meta', phoneNumberId: id, fromNumber: '+18685550705' }),
     ]);
     expect([a.status, b.status].sort(), `${JSON.stringify(a.body)} / ${JSON.stringify(b.body)}`).toEqual([200, 409]);
+    const loser = a.status === 409 ? a : b;
+    expect(loser.body?.code, JSON.stringify(loser.body)).toBe('WHATSAPP_PHONE_NUMBER_ID_IN_USE');
     const holders = await db.business.findMany({ where: { metaData: { path: ['whatsapp', 'phoneNumberId'], equals: id } }, select: { id: true } });
     expect(holders.length, JSON.stringify(holders)).toBe(1);
     await reset(ID.bizO);
-    await reset(ID.bizL);
+    await reset(ID.bizX);
   });
 });
 
@@ -706,24 +725,23 @@ describe('R0-SEC2 sending and the inbox reads need an operations scope', () => {
     await reset(ID.bizW);
   });
 
-  it('[SEC2-S05] RED-BEFORE (review CR-SEC2-1): the distinguished owner of bizL (Business.ownerId, no membership row), whom PATCH config admits, keeps every inbox read and sends (mock provider): status connected, conversations, templates, POST test, POST send and POST messages', async () => {
+  it("[SEC2-S05] (review CR-SEC2-1; owner ruling D-104, W10-OWNER-MEMBERSHIP) the distinguished owner of bizL (Business.ownerId, no membership row), whom PATCH config refuses too, is refused every inbox read and send (403 'No access to this business'): status, conversations, templates, POST test, POST send and POST messages; nothing written, no provider traffic", async () => {
     await reset(ID.bizL, SEEDED_MOCK);
     const reads = READS.filter(({ label }) => label !== 'GET conversations/:id');
     for (const { label, call } of reads) {
       const res = await call(ID.legacyOwner, ID.bizL);
-      expect([200, 201], `${label}: ${JSON.stringify(res.body)}`).toContain(res.status);
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, label).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
       expectNoSecret(res.body, label);
     }
-    const status = await READS[0].call(ID.legacyOwner, ID.bizL);
-    expect(status.body.connected, JSON.stringify(status.body)).toBe(true);
     const before = await messageCount(ID.bizL);
     const a = await send(ID.legacyOwner, ID.bizL);
-    expect(a.status, `send: ${JSON.stringify(a.body)}`).toBe(201);
-    expect(a.body.success).toBe(true);
+    expect(a.status, `send: ${JSON.stringify(a.body)}`).toBe(403);
+    expect(a.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
     const b = await sendDrawer(ID.legacyOwner, ID.bizL);
-    expect(b.status, `messages: ${JSON.stringify(b.body)}`).toBe(201);
-    expect(b.body.status).toBe('SENT');
-    expect((await messageCount(ID.bizL)).messages - before.messages).toBe(2);
+    expect(b.status, `messages: ${JSON.stringify(b.body)}`).toBe(403);
+    expect(b.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await messageCount(ID.bizL), 'nothing written').toEqual(before);
     expect(fetchCalls).toEqual([]);
     await db.$executeRawUnsafe('DELETE FROM whatsapp_messages WHERE business_id = $1', ID.bizL);
     await db.$executeRawUnsafe('DELETE FROM whatsapp_contacts WHERE business_id = $1', ID.bizL);
@@ -831,12 +849,17 @@ function expectMaskedBusiness(body: any, label: string) {
 }
 
 describe('R0-SEC2b business reads never carry the WhatsApp config (review SEC2-R2)', () => {
-  it('[SEC2-T01] RED-BEFORE (review SEC2-R2): GET /identity/businesses/:businessId answers metaData.whatsapp as {configured:true} only to every reader (STAFF with operations:none, STAFF on role defaults, ADMIN, the owner, the co-owner, the distinguished owner of bizL, SUPER_ADMIN): no credential plaintext or ciphertext, no phoneNumberId, the other metaData keys kept', async () => {
+  it("[SEC2-T01] RED-BEFORE (review SEC2-R2): GET /identity/businesses/:businessId answers metaData.whatsapp as {configured:true} only to every reader (STAFF with operations:none, STAFF on role defaults, ADMIN, the owner, the co-owner, SUPER_ADMIN): no credential plaintext or ciphertext, no phoneNumberId, the other metaData keys kept; the distinguished owner of bizL (no membership) is refused (owner ruling D-104: 403 'No access to this business', no business in the body)", async () => {
     await reset(ID.bizW);
     await reset(ID.bizL);
+    const refused = await getBusinessRoute(ID.legacyOwner, ID.bizL);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(refused.body).not.toHaveProperty('metaData');
+    expectNoSecret(refused.body, 'legacyOwner GET /identity/businesses/bizL');
     const readers: Array<[string, string]> = [
       [ID.staffNoOps, ID.bizW], [ID.staff, ID.bizW], [ID.admin, ID.bizW], [ID.owner, ID.bizW],
-      [ID.coOwner, ID.bizW], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizW],
+      [ID.coOwner, ID.bizW], [ID.superAdmin, ID.bizW],
     ];
     for (const [actor, biz] of readers) {
       const res = await getBusinessRoute(actor, biz);

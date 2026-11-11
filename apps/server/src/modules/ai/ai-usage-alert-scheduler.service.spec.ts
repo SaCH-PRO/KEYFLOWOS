@@ -12,6 +12,9 @@ const mockPrismaClient = {
   },
   user: {
     findUnique: vi.fn(),
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the owner fallback reads the
+    // ownerId user only with a Membership in the business (businessOwnerRecipient).
+    findFirst: vi.fn(),
   },
 };
 
@@ -109,7 +112,7 @@ describe('AiUsageAlertSchedulerService', () => {
         email: null,
         ownerId: 'user-1',
       });
-      mockPrismaClient.user.findUnique.mockResolvedValue({ email: 'owner@example.com' });
+      mockPrismaClient.user.findFirst.mockResolvedValue({ email: 'owner@example.com', name: null });
       mockModuleRef.get
         .mockReturnValueOnce(mockNotifications)
         .mockReturnValueOnce(mockSystemEmail);
@@ -121,6 +124,36 @@ describe('AiUsageAlertSchedulerService', () => {
           to: 'owner@example.com',
         }),
       );
+    });
+
+    it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, review SEC-W10OM-6): the owner fallback is read only with a Membership in the business, so an owner recorded only as Business.ownerId gets no alert email; the alert is still marked notified', async () => {
+      const alert = {
+        id: 'alert-d104',
+        businessId: 'biz-1',
+        type: 'credit_depleted',
+        threshold: 100,
+        metadata: { used: 100, limit: 100 },
+        triggeredAt: new Date(),
+      };
+      mockPrismaClient.aiUsageAlert.findMany.mockResolvedValue([alert]);
+      mockPrismaClient.aiUsageAlert.update.mockResolvedValue({});
+      mockPrismaClient.business.findUnique.mockResolvedValue({ name: 'Acme', email: null, ownerId: 'user-1' });
+      // The membership-filtered read finds no member owner.
+      mockPrismaClient.user.findFirst.mockResolvedValue(null);
+      mockPrismaClient.user.findUnique.mockResolvedValue({ email: 'owner@example.com' });
+      mockModuleRef.get
+        .mockReturnValueOnce(mockNotifications)
+        .mockReturnValueOnce(mockSystemEmail);
+
+      await service.tick();
+
+      expect(mockPrismaClient.user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'user-1', businesses: { some: { businessId: 'biz-1' } } },
+        select: { email: true, name: true },
+      });
+      expect(mockPrismaClient.user.findUnique).not.toHaveBeenCalled();
+      expect(mockSystemEmail.sendTransactional).not.toHaveBeenCalled();
+      expect(mockPrismaClient.aiUsageAlert.update).toHaveBeenCalledWith({ where: { id: 'alert-d104' }, data: { notified: true } });
     });
 
     it('skips email when SystemEmailService is unavailable', async () => {

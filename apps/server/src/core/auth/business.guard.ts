@@ -34,6 +34,27 @@ export async function userCanAccessBusiness(prisma: PrismaService, userId: strin
 }
 
 /**
+ * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the user
+ * named by Business.ownerId, as a recipient of mail addressed to "the business
+ * owner" (the weekly financial briefing, the public quote alerts, the AI usage
+ * alerts), only while they hold a Membership in that business. A user D-104
+ * refuses at every route (recorded only as ownerId, or removed by a co-owner)
+ * receives none of the business's figures by mail either. Null when the
+ * ownerId is empty, names no user, or names one who is no member.
+ */
+export async function businessOwnerRecipient(
+  prisma: PrismaService,
+  businessId: string,
+  ownerId: string | null | undefined,
+): Promise<{ email: string | null; name: string | null } | null> {
+  if (!ownerId) return null;
+  return prisma.client.user.findFirst({
+    where: { id: ownerId, businesses: { some: { businessId } } },
+    select: { email: true, name: true },
+  });
+}
+
+/**
  * The tenant a request may be scoped to: the one answer BusinessGuard and
  * TenantInterceptor share (R0-F24-TENANT-INTERCEPTOR-ALIGN, build map CF-24).
  * Only a tenant the caller has been VERIFIED for is ever returned:
