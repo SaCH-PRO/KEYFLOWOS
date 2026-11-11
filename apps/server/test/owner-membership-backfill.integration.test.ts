@@ -260,7 +260,7 @@ async function bootMemberships() {
 
 /** The bootstrap's refusal, or null when it answered. */
 async function bootstrapError(userId: string) {
-  return identity.bootstrapUser({ userId, email: `${userId}@test.local` }).then(
+  return identity.bootstrapUser({ userId, email: `${P}${userId.slice(P.length)}@test.local` }).then(
     () => null,
     (e: unknown) => e,
   );
@@ -498,7 +498,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-3): the sign-in bootstra
 describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answers a business the caller is a member of and refuses only a recorded owner who is a member nowhere', () => {
   beforeAll(async () => {
     for (const id of BOOT_USERS) {
-      await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
     }
     // Explicit timestamps: the bootstrap's choices are by age, so the fixture
     // fixes every age rather than relying on insertion order.
@@ -539,7 +539,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answ
 
   it('[OMB-14] RED-BEFORE (D-104; review OMV-2): a caller a co-owner removed from their oldest owned business, OWNER of a newer one and STAFF of another, signs in: the bootstrap answers the oldest owned business they are a member of (isNewBusiness false), writes nothing, and re-admits them nowhere', async () => {
     const before = await bootMemberships();
-    const out = await identity.bootstrapUser({ userId: ID.bootRemoved, email: `${ID.bootRemoved}@test.local` });
+    const out = await identity.bootstrapUser({ userId: ID.bootRemoved, email: `${P}${ID.bootRemoved.slice(P.length)}@test.local` });
     expect(out.business.id).toBe(ID.bootNewer);
     expect(out.isNewBusiness).toBe(false);
     expect(await bootMemberships()).toEqual(before);
@@ -550,10 +550,10 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answ
 
   it('[OMB-15] RED-BEFORE (D-104; review OMV-2): a caller recorded as Business.ownerId only of a with_another_owner business, a member of none they own but STAFF and ADMIN elsewhere, signs in: the bootstrap answers the business of their oldest Membership on a live business, the same one each time (isNewBusiness false), and writes nothing', async () => {
     const before = await bootMemberships();
-    const first = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${ID.bootFallback}@test.local` });
+    const first = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${P}${ID.bootFallback.slice(P.length)}@test.local` });
     expect(first.business.id).toBe(ID.bootAdminY);
     expect(first.isNewBusiness).toBe(false);
-    const again = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${ID.bootFallback}@test.local` });
+    const again = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${P}${ID.bootFallback.slice(P.length)}@test.local` });
     expect(again.business.id, 'deterministic').toBe(ID.bootAdminY);
     expect(again.isNewBusiness).toBe(false);
     expect(await bootMemberships()).toEqual(before);
@@ -564,7 +564,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answ
 
   it('[OMB-16] control (D-104): a caller who owns no business (STAFF elsewhere) still gets their first workspace with its founding OWNER Membership, the same one on the next sign-in; a recorded owner who is a member nowhere live (only of a soft-deleted business) is still refused 403 OWNER_MEMBERSHIP_REQUIRED with nothing written', async () => {
     const before = await bootMemberships();
-    const first = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${ID.bootFirst}@test.local` });
+    const first = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${P}${ID.bootFirst.slice(P.length)}@test.local` });
     expect(first.isNewBusiness).toBe(true);
     const created = await db.business.findUnique({ where: { id: first.business.id }, select: { ownerId: true } });
     expect(created).toEqual({ ownerId: ID.bootFirst });
@@ -573,7 +573,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answ
     expect(after.filter((row: any) => !before.some((b: any) => b.id === row.id)).map(({ id: _id, ...rest }: any) => rest)).toEqual([
       { userId: ID.bootFirst, businessId: first.business.id, role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 },
     ]);
-    const again = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${ID.bootFirst}@test.local` });
+    const again = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${P}${ID.bootFirst.slice(P.length)}@test.local` });
     expect(again.business.id).toBe(first.business.id);
     expect(again.isNewBusiness).toBe(false);
     expect(await bootMemberships()).toEqual(after);
