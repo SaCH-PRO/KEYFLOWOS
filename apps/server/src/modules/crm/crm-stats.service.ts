@@ -98,6 +98,12 @@ const NO_CONTACT: Prisma.ContactWhereInput = { id: { in: [] } };
  * money: an invoice row ('Total <amount> <currency>') or a ContactEvent row of
  * a money type (crmRowCarriesMoney, the feed's rule). A member without revenue
  * read is served neither (crm.controller.ts withoutHighlightsMoney).
+ *
+ * An entry carries no data, so this cannot see an event of another type whose
+ * data carries an amount (e.g. payment.completed, store_order.paid): that one
+ * is judged on its row, data included, before the entry is made
+ * (CrmTimelineService.buildTimeline withoutMoney; W10-MONEY-SIGNALS-REST review
+ * repair SEC-W10MSR-1, D-100, D-90, D-63). This stays as the backstop.
  */
 export function timelineEntryCarriesMoney(entry: { type: string; title: string }): boolean {
   return entry.type === 'invoice' || (entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title }));
@@ -968,9 +974,11 @@ export class CrmStatsService {
   /**
    * W9-MONEY-RANKING review repair SEC-W9MR-2 (owner ruling D-100): the
    * timeline for a member without revenue read. CrmTimelineService.buildTimeline
-   * reads it without money (no invoice; the money-type ContactEvent rows left
-   * out in the event query itself, so they take none of its 10 places:
-   * W10-MONEY-SIGNALS-REST, SEC-W9MR-2 remainder) and with no cut, from the
+   * reads it without money (no invoice; every ContactEvent the feed rule
+   * withholds from that member, a sales_revenue type or data carrying an
+   * amount, left out before its 10 events are taken, so they take none of the
+   * places: W10-MONEY-SIGNALS-REST, SEC-W9MR-2 remainder and review repair
+   * SEC-W10MSR-1, D-100, D-90) and with no cut, from the
    * rows of the contacts `contacts` admits (D-63); any entry that still
    * carries money (timelineEntryCarriesMoney) is left out, then the timeline
    * is cut to the 20 the highlights serve.

@@ -61,6 +61,10 @@
  *     owner's highlights are unchanged (a third business, biz3);
  *   - SEC-W9MR-2 remainder: the timeline's event read leaves the money-type
  *     ContactEvent rows out in the query, so they take none of its 10 places.
+ * Its review repair SEC-W10MSR-1 (D-100, D-90, D-63; a fourth business, biz4):
+ * that read judges each event by the feed rule GET contacts/:c/events applies,
+ * so an event of another type whose data carries an amount (payment.completed,
+ * store_order.paid / refunded, autopilot.payment_recovery) is left out too.
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -1198,6 +1202,81 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
     for (const user of [ID.owner, ID.rev]) {
       const full: Highlights = await ok3(user, 'highlights');
       expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestTen);
+    }
+  });
+});
+
+// ---- W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1: a fourth business (biz4) ----
+const ID4 = {
+  biz: `${P}biz4`,
+  cTeam: `${P}c4Team`,
+  callEvent: `${P}c4ev_call`,
+  moneyEvents: Array.from({ length: 11 }, (_, k) => `${P}c4ev_money${String(k).padStart(2, '0')}`),
+};
+/**
+ * ContactEvent types outside the sales_revenue category whose rows here carry
+ * an amount in data (a MONEY_DATA_FIELDS field, which crmRowCarriesMoney reads),
+ * so the feed rule withholds them from a member without revenue read.
+ */
+const DATA_MONEY_TYPES = ['payment.completed', 'store_order.paid', 'store_order.refunded', 'autopilot.payment_recovery'];
+const EVENT_AMOUNT = 777.31;
+
+async function ok4(user: string, routePath: string) {
+  const res = await request(app.getHttpServer()).get(`/crm/businesses/${ID4.biz}/${routePath}`).set('x-test-user', user);
+  expect(res.status, `${user} GET biz4 ${routePath}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+  return res.body;
+}
+
+describe('W10-MONEY-SIGNALS-REST review repair: the highlights timeline judges each ContactEvent by the feed rule (D-100, D-90, D-63, real DB)', () => {
+  beforeAll(async () => {
+    await db.business.create({ data: { id: ID4.biz, name: 'V94E Biz4', ownerId: ID.owner, metaData: { features: { ai_tools: true } } } });
+    await db.membership.create({ data: { id: `${P}m4_owner`, userId: ID.owner, businessId: ID4.biz, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m4_noRev`, userId: ID.noRev, businessId: ID4.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}m4_rev`, userId: ID.rev, businessId: ID4.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+
+    const now = Date.now();
+    const ago = (minutes: number) => new Date(now - minutes * 60_000);
+    await db.contact.create({
+      data: {
+        id: ID4.cTeam, businessId: ID4.biz, firstName: 'V94E', lastName: 'c4Team', status: 'LEAD', visibility: 'TEAM', ownerId: ID.owner,
+        email: `${P}c4team@contacts.test`, createdAt: ago(180),
+      },
+    });
+    // c4Team's events: the non-money one first, then 11 newer ones (more than the 10 the timeline reads)
+    // whose type is no sales_revenue type but whose data carries an amount.
+    await db.contactEvent.create({ data: { id: ID4.callEvent, businessId: ID4.biz, contactId: ID4.cTeam, type: 'communication.call', data: {}, source: 'v94e', createdAt: ago(30) } });
+    for (const [k, id] of ID4.moneyEvents.entries()) {
+      await db.contactEvent.create({
+        data: {
+          id, businessId: ID4.biz, contactId: ID4.cTeam, type: DATA_MONEY_TYPES[k % DATA_MONEY_TYPES.length],
+          data: { amount: EVENT_AMOUNT, currency: 'TTD' }, source: 'v94e', createdAt: ago(20 - k),
+        },
+      });
+    }
+  }, 60_000);
+
+  it("SEC-W10MSR-1 (D-100, D-90, D-63) (W10-MONEY-SIGNALS-REST review): GET .../highlights serves a member without revenue read no ContactEvent the feed rule withholds from them (canReadActivityRow: a crm row whose data carries an amount, whatever its type, e.g. payment.completed, store_order.paid, store_order.refunded, autopilot.payment_recovery), exactly as GET contacts/:c/events withholds them, and those rows take none of the timeline's 10 event places: that member's timeline is c4Team's call event; the owner's and a revenue-read member's timeline keep the 10 newest events", async () => {
+    const newestFirst = [...ID4.moneyEvents].reverse();
+
+    // The feed rule, as GET contacts/:c/events applies it (W6-CONTACT-EVENTS-MONEY): the owner reads every
+    // event, the member without revenue read the call event only.
+    const ownerEvents = (await ok4(ID.owner, `contacts/${ID4.cTeam}/events`)) as Array<{ id: string; type: string }>;
+    expect(ownerEvents.map((event) => event.id)).toEqual([...newestFirst, ID4.callEvent]);
+    expect(new Set(ownerEvents.map((event) => event.type))).toEqual(new Set([...DATA_MONEY_TYPES, 'communication.call']));
+    const withheldEvents = (await ok4(ID.noRev, `contacts/${ID4.cTeam}/events`)) as Array<{ id: string }>;
+    expect(withheldEvents.map((event) => event.id)).toEqual([ID4.callEvent]);
+
+    // The highlights timeline judges the events by the same rule.
+    const withheld: Highlights = await ok4(ID.noRev, 'highlights');
+    expect(withheld.timeline.map((entry) => [entry.id, entry.type, entry.title])).toEqual([[ID4.callEvent, 'event', 'communication.call']]);
+    const text = JSON.stringify(withheld);
+    for (const id of ID4.moneyEvents) expect(text).not.toContain(id);
+    for (const type of DATA_MONEY_TYPES) expect(text).not.toContain(type);
+    expect(text).not.toContain(String(EVENT_AMOUNT));
+
+    for (const user of [ID.owner, ID.rev]) {
+      const full: Highlights = await ok4(user, 'highlights');
+      expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestFirst.slice(0, 10));
     }
   });
 });
