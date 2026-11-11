@@ -276,8 +276,17 @@ export class ConnectController {
   }
 
   // ----- Contacts -----
+  // W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T05]; review SEC-W9GD-2):
+  // the Google Contacts sync is the owner's to start, as its contact-source
+  // twins resync google_contacts and sync-all are (they run the same
+  // GoogleContactsSyncService.sync): assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY first, before anything is synced.
   @Post('businesses/:businessId/contacts/sync')
-  syncContacts(@Param('businessId') businessId: string) {
+  async syncContacts(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.contacts.sync(businessId);
   }
 

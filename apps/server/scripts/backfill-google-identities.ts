@@ -82,6 +82,7 @@
 import { db } from '@keyflow/db';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 import { RISC_DISABLED_REASON, RISC_EVENT_TYPES } from '../src/modules/risc/risc.types';
+import { endsSessions } from '../src/modules/risc/risc.service';
 
 /** The parts of a GoTrue user this script reads. user_metadata is deliberately absent. */
 export interface GoTrueIdentity {
@@ -144,22 +145,21 @@ const PROVIDER = 'google';
 const IN_CHUNK = 1000;
 
 /**
- * The RISC event types RiscService ends sessions for (endsSessions in
- * risc.service.ts): sessions-revoked, tokens-revoked, token-revoked, and
- * account-disabled with reason hijacking. A `no_matching_user` row of one of
- * these is a cutoff that was never applied.
+ * The RISC event types RiscService can end sessions for, by its own
+ * classification (endsSessions, imported from risc.service.ts: W10-RISC-RESET,
+ * no copy): every type it ends sessions for with some reason (sessions-revoked,
+ * tokens-revoked, token-revoked, and account-disabled, which needs reason
+ * hijacking). A `no_matching_user` row of one of these is a cutoff that was
+ * never applied when sessionEndingEvent says so for its stored reason.
  */
-const SESSION_ENDING_EVENT_TYPES: readonly string[] = [
-  RISC_EVENT_TYPES.SESSIONS_REVOKED,
-  RISC_EVENT_TYPES.TOKENS_REVOKED,
-  RISC_EVENT_TYPES.TOKEN_REVOKED,
-];
+const SESSION_ENDING_EVENT_TYPES: readonly string[] = Object.values(RISC_EVENT_TYPES).filter((type) =>
+  endsSessions(type, RISC_DISABLED_REASON.HIJACKING),
+);
 
-function endsSessions(eventType: string, payload: unknown): boolean {
-  if (SESSION_ENDING_EVENT_TYPES.includes(eventType)) return true;
-  if (eventType !== RISC_EVENT_TYPES.ACCOUNT_DISABLED) return false;
+/** RiscService's endsSessions for a stored event: the reason it persisted on RiscEvent.payload. */
+function sessionEndingEvent(eventType: string, payload: unknown): boolean {
   const reason = payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as { reason?: unknown }).reason : undefined;
-  return reason === RISC_DISABLED_REASON.HIJACKING;
+  return endsSessions(eventType, typeof reason === 'string' ? reason : undefined);
 }
 
 /** A stop the script itself names: its message carries no provider or database text, so it is printed. */
@@ -369,14 +369,14 @@ async function countUnappliedRiscEvents(database: Db, pending: Map<string, strin
       where: {
         userId: null,
         actionTaken: 'no_matching_user',
-        eventType: { in: [...SESSION_ENDING_EVENT_TYPES, RISC_EVENT_TYPES.ACCOUNT_DISABLED] },
+        eventType: { in: [...SESSION_ENDING_EVENT_TYPES] },
       },
       select: { id: true, eventType: true, providerSubject: true, payload: true },
       orderBy: { id: 'asc' },
       take: IN_CHUNK,
       ...(cursor !== null ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
-    for (const e of batch) if (endsSessions(e.eventType, e.payload)) missed.push(e);
+    for (const e of batch) if (sessionEndingEvent(e.eventType, e.payload)) missed.push(e);
     if (batch.length < IN_CHUNK) break;
     cursor = batch[batch.length - 1].id;
   }

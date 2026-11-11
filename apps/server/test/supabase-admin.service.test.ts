@@ -4,7 +4,12 @@ import type { Request } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
-import { AuthMiddleware, LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationKey } from '../src/core/auth/auth.middleware';
+import {
+  AuthMiddleware,
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  recordPasswordResetAfterCutoff,
+} from '../src/core/auth/auth.middleware';
 import { buildAdminToken, verifyAdminToken } from '../src/core/auth/admin-token.util';
 import { RiscService } from '../src/modules/risc/risc.service';
 import { RISC_EVENT_TYPES } from '../src/modules/risc/risc.types';
@@ -1472,11 +1477,18 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
    * recorded or at the sign-in if later: review CR-W9RPC-3). The clearing
    * sign-ins below are dated 20s after the event, ahead of this server's
    * clock however slow the run, so the clearing is dated at them. From then
-   * on a session authenticated after the clearing is admitted by any method;
-   * the password session authenticated between the cutoff and the clearing
-   * (the hijacker's) stays refused. A later RISC event re-arms it.
+   * on a session of another method authenticated after the clearing is
+   * admitted; the password session authenticated between the cutoff and the
+   * clearing (the hijacker's) stays refused. A later RISC event re-arms it.
+   *
+   * D-113 (W10-RISC-RESET) amends it: a PASSWORD session after the clearing
+   * is still refused until the user completes a password reset through
+   * KEYFLOW after the cutoff (User.metaData.passwordResetAfterCutoffAt, which
+   * completeReset records with recordPasswordResetAfterCutoff under the same
+   * lock); one authenticated after that reset is admitted. Under D-101 as
+   * first worded the password session after the clearing was admitted.
    */
-  it("D-101 (W9-RISC-PASSWORD-CUTOFF): after account-disabled/hijacking a password session authenticated after the cutoff is refused by the real AuthMiddleware; a Google session after the cutoff is admitted and records signInCutoffClearedAt once under the User row lock; then a password session authenticated after the clearing is admitted, while the password session authenticated between the cutoff and the clearing stays refused", async () => {
+  it("D-101 (W9-RISC-PASSWORD-CUTOFF), amended by D-113 (W10-RISC-RESET): after account-disabled/hijacking a password session authenticated after the cutoff is refused by the real AuthMiddleware; a Google session after the cutoff is admitted and records signInCutoffClearedAt once under the User row lock; a password session after the clearing stays refused until a password reset after the cutoff is recorded, then one after the reset is admitted, while the password session authenticated between the cutoff and the clearing stays refused", async () => {
     const h = build();
     const attached = realMiddleware(h);
     await expect(h.risc.receiveEvent(await hijacking())).resolves.toEqual({ status: 202, processed: true });
@@ -1505,8 +1517,13 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     // The cutoff itself and the flag the event wrote are kept.
     expect(h.userRow.metaData).toMatchObject({ signInCutoffAt: cutoff, googleSignInDisabled: true });
 
-    // A password session the real user opens after the clearing is admitted ...
-    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-real-password'))).toBe(USER);
+    // D-113: a password session after the clearing still waits for a password reset ...
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-real-password'))).toBeNull();
+    // ... which completeReset records under the User row lock; a password session after it is admitted ...
+    await expect(recordPasswordResetAfterCutoff(h.prisma.client as never, USER, cutoff + 30)).resolves.toBe('recorded');
+    expect(h.userRow.metaData.passwordResetAfterCutoffAt).toBe(cutoff + 30);
+    expect(await attached(signInToken('password', cutoff + 31, cutoff + 31, 's-real-password-2'))).toBe(USER);
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-real-password'))).toBeNull();
     // ... while the hijacker's, opened between the cutoff and the clearing, stays refused, refreshed or not.
     expect(await attached(hijackerPassword)).toBeNull();
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 600, 's-hijacker-password'))).toBeNull();
@@ -1527,7 +1544,11 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
       const emailOnly = { provider: 'email', providers: ['email'] };
       expect(await attached(signInToken(method, cutoff + 20, cutoff + 20, 's-link', emailOnly))).toBe(USER);
       expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
-      expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-2'))).toBe(USER);
+      // It clears the rest: another method after it is admitted. A password
+      // session still waits for a password reset (D-113, W10-RISC-RESET; it
+      // was admitted here under D-101 as first worded).
+      expect(await attached(signInToken('sso/saml', cutoff + 21, cutoff + 21, 's-other-2'))).toBe(USER);
+      expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-2'))).toBeNull();
       expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password'))).toBeNull();
     },
   );
@@ -1551,12 +1572,20 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     },
   );
 
-  it('D-101 (W9-RISC-PASSWORD-CUTOFF): a new RISC event re-arms the restriction — it records the new cutoff and removes the cleared marker, so a password session after it is refused until a Google sign-in clears it again', async () => {
+  // D-113 (W10-RISC-RESET) amends this case: the password sessions now need a
+  // password reset after the cutoff, and an earlier reset does not count for
+  // a new cutoff; under D-101 as first worded the Google clearing admitted them.
+  it('D-101 (W9-RISC-PASSWORD-CUTOFF), amended by D-113 (W10-RISC-RESET): a new RISC event re-arms the restriction — it records the new cutoff and removes the cleared marker, and the password reset recorded for the earlier cutoff no longer counts, so a password session after it is refused, a Google sign-in clearing only the rest, until a password reset after the new cutoff', async () => {
     const h = build();
     const attached = realMiddleware(h);
     const now = Math.floor(Date.now() / 1000);
-    // An earlier event, already cleared by a Google sign-in an hour ago.
-    h.userRow.metaData = { signInCutoffAt: now - 7200, signInCutoffClearedAt: now - 3600, keep: 'me' };
+    // An earlier event, already cleared by a Google sign-in an hour ago, and the password reset since.
+    h.userRow.metaData = {
+      signInCutoffAt: now - 7200,
+      signInCutoffClearedAt: now - 3600,
+      passwordResetAfterCutoffAt: now - 3000,
+      keep: 'me',
+    };
     const before = signInToken('password', now - 1800, now - 1800, 's-password-before');
     expect(await attached(before)).toBe(USER);
 
@@ -1570,7 +1599,47 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
     expect(await attached(signInToken('oauth', cutoff + 20, cutoff + 20, 's-google-after'))).toBe(USER);
     expect(h.userRow.metaData.signInCutoffClearedAt).toBe(cutoff + 20);
-    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-later'))).toBe(USER);
+    expect(await attached(signInToken('password', cutoff + 21, cutoff + 21, 's-password-later'))).toBeNull();
+    await expect(recordPasswordResetAfterCutoff(h.prisma.client as never, USER, cutoff + 30)).resolves.toBe('recorded');
+    expect(await attached(signInToken('password', cutoff + 31, cutoff + 31, 's-password-reset'))).toBe(USER);
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
+  });
+
+  /**
+   * W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113). The cutoff write
+   * removed only the clearing, so a password reset recorded after the NEW
+   * cutoff survived the event: a reset is dated at its recovery session's
+   * authentication when the provider dates that ahead of this server (up to
+   * 60s), or commits while the event is in flight, and a recorded cutoff
+   * kept higher by another instance's clock left the row untouched
+   * altogether (the early return). Either way every later password session
+   * was admitted with no reset after the event. The cutoff write now removes
+   * passwordResetAfterCutoffAt with the clearing, under the same User row
+   * lock, and writes when either is present.
+   */
+  it('W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113): a session-ending RISC event removes passwordResetAfterCutoffAt under the User row lock — also one dated after the new cutoff, and also when a later cutoff already recorded stays and nothing was cleared — so the real AuthMiddleware refuses a password session after the old reset until a new one', async () => {
+    const h = build();
+    const attached = realMiddleware(h);
+    const now = Math.floor(Date.now() / 1000);
+    h.userRow.metaData = { signInCutoffAt: now - 600, keep: 'me' };
+    // A reset whose recovery session the provider dated 50s ahead of this server.
+    await expect(recordPasswordResetAfterCutoff(h.prisma.client as never, USER, now + 50)).resolves.toBe('recorded');
+    expect(h.userRow.metaData.passwordResetAfterCutoffAt).toBe(now + 50);
+
+    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.TOKEN_REVOKED))).resolves.toEqual({ status: 202, processed: true });
+    const cutoff = h.userRow.metaData.signInCutoffAt as number;
+    expect(cutoff).toBeGreaterThanOrEqual(now);
+    expect(cutoff).toBeLessThan(now + 50);
+    expect(h.userRow.metaData.passwordResetAfterCutoffAt).toBeUndefined();
+    expect(h.userRow.metaData.keep).toBe('me');
+    expect(await attached(signInToken('password', now + 55, now + 55, 's-password-after-old-reset'))).toBeNull();
+
+    // A later cutoff already recorded (another instance's clock ahead), no
+    // clearing, and a reset after it: the event still removes the reset and
+    // never lowers the cutoff.
+    h.userRow.metaData = { signInCutoffAt: now + 30, passwordResetAfterCutoffAt: now + 40, keep: 'me' };
+    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED))).resolves.toEqual({ status: 202, processed: true });
+    expect(h.userRow.metaData).toEqual({ signInCutoffAt: now + 30, keep: 'me' });
+    expect(await attached(signInToken('password', now + 45, now + 45, 's-password-after-skewed-reset'))).toBeNull();
   });
 });

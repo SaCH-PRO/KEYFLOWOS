@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import type { Request, Response } from 'express';
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthMiddleware, logoutRevocationCutoff } from './auth.middleware';
+import { AuthMiddleware, logoutRevocationCutoff, signInCutoffVerdict } from './auth.middleware';
 import { buildAdminToken } from './admin-token.util';
 import { IdentityController } from '../../modules/identity/identity.controller';
 import { IdentityPasswordService } from '../../modules/identity/identity-password.service';
@@ -1315,11 +1315,18 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(h.client.$transaction).not.toHaveBeenCalled();
   });
 
-  it('D-101: once cleared, a password session authenticated after the clearing is admitted, while one authenticated between the cutoff and the clearing (or in the clearing second) stays refused; nothing more is written', async () => {
+  // D-113 (W10-RISC-RESET) amends this case: under D-101 as first worded a
+  // password session after the clearing was admitted; it now waits for a
+  // password reset after the cutoff (see the D-113 block below), while the
+  // rest of the restriction (any other method) is cleared as before.
+  it('D-101, amended by D-113 (W10-RISC-RESET): once cleared, a session of another method authenticated after the clearing is admitted, a password session after it is still refused without a password reset, and one authenticated between the cutoff and the clearing (or in the clearing second) stays refused; nothing more is written', async () => {
     const CLEARED = CUTOFF + 600;
     const h = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CLEARED });
-    expect(await h.attached(password(CLEARED + 1))).toBe(USER);
+    expect(await h.attached(by('passkey', CLEARED + 1))).toBe(USER);
+    expect(await h.attached(password(CLEARED + 1))).toBeNull();
+    expect(await h.attached(by('passkey', CUTOFF + 300))).toBeNull();
     expect(await h.attached(password(CUTOFF + 300))).toBeNull();
+    expect(await h.attached(by('passkey', CLEARED))).toBeNull();
     expect(await h.attached(password(CLEARED))).toBeNull();
     // Still refused by D-97: signed in before the cutoff.
     expect(await h.attached(google(CUTOFF - 60))).toBeNull();
@@ -1387,8 +1394,12 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     expect(await h.attached(hijacker)).toBeNull();
     expect(await h.attached(signedIn([{ method: 'password', timestamp: CUTOFF + 200 }], BOTH, NOW + 30))).toBeNull();
     expect(await h.attached(fresh('password', NOW))).toBeNull();
-    // A password session opened after the clearing was recorded is admitted.
-    expect(await h.attached(fresh('password', NOW + 1))).toBe(USER);
+    expect(await h.attached(fresh('passkey', NOW))).toBeNull();
+    // A session of another method opened after the clearing was recorded is
+    // admitted; a password one still waits for a password reset (D-113,
+    // W10-RISC-RESET; it was admitted here under D-101 as first worded).
+    expect(await h.attached(fresh('passkey', NOW + 1))).toBe(USER);
+    expect(await h.attached(fresh('password', NOW + 1))).toBeNull();
     expect(h.client.user.update).toHaveBeenCalledTimes(1);
   });
 
@@ -1396,8 +1407,84 @@ describe('D-101 — after a RISC sign-in cutoff only a Google or emailed-link si
     const h = harness({ signInCutoffAt: CUTOFF });
     expect(await h.attached(fresh('oauth', NOW + 20))).toBe(USER);
     expect(h.row.metaData).toEqual({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: NOW + 20 });
-    expect(await h.attached(fresh('password', NOW + 20))).toBeNull();
-    expect(await h.attached(fresh('password', NOW + 21))).toBe(USER);
+    expect(await h.attached(fresh('passkey', NOW + 20))).toBeNull();
+    expect(await h.attached(fresh('passkey', NOW + 21))).toBe(USER);
+    // D-113 (W10-RISC-RESET): a password session waits for a password reset.
+    expect(await h.attached(fresh('password', NOW + 21))).toBeNull();
+  });
+
+  /**
+   * D-113 (W10-RISC-RESET; owner ruling, extends D-101: reviews SEC-W9RPC-1/2).
+   * After a cutoff a PASSWORD session is admitted only when it was
+   * authenticated after the password reset the user completed through KEYFLOW
+   * after the cutoff (User.metaData.passwordResetAfterCutoffAt, which
+   * IdentityPasswordService.completeReset records under the User row lock); a
+   * Google or emailed-link sign-in clears only the rest of the restriction. A
+   * session whose sign-in method cannot be read counts as a password one
+   * (fail closed).
+   */
+  it('D-113 (W10-RISC-RESET): a password session after the cutoff is admitted only when authenticated after passwordResetAfterCutoffAt, with or without a clearing — before the reset, or in its second, it stays refused; nothing is written', async () => {
+    const RESET = CUTOFF + 900;
+    const cleared = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600, passwordResetAfterCutoffAt: RESET });
+    expect(await cleared.attached(password(RESET + 1))).toBe(USER);
+    expect(await cleared.attached(password(RESET))).toBeNull();
+    expect(await cleared.attached(password(CUTOFF + 700))).toBeNull();
+    // A reset whose clearing was not recorded still admits the password session after it.
+    const resetOnly = harness({ signInCutoffAt: CUTOFF, passwordResetAfterCutoffAt: RESET });
+    expect(await resetOnly.attached(password(RESET + 1))).toBe(USER);
+    expect(await resetOnly.attached(password(RESET - 1))).toBeNull();
+    // ... but not the rest of the restriction: another method waits for a clearing.
+    expect(await resetOnly.attached(by('passkey', RESET + 1))).toBeNull();
+    expect(cleared.client.$transaction).not.toHaveBeenCalled();
+    expect(resetOnly.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not after the current cutoff (left by an earlier cutoff)', CUTOFF - 60],
+    ['exactly the cutoff second', CUTOFF],
+    ['not a number', 'yesterday'],
+  ] as Array<[string, unknown]>)('D-113 (W10-RISC-RESET): a password reset record %s admits no password session', async (_name, resetAt) => {
+    const h = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600, passwordResetAfterCutoffAt: resetAt });
+    expect(await h.attached(password(CUTOFF + 601))).toBeNull();
+    expect(await h.attached(password(NOW))).toBeNull();
+  });
+
+  it('D-113 (W10-RISC-RESET): a session whose sign-in method cannot be read counts as a password sign-in — a token with no session and no amr is refused after a clearing until a reset', async () => {
+    const noAmr = token({ iat: NOW, exp: NOW + 3600, app_metadata: BOTH });
+    expect(await harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 }).attached(noAmr)).toBeNull();
+    expect(
+      await harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600, passwordResetAfterCutoffAt: CUTOFF + 900 }).attached(noAmr),
+    ).toBe(USER);
+  });
+
+  it("D-113 (W10-RISC-RESET): the session's ORIGINAL sign-in decides — a password session stepped up with TOTP after the reset is admitted only when the password sign-in itself came after the reset", async () => {
+    const RESET = CUTOFF + 900;
+    const h = harness({ signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600, passwordResetAfterCutoffAt: RESET });
+    // GoTrue lists the most recent entry first.
+    const stepped = (passwordAt: number) =>
+      signedIn([
+        { method: 'totp', timestamp: RESET + 100 },
+        { method: 'password', timestamp: passwordAt },
+      ]);
+    expect(await h.attached(stepped(RESET + 10))).toBe(USER);
+    expect(await h.attached(stepped(RESET - 10))).toBeNull();
+  });
+
+  it('D-113 (W10-RISC-RESET): signInCutoffVerdict names why a session is refused — password_reset_required, google_or_email_link_required, signed_in_before_cutoff — and is null without a cutoff', () => {
+    const meta = { signInCutoffAt: CUTOFF, signInCutoffClearedAt: CUTOFF + 600 };
+    expect(signInCutoffVerdict(meta, password(CUTOFF + 700))).toEqual({ admitted: false, refusal: 'password_reset_required' });
+    expect(signInCutoffVerdict({ signInCutoffAt: CUTOFF }, by('passkey', CUTOFF + 30))).toEqual({
+      admitted: false,
+      refusal: 'google_or_email_link_required',
+    });
+    expect(signInCutoffVerdict(meta, password(CUTOFF - 1))).toEqual({ admitted: false, refusal: 'signed_in_before_cutoff' });
+    expect(signInCutoffVerdict({ signInCutoffAt: CUTOFF }, google(CUTOFF + 30))).toEqual({ admitted: true, clearingAt: CUTOFF + 30 });
+    expect(signInCutoffVerdict(meta, google(CUTOFF + 30))).toEqual({ admitted: true, clearingAt: null });
+    expect(signInCutoffVerdict({ ...meta, passwordResetAfterCutoffAt: CUTOFF + 900 }, password(CUTOFF + 901))).toEqual({
+      admitted: true,
+      clearingAt: null,
+    });
+    expect(signInCutoffVerdict({ googleSignInDisabled: true }, password(NOW))).toBeNull();
   });
 
   it('D-101 negative control: with no cutoff on the row a password session is admitted and nothing is written', async () => {

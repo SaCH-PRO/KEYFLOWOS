@@ -365,6 +365,21 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
     ['Outlook Contacts', 'outlook-contacts', 'outlook_contacts'],
   ])('%s sync rules', (_label, route, connectorType) => {
     const url = (businessId: string) => `/connect/businesses/${businessId}/${route}/mapping-rules`;
+    /**
+     * W10-GOOGLE-DOORS-REST (owner ruling D-99): POST contacts/sync (the Google
+     * Contacts sync) is the business owner's to start, so the two sync cases
+     * below start the Google run as an OWNER member of the business (the
+     * Outlook run, a Microsoft connection, is started as before). No
+     * TenantInterceptor runs here, so the sync's own principals are unchanged.
+     */
+    const startSync = (businessId: string) => {
+      const req = agent().post(`/connect/businesses/${businessId}/${route}/sync`);
+      if (route !== 'contacts') return req;
+      if (!db.membership.rows.some((r) => r.userId === 'u-owner' && r.businessId === businessId)) {
+        db.membership.insert({ userId: 'u-owner', businessId, role: 'OWNER', permissionScopes: null });
+      }
+      return req.set('x-test-user', 'u-owner');
+    };
 
     it('D-92: the setting stores DORMANT and customer in any case as CLIENT and a canonical status in any case or padding as itself, and answers with the stored status', async () => {
       for (const [given, stored] of CANONICAL) {
@@ -427,7 +442,7 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         const handle = `person.${legacy.toLowerCase()}@example.test`;
         peopleConnections = [{ resourceName: 'people/c1', names: [{ givenName: 'Ada' }], emailAddresses: [{ value: handle }] }];
         graphContacts = [{ id: 'graph-c1', givenName: 'Ada', emailAddresses: [{ address: handle }] }];
-        const sync = await agent().post(`/connect/businesses/${businessId}/${route}/sync`);
+        const sync = await startSync(businessId); // D-99: the owner starts the Google run
         expect(sync.status, `${legacy}: ${JSON.stringify(sync.body)}`).toBe(201);
         expect(sync.body.imported, legacy).toBe(1);
         const created = db.contact.rows.filter((r) => r.businessId === businessId);
@@ -493,7 +508,7 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         const handle = `owner.${ownerId}@example.test`;
         peopleConnections = [{ resourceName: 'people/c1', names: [{ givenName: 'Ada' }], emailAddresses: [{ value: handle }] }];
         graphContacts = [{ id: 'graph-c1', givenName: 'Ada', emailAddresses: [{ address: handle }] }];
-        const sync = await agent().post(`/connect/businesses/${businessId}/${route}/sync`);
+        const sync = await startSync(businessId); // D-99: the owner starts the Google run
         expect(sync.status, `${ownerId}: ${JSON.stringify(sync.body)}`).toBe(201);
         const created = db.contact.rows.filter((r) => r.businessId === businessId);
         expect(created, ownerId).toHaveLength(1);

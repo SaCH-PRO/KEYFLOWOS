@@ -9,6 +9,7 @@ import {
   LOGOUT_REVOCATION_TTL_SECONDS,
   logoutRevocationKey,
   logoutRevocationValue,
+  PASSWORD_RESET_AFTER_CUTOFF_META_KEY,
   SIGN_IN_CUTOFF_META_KEY,
   signInCutoffOf,
 } from '../../core/auth/auth.middleware';
@@ -68,8 +69,15 @@ const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
  */
 type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'signin_cutoff' | 'local_sessions' | 'provider_ban';
 
-/** Whether handleEvent ends the user's sessions (terminateUserSessions) for this event. */
-function endsSessions(eventType: string, reason: string | undefined): boolean {
+/**
+ * Whether handleEvent ends the user's sessions (terminateUserSessions) for this
+ * event: sessions-revoked, tokens-revoked, token-revoked, and account-disabled
+ * with reason hijacking. Exported (W10-RISC-RESET) as the one classification:
+ * the UserIdentity backfill (apps/server/scripts/backfill-google-identities.ts)
+ * imports it to count the stored `no_matching_user` events that were never
+ * applied, instead of keeping a copy that could drift.
+ */
+export function endsSessions(eventType: string, reason: string | undefined): boolean {
   return (
     eventType === RISC_EVENT_TYPES.SESSIONS_REVOKED ||
     eventType === RISC_EVENT_TYPES.TOKENS_REVOKED ||
@@ -384,10 +392,15 @@ export class RiscService {
    * user record for the token's own subject), never the request body's.
    *
    * Residual (D-97 review SEC-W8RSC-3, docs/auth-pathway.md): nothing wrote
-   * UserIdentity before that packet and there is no backfill, so an account
-   * last signed in with Google before it resolves no user here until its owner
-   * signs in again; receiveEvent logs such a session-ending event for the
-   * operator. user_metadata (user-editable at GoTrue) is never used to match.
+   * UserIdentity before that packet, so an account last signed in with Google
+   * before it resolves no user here until its owner signs in again or the
+   * operator runs the backfill (W9-IDENTITY-BACKFILL-SCRIPT:
+   * apps/server/scripts/backfill-google-identities.ts, `pnpm
+   * backfill:google-identities`, dry run by default), which writes bootstrap's
+   * row from GoTrue's verified records; an event that arrived before the
+   * backfill is not replayed (review SEC-W9IBS-1). receiveEvent logs such a
+   * session-ending event for the operator. user_metadata (user-editable at
+   * GoTrue) is never used to match.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
@@ -556,6 +569,17 @@ export class RiscService {
    * the cleared marker, in the same locked read-modify-write, even when a
    * later cutoff already recorded stays.
    *
+   * D-113 (W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2): the same write
+   * removes the password reset recorded after the earlier cutoff
+   * (passwordResetAfterCutoffAt), so a password sign-in needs a new reset
+   * after this event. Reading a record as none while it is not after the new
+   * cutoff was not enough: completeReset dates a reset at its recovery
+   * session's authentication when the provider dates that ahead of this
+   * server (up to 60s), and a reset can commit while this event is in flight,
+   * so a record dated after the new cutoff survived the event and admitted
+   * every later password session with no reset after it. The write also runs
+   * when only that record is present, under a later cutoff already recorded.
+   *
    * Through updateUserMeta (D-97 review SEC-W8RSC-1 / CR-W8RSC-1): two events
    * for the same user handled together no longer write back each other's
    * stale copy, so a concurrent flag write cannot erase the cutoff.
@@ -565,10 +589,13 @@ export class RiscService {
       const found = await this.updateUserMeta(userId, (meta) => {
         const recorded = signInCutoffOf(meta);
         const cleared = SIGN_IN_CUTOFF_CLEARED_META_KEY in meta;
-        if (recorded !== null && recorded >= cutoff && !cleared) return null;
+        const reset = PASSWORD_RESET_AFTER_CUTOFF_META_KEY in meta;
+        if (recorded !== null && recorded >= cutoff && !cleared && !reset) return null;
         // D-101: the cleared marker goes (the restriction holds again); the cutoff is never lowered.
+        // D-113 (SEC-W10RR-2 / CR-W10RR-2): the password reset recorded for the earlier cutoff goes too.
         const kept: Record<string, unknown> = { ...meta };
         delete kept[SIGN_IN_CUTOFF_CLEARED_META_KEY];
+        delete kept[PASSWORD_RESET_AFTER_CUTOFF_META_KEY];
         return { ...kept, [SIGN_IN_CUTOFF_META_KEY]: recorded !== null && recorded > cutoff ? recorded : cutoff };
       });
       if (!found) {

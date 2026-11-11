@@ -88,12 +88,30 @@ export class CalendarController {
     return this.sync.getSettings(businessId);
   }
 
+  /**
+   * W10-GOOGLE-DOORS-REST review repair (owner rulings D-99 and D-111;
+   * SEC-W10GDR-1, [V94D-T08]): every key this door writes changes the sync of
+   * the owner's Google Calendar connection: which of the owner's calendars the
+   * hourly resync reads and writes (calendarId), whether it runs and which way
+   * (syncEnabled, syncDirection), whether the owner's Google events are pulled
+   * in and whom they are shown to (pullExternal, defaultVisibility), and which
+   * KEYFLOW items are pushed into the owner's calendar (the per-type switches).
+   * D-99 gives starting, syncing and stopping a Google connection to the owner
+   * alone and D-111 keeps changing one owner-only, so
+   * assertGoogleConnectOwner (OWNER membership, Business.ownerId or
+   * SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY) runs first, before the
+   * body is read or anything is written, as on its twin PATCH
+   * /bookings/businesses/:b/calendar/settings. The settings, status and
+   * calendar-list reads stay a member's.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/sync/settings')
   async patchSyncSettings(
     @Param('businessId') businessId: string,
     @Body() body: Partial<CalendarSyncSettings>,
+    @Req() req: AuthedRequest,
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     if (!body || typeof body !== 'object') {
       throw new BadRequestException('Body required');
     }
@@ -172,9 +190,19 @@ export class CalendarController {
     return this.sync.manualResync(businessId);
   }
 
+  // W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T07]; review SEC-W9GD-3):
+  // pulling the coming events of the business Google Calendar into the
+  // temporal flow is a sync of the Google connection, so it is the owner's, as
+  // .../sync/google/resync is (assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY first). Its review repair (SEC-W10GDR-1) makes
+  // PATCH .../sync/settings the owner's too (D-99, D-111; see that handler).
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/temporal-flow')
-  async syncGoogleCalendarToTemporalFlow(@Param('businessId') businessId: string) {
+  async syncGoogleCalendarToTemporalFlow(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.temporalSync.syncBusiness(businessId);
   }
 

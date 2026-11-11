@@ -16,7 +16,11 @@ import {
   logoutRevocationCutoff,
   logoutRevocationKey,
   logoutRevocationValue,
+  recordPasswordResetAfterCutoff,
+  recordSignInCutoffCleared,
+  signInCutoffOf,
 } from '../../core/auth/auth.middleware';
+import { sessionSignedInWithGoogleOrEmailLink } from '../../core/auth/sign-in-cutoff';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { PasswordPolicyService } from './password-policy.service';
@@ -340,6 +344,51 @@ export class IdentityPasswordService {
     if (email) {
       await this.bestEffort(userId, 'consume the recovery request', () => this.redis.del(recoveryRequestKey(email)));
     }
+
+    // D-113 (W10-RISC-RESET; closes D-101 review SEC-W9RPC-1 / CR-W9RPC-1):
+    // after a RISC sign-in cutoff a password session stays refused until the
+    // user completes a password reset through KEYFLOW after the cutoff. This
+    // is that reset, so once GoTrue holds the new password (and has ended
+    // every session of the user, the hijacker's pre-event one included) it is
+    // recorded, under the User row lock, as passwordResetAfterCutoffAt, and the
+    // recovery-link session, an emailed link, clears the rest of the
+    // restriction (recordSignInCutoffCleared), as AuthMiddleware would had it
+    // arrived as a bearer. Both re-read the row under the lock and write only
+    // when it holds a cutoff the recovery session was authenticated after;
+    // the unlocked read first spares every other reset the lock. The password
+    // is already set, so a failure is logged, not thrown: password sign-ins
+    // then stay refused (fail closed) and the user can reset again.
+    //
+    // Only for a recovery session AuthMiddleware itself would count as an
+    // emailed link (sessionSignedInWithGoogleOrEmailLink, the rule
+    // recordSignInCutoffCleared's callers must apply; W10-RISC-RESET review
+    // SEC-W10RR-1 / CR-W10RR-1, D-113 and D-101). The reset accepts an
+    // implicit-flow 'otp' session bound to a recovery request for the email,
+    // and anyone can make that request; GoTrue stamps an SMS-code sign-in
+    // 'otp' too, so for a user with a phone identity such a session may be a
+    // text, not the mail. Recorded for it, whoever held a phone identity on
+    // the account (added through the pre-event GoTrue session) would get
+    // their own password, and every other method, admitted after the cutoff.
+    // Such a reset still sets the password (as before D-113) but records
+    // nothing: password sign-ins stay refused, and the user clears with Google
+    // or a PKCE recovery link ('recovery'), which GoTrue mails only to the
+    // account's address.
+    await this.bestEffort(userId, 'record the password reset after the sign-in cutoff (D-113)', async () => {
+      const row = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { metaData: true } });
+      if (signInCutoffOf(row?.metaData) === null) return;
+      if (!sessionSignedInWithGoogleOrEmailLink(accessToken)) {
+        this.logger.warn(
+          `D-113: password reset for ${userId} after the sign-in cutoff recorded nothing: its recovery session is not an emailed link by AuthMiddleware's rule (an implicit-flow otp of a user with a phone identity may be an SMS code); password sign-ins stay refused (SEC-W10RR-1)`,
+        );
+        return;
+      }
+      const recorded = await recordPasswordResetAfterCutoff(this.prisma.client, userId, session.authenticatedAt);
+      const cleared =
+        session.authenticatedAt === null
+          ? 'not_after_cutoff'
+          : await recordSignInCutoffCleared(this.prisma.client, userId, session.authenticatedAt);
+      this.logger.log(`D-113: password reset for ${userId} after the sign-in cutoff: reset ${recorded}, clearing ${cleared}`);
+    });
 
     return { userId, email, providerSignedOut };
   }

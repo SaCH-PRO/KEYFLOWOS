@@ -120,6 +120,8 @@ export default function LoginForm() {
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [resetSent, setResetSent] = useState(false);
   const [needsVerification, setNeedsVerification] = useState(false);
+  // D-113 (W10-RISC-RESET): the password is refused after a security event until it is reset.
+  const [resetRequired, setResetRequired] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendNote, setResendNote] = useState<string | null>(null);
 
@@ -138,6 +140,7 @@ export default function LoginForm() {
     setError(null);
     setBanner(null);
     setNeedsVerification(false);
+    setResetRequired(false);
     setResendNote(null);
     if (mode === "forgot") {
       if (!email.trim()) { setError("Enter your email address."); return; }
@@ -203,6 +206,13 @@ export default function LoginForm() {
         return;
       case "signin_failed":
         setError("Sign in failed. Please try again.");
+        return;
+      // D-113 (W10-RISC-RESET; review CR-W9RPC-2): after a security event the
+      // server refuses a password sign-in until the password is reset through
+      // KEYFLOW. Say so, with a link into the existing reset flow below.
+      case "password_reset_required":
+        setResetRequired(true);
+        setError("Password reset required after a security event. Reset your password to sign in with it again, or continue with Google.");
         return;
       default:
         setError(message);
@@ -336,6 +346,18 @@ export default function LoginForm() {
                           >
                             Don&apos;t have an account? Create one →
                           </Link>
+                        </div>
+                      )}
+                      {resetRequired && (
+                        <div className="pl-6.5">
+                          <button
+                            type="button"
+                            onClick={() => { setMode("forgot"); setError(null); setBanner(null); setResetRequired(false); }}
+                            suppressHydrationWarning
+                            className="text-xs font-medium text-[hsl(24_95%_63%)] hover:text-[hsl(24_95%_73%)] transition-colors"
+                          >
+                            Reset your password →
+                          </button>
                         </div>
                       )}
                       {needsVerification && (
