@@ -44,8 +44,8 @@
  *      becomes WITHHELD_MODULE, a module the
  *      timeline table (ACTIVITY_MODULE_SCOPES) deliberately does not map, and
  *      the rule serves a row of an unmapped module to OWNER and ADMIN only
- *      (and SUPER_ADMIN; D-63, canReadActivityRow's readsUnmapped). The rule is
- *      not changed. An invoice row is filed under category COMMERCE (unless it
+ *      (and SUPER_ADMIN; D-63, canReadActivityRow's readsUnmapped), with the
+ *      one D-115 term described below. An invoice row is filed under category COMMERCE (unless it
  *      already carries a revenue category), so it still needs revenue read, as
  *      its module 'commerce' required. The original module and category are
  *      kept under data.d115 ({ withheld, module, category }; withheld is

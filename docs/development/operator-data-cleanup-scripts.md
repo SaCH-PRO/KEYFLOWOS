@@ -120,12 +120,13 @@ shapes and an empty `contactId`:
    and the intake's link was set to null. The W9 writer stores exactly this row
    today (timeline-scope TS-13b), so the script only counts it.
 
-The timeline rule itself is unchanged. `test/data-cleanup-scripts.integration.test.ts`
+The timeline rule serves a `d115_withheld` row under D-63's unmapped branch
+plus one D-115 term (below). `test/data-cleanup-scripts.integration.test.ts`
 (DCS-T05) pins that `d115_withheld` stays unmapped. Never add it to
 `ACTIVITY_MODULE_SCOPES`: that would serve withheld rows to everyone who reads
 the mapped module.
 
-Limits of the withheld audience, as D-63's unmapped branch defines it:
+Limits of the withheld audience (D-63's unmapped branch and the D-115 term):
 
 - A withheld invoice row still needs `revenue` read, as before the backfill.
   An ADMIN whose `revenue` access is `none` is not served it.
