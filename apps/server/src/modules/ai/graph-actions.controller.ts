@@ -32,7 +32,7 @@ import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bu
 import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, isCanonicalModule, rankOf } from '../../core/authority/module-vocabulary';
 import type { Prisma } from '@prisma/client';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
-import { KEY_PLAN_MODULE_SCOPES, planStepReadsContacts } from '../key-cortex/key-cortex-plan-authority';
+import { KEY_PLAN_MODULE_SCOPES, planStepReadsContacts, planStepReadsMoneyReport } from '../key-cortex/key-cortex-plan-authority';
 import {
   CANONICAL_MODULE_TOOLS,
   CRM_ROW_VISIBILITY_TOOLS,
@@ -622,6 +622,15 @@ function withholdHiddenRows(value: unknown, hidden: ReadonlySet<string>): unknow
  * default to a viewer held to module scopes (it was shown with its output: 'activity' and 'genome'
  * steps, the business-wide audit log and DNA, reached a STAFF proposer). A step that dispatches
  * nothing and names no module (an 'analyze' step) is shown with its plan.
+ *
+ * W10-KEY-PLAN-SCOPE (SEC-W9MRK-2; owner rulings D-57, D-114): a KEY-cortex money report step
+ * (planStepReadsMoneyReport: finance.generate_pnl, analytics.create_report / export_report, the steps
+ * the plan door holds to revenue:read) is shown to a viewer who reads its module, and its stored
+ * output (the whole report) only to one who also reads revenue: cortexStep('revenue'), the canonical
+ * module's read, as graphPlanReadScope judges a step under a canonical module label (every viewer the
+ * OWNER or a SUPER_ADMIN is; an ADMIN by its explicit scope map, else its role defaults). GET
+ * ai/execution-logs applies the same rule through visibleExecutionLogs. A registry money report tool
+ * is judged by its tool (graphActionRequirement asks revenue:read for it, CRR-A7-2).
  */
 function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { shown: boolean; output: boolean } {
   const tool = planStepDispatchedTool(step);
@@ -631,7 +640,9 @@ function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { show
   const module = step.module;
   if (module) {
     if (!scope.cortexStep(module)) return { shown: false, output: false };
-    return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, step.action ?? '') };
+    const action = step.action ?? '';
+    if (planStepReadsMoneyReport(module, action) && !scope.cortexStep('revenue')) return { shown: true, output: false };
+    return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, action) };
   }
   return { shown: true, output: true };
 }

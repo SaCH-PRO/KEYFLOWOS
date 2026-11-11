@@ -16,6 +16,7 @@ import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/m
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import {
   CRM_DELETE_ACTIONS,
+  adminPlanStepScopeRefusal,
   memberPlanStepScopeRefusal,
   noMemberPlanStepRefusal,
   planStepContactIds,
@@ -847,7 +848,14 @@ export class KeyCortexPlannerService {
     }
   }
 
-  /** D-71 for a member who is neither the business OWNER nor SUPER_ADMIN (assertStepsWithinAuthority). */
+  /**
+   * D-71 for a member who is neither the business OWNER nor SUPER_ADMIN (assertStepsWithinAuthority).
+   * W10-KEY-PLAN-SCOPE (owner ruling D-114, amending D-71 for an explicit revenue 'none' only;
+   * SEC-W9MRK-1): an ADMIN keeps every module, except that an ADMIN whose explicit scope map sets
+   * revenue to none is refused money steps (adminPlanStepScopeRefusal: the money reports and the
+   * invoice actions); an ADMIN with role-default scopes is unaffected. Anyone else is held to its
+   * scopes, a money report step to revenue:read too (memberPlanStepScopeRefusal, D-57).
+   */
   private async assertMemberSteps(
     plan: { businessId: string; steps?: Array<{ module: string | null; action: string; inputPayload?: unknown }> },
     userId: string,
@@ -857,16 +865,16 @@ export class KeyCortexPlannerService {
       throw new ForbiddenException('Not a member of this business: a KEY plan runs only as a member of its business (D-73)');
     }
     const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
+    const explicitScopes: Record<string, string> | null =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? (explicit as Record<string, string>) : null;
+    const scopes: Record<string, string> = explicitScopes ?? defaultScopesForRole(membership.role);
     let crm: { access: CrmAccess; clause: unknown } | undefined;
     for (const step of plan.steps ?? []) {
-      if (membership.role !== 'ADMIN') {
-        const refusal = memberPlanStepScopeRefusal(step.module, step.action, scopes);
-        if (refusal) throw new ForbiddenException(refusal);
-      }
+      const refusal =
+        membership.role === 'ADMIN'
+          ? adminPlanStepScopeRefusal(step.module, step.action, explicitScopes)
+          : memberPlanStepScopeRefusal(step.module, step.action, scopes);
+      if (refusal) throw new ForbiddenException(refusal);
       if (step.module === 'crm') {
         if (!crm) {
           const access = await resolveCrmAccess(this.prisma, plan.businessId, userId);

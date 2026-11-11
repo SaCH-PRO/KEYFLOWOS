@@ -468,6 +468,8 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
       };
       const scope = await graphPlanReadScope(prisma as any, BIZ, { id: VIEWER, role: 'USER' });
       const planSteps = await visiblePlanSteps(steps, scope);
+      // GET ai/execution-logs as an ADMIN (who sees every run: no per-member run filter to stand in for)
+      if (membership.role !== 'ADMIN') return { planSteps, logs: [] as typeof logs };
       const controller = Object.create(AiController.prototype);
       Object.assign(controller, { prisma, executionLog: { getHistory: vi.fn(async () => ({ logs, total: logs.length, limit: 1000, offset: 0 })) } });
       const served = await controller.getExecutionLogs(BIZ, { user: { id: VIEWER, role: 'USER' } }, undefined, undefined, '1000');
