@@ -16,7 +16,9 @@ import {
   DEMO_MODE_ENABLED,
   NO_BUSINESS_SELECTED,
   UNSELECTED_BUSINESS,
+  MISSING_ID,
   NoBusinessSelectedError,
+  namesMissingId,
   namesNoBusiness,
   noBusinessSelected,
   requestNamesNoBusiness,
@@ -462,6 +464,12 @@ const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
 async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
   // R0-15d: a read that names no business is not sent (see selectedBusinessId).
   if (namesNoBusiness(path)) return { data: fallback ?? null, error: NO_BUSINESS_SELECTED };
+  // W10-WEB-CLIENT-MISSING-ID (FOLLOW3-D11): nor is a read that names a missing
+  // id (an empty, "undefined" or "null" segment, a trailing "/", or a path the
+  // wire rewrites, such as `contacts/.`), the refusal the lib/api.ts transports
+  // give: this helper calls fetch itself, so without it fetchContactDetail("")
+  // sent .../contacts/ and the server answered the detail read from the list route.
+  if (namesMissingId(path)) return { data: fallback ?? null, error: MISSING_ID };
   try {
     // No `_t=${Date.now()}` cache-buster, for the same reason it was removed
     // from apiGet in ./api.ts: `cache: "no-store"` already prevents any HTTP

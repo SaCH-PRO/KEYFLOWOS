@@ -50,25 +50,6 @@ function openHours(hours: unknown, weekday: number): { openMin: number; closeMin
   return { openMin: oh * 60 + om, closeMin: ch * 60 + cm };
 }
 
-/**
- * W9-KEY-AVAILABILITY-TZ review repair (CR-W9KAT-1): minutes past midnight
- * `instant` reads on the business's clock, as BookingsService's create
- * validator reads a start (Business.timezone; the server's clock for no zone
- * or one this runtime cannot read, as BookingsService falls back).
- */
-function minutesOnClock(instant: Date, timeZone: string | null | undefined): number {
-  if (timeZone) {
-    try {
-      const parts = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', hour: 'numeric', minute: 'numeric' }).formatToParts(instant);
-      const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-      return (part('hour') % 24) * 60 + part('minute');
-    } catch {
-      // RangeError: a zone this runtime does not know; the server's clock below.
-    }
-  }
-  return instant.getHours() * 60 + instant.getMinutes();
-}
-
 const DAY_TO_INDEX: Record<string, number> = {
   sun: 0,
   mon: 1,
@@ -269,15 +250,14 @@ export class BookingsAdapterService {
    *   hours name no such weekday, or, for one with none, the business's hours
    *   set none that day) is not asked about either: getAvailableSlots answers
    *   it with no slots, after three reads.
-   * - CR-W9KAT-1: getAvailableSlots fits a start in the business's hours by
+   * - CR-W9KAT-1: getAvailableSlots fitted a start in the business's hours by
    *   the service's duration, while createBooking (KEY create_booking) also
-   *   counts the service's buffer before closing. For a staff member on the
-   *   business's hours the starts whose buffer runs past closing were offered
-   *   and then refused, so they are left out here. Both sides read a staff
-   *   member's own hours without the buffer, and rescheduleBooking adds it to
-   *   neither kind of hours, so what is offered stays bookable on both KEY
-   *   write paths. The picker itself (BookingsService, also behind the public
-   *   slots route) is outside this packet.
+   *   counts the service's buffer before closing, so W9 left out here the
+   *   business-hours starts whose buffer ran past closing. W10-BOOKING-BUFFER
+   *   moved that rule into the picker itself (BookingsService.
+   *   getAvailableSlots, also behind the public slots route) and into
+   *   rescheduleBooking, so this adapter keeps no copy of it: what the picker
+   *   offers is what KEY offers.
    */
   async getAvailability(input: {
     businessId: string;
@@ -293,7 +273,6 @@ export class BookingsAdapterService {
       throw new Error(`Service ${input.serviceId} not found`);
     }
     const durationMins = service.duration ?? 60;
-    const bufferMins = service.bufferMins ?? 0;
     const now = new Date();
     const yesterday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - DAY_MS;
     const firstDay = Math.max(calendarDay(input.from, 'from'), yesterday);
@@ -319,22 +298,21 @@ export class BookingsAdapterService {
     const business = staff.length
       ? await this.prisma.client.business.findUnique({
           where: { id: input.businessId },
-          select: { businessHours: true, timezone: true },
+          select: { businessHours: true },
         })
       : null;
 
     const slots: Array<{ startTime: string; endTime: string; staffId: string; staffName?: string | null }> = [];
     for (const s of staff) {
       // getAvailableSlots' choice of window: the staff member's own hours when
-      // they have any, else the business's (SEC-KAT-1, CR-W9KAT-1).
+      // they have any, else the business's (SEC-KAT-1).
       const ownWeekdays = new Set((s.availabilities ?? []).map((a) => a.dayOfWeek));
       const onBusinessHours = ownWeekdays.size === 0;
       const offered: Array<{ start: Date; end: Date }> = [];
       for (let day = firstDay; day <= lastDay; day += DAY_MS) {
         const d = new Date(day);
         const weekday = d.getUTCDay();
-        const businessDay = onBusinessHours ? openHours(business?.businessHours, weekday) : null;
-        if (onBusinessHours ? !businessDay : !ownWeekdays.has(weekday)) continue;
+        if (onBusinessHours ? !openHours(business?.businessHours, weekday) : !ownWeekdays.has(weekday)) continue;
         // Handed over as the public slots route hands it: that calendar day's
         // midnight on the server's clock, which getAvailableSlots reads back.
         const { slots: starts } = await this.bookings.getAvailableSlots({
@@ -343,16 +321,10 @@ export class BookingsAdapterService {
           date: new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
           staffId: s.id,
         });
+        // W10-BOOKING-BUFFER (CR-W9KAT-1): offered as the picker answers them;
+        // the buffer rule is the picker's own.
         for (const iso of starts) {
           const start = new Date(iso);
-          // CR-W9KAT-1: createBooking's business-hours check, buffer included.
-          if (
-            businessDay &&
-            bufferMins > 0 &&
-            minutesOnClock(start, business?.timezone) + durationMins + bufferMins > businessDay.closeMin
-          ) {
-            continue;
-          }
           offered.push({ start, end: new Date(start.getTime() + durationMins * 60000) });
         }
       }

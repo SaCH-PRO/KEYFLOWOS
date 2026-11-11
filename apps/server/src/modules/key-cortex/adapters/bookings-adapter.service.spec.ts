@@ -177,7 +177,18 @@ describe('BookingsAdapterService', () => {
     expect(bookings.getAvailableSlots).not.toHaveBeenCalled();
   });
 
-  it('get_availability leaves out a business-hours start whose buffer runs past closing, as KEY create_booking refuses it (CR-W9KAT-1)', async () => {
+  /**
+   * W10-BOOKING-BUFFER (CR-W9KAT-1): W9 left out, here, the business-hours
+   * starts whose buffer ran past closing, because the picker offered them and
+   * KEY create_booking refused them. The picker (BookingsService.
+   * getAvailableSlots) now applies createBooking's buffer rule itself, so the
+   * adapter keeps no second copy of it: whatever the picker answers is what KEY
+   * offers. The mocked picker below answers a start the W9 filter dropped
+   * (staff2's 15:00Z, 11:00 local, whose buffer ends at 12:15) only to show
+   * that no such filter remains; booking-concurrency.integration.test.ts
+   * proves on a real database that the picker no longer offers it.
+   */
+  it('get_availability offers the picker\'s starts as the picker answers them, buffered service or not: the buffer rule is the picker\'s alone (W10-BOOKING-BUFFER, CR-W9KAT-1)', async () => {
     (prisma.client.service.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ duration: 60, bufferMins: 15 });
     (prisma.client.staffMember.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: 'staff1', name: 'Own Hours', availabilities: [{ dayOfWeek: 1 }] },
@@ -199,11 +210,12 @@ describe('BookingsAdapterService', () => {
     const result = await service.execute(mkCmd('get_availability', { serviceId: 's1', from: '2030-01-28', to: '2030-01-28' }));
 
     expect(result.success).toBe(true);
-    // staff2's 15:00Z (11:00 local) ends its buffer at 12:15: left out; staff1's own hours are read without it.
-    expect((result.data as any[]).map((s) => `${s.staffId} ${s.startTime}`)).toEqual([
-      'staff1 2030-01-28T14:00:00.000Z',
-      'staff1 2030-01-28T15:00:00.000Z',
-      'staff2 2030-01-28T14:30:00.000Z',
+    // Every start the picker answered, for both kinds of hours; each ends after the service's 60 minutes.
+    expect((result.data as any[]).map((s) => `${s.staffId} ${s.startTime} ${s.endTime}`)).toEqual([
+      'staff1 2030-01-28T14:00:00.000Z 2030-01-28T15:00:00.000Z',
+      'staff1 2030-01-28T15:00:00.000Z 2030-01-28T16:00:00.000Z',
+      'staff2 2030-01-28T14:30:00.000Z 2030-01-28T15:30:00.000Z',
+      'staff2 2030-01-28T15:00:00.000Z 2030-01-28T16:00:00.000Z',
     ]);
   });
 
