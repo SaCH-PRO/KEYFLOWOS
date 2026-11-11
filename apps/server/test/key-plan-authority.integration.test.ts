@@ -767,8 +767,8 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // W9-DISPATCH-CIRCUIT review SEC-W9DC-2 / CR-W9DC-1 (SEC-W8CTNM-1, owner ruling D-73): the per-business
   // circuit, end to end, as production reaches it. The queue's dispatcher calls the REAL
   // FlowOrchestratorService.executeToolDirectly here (its real executeTool, which catches what the tool
-  // throws and rethrows it as a plain Error, the form production delivers a failure and, today, a
-  // refusal in: SEC-W9DC-1, QW-07b), on a worker of the case's own (its own ActionDispatcherService, so
+  // throws and rethrows a failure as a plain Error, the form production delivers it in; a refusal, since
+  // W10-DISPATCH-STATUS, as the tool's HttpException: SEC-W9DC-1, QW-07b), on a worker of the case's own (its own ActionDispatcherService, so
   // no circuit leaks into other cases), with the job's retryCount 2 as PlanExecutorService enqueues it.
   // biz's circuit is opened by genuine failures (call_create_task erroring, its store not answering), which
   // stay failures whatever becomes of SEC-W9DC-1, so the bizB check below is never vacuous. With the circuit

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, HttpException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -176,6 +176,17 @@ export interface FlowToolResult {
    */
   notCleared?: { actionId: string | null; disposition: string; code: string };
 }
+
+/**
+ * W10-DISPATCH-STATUS (review SEC-W9DC-1, owner ruling D-73): the HttpException a tool threw, kept
+ * beside the failed FlowToolResult executeTool answers rather than on it, so the envelope the chat, a
+ * plan run over HTTP and executeToolDirect's callers read keeps its shape, and executeToolDirectly
+ * rethrows it with its status. executeToolDirectly used to rethrow a plain Error(result.error), so
+ * ActionDispatcherService, its production caller (the plan queue), could not tell a member's 404/403
+ * refusal from a failure: it retried the refusal and counted it toward that business's circuit for
+ * the tool (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
+ */
+const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -3299,6 +3310,11 @@ ${triage.standingContext}`;
           result.notCleared.disposition as ActionNotClearedError['disposition'],
         );
       }
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the tool's own HttpException, its status and its
+      // message (result.error), so the dispatcher answers a 4xx refusal once and counts it toward no
+      // circuit (isToolRefusal). Anything else stays the plain Error it was.
+      const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
+      if (httpException) throw httpException;
       throw new Error(result.error ?? `Tool ${toolName} failed`);
     }
     return result.result;
@@ -3368,7 +3384,7 @@ ${triage.standingContext}`;
       });
       if (actorUserId) await logged;
       const errorEnvelope = wrapToolResult(toolName, null);
-      return {
+      const failed: FlowToolResult = {
         toolCallId: id,
         name: toolName,
         result: null,
@@ -3382,6 +3398,9 @@ ${triage.standingContext}`;
           ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
           : {}),
       };
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the status goes beside the envelope, not on it.
+      if (error instanceof HttpException) TOOL_HTTP_EXCEPTIONS.set(failed, error);
+      return failed;
     }
   }
 
