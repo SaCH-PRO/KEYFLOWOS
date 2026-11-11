@@ -15,9 +15,14 @@ import type { PrismaService } from '../prisma/prisma.service';
  * authenticated between the cutoff and this time is admitted only when it is
  * itself a Google or emailed-link sign-in. A later session-ending event
  * removes it with the new cutoff (RiscService), so the restriction holds
- * again. After the clearing a password the hijacker set through the pre-event
- * GoTrue session works again: D-101 narrows SEC-W8RSC-4, it does not close it
- * (review SEC-W9RPC-2, docs/auth-pathway.md).
+ * again. D-113 (W10-RISC-RESET; closes reviews SEC-W9RPC-1/2, CR-W9RPC-2):
+ * the clearing does not admit a password session. A session whose original
+ * sign-in is a password (or cannot be read: fail closed) is admitted only
+ * when authenticated after User.metaData.passwordResetAfterCutoffAt, the time
+ * the user completed a password reset through KEYFLOW after the cutoff
+ * (IdentityPasswordService.completeReset; AuthMiddleware signInCutoffVerdict).
+ * So a password the hijacker set through the pre-event GoTrue session no
+ * longer works after the clearing (docs/auth-pathway.md).
  */
 export const SIGN_IN_CUTOFF_CLEARED_META_KEY = 'signInCutoffClearedAt';
 
@@ -60,11 +65,10 @@ const OTP_AMR_METHOD = 'otp';
  *
  * Only a session presented to this API as a bearer is judged here. The shipped
  * password reset posts its recovery session in the BODY of POST
- * /identity/reset-password (apps/web reset-password page) and completeReset
- * records no clearing, so today a reset clears nothing and the password
- * sign-in that follows stays refused (D-101 review SEC-W9RPC-1 / CR-W9RPC-1,
- * outside W9-RISC-PASSWORD-CUTOFF's write set: the follow-up calls
- * recordSignInCutoffCleared from completeReset; see docs/auth-pathway.md).
+ * /identity/reset-password (apps/web reset-password page); since D-113
+ * (W10-RISC-RESET) completeReset records the reset itself
+ * (passwordResetAfterCutoffAt), which is what admits the password sign-in that
+ * follows (see docs/auth-pathway.md).
  */
 const EMAILED_LINK_AMR_METHODS: ReadonlySet<string> = new Set(['magiclink', 'email/signup', 'recovery', 'invite']);
 
