@@ -268,10 +268,11 @@ const FULL_CRM_ACCESS: CrmAccess = {
 /**
  * The viewer for `userId` in `businessId`. The module rule is ModuleScopeGuard's
  * (an explicit scope map, else the role's defaults; a key absent from an
- * explicit map is 'none'); the contact rule is resolveCrmAccess's. A business
- * owner with no Membership row (BusinessGuard admits them through
- * Business.ownerId) is read as OWNER. Anyone else without a membership is
- * refused, as ModuleScopeGuard refuses them.
+ * explicit map is 'none'); the contact rule is resolveCrmAccess's. SUPER_ADMIN
+ * reads every module. Anyone else without a Membership is refused, as
+ * ModuleScopeGuard and BusinessGuard refuse them: owner ruling D-104
+ * (W10-OWNER-MEMBERSHIP) makes the Membership the one access rule, so a
+ * Business.ownerId with no Membership row is refused too, not read as OWNER.
  */
 export async function resolveTimelineViewer(prisma: PrismaService, businessId: string, userId: string): Promise<TimelineViewer> {
   const user = await prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });

@@ -4,7 +4,8 @@
  * Search Console) is started, synced and disconnected only by the business
  * owner. The rule has the Gmail rule's shape (GmailService.assertConnectAuthority,
  * D-11): an OWNER membership of the route's own business, or that business's
- * distinguished owner (Business.ownerId), with the SUPER_ADMIN bypass
+ * distinguished owner (Business.ownerId, holding a Membership there since owner
+ * ruling D-104), with the SUPER_ADMIN bypass
  * BusinessGuard already grants. Anyone else (an ADMIN or STAFF member, the
  * owner of another business) gets 403 GOOGLE_CONNECT_OWNER_ONLY before a
  * consent URL is built or a stored connection is touched.
@@ -1086,7 +1087,7 @@ describe('W10-GOOGLE-DOORS-REST: starting a Google Contacts sync is the business
     expect(outlookContacts.sync).not.toHaveBeenCalled();
   });
 
-  it('[V94D-J01] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) on their own business and a SUPER_ADMIN with no membership start the Google Contacts sync for the route\'s business; the Outlook Contacts sync (a Microsoft connection, outside D-99) stays a member\'s (an ADMIN and a STAFF member start it); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing synced', async () => {
+  it('[V94D-J01] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) on their own business and a SUPER_ADMIN with no membership start the Google Contacts sync for the route\'s business; the Outlook Contacts sync (a Microsoft connection, outside D-99) stays a member\'s (an ADMIN and a STAFF member start it); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing synced', async () => {
     for (const [businessId, actor] of OWNER_ARMS) {
       await connectContacts(businessId);
       clearContactSyncs();
