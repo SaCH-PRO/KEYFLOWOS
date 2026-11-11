@@ -38,7 +38,10 @@
  * re-points a SENT invoice's contact; DCS-T06, business C); a withheld intake
  * row is served to an ADMIN whose crm access is 'none' until the timeline rule
  * gains a D-115 term outside this packet's write set (SEC-W10DCS-1 /
- * CR-W10DCS-1; DCS-T07, it.todo).
+ * CR-W10DCS-1; DCS-T07, it.todo). An intake of A whose contact is B's
+ * (oldInCrossContact) is the intake side's negative control for the tenant
+ * binding, as oldInvCrossContact is the invoice side's (SEC-W10DCS-3): it is
+ * withheld, never linked to B's contact.
  *
  * Both are dry runs by default (counts only, nothing written), write with
  * --apply, are idempotent, and accept --business=<id> (repeatable) to limit a
@@ -117,13 +120,14 @@ const INV = {
   repointed: `${P}invRepointed`, // C: sent to cCPriv, now cCTeam's
   nameless: `${P}invNameless`,   // C: cCNameless's
 };
-/** Message intakes: A's (PRIVATE contact, TEAM contact, no contact), B's, and one that is gone. */
+/** Message intakes: A's (PRIVATE contact, TEAM contact, no contact), B's, one that is gone, and A's intake whose contact is B's. */
 const INTAKE = {
   priv: `${P}inPriv`,
   team: `${P}inTeam`,
   none: `${P}inNone`,
   b: `${P}inB`,
   gone: `${P}inGone`, // no row
+  crossContact: `${P}inCrossContact`, // A's intake naming B's contact (data corruption, never linked; review SEC-W10DCS-3)
 };
 
 /** The day the timeline rows sit on (local noon two days back: the summary reads local days). */
@@ -188,6 +192,7 @@ const ROWS: Row[] = [
   invoiceRow('oldInvCrossContact', ID.bizA, INV.crossContact, 'v96o-INV-3', 'v96o B Payer'),
   intakeRow('oldInGone', ID.bizA, INTAKE.gone, `${P}gone-sender@test.local`, 'v96o gone subject'),
   intakeRow('oldInOtherBiz', ID.bizA, INTAKE.b, `${P}b-sender@test.local`, 'v96o B subject'),
+  intakeRow('oldInCrossContact', ID.bizA, INTAKE.crossContact, `${P}cross-sender@test.local`, 'v96o cross subject'),
   // left as the W9 writer stores it: the intake names no contact
   intakeRow('oldInNone', ID.bizA, INTAKE.none, `${P}stranger@test.local`, 'v96o general question'),
   // B's own pre-W9 row, linked only by a run that includes B
@@ -208,7 +213,7 @@ const LINKED: Record<string, string> = {
   oldInPriv: ID.cPriv,
   oldInTeam: ID.cTeam,
 };
-const WITHHELD = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact', 'oldInGone', 'oldInOtherBiz'];
+const WITHHELD = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact', 'oldInGone', 'oldInOtherBiz', 'oldInCrossContact'];
 const UNTOUCHED = ['oldInNone', 'ctlW9Inv', 'ctlW9In', 'ctlInvPaid', 'ctlCrm'];
 const A_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizA).map((r) => act(r.key));
 const C_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizC).map((r) => act(r.key));
@@ -430,6 +435,8 @@ beforeAll(async () => {
   await intake(INTAKE.team, ID.bizA, ID.cTeam);
   await intake(INTAKE.none, ID.bizA, null);
   await intake(INTAKE.b, ID.bizB, ID.cB);
+  // A's intake whose contact is B's: never a contact of A, so never linked (review SEC-W10DCS-3).
+  await intake(INTAKE.crossContact, ID.bizA, ID.cB);
 
   await db.activity.createMany({
     data: ROWS.map((r, i) => ({
@@ -546,17 +553,17 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(countOf(res.out, 'invoice_sent_unlinked')).toBe(7);
     expect(countOf(res.out, 'invoice_sent_would_link')).toBe(3);
     expect(countOf(res.out, 'invoice_sent_would_withhold')).toBe(4);
-    expect(countOf(res.out, 'intake_approved_unlinked')).toBe(5);
+    expect(countOf(res.out, 'intake_approved_unlinked')).toBe(6);
     expect(countOf(res.out, 'intake_approved_would_link')).toBe(2);
     expect(countOf(res.out, 'intake_approved_no_contact')).toBe(1);
-    expect(countOf(res.out, 'intake_approved_would_withhold')).toBe(2);
+    expect(countOf(res.out, 'intake_approved_would_withhold')).toBe(3); // incl. oldInCrossContact (review SEC-W10DCS-3)
     expect(res.out).not.toContain(P);
     expect(res.out).not.toContain(HIDDEN_NAME);
 
     const global = await run('timeline', []);
     expect(global.code, global.out).toBe(0);
     expect(countOf(global.out, 'invoice_sent_unlinked')).toBeGreaterThanOrEqual(7);
-    expect(countOf(global.out, 'intake_approved_unlinked')).toBeGreaterThanOrEqual(5);
+    expect(countOf(global.out, 'intake_approved_unlinked')).toBeGreaterThanOrEqual(6);
     expect(global.out).not.toContain(P);
 
     expect(await timelineState(), 'a dry run writes nothing').toEqual(before);
@@ -567,7 +574,7 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(admin.text).toContain(HIDDEN_NAME);
   });
 
-  it('[DCS-T02] --apply limited to A links the four rows to their source contact in A, withholds the six whose source is gone (another business, a contact of another business, no row, no entity id), leaves the approved intake without a contact and every control exactly as stored, and does not touch B', async () => {
+  it('[DCS-T02] --apply limited to A links the four rows to their source contact in A, withholds the seven whose source is gone (another business, an invoice or intake whose contact is of another business (review SEC-W10DCS-3), no row, no entity id), leaves the approved intake without a contact and every control exactly as stored, and does not touch B', async () => {
     const before = await timelineState();
     const res = await run('timeline', ['--apply', `--business=${ID.bizA}`]);
     expect(res.code, res.out).toBe(0);
@@ -575,7 +582,7 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(countOf(res.out, 'invoice_sent_linked')).toBe(2);
     expect(countOf(res.out, 'invoice_sent_withheld')).toBe(4);
     expect(countOf(res.out, 'intake_approved_linked')).toBe(2);
-    expect(countOf(res.out, 'intake_approved_withheld')).toBe(2);
+    expect(countOf(res.out, 'intake_approved_withheld')).toBe(3); // incl. oldInCrossContact (review SEC-W10DCS-3)
     expect(countOf(res.out, 'intake_approved_no_contact')).toBe(1);
     expect(res.out).not.toContain(P);
 

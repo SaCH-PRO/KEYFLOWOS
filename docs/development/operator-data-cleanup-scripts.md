@@ -173,7 +173,10 @@ runs both scripts' `main()` in process against Postgres. It covers:
 
 - dry runs that write nothing and print counts only;
 - `--apply` fixing exactly the seeded rows, with same-business controls left
-  untouched;
+  untouched. An invoice of business A and an intake of business A whose
+  contact belongs to business B are both withheld, never linked to B's
+  contact: these negative controls pin the tenant binding on both sides
+  (review SEC-W10DCS-3);
 - idempotent re-runs and the `--business` scope;
 - TS-13d: after the backfill, `/events`, the day's summary and the legacy
   activity route no longer serve the pre-W9 rows naming a PRIVATE contact to a
