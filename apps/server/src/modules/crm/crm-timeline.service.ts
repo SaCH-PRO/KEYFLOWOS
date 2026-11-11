@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
-import type { Prisma } from '@prisma/client';
+import { CONTACT_EVENT_TYPES_BY_CATEGORY, normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
+import type { Invoice, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase } from './crm.helpers';
 import { TimelineService } from '../timeline/timeline.service';
@@ -816,30 +816,58 @@ export class CrmTimelineService {
     return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
   }
 
-  async buildTimeline(businessId: string, limit = 20): Promise<TimelineEntry[]> {
+  /**
+   * The business's recent CRM rows (the 10 newest ContactEvents, 8 notes, 8
+   * tasks, 6 invoices, 6 bookings), newest first, cut to `limit`. With no
+   * options every row of the business is read, as before (the owner's
+   * highlights).
+   *
+   * W10-MONEY-SIGNALS-REST (owner rulings D-63 and D-100; review residuals
+   * SEC-W9MR-1 and SEC-W9MR-2 remainder), for CrmStatsService.flowHighlights:
+   * - `contacts`: each read keeps only the rows of the contacts matching it
+   *   (the viewer's visibility clause, the rule GET contacts/:contactId
+   *   applies), so another member's PRIVATE contact takes no place and is
+   *   never named;
+   * - `withoutMoney`: no invoice is read and the money-type ContactEvent rows
+   *   (a sales_revenue type, @keyflow/shared; the rule timelineEntryCarriesMoney
+   *   serves them by) are left out in the event query itself, so they take
+   *   none of its 10 places (a member without revenue read).
+   */
+  async buildTimeline(
+    businessId: string,
+    limit = 20,
+    options: { contacts?: Prisma.ContactWhereInput | null; withoutMoney?: boolean } = {},
+  ): Promise<TimelineEntry[]> {
+    const ofContacts = options.contacts ? { contact: options.contacts } : {};
     const [events, notes, tasks, invoices, bookings] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
-        where: { businessId },
+        where: {
+          businessId,
+          ...ofContacts,
+          ...(options.withoutMoney ? { type: { notIn: [...CONTACT_EVENT_TYPES_BY_CATEGORY.sales_revenue] } } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
       this.prisma.client.contactNote.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
       this.prisma.client.contactTask.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 6,
-      }),
+      options.withoutMoney
+        ? Promise.resolve([] as Invoice[])
+        : this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, ...ofContacts },
+            orderBy: { createdAt: 'desc' },
+            take: 6,
+          }),
       this.prisma.client.booking.findMany({
-        where: { businessId, deletedAt: null },
+        where: { businessId, deletedAt: null, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 6,
       }),
