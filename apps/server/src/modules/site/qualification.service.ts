@@ -228,24 +228,56 @@ export class QualificationService {
     };
   }
 
+  /**
+   * The journey behind a public select or intake step, only while its store is
+   * open. A journey whose store has since closed (storeEnabled false) or been
+   * soft-deleted answers exactly as an unknown journey, 404 'Journey not
+   * found', before anything is written (CF-56, as findPublicStore).
+   * W10-QUALIFICATION-PUBLIC review SEC-W10QP-2: a journey written while the
+   * store was open kept answering 201 after it closed.
+   */
+  private async findPublicJourney(journeyId: string) {
+    const journey = await this.prisma.client.qualificationJourney.findFirst({
+      where: { id: journeyId, business: { deletedAt: null, storeEnabled: true } },
+    });
+    if (!journey) throw new NotFoundException('Journey not found');
+    return journey;
+  }
+
+  /**
+   * SEC-W10QP-2 (CF-56 / M36): the journey's store must be open
+   * (findPublicJourney); productId must be one of that store's own listed
+   * products (active, not deleted: the set scoreAndRecommend offers), so
+   * another tenant's or an unlisted product is a 400 and is never stored; the
+   * response is the four fields the storefront needs, never the journey row
+   * (businessId, sessionId, the customer, answers, scores, intakeData).
+   */
   async selectPackage(
     journeyId: string,
     productId: string,
     executionModel?: string,
     customer?: { name?: string; email?: string; visitorId?: string; referralCode?: string },
   ) {
-    const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
-    if (!journey) throw new NotFoundException('Journey not found');
+    const journey = await this.findPublicJourney(journeyId);
+
+    const product = productId
+      ? await this.prisma.client.product.findFirst({
+          where: { id: productId, businessId: journey.businessId, deletedAt: null, isActive: true },
+          select: { id: true },
+        })
+      : null;
+    if (!product) throw new BadRequestException('Product not found or unavailable');
 
     const updated = await this.prisma.client.qualificationJourney.update({
       where: { id: journeyId },
       data: {
-        selectedProductId: productId,
+        selectedProductId: product.id,
         executionModelChosen: executionModel ?? null,
         customerName: customer?.name ?? journey.customerName,
         customerEmail: customer?.email ?? journey.customerEmail,
         status: 'package_selected',
       },
+      select: { id: true, status: true, selectedProductId: true, executionModelChosen: true },
     });
 
     const customerEmail = customer?.email ?? journey.customerEmail ?? null;
@@ -291,9 +323,9 @@ export class QualificationService {
     return updated;
   }
 
+  /** SEC-W10QP-2 (CF-56): a closed or soft-deleted store's journey is the unknown journey's 404 (findPublicJourney). */
   async submitAssetIntake(journeyId: string, intakeData: Record<string, any>) {
-    const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
-    if (!journey) throw new NotFoundException('Journey not found');
+    await this.findPublicJourney(journeyId);
 
     // Return only what the storefront renders. The full row carries
     // customerEmail, customerName, answers, scores and businessId, none of

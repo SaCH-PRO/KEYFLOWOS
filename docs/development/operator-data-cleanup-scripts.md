@@ -129,25 +129,14 @@ Limits of the withheld audience, as D-63's unmapped branch defines it:
 
 - A withheld invoice row still needs `revenue` read, as before the backfill.
   An ADMIN whose `revenue` access is `none` is not served it.
-- A withheld intake row (category `AI`) needs no further scope.
-
-**Open (review SEC-W10DCS-1 / CR-W10DCS-1).** The unmapped branch checks the
-role only. Before the backfill, an intake row was in module `communications`,
-which needs `crm` read. After a withhold, an ADMIN whose `crm` access is
-explicitly `none` is served the row, including its detail
-(`<intent> from <sender> — <subject>`). That ADMIN was not served the row
-before. This conflicts with D-114's principle that explicit scopes bind
-ADMINs. No column the rule reads can tie an unmapped row to `crm`. The only
-`crm` gate is a named contact, and naming an id that is not a contact of the
-business hides the row from every ADMIN. The fix is a rule change outside this
-packet's write set: in `canReadActivityRow`, a row of module `d115_withheld`
-also needs read on `activityModuleScope(data.d115.module)`. Withheld invoice
-rows already meet that through category `COMMERCE`. Until that term lands, or
-a ruling accepts the gap, `data-cleanup-scripts` DCS-T07 stays `it.todo`.
-The gap reaches only intake rows whose source is gone. Source code never
-deletes an intake, so these are rows with no `entityId`, or whose intake or
-contact belongs to another business. Before `--apply`, an operator can check
-for ADMIN memberships with `crm` set to `none` in the affected businesses.
+- A withheld row also needs read on the scope of the module it had before the
+  backfill (`data.d115.module`). A withheld intake row (module
+  `communications` before, read on `crm`) is not served to an ADMIN whose
+  `crm` access is explicitly `none`, who was not served it before either
+  (review SEC-W10DCS-1 / CR-W10DCS-1, D-114's principle that explicit scopes
+  bind ADMINs). `canReadActivityRow` applies this term to every row of module
+  `d115_withheld` (`D115_WITHHELD_MODULE` in `timeline-visibility.ts`, the
+  same marker as the script's `WITHHELD_MODULE`).
 
 `--apply` runs four UPDATE statements: link invoice rows, link intake rows,
 withhold invoice rows, withhold intake rows. Each is idempotent on its own. A
@@ -173,7 +162,10 @@ runs both scripts' `main()` in process against Postgres. It covers:
 
 - dry runs that write nothing and print counts only;
 - `--apply` fixing exactly the seeded rows, with same-business controls left
-  untouched;
+  untouched. An invoice of business A and an intake of business A whose
+  contact belongs to business B are both withheld, never linked to B's
+  contact: these negative controls pin the tenant binding on both sides
+  (review SEC-W10DCS-3);
 - idempotent re-runs and the `--business` scope;
 - TS-13d: after the backfill, `/events`, the day's summary and the legacy
   activity route no longer serve the pre-W9 rows naming a PRIVATE contact to a
@@ -182,5 +174,6 @@ runs both scripts' `main()` in process against Postgres. It covers:
 - DCS-T06 (review SEC-W10DCS-2): a row naming the contact an invoice had before
   it was re-pointed is withheld, not linked to the invoice's new contact. The
   writer's `Customer` fallback still links;
-- DCS-T07 (`it.todo`, review SEC-W10DCS-1 / CR-W10DCS-1): the open rule term
-  above.
+- DCS-T07 (review SEC-W10DCS-1 / CR-W10DCS-1): an ADMIN whose `crm` access is
+  `none` is not served a withheld intake row, its sender or its subject; the
+  same ADMIN, reading `revenue`, is still served the withheld invoice rows.

@@ -30,6 +30,10 @@
  *   - GET /site/storefront/public/:slug/qualification-flow (review
  *     SEC-W10QP-1) answered a closed store 404 'Store is currently
  *     unavailable' and an unknown one 404 'Store not found'.
+ *   - POST /site/storefront/public/qualification/:journeyId/select and
+ *     .../intake (review SEC-W10QP-2) answered 201 for a closed store's
+ *     journey; select stored another tenant's productId and returned the
+ *     whole QualificationJourney row (customer, session, answers, scores).
  *
  * Contract pinned here:
  *
@@ -50,6 +54,12 @@
  *                                    the canary reaches the body (W10-QUALIFICATION-PUBLIC)
  *   qualification-flow            -> a closed (or soft-deleted) store is the unknown
  *                                    store's 404, the same body (SEC-W10QP-1)
+ *   qualification select / intake -> a closed (or soft-deleted) store's journey is the
+ *                                    unknown journey's 404 and nothing is written;
+ *                                    select takes only the journey store's own listed
+ *                                    products and answers { id, status,
+ *                                    selectedProductId, executionModelChosen } only
+ *                                    (SEC-W10QP-2)
  *   rate limit                    -> the catalog products route carries
  *                                    @PublicRateLimit(N <= 60, >= 60s); request N+1
  *                                    in the window is a 429. The commerce products
@@ -65,8 +75,9 @@
  * route), BookingsController + BookingsService (the slots read) and
  * SiteController + SiteService read real rows behind the production
  * GlobalHttpExceptionFilter and ValidationPipe; QualificationService is real
- * for the qualification-recommend and qualification-flow reads
- * (W10-QUALIFICATION-PUBLIC). Every
+ * for the qualification-recommend and qualification-flow reads and the select
+ * and intake steps (W10-QUALIFICATION-PUBLIC; CrmService records the select
+ * step's contact call). Every
  * request is anonymous.
  * Collaborators the public reads never call (waitlist, calendar, ledger, AI,
  * orders, promo codes, e-mail, timeline...) are stubs.
@@ -156,6 +167,8 @@ let CatalogControllerClass: any;
 let CommerceControllerClass: any;
 let BookingsControllerClass: any;
 let PUBLIC_RATE_LIMIT_KEY_VALUE: string;
+/** CrmService.findOrCreateContact calls (the qualification select step, SEC-W10QP-2). */
+const crmContactCalls: Array<{ businessId: string; email: unknown }> = [];
 
 async function cleanup() {
   for (const sql of [
@@ -324,8 +337,18 @@ beforeAll(async () => {
         useValue: { emit: () => true, emitAsync: async () => [], on: () => undefined, off: () => undefined, once: () => undefined, removeListener: () => undefined },
       },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+      // Only the qualification select step calls it (SEC-W10QP-2): recorded,
+      // so a closed store's journey is shown to create no contact.
+      {
+        provide: CrmService,
+        useValue: {
+          findOrCreateContact: async (businessId: string, input: Record<string, unknown>) => {
+            crmContactCalls.push({ businessId, email: input?.email });
+            return null;
+          },
+        },
+      },
       // Off the public read paths: never called by the routes under test.
-      { provide: CrmService, useValue: stub },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
       { provide: InvoiceWorkflowService, useValue: stub },
       { provide: InvoiceReceiptBuilderService, useValue: stub },
@@ -726,6 +749,109 @@ describe('V1-23 sibling public product reads outside the write set', () => {
     const noFlow = await qualificationFlow(SLUG.a);
     expect(noFlow.status).toBe(200);
     expect(noFlow.body).toEqual({ enabled: false, questions: [] });
+  });
+
+  // Review finding SEC-W10QP-2 (confirmed by running): a journey written while
+  // the store was open kept working after it closed. POST
+  // .../qualification/:journeyId/select and .../intake answered 201 for a
+  // closed store; select stored any productId, another tenant's included, and
+  // returned the whole QualificationJourney row (businessId, sessionId,
+  // customerName, customerEmail, answers, scores) to whoever held the
+  // journeyId. Both steps now answer a closed or soft-deleted store's journey
+  // as an unknown journey (CF-56), select accepts only the journey store's own
+  // listed products and both return only the fields the storefront needs (M36).
+  it('qualification select and intake honour store closure, accept only the journey store\'s own products and return only the storefront\'s fields (W10-QUALIFICATION-PUBLIC review SEC-W10QP-2, CF-56 / M36): a closed or soft-deleted store\'s journey is the unknown journey\'s 404 and nothing is written; another tenant\'s, an inactive or an unknown product is a 400; the select body carries no customer, session, answer or score', async () => {
+    const Q = { owner: `${P}ownerQx`, biz: `${P}bizQx`, slug: `${P}store-qx`, prod: `${P}prodQx`, inactive: `${P}prodQxInactive` };
+    await db.user.create({ data: { id: Q.owner, email: `${P}ownerQx@test.local`, role: 'USER' } });
+    await db.business.create({
+      data: { id: Q.biz, name: 'V23A Qualification Store', slug: Q.slug, ownerId: Q.owner, currency: 'TTD', storeEnabled: true },
+    });
+    for (const [id, isActive] of [[Q.prod, true], [Q.inactive, false]] as const) {
+      await db.product.create({
+        data: {
+          id, businessId: Q.biz, name: `V23A ${id.slice(P.length)}`, price: 49, currency: 'TTD', category: 'PRODUCT', isActive,
+          executionModel: 'FULL_SERVICE', executionMeta: { pricingNote: `${CANARY}qualification store note` },
+        },
+      });
+    }
+    const select = (journeyId: string, body: Record<string, unknown>) =>
+      agent().post(`/site/storefront/public/qualification/${encodeURIComponent(journeyId)}/select`).send(body);
+    const intake = (journeyId: string, body: Record<string, unknown>) =>
+      agent().post(`/site/storefront/public/qualification/${encodeURIComponent(journeyId)}/intake`).send(body);
+    const journeyRow = (id: string) => db.qualificationJourney.findUnique({ where: { id } });
+    const VISITOR = { name: 'V23A Visitor', email: `${P}visitor-qx@example.test` };
+
+    const recommended = async () => {
+      const res = await qualificationRecommend(Q.slug);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return res.body.journeyId as string;
+    };
+    const selected = await recommended();
+    const pending = await recommended();
+    crmContactCalls.length = 0;
+
+    // Baselines: an unknown journey's answers.
+    const unknownSelect = await select(`${P}nosuchjourney`, { productId: Q.prod });
+    expect(unknownSelect.status).toBe(404);
+    const unknownIntake = await intake(`${P}nosuchjourney`, { logo: 'https://example.test/logo.png' });
+    expect(unknownIntake.status).toBe(404);
+
+    // Open store: another tenant's, an inactive or an unknown product is refused, nothing stored.
+    for (const [label, productId] of [
+      ['another tenant\'s product', ID.prodA],
+      ['the store\'s inactive product', Q.inactive],
+      ['an unknown product', `${P}nosuchproduct`],
+      ['no product', ''],
+    ] as const) {
+      const res = await select(selected, { productId, executionModel: 'FULL_SERVICE', customer: VISITOR });
+      expect(res.status, `${label} answered ${res.status} ${JSON.stringify(res.body)}`).toBe(400);
+      expect(JSON.stringify(res.body), label).not.toContain(VISITOR.email);
+    }
+    expect(await journeyRow(selected), 'a refused product is not stored').toMatchObject({
+      selectedProductId: null, customerEmail: null, status: 'recommended',
+    });
+    expect(crmContactCalls, 'a refused product creates no contact').toEqual([]);
+
+    // Open store, own product: 201 with only the storefront's fields.
+    const ok = await select(selected, { productId: Q.prod, executionModel: 'FULL_SERVICE', customer: VISITOR });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toEqual({ id: selected, status: 'package_selected', selectedProductId: Q.prod, executionModelChosen: 'FULL_SERVICE' });
+    expect(JSON.stringify(ok.body)).not.toContain(VISITOR.email);
+    expectNoCanary(ok.body);
+    expect(await journeyRow(selected)).toMatchObject({
+      businessId: Q.biz, selectedProductId: Q.prod, customerEmail: VISITOR.email, status: 'package_selected',
+    });
+    expect(crmContactCalls, 'the open store\'s select still records the visitor').toEqual([{ businessId: Q.biz, email: VISITOR.email }]);
+    // CONTROL: intake on the open store still answers its four fields.
+    const intakeOk = await intake(selected, { logo: 'https://example.test/logo.png' });
+    expect(intakeOk.status, JSON.stringify(intakeOk.body)).toBe(201);
+    expect(sortedKeys(intakeOk.body)).toEqual(['id', 'intakeCompleted', 'intakeStatus', 'status']);
+
+    // The store closes, then is soft-deleted: both steps answer the unknown journey's 404.
+    crmContactCalls.length = 0;
+    await clearRateLimits(); // intake allows 5 a minute; this case makes 6
+
+    for (const [label, data] of [
+      ['closed store', { storeEnabled: false }],
+      ['soft-deleted store', { storeEnabled: true, deletedAt: new Date() }],
+    ] as const) {
+      await db.business.update({ where: { id: Q.biz }, data });
+      const sel = await select(pending, { productId: Q.prod, executionModel: 'FULL_SERVICE', customer: VISITOR });
+      expect(sel.status, `${label} select answered ${sel.status} ${JSON.stringify(sel.body)}`).toBe(404);
+      expect(stripVolatile(sel.body), `${label} select`).toEqual(stripVolatile(unknownSelect.body));
+      for (const journeyId of [pending, selected]) {
+        const res = await intake(journeyId, { logo: `https://example.test/${label.replace(/\W+/g, '-')}.png` });
+        expect(res.status, `${label} intake answered ${res.status} ${JSON.stringify(res.body)}`).toBe(404);
+        expect(stripVolatile(res.body), `${label} intake`).toEqual(stripVolatile(unknownIntake.body));
+      }
+    }
+    expect(await journeyRow(pending), 'nothing written for the closed store\'s journey').toMatchObject({
+      selectedProductId: null, customerEmail: null, intakeData: null, intakeCompleted: false, status: 'recommended',
+    });
+    expect(await journeyRow(selected), 'the selected journey is left as it was').toMatchObject({
+      intakeData: { logo: 'https://example.test/logo.png' }, status: 'intake_completed',
+    });
+    expect(crmContactCalls, 'a closed store\'s journey creates no contact').toEqual([]);
   });
 });
 

@@ -441,11 +441,26 @@ describe("SEC-D11-1 on the real wire: what reaches the server is judged, not the
     ]);
   });
 
-  it.todo(
-    "fetchContactDetail('.', 'b1') (or '') is refused as a missing id: DEFERRED. It sends through lib/client.ts's private schema apiGet, " +
-      "which calls fetch itself and asks only namesNoBusiness, never namesMissingId, so a missing contact id still reaches the list route " +
-      "(as `''` always has). client.ts is outside this packet's write set (V1-45, V1-41b); the fix is one namesMissingId check there.",
-  );
+  /*
+   * W10-WEB-CLIENT-MISSING-ID (FOLLOW3-D11, was it.todo): fetchContactDetail
+   * sends through lib/client.ts's private schema apiGet, which calls fetch
+   * itself. It asked only namesNoBusiness, so a missing contact id ("", ".",
+   * "..", "undefined", "null") left as .../contacts/ (or a spelled-out missing
+   * value) and the server's non-strict routing answered the detail read from
+   * the LIST route. It now asks namesMissingId too, the refusal the lib/api.ts
+   * transports give, and sends nothing.
+   */
+  it("fetchContactDetail('.', 'b1') (or '') is refused as a missing id, sending nothing (W10-WEB-CLIENT-MISSING-ID, FOLLOW3-D11, was it.todo)", async () => {
+    window.localStorage.setItem("kf_business_id", STORED);
+    const missing = [".", "", "..", "undefined", "null"];
+    const answers = [];
+    for (const contactId of missing) answers.push(await fetchContactDetail(contactId, "b1"));
+    // No business named: the selected one is bound, and the missing contact id is still refused.
+    answers.push(await fetchContactDetail(""));
+    answers.push(await fetchContactDetail("."));
+    expect(wire).toEqual([]);
+    expect(answers).toEqual([...missing, "", "."].map(() => ({ data: null, error: MISSING_ID })));
+  });
 });
 
 // ---------------------------------------------------------------------------
