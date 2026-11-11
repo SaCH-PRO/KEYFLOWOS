@@ -73,7 +73,12 @@ function briefingSchedulerWith(email: SystemEmailService, businessId: string) {
       invoice: { aggregate: vi.fn(async () => ({ _sum: { total: 0 }, _count: 0 })) },
       expense: { aggregate: vi.fn(async () => ({ _sum: { amount: 0 } })) },
       financeActionItem: { findMany: vi.fn(async () => []) },
-      user: { findUnique: vi.fn(async () => ({ email: RECIPIENT })) },
+      // W10-OWNER-MEMBERSHIP (D-104, SEC-W10OM-6), trial-Z3 seam: the briefing goes to the owner only while
+      // they hold a Membership of the business (businessOwnerRecipient reads user.findFirst with that filter).
+      user: {
+        findUnique: vi.fn(async () => ({ email: RECIPIENT })),
+        findFirst: vi.fn(async () => ({ email: RECIPIENT, name: null })),
+      },
     },
   };
   const copilot = {

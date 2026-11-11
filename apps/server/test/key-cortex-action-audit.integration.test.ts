@@ -421,6 +421,9 @@ beforeAll(async () => {
   await db.membership.create({
     data: { userId: ID.member, businessId: ID.toolBiz, role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'write', expenses: 'read' } },
   });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104), trial-Z3 seam: the owner holds the OWNER Membership the
+  // operator backfill writes; an owner recorded only as Business.ownerId is no member (fixture change).
+  await db.membership.create({ data: { userId: ID.owner, businessId: ID.toolBiz, role: 'OWNER' } });
 }, 120_000);
 
 afterAll(async () => {
@@ -1466,7 +1469,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       expect(member.text, path).toContain('I did not run finance_profit_and_loss: Insufficient permissions: revenue requires read access (you have none)');
       expect(member.text, path).toContain('I did not run crm_list_contacts: Tool "crm_list_contacts" is executed from here only for the business owner');
 
-      // control: the owner by Business.ownerId (no membership row) has all three run
+      // control: the business owner (Business.ownerId with its OWNER membership, D-104) has all three run
       const owner = await chatToolTurnFor(ID.owner, [PNL, CONTACTS, 'expenses_list'], path);
       expect(owner.dispatched, path).toEqual([PNL, CONTACTS, 'expenses_list']);
       expect(owner.actions.map((a: any) => a.status), path).toEqual(['success', 'success', 'success']);

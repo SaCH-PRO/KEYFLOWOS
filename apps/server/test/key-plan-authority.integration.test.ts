@@ -898,7 +898,7 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
     const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
     const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
     const superAdmin = `${P}qw07b_sa`; // a SUPER_ADMIN who is no member of biz (D-46)
-    const ownerOnly = `${P}qw07b_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2, D-104)
+    const ownerOnly = `${P}qw07b_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2, D-104: refused at the gate)
     const bizC = `${P}qw07b_bizc`;
     const cC = `${P}qw07b_c_bizc`;
     await db.user.create({ data: { id: superAdmin, email: `${P}qw07b_sa@test.local`, role: 'SUPER_ADMIN' } });
@@ -943,7 +943,6 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
         refusals.push({ planId: `${P}qw07b_crmw_${i}`, userId: ID.staffCrmW, businessId: ID.biz, contactId: ID.cPriv, status: 404, error: /^Contact not found$/ });
       }
       refusals.push({ planId: `${P}qw07b_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, status: 403, error: /Only a member of this business/ });
-      refusals.push({ planId: `${P}qw07b_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, status: 403, error: /Only a member of this business/ });
       for (const r of refusals) {
         // callerId is the tool contract's (validateToolInput requires it); the dispatcher ignores it (D-88).
         const args = { contactId: r.contactId, callerId: ID.owner, notes: `v87b qw07b ${r.planId}` };
@@ -963,6 +962,18 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
         const row = await planRow(r.planId);
         expect(row.steps[0].status, r.planId).toBe('failed');
         expect(String(row.steps[0].errorMessage), r.planId).toMatch(r.error);
+      }
+      // W10-OWNER-MEMBERSHIP (owner ruling D-104), trial-Z3 seam: bizC's owner by Business.ownerId alone is
+      // no member, so the plan queue's gate now refuses the step before dispatch (it used to pass the gate and
+      // be refused inside dispatch, 403 'Only a member of this business'): nothing dispatched, no call log.
+      {
+        const planO = `${P}qw07b_owner_only`;
+        const argsO = { contactId: cC, callerId: ID.owner, notes: `v87b qw07b ${planO}` };
+        const stepO = await seedQueuePlan(planO, ownerOnly, 'call_create_task', argsO, bizC);
+        expect(await planStepRunRefusal(prisma, bizC, planO, 'call_create_task')).toBe('Not a member of this business');
+        await runQueueStep(planO, 'call_create_task', argsO, bizC, { retryCount: 2, worker });
+        expect(dispatchedFor(stepO), planO).toHaveLength(0);
+        expect((await planRow(planO)).steps[0].status, planO).not.toBe('completed');
       }
       expect(await callLogs(ID.biz)).toEqual([]);
       expect(await callLogs(bizC)).toEqual([]);
