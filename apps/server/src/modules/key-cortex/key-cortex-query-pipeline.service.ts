@@ -59,7 +59,10 @@ import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
-import { KeyCortexPromptContextService } from './key-cortex-prompt-context.service';
+import { KeyCortexPromptContextService, isToolCallRecord } from './key-cortex-prompt-context.service';
+import { userCanAccessBusiness } from '../../core/auth/business.guard';
+import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
+import type { CortexMemberAuthority } from './key-cortex.controller';
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
 import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
@@ -86,6 +89,24 @@ type ParsedCommandDecision<C> = {
   disposition: 'executable' | 'approval_required' | 'denied' | 'failed_closed';
   reason: string;
 };
+
+/** How many memory fragments a chat turn's system prompt carries (processQuery and its stream path). */
+const CHAT_MEMORY_FRAGMENTS = 10;
+/**
+ * W10-CORTEX-CHAT-SCOPE review CR-W10CCS-1: what chatMemoryFragments asks for on top of
+ * CHAT_MEMORY_FRAGMENTS, so that what it leaves out does not empty the prompt's memory block (the
+ * headroom rule of buildMemoryContext): the tool-call records of the business-wide stores
+ * (UnifiedMemoryRetrievalService reads at most 50 business_events and 50 cognitive_events, which rank
+ * highest on recency in an active business) and the cognition memory of anyone but the reader (it
+ * reads at most 50 rows; review SEC-W10CCS-R2).
+ */
+const CHAT_MEMORY_HEADROOM = 150;
+
+/** The tool a model tool call names, or '' for a call that names none. */
+function toolCallName(call: unknown): string {
+  const name = (call as { function?: { name?: unknown } } | null)?.function?.name;
+  return typeof name === 'string' ? name : '';
+}
 
 /**
  * KeyCortexQueryPipelineService
@@ -321,10 +342,7 @@ export class KeyCortexQueryPipelineService {
       let memoryFragments: MemoryFragment[] = [];
       if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
         try {
-          memoryFragments = await this.memoryRetrieval.retrieveContext(
-            query.businessId,
-            { query: query.text, limit: 10 },
-          );
+          memoryFragments = await this.chatMemoryFragments(query);
           this.logger.log(
             `[processQuery][${correlationId}] Loaded ${memoryFragments.length} memory fragment(s)`,
           );
@@ -619,18 +637,22 @@ export class KeyCortexQueryPipelineService {
         responseFormat: { type: 'text' },
       });
 
-      const toolLoopResult = await this.toolLoopService.handleToolCalls(
-        completionResult,
-        messages,
-        query,
-        {
-          ...routeDecision,
-          temperatureOverride: effectiveTemperature,
-        },
-        personalityConfig,
-        taskCategory,
-        turnIdentity,
-        this.MAX_CONTEXT_TOKENS,
+      // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (D-71, D-57): the model's tool calls run only as far
+      // as the member may run them (memberToolLoop).
+      const toolLoopResult = await this.memberToolLoop(completionResult, query, 'processQuery', correlationId, (screened) =>
+        this.toolLoopService.handleToolCalls(
+          screened,
+          messages,
+          query,
+          {
+            ...routeDecision,
+            temperatureOverride: effectiveTemperature,
+          },
+          personalityConfig,
+          taskCategory,
+          turnIdentity,
+          this.MAX_CONTEXT_TOKENS,
+        ),
       );
 
       const latencyMs = Date.now() - startTime;
@@ -1246,10 +1268,7 @@ export class KeyCortexQueryPipelineService {
       let streamMemoryFragments: MemoryFragment[] = [];
       if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
         try {
-          streamMemoryFragments = await this.memoryRetrieval.retrieveContext(
-            query.businessId,
-            { query: query.text, limit: 10 },
-          );
+          streamMemoryFragments = await this.chatMemoryFragments(query);
         } catch {
           // Non-critical
         }
@@ -1375,18 +1394,21 @@ export class KeyCortexQueryPipelineService {
 
       if (collectedToolCalls.length > 0 && this.toolLoopService) {
         try {
-          const toolLoopResult = await this.toolLoopService.handleToolCalls(
-            { toolCalls: collectedToolCalls },
-            messages,
-            query,
-            {
-              ...routeDecision,
-              temperatureOverride: effectiveTemperature,
-            },
-            personalityConfig,
-            taskCategory,
-            turnIdentity,
-            this.MAX_CONTEXT_TOKENS,
+          // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (D-71, D-57): as processQuery (memberToolLoop).
+          const toolLoopResult = await this.memberToolLoop({ toolCalls: collectedToolCalls }, query, 'streamQuery', correlationId, (screened) =>
+            this.toolLoopService.handleToolCalls(
+              screened,
+              messages,
+              query,
+              {
+                ...routeDecision,
+                temperatureOverride: effectiveTemperature,
+              },
+              personalityConfig,
+              taskCategory,
+              turnIdentity,
+              this.MAX_CONTEXT_TOKENS,
+            ),
           );
 
           if (toolLoopResult?.content) {
@@ -1788,10 +1810,31 @@ export class KeyCortexQueryPipelineService {
           });
         }
 
-        executable = approvedCommands;
+        // W10-CORTEX-CHAT-SCOPE (review SEC-W9MRK-3, owner ruling D-57): a command the authority
+        // would run, or put up for approval, runs only for a member who may run it as a direct
+        // command (memberCommandRefusals). A refused one is settled as 'denied' with its refusal,
+        // before anything executes or is proposed. A member that cannot be read throws here, and
+        // the whole batch fails closed in the catch below.
+        const refusals = await this.memberCommandRefusals(
+          evaluated
+            .filter((decision) => decision.disposition !== 'denied')
+            .map((decision) => decision.command),
+          query,
+        );
+        for (const decision of evaluated) {
+          const refusal = refusals.get(decision.command);
+          if (refusal === undefined) continue;
+          decision.disposition = 'denied';
+          decision.reason = refusal;
+          this.logger.warn(
+            `[${path}][${correlationId}] Action ${decision.command.module}.${decision.command.action} refused for this member: ${refusal}`,
+          );
+        }
+
+        executable = approvedCommands.filter((cmd) => !refusals.has(cmd));
         decisions = evaluated;
         this.logger.log(
-          `[${path}][${correlationId}] Autonomy check: ${approvedCommands.length}/${commands.length} commands approved`,
+          `[${path}][${correlationId}] Autonomy check: ${executable.length}/${commands.length} commands approved`,
         );
       } catch (err: unknown) {
         // The batch is atomic: commands approved before the failure are not
@@ -1810,6 +1853,240 @@ export class KeyCortexQueryPipelineService {
     }
 
     return { executable, decisions, results, error };
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE (review SEC-W9MRK-3; owner ruling D-57): why each of `commands` may not
+   * run for the member the chat runs for, by the rule POST cortex/execute holds a direct command to
+   * (cortexCommandRefusal: the action's own module write scope, the crm owner-only rule, a money
+   * report's revenue:read, and deny by default for a module or an action the KEY capability registry
+   * does not map or list). A parsed chat command, and a stream's detected action, run through the
+   * same executor as a direct command (executeBatch); they ran after the autonomy authority alone, so
+   * a member with revenue 'none' had finance.generate_pnl run and its P&L returned, and any member's
+   * command ran whatever their module scopes.
+   *
+   * The member is read as CortexMemberAuthorityGuard reads it for that route (memberAuthority).
+   * A requester with no membership in the business, who is no platform SUPER_ADMIN, has every
+   * command refused (the guard refuses such a request: D-104, membership is the single rule). A read
+   * that fails throws, so the caller fails the batch closed. No command, no read.
+   */
+  private async memberCommandRefusals<C extends { module: string; action: string }>(
+    commands: C[],
+    query: CortexQuery,
+  ): Promise<Map<C, string>> {
+    const refusals = new Map<C, string>();
+    if (commands.length === 0) return refusals;
+    // Loaded on use: the controller module imports this service's own consumers (the
+    // reasoning service), so a top-level import would be a cycle.
+    const { cortexCommandRefusal } = await import('./key-cortex.controller');
+    const authority = await this.memberAuthority(query.businessId, query.userId);
+    for (const command of commands) {
+      const refusal = authority
+        ? cortexCommandRefusal(authority, command.module, command.action)
+        : `Not a member of this business: "${command.module}.${command.action}" runs only for a member of the business (D-104)`;
+      if (refusal) refusals.set(command, refusal);
+    }
+    return refusals;
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (owner rulings D-71, D-57, D-73, D-104): the tool loop of
+   * a chat turn (processQuery and its stream path), run on the model's tool calls the member may run.
+   * KeyCortexToolLoopService runs each call through the registry (registry.execute), which reads no
+   * membership, and a bridged flow tool dispatches with no principal (CORTEX_BRIDGE), so a STAFF member
+   * with revenue 'none' had finance_profit_and_loss answer the P&L (D-57) and crm_list_contacts read the
+   * whole contact book, both of which a plan refuses that member. Each call is now held to the rule the
+   * plan queue holds a plan's member to before it dispatches a tool (memberToolCallRefusals).
+   *
+   * A refused call reaches neither the tool loop nor the model's follow-up; it is reported 'blocked'
+   * with its refusal, and the refusal is said in the answer. The calls the member may run go through
+   * the tool loop as before. No tool call, or none refused: the tool loop gets the turn's completion
+   * unchanged.
+   */
+  private async memberToolLoop<T extends { toolCalls?: unknown }>(
+    completion: T,
+    query: CortexQuery,
+    path: 'processQuery' | 'streamQuery',
+    correlationId: string,
+    runToolLoop: (completion: T) => Promise<{ content: string; actions: CortexActionResult[] } | undefined>,
+  ): Promise<{ content: string; actions: CortexActionResult[] } | undefined> {
+    const calls: unknown[] = Array.isArray(completion?.toolCalls) ? completion.toolCalls : [];
+    if (calls.length === 0) return runToolLoop(completion);
+    const refusals = await this.memberToolCallRefusals(calls.map(toolCallName), query);
+    if (refusals.size === 0) return runToolLoop(completion);
+
+    const allowed = calls.filter((call) => !refusals.has(toolCallName(call)));
+    const refused = calls.filter((call) => refusals.has(toolCallName(call)));
+    const blocked: CortexActionResult[] = refused.map((call) => {
+      const name = toolCallName(call);
+      const refusal = refusals.get(name) as string;
+      this.logger.warn(`[${path}][${correlationId}] Tool call ${name || '(no tool)'} refused for this member: ${refusal}`);
+      return {
+        actionType: (name ? name.toUpperCase().replace(/\./g, '_') : 'EXECUTE_TOOL') as CortexActionType,
+        status: 'blocked',
+        description: `Not run: ${refusal}`,
+        error: refusal,
+        requiresApproval: false,
+      };
+    });
+    await this.logEvent(correlationId, path === 'processQuery' ? 'STEP_7B_TOOL_CALLS_REFUSED' : 'STREAM_TOOL_CALLS_REFUSED', {
+      totalToolCalls: calls.length,
+      refusedToolCalls: refused.map((call) => ({ tool: toolCallName(call), refusal: refusals.get(toolCallName(call)) })),
+    });
+
+    const note = refused.map((call) => `I did not run ${toolCallName(call) || 'a tool call'}: ${refusals.get(toolCallName(call))}`).join('\n');
+    const ran = allowed.length > 0 ? await runToolLoop({ ...completion, toolCalls: allowed }) : undefined;
+    if (!ran) return { content: note, actions: blocked };
+    return { content: ran.content ? `${ran.content}\n\n${note}` : note, actions: [...ran.actions, ...blocked] };
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (D-71, D-57, D-73, D-104): why the member the chat runs for
+   * may not run each of the tools `names` (keyed by tool name), by memberToolRunAuthority with no
+   * principal, the rule the plan queue applies to a plan's member (and the Pro Auto monitor to the
+   * owner): every module scope of the tool (D-71; a money report's revenue:read, D-57), the OWNER for an
+   * owner-only tool and for a contact read no visibility clause bounds (a bridged flow tool runs with no
+   * principal), the CRM sub-permission, D-46 for a platform SUPER_ADMIN who is no member, and deny by
+   * default for a tool the authority map does not map (a dotted organ or legacy cortex tool, such as
+   * cortex.execute_tool, which runs any tool by name): only the business owner runs one. The owner by
+   * Business.ownerId runs every tool but those refused to everyone. A call that names no tool, and every
+   * call of a requester with no user, is refused (D-104: membership is the single rule; a user with no
+   * membership is refused by the rule itself). A read that fails refuses every call (fail closed).
+   */
+  private async memberToolCallRefusals(names: string[], query: CortexQuery): Promise<Map<string, string>> {
+    const refusals = new Map<string, string>();
+    const named = [...new Set(names)];
+    if (named.includes('')) refusals.set('', 'A tool call that names no tool is not run');
+    const tools = named.filter((name) => name !== '');
+    if (tools.length === 0) return refusals;
+    if (!query.userId) {
+      for (const name of tools) refusals.set(name, `Not a member of this business: "${name}" runs only for a member of the business (D-104)`);
+      return refusals;
+    }
+    try {
+      // Loaded on use, as the plan queue's other callers load it: plan-step-authority imports
+      // graph-actions.controller, which imports the flow orchestrator.
+      const { memberToolRunAuthority } = await import('../ai/plan-step-authority');
+      for (const name of tools) {
+        const { refusal } = await memberToolRunAuthority(this.prisma, query.businessId, query.userId, name);
+        if (refusal) refusals.set(name, refusal);
+      }
+    } catch (err: unknown) {
+      const reason = `The member's authority could not be read, so the tool call is not run (failed closed): ${err instanceof Error ? err.message : String(err)}`;
+      for (const name of tools) refusals.set(name, reason);
+    }
+    return refusals;
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE: the member a chat turn acts for, as CortexMemberAuthorityGuard loads it
+   * for POST cortex/execute: a platform SUPER_ADMIN (its User role) keeps the bypass, a member only
+   * of the businesses it holds a membership in (D-46); anyone else is its membership's role and
+   * scopes, the explicit scope map or else the role's defaults (as ModuleScopeGuard computes them),
+   * or null when it holds no membership. The chat routes run no such guard, so it is read here.
+   */
+  private async memberAuthority(businessId: string, userId: string | undefined): Promise<CortexMemberAuthority | null> {
+    if (!userId) return null;
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    ]);
+    if (user?.role === 'SUPER_ADMIN') {
+      return { userId, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {}, member: !!membership };
+    }
+    if (!membership) return null;
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return { userId, businessId, role: membership.role, superAdmin: false, scopes, member: true };
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE (W9-KEY-CORTEX-AUDIT residual; review SEC-W9KCA-2, CR-W9KCA-4): the memory
+   * fragments a chat turn renders into its system prompt (processQuery and its stream path), read by
+   * the rule KeyCortexPromptContextService.buildMemoryContext applies to the same prompt. The episodic
+   * stores (AiExecutionLog and CortexActionLog: what someone asked KEY to do, tool answers included)
+   * are the requesting member's own (MemoryRetrievalOptions.userId); a requester who is no member of
+   * the business reads none (fail closed); and no KEY tool call's record is taken from the
+   * business-wide stores (isToolCallRecord: another member's tool answer and typed input). The
+   * business-wide stores are otherwise not narrowed. Both calls read every member's episodes before.
+   *
+   * Review SEC-W10CCS-R2: cognition memory (CognitionMemory) is a per-member store, read business-wide
+   * by the retrieval service: processQuery writes one row on every turn (recordObservation: what the
+   * member typed, verbatim, and KEY's whole answer to them, which can carry P&L figures another member
+   * may not see under D-57). A cognition fragment is kept only when its row is the reader's own
+   * (readersCognitionMemory); a requester who is no member reads none.
+   *
+   * Review CR-W10CCS-1: by buildMemoryContext's whole rule, its headroom included: it asks for
+   * CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM and keeps the first CHAT_MEMORY_FRAGMENTS of what it may
+   * render, so an active business's recent tool-call records no longer leave the prompt with no memory.
+   */
+  private async chatMemoryFragments(query: CortexQuery): Promise<MemoryFragment[]> {
+    if (!this.memoryRetrieval) return [];
+    const reader = await this.episodicMemoryReader(query.businessId, query.userId);
+    const fragments = (
+      await this.memoryRetrieval.retrieveContext(query.businessId, {
+        query: query.text,
+        limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
+        ...(reader ? { userId: reader } : { includeEpisodic: false }),
+      })
+    ).filter((fragment) => !isToolCallRecord(fragment));
+    const own = await this.readersCognitionMemory(query.businessId, reader, fragments);
+    return fragments
+      .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
+      .slice(0, CHAT_MEMORY_FRAGMENTS);
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R2: which of the cognition-memory fragments among
+   * `fragments` are the reader's own rows (CognitionMemory.userId, in this business). A fragment does not
+   * carry its row's member, so the rows are read by id. No reader, or no cognition fragment: none, and
+   * nothing is read. A row with no member (KEY's own tool-outcome and action-outcome learning rows, a
+   * record of someone's tool call) is nobody's own. A read that fails: none (fail closed).
+   */
+  private async readersCognitionMemory(
+    businessId: string,
+    reader: string | null,
+    fragments: MemoryFragment[],
+  ): Promise<Set<string>> {
+    const ids = fragments.filter((fragment) => fragment.sourceType === 'cognition_memory').map((fragment) => fragment.id);
+    if (!reader || ids.length === 0) return new Set();
+    try {
+      const rows = await this.prisma.client.cognitionMemory.findMany({
+        where: { id: { in: ids }, businessId, userId: reader },
+        select: { id: true },
+      });
+      return new Set(rows.map((row) => row.id));
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[chatMemory][${businessId}] cognition memory owner check failed, none of it read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return new Set();
+    }
+  }
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE: the member whose episodic memory a chat prompt may read, by
+   * buildMemoryContext's own predicate (BusinessGuard's userCanAccessBusiness): the requester when
+   * they own the business or hold a membership in it, else nobody. No requester, a requester who is
+   * no member (a platform SUPER_ADMIN passes BusinessGuard without one), or a check that cannot be
+   * made: nobody, so no episodic memory is read.
+   */
+  private async episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {
+    if (!userId) return null;
+    try {
+      return (await userCanAccessBusiness(this.prisma, userId, businessId)) ? userId : null;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[chatMemory][${businessId}] membership check failed, no episodic memory read: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   /**

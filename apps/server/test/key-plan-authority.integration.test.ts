@@ -767,8 +767,8 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
   // W9-DISPATCH-CIRCUIT review SEC-W9DC-2 / CR-W9DC-1 (SEC-W8CTNM-1, owner ruling D-73): the per-business
   // circuit, end to end, as production reaches it. The queue's dispatcher calls the REAL
   // FlowOrchestratorService.executeToolDirectly here (its real executeTool, which catches what the tool
-  // throws and rethrows it as a plain Error, the form production delivers a failure and, today, a
-  // refusal in: SEC-W9DC-1, QW-07b), on a worker of the case's own (its own ActionDispatcherService, so
+  // throws and rethrows a failure as a plain Error, the form production delivers it in; a refusal, since
+  // W10-DISPATCH-STATUS, as the tool's HttpException: SEC-W9DC-1, QW-07b), on a worker of the case's own (its own ActionDispatcherService, so
   // no circuit leaks into other cases), with the job's retryCount 2 as PlanExecutorService enqueues it.
   // biz's circuit is opened by genuine failures (call_create_task erroring, its store not answering), which
   // stay failures whatever becomes of SEC-W9DC-1, so the bizB check below is never vacuous. With the circuit
@@ -868,21 +868,126 @@ describe('the ai plan queue runs each step as the plan\'s member, checked at run
     }
   });
 
-  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73), left open: through the real
-  // FlowOrchestratorService.executeToolDirectly the refusal does not reach the dispatcher as the
-  // HttpException CallLogService throws. executeTool catches it and answers { success: false, error }
-  // with the message alone, and executeToolDirectly rethrows a plain Error(result.error), so the
-  // dispatcher sees no status and still retries and counts a member's 404/403 toward the circuit of
-  // that business and tool. QW-07 holds there (the circuit is the business's own), but five refusals
-  // stop call_create_task in biz itself for CIRCUIT_TIMEOUT_MS. executeToolDirectly must carry the
-  // refusal's status (rethrow an HttpException of it), which is FlowOrchestratorService, outside
-  // W9-DISPATCH-CIRCUIT's write set (ActionDispatcherService only).
-  // Review SEC-W9DC-1 (confirmed by running, repair round 1): over the real executeToolDirectly and
-  // executeTool, five 404 'Contact not found' refusals in biz made 15 tool calls (each retried twice)
+  // W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73), left open there and closed by W10-DISPATCH-STATUS (D-73):
+  // through the real FlowOrchestratorService.executeToolDirectly the refusal did not reach the dispatcher
+  // as the HttpException CallLogService throws. executeTool caught it and answered { success: false, error }
+  // with the message alone, and executeToolDirectly rethrew a plain Error(result.error), so the dispatcher
+  // saw no status and still retried and counted a member's 404/403 toward the circuit of that business
+  // and tool. Review SEC-W9DC-1 (confirmed by running, W9 repair round 1): over the real executeToolDirectly
+  // and executeTool, five 404 'Contact not found' refusals in biz made 15 tool calls (each retried twice)
   // and opened biz's circuit ({open: true, failures: 5}); biz's OWNER was then answered 'Circuit breaker
-  // open for tool "call_create_task"', while bizB ran (QW-07c pins that half). Needs a follow-up packet
-  // with FlowOrchestratorService in its write set.
-  it.todo('QW-07b W9-DISPATCH-CIRCUIT (SEC-W8CTNM-1, D-73): through the real FlowOrchestratorService.executeToolDirectly, a member\'s call_create_task refused inside dispatch (404, 403) is answered once and counts toward no circuit in its own business either: five such refusals in biz leave call_create_task running for biz\'s OWNER (executeToolDirectly rethrows a plain Error, so the dispatcher cannot see the status; FlowOrchestratorService, outside this packet\'s write set)');
+  // open for tool "call_create_task"', while bizB ran (QW-07c pins that half).
+  // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): executeToolDirectly rethrows the tool's HttpException, its
+  // status and message, so W9's non-retryable-4xx rule (isToolRefusal) runs in production; the envelope
+  // executeTool answers its other callers keeps its shape. Review CR-W10DS-1 (D-73): a 400 or 409 stays the
+  // plain Error it was (a provider outage reported as 400, a conflict that asks to try again; retried and
+  // counted), pinned in src/modules/ai/flow-orchestrator-dispatch-status.spec.ts. Here the queue's dispatcher calls the REAL
+  // executeToolDirectly and executeTool over the harness's orchestrator (call_create_task its own case,
+  // over the real CallLogService), on a worker of the case's own (its own ActionDispatcherService, so no
+  // circuit leaks into other cases), with the job's retryCount 2 as PlanExecutorService enqueues it.
+  it('QW-07b W9-DISPATCH-CIRCUIT review SEC-W9DC-1 (SEC-W8CTNM-1, D-73): through the real FlowOrchestratorService.executeToolDirectly, a member\'s call_create_task refused inside dispatch (404, 403) reaches the dispatcher as an HttpException of the refusal\'s status, is answered once and counts toward no circuit in its own business either: five such refusals in biz leave call_create_task running for biz\'s OWNER, and the envelope executeTool answers keeps its shape (W10-DISPATCH-STATUS, D-73, was it.todo)', async () => {
+    const { ActionDispatcherService } = await import('../src/modules/ai/action-dispatcher.service');
+    const { QueueService } = await import('../src/modules/ai/queue.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+    const superAdmin = `${P}qw07b_sa`; // a SUPER_ADMIN who is no member of biz (D-46)
+    const ownerOnly = `${P}qw07b_owner_only`; // bizC's owner by Business.ownerId alone, no membership (CR-W4PP-2, D-104)
+    const bizC = `${P}qw07b_bizc`;
+    const cC = `${P}qw07b_c_bizc`;
+    await db.user.create({ data: { id: superAdmin, email: `${P}qw07b_sa@test.local`, role: 'SUPER_ADMIN' } });
+    await db.user.create({ data: { id: ownerOnly, email: `${P}qw07b_owner_only@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: bizC, name: 'V87B Biz C (QW-07b)', ownerId: ownerOnly } });
+    await db.contact.create({ data: { id: cC, businessId: bizC, firstName: 'V87B C', visibility: 'TEAM', ownerId: ownerOnly } });
+    const callLogs = (businessId: string) => db.callLog.findMany({ where: { businessId, notes: { startsWith: 'v87b qw07b' } }, select: { contactId: true, callerId: true, notes: true } });
+
+    // What reached the dispatcher from the real executeToolDirectly on each failed attempt.
+    const delivered: Array<{ planStepId?: string; error: unknown }> = [];
+    const realExecuteToolDirectly = FlowOrchestratorService.prototype.executeToolDirectly;
+    const flowAsProduction = {
+      executeToolDirectly: async (businessId: string, toolName: string, args: Record<string, unknown>, planContext?: { planId: string; planStepId: string }, action?: any) => {
+        dispatched.push({ toolName, planStepId: planContext?.planStepId, principal: action?.principalUserId, surface: action?.surface });
+        try {
+          return await realExecuteToolDirectly.call(flow, businessId, toolName, args, planContext, action);
+        } catch (e) {
+          delivered.push({ planStepId: planContext?.planStepId, error: e });
+          throw e;
+        }
+      },
+    };
+    const ALLOW = { allowed: true, tier: 1, reason: 'v87b: allowed', requiresFormalApproval: false, requiresAdminApproval: false, requiresQuickConfirm: false };
+    const governance = { evaluate: async () => ({ ...ALLOW }), evaluateAutoApproval: async () => ({ ...ALLOW, autoApproved: true }), getToolTier: () => 1 };
+    const events = { emit: () => true };
+    const executionLog = new AiExecutionLogService(prisma);
+    const dispatcher = new ActionDispatcherService(prisma, events as any, executionLog, governance as any, flowAsProduction as any, { registerAction: async () => undefined } as any);
+    // Production's retry delays are 1 s and 3 s; the attempts are production's, only their spacing is not.
+    (dispatcher as unknown as { RETRY_DELAYS: number[] }).RETRY_DELAYS = [0, 0];
+    const worker = Object.create(QueueService.prototype);
+    Object.assign(worker, {
+      prisma, events, governance, executionLog, actionDispatcher: dispatcher, flowOrchestrator: flowAsProduction,
+      stateMachine: { transition: async () => undefined },
+      logger: new Logger('v87b-qw07b-queue'),
+    });
+    const CLOSED = { open: false, failures: 0, lastFailure: null };
+
+    try {
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual(CLOSED);
+      const refusals: Array<{ planId: string; userId: string; businessId: string; contactId: string; status: number; error: RegExp }> = [];
+      for (let i = 1; i <= 5; i++) {
+        refusals.push({ planId: `${P}qw07b_crmw_${i}`, userId: ID.staffCrmW, businessId: ID.biz, contactId: ID.cPriv, status: 404, error: /^Contact not found$/ });
+      }
+      refusals.push({ planId: `${P}qw07b_sa`, userId: superAdmin, businessId: ID.biz, contactId: ID.cTeam, status: 403, error: /Only a member of this business/ });
+      refusals.push({ planId: `${P}qw07b_owner_only`, userId: ownerOnly, businessId: bizC, contactId: cC, status: 403, error: /Only a member of this business/ });
+      for (const r of refusals) {
+        // callerId is the tool contract's (validateToolInput requires it); the dispatcher ignores it (D-88).
+        const args = { contactId: r.contactId, callerId: ID.owner, notes: `v87b qw07b ${r.planId}` };
+        const stepId = await seedQueuePlan(r.planId, r.userId, 'call_create_task', args, r.businessId);
+        // It passes the gate before dispatch (the refusal is the tool's, inside dispatch).
+        expect(await planStepRunRefusal(prisma, r.businessId, r.planId, 'call_create_task'), r.planId).toBeNull();
+        const result = await runQueueStep(r.planId, 'call_create_task', args, r.businessId, { retryCount: 2, worker });
+        expect(result.ok, r.planId).toBe(false);
+        // Answered once: a refusal is not retried.
+        expect(dispatchedFor(stepId), r.planId).toHaveLength(1);
+        // It reached the dispatcher as an HttpException of the refusal's status, with the tool's message.
+        const reached = delivered.filter((d) => d.planStepId === stepId).map((d) => d.error);
+        expect(reached, r.planId).toHaveLength(1);
+        expect(reached[0], r.planId).toBeInstanceOf(HttpException);
+        expect((reached[0] as HttpException).getStatus(), r.planId).toBe(r.status);
+        expect((reached[0] as Error).message, r.planId).toMatch(r.error);
+        const row = await planRow(r.planId);
+        expect(row.steps[0].status, r.planId).toBe('failed');
+        expect(String(row.steps[0].errorMessage), r.planId).toMatch(r.error);
+      }
+      expect(await callLogs(ID.biz)).toEqual([]);
+      expect(await callLogs(bizC)).toEqual([]);
+      // No refusal counted, in biz's own circuit either.
+      expect(dispatcher.getCircuitStatus('call_create_task', ID.biz)).toEqual(CLOSED);
+      expect(dispatcher.getCircuitStatus('call_create_task', bizC)).toEqual(CLOSED);
+      expect(dispatcher.getCircuitStatus('call_create_task')).toEqual(CLOSED);
+
+      // biz's OWNER still runs call_create_task in biz: dispatched once, completed, the call log recorded.
+      const planA = `${P}qw07b_owner`;
+      const argsA = { contactId: ID.cTeam, callerId: ID.staff, notes: 'v87b qw07b biz owner' };
+      const stepA = await seedQueuePlan(planA, ID.owner, 'call_create_task', argsA);
+      const ranA = await runQueueStep(planA, 'call_create_task', argsA, ID.biz, { retryCount: 2, worker });
+      expect(ranA, JSON.stringify(ranA)).toMatchObject({ ok: true });
+      expect(dispatchedFor(stepA)).toHaveLength(1);
+      expect((await planRow(planA)).steps[0].status).toBe('completed');
+      expect(await callLogs(ID.biz)).toEqual([{ contactId: ID.cTeam, callerId: ID.owner, notes: 'v87b qw07b biz owner' }]);
+      expect(dispatcher.getCircuitStatus('call_create_task', ID.biz)).toEqual(CLOSED);
+
+      // The envelope executeTool answers its other callers (executeToolDirect here, as the plan run over
+      // HTTP and the chat read it) keeps its shape: the same keys, the tool's message as the error.
+      const planE = `${P}qw07b_envelope`;
+      const argsE = { contactId: ID.cPriv, callerId: ID.owner, notes: 'v87b qw07b envelope' };
+      const stepE = await seedQueuePlan(planE, ID.staffCrmW, 'call_create_task', argsE);
+      const envelope = await flow.executeToolDirect(ID.biz, 'call_create_task', argsE, planE, stepE, { surface: 'PLAN_QUEUE', planId: planE, planStepId: stepE });
+      expect(Object.keys(envelope).sort()).toEqual(['changedEntities', 'error', 'family', 'followOnSuggestions', 'name', 'result', 'riskTier', 'success', 'toolCallId']);
+      expect(envelope).toMatchObject({ success: false, result: null, error: 'Contact not found', name: 'call_create_task' });
+      expect(await callLogs(ID.biz)).toHaveLength(1);
+    } finally {
+      dispatcher.resetCircuit('call_create_task');
+    }
+  });
 });
 
 /** NOPRINCIPAL-SURFACES: PRO_AUTO_MONITOR runs tools with no member at all. */
@@ -1182,5 +1287,199 @@ describe('review repairs: briefing execute-all takes only the daily briefing, an
     expect((await planRow(planId)).userId).toBe(ID.owner);
     await runQueueStep(planId, 'bookings_create', { serviceId: `${P}svc` });
     expect(dispatchedFor(stepId)).toHaveLength(1);
+  });
+});
+
+/**
+ * W10-KEY-PLAN-SCOPE (owner ruling D-114, amending D-71 for an explicit revenue 'none' only; D-57;
+ * W9-MONEY-REPORTS-KEY review SEC-W9MRK-1 and SEC-W9MRK-2). assertMemberSteps skipped every step check
+ * for an ADMIN (D-71: an ADMIN keeps every module), and memberPlanStepScopeRefusal held a money report
+ * step (finance.generate_pnl, analytics.create_report, analytics.export_report) to its module's scope
+ * alone, while POST cortex/execute also asks revenue:read for it (cortexCommandRefusal, D-57). D-114: an
+ * ADMIN whose explicit scope map sets revenue to none is refused money steps (the money reports and the
+ * invoice actions); an ADMIN with role-default scopes is unaffected, and keeps every other module. The
+ * plan read rule withholds such a step's stored output from a viewer without revenue read (SEC-W9MRK-2).
+ * The members below are added for this block only (the fixture sanity case above counts the others).
+ */
+describe('W10-KEY-PLAN-SCOPE (D-114, D-57): an explicit revenue none binds an ADMIN\'s money steps, a money report step needs revenue read, and its stored output follows the plan read rule', () => {
+  const KP = {
+    adminNoRev: `${P}admin_norev`, // ADMIN, explicit scope map: role defaults with revenue and bookings 'none'
+    adminDef: `${P}admin_def`, // ADMIN, no scope map (role defaults: revenue admin)
+    staffFinNoRev: `${P}staff_fin_norev`, // STAFF, role defaults + expenses and analytics write, revenue 'none'
+    staffFinRev: `${P}staff_fin_rev`, // STAFF, role defaults + expenses and analytics write (revenue read)
+  };
+  const MONEY_REPORT_STEPS = [
+    { module: 'finance', action: 'generate_pnl' },
+    { module: 'analytics', action: 'create_report' },
+    { module: 'analytics', action: 'export_report' },
+  ];
+  let visiblePlanSteps: (steps: any[], scope: any) => Promise<any[]>;
+  let aiController: any;
+
+  beforeAll(async () => {
+    ({ visiblePlanSteps } = await import('../src/modules/ai/graph-actions.controller') as any);
+    const { AiController } = await import('../src/modules/ai/ai.controller');
+    const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+    aiController = Object.create(AiController.prototype);
+    Object.assign(aiController, { prisma, executionLog: new AiExecutionLogService(prisma) });
+    const adminDefaults = defaultScopesForRole('ADMIN');
+    const staffDefaults = defaultScopesForRole('STAFF');
+    for (const id of Object.values(KP)) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    }
+    const member = (userId: string, role: string, permissionScopes?: Record<string, string>) =>
+      db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_biz`, userId, businessId: ID.biz, role, ...(permissionScopes ? { permissionScopes } : {}) } });
+    await member(KP.adminNoRev, 'ADMIN', { ...adminDefaults, revenue: 'none', bookings: 'none' });
+    await member(KP.adminDef, 'ADMIN');
+    await member(KP.staffFinNoRev, 'STAFF', { ...staffDefaults, expenses: 'write', analytics: 'write', revenue: 'none' });
+    await member(KP.staffFinRev, 'STAFF', { ...staffDefaults, expenses: 'write', analytics: 'write' });
+  });
+
+  it('PM-07 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-114; SEC-W9MRK-1): an ADMIN whose explicit scope map sets revenue to none is refused its own plan with a money step (finance.generate_pnl, analytics.create_report, analytics.export_report; commerce.create_invoice already was), executed by that ADMIN or run with no member: 403 before the claim, nothing routed, the plan still pending', async () => {
+    for (const step of [...MONEY_REPORT_STEPS, { module: 'commerce', action: 'create_invoice' }]) {
+      const label = `${step.module}.${step.action}`;
+      for (const path of ['member', 'creator'] as const) {
+        const planId = `${P}pm07_${step.action}_${path}`;
+        await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }, step], KP.adminNoRev);
+        const from = routed.length;
+        const run = path === 'member' ? planner.executePlan(planId, {}, asMember(KP.adminNoRev)) : planner.executePlan(planId, { traceId: planId });
+        const err = await run.catch((e: unknown) => e);
+        expect(err, `${label} ${path} ${String(err)}`).toBeInstanceOf(ForbiddenException);
+        expect(String((err as Error).message), `${label} ${path}`).toMatch(
+          step.module === 'commerce' ? /revenue requires write access \(you have none\)/ : /revenue requires read access \(you have none\).*D-114/,
+        );
+        expect(routedFor(planId, from), `${label} ${path}`).toEqual([]);
+        expect(await planRow(planId), `${label} ${path}`).toMatchObject({ status: 'pending', startedAt: null });
+      }
+    }
+  });
+
+  it('PM-08 regression control (W10-KEY-PLAN-SCOPE, D-114, D-71): an ADMIN with role-default scopes runs the same money steps; the ADMIN whose explicit map holds revenue runs a money report; the ADMIN whose map sets revenue to none still runs a step of a module its map denies (bookings) and a finance step that reads no money report; each step once, as that member', async () => {
+    for (const [planId, creator, steps] of [
+      [`${P}pm08_admindef`, KP.adminDef, [...MONEY_REPORT_STEPS, { module: 'commerce', action: 'create_invoice', params: INVOICE_ARGS }]],
+      [`${P}pm08_adminrev`, ID.admin, [{ module: 'finance', action: 'generate_pnl' }]],
+      [`${P}pm08_adminnorev`, KP.adminNoRev, [{ module: 'bookings', action: 'create_booking' }, { module: 'finance', action: 'record_expense' }]],
+    ] as const) {
+      await seedCortexPlan(planId, steps as any, creator);
+      const from = routed.length;
+      expect(await planner.executePlan(planId, {}, asMember(creator)), planId).toMatchObject({ planId, status: 'completed', executed: steps.length });
+      expect(routedFor(planId, from).map((r) => r.userId), planId).toEqual(steps.map(() => creator));
+    }
+  });
+
+  it('PM-09 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-57; SEC-W9MRK-1): a STAFF member holding the module\'s write scope but revenue none is refused a money report step, executed by that member or run with no member (nothing routed); the same plan runs for a STAFF member who also holds revenue read', async () => {
+    for (const step of MONEY_REPORT_STEPS) {
+      const label = `${step.module}.${step.action}`;
+      for (const path of ['member', 'creator'] as const) {
+        const planId = `${P}pm09_${step.action}_${path}`;
+        await seedCortexPlan(planId, [step], KP.staffFinNoRev);
+        const from = routed.length;
+        const run = path === 'member' ? planner.executePlan(planId, {}, asMember(KP.staffFinNoRev)) : planner.executePlan(planId, { traceId: planId });
+        const err = await run.catch((e: unknown) => e);
+        expect(err, `${label} ${path} ${String(err)}`).toBeInstanceOf(ForbiddenException);
+        expect(String((err as Error).message), `${label} ${path}`).toMatch(/revenue requires read access \(you have none\).*D-57/);
+        expect(routedFor(planId, from), `${label} ${path}`).toEqual([]);
+        expect(await planRow(planId), `${label} ${path}`).toMatchObject({ status: 'pending', startedAt: null });
+      }
+    }
+    const planId = `${P}pm09_rev`;
+    await seedCortexPlan(planId, MONEY_REPORT_STEPS, KP.staffFinRev);
+    const from = routed.length;
+    expect(await planner.executePlan(planId, {}, asMember(KP.staffFinRev))).toMatchObject({ planId, status: 'completed', executed: MONEY_REPORT_STEPS.length });
+    expect(routedFor(planId, from).map((r) => r.userId)).toEqual(MONEY_REPORT_STEPS.map(() => KP.staffFinRev));
+  });
+
+  it('PM-10 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-114, D-57, D-74; SEC-W9MRK-2): the stored output of the money report steps an ADMIN with role-default scopes ran (stored as KeyCortexPlannerService steps, module.action with no tool) is withheld from the ADMIN whose explicit map sets revenue to none, on the plan read (visiblePlanSteps) and on GET ai/execution-logs (the KEY executor\'s rows), the steps still shown; the expense step keeps its output; the ADMIN with role-default scopes and the OWNER read every output', async () => {
+    const planId = `${P}pm10`;
+    const steps = [...MONEY_REPORT_STEPS, { module: 'finance', action: 'record_expense' }];
+    await db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId: KP.adminDef, objective: `v87b ${planId}`, status: 'pending',
+        steps: { create: steps.map((s, i) => ({ id: `${planId}_s${i + 1}`, order: i + 1, module: s.module, action: s.action, toolName: null, inputPayload: { marker: `${planId}_s${i + 1}` } })) },
+      },
+    });
+    expect(await planner.executePlan(planId, {}, asMember(KP.adminDef))).toMatchObject({ planId, status: 'completed', executed: steps.length });
+    const stored = (await db.aiPlan.findUnique({ where: { id: planId }, include: { steps: { orderBy: { order: 'asc' } } } })).steps;
+    expect(stored.map((s: any) => s.outputResult)).toEqual(steps.map((_s, i) => expect.objectContaining({ done: `${planId}_s${i + 1}` })));
+
+    const read = async (viewer: string) => {
+      const scope = await graphPlanReadScope(prisma, ID.biz, { id: viewer, role: 'USER' });
+      const planSteps = await visiblePlanSteps(stored, scope);
+      const page = await aiController.getExecutionLogs(ID.biz, { user: { id: viewer, role: 'USER' } }, undefined, undefined, '1000');
+      const rows = (page.logs as any[]).filter((l) => typeof l.inputSummary?.parameters?.marker === 'string' && l.inputSummary.parameters.marker.startsWith(`${planId}_s`));
+      rows.sort((a, b) => String(a.inputSummary.parameters.marker).localeCompare(String(b.inputSummary.parameters.marker)));
+      return { planSteps, rows };
+    };
+    const markers = steps.map((_s, i) => `${planId}_s${i + 1}`);
+
+    const denied = await read(KP.adminNoRev);
+    expect(denied.planSteps.map((s: any) => `${s.module}.${s.action}`)).toEqual(steps.map((s) => `${s.module}.${s.action}`));
+    expect(denied.planSteps.map((s: any) => s.outputResult)).toEqual([null, null, null, expect.objectContaining({ done: markers[3] })]);
+    expect(denied.rows.map((r) => r.inputSummary.parameters.marker)).toEqual(markers);
+    expect(denied.rows.map((r) => r.outputSummary)).toEqual([null, null, null, expect.objectContaining({ data: { done: markers[3] } })]);
+
+    for (const viewer of [KP.adminDef, ID.owner]) {
+      const served = await read(viewer);
+      expect(served.planSteps.map((s: any) => s.outputResult), viewer).toEqual(markers.map((m) => expect.objectContaining({ done: m })));
+      expect(served.rows.map((r) => r.outputSummary), viewer).toEqual(markers.map((m) => expect.objectContaining({ data: { done: m } })));
+    }
+  });
+
+  it('SEC-W10KPS-1 RED-BEFORE (W10-KEY-PLAN-SCOPE review, D-114, D-57, D-74): a stored step naming a non-money tool (projects_list, fetch_project_status, create_task) with module finance, analytics or commerce runs as module.action (the P&L, a report, the invoices); GET cortex/plans/:planId judges it by its module too: the money report output is withheld from the ADMIN whose explicit map sets revenue to none and from a STAFF proposer without revenue read, the commerce step is not shown to them, a projects step keeps its output; the ADMIN with role-default scopes and the OWNER read every output; GET ai/execution-logs agrees', async () => {
+    const toolSteps = [
+      { toolName: 'projects_list', module: 'finance', action: 'generate_pnl' },
+      { toolName: 'fetch_project_status', module: 'analytics', action: 'create_report' },
+      { toolName: 'create_task', module: 'commerce', action: 'list_invoices' },
+      { toolName: 'projects_list', module: 'projects', action: 'list_projects' },
+    ];
+    const labels = toolSteps.map((s) => `${s.module}.${s.action}`);
+    const seed = (planId: string, userId: string) => db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId, objective: `v87b ${planId}`, status: 'pending',
+        steps: { create: toolSteps.map((s, i) => ({ id: `${planId}_s${i + 1}`, order: i + 1, toolName: s.toolName, module: s.module, action: s.action, inputPayload: { marker: `${planId}_s${i + 1}` } })) },
+      },
+    });
+    // a plan of the ADMIN with role-default scopes, run by that ADMIN; a plan the STAFF member without
+    // revenue read proposed, run by the OWNER: each step runs as module.action, whatever its toolName
+    const adminPlan = `${P}kps1_admin`;
+    const staffPlan = `${P}kps1_staff`;
+    await seed(adminPlan, KP.adminDef);
+    await seed(staffPlan, KP.staffFinNoRev);
+    for (const [planId, runner] of [[adminPlan, KP.adminDef], [staffPlan, ID.owner]] as const) {
+      const from = routed.length;
+      expect(await planner.executePlan(planId, {}, asMember(runner)), planId).toMatchObject({ planId, status: 'completed', executed: toolSteps.length });
+      expect(routedFor(planId, from).map((r) => `${r.module}.${r.action}`), planId).toEqual(labels);
+    }
+
+    const read = async (planId: string, viewer: string) => {
+      const plan = await goalsController.getPlan(planId, ID.biz, { id: viewer, role: 'USER' });
+      const steps = [...(plan?.steps ?? [])].sort((a: any, b: any) => a.order - b.order);
+      return steps.map((s: any) => [`${s.module}.${s.action}`, s.outputResult]);
+    };
+    const outputOf = (planId: string, i: number) => expect.objectContaining({ done: `${planId}_s${i + 1}` });
+
+    for (const [planId, viewer] of [[adminPlan, KP.adminNoRev], [staffPlan, KP.adminNoRev], [staffPlan, KP.staffFinNoRev]] as const) {
+      expect(await read(planId, viewer), `${planId} ${viewer}`).toEqual([
+        ['finance.generate_pnl', null],
+        ['analytics.create_report', null],
+        ['projects.list_projects', outputOf(planId, 3)],
+      ]);
+    }
+    for (const viewer of [KP.adminDef, ID.owner]) {
+      for (const planId of [adminPlan, staffPlan]) {
+        expect(await read(planId, viewer), `${planId} ${viewer}`).toEqual(labels.map((l, i) => [l, outputOf(planId, i)]));
+      }
+    }
+
+    // GET ai/execution-logs (the KEY executor's rows, toolName module.action): the same answer for the ADMIN
+    const page = await aiController.getExecutionLogs(ID.biz, { user: { id: KP.adminNoRev, role: 'USER' } }, undefined, undefined, '1000');
+    const rows = (page.logs as any[])
+      .filter((l) => typeof l.inputSummary?.parameters?.marker === 'string' && l.inputSummary.parameters.marker.startsWith(`${adminPlan}_s`))
+      .sort((a, b) => String(a.inputSummary.parameters.marker).localeCompare(String(b.inputSummary.parameters.marker)));
+    expect(rows.map((r) => [r.toolName, r.outputSummary])).toEqual([
+      ['finance.generate_pnl', null],
+      ['analytics.create_report', null],
+      ['projects.list_projects', expect.objectContaining({ data: { done: `${adminPlan}_s4` } })],
+    ]);
   });
 });

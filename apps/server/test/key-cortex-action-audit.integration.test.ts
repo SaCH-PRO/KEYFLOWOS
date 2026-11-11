@@ -108,6 +108,29 @@
  *     principal (SEC-W9KCA-3, CR-W9KCA-2) is an it.todo (outside the write
  *     set: the registry and the efferent bridge).
  *
+ * W10-CORTEX-CHAT-SCOPE (FOLLOW11) turned two of the residual it.todo cases live:
+ *   - POST /cortex/chat reads episodic memory as the requesting member may outside buildMemoryContext
+ *     too: key-cortex-query-pipeline.service.ts processQuery and its stream path read the memory they
+ *     render into the system prompt by buildMemoryContext's rule (the member's own CortexActionLog and
+ *     AiExecutionLog rows, none for a requester who is no member, no tool-call record of the
+ *     business-wide stores; SEC-W9KCA-2, CR-W9KCA-4);
+ *   - a KEY-cortex turn's bridged organ call is on the turn's thread and names the turn's member on
+ *     its CortexActionLog row outside a request (SEC-W9KCA-3, CR-W9KCA-2, CR-W9KCA-3): the efferent
+ *     bridge carries the session and correlation on its dispatch, and the registry names, on the audit
+ *     row only, the actor of the registry call it runs inside (and that call's command id, on the same
+ *     correlation) or a caller's audit-only actor (KeyCortexToolContext.auditUserId). The organ handler
+ *     still gets no acting user and the ledger still records the AI (SEC-W9KCA-4).
+ *   The dispatcher surfaces with no principal that run outside any registry call (the plan queue, the Pro
+ *   Auto monitor, an approved proposal, a custom-logic call from the chat) stay an it.todo: naming their
+ *   member needs flow-orchestrator.service.ts executeBridgedCortexTool to pass the dispatch's
+ *   onBehalfOfUserId as the audit-only actor (and action-dispatcher.service.ts to name the plan's member),
+ *   outside the W10-CORTEX-CHAT-SCOPE write set.
+ *
+ * W10-CORTEX-CHAT-SCOPE review repairs: the chat's memory block keeps only the reader's own cognition
+ * memory (SEC-W10CCS-R2; buildMemoryContext's same gap stays an it.todo, outside the write set), and the
+ * model's tool calls on the chat are held to the plan queue's member rule before the registry runs them
+ * (SEC-W10CCS-R1: memberToolRunAuthority, D-71, D-57), in ID.toolBiz.
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -139,6 +162,11 @@ const ID = {
   outsider: `${P}outsider`,
   /** W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): a business whose AiExecutionLog rows one bridged flow call writes. */
   flowBiz: `${P}biz_flow`,
+  /**
+   * W10-CORTEX-CHAT-SCOPE review (SEC-W10CCS-R1): a business whose chat runs the model's tool calls (owned by
+   * ID.owner, no membership row; ID.member is a STAFF member with revenue none).
+   */
+  toolBiz: `${P}biz_tools`,
 };
 
 const TOOL_OK = 'v19c.create_ticket';
@@ -200,6 +228,7 @@ async function cleanup() {
     `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cognitive_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tool_outcome_scores WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -381,6 +410,12 @@ beforeAll(async () => {
   });
   await db.aiMemory.create({
     data: { businessId: ID.memBiz, category: 'fact', key: `${P}shared_fact`, value: 'v19c memory: a business-wide fact' },
+  });
+
+  // W10-CORTEX-CHAT-SCOPE review (SEC-W10CCS-R1): a STAFF member held to explicit scopes (revenue none, D-57).
+  await db.business.create({ data: { id: ID.toolBiz, name: 'V19C Chat Tools Biz', ownerId: ID.owner } });
+  await db.membership.create({
+    data: { userId: ID.member, businessId: ID.toolBiz, role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'write', expenses: 'read' } },
   });
 }, 120_000);
 
@@ -928,7 +963,9 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(organCalls).toHaveLength(1);
     expect(organCalls[0].userId).toBeUndefined();
 
-    const turnRows = await rowsFor(t.correlationId, ID.biz2);
+    // W10-CORTEX-CHAT-SCOPE: the organ row is on the turn's correlation too now (CR-W9KCA-3), so the
+    // turn's own row is the one of its own tool.
+    const turnRows = (await rowsFor(t.correlationId, ID.biz2)).filter((r: any) => r.actionType === 'inbox_read_thread');
     expect(turnRows).toHaveLength(1);
     expect(turnRows[0]).toMatchObject({ actionType: 'inbox_read_thread', userId: ID.member, sessionId: t.sessionId, commandId: t.commandId });
 
@@ -942,18 +979,105 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(organLedger[0]).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
   });
 
+  // W10-CORTEX-CHAT-SCOPE: was an it.todo. The efferent bridge carries the turn's session and correlation on
+  // its dispatch (executeBridgedCortexTool hands them to the organ call), and the registry names on the organ
+  // call's audit row the actor of the registry call it runs inside, and that call's command id when the organ
+  // call is on its correlation. Audit row only (SEC-W9KCA-4 holds): the handler's ctx and the ledger row are
+  // as before.
+  it("W9-KEY-CORTEX-AUDIT residual (review SEC-W9KCA-3, CR-W9KCA-2, CR-W9KCA-3): a KEY-cortex turn's bridged organ call outside any request is on the turn's thread (session, command, correlation) and names the turn's member on its CortexActionLog row as an audit-only actor; the organ handler gets no acting user and its ledger row records the AI (W10-CORTEX-CHAT-SCOPE, SEC-W9KCA-4, was it.todo)", async () => {
+    const t = thread('bridgeout');
+    organCalls.length = 0;
+    await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1 AND action = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    // No runWithTenant: a KEY-cortex turn a job or a queue worker runs, outside any request.
+    const result = await auditedRegistry.execute(
+      'inbox_read_thread',
+      { businessId: ID.biz2, userId: ID.member, autonomyLevel: 2, ...t },
+      { threadId: `${P}thread_bridge_out` },
+    );
+    expect(result.success).toBe(true);
+    expect(organCalls).toHaveLength(1);
+    expect(organCalls[0].userId).toBeUndefined();
+    expect(organCalls[0].auditUserId).toBeUndefined();
+
+    const organRows = await db.cortexActionLog.findMany({ where: { businessId: ID.biz2, actionType: TOOL_ORGAN_THREAD } });
+    expect(organRows).toHaveLength(1);
+    expect(organRows[0]).toMatchObject({
+      userId: ID.member,
+      sessionId: t.sessionId,
+      commandId: t.commandId,
+      correlationId: t.correlationId,
+      status: 'success',
+    });
+    const organLedger = await db.businessEvent.findMany({
+      where: { businessId: ID.biz2, eventType: 'ACTION_EXECUTED', action: TOOL_ORGAN_THREAD },
+    });
+    expect(organLedger).toHaveLength(1);
+    expect(organLedger[0]).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
+
+    // The turn's thread holds the turn's own call and the organ call it made.
+    const threadRows = await rowsFor(t.correlationId, ID.biz2);
+    expect(threadRows.map((r: any) => r.actionType).sort()).toEqual(['inbox_read_thread', TOOL_ORGAN_THREAD].sort());
+    for (const row of threadRows) expect(row).toMatchObject({ userId: ID.member, sessionId: t.sessionId, commandId: t.commandId });
+  });
+
+  it("W10-CORTEX-CHAT-SCOPE (review SEC-W9KCA-3, CR-W9KCA-2): the registry's audit-only actor (ctx.auditUserId) is named on the call's CortexActionLog row alone: the handler gets no acting user, the ledger records the AI, a caller-named actor still wins, and a nested call for another business inherits nothing", async () => {
+    organCalls.length = 0;
+    await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1 AND action = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', ID.biz2, TOOL_ORGAN_THREAD);
+    const audited = thread('auditonly');
+    await auditedRegistry.execute(
+      TOOL_ORGAN_THREAD,
+      { businessId: ID.biz2, auditUserId: ID.member, preApproved: true, ...audited },
+      { threadId: `${P}thread_audit_only` },
+    );
+    expect(organCalls).toHaveLength(1);
+    expect(organCalls[0].userId).toBeUndefined();
+    const [row] = await rowsFor(audited.correlationId, ID.biz2);
+    expect(row).toMatchObject({ actionType: TOOL_ORGAN_THREAD, userId: ID.member, commandId: audited.commandId });
+    const ledger = await db.businessEvent.findMany({ where: { businessId: ID.biz2, eventType: 'ACTION_EXECUTED', action: TOOL_ORGAN_THREAD } });
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
+
+    // A caller-named actor is the acting user and wins over the audit-only one.
+    const named = thread('auditnamed');
+    await auditedRegistry.execute(
+      TOOL_ORGAN_THREAD,
+      { businessId: ID.biz2, userId: ID.owner, auditUserId: ID.member, preApproved: true, ...named },
+      { threadId: `${P}thread_audit_named` },
+    );
+    expect(organCalls[1].userId).toBe(ID.owner);
+    expect((await rowsFor(named.correlationId, ID.biz2))[0]).toMatchObject({ userId: ID.owner });
+
+    // A registry call made inside another business's call names nobody it did not name itself.
+    const outer = thread('auditouter');
+    const inner = thread('auditinner');
+    const nestedTool = `${P}.nested_other_business`;
+    if (!registry.hasTool(nestedTool)) {
+      registry.register({
+        name: nestedTool,
+        module: 'v19c',
+        description: 'v19c: calls the organ tool for another business',
+        parameters: { type: 'object', properties: {}, required: [] },
+        riskTier: 1,
+        requiresApproval: false,
+        handler: async () => auditedRegistry.execute(TOOL_ORGAN_THREAD, { businessId: ID.biz2, preApproved: true, ...inner }, {}),
+      });
+    }
+    await registry.execute(nestedTool, { businessId: ID.biz, userId: ID.owner, preApproved: true, ...outer }, {});
+    const [innerRow] = await rowsFor(inner.correlationId, ID.biz2);
+    expect(innerRow).toMatchObject({ actionType: TOOL_ORGAN_THREAD, userId: null, commandId: inner.commandId });
+  });
+
   it.todo(
-    'W9-KEY-CORTEX-AUDIT residual (review SEC-W9KCA-3, CR-W9KCA-2, CR-W9KCA-3): a bridged organ call on a surface ' +
-      'with no principal names nobody on its CortexActionLog row outside a request, and a KEY-cortex turn\'s bridged ' +
-      "call is not on the turn's thread: the plan queue (action-dispatcher.service.ts dispatches { surface: " +
-      "'PLAN_QUEUE', planId, planStepId }, though contactBindMember resolves the plan's member), the Pro Auto monitor, " +
-      'an inner execute_custom_logic call, an approved proposal, and the efferent bridge, which sends only ' +
-      "{ surface: 'CORTEX_BRIDGE', onBehalfOfUserId } (key-cortex-efferent-bridge.service.ts), not ctx.sessionId, " +
-      "ctx.commandId or ctx.correlationId, so the organ row has sessionId 'unknown' and correlationId null. The " +
-      "registry's one actor field, ctx.userId, also makes its business event a human action and the organ " +
-      "handler's acting user (SEC-W9KCA-4), so naming the member these surfaces run for on the row alone needs an " +
-      'audit-only actor in key-cortex-tool-registry.service.ts, and the thread belongs in the efferent bridge: both ' +
-      'outside the W9-KEY-CORTEX-AUDIT write set.',
+    'W9-KEY-CORTEX-AUDIT residual (review SEC-W9KCA-3, CR-W9KCA-2; follow-up packet, outside the W10-CORTEX-CHAT-SCOPE ' +
+      'write set): a bridged organ call a dispatcher surface with no principal makes outside any registry call names ' +
+      'the member it runs for on its CortexActionLog row (audit-only): the plan queue (action-dispatcher.service.ts ' +
+      "dispatches { surface: 'PLAN_QUEUE', planId, planStepId } with no member, though contactBindMember resolves the " +
+      "plan's), the Pro Auto monitor, an approved proposal and a custom-logic call from the chat carry onBehalfOfUserId, " +
+      'but flow-orchestrator.service.ts executeBridgedCortexTool hands the registry no actor for them, so the row names ' +
+      "nobody outside a request. The registry's audit-only actor (KeyCortexToolContext.auditUserId) is in place: " +
+      'executeBridgedCortexTool passing action.onBehalfOfUserId to it (never as ctx.userId, SEC-W9KCA-4) closes it.',
   );
 
   it('the callers name their actor and command thread: key-cortex-actions.service.ts handleExecuteTool (cortex.execute_tool), outside any request, passes its own call\'s actor and thread to the tool it runs (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
@@ -1054,16 +1178,304 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(owner).not.toContain(OWNER_INPUT_SECRET);
   });
 
+  /**
+   * W10-CORTEX-CHAT-SCOPE: the system prompt the chat pipeline behind POST /cortex/chat (processQuery) or its
+   * stream (streamQuery) renders for `userId`, over the real memory store (its structured stores; the
+   * semantic store answers nothing, so no embedding request is made). Every other collaborator is a
+   * stand-in; the prompt is what the pipeline hands buildMessages.
+   */
+  async function chatPromptFor(userId: string | undefined, path: 'processQuery' | 'streamQuery'): Promise<string> {
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const { KeyCortexMemoryRetrievalService } = await import('../src/modules/key-cortex/key-cortex-memory-retrieval.service');
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const memory = new KeyCortexMemoryRetrievalService(new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any));
+    const prompts: string[] = [];
+    const session = { id: `${P}sess_chat_prompt`, businessId: ID.memBiz, userId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: false, includeMemoryContext: true,
+      includeActions: false, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      {
+        complete: async () => ({ content: 'ok', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }),
+        streamComplete: async function* () {
+          yield { content: 'ok', provider: 'openai', model: 'stand-in' };
+        },
+      } as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      { buildContextSnapshot: async () => ({ businessId: ID.memBiz, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      {
+        getOrCreateSession: async () => session,
+        generateId: () => `${P}msg`,
+        saveMessage: async () => undefined,
+        updateSessionCognitionMetadata: async () => undefined,
+        updateRunningSummary: async () => undefined,
+      } as any,
+      {
+        buildMemoryContext: async () => ({}),
+        buildMessages: (_query: unknown, _context: unknown, systemPrompt: string) => {
+          prompts.push(systemPrompt);
+          return [];
+        },
+      } as any,
+      { handleToolCalls: async () => null } as any,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      {} as any,
+      { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'ok', confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      memory,
+      { route: async () => route } as any,
+    );
+    const query = { text: 'what happened lately', businessId: ID.memBiz, userId } as any;
+    const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+    if (path === 'processQuery') await pipeline.processQuery(query, flags);
+    else for await (const chunk of pipeline.streamQuery(query, flags)) void chunk;
+    expect(prompts, path).toHaveLength(1);
+    return prompts[0];
+  }
+
+  // W10-CORTEX-CHAT-SCOPE: was an it.todo. processQuery and its stream path read the memory they render
+  // into the system prompt by buildMemoryContext's rule. Runs after the SEC-W9KCA-2 case above, which put
+  // the owner's real tool call (its CortexActionLog row, two business_events and a cognitive_event) in memBiz.
+  it("W9-KEY-CORTEX-AUDIT residual: POST /cortex/chat reads episodic memory as the requesting member may outside buildMemoryContext too: key-cortex-query-pipeline.service.ts processQuery and its stream path render the member's own CortexActionLog and AiExecutionLog rows, none for a requester who is no member, and no tool-call record of the business-wide stores (W10-CORTEX-CHAT-SCOPE, SEC-W9KCA-2, was it.todo)", async () => {
+    for (const path of ['processQuery', 'streamQuery'] as const) {
+      const member = await chatPromptFor(ID.member, path);
+      expect(member, path).toContain('v19c.mem.member_action');
+      expect(member, path).toContain('v19c.mem.member_exec');
+      expect(member, path).not.toContain('v19c.mem.owner_action');
+      expect(member, path).not.toContain('v19c.mem.owner_exec');
+      expect(member, path).not.toContain('v19c.mem.outsider_action');
+      expect(member, path).not.toContain(OWNER_THREAD_SECRET);
+      expect(member, path).not.toContain(OWNER_INPUT_SECRET);
+      // Business-wide memory is not narrowed.
+      expect(member, path).toContain('v19c memory: a business-wide fact');
+
+      for (const userId of [ID.outsider, undefined]) {
+        const prompt = await chatPromptFor(userId, path);
+        expect(prompt, `${path} ${String(userId)}`).not.toContain('[cortex_action_log]');
+        expect(prompt, `${path} ${String(userId)}`).not.toContain('[ai_execution_log]');
+        expect(prompt, `${path} ${String(userId)}`).not.toContain(OWNER_THREAD_SECRET);
+        expect(prompt, `${path} ${String(userId)}`).not.toContain(OWNER_INPUT_SECRET);
+        expect(prompt, `${path} ${String(userId)}`).toContain('v19c memory: a business-wide fact');
+      }
+
+      // The owner (by Business.ownerId) reads their own rows, their own tool call on its CortexActionLog row only.
+      const owner = await chatPromptFor(ID.owner, path);
+      expect(owner, path).toContain('v19c.mem.owner_action');
+      expect(owner, path).toContain('v19c.mem.owner_exec');
+      expect(owner, path).not.toContain('v19c.mem.member_action');
+      expect(owner, path).not.toContain('v19c.mem.member_exec');
+      const secretLines = owner.split('\n').filter((l) => l.includes(OWNER_THREAD_SECRET));
+      expect(secretLines, path).toHaveLength(1);
+      expect(secretLines[0], path).toMatch(/^\[cortex_action_log\] key_inbox\.get_thread: /);
+      expect(owner, path).not.toContain(OWNER_INPUT_SECRET);
+      expect(owner, path).not.toContain('[business_event]');
+    }
+  });
+
+  // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R2 (D-57): CognitionMemory is a per-member store, and processQuery
+  // writes one row on every turn (KeyCortexLearningService.recordObservation: what the member typed, verbatim,
+  // and KEY's whole answer to them). The rows below are that shape; they are removed when the case ends.
+  it("SEC-W10CCS-R2 (W10-CORTEX-CHAT-SCOPE review, D-57): POST /cortex/chat and its stream render only the reader's own cognition memory: another member's typed chat and KEY's answer to them never reach the system prompt, and a requester who is no member reads none", async () => {
+    const OWNER_SAID = 'V19C-COGNITION-OWNER';
+    const MEMBER_SAID = 'V19C-COGNITION-MEMBER';
+    const observation = (userId: string, label: string, said: string) => ({
+      businessId: ID.memBiz,
+      userId,
+      sessionId: `${P}sess_cognition_${label}`,
+      query: `${said} typed: what is our net profit this quarter?`,
+      recommendation: `${said} KEY answered: net profit 48213`,
+      userResponse: 'no_action',
+      confidence: 0.7,
+    });
+    await db.cognitionMemory.createMany({
+      data: [observation(ID.owner, 'owner', OWNER_SAID), observation(ID.member, 'member', MEMBER_SAID)],
+    });
+    try {
+      for (const path of ['processQuery', 'streamQuery'] as const) {
+        const member = await chatPromptFor(ID.member, path);
+        expect(member, path).toContain(`[cognition_memory]`);
+        expect(member, path).toContain(`${MEMBER_SAID} typed`);
+        expect(member, path).toContain(`${MEMBER_SAID} KEY answered`);
+        expect(member, path).not.toContain(OWNER_SAID);
+
+        for (const userId of [ID.outsider, undefined]) {
+          const prompt = await chatPromptFor(userId, path);
+          expect(prompt, `${path} ${String(userId)}`).not.toContain('[cognition_memory]');
+          expect(prompt, `${path} ${String(userId)}`).toContain('v19c memory: a business-wide fact');
+        }
+
+        // The owner (by Business.ownerId) reads their own, not the member's.
+        const owner = await chatPromptFor(ID.owner, path);
+        expect(owner, path).toContain(`${OWNER_SAID} typed`);
+        expect(owner, path).not.toContain(MEMBER_SAID);
+      }
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+    }
+  });
+
   it.todo(
-    'W9-KEY-CORTEX-AUDIT residual: POST /cortex/chat also reads episodic memory business-wide outside buildMemoryContext: ' +
-      'key-cortex-query-pipeline.service.ts processQuery (and its stream path) calls memoryRetrieval.retrieveContext ' +
-      'with { query, limit: 10 } and no userId when the route decision includes memory context, and renders the ' +
-      "fragments into the system prompt (formatMemoryContextBlock), so another member's CortexActionLog and " +
-      'AiExecutionLog rows, and the business_event and cognitive_event rows of their tool calls (review SEC-W9KCA-2, ' +
-      'CR-W9KCA-4), can still reach a prompt there. Outside the W9-KEY-CORTEX-AUDIT write set: the same rule ' +
-      "(the session's member's own episodes, none for a non-member, no tool-call records from the business-wide " +
-      'stores) belongs on those two calls.',
+    'SEC-W10CCS-R2 residual (W10-CORTEX-CHAT-SCOPE review; follow-up packet, outside the W10-CORTEX-CHAT-SCOPE write set): ' +
+      'key-cortex-prompt-context.service.ts buildMemoryContext, whose aiMemory block processQuery and its stream path also ' +
+      "hand buildMessages, still renders every member's cognition memory (CognitionMemory rows: another member's typed " +
+      "chat and KEY's answer to them, read business-wide by UnifiedMemoryRetrievalService) into a member's prompt; it " +
+      "should keep only the reader's own rows, as the pipeline's chatMemoryFragments now does (D-57). Not a regression: " +
+      'the W9 buildMemoryContext rule has the same gap.',
   );
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: a chat turn (processQuery or its stream) in ID.toolBiz in which the
+   * model calls `tools`, run through the real KeyCortexToolLoopService over the registry the app wires to its
+   * ledgers (auditedRegistry, the efferent bridge's flow tools in it, dispatched to `chain`). The member is read
+   * from the real rows. `dispatched`: the tools the dispatcher was reached for (its action is a stand-in here, so
+   * no ledger or CRM read runs).
+   */
+  async function chatToolTurnFor(userId: string, tools: string[], path: 'processQuery' | 'streamQuery') {
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const { KeyCortexToolLoopService } = await import('../src/modules/key-cortex/key-cortex-tool-loop.service');
+    // The P&L needs its period (the registry validates a call's input against the tool's schema).
+    const args = (name: string) => (name === 'finance_profit_and_loss' ? { from: '2026-01-01', to: '2026-10-31' } : {});
+    const calls = tools.map((name, i) => ({ id: `${P}tc_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args(name)) } }));
+    const gateway = {
+      complete: vi.fn(async (request: any) =>
+        request.tools
+          ? { content: '', toolCalls: calls, provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }
+          : { content: 'v19c answer over the tool results', provider: 'openai', model: 'stand-in' },
+      ),
+      streamComplete: async function* () {
+        for (const [index, c] of calls.entries()) {
+          yield { toolCall: { index, id: c.id, name: c.function.name, argumentsDelta: c.function.arguments }, provider: 'openai', model: 'stand-in' };
+        }
+      },
+    };
+    // Positionally, as Nest constructs it: gateway, prisma, registry, lifecycle, orchestrator, safety, autonomy level.
+    const loop = new KeyCortexToolLoopService(gateway as any, prisma, auditedRegistry, undefined, undefined, undefined, {
+      resolve: async () => ({ level: 2 }),
+    } as any);
+    const session = { id: `${P}sess_chat_tools`, businessId: ID.toolBiz, userId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: false, includeMemoryContext: false,
+      includeActions: true, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      gateway as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      { buildContextSnapshot: async () => ({ businessId: ID.toolBiz, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      {
+        getOrCreateSession: async () => session,
+        generateId: () => `${P}msg`,
+        saveMessage: async () => undefined,
+        updateSessionCognitionMetadata: async () => undefined,
+        updateRunningSummary: async () => undefined,
+      } as any,
+      { buildMemoryContext: async () => ({}), buildMessages: () => [] } as any,
+      loop,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      {} as any,
+      { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: undefined, confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      undefined, // memory retrieval
+      { route: async () => route } as any,
+      undefined, // connector
+      undefined, // command
+      undefined, // executor
+      undefined, // context v2
+      undefined, // genome bridge
+      undefined, // events
+      undefined, // proactive
+      undefined, // trust explanation
+      undefined, // learning
+      undefined, // autonomy orchestrator
+      auditedRegistry,
+    );
+    const dispatched: string[] = [];
+    const realAction = chain.executeToolAction;
+    chain.executeToolAction = async (_businessId: string, toolName: string) => {
+      dispatched.push(toolName);
+      return { v19c: `stand-in answer of ${toolName}` };
+    };
+    try {
+      const query = { text: 'what is my P&L and who are my contacts?', businessId: ID.toolBiz, userId } as any;
+      const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+      if (path === 'processQuery') {
+        const response = await pipeline.processQuery(query, flags);
+        return { dispatched, actions: response.actions ?? [], text: response.message.content };
+      }
+      const chunks: any[] = [];
+      for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+      return {
+        dispatched,
+        actions: chunks.filter((c) => c.type === 'action_delta').map((c) => c.action),
+        text: chunks.filter((c) => c.type === 'text_delta').map((c) => c.content).join(''),
+      };
+    } finally {
+      chain.executeToolAction = realAction;
+    }
+  }
+
+  // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (D-57, D-71): the model's tool calls on the chat run through the
+  // registry, which reads no membership, and a bridged flow tool dispatches with no principal. Each call is held
+  // to the plan queue's rule for the member first (memberToolRunAuthority, no principal), over the real rows.
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-57, D-71): POST /cortex/chat and its stream hold the model\'s tool calls to the rule the plan queue holds a plan\'s member to: a STAFF member with revenue none is refused the P&L and the whole-book contact read before the registry runs either, a tool their scopes reach still runs, and the business owner has every call run', async () => {
+    const PNL = 'finance_profit_and_loss';
+    const CONTACTS = TOOL_FLOW_BRIDGED; // crm_list_contacts
+    expect(auditedRegistry.hasTool(PNL)).toBe(true);
+    for (const path of ['processQuery', 'streamQuery'] as const) {
+      const member = await chatToolTurnFor(ID.member, [PNL, CONTACTS, 'expenses_list'], path);
+      expect(member.dispatched, path).toEqual(['expenses_list']);
+      expect(member.actions, path).toEqual([
+        expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'success' }),
+        expect.objectContaining({ actionType: 'FINANCE_PROFIT_AND_LOSS', status: 'blocked' }),
+        expect.objectContaining({ actionType: 'CRM_LIST_CONTACTS', status: 'blocked' }),
+      ]);
+      expect(member.text, path).toContain('I did not run finance_profit_and_loss: Insufficient permissions: revenue requires read access (you have none)');
+      expect(member.text, path).toContain('I did not run crm_list_contacts: Tool "crm_list_contacts" is executed from here only for the business owner');
+
+      // control: the owner by Business.ownerId (no membership row) has all three run
+      const owner = await chatToolTurnFor(ID.owner, [PNL, CONTACTS, 'expenses_list'], path);
+      expect(owner.dispatched, path).toEqual([PNL, CONTACTS, 'expenses_list']);
+      expect(owner.actions.map((a: any) => a.status), path).toEqual(['success', 'success', 'success']);
+      expect(owner.text, path).not.toContain('I did not run');
+
+      // a user with no membership in the business, and who does not own it, has none run
+      const outsider = await chatToolTurnFor(ID.outsider, ['expenses_list'], path);
+      expect(outsider.dispatched, path).toEqual([]);
+      expect(outsider.actions, path).toEqual([
+        expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'blocked', description: 'Not run: Not a member of this business' }),
+      ]);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -176,6 +176,30 @@ export interface FlowToolResult {
    */
   notCleared?: { actionId: string | null; disposition: string; code: string };
 }
+
+/**
+ * W10-DISPATCH-STATUS (review SEC-W9DC-1, owner ruling D-73): the HttpException a tool threw, kept
+ * beside the failed FlowToolResult executeTool answers rather than on it, so the envelope the chat, a
+ * plan run over HTTP and executeToolDirect's callers read keeps its shape, and executeToolDirectly
+ * rethrows it with its status. executeToolDirectly used to rethrow a plain Error(result.error), so
+ * ActionDispatcherService, its production caller (the plan queue), could not tell a member's 404/403
+ * refusal from a failure: it retried the refusal and counted it toward that business's circuit for
+ * the tool (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
+ */
+const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
+
+/**
+ * W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): the statuses executeToolDirectly does not hand the
+ * dispatcher as the tool's HttpException, because in this codebase they do not say that asking again
+ * gets the same answer. A 409 is also the optimistic-concurrency conflict that tells the caller to try
+ * again (ProjectsService.updateTask's ConflictException, reached by projects_complete_task and
+ * projects_update_task), and a 400 is also a provider that did not answer (GmailService.searchMessages'
+ * BadRequestException('Gmail search failed (503)'), reached by reconcile_sweep_statements; the Drive,
+ * Google and Graph clients do the same). The dispatcher takes every 4xx but 408 and 429 as final
+ * (isToolRefusal), so these reach it as the plain Error they did before this packet: retried, and
+ * counted toward that business's circuit for the tool, with the HttpException as the Error's cause.
+ */
+const TOOL_STATUSES_RETRIED: ReadonlySet<number> = new Set([HttpStatus.BAD_REQUEST, HttpStatus.CONFLICT]);
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -3299,7 +3323,13 @@ ${triage.standingContext}`;
           result.notCleared.disposition as ActionNotClearedError['disposition'],
         );
       }
-      throw new Error(result.error ?? `Tool ${toolName} failed`);
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the tool's own HttpException, its status and its
+      // message (result.error), so the dispatcher answers a 4xx refusal once and counts it toward no
+      // circuit (isToolRefusal). Review CR-W10DS-1 (D-73): a 400 or 409 (TOOL_STATUSES_RETRIED) and
+      // anything else stay the plain Error they were, a 400 or 409 with the HttpException as its cause.
+      const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
+      if (httpException && !TOOL_STATUSES_RETRIED.has(httpException.getStatus())) throw httpException;
+      throw new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
     }
     return result.result;
   }
@@ -3368,7 +3398,7 @@ ${triage.standingContext}`;
       });
       if (actorUserId) await logged;
       const errorEnvelope = wrapToolResult(toolName, null);
-      return {
+      const failed: FlowToolResult = {
         toolCallId: id,
         name: toolName,
         result: null,
@@ -3382,6 +3412,9 @@ ${triage.standingContext}`;
           ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
           : {}),
       };
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the status goes beside the envelope, not on it.
+      if (error instanceof HttpException) TOOL_HTTP_EXCEPTIONS.set(failed, error);
+      return failed;
     }
   }
 

@@ -17,18 +17,22 @@
  * with the real ModuleScopeGuard are in job-role-policy.service.spec.ts.
  */
 import 'reflect-metadata';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
 import { ReportsController } from './reports.controller';
 import { RevenueReportingController } from '../commerce/revenue-reporting.controller';
 import { CANONICAL_MODULE_TOOLS, JobRolePolicyService } from '../structure/job-role-policy.service';
-import { graphActionModuleScope, graphActionRequirement } from '../ai/graph-actions.controller';
+import { graphActionModuleScope, graphActionRequirement, graphPlanReadScope, visiblePlanSteps } from '../ai/graph-actions.controller';
 import {
   cortexCommandRefusal,
   cortexCommandRequirement,
   type CortexMemberAuthority,
 } from '../key-cortex/key-cortex.controller';
 import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
+import { KeyCortexQueryPipelineService } from '../key-cortex/key-cortex-query-pipeline.service';
+import * as planAuthority from '../key-cortex/key-cortex-plan-authority';
+import { KeyCortexCapabilityRegistryService } from '../key-cortex/key-cortex-capability-registry.service';
+import { AiController } from '../ai/ai.controller';
 
 /** The KEY tool that reads what each revenue-gated report route reads. */
 const TOOL_ROUTE: ReadonlyArray<readonly [tool: string, handler: keyof ReportsController]> = [
@@ -68,6 +72,141 @@ const member = (scopes: Record<string, string>, role = 'STAFF'): CortexMemberAut
 });
 
 const policy = new JobRolePolicyService();
+
+/**
+ * SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, D-57): the KEY chat pipeline behind POST cortex/chat (processQuery)
+ * and the chat stream (streamQuery), run with the v2 integration on as KeyCortexReasoningService runs it:
+ * the commands parsed from the member's words, or detected in the stream's answer, are put to the
+ * autonomy authority (which allows everything here) and run through the executor's executeBatch. The
+ * member is the one the membership row names; every other collaborator is a stand-in.
+ */
+const CHAT_USER = 'usr_v96r_chat_member';
+const CHAT_BIZ = 'biz_v96r_chat';
+
+function chatPipeline(opts: {
+  membership: { role: string; permissionScopes: Record<string, string> | null } | null;
+  intents?: Array<{ module: string; action: string }>;
+  detected?: Array<{ actionType: string }>;
+}) {
+  const allow = { allowed: true, requiresApproval: false, tier: 'full', confidence: 1, reason: 'policy allows', ruleTrace: [], createdAt: new Date(0) };
+  const record = (command: any) => ({
+    id: `exec-${command.action}`,
+    command,
+    result: { command, success: true, data: { ran: true }, executionTimeMs: 1 },
+    startedAt: new Date(0),
+    finishedAt: new Date(0),
+    durationMs: 1,
+    traceId: 'trace',
+    rolledBack: false,
+  });
+  const executor = {
+    executeBatch: vi.fn(async (commands: any[]) => ({
+      results: commands.map(record),
+      totalCommands: commands.length,
+      succeededCount: commands.length,
+      failedCount: 0,
+      rolledBackCount: 0,
+      durationMs: 1,
+      traceId: 'trace',
+      stoppedEarly: false,
+      summary: 'stand-in',
+    })),
+    executeWithApproval: vi.fn(async (command: any) => ({ id: `proposal-${command.action}`, command, status: 'pending', requestedAt: new Date(0) })),
+    logExecution: vi.fn(async (_row: unknown) => undefined),
+  };
+  const prisma = {
+    client: {
+      user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
+      membership: { findUnique: vi.fn(async () => opts.membership) },
+      business: { findFirst: vi.fn(async () => null) },
+    },
+  };
+  const session = { id: 'sess_v96r_chat', businessId: CHAT_BIZ, userId: CHAT_USER, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+  const route = {
+    taskCategory: 'general', layers: ['ethics'], promptVariant: 'concise', includeGenomeContext: false, includeMemoryContext: false,
+    includeActions: true, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+  };
+  const pipeline = new KeyCortexQueryPipelineService(
+    {
+      complete: async () => ({ content: 'Done.', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }),
+      streamComplete: async function* () {
+        yield { content: 'Done.', provider: 'openai', model: 'stand-in' };
+      },
+    } as any,
+    prisma as any,
+    { get: async () => null, setex: async () => undefined } as any,
+    {
+      getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+      buildSystemPrompt: () => 'You are KEY.',
+      buildValueBlock: async () => '',
+      classifyPersona: async () => undefined,
+      selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+    } as any,
+    { buildContextSnapshot: async () => ({ businessId: CHAT_BIZ, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+    { buildToolDefinitions: async () => [], executeActions: vi.fn(async () => []) } as any,
+    {
+      getOrCreateSession: async () => session,
+      generateId: () => 'msg_v96r',
+      saveMessage: async () => undefined,
+      updateSessionCognitionMetadata: async () => undefined,
+      updateRunningSummary: async () => undefined,
+    } as any,
+    { buildMemoryContext: async () => ({}), buildMessages: () => [] } as any,
+    { handleToolCalls: async () => null } as any,
+    {
+      detectActions: () =>
+        (opts.detected ?? []).map((d) => ({ actionType: d.actionType, status: 'pending_approval', description: `detected ${d.actionType}`, requiresApproval: false })),
+    } as any,
+    { generateSuggestions: async () => [] } as any,
+    {} as any,
+    { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+    {
+      classifyTaskCategory: () => 'general',
+      buildStructuredOutputInstructions: () => '',
+      parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'Done.', confidence: 80 }),
+    } as any,
+    { detectMood: () => 'casual' } as any,
+    undefined,
+    { route: async () => route } as any,
+    { getAllCapabilities: () => [] } as any,
+    {
+      parseIntent: async () =>
+        (opts.intents ?? []).map((i) => ({ ...i, parameters: {}, requiresApproval: false, naturalLanguage: `${i.module}.${i.action}` })),
+      toConnectorCommand: (intent: any, businessId: string, userId: string) => ({
+        module: intent.module,
+        action: intent.action,
+        parameters: intent.parameters,
+        businessId,
+        userId,
+        source: 'key_cortex',
+      }),
+    } as any,
+    executor as any,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { evaluateAction: vi.fn(async () => allow) } as any,
+  );
+  for (const level of ['error', 'warn', 'log', 'debug'] as const) {
+    vi.spyOn((pipeline as any).logger, level).mockImplementation(() => undefined);
+  }
+  const query = { text: 'run it', businessId: CHAT_BIZ, userId: CHAT_USER, enableActions: true } as any;
+  const flags = { integrationV2Enabled: true, genomeV3Enabled: false };
+  return {
+    executor,
+    chat: () => pipeline.processQuery(query, flags),
+    stream: async () => {
+      const chunks: any[] = [];
+      for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+      return chunks;
+    },
+    executed: () => executor.executeBatch.mock.calls.flatMap(([commands]: any[]) => commands),
+    refusals: () => executor.logExecution.mock.calls.map(([row]: any[]) => row),
+  };
+}
 const reaches = (permissions: Record<string, string>, tool: string) =>
   policy.isToolAllowed(policy.envelopeForJobRole({ id: 'jr_v81', name: 'Position', permissions }), tool);
 
@@ -204,13 +343,326 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
   //    (key-cortex-query-pipeline.service.ts, evaluateParsedCommandAutonomy); no member scope rule
   //    (cortexCommandRefusal or any membership read) applies, and the batch result data is returned.
   //    Pre-existing, and wider than the money reports: it holds for every registry action.
-  it.todo(
-    'SEC-W9MRK-1 / MRK-CR-1 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read (memberPlanStepScopeRefusal, D-57, D-71)',
-  );
-  it.todo(
-    'SEC-W9MRK-2 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)',
-  );
-  it.todo(
-    'SEC-W9MRK-3 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a command parsed on POST cortex/chat or the chat stream with enableActions is refused to a member the cortexCommandRefusal rule refuses, the money reports included (D-57)',
+  //    W10-CORTEX-CHAT-SCOPE turned it live (below).
+  //    W10-KEY-PLAN-SCOPE turned SEC-W9MRK-1 and SEC-W9MRK-2 live (below), under owner ruling D-114.
+
+  // SEC-W9MRK-1 / MRK-CR-1 (W10-KEY-PLAN-SCOPE, owner rulings D-57 and D-114): the plan door asks what the
+  // direct-command door asks. A member held to module scopes needs revenue:read for a money report step,
+  // on top of its module's own scope (memberPlanStepScopeRefusal). D-114 amends D-71's ADMIN bypass for an
+  // explicit revenue 'none' only: an ADMIN whose explicit scope map sets revenue to none (an absent key
+  // reads 'none', as ModuleScopeGuard reads it) is refused money steps, the money reports and the invoice
+  // actions (commerce); an ADMIN with role-default scopes keeps every step, and an ADMIN keeps every other
+  // module whatever its map says (adminPlanStepScopeRefusal).
+  it('SEC-W9MRK-1 / MRK-CR-1 (W10-KEY-PLAN-SCOPE, D-114, was it.todo): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read, and to an ADMIN whose explicit scope map sets revenue to none (memberPlanStepScopeRefusal, adminPlanStepScopeRefusal, D-57, D-71)', () => {
+    const { memberPlanStepScopeRefusal, adminPlanStepScopeRefusal, planStepReadsMoneyReport } = planAuthority as any;
+    for (const [module, action, moduleScope] of MONEY_REPORT_COMMANDS) {
+      const label = `${module}.${action}`;
+      expect(planStepReadsMoneyReport(module, action), label).toBe(true);
+      // the plan door asks what the direct-command door asks: the module's own scope, and revenue:read
+      expect(cortexCommandRequirement(module, action), label).toEqual({ scope: moduleScope, alsoRequires: { module: 'revenue', minLevel: 'read' } });
+      for (const scopes of [
+        { [moduleScope]: 'write' },
+        { [moduleScope]: 'admin', revenue: 'none' },
+        { [moduleScope]: 'admin', finance: 'admin', expenses: 'admin', analytics: 'admin', reports: 'admin' },
+        { [moduleScope]: 'admin', Revenue: 'read' },
+        { [moduleScope]: 'admin', revenue: 'owner' },
+      ]) {
+        const level = (scopes as Record<string, string>).revenue ?? 'none';
+        expect(memberPlanStepScopeRefusal(module, action, scopes), `${JSON.stringify(scopes)} -> ${label}`).toBe(
+          `Insufficient permissions: revenue requires read access (you have ${level}); plan step "${label}" reads a money report, so it is not run (D-57)`,
+        );
+      }
+      for (const level of ['read', 'write', 'admin']) {
+        expect(memberPlanStepScopeRefusal(module, action, { [moduleScope]: 'write', revenue: level }), `${label} revenue ${level}`).toBeNull();
+      }
+      // the module's own scope is still checked first (revenue alone is not the module's write scope)
+      expect(memberPlanStepScopeRefusal(module, action, { revenue: 'admin' }), label).toBe(
+        `Insufficient permissions: ${moduleScope} requires write access (you have none); plan step "${label}" is not run (D-71)`,
+      );
+    }
+
+    // D-114: an ADMIN whose explicit map sets revenue to none (or leaves it out) is refused every money step
+    const adminNoRevenue = { ...defaultScopesForRole('ADMIN'), revenue: 'none' };
+    const adminWithoutRevenueKey = Object.fromEntries(Object.entries(defaultScopesForRole('ADMIN')).filter(([key]) => key !== 'revenue'));
+    const moneySteps: ReadonlyArray<readonly [string, string]> = [
+      ...MONEY_REPORT_COMMANDS.map(([module, action]) => [module, action] as const),
+      ['commerce', 'create_invoice'],
+      ['commerce', 'process_payment'],
+      ['commerce', 'get_revenue_summary'],
+    ];
+    for (const [module, action] of moneySteps) {
+      const label = `${module}.${action}`;
+      for (const explicit of [adminNoRevenue, adminWithoutRevenueKey, { revenue: 'none' }, { revenue: 'Read' }]) {
+        const level = (explicit as Record<string, string>).revenue ?? 'none';
+        expect(adminPlanStepScopeRefusal(module, action, explicit), `${JSON.stringify(explicit)} -> ${label}`).toBe(
+          `Insufficient permissions: revenue requires read access (you have ${level}); plan step "${label}" is a money step, and an ADMIN whose revenue access is set to none runs no money step (D-114)`,
+        );
+      }
+      // control: role-default scopes (no explicit map) keep D-71; an explicit revenue read or above runs it
+      expect(adminPlanStepScopeRefusal(module, action, null), `${label} role defaults`).toBeNull();
+      for (const level of ['read', 'write', 'admin']) {
+        expect(adminPlanStepScopeRefusal(module, action, { ...adminNoRevenue, revenue: level }), `${label} revenue ${level}`).toBeNull();
+      }
+    }
+    // control: an ADMIN keeps every other module, whatever its explicit map says (D-114 amends D-71 for money steps only)
+    const denied = { revenue: 'none', expenses: 'none', bookings: 'none', analytics: 'none', crm: 'none' };
+    for (const [module, action] of [['finance', 'record_expense'], ['bookings', 'create_booking'], ['analytics', 'create_dashboard'], ['crm', 'update_contact'], [null, 'analyze']] as const) {
+      expect(adminPlanStepScopeRefusal(module, action, denied), `${module}.${action}`).toBeNull();
+    }
+  });
+
+  it('SEC-W9MRK-1 (W10-KEY-PLAN-SCOPE, D-57, D-114) control: the plan door and the direct-command door name the same money report actions (every registry action: planStepReadsMoneyReport exactly where cortexCommandRequirement also requires revenue:read)', () => {
+    const { planStepReadsMoneyReport } = planAuthority as any;
+    let money = 0;
+    for (const capability of new KeyCortexCapabilityRegistryService().getAllCapabilities()) {
+      for (const { name } of capability.actions) {
+        const requirement = cortexCommandRequirement(capability.module, name) as { alsoRequires?: unknown };
+        const label = `${String(capability.module)}.${name}`;
+        expect(planStepReadsMoneyReport(capability.module, name), label).toBe(!!requirement.alsoRequires);
+        if (requirement.alsoRequires) money += 1;
+      }
+    }
+    expect(money).toBe(MONEY_REPORT_COMMANDS.length);
+  });
+
+  // SEC-W9MRK-2 (W10-KEY-PLAN-SCOPE, owner rulings D-57, D-74 and D-114): the plan read rule (planStepReadRule,
+  // which GET ai/plans, GET ai/plans/:planId, GET cortex/plans/:planId and, through visibleExecutionLogs,
+  // GET ai/execution-logs apply) shows a money report KEY-cortex step to a viewer who reads its module, and
+  // its stored output (the whole report) only to one who also reads revenue. The viewer's scopes are the
+  // ones the real graphPlanReadScope reads from the membership row (an ADMIN's explicit map included).
+  it('SEC-W9MRK-2 (W10-KEY-PLAN-SCOPE, D-114, was it.todo): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)', async () => {
+    const BIZ = 'biz_v96s_reads';
+    const VIEWER = 'usr_v96s_viewer';
+    const OWNER = 'usr_v96s_owner';
+    const REPORT = { revenue: 98765, netProfit: 4321, marker: 'v96s_money_report' };
+    const EXPENSE = { id: 'v96s_expense_row', amount: 12 };
+    const steps = [
+      ...MONEY_REPORT_COMMANDS.map(([module, action]) => ({ toolName: null, module, action, inputPayload: { period: 'month' }, outputResult: REPORT })),
+      { toolName: null, module: 'finance', action: 'record_expense', inputPayload: { amount: 12 }, outputResult: EXPENSE },
+    ];
+    const logs = steps.map((step, i) => ({
+      id: `log_v96s_${i}`,
+      businessId: BIZ,
+      userId: OWNER,
+      toolName: `${step.module}.${step.action}`,
+      module: step.module,
+      action: step.action,
+      inputSummary: { actorId: OWNER, parameters: step.inputPayload },
+      outputSummary: { data: step.outputResult, rolledBack: false },
+      errorMessage: null,
+      success: true,
+    }));
+    type Viewer = { role: string; permissionScopes: Record<string, string> | null };
+    const read = async (membership: Viewer) => {
+      const prisma = {
+        client: {
+          user: { findUnique: vi.fn(async () => ({ id: VIEWER, role: 'USER' })) },
+          membership: { findUnique: vi.fn(async () => membership) },
+          business: { findFirst: vi.fn(async () => null) },
+          aiExecutionLog: {
+            groupBy: vi.fn(async () => logs.map(({ toolName, action, module }) => ({ toolName, action, module }))),
+            findMany: vi.fn(async () => logs),
+            count: vi.fn(async () => logs.length),
+          },
+        },
+      };
+      const scope = await graphPlanReadScope(prisma as any, BIZ, { id: VIEWER, role: 'USER' });
+      const planSteps = await visiblePlanSteps(steps, scope);
+      // GET ai/execution-logs as an ADMIN (who sees every run: no per-member run filter to stand in for)
+      if (membership.role !== 'ADMIN') return { planSteps, logs: [] as typeof logs };
+      const controller = Object.create(AiController.prototype);
+      Object.assign(controller, { prisma, executionLog: { getHistory: vi.fn(async () => ({ logs, total: logs.length, limit: 1000, offset: 0 })) } });
+      const served = await controller.getExecutionLogs(BIZ, { user: { id: VIEWER, role: 'USER' } }, undefined, undefined, '1000');
+      return { planSteps, logs: served.logs as typeof logs };
+    };
+    const moneyLabels = MONEY_REPORT_COMMANDS.map(([module, action]) => `${module}.${action}`);
+
+    // an ADMIN (who sees every plan) whose explicit map holds expenses and analytics but sets revenue to
+    // none, and a STAFF member reading its own plan with the same reads: each money report step is shown
+    // with its input, its output withheld; the expense step keeps its output
+    const withheldFrom: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: { ...defaultScopesForRole('ADMIN'), revenue: 'none' } },
+      { role: 'ADMIN', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'none' } },
+      { role: 'STAFF', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'none' } },
+    ];
+    for (const membership of withheldFrom) {
+      const who = JSON.stringify(membership);
+      const { planSteps, logs: served } = await read(membership);
+      expect(planSteps.map((s) => `${s.module}.${s.action}`), who).toEqual([...moneyLabels, 'finance.record_expense']);
+      for (const step of planSteps.slice(0, moneyLabels.length)) {
+        expect(step, `${who} ${step.module}.${step.action}`).toMatchObject({ outputResult: null, inputPayload: { period: 'month' } });
+      }
+      expect(planSteps[moneyLabels.length].outputResult, who).toEqual(EXPENSE);
+      if (membership.role === 'ADMIN') {
+        // GET ai/execution-logs: the same rule over the rows the KEY executor wrote for those steps
+        expect(served.map((l) => l.toolName), who).toEqual([...moneyLabels, 'finance.record_expense']);
+        for (const row of served.slice(0, moneyLabels.length)) {
+          expect(row, `${who} ${row.toolName}`).toMatchObject({ outputSummary: null, errorMessage: null, inputSummary: { parameters: { period: 'month' } } });
+        }
+        expect(served[moneyLabels.length].outputSummary, who).toEqual({ data: EXPENSE, rolledBack: false });
+      }
+    }
+
+    // control: an ADMIN with role-default scopes (revenue admin), an ADMIN whose explicit map holds revenue
+    // read, and a STAFF member with revenue read are served every output as stored
+    const servedTo: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: null },
+      { role: 'ADMIN', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'read' } },
+      { role: 'STAFF', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'read' } },
+    ];
+    for (const membership of servedTo) {
+      const who = JSON.stringify(membership);
+      const { planSteps, logs: served } = await read(membership);
+      expect(planSteps.map((s) => s.outputResult), who).toEqual([REPORT, REPORT, REPORT, EXPENSE]);
+      if (membership.role === 'ADMIN') {
+        expect(served.map((l) => l.outputSummary), who).toEqual(steps.map((s) => ({ data: s.outputResult, rolledBack: false })));
+      }
+    }
+  });
+
+  // W10-KEY-PLAN-SCOPE review SEC-W10KPS-1 (owner rulings D-114, D-57): PlannerService stores a step's
+  // toolName, module and action independently (from the model's output), and KeyCortexPlannerService
+  // (POST cortex/plans/:planId/execute) runs module.action whatever the toolName (buildCommand). A step
+  // that names a tool was judged by that tool alone, so a money report or commerce step stored under a
+  // non-money tool had its stored output (the P&L, the invoices) served to a viewer without revenue read.
+  // A step whose module the KEY connector dispatches is now judged by its tool AND its module.
+  it('SEC-W10KPS-1 (W10-KEY-PLAN-SCOPE review, D-114, D-57): a stored step naming a tool and a KEY connector module is judged by both rules: a money report step under a non-money tool keeps its output from a viewer without revenue:read, a commerce step under one is not shown to that viewer; a module the connector does not dispatch is judged by its tool alone', async () => {
+    const BIZ = 'biz_v96s_kps1';
+    const VIEWER = 'usr_v96s_kps1_viewer';
+    const REPORT = { revenue: 98765, netProfit: 4321, marker: 'v96s_kps1_report' };
+    const INVOICES = [{ id: 'v96s_kps1_invoice', total: 500 }];
+    const PROJECTS = [{ id: 'v96s_kps1_project', name: 'Fit-out' }];
+    const NON_MONEY_TOOLS = ['projects_list', 'fetch_project_status', 'create_task'];
+    const steps = [
+      ...NON_MONEY_TOOLS.map((toolName) => ({ toolName, module: 'finance', action: 'generate_pnl', inputPayload: { period: 'month' }, outputResult: REPORT })),
+      { toolName: 'projects_list', module: 'analytics', action: 'create_report', inputPayload: { type: 'pnl' }, outputResult: REPORT },
+      { toolName: 'projects_list', module: 'analytics', action: 'export_report', inputPayload: { type: 'revenue_by' }, outputResult: REPORT },
+      { toolName: 'projects_list', module: 'commerce', action: 'list_invoices', inputPayload: {}, outputResult: INVOICES },
+      // controls: a connector module the viewer reads, with no money report; a module label the connector
+      // does not dispatch (answered 'Unknown module', so no module.action output is ever stored under it)
+      { toolName: 'projects_list', module: 'projects', action: 'list_projects', inputPayload: {}, outputResult: PROJECTS },
+      { toolName: 'projects_list', module: 'marketing', action: 'list the projects', inputPayload: {}, outputResult: PROJECTS },
+    ];
+    type Viewer = { role: string; permissionScopes: Record<string, string> | null };
+    const read = async (membership: Viewer) => {
+      const prisma = {
+        client: {
+          user: { findUnique: vi.fn(async () => ({ id: VIEWER, role: 'USER' })) },
+          membership: { findUnique: vi.fn(async () => membership) },
+          business: { findFirst: vi.fn(async () => null) },
+        },
+      };
+      const scope = await graphPlanReadScope(prisma as any, BIZ, { id: VIEWER, role: 'USER' });
+      return visiblePlanSteps(steps, scope);
+    };
+    const label = (s: { toolName: string | null; module?: string | null; action: string | null }) => `${s.toolName}:${s.module}.${s.action}`;
+
+    // the tool rule alone shows every one of these steps with its output to the viewers below (the
+    // tools are read by their role defaults); the module rule withholds the money
+    const withheldFrom: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: { ...defaultScopesForRole('ADMIN'), revenue: 'none' } },
+      { role: 'STAFF', permissionScopes: { ...defaultScopesForRole('STAFF'), expenses: 'read', analytics: 'read', revenue: 'none' } },
+    ];
+    for (const membership of withheldFrom) {
+      const who = JSON.stringify(membership);
+      const shown = await read(membership);
+      expect(shown.map(label), who).toEqual(steps.filter((s) => s.module !== 'commerce').map(label));
+      for (const step of shown.filter((s) => s.module === 'finance' || s.module === 'analytics')) {
+        expect(step, `${who} ${label(step)}`).toMatchObject({ outputResult: null, inputPayload: step.inputPayload });
+      }
+      expect(shown.filter((s) => s.module === 'projects' || s.module === 'marketing').map((s) => s.outputResult), who).toEqual([PROJECTS, PROJECTS]);
+    }
+
+    // control: the same viewers holding revenue read are served every step with its output as stored
+    const servedTo: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: null },
+      { role: 'STAFF', permissionScopes: { ...defaultScopesForRole('STAFF'), expenses: 'read', analytics: 'read', revenue: 'read' } },
+    ];
+    for (const membership of servedTo) {
+      const who = JSON.stringify(membership);
+      const shown = await read(membership);
+      expect(shown.map(label), who).toEqual(steps.map(label));
+      expect(shown.map((s) => s.outputResult), who).toEqual(steps.map((s) => s.outputResult));
+    }
+  });
+
+  it('SEC-W10KPS-1 (W10-KEY-PLAN-SCOPE review, D-114) control: KEY_CONNECTOR_MODULES is exactly the modules KeyCortexConnectorService dispatches a command to (its adapter map); any other module is answered Unknown module and stores no output', async () => {
+    const { KeyCortexConnectorService } = await import('../key-cortex/key-cortex-connector.service');
+    const adapter = (i: number) => ({ execute: vi.fn(async (command: any) => ({ success: true, data: { adapter: i }, executionTimeMs: 0, command })) });
+    const connector = new (KeyCortexConnectorService as any)({}, {}, ...Array.from({ length: 18 }, (_v, i) => adapter(i)));
+    const dispatched = Object.entries((connector as any).adapterMap as Record<string, unknown>)
+      .filter(([, a]) => !!a)
+      .map(([m]) => m)
+      .sort();
+    expect([...planAuthority.KEY_CONNECTOR_MODULES].sort()).toEqual(dispatched);
+    for (const module of Object.keys(planAuthority.KEY_PLAN_MODULE_SCOPES)) expect(planAuthority.KEY_CONNECTOR_MODULES.has(module), module).toBe(true);
+    const run = (module: string) =>
+      connector.execute({ module, action: 'list_projects', parameters: {}, businessId: 'biz_v96s_kps1', userId: 'usr_v96s_kps1', source: 'key_cortex', timestamp: new Date(), correlationId: 'v96s_kps1' });
+    for (const module of dispatched) expect((await run(module)).success, module).toBe(true);
+    for (const module of ['marketing', 'expenses', 'automations', 'general', 'keystore', 'null', 'Finance']) {
+      const result = await run(module);
+      expect(result, module).toMatchObject({ success: false, error: `Unknown module: ${module}` });
+    }
+  });
+
+  // SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, owner ruling D-57): a parsed chat command runs through the
+  // executor POST cortex/execute runs a direct command through, so it is held to the same rule
+  // (cortexCommandRefusal) for the member the chat runs for. A refused command reaches neither
+  // executeBatch nor an approval request, and is put on record through the executor's audit door with
+  // its refusal. The stream's detected actions (autopilot commands) are held to it too.
+  it.each(MONEY_REPORT_COMMANDS)(
+    'SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, D-57, was it.todo): a command parsed on POST cortex/chat or the chat stream with enableActions is refused to a member the cortexCommandRefusal rule refuses, the money reports included: %s.%s',
+    async (module, action, moduleScope) => {
+      // the chat door: a STAFF member with the module's write scope and revenue none
+      const refused = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { [moduleScope]: 'write', revenue: 'none' } },
+        intents: [{ module, action }],
+      });
+      await refused.chat();
+      expect(refused.executor.executeBatch, `${module}.${action}`).not.toHaveBeenCalled();
+      expect(refused.executor.executeWithApproval).not.toHaveBeenCalled();
+      expect(refused.refusals()).toEqual([
+        expect.objectContaining({
+          command: expect.objectContaining({ module, action, businessId: CHAT_BIZ, userId: CHAT_USER }),
+          result: expect.objectContaining({
+            success: false,
+            error: 'Insufficient permissions: revenue requires read access (you have none)',
+          }),
+        }),
+      ]);
+
+      // control: the same member with revenue:read has the report run
+      const allowed = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { [moduleScope]: 'write', revenue: 'read' } },
+        intents: [{ module, action }],
+      });
+      await allowed.chat();
+      expect(allowed.executed()).toEqual([expect.objectContaining({ module, action, userId: CHAT_USER })]);
+      expect(allowed.refusals()).toEqual([]);
+
+      // the chat stream: its detected actions run as autopilot commands, held to the same rule
+      const streamRefused = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { automations: 'read', [moduleScope]: 'admin', revenue: 'admin' } },
+        detected: [{ actionType: 'CREATE_TASK' }],
+      });
+      const chunks = await streamRefused.stream();
+      expect(streamRefused.executor.executeBatch).not.toHaveBeenCalled();
+      expect(streamRefused.refusals()).toEqual([
+        expect.objectContaining({
+          command: expect.objectContaining({ module: 'autopilot', action: 'create_task', userId: CHAT_USER }),
+          result: expect.objectContaining({ success: false, error: 'Insufficient permissions: automations requires write access (you have read)' }),
+        }),
+      ]);
+      expect(chunks.filter((c) => c.type === 'action_delta').slice(1).map((c) => c.action)).toEqual([
+        expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+      ]);
+      // control: automations write runs it
+      const streamAllowed = chatPipeline({
+        membership: { role: 'STAFF', permissionScopes: { automations: 'write' } },
+        detected: [{ actionType: 'CREATE_TASK' }],
+      });
+      await streamAllowed.stream();
+      expect(streamAllowed.executed()).toEqual([expect.objectContaining({ module: 'autopilot', action: 'create_task' })]);
+    },
   );
 });
