@@ -520,6 +520,91 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
     }
   });
 
+  // W10-KEY-PLAN-SCOPE review SEC-W10KPS-1 (owner rulings D-114, D-57): PlannerService stores a step's
+  // toolName, module and action independently (from the model's output), and KeyCortexPlannerService
+  // (POST cortex/plans/:planId/execute) runs module.action whatever the toolName (buildCommand). A step
+  // that names a tool was judged by that tool alone, so a money report or commerce step stored under a
+  // non-money tool had its stored output (the P&L, the invoices) served to a viewer without revenue read.
+  // A step whose module the KEY connector dispatches is now judged by its tool AND its module.
+  it('SEC-W10KPS-1 (W10-KEY-PLAN-SCOPE review, D-114, D-57): a stored step naming a tool and a KEY connector module is judged by both rules: a money report step under a non-money tool keeps its output from a viewer without revenue:read, a commerce step under one is not shown to that viewer; a module the connector does not dispatch is judged by its tool alone', async () => {
+    const BIZ = 'biz_v96s_kps1';
+    const VIEWER = 'usr_v96s_kps1_viewer';
+    const REPORT = { revenue: 98765, netProfit: 4321, marker: 'v96s_kps1_report' };
+    const INVOICES = [{ id: 'v96s_kps1_invoice', total: 500 }];
+    const PROJECTS = [{ id: 'v96s_kps1_project', name: 'Fit-out' }];
+    const NON_MONEY_TOOLS = ['projects_list', 'fetch_project_status', 'create_task'];
+    const steps = [
+      ...NON_MONEY_TOOLS.map((toolName) => ({ toolName, module: 'finance', action: 'generate_pnl', inputPayload: { period: 'month' }, outputResult: REPORT })),
+      { toolName: 'projects_list', module: 'analytics', action: 'create_report', inputPayload: { type: 'pnl' }, outputResult: REPORT },
+      { toolName: 'projects_list', module: 'analytics', action: 'export_report', inputPayload: { type: 'revenue_by' }, outputResult: REPORT },
+      { toolName: 'projects_list', module: 'commerce', action: 'list_invoices', inputPayload: {}, outputResult: INVOICES },
+      // controls: a connector module the viewer reads, with no money report; a module label the connector
+      // does not dispatch (answered 'Unknown module', so no module.action output is ever stored under it)
+      { toolName: 'projects_list', module: 'projects', action: 'list_projects', inputPayload: {}, outputResult: PROJECTS },
+      { toolName: 'projects_list', module: 'marketing', action: 'list the projects', inputPayload: {}, outputResult: PROJECTS },
+    ];
+    type Viewer = { role: string; permissionScopes: Record<string, string> | null };
+    const read = async (membership: Viewer) => {
+      const prisma = {
+        client: {
+          user: { findUnique: vi.fn(async () => ({ id: VIEWER, role: 'USER' })) },
+          membership: { findUnique: vi.fn(async () => membership) },
+          business: { findFirst: vi.fn(async () => null) },
+        },
+      };
+      const scope = await graphPlanReadScope(prisma as any, BIZ, { id: VIEWER, role: 'USER' });
+      return visiblePlanSteps(steps, scope);
+    };
+    const label = (s: { toolName: string | null; module?: string | null; action: string | null }) => `${s.toolName}:${s.module}.${s.action}`;
+
+    // the tool rule alone shows every one of these steps with its output to the viewers below (the
+    // tools are read by their role defaults); the module rule withholds the money
+    const withheldFrom: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: { ...defaultScopesForRole('ADMIN'), revenue: 'none' } },
+      { role: 'STAFF', permissionScopes: { ...defaultScopesForRole('STAFF'), expenses: 'read', analytics: 'read', revenue: 'none' } },
+    ];
+    for (const membership of withheldFrom) {
+      const who = JSON.stringify(membership);
+      const shown = await read(membership);
+      expect(shown.map(label), who).toEqual(steps.filter((s) => s.module !== 'commerce').map(label));
+      for (const step of shown.filter((s) => s.module === 'finance' || s.module === 'analytics')) {
+        expect(step, `${who} ${label(step)}`).toMatchObject({ outputResult: null, inputPayload: step.inputPayload });
+      }
+      expect(shown.filter((s) => s.module === 'projects' || s.module === 'marketing').map((s) => s.outputResult), who).toEqual([PROJECTS, PROJECTS]);
+    }
+
+    // control: the same viewers holding revenue read are served every step with its output as stored
+    const servedTo: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: null },
+      { role: 'STAFF', permissionScopes: { ...defaultScopesForRole('STAFF'), expenses: 'read', analytics: 'read', revenue: 'read' } },
+    ];
+    for (const membership of servedTo) {
+      const who = JSON.stringify(membership);
+      const shown = await read(membership);
+      expect(shown.map(label), who).toEqual(steps.map(label));
+      expect(shown.map((s) => s.outputResult), who).toEqual(steps.map((s) => s.outputResult));
+    }
+  });
+
+  it('SEC-W10KPS-1 (W10-KEY-PLAN-SCOPE review, D-114) control: KEY_CONNECTOR_MODULES is exactly the modules KeyCortexConnectorService dispatches a command to (its adapter map); any other module is answered Unknown module and stores no output', async () => {
+    const { KeyCortexConnectorService } = await import('../key-cortex/key-cortex-connector.service');
+    const adapter = (i: number) => ({ execute: vi.fn(async (command: any) => ({ success: true, data: { adapter: i }, executionTimeMs: 0, command })) });
+    const connector = new (KeyCortexConnectorService as any)({}, {}, ...Array.from({ length: 18 }, (_v, i) => adapter(i)));
+    const dispatched = Object.entries((connector as any).adapterMap as Record<string, unknown>)
+      .filter(([, a]) => !!a)
+      .map(([m]) => m)
+      .sort();
+    expect([...planAuthority.KEY_CONNECTOR_MODULES].sort()).toEqual(dispatched);
+    for (const module of Object.keys(planAuthority.KEY_PLAN_MODULE_SCOPES)) expect(planAuthority.KEY_CONNECTOR_MODULES.has(module), module).toBe(true);
+    const run = (module: string) =>
+      connector.execute({ module, action: 'list_projects', parameters: {}, businessId: 'biz_v96s_kps1', userId: 'usr_v96s_kps1', source: 'key_cortex', timestamp: new Date(), correlationId: 'v96s_kps1' });
+    for (const module of dispatched) expect((await run(module)).success, module).toBe(true);
+    for (const module of ['marketing', 'expenses', 'automations', 'general', 'keystore', 'null', 'Finance']) {
+      const result = await run(module);
+      expect(result, module).toMatchObject({ success: false, error: `Unknown module: ${module}` });
+    }
+  });
+
   // SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, owner ruling D-57): a parsed chat command runs through the
   // executor POST cortex/execute runs a direct command through, so it is held to the same rule
   // (cortexCommandRefusal) for the member the chat runs for. A refused command reaches neither

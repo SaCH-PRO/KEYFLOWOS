@@ -32,7 +32,7 @@ import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bu
 import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, isCanonicalModule, rankOf } from '../../core/authority/module-vocabulary';
 import type { Prisma } from '@prisma/client';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
-import { KEY_PLAN_MODULE_SCOPES, planStepReadsContacts, planStepReadsMoneyReport } from '../key-cortex/key-cortex-plan-authority';
+import { KEY_CONNECTOR_MODULES, KEY_PLAN_MODULE_SCOPES, planStepReadsContacts, planStepReadsMoneyReport } from '../key-cortex/key-cortex-plan-authority';
 import {
   CANONICAL_MODULE_TOOLS,
   CRM_ROW_VISIBILITY_TOOLS,
@@ -631,20 +631,45 @@ function withholdHiddenRows(value: unknown, hidden: ReadonlySet<string>): unknow
  * OWNER or a SUPER_ADMIN is; an ADMIN by its explicit scope map, else its role defaults). GET
  * ai/execution-logs applies the same rule through visibleExecutionLogs. A registry money report tool
  * is judged by its tool (graphActionRequirement asks revenue:read for it, CRR-A7-2).
+ *
+ * W10-KEY-PLAN-SCOPE review SEC-W10KPS-1 (owner rulings D-114, D-57): a step that names a tool AND a
+ * module the KEY connector dispatches (KEY_CONNECTOR_MODULES) is judged by both rules: shown only when
+ * both show it, its output only when both serve it. PlannerService stores toolName, module and action
+ * independently (from the model's output), PlanExecutorService runs the tool and KeyCortexPlannerService
+ * (POST cortex/plans/:planId/execute, any plan of the business) runs module.action whatever the toolName,
+ * so the stored output may be either one's. A step {toolName: a non-money tool, module 'finance', action
+ * 'generate_pnl'} had the P&L it ran served to every viewer the tool alone admitted (an ADMIN whose
+ * explicit map sets revenue to none, a STAFF proposer without revenue read), and a commerce step escaped
+ * cortexStep('commerce') the same way. A step whose module the connector does not dispatch (a
+ * PlannerService label such as 'marketing' or 'expenses') is answered 'Unknown module' there and stores
+ * no module.action output, so its tool alone judges it. The KEY executor's execution-log rows name
+ * toolName module.action, which executionLogStep reads as no tool, so they are judged by their module.
  */
 function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { shown: boolean; output: boolean } {
   const tool = planStepDispatchedTool(step);
-  if (tool !== null) {
-    return scope.step(tool) ? { shown: true, output: scope.stepOutput(tool) } : { shown: false, output: false };
-  }
   const module = step.module;
-  if (module) {
-    if (!scope.cortexStep(module)) return { shown: false, output: false };
-    const action = step.action ?? '';
-    if (planStepReadsMoneyReport(module, action) && !scope.cortexStep('revenue')) return { shown: true, output: false };
-    return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, action) };
+  const action = step.action ?? '';
+  if (tool !== null) {
+    if (!scope.step(tool)) return { shown: false, output: false };
+    const output = scope.stepOutput(tool);
+    if (!module || !KEY_CONNECTOR_MODULES.has(module)) return { shown: true, output };
+    const cortex = cortexStepReadRule(module, action, scope);
+    return { shown: cortex.shown, output: cortex.shown && cortex.output && output };
   }
+  if (module) return cortexStepReadRule(module, action, scope);
   return { shown: true, output: true };
+}
+
+/**
+ * The read rule of a KEY-cortex step, module.action (planStepReadRule): shown to a viewer who reads its
+ * module (cortexStep); its output withheld from a viewer without revenue read when it reads a money report
+ * (W10-KEY-PLAN-SCOPE, SEC-W9MRK-2, D-57, D-114), and the OWNER's and a SUPER_ADMIN's only when it reads
+ * contacts (planStepReadsContacts, KEY-R3a).
+ */
+function cortexStepReadRule(module: string, action: string, scope: GraphPlanReadScope): { shown: boolean; output: boolean } {
+  if (!scope.cortexStep(module)) return { shown: false, output: false };
+  if (planStepReadsMoneyReport(module, action) && !scope.cortexStep('revenue')) return { shown: true, output: false };
+  return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, action) };
 }
 
 /**

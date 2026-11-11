@@ -49,6 +49,37 @@ export const KEY_PLAN_MODULE_SCOPES: Readonly<Record<string, CanonicalModule | '
 export const MONEY_WRITE_MODULES: ReadonlySet<string> = new Set(['commerce', 'finance']);
 
 /**
+ * W10-KEY-PLAN-SCOPE review SEC-W10KPS-1 (owner rulings D-114, D-57): the modules KeyCortexConnectorService
+ * dispatches a command to (its adapter map: every module with an adapter; 'keystore' has none). A stored
+ * step of one of these modules may hold the output of module.action whatever its toolName:
+ * KeyCortexPlannerService runs module.action (buildCommand reads no toolName), and PlannerService stores
+ * a step's toolName, module and action independently from the model's output. The plan read rule
+ * (graph-actions.controller planStepReadRule) therefore judges such a step by its module too. A step of
+ * any other module is answered 'Unknown module' by the connector and stores no module.action output.
+ * money-reports-key-parity.spec.ts pins this set to the connector's adapter map.
+ */
+export const KEY_CONNECTOR_MODULES: ReadonlySet<string> = new Set([
+  'crm',
+  'commerce',
+  'bookings',
+  'content',
+  'communications',
+  'flow',
+  'autopilot',
+  'temporal',
+  'inbox',
+  'notifications',
+  'projects',
+  'activity',
+  'genome',
+  'intelligence',
+  'analytics',
+  'finance',
+  'settings',
+  'social',
+]);
+
+/**
  * W10-KEY-PLAN-SCOPE (SEC-W9MRK-1, owner rulings D-57 and D-114): the plan steps that read a money
  * report through LedgerReportingService: finance.generate_pnl (the P&L) and analytics.create_report /
  * export_report (the P&L, cash flow, balance sheet, tax summary and revenue by customer, CSV

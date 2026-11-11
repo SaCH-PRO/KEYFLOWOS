@@ -1319,4 +1319,62 @@ describe('W10-KEY-PLAN-SCOPE (D-114, D-57): an explicit revenue none binds an AD
       expect(served.rows.map((r) => r.outputSummary), viewer).toEqual(markers.map((m) => expect.objectContaining({ data: { done: m } })));
     }
   });
+
+  it('SEC-W10KPS-1 RED-BEFORE (W10-KEY-PLAN-SCOPE review, D-114, D-57, D-74): a stored step naming a non-money tool (projects_list, fetch_project_status, create_task) with module finance, analytics or commerce runs as module.action (the P&L, a report, the invoices); GET cortex/plans/:planId judges it by its module too: the money report output is withheld from the ADMIN whose explicit map sets revenue to none and from a STAFF proposer without revenue read, the commerce step is not shown to them, a projects step keeps its output; the ADMIN with role-default scopes and the OWNER read every output; GET ai/execution-logs agrees', async () => {
+    const toolSteps = [
+      { toolName: 'projects_list', module: 'finance', action: 'generate_pnl' },
+      { toolName: 'fetch_project_status', module: 'analytics', action: 'create_report' },
+      { toolName: 'create_task', module: 'commerce', action: 'list_invoices' },
+      { toolName: 'projects_list', module: 'projects', action: 'list_projects' },
+    ];
+    const labels = toolSteps.map((s) => `${s.module}.${s.action}`);
+    const seed = (planId: string, userId: string) => db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId, objective: `v87b ${planId}`, status: 'pending',
+        steps: { create: toolSteps.map((s, i) => ({ id: `${planId}_s${i + 1}`, order: i + 1, toolName: s.toolName, module: s.module, action: s.action, inputPayload: { marker: `${planId}_s${i + 1}` } })) },
+      },
+    });
+    // a plan of the ADMIN with role-default scopes, run by that ADMIN; a plan the STAFF member without
+    // revenue read proposed, run by the OWNER: each step runs as module.action, whatever its toolName
+    const adminPlan = `${P}kps1_admin`;
+    const staffPlan = `${P}kps1_staff`;
+    await seed(adminPlan, KP.adminDef);
+    await seed(staffPlan, KP.staffFinNoRev);
+    for (const [planId, runner] of [[adminPlan, KP.adminDef], [staffPlan, ID.owner]] as const) {
+      const from = routed.length;
+      expect(await planner.executePlan(planId, {}, asMember(runner)), planId).toMatchObject({ planId, status: 'completed', executed: toolSteps.length });
+      expect(routedFor(planId, from).map((r) => `${r.module}.${r.action}`), planId).toEqual(labels);
+    }
+
+    const read = async (planId: string, viewer: string) => {
+      const plan = await goalsController.getPlan(planId, ID.biz, { id: viewer, role: 'USER' });
+      const steps = [...(plan?.steps ?? [])].sort((a: any, b: any) => a.order - b.order);
+      return steps.map((s: any) => [`${s.module}.${s.action}`, s.outputResult]);
+    };
+    const outputOf = (planId: string, i: number) => expect.objectContaining({ done: `${planId}_s${i + 1}` });
+
+    for (const [planId, viewer] of [[adminPlan, KP.adminNoRev], [staffPlan, KP.adminNoRev], [staffPlan, KP.staffFinNoRev]] as const) {
+      expect(await read(planId, viewer), `${planId} ${viewer}`).toEqual([
+        ['finance.generate_pnl', null],
+        ['analytics.create_report', null],
+        ['projects.list_projects', outputOf(planId, 3)],
+      ]);
+    }
+    for (const viewer of [KP.adminDef, ID.owner]) {
+      for (const planId of [adminPlan, staffPlan]) {
+        expect(await read(planId, viewer), `${planId} ${viewer}`).toEqual(labels.map((l, i) => [l, outputOf(planId, i)]));
+      }
+    }
+
+    // GET ai/execution-logs (the KEY executor's rows, toolName module.action): the same answer for the ADMIN
+    const page = await aiController.getExecutionLogs(ID.biz, { user: { id: KP.adminNoRev, role: 'USER' } }, undefined, undefined, '1000');
+    const rows = (page.logs as any[])
+      .filter((l) => typeof l.inputSummary?.parameters?.marker === 'string' && l.inputSummary.parameters.marker.startsWith(`${adminPlan}_s`))
+      .sort((a, b) => String(a.inputSummary.parameters.marker).localeCompare(String(b.inputSummary.parameters.marker)));
+    expect(rows.map((r) => [r.toolName, r.outputSummary])).toEqual([
+      ['finance.generate_pnl', null],
+      ['analytics.create_report', null],
+      ['projects.list_projects', expect.objectContaining({ data: { done: `${adminPlan}_s4` } })],
+    ]);
+  });
 });
