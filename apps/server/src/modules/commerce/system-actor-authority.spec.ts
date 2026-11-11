@@ -164,9 +164,12 @@ describe('and cannot reach past its own tenant to do it', () => {
   it('leaves the unauthenticated internal path alone', async () => {
     // Callers that pass no actor at all are trusted internals behind a guard.
     // Changing their behaviour was not the point of this fix.
+    // W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half): such a
+    // caller names the tenant its guard established (every production caller
+    // does, RA-G16-01 census); one naming neither is refused (pinned below).
     const { service, recordPayment } = makeService(MINE);
 
-    await service.markInvoicePaid('inv_1');
+    await service.markInvoicePaid('inv_1', undefined, MINE);
 
     // R0-PL-04: the same write as every other caller, with no actor invented.
     expect(recordPayment).toHaveBeenCalledTimes(1);
@@ -176,6 +179,28 @@ describe('and cannot reach past its own tenant to do it', () => {
       expect.objectContaining({ amount: 100 }),
       expect.objectContaining({ actorId: null }),
     );
+  });
+
+  it('W10-MARKPAID-ACTOR-REQUIRED (D-05, RA-G16-01 service half): refuses a call that names neither an actor nor a tenant, before the invoice is read', async () => {
+    // No actor to check and no tenant to bind the lookup to: nothing would
+    // stand between the caller and any invoice in any business.
+    type Call = (s: CommerceService) => Promise<unknown>;
+    const calls: Call[] = [
+      (s) => s.markInvoicePaid('inv_1'),
+      (s) => s.markInvoicePaid('inv_1', undefined, undefined),
+      (s) => s.markInvoicePaid('inv_1', null, undefined),
+      (s) => s.markInvoicePaid('inv_1', '', ''),
+    ];
+    for (const call of calls) {
+      const { service, transition, recordPayment } = makeService(MINE);
+      const { findUnique } = (service as unknown as { prisma: { client: { invoice: { findUnique: ReturnType<typeof vi.fn> } } } })
+        .prisma.client.invoice;
+
+      await expect(call(service)).rejects.toThrow(/Not authorized/);
+      expect(findUnique).not.toHaveBeenCalled();
+      expect(transition).not.toHaveBeenCalled();
+      expect(recordPayment).not.toHaveBeenCalled();
+    }
   });
 });
 

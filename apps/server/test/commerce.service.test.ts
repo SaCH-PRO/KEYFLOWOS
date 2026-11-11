@@ -177,7 +177,10 @@ describe('CommerceService', () => {
     const crm = { logContactEvent: vi.fn() } as any;
     const { service } = makeService(prisma, events, crm);
 
-    const invoice = await service.markInvoicePaid('inv_1');
+    // W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half): a call naming
+    // neither an actor nor a tenant is refused, so the event is proven on the
+    // shape every production caller uses (actor and tenant named).
+    const invoice = await service.markInvoicePaid('inv_1', 'user_1', 'biz_1');
 
     expect(invoice!.status).toBe('PAID');
     expect(emit).toHaveBeenCalledWith(
