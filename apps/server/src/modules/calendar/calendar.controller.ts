@@ -172,9 +172,18 @@ export class CalendarController {
     return this.sync.manualResync(businessId);
   }
 
+  // W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T07]; review SEC-W9GD-3):
+  // pulling the coming events of the business Google Calendar into the
+  // temporal flow is a sync of the Google connection, so it is the owner's, as
+  // .../sync/google/resync is (assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY first). PATCH .../sync/settings stays a member's.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/temporal-flow')
-  async syncGoogleCalendarToTemporalFlow(@Param('businessId') businessId: string) {
+  async syncGoogleCalendarToTemporalFlow(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.temporalSync.syncBusiness(businessId);
   }
 

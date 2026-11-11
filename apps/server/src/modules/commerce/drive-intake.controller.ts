@@ -16,6 +16,7 @@ import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/m
 import { ConnectorIntelligenceService } from '../ai/connector-intelligence.service';
 import { DriveIntakeOrchestrator } from './drive-intake-orchestrator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 
 interface AuthenticatedRequest {
   user?: { id: string; role?: string };
@@ -30,8 +31,18 @@ export class DriveIntakeController {
     private readonly prisma: PrismaService,
   ) {}
 
+  /**
+   * W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T06]; review CRR-W9GD-1):
+   * this is the Google Drive sync the web starts (Key Connect and the Drive
+   * intake queue): ConnectorIntelligenceService.syncGoogleDrive pulls the
+   * business Drive and writes intake rows, so it is the owner's to start, as
+   * the Drive consent and disconnect are (assertGoogleConnectOwner: OWNER
+   * membership, Business.ownerId or SUPER_ADMIN, else 403
+   * GOOGLE_CONNECT_OWNER_ONLY, first, before anything is pulled).
+   */
   @Post('sync')
-  async sync(@Param('businessId') businessId: string) {
+  async sync(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     const result = await this.connectorIntelligence.syncGoogleDrive(businessId);
     return { success: true, ...result };
   }
