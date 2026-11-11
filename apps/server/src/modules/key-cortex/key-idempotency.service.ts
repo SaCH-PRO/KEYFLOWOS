@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -75,11 +75,28 @@ interface StoredIdempotencyKey {
   error: string | null;
 }
 
+/** An open claim as check() reads it: the row id is its claimId. */
+interface StoredClaim extends StoredIdempotencyKey {
+  id: string;
+  updatedAt: Date;
+}
+
 type SettleData =
   | { status: 'completed'; response: Prisma.InputJsonValue }
   | { status: 'failed'; error: string; response?: Prisma.InputJsonValue };
 
 const IN_FLIGHT = 'Idempotency key is being processed by another request';
+
+/**
+ * The claim lease (owner ruling D-103, W10-CLAIM-LEASE; closes V1-19 review
+ * CR-V19-2 and supersedes D-51's manual release): a claim still open this long
+ * after it was taken is stranded (its claimant crashed between check() and its
+ * settle), and the next check() of the same request takes it over.
+ */
+export const KEY_IDEMPOTENCY_CLAIM_LEASE_MS = 15 * 60 * 1000;
+
+/** The KEY execution log's (CortexActionLog) action type of a takeover (D-103). */
+export const KEY_IDEMPOTENCY_TAKEOVER_ACTION = 'idempotency.claim_takeover';
 
 /** Prisma's unique-constraint violation, matched on the code (the idiom of key-action-boundary.service.ts). */
 function isUniqueViolation(err: unknown): boolean {
@@ -124,6 +141,12 @@ function isRecordNotFound(err: unknown): boolean {
  * except the one that files an approval proposal, which settles the key with
  * that proposal so a retry is answered with it instead of filing another
  * (V1-19b review, SEC-V19b-2).
+ *
+ * A claim stranded by a crash between check() and its settle is not held for
+ * good (owner ruling D-103, W10-CLAIM-LEASE, closing CR-V19-2): still open
+ * KEY_IDEMPOTENCY_CLAIM_LEASE_MS (15 minutes) after it was taken (the row's
+ * updated_at: when it was claimed, or last taken over), it is taken over by
+ * the next check() of the same request. See takeOver().
  */
 @Injectable()
 export class KeyIdempotencyService {
@@ -144,10 +167,20 @@ export class KeyIdempotencyService {
       },
     };
 
-    // A settled key answers from the read; there is nothing left to claim.
+    // A settled key answers from the read; there is nothing left to claim, and
+    // however old it is, a finished claim is never run again (D-103).
     const existing = await this.prisma.client.idempotencyKey.findUnique({ where });
     if (existing && (existing.status === 'completed' || existing.status === 'failed')) {
       return this.answerFor<T>(existing, req);
+    }
+
+    // D-103: an open claim past its lease is stranded, and this retry of the
+    // same request takes it over. A retry that loses the takeover to another
+    // (or finds the claim settled or released meanwhile) goes on below and is
+    // answered from the row as it now is.
+    if (existing && this.isStranded(existing) && !this.isOtherRequest(existing, req)) {
+      const takenOver = await this.takeOver<T>(existing, req);
+      if (takenOver) return takenOver;
     }
 
     // Absent or in flight: the insert is the claim. A held key fails it on the
@@ -175,11 +208,114 @@ export class KeyIdempotencyService {
     return this.answerFor<T>(holder, req);
   }
 
+  /**
+   * Whether the caller presents another request than the one the key was
+   * claimed for. Compared only when both sides carry a hash: a key stored or
+   * presented without one has nothing to compare and replays as before.
+   */
+  private isOtherRequest(row: StoredIdempotencyKey, req: IdempotencyRequest): boolean {
+    return !!(req.requestHash && row.requestHash && req.requestHash !== row.requestHash);
+  }
+
+  /**
+   * D-103: an open claim (status 'pending', the status check() claims under)
+   * not taken again for KEY_IDEMPOTENCY_CLAIM_LEASE_MS. Any other status is
+   * not this service's claim to take over: a settled key is never run again,
+   * and the KEY action boundary's own rows in this table ('claimed', 'voided')
+   * are never touched here.
+   */
+  private isStranded(row: StoredIdempotencyKey & { updatedAt?: Date }): row is StoredClaim {
+    return (
+      row.status === 'pending' &&
+      row.updatedAt instanceof Date &&
+      Date.now() - row.updatedAt.getTime() >= KEY_IDEMPOTENCY_CLAIM_LEASE_MS
+    );
+  }
+
+  /**
+   * Take a stranded claim over for this caller (owner ruling D-103,
+   * W10-CLAIM-LEASE). One conditional update on the claim row: it matches only
+   * while the row is still the stranded claim this caller read (its id, still
+   * 'pending', still past its lease), and it gives the row a new id, the new
+   * claimId, and a new lease (updated_at now). Of two retries racing for one
+   * stranded claim, the second update waits on the row lock and then matches
+   * nothing (the id is gone), so exactly one takes it over. The stranded
+   * holder's claimId then names no row: its complete(), fail() and release()
+   * bind nothing and answer false.
+   *
+   * The takeover is written to the KEY execution log (CortexActionLog) in the
+   * same transaction, naming the old claim and its age, so no takeover goes
+   * unrecorded: if the log row cannot be written the takeover is undone and
+   * the error propagates, as any other database error of check() does.
+   *
+   * Answers 'new' with the new claimId, or null when another caller took the
+   * claim over first, or it was settled or released meanwhile.
+   */
+  private async takeOver<T>(stale: StoredClaim, req: IdempotencyRequest): Promise<IdempotencyCheckResult<T> | null> {
+    const claimId = randomUUID();
+    // The stranded claim as this caller read it (values, not the row object).
+    const staleId = stale.id;
+    const staleTakenAt = new Date(stale.updatedAt.getTime());
+    const staleHash = stale.requestHash;
+    const now = new Date();
+    const ageMs = now.getTime() - staleTakenAt.getTime();
+    const ageMinutes = Math.floor(ageMs / 60_000);
+    const leaseMinutes = KEY_IDEMPOTENCY_CLAIM_LEASE_MS / 60_000;
+
+    const taken = await this.prisma.client.$transaction(async (tx) => {
+      const { count } = await tx.idempotencyKey.updateMany({
+        where: {
+          id: staleId,
+          businessId: req.businessId,
+          idempotencyKey: req.idempotencyKey,
+          status: 'pending',
+          updatedAt: { lte: new Date(now.getTime() - KEY_IDEMPOTENCY_CLAIM_LEASE_MS) },
+        },
+        // The key stays bound to its request: only the same request (or one
+        // with nothing to compare) gets here, so the stored hash is kept unless
+        // the row had none and this caller brings one, as a fresh claim would.
+        data: { id: claimId, updatedAt: now, requestHash: req.requestHash ?? staleHash },
+      });
+      if (count !== 1) return false;
+
+      await tx.cortexActionLog.create({
+        data: {
+          businessId: req.businessId,
+          sessionId: `idempotency:${req.idempotencyKey}`,
+          actionType: KEY_IDEMPOTENCY_TAKEOVER_ACTION,
+          status: 'success',
+          description:
+            `Idempotency claim ${staleId} on key ${req.idempotencyKey} was still open ${ageMinutes} min after it was taken ` +
+            `(lease ${leaseMinutes} min, D-103): taken over as claim ${claimId}`,
+          result: JSON.stringify({
+            idempotencyKey: req.idempotencyKey,
+            staleClaimId: staleId,
+            staleClaimTakenAt: staleTakenAt.toISOString(),
+            staleClaimAgeMs: ageMs,
+            newClaimId: claimId,
+            leaseMs: KEY_IDEMPOTENCY_CLAIM_LEASE_MS,
+            ruling: 'D-103',
+          }),
+          requiresApproval: false,
+          startedAt: now,
+          completedAt: now,
+          durationMs: 0,
+          createdAt: now,
+        },
+      });
+      return true;
+    });
+    if (!taken) return null;
+
+    this.logger.warn(
+      `[check][${req.businessId}] idempotency key ${req.idempotencyKey}: claim ${staleId} open ${ageMinutes} min past its taking (lease ${leaseMinutes} min) was taken over as claim ${claimId} (D-103)`,
+    );
+    return { status: 'new', claimId };
+  }
+
   /** What a caller that does not hold the claim is told about the stored key. */
   private answerFor<T>(row: StoredIdempotencyKey, req: IdempotencyRequest): IdempotencyCheckResult<T> {
-    // Compared only when both sides carry a hash: a key stored or presented
-    // without one has nothing to compare and replays as before.
-    if (req.requestHash && row.requestHash && req.requestHash !== row.requestHash) {
+    if (this.isOtherRequest(row, req)) {
       this.logger.warn(
         `[check][${req.businessId}] idempotency key ${req.idempotencyKey} reused for a different request`,
       );
@@ -271,8 +407,11 @@ export class KeyIdempotencyService {
       return true;
     } catch (err) {
       if (!isRecordNotFound(err)) throw err;
+      // A claimId that names no open claim was settled, released, or (D-103)
+      // taken over after its lease by a retry: this settle binds nothing.
       this.logger.warn(
-        `[${op}][${req.businessId}] idempotency key ${req.idempotencyKey} has no open claim for this caller; the stored row is unchanged`,
+        `[${op}][${req.businessId}] idempotency key ${req.idempotencyKey} has no open claim for this caller` +
+          `${req.claimId ? ` (claim ${req.claimId} is settled, released, or was taken over after its lease)` : ''}; the stored row is unchanged`,
       );
       return false;
     }
