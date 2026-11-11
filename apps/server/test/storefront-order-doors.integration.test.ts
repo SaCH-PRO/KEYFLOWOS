@@ -104,6 +104,18 @@
  *           contact) is answered 201 paid / PAID, with one contact, its invoice
  *           made out to it, and no placed order left behind
  *
+ * W10-PAYPAL-CURRENCY (owner ruling D-106: PayPal is not offered for an order
+ * in a currency PayPal does not support):
+ *
+ *   V87-16  the storefront gateway list offers no PayPal for a TTD, JMD, BBD,
+ *           GYD or XCD amount, and the PayPal checkout of a TTD cart is
+ *           refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called
+ *           (the PayPal SDK client is stubbed in this case only); control: a
+ *           USD cart is offered PayPal and checks out a USD order. The order
+ *           itself is still written before the refusal, as it was before
+ *           D-106 when PayPal refused the TTD order (StoreOrderService is
+ *           outside the W10-PAYPAL-CURRENCY write set)
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard,
  * PublicRateLimitGuard (real Redis, this suite's namespace), SiteService,
@@ -1162,5 +1174,64 @@ describe('G6PUB-R3-STORE-ORDER-DOORS review repairs: an order created paid (D-77
       );
     }
     expect(results).toEqual(Array(3).fill('201|paid/PAID|contacts=1|PAID:true'));
+  });
+});
+
+describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106)', () => {
+  it('V87-16 (W10-PAYPAL-CURRENCY, D-106): GET /site/storefront/public/:slug/gateways offers no PayPal for a TTD amount (nor JMD, BBD, GYD, XCD, nor a TTD business with no cart currency), and the PayPal checkout of a TTD cart is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called; control: a USD cart is offered PayPal in USD and its PayPal checkout makes a USD order', async () => {
+    const paypalEnv = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
+    const previous = Object.fromEntries(Object.keys(paypalEnv).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, paypalEnv);
+    // The PayPal SDK client (the provider edge), stubbed: it records the orders it is asked for.
+    const ordered: any[] = [];
+    const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
+      client: {},
+      ordersController: {
+        createOrder: vi.fn(async (req: any) => {
+          ordered.push(req?.body?.purchaseUnits);
+          return { result: { id: `${P}pp_order_${ordered.length}`, links: [] } };
+        }),
+      },
+    });
+    const gateways = async (slug: string, currency?: string) => {
+      await clearRateLimits();
+      const res = await agent().get(`/site/storefront/public/${encodeURIComponent(slug)}/gateways`).query(currency ? { currency } : {});
+      expect(res.status, `${slug} ${currency ?? ''}: ${JSON.stringify(res.body)}`).toBe(200);
+      return res.body as Array<{ id: string; name: string; currencies: string[] }>;
+    };
+    try {
+      // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } for every cart.
+      for (const code of ['TTD', 'JMD', 'BBD', 'GYD', 'XCD']) {
+        expect((await gateways(SLUG.a, code)).map((g) => g.id), code).not.toContain('paypal');
+      }
+      expect((await gateways(SLUG.a)).map((g) => g.id), 'the business currency (TTD)').not.toContain('paypal');
+
+      // At 71a97cb1: 201, PayPal asked for a TTD order (real PayPal refuses it).
+      await clearRateLimits();
+      const refused = await checkout(SLUG.a, cart(ID.prodA, 'PAYPAL'));
+      await settle();
+      expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+      expect(refused.body).toMatchObject({
+        code: 'PAYPAL_CURRENCY_UNSUPPORTED',
+        message: 'PayPal does not support TTD: this order cannot be paid with PayPal. Choose another payment method.',
+      });
+      expect(clientSpy, 'PayPal is never called').not.toHaveBeenCalled();
+      expect(ordered).toEqual([]);
+
+      // Control: a USD cart is offered PayPal, in USD, and its checkout makes a USD order.
+      expect((await gateways(SLUG.usd, 'USD')).find((g) => g.id === 'paypal')).toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      await clearRateLimits();
+      const usd = await checkout(SLUG.usd, cart(ID.prodUsd, 'PAYPAL'));
+      await settle();
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body.payment).toMatchObject({ status: 'PAYPAL_AWAITING_APPROVAL' });
+      expect(ordered.map((units) => `${units[0].amount.currencyCode}:${units[0].amount.value}`)).toEqual([`USD:${ORDER_TOTAL.toFixed(2)}`]);
+    } finally {
+      clientSpy.mockRestore();
+      for (const [k, v] of Object.entries(previous)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });

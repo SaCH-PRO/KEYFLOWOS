@@ -1868,7 +1868,8 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
     return vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
       client: {},
       ordersController: {
-        getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00', currencyCode: 'TTD' } }] } }),
+        // W10-PAYPAL-CURRENCY (D-106): the capture invoices are USD; PayPal does not support TTD.
+        getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00', currencyCode: 'USD' } }] } }),
         captureOrder: async () => {
           await duringCapture?.();
           return {
@@ -1897,7 +1898,7 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
         JSON.stringify({
           id: eventId,
           event_type: 'PAYMENT.CAPTURE.COMPLETED',
-          resource: { id: captureId, custom_id: invoiceId, amount: { value: '100.00', currency_code: 'TTD' } },
+          resource: { id: captureId, custom_id: invoiceId, amount: { value: '100.00', currency_code: 'USD' } },
         }),
         {},
       );
@@ -1927,10 +1928,11 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
   beforeAll(async () => {
     await seedTenant(ID.bizCapture, 'CASH');
     await db.contact.create({ data: { id: ID.contactCapture, businessId: ID.bizCapture, firstName: 'V15A', lastName: 'Capture', email: `${P}capture@test.local` } });
-    await seedInvoice(ID.invCapture, ID.bizCapture, ID.contactCapture, 50, 100, 'TTD', 'SENT');
-    await seedInvoice(ID.invCaptureAbort, ID.bizCapture, ID.contactCapture, 51, 100, 'TTD', 'SENT');
-    await seedInvoice(ID.invCaptureRetry, ID.bizCapture, ID.contactCapture, 52, 100, 'TTD', 'SENT');
-    await seedInvoice(ID.invCaptureRace, ID.bizCapture, ID.contactCapture, 53, 100, 'TTD', 'SENT');
+    // W10-PAYPAL-CURRENCY (D-106): in USD, a currency PayPal supports (a TTD invoice's capture is refused before PayPal is called).
+    await seedInvoice(ID.invCapture, ID.bizCapture, ID.contactCapture, 50, 100, 'USD', 'SENT');
+    await seedInvoice(ID.invCaptureAbort, ID.bizCapture, ID.contactCapture, 51, 100, 'USD', 'SENT');
+    await seedInvoice(ID.invCaptureRetry, ID.bizCapture, ID.contactCapture, 52, 100, 'USD', 'SENT');
+    await seedInvoice(ID.invCaptureRace, ID.bizCapture, ID.contactCapture, 53, 100, 'USD', 'SENT');
   }, 60_000);
 
   it('LWD-24 (V1-15c): capturePaypalOrder records one SUCCESSFUL row and posts it once; the invoice is PAID', async () => {

@@ -88,11 +88,10 @@
  *          PAYMENT.CAPTURE.COMPLETED delivery of the same capture id write no
  *          second row and no second posting
  *   PC-08  createPaypalOrder asks PayPal for the invoice's own currency, never
- *          USD for a TTD invoice, and the capture checks it: against the stubbed
- *          SDK a TTD invoice's own order is captured and recorded in TTD. Real
- *          PayPal does not offer TTD, so that checkout fails closed at
- *          createOrder; refusing it up front with 400 is PC-08b (todo: review
- *          V05-COR-4 / CR-V05-4, held by TG-14 / TG-14b)
+ *          USD for a EUR invoice, and the capture checks it: against the
+ *          stubbed SDK a EUR invoice's own order is captured and recorded in
+ *          EUR (amended by W10-PAYPAL-CURRENCY: it was a TTD invoice, which
+ *          D-106 no longer lets reach PayPal)
  *   PC-09  LEDGER: every SUCCESSFUL provider payment of this suite has exactly
  *          one Payment:<id>:payment_recorded FinancialTransaction whose debits
  *          equal its credits; payments.service.ts writes no SUCCESSFUL 'paypal'
@@ -144,6 +143,27 @@
  *          are refused WIPAY_KEY_REQUIRED and a sandbox-keyed success settles
  *          nothing (PC-21b, the refusal at the payment-secret write, is a
  *          todo: identity.service.ts is outside this packet's write set)
+ *
+ * W10-PAYPAL-CURRENCY (owner ruling D-106: PayPal is not offered for an
+ * invoice or order in a currency PayPal does not support, TTD, JMD, BBD, GYD,
+ * XCD and any other it does not list; the payer sees which methods can pay
+ * it). Real PayPal refused createPaypalOrder's TTD order, so the payer of a
+ * TTD invoice was offered PayPal and got 500 'Failed to create PayPal order'
+ * (review V05-COR-4 / CR-V05-4):
+ *
+ *   PC-08b the pay link of a TTD invoice is not offered PayPal, and its PayPal
+ *          checkout and capture are refused 400 PAYPAL_CURRENCY_UNSUPPORTED
+ *          before PayPal is called; nothing is written (was a todo). Control:
+ *          a USD invoice's pay link is offered PayPal and makes a USD order
+ *   PC-08c the bare-id gateway list and the generic invoice checkout, the same
+ *   PC-08d the storefront: the gateway list the storefront reads offers no
+ *          PayPal for a TTD, JMD, BBD, GYD or XCD amount (nor for a TTD
+ *          business's cart in no currency), and createStorePayment and the
+ *          generic storefront checkout refuse a TTD order's PayPal order
+ *          before PayPal is called. Control: USD and EUR are offered PayPal
+ *          in their own currency
+ *   PC-15  (amended) the storefront PayPal order in its own currency is shown
+ *          on a EUR order
  *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
@@ -223,9 +243,37 @@ const ID = {
   contactPaypal: `${P}contactPaypal`,
   invUsd: `${P}invUsd`, // USD 100: the matching capture
   invUsdOther: `${P}invUsdOther`, // USD 100: the invoice another order names
-  invTtd: `${P}invTtd`, // TTD 100: currency refusals
-  invTtdOwn: `${P}invTtdOwn`, // TTD 100: its own order, made in TTD
+  invTtd: `${P}invTtd`, // TTD 100: D-106, PayPal is not offered and its checkout is refused (PC-08b, PC-08c)
+  invTtdOwn: `${P}invTtdOwn`, // TTD 100: D-106, the capture of an order made in TTD is refused (PC-08b)
+  // W10-PAYPAL-CURRENCY (D-106): a EUR business (its ledger posts EUR, D-13), seeded by the PayPal describe and the
+  // cases that use them, so the fixture sanity counts are unchanged.
+  bizEur: `${P}bizEur`,
+  contactEur: `${P}contactEur`,
+  invEur: `${P}invEur`, // EUR 100: the wrong-currency and no-currency orders (PC-06)
+  invEurOwn: `${P}invEurOwn`, // EUR 100: its own order, made in EUR (PC-08)
 };
+/** W10-PAYPAL-CURRENCY (D-106): the code of a PayPal refusal for a currency PayPal does not support. */
+const PAYPAL_CURRENCY_UNSUPPORTED = 'PAYPAL_CURRENCY_UNSUPPORTED';
+const paypalRefusal = (currency: string, payable: 'invoice' | 'order') => ({
+  code: PAYPAL_CURRENCY_UNSUPPORTED,
+  message: `PayPal does not support ${currency}: this ${payable} cannot be paid with PayPal. Choose another payment method.`,
+});
+/** PayPal app credentials (env), set only inside the cases that read a gateway list for PayPal (PC-08b..PC-08d). */
+const PAYPAL_ENV = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
+
+/** Runs `fn` with PayPal configured for every business (PAYPAL_ENV), then restores the environment. */
+async function withPaypalEnv<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = Object.fromEntries(Object.keys(PAYPAL_ENV).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, PAYPAL_ENV);
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(previous)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
 const TOTAL = 100;
 const STORE_TOTAL = 50;
 
@@ -1009,25 +1057,36 @@ describe('review V05-SEC-3: the platform WiPay key verifies only payables that p
 });
 
 describe('V1-05: a PayPal capture is bound to its invoice, amount and currency and recorded through the ledger door', () => {
+  beforeAll(async () => {
+    // W10-PAYPAL-CURRENCY (D-106): a EUR business, whose EUR invoices PayPal takes and whose ledger posts EUR (D-13).
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    await seedBusiness(ID.bizEur, 'EUR');
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizEur);
+    await db.contact.create({ data: { id: ID.contactEur, businessId: ID.bizEur, firstName: 'V05A', lastName: 'Eur', email: `${P}eur@test.local` } });
+  });
+
   it('PC-06: orders naming another invoice, a wrong amount, a wrong currency (both ways) or no currency get 400 before PayPal captures anything; no row, no posting', async () => {
+    // W10-PAYPAL-CURRENCY (D-106): a TTD invoice's capture is refused before its order is read (PC-08b), so the
+    // order binding's currency check is shown on a EUR invoice, a currency PayPal supports (it was the TTD invoice).
+    await seedInvoice(ID.invEur, ID.bizEur, ID.contactEur, TOTAL, 'EUR');
     const book: Array<[string, string, string, any[]]> = [
       ['custom_id of another invoice', ID.invUsd, `${P}order_other_invoice`, [{ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
       ['a wrong amount', ID.invUsd, `${P}order_wrong_amount`, [{ customId: ID.invUsd, amount: { currencyCode: 'USD', value: '1.00' } }]],
-      ['USD order for a TTD invoice', ID.invTtd, `${P}order_usd_for_ttd`, [{ customId: ID.invTtd, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
+      ['USD order for a EUR invoice', ID.invEur, `${P}order_usd_for_eur`, [{ customId: ID.invEur, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } }]],
       ['TTD order for a USD invoice', ID.invUsd, `${P}order_ttd_for_usd`, [{ customId: ID.invUsd, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]],
-      ['no currency', ID.invTtd, `${P}order_no_currency`, [{ customId: ID.invTtd, amount: { value: TOTAL.toFixed(2) } }]],
+      ['no currency', ID.invEur, `${P}order_no_currency`, [{ customId: ID.invEur, amount: { value: TOTAL.toFixed(2) } }]],
     ];
     const captures = paypalOrders.captureOrder.mock.calls.length;
     for (const [label, invoiceId, orderId, units] of book) {
       orderBook.set(orderId, units);
       await clearRateLimits();
       const res = await capture(invoiceId, orderId);
-      // At the base: 'USD order for a TTD invoice', 'TTD order for a USD invoice' and 'no currency' are captured and recorded.
+      // At the base: the wrong-currency orders (then for a TTD invoice) and 'no currency' are captured and recorded.
       expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
       expect(res.body.message, label).toBe('This PayPal order does not belong to this invoice');
     }
     expect(paypalOrders.captureOrder.mock.calls.length, 'PayPal captured nothing').toBe(captures);
-    for (const inv of [ID.invUsd, ID.invUsdOther, ID.invTtd]) {
+    for (const inv of [ID.invUsd, ID.invUsdOther, ID.invEur]) {
       expect(await rowsOf(inv), inv).toEqual([]);
       expect(await postingCount(inv), inv).toBe(0);
       expect(await invoiceStatus(inv), inv).toBe('SENT');
@@ -1060,31 +1119,154 @@ describe('V1-05: a PayPal capture is bound to its invoice, amount and currency a
     await expectBalanced(ID.bizPaypal);
   });
 
-  // Review V05-COR-4 / CR-V05-4: this proves the currency binding against the stubbed SDK only; real PayPal does not offer TTD (PC-08b).
-  it("PC-08: createPaypalOrder asks PayPal for the invoice's own currency, never USD for a TTD invoice, and the capture checks it: against the stubbed SDK a TTD invoice's own order is captured and recorded in TTD", async () => {
-    const created = await paypalCheckout(ID.invTtdOwn);
+  // W10-PAYPAL-CURRENCY (D-106): the currency binding is shown on a EUR invoice; a TTD invoice no longer reaches PayPal (PC-08b).
+  it("PC-08 (amended by W10-PAYPAL-CURRENCY, D-106): createPaypalOrder asks PayPal for the invoice's own currency, never USD for a EUR invoice, and the capture checks it: against the stubbed SDK a EUR invoice's own order is captured and recorded in EUR", async () => {
+    await seedInvoice(ID.invEurOwn, ID.bizEur, ID.contactEur, TOTAL, 'EUR');
+    const created = await paypalCheckout(ID.invEurOwn);
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     expect(created.body).toMatchObject({ type: 'paypal_order' });
     const orderId = created.body.orderId as string;
-    // At the base: currencyCode 'USD' whatever the invoice's currency.
-    expect(orderBook.get(orderId)).toEqual([expect.objectContaining({ customId: ID.invTtdOwn, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } })]);
+    // At the V1-05 base: currencyCode 'USD' whatever the invoice's currency.
+    expect(orderBook.get(orderId)).toEqual([expect.objectContaining({ customId: ID.invEurOwn, amount: { currencyCode: 'EUR', value: TOTAL.toFixed(2) } })]);
 
     await clearRateLimits();
-    const res = await capture(ID.invTtdOwn, orderId);
+    const res = await capture(ID.invEurOwn, orderId);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(await rowsOf(ID.invTtdOwn)).toEqual([`paypal:${P}cap_${orderId}:SUCCESSFUL:${TOTAL}:TTD`]);
-    expect(await invoiceStatus(ID.invTtdOwn)).toBe('PAID');
-    await expectBalanced(ID.bizPaypal);
+    expect(await rowsOf(ID.invEurOwn)).toEqual([`paypal:${P}cap_${orderId}:SUCCESSFUL:${TOTAL}:EUR`]);
+    expect(await invoiceStatus(ID.invEurOwn)).toBe('PAID');
+    await expectBalanced(ID.bizEur);
+  });
+});
+
+describe('W10-PAYPAL-CURRENCY: PayPal is not offered for a currency PayPal does not support (D-106)', () => {
+  /** Every PayPal SDK call this suite's stub has answered (orders made, read, captured). */
+  const paypalCalls = () => [
+    paypalOrders.createOrder.mock.calls.length,
+    paypalOrders.getOrder.mock.calls.length,
+    paypalOrders.captureOrder.mock.calls.length,
+  ];
+  const ids = (body: unknown) => (body as Array<{ id: string }>).map((g) => g.id);
+
+  async function expectUntouched(invoiceIds: string[]) {
+    for (const inv of invoiceIds) {
+      expect(await rowsOf(inv), inv).toEqual([]);
+      expect(await postingCount(inv), inv).toBe(0);
+      expect(await invoiceStatus(inv), inv).toBe('SENT');
+    }
+  }
+
+  it("PC-08b (W10-PAYPAL-CURRENCY, D-106, was it.todo): PayPal does not support TTD (nor JMD, BBD, GYD, XCD), so the pay link of a TTD invoice is not offered PayPal, and its PayPal checkout and the capture of a TTD order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called (no order made, read or captured); nothing is written; control: a USD invoice's pay link is offered PayPal in USD and its checkout makes a USD order", async () => {
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      await clearRateLimits();
+      const listed = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invTtd))}/gateways`);
+      expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+      // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } is offered for the TTD invoice.
+      expect(ids(listed.body), 'pay-link gateway list').not.toContain('paypal');
+
+      // At 71a97cb1: 201, PayPal asked for a TTD order (real PayPal refuses it: the payer got 500 'Failed to create PayPal order').
+      const checkout = await paypalCheckout(ID.invTtd);
+      expect(checkout.status, JSON.stringify(checkout.body)).toBe(400);
+      expect(checkout.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+      expect(JSON.stringify(checkout.body), 'the refusal names no invoice').not.toContain(ID.invTtd);
+
+      // An order made in TTD (as the base made them) is not read or captured either.
+      const ttdOrder = `${P}order_ttd_own`;
+      orderBook.set(ttdOrder, [{ referenceId: ID.invTtdOwn, customId: ID.invTtdOwn, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]);
+      await clearRateLimits();
+      // At 71a97cb1: 201, the order read and captured, and 100 TTD recorded.
+      const captured = await capture(ID.invTtdOwn, ttdOrder);
+      expect(captured.status, JSON.stringify(captured.body)).toBe(400);
+      expect(captured.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      await expectUntouched([ID.invTtd, ID.invTtdOwn]);
+
+      // Control: a USD invoice's pay link is offered PayPal, in USD, and its checkout makes a USD order.
+      await clearRateLimits();
+      const usdListed = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invUsdOther))}/gateways`);
+      expect(usdListed.body.find((g: { id: string }) => g.id === 'paypal')).toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      const usd = await paypalCheckout(ID.invUsdOther);
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } })]);
+      await expectUntouched([ID.invUsdOther]);
+    });
   });
 
-  it.todo(
-    'PC-08b (review V05-COR-4 / CR-V05-4, held outside this write set): PayPal does not support TTD (nor JMD, BBD, GYD, XCD), so real PayPal ' +
-      "refuses createPaypalOrder's TTD order and the payer gets 500 'Failed to create PayPal order' (fail-closed: the base charged X USD for an " +
-      'X TTD invoice). The fix is a 400 before PayPal is called for a currency PayPal does not support, and no PayPal in the gateway list of such ' +
-      "an invoice (getGatewaysByToken / getGatewaysForInvoice). Both would break pay-link-token-gate TG-14 (PayPal listed and a 201 PayPal checkout " +
-      'for a TTD invoice) and TG-14b (a TTD PayPal order captured), bound by manifests/pay-link-token-gate.json; their fixtures need a scope ' +
-      'release (a USD invoice, or the refusal pinned).',
-  );
+  it('PC-08c (W10-PAYPAL-CURRENCY, D-106): the bare-id surface: the gateway list of a TTD invoice offers no PayPal and the generic invoice checkout of its PayPal order is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called; control: a USD invoice is offered PayPal and its generic checkout makes a USD order', async () => {
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      await clearRateLimits();
+      const listed = await agent().get(`/payments/invoice/${encodeURIComponent(ID.invTtd)}/gateways`);
+      expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+      // At 71a97cb1: PayPal is listed for the TTD invoice.
+      expect(ids(listed.body), 'bare-id gateway list').not.toContain('paypal');
+      const checkout = await agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: ID.invTtd, gateway: 'paypal' });
+      expect(checkout.status, JSON.stringify(checkout.body)).toBe(400);
+      expect(checkout.body).toMatchObject(paypalRefusal('TTD', 'invoice'));
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      await expectUntouched([ID.invTtd]);
+
+      // Control: the USD invoice.
+      await clearRateLimits();
+      const usdListed = await agent().get(`/payments/invoice/${encodeURIComponent(ID.invUsdOther)}/gateways`);
+      expect(ids(usdListed.body)).toContain('paypal');
+      const usd = await agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: ID.invUsdOther, gateway: 'paypal' });
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body).toMatchObject({ type: 'paypal_order' });
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: ID.invUsdOther, amount: { currencyCode: 'USD', value: TOTAL.toFixed(2) } })]);
+      await expectUntouched([ID.invUsdOther]);
+    });
+  });
+
+  it("PC-08d (W10-PAYPAL-CURRENCY, D-106): the storefront surface: the gateway list the storefront reads (getAvailableGateways, what GET /site/storefront/public/:slug/gateways answers) offers no PayPal for a TTD, JMD, BBD, GYD or XCD amount, nor for a TTD business's cart in no currency; createStorePayment and the generic storefront checkout of a TTD order's PayPal order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called, the order UNPAID; control: USD and EUR are offered PayPal in their own currency and a USD storefront order's checkout makes a USD order", async () => {
+    await withPaypalEnv(async () => {
+      const before = paypalCalls();
+      // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } for every amount.
+      for (const code of ['TTD', 'JMD', 'BBD', 'GYD', 'XCD', 'ttd']) {
+        expect((await payments.getAvailableGateways(ID.bizPaypal, code)).map((g) => g.id), code).not.toContain('paypal');
+      }
+      expect((await payments.getAvailableGateways(ID.bizKeyed)).map((g) => g.id), 'a TTD business, no cart currency').not.toContain('paypal');
+      expect((await payments.getAvailableGateways(ID.bizPaypal)).find((g) => g.id === 'paypal'), 'a USD business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      expect((await payments.getAvailableGateways(ID.bizEur)).find((g) => g.id === 'paypal'), 'a EUR business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['EUR'] });
+
+      // At 71a97cb1: PayPal asked for a TTD order by both.
+      const direct = await payments
+        .createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'PAYPAL', businessId: ID.bizKeyed })
+        .then(() => null, (e: any) => e);
+      expect(direct?.getStatus?.(), 'createStorePayment refuses').toBe(400);
+      expect(direct.getResponse()).toMatchObject(paypalRefusal('TTD', 'order'));
+      await clearRateLimits();
+      const generic = await agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: ID.storeOrder, gateway: 'paypal' });
+      expect(generic.status, JSON.stringify(generic.body)).toBe(400);
+      expect(generic.body).toMatchObject(paypalRefusal('TTD', 'order'));
+      expect(paypalCalls(), 'PayPal is never called').toEqual(before);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: ID.storeOrder } })).paymentStatus).toBe('UNPAID');
+
+      // Control: a USD storefront order's PayPal checkout makes a USD order.
+      const usdOrder = `${P}storeUsdPaypal`;
+      await db.marketplaceOrder.create({
+        data: {
+          id: usdOrder,
+          businessId: ID.bizPaypal,
+          orderNumber: `${P}SO-0106`,
+          customerName: 'V05A Store Customer',
+          customerEmail: `${P}store@test.local`,
+          subtotal: STORE_TOTAL,
+          total: STORE_TOTAL,
+          currency: 'USD',
+          type: 'STOREFRONT',
+          paymentStatus: 'UNPAID',
+          paymentMethod: 'PAYPAL',
+        },
+      });
+      await clearRateLimits();
+      const usd = await agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: usdOrder, gateway: 'paypal' });
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body).toMatchObject({ type: 'paypal_order' });
+      expect(orderBook.get(usd.body.orderId)).toEqual([expect.objectContaining({ customId: usdOrder, amount: { currencyCode: 'USD', value: STORE_TOTAL.toFixed(2) } })]);
+    });
+  });
 });
 
 describe('V1-05: the ledger', () => {
@@ -1092,8 +1274,9 @@ describe('V1-05: the ledger', () => {
     const successful = await db.payment.findMany({ where: { businessId: { startsWith: P }, status: 'SUCCESSFUL' }, orderBy: { createdAt: 'asc' } });
     expect(successful.map((p: any) => `${p.provider}:${p.invoiceId}`).sort()).toEqual(
       // W10-WIPAY-KEY (D-105): the platform key settles no tenant's invoice (PC-11), so invPlatform has no
-      // payment; PC-11b's control settles invCrossA with its own business's key.
-      [`paypal:${ID.invTtdOwn}`, `paypal:${ID.invUsd}`, `wipay:${ID.invKeyed}`, `wipay:${ID.invFailed}`, `wipay:${P}invCrossA`].sort(),
+      // payment; PC-11b's control settles invCrossA with its own business's key. W10-PAYPAL-CURRENCY (D-106): PC-08's
+      // own-currency capture is a EUR invoice's (a TTD invoice reaches no PayPal capture).
+      [`paypal:${ID.invEurOwn}`, `paypal:${ID.invUsd}`, `wipay:${ID.invKeyed}`, `wipay:${ID.invFailed}`, `wipay:${P}invCrossA`].sort(),
     );
     for (const p of successful) {
       const txns = await db.financialTransaction.findMany({
@@ -1237,25 +1420,43 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
   });
 
   it("PC-15 (G6PUB-SEC-4): the storefront PayPal order is made in the order's own currency, and a CAPTURE.COMPLETED settles a storefront order only for its total in its currency, naming PayPal (G6ML-3)", async () => {
+    // W10-PAYPAL-CURRENCY (D-106): shown on a EUR order (it was the TTD storefront order, which PayPal does not
+    // support: its PayPal order is now refused before PayPal is called, PC-08d).
+    const eurOrder = `${P}storeEur`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: eurOrder,
+        businessId: ID.bizEur,
+        orderNumber: `${P}SO-0015`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'EUR',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'PAYPAL',
+      },
+    });
     paypalOrders.createOrder.mockClear();
-    const created = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'PAYPAL', businessId: ID.bizKeyed });
+    const created = await payments.createStorePayment({ orderId: eurOrder, amount: STORE_TOTAL, currency: 'EUR', method: 'PAYPAL', businessId: ID.bizEur });
     expect(created.paymentId).toBeTruthy();
     const units = (paypalOrders.createOrder.mock.calls[0] as any[])[0].body.purchaseUnits;
-    // At 2db133a4: currencyCode 'USD' for a TTD order.
-    expect(units.map((u: any) => `${u.customId}:${u.amount.value}:${u.amount.currencyCode}`)).toEqual([`${ID.storeOrder}:${STORE_TOTAL.toFixed(2)}:TTD`]);
+    // At 2db133a4: currencyCode 'USD' for an order in another currency.
+    expect(units.map((u: any) => `${u.customId}:${u.amount.value}:${u.amount.currencyCode}`)).toEqual([`${eurOrder}:${STORE_TOTAL.toFixed(2)}:EUR`]);
 
     storeOrders.updatePaymentStatus.mockClear();
     // A capture of another amount, and one in another currency, naming the storefront order (PayPal orders can be made client-side).
-    const short = await captureWebhook(`${P}WH_store_short`, `${P}cap_store_short`, ID.storeOrder, '0.01', 'TTD');
-    const usd = await captureWebhook(`${P}WH_store_usd`, `${P}cap_store_usd`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'USD');
+    const short = await captureWebhook(`${P}WH_store_short`, `${P}cap_store_short`, eurOrder, '0.01', 'EUR');
+    const usd = await captureWebhook(`${P}WH_store_usd`, `${P}cap_store_usd`, eurOrder, STORE_TOTAL.toFixed(2), 'USD');
     expect(short.status, JSON.stringify(short.body)).toBe(201);
     expect(usd.status, JSON.stringify(usd.body)).toBe(201);
-    // At 2db133a4: updatePaymentStatus(order, 'PAID', <capture>) for each, so the order total is booked for 0.01 TTD and for USD.
+    // At 2db133a4: updatePaymentStatus(order, 'PAID', <capture>) for each, so the order total is booked for 0.01 and for USD.
     expect(storeOrders.updatePaymentStatus).not.toHaveBeenCalled();
 
-    const ok = await captureWebhook(`${P}WH_store_ok`, `${P}cap_store_ok`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'TTD');
+    const ok = await captureWebhook(`${P}WH_store_ok`, `${P}cap_store_ok`, eurOrder, STORE_TOTAL.toFixed(2), 'EUR');
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
-    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[ID.storeOrder, 'PAID', `${P}cap_store_ok`, 'paypal']]);
+    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[eurOrder, 'PAID', `${P}cap_store_ok`, 'paypal']]);
   });
 
   it('PC-16 (G6ML-4): the storefront Stripe checkout answers its session and writes no PENDING payment naming the order as an invoice', async () => {

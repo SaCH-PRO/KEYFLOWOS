@@ -50,8 +50,11 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
   } as unknown as Response;
 }
 
-/** GET answers `metaData`; every PATCH body is recorded and answered with the masked business. */
-function stubServer(metaData: Record<string, unknown>) {
+/**
+ * GET answers `metaData` (and the business `currency`, when given); every PATCH body is recorded and answered with
+ * the masked business.
+ */
+function stubServer(metaData: Record<string, unknown>, currency?: string) {
   const patches: Array<{ metaData: Record<string, unknown> }> = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -62,7 +65,7 @@ function stubServer(metaData: Record<string, unknown>) {
       patches.push(body);
       return jsonResponse(200, { id: BUSINESS, metaData: {} });
     }
-    return jsonResponse(200, { id: BUSINESS, address: "1 Frederick St", metaData });
+    return jsonResponse(200, { id: BUSINESS, address: "1 Frederick St", metaData, ...(currency ? { currency } : {}) });
   }));
   return { patches };
 }
@@ -192,5 +195,51 @@ describe("payments tab: payment provider secrets are write-only (R0-SEC2c)", () 
     for (const k of SECRET_KEYS.filter((s) => s !== "wipayApiKey")) expect(patches[0].metaData).not.toHaveProperty(k);
     const card = screen.getByText("Card Payments (WiPay)").closest("button") as HTMLElement;
     expect(within(card).getByText("Connected")).toBeInTheDocument();
+  });
+});
+
+describe("payments tab: why PayPal is missing for the business currency (W10-PAYPAL-CURRENCY, D-106)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-a");
+    window.localStorage.setItem("kf_business_id", BUSINESS);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("[PPC-UI01] (W10-PAYPAL-CURRENCY, D-106) a TTD business: the PayPal card says PayPal does not support TTD, so payers are not offered PayPal for invoices, pay links and storefront orders in TTD", async () => {
+    stubServer({ paypalClientSecret: MASKED, ...PUBLIC_META }, "TTD");
+    render(<PaymentsTab />);
+    fireEvent.click(await screen.findByText("PayPal"));
+
+    // At 71a97cb1: no such note; the card listed PayPal as connected with no word on the business currency.
+    const note = await screen.findByTestId("paypal-currency-note");
+    expect(note).toHaveTextContent("PayPal does not support TTD, your business currency");
+    expect(note).toHaveTextContent("invoices, pay links and storefront orders in TTD are not offered PayPal");
+  });
+
+  it("[PPC-UI02] (W10-PAYPAL-CURRENCY, D-106) the other Caribbean currencies the ruling names get the same note; a USD business (control) gets none", async () => {
+    for (const currency of ["JMD", "BBD", "GYD", "XCD"]) {
+      stubServer({ ...PUBLIC_META }, currency);
+      render(<PaymentsTab />);
+      fireEvent.click(await screen.findByText("PayPal"));
+      expect(await screen.findByTestId("paypal-currency-note"), currency).toHaveTextContent(`PayPal does not support ${currency}`);
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+
+    stubServer({ ...PUBLIC_META }, "USD");
+    render(<PaymentsTab />);
+    fireEvent.click(await screen.findByText("PayPal"));
+    // The read has landed (the client id is in its input) and no note is shown.
+    await waitFor(() => expect(inputValues()).toContain(PUBLIC_META.paypalClientId));
+    expect(screen.queryByTestId("paypal-currency-note")).toBeNull();
   });
 });
