@@ -38,11 +38,13 @@
  *           admitted by BusinessGuard, scoped by TenantInterceptor and listed by
  *           discovery; that grant is audited too.
  *   OMB-09  census pin: no business access predicate under apps/server/src
- *           admits Business.ownerId without a Membership, except the listed,
- *           referred exceptions (review CR-W10OM-2): no `OR [{ ownerId },
- *           { members }]`, no owner arm `{ id, ownerId: x }` that does not also
- *           require x's Membership, no Business.ownerId compared to a caller and
- *           no `ownerId === actorId` arm outside the exception list.
+ *           admits Business.ownerId without a Membership, except the listed
+ *           exceptions, one per site (reviews CR-W10OM-2, OMV-3): no OR mixing
+ *           an ownerId arm and a members arm (either order, any values), no
+ *           business read whose where names ownerId anywhere without a members
+ *           filter, no `business: { ownerId }` relation filter without one, and
+ *           no ownerId (on any receiver but a contact, or destructured) compared
+ *           to the caller (userId, actorId, user.id, ...).
  *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
  *           no Membership on a business it did not create: the ownerId-only
  *           owner is refused 403 OWNER_MEMBERSHIP_REQUIRED and stays refused.
@@ -265,25 +267,85 @@ async function bootstrapError(userId: string) {
 }
 
 /**
- * OMB-09's census (review CR-W10OM-2): the ownerId-as-authority shapes found in
- * whitespace-normalised source, one label per site.
+ * OMB-09's census (reviews CR-W10OM-2, OMV-3): the ownerId-as-authority shapes
+ * found in whitespace-normalised source, one label per site. OMB-17 runs it on
+ * synthetic source so it cannot go vacuous.
+ *
+ *   'ownerId OR members': an `OR: [...]` holding an ownerId arm and a members
+ *     arm, in either order, whatever the values or the other keys.
+ *   'business read on ownerId without membership': a business read
+ *     (findUnique, findFirst, findMany, count, ...) whose top-level `where`
+ *     names ownerId anywhere and no `members` filter.
+ *   'business relation on ownerId without membership': any read whose `where`
+ *     filters a `business: { ... }` relation on ownerId without `members`.
+ *   'ownerId compared to the caller': `<receiver>.ownerId` or a bare
+ *     (destructured, handed-in) `ownerId` compared (===, !==, ==, !=) with the
+ *     caller (userId, actorId, user.id, req.user?.id, rows.userId, ...), either
+ *     side. A receiver named `contact`/`...Contact` is a Contact's owner, not
+ *     Business.ownerId, and is not counted.
  */
-const CENSUS_PATTERNS: Array<[string, RegExp]> = [
-  // OR: [{ ownerId: x }, { members: { some: ... } }] and the reverse order.
-  ['ownerId OR members', /OR: \[ ?\{ ownerId: [\w.]+ \}, \{ members: \{ some:/g],
-  ['ownerId OR members', /OR: \[ ?\{ members: \{ some: \{ userId[^\]]*\}, \{ ownerId: [\w.]+ \},? ?\]/g],
-  // An owner arm on a business read that does not also require the Membership.
-  ['business read on ownerId without membership', /business\.(?:findFirst|findMany|count)\(\{ where: \{ id: \w+, ownerId: [\w.]+ \}/g],
-  // Review CR-W10OM-2: the same arm in another shape, a business row's ownerId compared to a caller.
-  ['ownerId compared to the caller', /\b(?:business|biz|existingBusiness|rows\.business)\??\.ownerId ?[!=]==|[!=]== ?(?:business|biz|existingBusiness|rows\.business)\??\.ownerId\b/g],
-  // A bare `ownerId` (the business's, handed in) against the actor; `contact.ownerId` is a contact's owner, not this.
-  ['ownerId compared to the caller', /(?<![.\w])ownerId ?[!=]== ?actorId\b|\bactorId ?[!=]== ?ownerId\b/g],
+const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
+const RECEIVER = String.raw`[\w$]+(?:(?:\?\.|!\.|\.)[\w$]+)*`;
+const DOT = String.raw`(?:\?\.|!\.|\.)`;
+const EQ = String.raw`\s*[!=]==?\s*`;
+const COMPARED: RegExp[] = [
+  new RegExp(String.raw`(?<![\w$.])(${RECEIVER})${DOT}ownerId${EQ}${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}(${RECEIVER})${DOT}ownerId\b`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])()ownerId${EQ}${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}()ownerId(?![\w$])`, 'g'),
 ];
+const READS = String.raw`(?:findUnique|findUniqueOrThrow|findFirst|findFirstOrThrow|findMany|count|aggregate|groupBy)`;
+
+/** The bracket group ('{', '[' or '(') that opens at text[start], brackets balanced. */
+function bracketGroup(text: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if ((c === '}' || c === ']' || c === ')') && --depth === 0) return text.slice(start, i + 1);
+  }
+  return text.slice(start);
+}
+
+/** The object literal under `key:` at the top level of the call argument `args` ('(' ... ')'), or null. */
+function topLevelObject(args: string, key: string): string | null {
+  let depth = 0;
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') depth--;
+    else if (depth === 2 && !/[\w$]/.test(args[i - 1] ?? '')) {
+      const m = new RegExp(String.raw`^${key}\s*:\s*\{`).exec(args.slice(i));
+      if (m) return bracketGroup(args, i + m[0].length - 1);
+    }
+  }
+  return null;
+}
 
 function censusHits(source: string): string[] {
   const text = source.replace(/\s+/g, ' ');
   const hits: string[] = [];
-  for (const [label, re] of CENSUS_PATTERNS) for (const _ of text.matchAll(re)) hits.push(label);
+  for (const m of text.matchAll(/\bOR\s*:\s*\[/g)) {
+    const arms = bracketGroup(text, m.index! + m[0].length - 1);
+    if (/\bownerId\b/.test(arms) && /\bmembers\b/.test(arms)) hits.push('ownerId OR members');
+  }
+  for (const m of text.matchAll(new RegExp(String.raw`(?<![\w$])(\w+)\s*\.\s*${READS}\s*\(`, 'g'))) {
+    const where = topLevelObject(bracketGroup(text, m.index! + m[0].length - 1), 'where');
+    if (!where) continue;
+    if (m[1] === 'business' && /\bownerId\b/.test(where) && !/\bmembers\b/.test(where)) {
+      hits.push('business read on ownerId without membership');
+    }
+    for (const rel of where.matchAll(/(?<![\w$])business\s*:\s*\{/g)) {
+      const filter = bracketGroup(where, rel.index! + rel[0].length - 1);
+      if (/\bownerId\b/.test(filter) && !/\bmembers\b/.test(filter)) hits.push('business relation on ownerId without membership');
+    }
+  }
+  for (const re of COMPARED) {
+    for (const m of text.matchAll(re)) {
+      const receiver = (m[1] ?? '').split(/\?\.|!\.|\./).pop() ?? '';
+      if (!/contact$/i.test(receiver)) hits.push('ownerId compared to the caller');
+    }
+  }
   return hits.sort();
 }
 
@@ -702,7 +764,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
 });
 
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] (D-104; review CR-W10OM-2) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed referred exceptions: the ACTION-001 principal basis and onboarding completion\'s ownerId arm', () => {
+  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis and onboarding completion\'s ownerId arm, and the informational reads that grant nothing', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -734,6 +796,25 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       // since D-104, or SUPER_ADMIN); its ownerId arm is pinned by
       // release0-edited-suites (onboarding-concierge.service.spec ST-R032-1).
       ['modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId compared to the caller', 'referred: release0-edited-suites'],
+      // Informational (review OMV-3), none grants anything on ownerId alone:
+      // checkSlugAvailability's `existing.ownerId === userId` only answers
+      // { available: true, ownedByYou: true } on the slug route; writing a slug
+      // goes through the business PATCH, which BusinessGuard and the D-11 owner
+      // check (Membership) gate.
+      ['modules/identity/identity.service.ts: ownerId compared to the caller', 'informational: slug availability, grants nothing'],
+      // ensureBootstrapWorkspace's bootstrap-business lookup (oldest owned):
+      // it answers that business only after checking the caller's Membership on
+      // it, and otherwise only a business they hold a Membership on (D-104,
+      // review OMV-2); on its own it decides first-sign-in creation vs the rest.
+      ['modules/identity/identity.service.ts: business read on ownerId without membership', 'informational: bootstrap lookup, Membership checked before answering'],
+      // assertAdoptableInvitePlaceholder's never-bound test: an owned business
+      // makes the row an account, which is refused (409); it admits no one.
+      ['modules/identity/identity.service.ts: business read on ownerId without membership', 'informational: refusal predicate'],
+      // Contact.ownerId, not Business.ownerId: createContact's requested owner
+      // against the actor (a different owner needs reassign permission, and must
+      // be a member), and the Google Contacts default owner setting likewise.
+      ['modules/crm/crm.service.ts: ownerId compared to the caller', "informational: a contact's owner"],
+      ['modules/connect/google-contacts-sync.service.ts: ownerId compared to the caller', "informational: a contact's default owner"],
     ];
     expect(offenders.sort()).toEqual(EXCEPTIONS.map(([site]) => site).sort());
   });
