@@ -1401,4 +1401,145 @@ describe('the consumer of the claim: a stranded claim is taken over after 15 min
     expect(await service.complete({ ...req(key, hash), claimId: stranded.claimId }, { owner: 'stranded' })).toBe(false);
     expect(await claimRow(ID.biz, key)).toMatchObject({ status: 'completed', response: row.response });
   });
+
+  /**
+   * W10-CLAIM-LEASE review, SEC-W10CL-1. Measured on the packet head
+   * (8948764e), the review's probe P5: a takeover through the registry inside
+   * a member's request wrote its log row with userId, correlationId and
+   * commandId null, the session 'idempotency:<key>', and no tool name, while
+   * the run it caused named the member, the session and the correlation. The
+   * takeover could not be tied to who triggered it or to that run.
+   */
+  it("D-103, SEC-W10CL-1: a takeover through the registry is logged naming the member, the tool, and the call's session, command and correlation, as the run row it caused names them (W10-CLAIM-LEASE)", async () => {
+    const key = freshKey('lease_audit');
+    const input = { title: `${key}_A` };
+    const stranded = await service.check(req(key, fingerprint(TOOL, input, ID.owner)));
+    await ageClaim(ID.biz, key, LEASE_MINUTES + 1);
+
+    const call = { sessionId: `${P}sess_audit`, commandId: `${P}cmd_audit`, correlationId: `${P}corr_audit` };
+    const result = await registry.execute(TOOL, ctxFor(key, call), input);
+    expect(result).toMatchObject({ success: true });
+    expect(runsOf(input.title)).toBe(1);
+
+    const [takeover] = await db.cortexActionLog.findMany({
+      where: { businessId: ID.biz, actionType: TAKEOVER_ACTION, description: { contains: key } },
+    });
+    expect(takeover).toMatchObject({ userId: ID.owner, ...call, status: 'success' });
+    expect(takeover.description).toContain(TOOL);
+    expect(takeover.description).toContain(stranded.claimId);
+    expect(JSON.parse(takeover.result)).toMatchObject({ toolName: TOOL, actorId: ID.owner, staleClaimId: stranded.claimId });
+    // The run it caused carries the same member, session, command and correlation.
+    const [run] = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL, correlationId: call.correlationId } });
+    expect(run).toMatchObject({ userId: ID.owner, ...call, status: 'success' });
+  });
+
+  it("D-103, SEC-W10CL-1: a call naming no actor, run inside a member's request in this business, logs its takeover for that member, as the registry's own rows name the actor (W10-CLAIM-LEASE)", async () => {
+    const key = freshKey('lease_audit_ctx');
+    const input = { title: `${key}_C` };
+    // As the chat's bridged tools call: no userId in ctx, so the request hash has no actor.
+    const anonymousCtx = { businessId: ID.biz, autonomyLevel: 2, idempotencyKey: key, correlationId: `${P}corr_ctx` };
+    await service.check(req(key, fingerprint(TOOL, input)));
+    await ageClaim(ID.biz, key, LEASE_MINUTES + 1);
+
+    const result = await tenant.runWithTenant(ID.biz, ID.member, () => registry.execute(TOOL, anonymousCtx, input));
+    expect(result).toMatchObject({ success: true });
+    const [takeover] = await db.cortexActionLog.findMany({
+      where: { businessId: ID.biz, actionType: TAKEOVER_ACTION, description: { contains: key } },
+    });
+    expect(takeover).toMatchObject({
+      userId: ID.member,
+      sessionId: anonymousCtx.correlationId,
+      correlationId: anonymousCtx.correlationId,
+      commandId: null,
+    });
+    const [run] = await db.cortexActionLog.findMany({ where: { businessId: ID.biz, actionType: TOOL, correlationId: anonymousCtx.correlationId } });
+    expect(run).toMatchObject({ userId: ID.member, sessionId: anonymousCtx.correlationId });
+  });
+
+  /**
+   * W10-CLAIM-LEASE review, CR-CL-1. On the approval path the key settles with
+   * the proposal it filed (SEC-V19b-2); when that settle threw, the claim
+   * stayed 'pending', and the registry said "a retry is refused, it files
+   * nothing". With D-103 that holds only for the lease: measured on the packet
+   * head with the settle stubbed to throw, the immediate retry was refused
+   * IN_FLIGHT and the retry 16 minutes later took the claim over and filed a
+   * second proposal. Repaired: the settle is tried again (a passing failure
+   * no longer leaves the key open), and what is left (a settle that cannot be
+   * written at all) is the D-103 trade-off, stated in the registry and pinned
+   * below: the retry past the lease files another proposal, and its takeover
+   * is logged naming the tool and the member.
+   */
+  it('D-103, CR-CL-1: the approval path keeps its key through a passing settle failure: the settle is tried again, the key settles with the proposal, and a retry 16 minutes later is answered with that proposal and files none (W10-CLAIM-LEASE)', async () => {
+    const key = freshKey('lease_proposal_retry');
+    const input = { title: `${key}_P` };
+    const filedBefore = proposalsFiled.length;
+    const fail = service.fail.bind(service);
+    let attempts = 0;
+    service.fail = async (r: any, error: string, response?: unknown) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('v19a: settle store blinked');
+      return fail(r, error, response);
+    };
+    let filed: any;
+    try {
+      filed = await registry.execute(TOOL_TIER3, ctxFor(key), input);
+    } finally {
+      delete service.fail;
+    }
+    expect(attempts).toBe(2);
+    expect(filed).toMatchObject({ success: false, requiresApproval: true, data: { proposalId: expect.stringMatching(/^v19a_proposal_/) } });
+    expect(await rowsFor(ID.biz, key)).toEqual([
+      { status: 'failed', requestHash: fingerprint(TOOL_TIER3, input, ID.owner), response: filed, error: filed.error },
+    ]);
+
+    await ageClaim(ID.biz, key, LEASE_MINUTES + 1);
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual(filed);
+    expect(proposalsFiled.length - filedBefore).toBe(1);
+    expect(await takeoverLogs(key)).toEqual([]);
+    expect(runsOf(input.title)).toBe(0);
+  });
+
+  it('D-103, CR-CL-1: a proposal whose key cannot be settled at all holds the key for the lease only: the retry is refused and files nothing until then; past the lease a retry takes the claim over and files another proposal (accepted under D-103), its takeover logged naming the tool and the member, and later retries are answered with that proposal (W10-CLAIM-LEASE)', async () => {
+    const key = freshKey('lease_proposal_unsettled');
+    const input = { title: `${key}_Q` };
+    const filedBefore = proposalsFiled.length;
+    let attempts = 0;
+    service.fail = async () => {
+      attempts += 1;
+      throw new Error('v19a: settle store unreachable');
+    };
+    let first: any;
+    try {
+      first = await registry.execute(TOOL_TIER3, ctxFor(key), input);
+    } finally {
+      delete service.fail;
+    }
+    expect(attempts).toBe(3); // tried, and tried again twice
+    expect(first).toMatchObject({ success: false, requiresApproval: true, data: { proposalId: expect.stringMatching(/^v19a_proposal_/) } });
+    expect(await rowsFor(ID.biz, key)).toEqual([
+      { status: 'pending', requestHash: fingerprint(TOOL_TIER3, input, ID.owner), response: null, error: null },
+    ]);
+
+    // Within the lease the key is held: the retry is refused and files nothing.
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual({ success: false, notExecuted: true, error: IN_FLIGHT });
+    await ageClaim(ID.biz, key, LEASE_MINUTES - 1);
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual({ success: false, notExecuted: true, error: IN_FLIGHT });
+    expect(proposalsFiled.length - filedBefore).toBe(1);
+
+    // Past the lease, D-103: the retry takes the claim over and files another proposal.
+    await ageClaim(ID.biz, key, LEASE_MINUTES + 1);
+    const second = await registry.execute(TOOL_TIER3, ctxFor(key), input);
+    expect(second).toMatchObject({ success: false, requiresApproval: true });
+    expect(second.data.proposalId).not.toBe(first.data.proposalId);
+    expect(proposalsFiled.length - filedBefore).toBe(2);
+    const logs = await takeoverLogs(key);
+    expect(logs).toHaveLength(1);
+    expect(logs[0].description).toContain(TOOL_TIER3);
+    expect(JSON.parse(logs[0].result)).toMatchObject({ toolName: TOOL_TIER3, actorId: ID.owner });
+
+    // That retry settled the key with its proposal: later retries are answered with it, and file none.
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual(second);
+    expect(proposalsFiled.length - filedBefore).toBe(2);
+    expect(runsOf(input.title)).toBe(0);
+  });
 });

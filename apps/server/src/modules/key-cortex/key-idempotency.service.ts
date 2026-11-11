@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
 
 /**
@@ -57,6 +58,22 @@ export interface IdempotencyCheckResult<T = unknown> {
   claimId?: string;
 }
 
+/**
+ * Who and what a takeover (D-103) is recorded for on the KEY execution log
+ * (W10-CLAIM-LEASE review, SEC-W10CL-1): the call that retried the request.
+ * Attribution only: it is not part of the request, and never decides whether a
+ * claim is taken, held or settled.
+ */
+export interface IdempotencyAuditContext {
+  /** The acting member; absent, the request's member when its tenant is this business. */
+  actorId?: string | null;
+  /** The tool the claim is for (the tool registry's call). */
+  toolName?: string;
+  sessionId?: string;
+  commandId?: string;
+  correlationId?: string;
+}
+
 export interface IdempotencyRequest {
   businessId: string;
   idempotencyKey: string;
@@ -66,6 +83,8 @@ export interface IdempotencyRequest {
    * settle that claim only (never one released and claimed again since).
    */
   claimId?: string;
+  /** check() only: what a takeover's log row names (SEC-W10CL-1). */
+  audit?: IdempotencyAuditContext;
 }
 
 interface StoredIdempotencyKey {
@@ -97,6 +116,19 @@ export const KEY_IDEMPOTENCY_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
 /** The KEY execution log's (CortexActionLog) action type of a takeover (D-103). */
 export const KEY_IDEMPOTENCY_TAKEOVER_ACTION = 'idempotency.claim_takeover';
+
+/**
+ * The member a takeover is recorded for (W10-CLAIM-LEASE review, SEC-W10CL-1):
+ * the one the caller names, else the authenticated member of the request the
+ * check runs in when that request's tenant is this business (the tool
+ * registry's auditActor() rule, V1-19c review SEC-V19c-2). Outside a request
+ * (a job, a queue worker) nobody is named. Attribution only.
+ */
+function takeoverActor(req: IdempotencyRequest): string | null {
+  if (req.audit?.actorId) return req.audit.actorId;
+  const request = getTenantContext();
+  return request?.userId && request.businessId === req.businessId ? request.userId : null;
+}
 
 /** Prisma's unique-constraint violation, matched on the code (the idiom of key-action-boundary.service.ts). */
 function isUniqueViolation(err: unknown): boolean {
@@ -146,7 +178,12 @@ function isRecordNotFound(err: unknown): boolean {
  * good (owner ruling D-103, W10-CLAIM-LEASE, closing CR-V19-2): still open
  * KEY_IDEMPOTENCY_CLAIM_LEASE_MS (15 minutes) after it was taken (the row's
  * updated_at: when it was claimed, or last taken over), it is taken over by
- * the next check() of the same request. See takeOver().
+ * the next check() of the same request. See takeOver(). An open claim cannot be
+ * told from a stranded one, so this holds too for a claimant that did its work
+ * and could not store the outcome: the tool registry's call that filed an
+ * approval proposal and could not settle its key with it, after retrying the
+ * settle, is taken over past the lease, and that retry files another proposal
+ * (accepted under D-103; W10-CLAIM-LEASE review, CR-CL-1).
  */
 @Injectable()
 export class KeyIdempotencyService {
@@ -246,7 +283,11 @@ export class KeyIdempotencyService {
    * The takeover is written to the KEY execution log (CortexActionLog) in the
    * same transaction, naming the old claim and its age, so no takeover goes
    * unrecorded: if the log row cannot be written the takeover is undone and
-   * the error propagates, as any other database error of check() does.
+   * the error propagates, as any other database error of check() does. The
+   * row names who retried and what (W10-CLAIM-LEASE review, SEC-W10CL-1): the
+   * member (takeoverActor()), the tool, and the call's command and
+   * correlation, with its session (else its correlation, as the registry's
+   * run rows do; else the key), so the takeover ties to the run it caused.
    *
    * Answers 'new' with the new claimId, or null when another caller took the
    * claim over first, or it was settled or released meanwhile.
@@ -261,6 +302,11 @@ export class KeyIdempotencyService {
     const ageMs = now.getTime() - staleTakenAt.getTime();
     const ageMinutes = Math.floor(ageMs / 60_000);
     const leaseMinutes = KEY_IDEMPOTENCY_CLAIM_LEASE_MS / 60_000;
+    // SEC-W10CL-1: who retried, and what (the takeover named nobody before).
+    const actorId = takeoverActor(req);
+    const toolName = req.audit?.toolName ?? null;
+    const onTool = toolName ? ` (tool ${toolName})` : '';
+    const byActor = actorId ? ` for ${actorId}` : '';
 
     const taken = await this.prisma.client.$transaction(async (tx) => {
       const { count } = await tx.idempotencyKey.updateMany({
@@ -281,14 +327,19 @@ export class KeyIdempotencyService {
       await tx.cortexActionLog.create({
         data: {
           businessId: req.businessId,
-          sessionId: `idempotency:${req.idempotencyKey}`,
+          userId: actorId,
+          sessionId: req.audit?.sessionId ?? req.audit?.correlationId ?? `idempotency:${req.idempotencyKey}`,
+          commandId: req.audit?.commandId ?? null,
+          correlationId: req.audit?.correlationId ?? null,
           actionType: KEY_IDEMPOTENCY_TAKEOVER_ACTION,
           status: 'success',
           description:
-            `Idempotency claim ${staleId} on key ${req.idempotencyKey} was still open ${ageMinutes} min after it was taken ` +
-            `(lease ${leaseMinutes} min, D-103): taken over as claim ${claimId}`,
+            `Idempotency claim ${staleId} on key ${req.idempotencyKey}${onTool} was still open ${ageMinutes} min after it was taken ` +
+            `(lease ${leaseMinutes} min, D-103): taken over as claim ${claimId}${byActor}`,
           result: JSON.stringify({
             idempotencyKey: req.idempotencyKey,
+            toolName,
+            actorId,
             staleClaimId: staleId,
             staleClaimTakenAt: staleTakenAt.toISOString(),
             staleClaimAgeMs: ageMs,
@@ -308,7 +359,7 @@ export class KeyIdempotencyService {
     if (!taken) return null;
 
     this.logger.warn(
-      `[check][${req.businessId}] idempotency key ${req.idempotencyKey}: claim ${staleId} open ${ageMinutes} min past its taking (lease ${leaseMinutes} min) was taken over as claim ${claimId} (D-103)`,
+      `[check][${req.businessId}] idempotency key ${req.idempotencyKey}${onTool}: claim ${staleId} open ${ageMinutes} min past its taking (lease ${leaseMinutes} min) was taken over as claim ${claimId}${byActor} (D-103)`,
     );
     return { status: 'new', claimId };
   }

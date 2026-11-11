@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyIdempotencyService, fingerprintToolRequest, KEY_IDEMPOTENCY_CLAIM_LEASE_MS } from './key-idempotency.service';
+import { runWithTenant } from '../../core/tenant/tenant-context';
 
 /**
  * An in-memory idempotency_keys table that keeps the constraints the service
@@ -261,6 +262,51 @@ describe('KeyIdempotencyService: the claim lease (D-103, W10-CLAIM-LEASE)', () =
 
     expect(await service.complete(k({ claimId: taker.claimId }), { by: 'taker' })).toBe(true);
     expect(await service.check(k())).toEqual({ status: 'completed', response: { by: 'taker' } });
+  });
+
+  /**
+   * W10-CLAIM-LEASE review, SEC-W10CL-1: the takeover's log row named nobody
+   * (userId, commandId and correlationId null, the session 'idempotency:<key>',
+   * no tool), even when the retry ran inside a member's request, so the D-103
+   * takeover could not be tied to who triggered it or to the run it caused.
+   */
+  it("D-103, SEC-W10CL-1: the takeover's log row names the caller's actor, tool, session, command and correlation", async () => {
+    await service.check(k());
+    age(16);
+    const audit = { actorId: 'user_x', toolName: 'crm.create_contact', sessionId: 'sess_1', commandId: 'cmd_1', correlationId: 'corr_1' };
+
+    const taker = await service.check(k({ audit }));
+    expect(taker.status).toBe('new');
+    expect(client.logs).toHaveLength(1);
+    const [log] = client.logs;
+    expect(log).toMatchObject({ userId: 'user_x', sessionId: 'sess_1', commandId: 'cmd_1', correlationId: 'corr_1' });
+    expect(log.description).toContain('crm.create_contact');
+    expect(log.description).toContain('user_x');
+    expect(JSON.parse(log.result)).toMatchObject({ toolName: 'crm.create_contact', actorId: 'user_x', newClaimId: taker.claimId });
+  });
+
+  it("D-103, SEC-W10CL-1: a caller naming no actor is attributed to the request's member when the request's tenant is this business, never another business's member", async () => {
+    await service.check(k());
+    age(16);
+    // Inside a member's request in this business, naming no actor (as the chat's bridged tools call).
+    await runWithTenant('biz_1', 'user_member', () => service.check(k({ audit: { correlationId: 'corr_2' } })));
+    expect(client.logs[0]).toMatchObject({ userId: 'user_member', sessionId: 'corr_2', correlationId: 'corr_2', commandId: null });
+
+    // A request whose tenant is another business names nobody here.
+    await service.check(k({ idempotencyKey: 'req_2' }));
+    Object.assign(client.rows[1], { updatedAt: new Date(Date.now() - 16 * MIN) });
+    await runWithTenant('biz_other', 'user_elsewhere', () => service.check(k({ idempotencyKey: 'req_2' })));
+    expect(client.logs[1]).toMatchObject({ userId: null, sessionId: 'idempotency:req_2', commandId: null, correlationId: null });
+    expect(JSON.parse(client.logs[1].result)).toMatchObject({ toolName: null, actorId: null });
+  });
+
+  it('D-103, SEC-W10CL-1: the attribution never decides the claim: a stranded claim presented with another request stays a conflict whoever retries', async () => {
+    const stranded = await service.check(k());
+    age(16);
+    const answer = await service.check(k({ requestHash: 'h2', audit: { actorId: 'user_x', toolName: 'crm.create_contact' } }));
+    expect(answer.status).toBe('conflict');
+    expect(client.rows[0].id).toBe(stranded.claimId);
+    expect(client.logs).toEqual([]);
   });
 });
 
