@@ -9,6 +9,7 @@ import {
   LOGOUT_REVOCATION_TTL_SECONDS,
   logoutRevocationKey,
   logoutRevocationValue,
+  PASSWORD_RESET_AFTER_CUTOFF_META_KEY,
   SIGN_IN_CUTOFF_META_KEY,
   signInCutoffOf,
 } from '../../core/auth/auth.middleware';
@@ -568,6 +569,17 @@ export class RiscService {
    * the cleared marker, in the same locked read-modify-write, even when a
    * later cutoff already recorded stays.
    *
+   * D-113 (W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2): the same write
+   * removes the password reset recorded after the earlier cutoff
+   * (passwordResetAfterCutoffAt), so a password sign-in needs a new reset
+   * after this event. Reading a record as none while it is not after the new
+   * cutoff was not enough: completeReset dates a reset at its recovery
+   * session's authentication when the provider dates that ahead of this
+   * server (up to 60s), and a reset can commit while this event is in flight,
+   * so a record dated after the new cutoff survived the event and admitted
+   * every later password session with no reset after it. The write also runs
+   * when only that record is present, under a later cutoff already recorded.
+   *
    * Through updateUserMeta (D-97 review SEC-W8RSC-1 / CR-W8RSC-1): two events
    * for the same user handled together no longer write back each other's
    * stale copy, so a concurrent flag write cannot erase the cutoff.
@@ -577,10 +589,13 @@ export class RiscService {
       const found = await this.updateUserMeta(userId, (meta) => {
         const recorded = signInCutoffOf(meta);
         const cleared = SIGN_IN_CUTOFF_CLEARED_META_KEY in meta;
-        if (recorded !== null && recorded >= cutoff && !cleared) return null;
+        const reset = PASSWORD_RESET_AFTER_CUTOFF_META_KEY in meta;
+        if (recorded !== null && recorded >= cutoff && !cleared && !reset) return null;
         // D-101: the cleared marker goes (the restriction holds again); the cutoff is never lowered.
+        // D-113 (SEC-W10RR-2 / CR-W10RR-2): the password reset recorded for the earlier cutoff goes too.
         const kept: Record<string, unknown> = { ...meta };
         delete kept[SIGN_IN_CUTOFF_CLEARED_META_KEY];
+        delete kept[PASSWORD_RESET_AFTER_CUTOFF_META_KEY];
         return { ...kept, [SIGN_IN_CUTOFF_META_KEY]: recorded !== null && recorded > cutoff ? recorded : cutoff };
       });
       if (!found) {

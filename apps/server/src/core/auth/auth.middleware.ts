@@ -138,7 +138,10 @@ export type SignInCutoffClearing = 'cleared' | 'already_cleared' | 'no_cutoff' |
  * qualifying bearer) and, D-113 (W10-RISC-RESET, closing D-101 review
  * SEC-W9RPC-1 / CR-W9RPC-1), IdentityPasswordService.completeReset with the
  * recovery-link session POST /identity/reset-password receives in its body,
- * never as a bearer, once the new password is set.
+ * never as a bearer, once the new password is set, and only when that
+ * session qualifies by the same rule (sessionSignedInWithGoogleOrEmailLink:
+ * an implicit-flow 'otp' of a user with a phone identity may be an SMS code;
+ * W10-RISC-RESET review SEC-W10RR-1 / CR-W10RR-1).
  *
  * The marker is dated when it is recorded (`nowMs`), or at the sign-in when
  * that is later (a provider clock ahead of this one), never at the sign-in
@@ -193,9 +196,13 @@ export async function recordSignInCutoffCleared(
  * whoever set it through the pre-event GoTrue session still knows. The
  * reset's GoTrue password update ends every session of the user, that
  * pre-event one included, so a password set during the hijack never signs in.
- * A value that is not a whole number after the current cutoff (left by an
- * earlier cutoff, or written by hand) is read as none (fail closed), so a
- * later session-ending event re-arms the requirement without removing it.
+ * A later session-ending event re-arms the requirement: RiscService's cutoff
+ * write removes this record with the clearing, under the same lock, also one
+ * dated after the new cutoff (W10-RISC-RESET review SEC-W10RR-2 /
+ * CR-W10RR-2: a reset is dated ahead of this server when the provider dates
+ * its recovery session so, and can commit while the event is in flight). A
+ * value that is not a whole number after the current cutoff (written by
+ * hand, or before that repair) is still read as none (fail closed).
  */
 export const PASSWORD_RESET_AFTER_CUTOFF_META_KEY = 'passwordResetAfterCutoffAt';
 
@@ -219,8 +226,9 @@ export type PasswordResetAfterCutoffRecord = 'recorded' | 'no_cutoff' | 'not_aft
  * through KEYFLOW after the sign-in cutoff, with a recovery session
  * authenticated at `authenticatedAt` (epoch seconds). Called by
  * IdentityPasswordService.completeReset once GoTrue has set the new password,
- * so a password session authenticated after the recorded time signed in with
- * that password. Dated when it is recorded, or at the recovery session's
+ * for a recovery session that is an emailed link by AuthMiddleware's rule
+ * (SEC-W10RR-1), so a password session authenticated after the recorded
+ * time signed in with that password. Dated when it is recorded, or at the recovery session's
  * authentication when the provider dates that later (as the clearing is,
  * CR-W9RPC-3); never lowered. Written under the User row lock
  * (updateUserMetaLocked), so a RISC event that committed meanwhile is seen. A

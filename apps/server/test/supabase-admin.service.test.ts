@@ -1604,4 +1604,42 @@ describe('R0-ID-F4 review F4-C (R0-ID-F7) — a RISC event revokes the sessions 
     expect(await attached(signInToken('password', cutoff + 31, cutoff + 31, 's-password-reset'))).toBe(USER);
     expect(await attached(signInToken('password', cutoff + 1, cutoff + 1, 's-password-after'))).toBeNull();
   });
+
+  /**
+   * W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113). The cutoff write
+   * removed only the clearing, so a password reset recorded after the NEW
+   * cutoff survived the event: a reset is dated at its recovery session's
+   * authentication when the provider dates that ahead of this server (up to
+   * 60s), or commits while the event is in flight, and a recorded cutoff
+   * kept higher by another instance's clock left the row untouched
+   * altogether (the early return). Either way every later password session
+   * was admitted with no reset after the event. The cutoff write now removes
+   * passwordResetAfterCutoffAt with the clearing, under the same User row
+   * lock, and writes when either is present.
+   */
+  it('W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113): a session-ending RISC event removes passwordResetAfterCutoffAt under the User row lock — also one dated after the new cutoff, and also when a later cutoff already recorded stays and nothing was cleared — so the real AuthMiddleware refuses a password session after the old reset until a new one', async () => {
+    const h = build();
+    const attached = realMiddleware(h);
+    const now = Math.floor(Date.now() / 1000);
+    h.userRow.metaData = { signInCutoffAt: now - 600, keep: 'me' };
+    // A reset whose recovery session the provider dated 50s ahead of this server.
+    await expect(recordPasswordResetAfterCutoff(h.prisma.client as never, USER, now + 50)).resolves.toBe('recorded');
+    expect(h.userRow.metaData.passwordResetAfterCutoffAt).toBe(now + 50);
+
+    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.TOKEN_REVOKED))).resolves.toEqual({ status: 202, processed: true });
+    const cutoff = h.userRow.metaData.signInCutoffAt as number;
+    expect(cutoff).toBeGreaterThanOrEqual(now);
+    expect(cutoff).toBeLessThan(now + 50);
+    expect(h.userRow.metaData.passwordResetAfterCutoffAt).toBeUndefined();
+    expect(h.userRow.metaData.keep).toBe('me');
+    expect(await attached(signInToken('password', now + 55, now + 55, 's-password-after-old-reset'))).toBeNull();
+
+    // A later cutoff already recorded (another instance's clock ahead), no
+    // clearing, and a reset after it: the event still removes the reset and
+    // never lowers the cutoff.
+    h.userRow.metaData = { signInCutoffAt: now + 30, passwordResetAfterCutoffAt: now + 40, keep: 'me' };
+    await expect(h.risc.receiveEvent(await riscToken(RISC_EVENT_TYPES.SESSIONS_REVOKED))).resolves.toEqual({ status: 202, processed: true });
+    expect(h.userRow.metaData).toEqual({ signInCutoffAt: now + 30, keep: 'me' });
+    expect(await attached(signInToken('password', now + 45, now + 45, 's-password-after-skewed-reset'))).toBeNull();
+  });
 });

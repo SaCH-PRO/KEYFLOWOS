@@ -1014,8 +1014,29 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     for a user with no cutoff writes nothing and takes no lock. If the
     writes fail they are logged (the password is already set) and password
     sign-ins stay refused until another reset.
-  - A record that is not after the current cutoff is ignored, so a later
-    session-ending event requires a new reset without removing the old one.
+  - Both are recorded only for a recovery session the middleware itself
+    counts as an emailed link (`sessionSignedInWithGoogleOrEmailLink`;
+    review SEC-W10RR-1 / CR-W10RR-1). The reset accepts an implicit-flow
+    `otp` session bound to a recovery request for the email, and anyone can
+    make that request (`POST /identity/forgot-password`); GoTrue stamps an
+    SMS-code sign-in `otp` too. So for a user with a phone identity such a
+    reset still sets the password (as before D-113) but records nothing:
+    password sign-ins stay refused and the rest of the restriction holds
+    until a Google sign-in or a PKCE recovery link (`recovery`), which GoTrue
+    mails only to the account's address. Otherwise whoever held a phone
+    identity on the account (added through the pre-event GoTrue session)
+    could request a reset for the address, sign in by SMS, post that session
+    as the recovery session and have their own password admitted after the
+    cutoff.
+  - A later session-ending event requires a new reset: its cutoff write
+    removes the record together with the clearing, under the same lock
+    (review SEC-W10RR-2 / CR-W10RR-2). Reading a record that is not after the
+    new cutoff as none was not enough: a reset is dated at its recovery
+    session's authentication when the provider dates that ahead of this
+    server (up to 60s), and a reset can commit while the event is in flight,
+    so a record dated after the new cutoff survived the event and admitted
+    every later password session. A record that is not after the current
+    cutoff is still ignored.
   - `POST /identity/login` and `POST /identity/refresh` judge the session
     GoTrue just issued by the same rule (`signInCutoffVerdict`) and, when the
     middleware would refuse it, answer 401 with a code instead of the
@@ -1134,8 +1155,13 @@ authenticity is verified with Google's JWKS inside `RiscService`.
     identity. Enabling another provider or phone sign-in in the Supabase
     dashboard keeps this fail-closed (a user with another OAuth identity
     clears with an emailed link; a user with a phone identity clears with
-    Google or a PKCE emailed link, not an implicit-flow `otp`), but the allow
-    list must be revisited before either is offered.
+    Google or a PKCE emailed link, not an implicit-flow `otp`, and since the
+    shipped reset link is an implicit-flow `otp` such a user's reset records
+    nothing, so their password sign-in stays refused after a cutoff until a
+    PKCE recovery link is offered), but the allow list must be revisited
+    before either is offered. That the reset accepts an implicit-flow `otp`
+    session of such a user at all (it may be an SMS code) predates D-113 and
+    is part of the same revisit.
   - **The Google account itself.** A Google sign-in clears the restriction,
     as the ruling says; after `account-disabled/hijacking` this relies on
     Google having recovered the account (`googleSignInDisabled` is recorded

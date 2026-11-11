@@ -106,6 +106,9 @@ const ID = {
   d113: `${P}u_d113`,
   d113Reset: `${P}u_d113_reset`,
   d113Login: `${P}u_d113_login`,
+  // W10-RISC-RESET review repairs (SEC-W10RR-1/2, CR-W10RR-1/2).
+  d113Phone: `${P}u_d113_phone`,
+  d113Rearm: `${P}u_d113_rearm`,
 };
 const EMAIL = {
   victim: `${P}victim@test.local`,
@@ -121,6 +124,8 @@ const EMAIL = {
   d113: `${P}d113@test.local`,
   d113Reset: `${P}d113-reset@test.local`,
   d113Login: `${P}d113-login@test.local`,
+  d113Phone: `${P}d113-phone@test.local`,
+  d113Rearm: `${P}d113-rearm@test.local`,
 };
 /** The Google subs GoTrue holds for each user (its verified google identity). */
 const GSUB = {
@@ -137,6 +142,8 @@ const GSUB = {
   d113: `${P}gsub-d113`,
   d113Reset: `${P}gsub-d113-reset`,
   d113Login: `${P}gsub-d113-login`,
+  d113Phone: `${P}gsub-d113-phone`,
+  d113Rearm: `${P}gsub-d113-rearm`,
 };
 type Who = keyof typeof ID;
 const WHO = Object.keys(ID) as Who[];
@@ -236,6 +243,8 @@ async function cleanup() {
  * A Supabase-shaped access token (no iss: the local-verification test shape)
  * of a session that signed in at `signedInAt`, by Google unless `method` says
  * otherwise (D-101: a password session's user also holds an email identity).
+ * `appMetadata` overrides GoTrue's server-set app_metadata (SEC-W10RR-1: a
+ * user with a phone identity).
  */
 async function accessToken(
   user: Who,
@@ -243,6 +252,7 @@ async function accessToken(
   iat = Math.floor(Date.now() / 1000),
   sessionId = `${user}-session`,
   method = 'oauth',
+  appMetadata?: Record<string, unknown>,
 ) {
   return new SignJWT({
     email: EMAIL[user],
@@ -252,7 +262,9 @@ async function accessToken(
     // GoTrue's server-set claim after a Google sign-in: bootstrap reads the
     // verified provider record only for a bearer that names one, and D-101
     // reads it to name the OAuth provider (GoTrue's amr entry never does).
-    app_metadata: method === 'oauth' ? { provider: 'google', providers: ['google'] } : { provider: 'email', providers: ['email', 'google'] },
+    app_metadata:
+      appMetadata ??
+      (method === 'oauth' ? { provider: 'google', providers: ['google'] } : { provider: 'email', providers: ['email', 'google'] }),
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(ID[user])
@@ -328,12 +340,25 @@ const NEW_PASSWORD = 'v94a-new-passphrase-not-real';
  * and IdentityPasswordService: POST /identity/forgot-password records the
  * recovery request (the link's mail goes to the GoTrue stub), then the web
  * posts the recovery-link session in the BODY of POST /identity/reset-password
- * (the implicit flow's 'otp' session, opened at `recoveredAt`).
+ * (the implicit flow's 'otp' session, opened at `recoveredAt`; SEC-W10RR-1:
+ * `method` 'recovery' for a PKCE link's session, `appMetadata` for a user with
+ * a phone identity).
  */
-async function resetPassword(user: Who, recoveredAt: number) {
+async function resetPassword(
+  user: Who,
+  recoveredAt: number,
+  opts: { method?: 'otp' | 'recovery'; appMetadata?: Record<string, unknown> } = {},
+) {
   const forgot = await request(app.getHttpServer()).post('/identity/forgot-password').send({ email: EMAIL[user] });
   expect(forgot.status).toBe(201);
-  const recovery = await accessToken(user, recoveredAt, recoveredAt, `${user}-recovery-${recoveredAt}`, 'otp');
+  const recovery = await accessToken(
+    user,
+    recoveredAt,
+    recoveredAt,
+    `${user}-recovery-${recoveredAt}`,
+    opts.method ?? 'otp',
+    opts.appMetadata,
+  );
   return request(app.getHttpServer()).post('/identity/reset-password').send({ accessToken: recovery, password: NEW_PASSWORD });
 }
 
@@ -931,5 +956,104 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     expect(ok.body).toMatchObject({ status: 'authenticated', accessToken: afterReset });
     expect(auditedFor(EMAIL.d113Login)).toContainEqual(expect.objectContaining({ event: 'login_success' }));
     expect((await me(afterReset)).status).toBe(200);
+  });
+
+  /**
+   * W10-RISC-RESET review SEC-W10RR-1 / CR-W10RR-1 (D-113, D-101). GoTrue
+   * stamps an SMS-code sign-in 'otp' as well, so an implicit-flow 'otp'
+   * session counts as an emailed link only for a user with no phone identity
+   * (emailOtpOnly, core/auth/sign-in-cutoff.ts), and AuthMiddleware refuses
+   * such a session as a bearer. completeReset recorded the reset and the
+   * clearing for every session the reset accepts, that one included, and the
+   * recovery request its otp binding checks is one anyone can make (POST
+   * /identity/forgot-password). So whoever held a phone identity on the
+   * account (added through the pre-event GoTrue session) could request a
+   * reset for the address, sign in by SMS, post that session as the recovery
+   * session, and have their own password, and every other method, admitted
+   * after the cutoff. completeReset now records both only for a session
+   * AuthMiddleware itself counts as Google or an emailed link
+   * (sessionSignedInWithGoogleOrEmailLink): nothing is recorded here, and the
+   * password and other sessions stay refused. A PKCE recovery link's session
+   * ('recovery', a link GoTrue mails only to the account's address) of the
+   * same user records both. The reset itself is accepted, as before this
+   * packet (docs/auth-pathway.md, residuals of D-101 and D-113).
+   */
+  it("W10-RISC-RESET review SEC-W10RR-1 / CR-W10RR-1 (D-113): after a RISC cutoff, POST /identity/reset-password with an implicit-flow 'otp' recovery session of a user with a phone identity (it may be an SMS code, which AuthMiddleware refuses as a bearer) records neither passwordResetAfterCutoffAt nor signInCutoffClearedAt, so password and sso/saml sessions after it stay refused; a PKCE 'recovery' session of the same user records both", async () => {
+    expect((await bootstrap('d113Phone')).status).toBe(201);
+    await riscEvent(GSUB.d113Phone, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const cutoff = (await cutoffOf(ID.d113Phone)) as number;
+    expect(typeof cutoff).toBe('number');
+    const withPhone = { provider: 'email', providers: ['email', 'phone'] };
+
+    // As a bearer, the otp session of a user with a phone identity is refused and clears nothing.
+    const smsOtp = await accessToken('d113Phone', cutoff + 5, cutoff + 5, 'd113-phone-sms', 'otp', withPhone);
+    expect((await me(smsOtp)).status).toBe(401);
+    expect((await metaOf(ID.d113Phone)).signInCutoffClearedAt).toBeUndefined();
+
+    // The same kind of session posted as the recovery session: the reset is
+    // accepted, as before this packet, and records nothing.
+    supabaseAdminStub.updateUserPassword.mockClear();
+    const reset = await resetPassword('d113Phone', cutoff + 10, { appMetadata: withPhone });
+    expect(reset.status).toBe(201);
+    expect(supabaseAdminStub.updateUserPassword).toHaveBeenCalledWith(ID.d113Phone, NEW_PASSWORD);
+    const meta = await metaOf(ID.d113Phone);
+    expect(meta.signInCutoffAt).toBe(cutoff);
+    expect(meta.passwordResetAfterCutoffAt).toBeUndefined();
+    expect(meta.signInCutoffClearedAt).toBeUndefined();
+    expect((await me(await accessToken('d113Phone', cutoff + 20, cutoff + 20, 'd113-phone-password', 'password', withPhone))).status).toBe(401);
+    expect((await me(await accessToken('d113Phone', cutoff + 20, cutoff + 20, 'd113-phone-saml', 'sso/saml', withPhone))).status).toBe(401);
+    expect((await me(smsOtp)).status).toBe(401);
+
+    // Positive control: a PKCE recovery link's session of the same user records both.
+    const pkce = await resetPassword('d113Phone', cutoff + 30, { method: 'recovery', appMetadata: withPhone });
+    expect(pkce.status).toBe(201);
+    expect(await metaOf(ID.d113Phone)).toMatchObject({
+      signInCutoffAt: cutoff,
+      passwordResetAfterCutoffAt: cutoff + 30,
+      signInCutoffClearedAt: cutoff + 30,
+    });
+    expect((await me(await accessToken('d113Phone', cutoff + 31, cutoff + 31, 'd113-phone-password-2', 'password', withPhone))).status).toBe(200);
+    expect((await me(await accessToken('d113Phone', cutoff + 31, cutoff + 31, 'd113-phone-saml-2', 'sso/saml', withPhone))).status).toBe(200);
+  });
+
+  /**
+   * W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113). A new
+   * session-ending event removed only the clearing; the reset record stayed,
+   * read as none only while it was not after the new cutoff. But a reset is
+   * dated at the recovery session's authentication when the provider dates
+   * that ahead of this server (completeReset accepts up to 60s), and one can
+   * commit while an event is in flight, so a record dated after the new
+   * cutoff survived the event and admitted every later password session with
+   * no reset after that cutoff. The cutoff write now removes the record with
+   * the clearing, in the same locked write.
+   */
+  it('W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2 (D-113): a new session-ending RISC event removes passwordResetAfterCutoffAt with the clearing, also a reset dated after the new cutoff (its recovery session dated ahead of this server by the provider), so a password session after that reset stays refused until a password reset after the new cutoff', async () => {
+    expect((await bootstrap('d113Rearm')).status).toBe(201);
+    await riscEvent(GSUB.d113Rearm, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const cutoff = (await cutoffOf(ID.d113Rearm)) as number;
+    expect(typeof cutoff).toBe('number');
+
+    // The provider dates the recovery session 40s ahead of this server: the reset and the clearing are dated at it.
+    const ahead = Math.floor(Date.now() / 1000) + 40;
+    expect((await resetPassword('d113Rearm', ahead)).status).toBe(201);
+    expect(await metaOf(ID.d113Rearm)).toMatchObject({ passwordResetAfterCutoffAt: ahead, signInCutoffClearedAt: ahead });
+
+    // A new session-ending event, handled before that time on this server's clock.
+    await riscEvent(GSUB.d113Rearm, RISC_EVENT_TYPES.SESSIONS_REVOKED);
+    const rearmed = await metaOf(ID.d113Rearm);
+    const next = rearmed.signInCutoffAt as number;
+    expect(next).toBeGreaterThanOrEqual(cutoff);
+    expect(next).toBeLessThan(ahead);
+    expect(rearmed.signInCutoffClearedAt).toBeUndefined();
+    expect(rearmed.passwordResetAfterCutoffAt).toBeUndefined();
+    // A password session after the old reset, and after the new cutoff, waits for a new reset.
+    const afterOldReset = await accessToken('d113Rearm', ahead + 5, ahead + 5, 'd113-rearm-password', 'password');
+    expect((await me(afterOldReset)).status).toBe(401);
+
+    // Positive control: a reset after the new cutoff admits a password session after it.
+    expect((await resetPassword('d113Rearm', ahead + 10)).status).toBe(201);
+    expect((await metaOf(ID.d113Rearm)).passwordResetAfterCutoffAt).toBe(ahead + 10);
+    expect((await me(await accessToken('d113Rearm', ahead + 11, ahead + 11, 'd113-rearm-password-2', 'password'))).status).toBe(200);
+    expect((await me(afterOldReset)).status).toBe(401);
   });
 });
