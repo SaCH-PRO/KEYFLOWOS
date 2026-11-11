@@ -19,6 +19,7 @@
  * - Execution is audited and wrapped with uniform error handling.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { getTenantContext } from '../../core/tenant/tenant-context';
@@ -42,6 +43,14 @@ export interface KeyCortexToolContext {
   correlationId?: string;
   /** The approval proposal this call executes, when it executes one: named on its CortexActionLog row. */
   proposalId?: string;
+  /**
+   * W10-CORTEX-CHAT-SCOPE (review SEC-W9KCA-3, CR-W9KCA-2): the member a call with no acting user
+   * runs for (a plan's member, an on-behalf-of member), named on its CortexActionLog row ONLY. It is
+   * never the acting user: the business-event ledger keeps recording the call as KEY's own ('ai',
+   * SEC-W9KCA-4), the call's fingerprint and the organ's acting user stay ctx.userId, and no
+   * permission is decided from it. ctx.userId, when set, wins.
+   */
+  auditUserId?: string;
   idempotencyKey?: string;
   sagaId?: string;
   /**
@@ -246,12 +255,53 @@ export function auditErrorText(error: string | null | undefined, input: unknown)
  * the call's business. Callers that pass no actor (the chat's bridged organ
  * tools, cortex.execute_tool) otherwise audited a member's action with nobody
  * named. Attribution only: no permission is decided from it. A call outside a
- * request (a job, a queue worker) names nobody.
+ * request (a job, a queue worker) names nobody, unless its caller names an
+ * audit-only actor or it runs inside another registry call that names one
+ * (W10-CORTEX-CHAT-SCOPE, below).
  */
 function auditActor(ctx: KeyCortexToolContext): string | null {
   if (ctx.userId) return ctx.userId;
+  // W10-CORTEX-CHAT-SCOPE (SEC-W9KCA-3, CR-W9KCA-2): the caller's audit-only actor, else the actor of
+  // the registry call this one runs inside (a KEY-cortex turn's bridged organ call), both on this row
+  // alone. Then the request's member, as before.
+  if (ctx.auditUserId) return ctx.auditUserId;
+  const enclosing = enclosingCallFor(ctx);
+  if (enclosing?.actor) return enclosing.actor;
   const request = getTenantContext();
   return request?.userId && request.businessId === ctx.businessId ? request.userId : null;
+}
+
+/**
+ * W10-CORTEX-CHAT-SCOPE (review CR-W9KCA-3, SEC-W9KCA-3): the registry call whose handler is running,
+ * as its audit row names it. A KEY-cortex turn's bridged flow tool runs its organ tool through the
+ * flow dispatcher (KeyCortexEfferentBridgeService -> FlowOrchestratorService.executeBridgedCortexTool
+ * -> execute()), which hands the organ call no actor and no command id (it is no principal, and must
+ * not become the organ's acting user: SEC-W9KCA-4), so its row named nobody outside a request. The
+ * organ call's row now names the enclosing call's actor, and its command id when the organ call is on
+ * the same correlation (the bridge carries the turn's session and correlation). Audit row only.
+ */
+interface EnclosingToolCall {
+  businessId: string;
+  actor: string | null;
+  commandId: string | null;
+  correlationId: string | null;
+}
+
+const enclosingToolCall = new AsyncLocalStorage<EnclosingToolCall>();
+
+/** The registry call `ctx`'s call runs inside, when it is one for the same business. */
+function enclosingCallFor(ctx: KeyCortexToolContext): EnclosingToolCall | undefined {
+  const enclosing = enclosingToolCall.getStore();
+  return enclosing && enclosing.businessId === ctx.businessId ? enclosing : undefined;
+}
+
+/** The command id named on a call's CortexActionLog row: its own, else its enclosing call's on the same correlation. */
+function auditCommandId(ctx: KeyCortexToolContext): string | null {
+  if (ctx.commandId) return ctx.commandId;
+  const enclosing = enclosingCallFor(ctx);
+  return enclosing?.commandId && ctx.correlationId && enclosing.correlationId === ctx.correlationId
+    ? enclosing.commandId
+    : null;
 }
 
 @Injectable()
@@ -577,7 +627,17 @@ export class KeyCortexToolRegistryService {
       // above), a throw means the tool never ran (V1-19b review, SEC-V19b-3 /
       // CR-V19b-2): the catch below gives the claim up then, not settle it.
       handlerEntered = true;
-      const result = await tool.handler(ctx, validation.parsed);
+      // W10-CORTEX-CHAT-SCOPE (CR-W9KCA-3): a registry call the handler makes is audited as this
+      // call's (enclosingToolCall: its row only).
+      const result = await enclosingToolCall.run(
+        {
+          businessId: ctx.businessId,
+          actor: auditActor(ctx),
+          commandId: auditCommandId(ctx),
+          correlationId: ctx.correlationId ?? null,
+        },
+        () => tool.handler(ctx, validation.parsed),
+      );
       const durationMs = Date.now() - startMs;
 
       // KF-EXEC-ACTION-001. A handler can now answer "not executed": the KEY
@@ -1039,7 +1099,7 @@ export class KeyCortexToolRegistryService {
           businessId: ctx.businessId,
           userId: auditActor(ctx),
           sessionId: ctx.sessionId ?? ctx.correlationId ?? 'unknown',
-          commandId: ctx.commandId ?? null,
+          commandId: auditCommandId(ctx),
           correlationId: ctx.correlationId ?? null,
           proposalId: ctx.proposalId ?? null,
           actionType: toolName,
