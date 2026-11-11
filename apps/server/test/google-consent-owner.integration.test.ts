@@ -59,6 +59,22 @@
  * SEC-W9GD-2), POST /drive/businesses/:b/sync with the KEY tool
  * connect.scanDrive ([V94D-T06]; CRR-W9GD-1) and POST /calendar/businesses/:b/
  * sync/google/temporal-flow ([V94D-T07]; SEC-W9GD-3).
+ *
+ * W10-GOOGLE-DOORS-REST (owner ruling D-99) turns those three live: [V94D-T05]
+ * POST /connect/businesses/:b/contacts/sync (control [V94D-J01]; the five
+ * STAFF-started Google Contacts cases of connect-sync-actor.integration.test.ts
+ * are re-pointed at the owner, or at the Outlook source, in the same change),
+ * [V94D-T06] POST /drive/businesses/:b/sync (DriveIntakeController.sync) and the
+ * KEY tool connect.scanDrive (KeyToolRegistryService: the driving member must be
+ * the owner, else a refusal envelope and nothing run; control [V94D-J02]), and
+ * [V94D-T07] POST /calendar/businesses/:b/sync/google/temporal-flow (control
+ * [V94D-J03]: PATCH .../sync/settings stays a member's). For these cases the
+ * Drive pull (ConnectorIntelligenceService.syncGoogleDrive) and the calendar
+ * pull (GoogleCalendarTemporalSyncService.syncBusiness) are recording
+ * stand-ins, the KEY tool registry is the real KeyToolRegistryService with
+ * stand-ins for the services no case here reaches, and DriveIntakeController is
+ * mounted as the commerce module mounts it.
+ *
  * For these cases the connector registry behind ConnectorController is a
  * stand-in recording what reaches it, its credential store is the real
  * ConnectorCredentialsService, the Google Contacts sync is the real
@@ -177,6 +193,26 @@ const outlookContacts = {
 
 /** W9-GOOGLE-DOORS-SERVER: the provider run of the real GoogleContactsSyncService (spied in beforeAll). */
 let googleContactsSync: any;
+
+/**
+ * W10-GOOGLE-DOORS-REST (D-99, [V94D-T06]): the Google Drive API pull behind
+ * POST /drive/businesses/:b/sync and the KEY tool connect.scanDrive, a recording
+ * stand-in (a refused door or tool never reaches it).
+ */
+const driveIntelligence = {
+  syncGoogleDrive: vi.fn(async (_businessId: string) => ({ scanned: 0, newFiles: 0 })),
+};
+/**
+ * W10-GOOGLE-DOORS-REST (D-99, [V94D-T07]): the Google Calendar pull behind
+ * POST /calendar/businesses/:b/sync/google/temporal-flow, a recording stand-in.
+ */
+const temporalSync = {
+  syncBusiness: vi.fn(async (_businessId: string) => ({ synced: 0, skipped: 0 })),
+};
+/** W10-GOOGLE-DOORS-REST: the KEY tool registry's audit log, a recording stand-in. */
+const keyToolAudit = { logToolExecution: vi.fn(async () => 'v94d_audit') };
+/** W10-GOOGLE-DOORS-REST: the real KeyToolRegistryService (resolved in beforeAll). */
+let keyTools: any;
 
 let db: any;
 let app: any;
@@ -322,13 +358,33 @@ beforeAll(async () => {
   const { ConnectorFormMappingService } = await import('../src/modules/connect/connector-form-mapping.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  // W10-GOOGLE-DOORS-REST: the Drive intake sync door and the KEY tool registry.
+  const { DriveIntakeController } = await import('../src/modules/commerce/drive-intake.controller');
+  const { DriveIntakeOrchestrator } = await import('../src/modules/commerce/drive-intake-orchestrator.service');
+  const { ConnectorIntelligenceService } = await import('../src/modules/ai/connector-intelligence.service');
+  const { KeyToolRegistryService } = await import('../src/modules/ai/key-tool-registry.service');
+  const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+  const { SafeToSpendService } = await import('../src/modules/finance/safe-to-spend.service');
+  const { CashflowForecastService } = await import('../src/modules/finance/cashflow-forecast.service');
+  const { MoneyMovesService } = await import('../src/modules/finance/money-moves.service');
+  const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
+  const { FinanceOverviewService } = await import('../src/modules/finance/finance-overview.service');
+  const { CommandService } = await import('../src/modules/command/command.service');
+  const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+
+  // What tsc emits for DriveIntakeController's constructor (it declares its
+  // dependencies by type only, and this transform emits no decorator metadata),
+  // as payments-actor.integration.test.ts declares it.
+  if (!Reflect.getMetadata('design:paramtypes', DriveIntakeController)) {
+    Reflect.defineMetadata('design:paramtypes', [ConnectorIntelligenceService, DriveIntakeOrchestrator, PrismaService], DriveIntakeController);
+  }
 
   Logger.overrideLogger(false);
 
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [BookingsController, GoogleDriveController, CalendarController, MicrosoftOAuthController, ConnectorController, ConnectController],
+    controllers: [BookingsController, GoogleDriveController, CalendarController, MicrosoftOAuthController, ConnectorController, ConnectController, DriveIntakeController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -353,7 +409,8 @@ beforeAll(async () => {
       { provide: CalendarConflictService, useValue: {} },
       { provide: CalendarInsightService, useValue: {} },
       { provide: AiUsageService, useValue: {} },
-      { provide: GoogleCalendarTemporalSyncService, useValue: {} },
+      // W10-GOOGLE-DOORS-REST ([V94D-T07]): the temporal-flow pull, recording.
+      { provide: GoogleCalendarTemporalSyncService, useValue: temporalSync },
       // MicrosoftOAuthService's activity log, reached only by its callback (no case here).
       { provide: ConnectorActivityService, useValue: {} },
       // The Google Calendar and Drive connections, real (no connector: both are @Optional),
@@ -387,6 +444,22 @@ beforeAll(async () => {
       { provide: SignatureParserService, useValue: {} },
       { provide: GoogleBusinessProfileService, useValue: {} },
       { provide: ConnectorFormMappingService, useValue: {} },
+      // W10-GOOGLE-DOORS-REST ([V94D-T06]): DriveIntakeController's Drive pull
+      // (recording, shared with the KEY tool) and its plan orchestrator, which
+      // no case here reaches; the real KeyToolRegistryService over the real
+      // PrismaService, with stand-ins for the services connect.scanDrive does
+      // not use and a recording audit log.
+      { provide: ConnectorIntelligenceService, useValue: driveIntelligence },
+      { provide: DriveIntakeOrchestrator, useValue: {} },
+      KeyToolRegistryService,
+      { provide: AiExecutionLogService, useValue: keyToolAudit },
+      { provide: SafeToSpendService, useValue: {} },
+      { provide: CashflowForecastService, useValue: {} },
+      { provide: MoneyMovesService, useValue: {} },
+      { provide: ReceivablesService, useValue: {} },
+      { provide: FinanceOverviewService, useValue: {} },
+      { provide: CommandService, useValue: {} },
+      { provide: TimelineService, useValue: {} },
     ],
   }).compile();
 
@@ -409,6 +482,7 @@ beforeAll(async () => {
   googleContactsSync = vi
     .spyOn(app.get(GoogleContactsSyncService), 'sync')
     .mockImplementation(async () => ({ imported: 0, updated: 0, matched: 0, created: 0, skipped: 0, appliedRules: false }));
+  keyTools = app.get(KeyToolRegistryService);
 
   await cleanup(); // in case a prior run aborted
 
@@ -963,20 +1037,154 @@ describe('W9-GOOGLE-DOORS-SERVER review repair: clearing a Google Suite connecti
   });
 });
 
-describe('W8-GOOGLE-CONSENT-OWNER: Google doors outside this packet\'s write set (D-99 follow-up)', () => {
-  it.todo('[V94D-T05] needs apps/server/test/connect-sync-actor.integration.test.ts (outside the W9-GOOGLE-DOORS-SERVER write set): POST /connect/businesses/:b/contacts/sync (the Google Contacts sync) answers an ADMIN and a STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced; the owner keeps it. While it is open it runs the same GoogleContactsSyncService.sync that [V94D-T03] refuses at contact-sources/google_contacts/resync and sync-all, so a member bypasses that gate with one request (review SEC-W9GD-2). Gating it in connect.controller.ts turns red the five Google Contacts cases of that suite in which a STAFF member starts the sync (SEC-D92R-2 x2, SEC-W6CTM-2 x2, CR-CTM-3), which D-99 supersedes and which must be re-pointed at the owner or the Outlook source in the same change (D-99)');
+/**
+ * W10-GOOGLE-DOORS-REST (owner ruling D-99): the last Google sync doors. Each
+ * was an it.todo here ([V94D-T05]..[V94D-T07]) while its file was outside the
+ * W9-GOOGLE-DOORS-SERVER write set.
+ */
+const contactsSync = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/connect/businesses/${businessId}/contacts/sync`), actor);
+const outlookContactsSync = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/connect/businesses/${businessId}/outlook-contacts/sync`), actor);
+const driveSync = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/drive/businesses/${businessId}/sync`), actor).send({});
+const temporalFlowSync = (businessId: string, actor: string | undefined) =>
+  as(agent().post(`/calendar/businesses/${businessId}/sync/google/temporal-flow`), actor).send({});
+const patchSyncSettings = (businessId: string, actor: string | undefined, body: Record<string, unknown>) =>
+  as(agent().patch(`/calendar/businesses/${businessId}/sync/settings`), actor).send(body);
+/**
+ * The KEY tool connect.scanDrive, run as KeyCommandService.executeApprovedPlan
+ * runs a legacy tool: INTERNAL_EXEC (2), the driving member as userId.
+ */
+const scanDrive = (businessId: string, userId: string | undefined): Promise<any> =>
+  keyTools.execute('connect', 'scanDrive', { businessId, userId, commandId: `${P}cmd`, autonomyLevel: 2 }, {});
+/** A KEY refusal under D-99 (the shape of the other KEY refusals): nothing run, no data, the code named. */
+function expectKeyGoogleOwnerOnly(result: any, who: string) {
+  expect(result, `${who} ${JSON.stringify(result)}`).toMatchObject({ success: false, notExecuted: true });
+  expect(String(result.error), who).toContain('GOOGLE_CONNECT_OWNER_ONLY');
+  expect(result.data, who).toBeUndefined();
+}
+/** The arms of the owner rule, each on a business it owns: the owner, a co-owner, the distinguished owner, a SUPER_ADMIN. */
+const OWNER_ARMS: Array<[string, string]> = [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]];
 
-  it.todo('[V94D-T06] needs apps/server/src/modules/commerce/drive-intake.controller.ts and apps/server/src/modules/ai/key-tool-registry.service.ts (outside the W9-GOOGLE-DOORS-SERVER write set; review CRR-W9GD-1): POST /drive/businesses/:b/sync (DriveIntakeController.sync) and the KEY tool connect.scanDrive both run ConnectorIntelligenceService.syncGoogleDrive (the Drive API pull that writes intake rows) for any member; they answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY (the KEY tool refuses a non-owner run) with syncGoogleDrive not called; the owner keeps them. This is the Drive sync the web starts (key-connect handleSync): POST /connectors/.../sync/google_drive, gated by [V94D-T02], is PULL_SYNC_NOT_IMPLEMENTED for Drive (D-99)');
+describe('W10-GOOGLE-DOORS-REST: starting a Google Contacts sync is the business owner\'s (D-99)', () => {
+  it('[V94D-T05] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /connect/businesses/:b/contacts/sync (the Google Contacts sync: the GoogleContactsSyncService.sync [V94D-T03] refuses at contact-sources/google_contacts/resync and sync-all; review SEC-W9GD-2) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced and the stored Google Contacts connection exactly as it was', async () => {
+    await connectContacts(ID.biz);
+    clearContactSyncs();
+    for (const member of REFUSED) {
+      expectGoogleOwnerOnly(await contactsSync(ID.biz, member), `${member} contacts/sync`);
+      expect(await storedContacts(ID.biz), member).toEqual(contactsConnectedRow(ID.biz));
+    }
+    expect(googleContactsSync).not.toHaveBeenCalled();
+    expect(outlookContacts.sync).not.toHaveBeenCalled();
+  });
 
-  it.todo('[V94D-T07] needs apps/server/src/modules/calendar/calendar.controller.ts (outside the W9-GOOGLE-DOORS-SERVER write set; review SEC-W9GD-3): POST /calendar/businesses/:b/sync/google/temporal-flow (GoogleCalendarTemporalSyncService.syncBusiness, which pulls the coming events from the business Google Calendar) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with syncBusiness not called, as its sibling .../sync/google/resync does ([V94D-D01]); the owner keeps it (D-99)');
-
-  // [V94D-T04] (review CR-W8GCO-1, D-99) was an it.todo here: the web shows the
-  // GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect
-  // and GET .../auth-url to an ADMIN or STAFF member and keeps the Drive
-  // connection shown as connected (google-drive-browser.tsx handleDisconnect and
-  // handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx).
-  // The server cannot test the web: W9-GOOGLE-WEB-403 proves it in
-  // apps/web/src/app/app/__tests__/google-connect-owner-only-refusal.test.tsx
-  // (the [V94D-T04] cases, with the owner controls [V95K-W01]..[V95K-W02] and
-  // the connector and contact door pins [V95K-P01]..[V95K-P03]).
+  it('[V94D-J01] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, no membership row) on their own business and a SUPER_ADMIN with no membership start the Google Contacts sync for the route\'s business; the Outlook Contacts sync (a Microsoft connection, outside D-99) stays a member\'s (an ADMIN and a STAFF member start it); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing synced', async () => {
+    for (const [businessId, actor] of OWNER_ARMS) {
+      await connectContacts(businessId);
+      clearContactSyncs();
+      const res = await contactsSync(businessId, actor);
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
+      expect(googleContactsSync).toHaveBeenCalledTimes(1);
+      expect(googleContactsSync).toHaveBeenCalledWith(businessId);
+    }
+    for (const member of [ID.admin, ID.staff]) {
+      clearContactSyncs();
+      const res = await outlookContactsSync(ID.biz, member);
+      expect(res.status, `${member} outlook ${JSON.stringify(res.body)}`).toBe(201);
+      expect(outlookContacts.sync).toHaveBeenCalledWith(ID.biz);
+      expect(googleContactsSync).not.toHaveBeenCalled();
+    }
+    clearContactSyncs();
+    expect((await contactsSync(ID.biz, ID.stranger)).status, 'stranger').toBe(403);
+    expect((await contactsSync(ID.biz, undefined)).status, 'anonymous').toBe(401);
+    expect(googleContactsSync).not.toHaveBeenCalled();
+    await connectContacts(ID.biz);
+  });
 });
+
+describe('W10-GOOGLE-DOORS-REST: starting a Google Drive sync, at the Drive intake door or through the KEY tool, is the business owner\'s (D-99)', () => {
+  it('[V94D-T06] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /drive/businesses/:b/sync (DriveIntakeController.sync, the Drive sync the web starts: key-connect handleSync and the Drive intake queue) and the KEY tool connect.scanDrive (review CRR-W9GD-1) both run ConnectorIntelligenceService.syncGoogleDrive (the Drive API pull that writes intake rows); for an ADMIN, a STAFF member and the owner of another business who is STAFF here the door answers 403 GOOGLE_CONNECT_OWNER_ONLY and the KEY tool returns a refusal envelope (success false, notExecuted, GOOGLE_CONNECT_OWNER_ONLY, no data), as it does for a run with no driving member, one driven by a user with no membership and one by the owner of another business; syncGoogleDrive is not called', async () => {
+    driveIntelligence.syncGoogleDrive.mockClear();
+    for (const member of REFUSED) {
+      expectGoogleOwnerOnly(await driveSync(ID.biz, member), `${member} drive sync`);
+      expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, member), `${member} connect.scanDrive`);
+    }
+    expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, undefined), 'no driving member');
+    expectKeyGoogleOwnerOnly(await scanDrive(ID.biz, ID.stranger), 'stranger');
+    expectKeyGoogleOwnerOnly(await scanDrive(ID.bizOther, ID.owner), 'the owner of biz on bizOther');
+    expect(driveIntelligence.syncGoogleDrive).not.toHaveBeenCalled();
+  });
+
+  it('[V94D-J02] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN with no membership start the Drive sync at the door (201, success with the pull\'s counts) and through the KEY tool connect.scanDrive (success, the pull\'s counts), and syncGoogleDrive runs once for the route\'s business each time; a user with no membership is refused the door by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
+    for (const [businessId, actor] of OWNER_ARMS) {
+      driveIntelligence.syncGoogleDrive.mockClear();
+      const res = await driveSync(businessId, actor);
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body).toEqual({ success: true, scanned: 0, newFiles: 0 });
+      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledTimes(1);
+      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledWith(businessId);
+
+      driveIntelligence.syncGoogleDrive.mockClear();
+      expect(await scanDrive(businessId, actor), `${actor} connect.scanDrive`).toEqual({ success: true, data: { scanned: 0, newFiles: 0 } });
+      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledTimes(1);
+      expect(driveIntelligence.syncGoogleDrive).toHaveBeenCalledWith(businessId);
+    }
+    driveIntelligence.syncGoogleDrive.mockClear();
+    expect((await driveSync(ID.biz, ID.stranger)).status, 'stranger').toBe(403);
+    expect((await driveSync(ID.biz, undefined)).status, 'anonymous').toBe(401);
+    expect(driveIntelligence.syncGoogleDrive).not.toHaveBeenCalled();
+  });
+});
+
+describe('W10-GOOGLE-DOORS-REST: pulling the business Google Calendar into the temporal flow is the business owner\'s (D-99)', () => {
+  it('[V94D-T07] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /calendar/businesses/:b/sync/google/temporal-flow (GoogleCalendarTemporalSyncService.syncBusiness, which pulls the coming events from the business Google Calendar; review SEC-W9GD-3) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with syncBusiness not called, as its sibling .../sync/google/resync does ([V94D-D01])', async () => {
+    temporalSync.syncBusiness.mockClear();
+    for (const member of REFUSED) expectGoogleOwnerOnly(await temporalFlowSync(ID.biz, member), `${member} temporal-flow`);
+    expect(temporalSync.syncBusiness).not.toHaveBeenCalled();
+  });
+
+  it('[V94D-J03] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN pull the Google Calendar into the temporal flow (201, the pull\'s counts) and syncBusiness runs once for the route\'s business each time; the ruling covers start, sync and disconnect only, so PATCH .../sync/settings stays a member\'s (an ADMIN and a STAFF member each write a sync setting, 200, stored); a user with no membership is refused the pull by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
+    for (const [businessId, actor] of OWNER_ARMS) {
+      temporalSync.syncBusiness.mockClear();
+      const res = await temporalFlowSync(businessId, actor);
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body).toEqual({ synced: 0, skipped: 0 });
+      expect(temporalSync.syncBusiness).toHaveBeenCalledTimes(1);
+      expect(temporalSync.syncBusiness).toHaveBeenCalledWith(businessId);
+    }
+
+    const settingsBefore = await storedSyncSettings(ID.biz);
+    for (const [member, pullExternal] of [[ID.admin, true], [ID.staff, false]] as const) {
+      const res = await patchSyncSettings(ID.biz, member, { pullExternal });
+      expect(res.status, `${member} settings ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body).toMatchObject({ pullExternal });
+      expect(await storedSyncSettings(ID.biz), member).toMatchObject({ pullExternal });
+    }
+    await db.$executeRawUnsafe(
+      `UPDATE businesses SET calendar_sync_settings = $2::jsonb WHERE id = $1`,
+      ID.biz,
+      settingsBefore === null ? null : JSON.stringify(settingsBefore),
+    );
+
+    temporalSync.syncBusiness.mockClear();
+    expect((await temporalFlowSync(ID.biz, ID.stranger)).status, 'stranger').toBe(403);
+    expect((await temporalFlowSync(ID.biz, undefined)).status, 'anonymous').toBe(401);
+    expect(temporalSync.syncBusiness).not.toHaveBeenCalled();
+  });
+});
+
+// [V94D-T04] (review CR-W8GCO-1, D-99) was an it.todo here: the web shows the
+// GOOGLE_CONNECT_OWNER_ONLY refusal of DELETE /drive/businesses/:b/disconnect
+// and GET .../auth-url to an ADMIN or STAFF member and keeps the Drive
+// connection shown as connected (google-drive-browser.tsx handleDisconnect and
+// handleConnect, inventory-command-center.tsx and sheets-manage-drawer.tsx).
+// The server cannot test the web: W9-GOOGLE-WEB-403 proves it in
+// apps/web/src/app/app/__tests__/google-connect-owner-only-refusal.test.tsx
+// (the [V94D-T04] cases, with the owner controls [V95K-W01]..[V95K-W02] and
+// the connector and contact door pins [V95K-P01]..[V95K-P03]; [V95K-P03] is the
+// Google Contacts Sync now that [V94D-T05] gates). The web callers of the doors
+// W10-GOOGLE-DOORS-REST gates show the server's refusal as they stand: Key
+// Connect handleSync (google_drive) and the Drive intake queue's handleSync
+// toast res.error, which carries the server's message; the temporal-flow pull
+// (lib/api/temporal-flow.ts syncGoogleCalendarToTemporalFlow) has no web caller.

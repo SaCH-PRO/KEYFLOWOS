@@ -40,6 +40,15 @@
  *     tags merged) carries the actor: a ContactAuditEntry with
  *     { type: USER, id }, and on the CRM doors the ContactEvent too.
  *
+ * W10-GOOGLE-DOORS-REST (owner ruling D-99): a Google Contacts sync is started
+ * only by the business owner (POST contacts/sync answers anyone else 403
+ * GOOGLE_CONNECT_OWNER_ONLY). The five Google Contacts cases a STAFF member
+ * started (SEC-D92R-2 x2, SEC-W6CTM-2 x2, CR-CTM-3) are re-pointed: the
+ * configuring member's bound is proven with the owner starting the Google run,
+ * and the starting member's own bound (SEC-W6CTM-2) on the Outlook source, where
+ * a STAFF member still starts it (the Google start is refused and writes
+ * nothing). See the note in the sync describe.
+ *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership and contact rows, AuthGuard, BusinessGuard,
  * the TenantInterceptor, ConnectController, GoogleContactsSyncService,
@@ -355,6 +364,32 @@ describe.each([
   const rulesUrl = `/connect/businesses/${biz}/${route}/mapping-rules`;
   const syncUrl = `/connect/businesses/${biz}/${route}/sync`;
 
+  /**
+   * W10-GOOGLE-DOORS-REST (owner ruling D-99): every Google connection is
+   * started, synced and disconnected only by the business owner, so POST
+   * contacts/sync (the Google Contacts sync) answers anyone else 403
+   * GOOGLE_CONNECT_OWNER_ONLY before anything runs
+   * (google-consent-owner.integration.test.ts [V94D-T05]); the Outlook Contacts
+   * sync (a Microsoft connection) stays a member's. D-99 supersedes the five
+   * cases below in which a STAFF member started the Google sync. Where what a
+   * case proves is the configuring member's bound (SEC-D92R-2, CR-CTM-3), it
+   * holds whoever starts the run, so the Google run is started by the owner.
+   * Where it is the starting member's own bound (SEC-W6CTM-2 x2), it needs a
+   * starter who is not the owner, so it is proven on the Outlook source; on the
+   * Google source that member's start is refused and writes nothing.
+   */
+  const google = route === 'contacts';
+  /** Who starts a run the case has `member` start: the owner on the Google Contacts source (D-99). */
+  const starter = (member: string) => (google ? ID.owner : member);
+  /** D-99 on the Google Contacts source: `member`'s start is refused before anything runs. */
+  async function expectGoogleStartRefused(member: string) {
+    outbound.length = 0;
+    const res = await agent().post(syncUrl).set('x-test-user', member);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.code).toBe('GOOGLE_CONNECT_OWNER_ONLY');
+    expect(outbound).toEqual([]);
+  }
+
   /** The provider answers with these people (first name, email). */
   function remote(people: Array<[string, string]>) {
     peopleConnections = people.map(([first, email], i) => ({
@@ -369,12 +404,14 @@ describe.each([
     }));
   }
 
-  it('SEC-D92R-2: a sync whose rules a crm write STAFF member saved leaves the owner\'s PRIVATE contact that member cannot open unchanged and reports it skipped; the TEAM contact it writes and the contact it creates record that member as the actor', async () => {
+  it('SEC-D92R-2 (D-99): a sync whose rules a crm write STAFF member saved leaves the owner\'s PRIVATE contact that member cannot open unchanged and reports it skipped; the TEAM contact it writes and the contact it creates record the member who started the run as the actor (that STAFF member on the Outlook source; the owner on the Google Contacts source, whose sync only the owner starts)', async () => {
     const { priv, team } = await reseed(biz);
     await agent().put(rulesUrl).set('x-test-user', ID.staff).send({ defaultTags: ['synced'] }).expect(200);
     remote([['Renamed', EMAIL.priv], ['Renamed', EMAIL.team], ['Newcomer', EMAIL.fresh]]);
 
-    const res = await agent().post(syncUrl).set('x-test-user', ID.staff);
+    // D-99 (W10-GOOGLE-DOORS-REST): the owner starts the Google Contacts run.
+    const runner = starter(ID.staff);
+    const res = await agent().post(syncUrl).set('x-test-user', runner);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toEqual(expect.objectContaining({ imported: 1, updated: 1, skipped: 1 }));
 
@@ -383,14 +420,14 @@ describe.each([
     expect(await db.contactExternalMapping.count({ where: { contactId: priv.id } })).toBe(0);
     expect(await audits(priv.id)).toEqual([]);
 
-    // The TEAM contact is written, and the configuring member is its actor.
+    // The TEAM contact is written, and the member who started the run is its actor.
     expect(await contactRow(team.id)).toEqual(expect.objectContaining({ firstName: 'Renamed', tags: ['old'] }));
-    expect(await audits(team.id)).toEqual([{ action: 'updated', actor: asUser(ID.staff) }]);
+    expect(await audits(team.id)).toEqual([{ action: 'updated', actor: asUser(runner) }]);
 
     // So is the contact the sync creates.
     const created = await db.contact.findFirst({ where: { businessId: biz, emailNormalized: EMAIL.fresh } });
     expect(created).toEqual(expect.objectContaining({ firstName: 'Newcomer', source, tags: ['synced'] }));
-    expect(await audits(created.id)).toEqual([{ action: 'created', actor: asUser(ID.staff) }]);
+    expect(await audits(created.id)).toEqual([{ action: 'created', actor: asUser(runner) }]);
     expect(outbound.every((u) => u.startsWith('https://people.googleapis.com/') || u.startsWith('https://graph.microsoft.com/'))).toBe(true);
   });
 
@@ -406,12 +443,13 @@ describe.each([
     expect(await audits(team.id)).toEqual([{ action: 'updated', actor: asUser(ID.owner) }]);
   });
 
-  it('SEC-D92R-2: a sync whose rules a crm read STAFF member saved writes no existing contact (that member may edit none, the CRM edit rule) and reports both skipped', async () => {
+  it('SEC-D92R-2 (D-99): a sync whose rules a crm read STAFF member saved writes no existing contact (that member may edit none, the CRM edit rule) and reports both skipped, whoever starts it (that member on the Outlook source; the owner on the Google Contacts source, whose sync only the owner starts)', async () => {
     const { priv, team } = await reseed(biz);
     await agent().put(rulesUrl).set('x-test-user', ID.reader).send({ defaultTags: [] }).expect(200);
     remote([['Renamed', EMAIL.priv], ['Renamed', EMAIL.team]]);
 
-    const res = await agent().post(syncUrl).set('x-test-user', ID.reader);
+    // D-99 (W10-GOOGLE-DOORS-REST): the owner starts the Google Contacts run.
+    const res = await agent().post(syncUrl).set('x-test-user', starter(ID.reader));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toEqual(expect.objectContaining({ updated: 0, skipped: 2 }));
     expect(await contactRow(priv.id)).toEqual(expect.objectContaining({ firstName: 'Private' }));
@@ -420,10 +458,20 @@ describe.each([
     expect(await audits(team.id)).toEqual([]);
   });
 
-  it('SEC-W6CTM-2 (D-93): a sync whose rules record no configuring member runs as the member who starts it, not as the owner: a crm write STAFF member\'s run leaves the owner\'s PRIVATE contact unchanged and unlinked, and names that member on the TEAM contact it writes', async () => {
+  it('SEC-W6CTM-2 (D-93, D-99): a sync whose rules record no configuring member runs as the member who starts it, not as the owner: a crm write STAFF member\'s run of the Outlook source leaves the owner\'s PRIVATE contact unchanged and unlinked, and names that member on the TEAM contact it writes; on the Google Contacts source, whose sync only the owner starts, that member\'s start is refused 403 GOOGLE_CONNECT_OWNER_ONLY and changes, links and audits nothing', async () => {
     const { priv, team } = await reseed(biz);
     remote([['Renamed', EMAIL.priv], ['Renamed', EMAIL.team]]);
 
+    if (google) {
+      // D-99 (W10-GOOGLE-DOORS-REST): the starting member's bound is proven on the Outlook source.
+      await expectGoogleStartRefused(ID.staff);
+      for (const contact of [priv, team]) {
+        expect(await contactRow(contact.id)).toEqual(expect.objectContaining({ firstName: contact.firstName, tags: contact.tags }));
+        expect(await audits(contact.id)).toEqual([]);
+      }
+      expect(await db.contactExternalMapping.count({ where: { businessId: biz } })).toBe(0);
+      return;
+    }
     const res = await agent().post(syncUrl).set('x-test-user', ID.staff);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toEqual(expect.objectContaining({ updated: 1, skipped: 1 }));
@@ -434,14 +482,19 @@ describe.each([
     expect(await audits(team.id)).toEqual([{ action: 'updated', actor: asUser(ID.staff) }]);
   });
 
-  it('SEC-W6CTM-2: the member who starts a sync must be allowed each write as well: a member who may edit and create no contact (crm read) running a sync the owner configured changes, links and creates nothing, and no audit entry names anyone', async () => {
+  it('SEC-W6CTM-2 (D-99): the member who starts a sync must be allowed each write as well: a member who may edit and create no contact (crm read) running a sync the owner configured changes, links and creates nothing, and no audit entry names anyone (on the Outlook source by its run; on the Google Contacts source, whose sync only the owner starts, because that member\'s start is refused 403 GOOGLE_CONNECT_OWNER_ONLY)', async () => {
     const { priv, team } = await reseed(biz);
     await agent().put(rulesUrl).set('x-test-user', ID.owner).send({ defaultTags: ['synced'] }).expect(200);
     remote([['AttackerName', EMAIL.priv], ['AttackerName', EMAIL.team], ['Newcomer', EMAIL.fresh]]);
 
-    const res = await agent().post(syncUrl).set('x-test-user', ID.reader);
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toEqual(expect.objectContaining({ imported: 0, updated: 0, skipped: 3 }));
+    if (google) {
+      // D-99 (W10-GOOGLE-DOORS-REST): the starting member's bound is proven on the Outlook source.
+      await expectGoogleStartRefused(ID.reader);
+    } else {
+      const res = await agent().post(syncUrl).set('x-test-user', ID.reader);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toEqual(expect.objectContaining({ imported: 0, updated: 0, skipped: 3 }));
+    }
     expect(await contactRow(priv.id)).toEqual(expect.objectContaining({ firstName: 'Private' }));
     expect(await contactRow(team.id)).toEqual(expect.objectContaining({ firstName: 'Team' }));
     expect(await db.contact.count({ where: { businessId: biz, emailNormalized: EMAIL.fresh } })).toBe(0);
@@ -474,7 +527,7 @@ describe.each([
     expect(await db.contactAuditEntry.count({ where: { businessId: biz } })).toBe(0);
   });
 
-  it('CR-CTM-3: a sync that skips a person its members may not write keeps the provider\'s sync token where it was, so a later run whose members may write them applies them (the provider sends a person again only from the earlier token)', async () => {
+  it('CR-CTM-3 (D-99): a sync that skips a person its members may not write keeps the provider\'s sync token where it was, so a later run whose members may write them applies them (the provider sends a person again only from the earlier token); the first run, bounded by the crm write STAFF member who configured it, is started by that member on the Outlook source and by the owner on the Google Contacts source, whose sync only the owner starts', async () => {
     const { priv } = await reseed(biz);
     const tokenAfterRun1 = route === 'contacts'
       ? `${P}tok-after-run-1`
@@ -488,7 +541,8 @@ describe.each([
     peopleNextSyncToken = `${P}tok-after-run-1`;
     graphDeltaLink = `https://graph.microsoft.com/v1.0/me/contacts/delta?$deltatoken=${P}after-run-1`;
 
-    const run1 = await agent().post(syncUrl).set('x-test-user', ID.staff);
+    // D-99 (W10-GOOGLE-DOORS-REST): the owner starts the Google Contacts run; the configuring member still bounds it.
+    const run1 = await agent().post(syncUrl).set('x-test-user', starter(ID.staff));
     expect(run1.status, JSON.stringify(run1.body)).toBe(201);
     expect(run1.body).toEqual(expect.objectContaining({ updated: 0, skipped: 1 }));
     expect(await storedToken()).toBeNull();
