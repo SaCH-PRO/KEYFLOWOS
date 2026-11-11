@@ -1083,6 +1083,14 @@ function TokenPaymentPageInner() {
                 <Wallet className="w-5 h-5" style={{ color: primaryColor }} />
                 <h3 className="font-semibold text-lg">Choose Payment Method</h3>
               </div>
+              {/*
+                W10-PAYPAL-CURRENCY (D-106): the server lists only the methods that can take this invoice's currency
+                (PayPal is not listed for a currency PayPal does not support, such as TTD), so the payer is told the
+                methods shown are the ones that can pay it.
+              */}
+              <p className="text-xs text-slate-500 -mt-2" data-testid="pay-link-methods-note">
+                Methods that can pay this invoice in {currency}
+              </p>
 
               {error && (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 flex items-start gap-3">

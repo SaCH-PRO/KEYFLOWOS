@@ -25,6 +25,7 @@ import {
   wipayTakesCurrency,
 } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
+import { paypalCurrencyRefusal, paypalTakesCurrency } from './paypal-currency';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -968,13 +969,16 @@ export class PaymentsService {
       });
     }
 
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): PayPal is offered only for an amount in a currency PayPal supports
+    // (paypal-currency.ts; never TTD, JMD, BBD, GYD or XCD), and in that currency: the order is made in the
+    // payable's own currency (V1-05), not USD.
     const paypalId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
     const paypalSecret = meta.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET;
-    if (paypalId && paypalSecret) {
+    if (paypalId && paypalSecret && paypalTakesCurrency(currency)) {
       gateways.push({
         id: 'paypal',
         name: 'PayPal',
-        currencies: ['USD'],
+        currencies: [normalizeCurrency(currency)],
       });
     }
 
@@ -2438,6 +2442,17 @@ export class PaymentsService {
   }
 
   /**
+   * W10-PAYPAL-CURRENCY (owner ruling D-106, PC-08b): a PayPal order or capture
+   * for an invoice or storefront order in a currency PayPal does not support
+   * (paypal-currency.ts) is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before
+   * PayPal is called. The refusal names the currency, never the payable.
+   */
+  private static assertPaypalCurrency(currency: string | null | undefined, payable: 'invoice' | 'order'): void {
+    if (paypalTakesCurrency(currency)) return;
+    throw new BadRequestException(paypalCurrencyRefusal(currency, payable));
+  }
+
+  /**
    * Review V05-SEC-1: where a WiPay checkout goes and which merchant it names.
    * The API key is the secret behind the callback proof (wipayResponseHash),
    * so it never leaves this server: it used to be sent as developer_id, and so
@@ -2970,6 +2985,10 @@ export class PaymentsService {
     // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): the remainder net of payments and APPLIED credit notes,
     // the amount capturePaypalOrder binds the order to.
     const due = await this.checkoutAmountOf(invoice);
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): an invoice in a currency PayPal does not support is refused 400 before
+    // PayPal is called (PayPal refused the order, and the payer got 500). After the payable gate and the amount, so
+    // a settled invoice still answers 409 whatever the method.
+    PaymentsService.assertPaypalCurrency(invoice.currency, 'invoice');
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -2989,8 +3008,7 @@ export class PaymentsService {
               description: `Invoice ${invoice.invoiceNumber} - ${invoice.business.name}`,
               amount: {
                 // V1-05: the invoice's own currency (it was USD whatever the invoice's), which the capture checks.
-                // PayPal does not offer every currency (TTD among them): it refuses such an order and the checkout
-                // fails closed here; the up-front 400 is held by pay-link-token-gate TG-14/TG-14b (review V05-COR-4).
+                // W10-PAYPAL-CURRENCY (D-106): one PayPal supports (assertPaypalCurrency above).
                 currencyCode: normalizeCurrency(invoice.currency),
                 value: due.toFixed(2),
               },
@@ -3155,6 +3173,9 @@ export class PaymentsService {
     }
 
     if (input.method === 'PAYPAL') {
+      // W10-PAYPAL-CURRENCY (D-106, PC-08b): an order in a currency PayPal does not support is refused 400 before
+      // PayPal is called (the storefront checkout and the generic storefront checkout both come here).
+      PaymentsService.assertPaypalCurrency(input.currency, 'order');
       const business = await this.prisma.client.business.findUnique({
         where: { id: input.businessId },
         select: { metaData: true, name: true },
@@ -3176,8 +3197,8 @@ export class PaymentsService {
               amount: {
                 // Trial-N review (G6PUB-SEC-4): the order's own currency (it was USD whatever the order's), as
                 // createPaypalOrder does for an invoice; the capture webhook settles the order only for its total
-                // in that currency (maybeCompleteStorefrontOrder). PayPal refuses a currency it does not offer
-                // (TTD among them), so such a checkout fails closed here (PC-08b).
+                // in that currency (maybeCompleteStorefrontOrder). W10-PAYPAL-CURRENCY (D-106): one PayPal supports
+                // (assertPaypalCurrency above).
                 currencyCode: normalizeCurrency(input.currency),
                 value: input.amount.toFixed(2),
               },
@@ -3215,6 +3236,9 @@ export class PaymentsService {
     // net of payments and APPLIED credit notes, never invoice.total): the order must be for it, and it is
     // what is recorded.
     const due = await this.checkoutAmountOf(invoice);
+    // W10-PAYPAL-CURRENCY (D-106, PC-08b): no PayPal order exists for an invoice in a currency PayPal does not
+    // support (createPaypalOrder refuses it), so its capture is refused 400 before PayPal is called (no order read).
+    PaymentsService.assertPaypalCurrency(invoice.currency, 'invoice');
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
