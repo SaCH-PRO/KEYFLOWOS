@@ -152,7 +152,8 @@ export class RevenueActionController {
 
   private async ensureAccess(userId: string, businessId: string) {
     const biz = await this.prisma.client.business.findFirst({
-      where: { id: businessId, OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+      where: { id: businessId, members: { some: { userId } } },
       select: { id: true },
     });
     if (!biz) throw new ForbiddenException('No access to this business');

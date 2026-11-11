@@ -519,13 +519,17 @@ describe('DF-04 CONTROL: the OWNER gets the same actions and items as before', (
 });
 
 describe('DF-05 the D-40 rule is the one ModuleScopeGuard applies to POST command items', () => {
-  it("RED-BEFORE: a business owner without a membership (BusinessGuard admits, ModuleScopeGuard refuses) gets the unprojected answer and no item", async () => {
-    const { body, stored, items } = await run(ID.orphanOwner, EVERYTHING, 'df05', 'do', ID.bizOrphan);
-
-    expect(pairs(stored.actions)).toEqual([`follow_up:${ID.cOrphan}`]);
-    expect(body).not.toHaveProperty('dataWithheld');
-    expect(items).toEqual([]);
-    expect(stored.commandItemIds).toEqual([]);
+  it("owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: BusinessGuard admitted and ModuleScopeGuard refused, so the unprojected answer and no item): a business owner without a membership is refused by BusinessGuard (403): no command row, no item", async () => {
+    const rawInput = `${EVERYTHING} [df05]`;
+    const res = await request(app.getHttpServer())
+      .post(`/ai/businesses/${ID.bizOrphan}/key/command`)
+      .set(HEADER, ID.orphanOwner)
+      .send({ rawInput, mode: 'do' });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('No access to this business');
+    expect(JSON.stringify(res.body)).not.toContain('Orphancontact');
+    expect(await db.keyCommand.count({ where: { businessId: ID.bizOrphan, userId: ID.orphanOwner, rawInput } })).toBe(0);
+    expect(await db.commandItem.count({ where: { businessId: ID.bizOrphan } })).toBe(0);
   });
 });
 

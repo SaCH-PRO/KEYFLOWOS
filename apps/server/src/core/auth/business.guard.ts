@@ -17,21 +17,41 @@ export interface BusinessGuardedRequest extends TenantBearingRequest {
 }
 
 /**
- * BusinessGuard's access predicate, the one place it is written: `userId` owns
- * `businessId` or holds a Membership in it. Throws only when the lookup itself
- * fails; callers decide how to refuse.
+ * BusinessGuard's access predicate, the one place it is written: `userId` holds
+ * a Membership in `businessId`. Owner ruling D-104 (W10-OWNER-MEMBERSHIP):
+ * membership is the single rule for business access; an owner recorded only as
+ * Business.ownerId, with no Membership row, is refused, as ModuleScopeGuard and
+ * D-73 already refused them. scripts/backfill-owner-memberships.ts (operator,
+ * dry run by default) writes the missing OWNER rows. Throws only when the
+ * lookup itself fails; callers decide how to refuse.
  */
 export async function userCanAccessBusiness(prisma: PrismaService, userId: string, businessId: string): Promise<boolean> {
   const business = await prisma.client.business.findFirst({
-    where: {
-      id: businessId,
-      OR: [
-        { ownerId: userId },
-        { members: { some: { userId } } },
-      ],
-    },
+    where: { id: businessId, members: { some: { userId } } },
+    select: { id: true },
   });
   return !!business;
+}
+
+/**
+ * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the user
+ * named by Business.ownerId, as a recipient of mail addressed to "the business
+ * owner" (the weekly financial briefing, the public quote alerts, the AI usage
+ * alerts), only while they hold a Membership in that business. A user D-104
+ * refuses at every route (recorded only as ownerId, or removed by a co-owner)
+ * receives none of the business's figures by mail either. Null when the
+ * ownerId is empty, names no user, or names one who is no member.
+ */
+export async function businessOwnerRecipient(
+  prisma: PrismaService,
+  businessId: string,
+  ownerId: string | null | undefined,
+): Promise<{ email: string | null; name: string | null } | null> {
+  if (!ownerId) return null;
+  return prisma.client.user.findFirst({
+    where: { id: ownerId, businesses: { some: { businessId } } },
+    select: { email: true, name: true },
+  });
 }
 
 /**

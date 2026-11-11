@@ -348,7 +348,8 @@ export class WhatsAppService {
     });
     if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      where: { id: businessId, ownerId: actor.id },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
       select: { id: true },
     });
     return !!owned;

@@ -102,7 +102,8 @@ async function isBusinessOwner(prisma: PrismaService, businessId: string, userId
     select: { role: true },
   });
   if (membership?.role === 'OWNER') return true;
-  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId }, select: { id: true } });
+  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId, members: { some: { userId: userId } } }, select: { id: true } });
   return Boolean(owned);
 }
 

@@ -2001,11 +2001,13 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
           },
         },
         business: {
-          findFirst: async (args: { where: { id: string; OR: [{ ownerId: string }, { members: { some: { userId: string } } }] } }) => {
+          // BusinessGuard's predicate { id, members: { some: { userId } } }
+          // (owner ruling D-104, W10-OWNER-MEMBERSHIP: a Membership is the one rule).
+          findFirst: async (args: { where: { id: string; members: { some: { userId: string } } } }) => {
             const b = BUSINESSES.find((x) => x.id === args.where.id);
-            const uid = args.where.OR[0].ownerId;
-            expect(args.where.OR[1].members.some.userId).toBe(uid);
-            return b && (b.ownerId === uid || memberships.some((m) => m.businessId === b.id && m.userId === uid)) ? b : null;
+            expect(Object.keys(args.where).sort()).toEqual(['id', 'members']);
+            const uid = args.where.members.some.userId;
+            return b && memberships.some((m) => m.businessId === b.id && m.userId === uid) ? b : null;
           },
         },
       },
@@ -2472,10 +2474,11 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
           },
         },
         business: {
-          findFirst: async (args: { where: { id: string; OR: [{ ownerId: string }, { members: { some: { userId: string } } }] } }) => {
+          // BusinessGuard's predicate (owner ruling D-104, W10-OWNER-MEMBERSHIP).
+          findFirst: async (args: { where: { id: string; members: { some: { userId: string } } } }) => {
             const b = BUSINESSES.find((x) => x.id === args.where.id);
-            const uid = args.where.OR[0].ownerId;
-            return b && (b.ownerId === uid || w.memberships.some((m) => m.businessId === b.id && m.userId === uid)) ? b : null;
+            const uid = args.where.members.some.userId;
+            return b && w.memberships.some((m) => m.businessId === b.id && m.userId === uid) ? b : null;
           },
         },
         teamActivityLog: { create: async () => ({}) },

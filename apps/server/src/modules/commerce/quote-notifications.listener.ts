@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { businessOwnerRecipient } from '../../core/auth/business.guard';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { appUrl } from '../../core/config/runtime-urls';
 import type {
@@ -52,10 +53,9 @@ export class QuoteNotificationsListener {
     if (business.email && business.email.trim()) {
       return { email: business.email.trim(), name: business.name };
     }
-    const owner = await this.prisma.client.user.findUnique({
-      where: { id: business.ownerId },
-      select: { email: true, name: true },
-    });
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the
+    // fallback is the owner only while they hold a Membership in the business.
+    const owner = await businessOwnerRecipient(this.prisma, businessId, business.ownerId);
     if (owner?.email) {
       return { email: owner.email, name: owner.name || business.name };
     }

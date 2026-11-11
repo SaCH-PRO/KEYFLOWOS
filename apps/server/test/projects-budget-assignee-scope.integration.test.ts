@@ -61,7 +61,7 @@ const ID = {
   staffDefault: `${P}staffDefault`, // STAFF of bizA, role defaults (projects/expenses read, team none)
   staffNoExpenses: `${P}staffNoExpenses`, // STAFF of bizA, explicit { projects: read, expenses: none }
   staffProjectsOnly: `${P}staffProjectsOnly`, // STAFF of bizA, explicit { projects: write } (expenses absent = none)
-  ownerNoMembership: `${P}ownerNoMembership`, // owner of bizC with no Membership row (BusinessGuard admits by ownerId)
+  ownerNoMembership: `${P}ownerNoMembership`, // owner of bizC with no Membership row (BusinessGuard refuses since owner ruling D-104)
   // Members of bizA the assignee options name.
   memberNamed: `${P}member_named`,
   memberNoName: `${P}member_7f3a`, // name null, no first/last name
@@ -317,10 +317,12 @@ describe('SEC-W196-2 (W9-PROJECTS-SERVER, D-100 withholding rule): GET .../proje
     });
   });
 
-  it('the business owner with no Membership row (BusinessGuard admits them by Business.ownerId) is served the costs', async () => {
+  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: BusinessGuard admitted them by Business.ownerId and they were served the costs): the business owner with no Membership row is refused (403), no cost in the body', async () => {
     const res = await get(ID.ownerNoMembership, budgetUrl(ID.bizC, ID.projectC));
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ projectId: ID.projectC, expenseCost: EXPENSE_COST, timeCost: TIME_COST, totalCost: TOTAL_COST });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('No access to this business');
+    expect(res.body).not.toHaveProperty('totalCost');
+    expect(res.body).not.toHaveProperty('expenseCost');
   });
 
   it.each([

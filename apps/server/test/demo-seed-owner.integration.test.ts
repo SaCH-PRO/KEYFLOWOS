@@ -381,11 +381,12 @@ describe('the owner seeds, and the seed is audited in its own transaction (D-84,
     expect(after.activities, 'no second activity row for a seed that wrote nothing').toHaveLength(1);
   });
 
-  it('[SD-08] RED-BEFORE: the distinguished owner (Business.ownerId, no membership row) seeds, and the audit names them', async () => {
+  it('[SD-08] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: seeds, and the audit names them): the distinguished owner (Business.ownerId, no membership row) is refused by BusinessGuard (403) and nothing is written', async () => {
     await resetDemoRows(ID.bizL);
     const res = await seed(ID.legacy, ID.bizL);
-    expect(res.status, JSON.stringify(res.body)).toBe(SEED_OK);
-    await expectSeededAndAudited(ID.bizL, ID.legacy, res.body, 'TTD');
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain('No access to this business');
+    await expectNothingWritten(ID.bizL, 'refused seed');
   });
 });
 

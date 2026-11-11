@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { businessOwnerRecipient } from '../../core/auth/business.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { schedulersDisabled } from '../../core/config/env';
@@ -144,7 +145,7 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
     // Email notification
     if (systemEmail) {
       try {
-        const recipientEmail = business.email || await this.resolveOwnerEmail(business.ownerId);
+        const recipientEmail = business.email || await this.resolveOwnerEmail(alert.businessId, business.ownerId);
         if (recipientEmail) {
           await systemEmail.sendTransactional({
             to: recipientEmail,
@@ -170,12 +171,13 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
     });
   }
 
-  private async resolveOwnerEmail(ownerId: string | null): Promise<string | null> {
-    if (!ownerId) return null;
-    const user = await this.prisma.client.user.findUnique({
-      where: { id: ownerId },
-      select: { email: true },
-    });
+  /**
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the fallback
+   * recipient is the Business.ownerId user only while they hold a Membership
+   * in the business (businessOwnerRecipient).
+   */
+  private async resolveOwnerEmail(businessId: string, ownerId: string | null): Promise<string | null> {
+    const user = await businessOwnerRecipient(this.prisma, businessId, ownerId);
     return user?.email ?? null;
   }
 

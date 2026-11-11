@@ -269,10 +269,15 @@ describe('R0-SEC2c fixture sanity (real rows)', () => {
 });
 
 describe('R0-SEC2c Business reads answer each payment secret as a {configured} marker, to every reader', () => {
-  it('[SEC2c-R01] RED-BEFORE: GET /identity/businesses/:businessId answers the four payment secrets as {configured:true} only to every reader (STAFF on role defaults, STAFF with settings:write, ADMIN, the owner, the co-owner, the distinguished owner of bizL, SUPER_ADMIN), the non-secret payment settings kept', async () => {
+  it("[SEC2c-R01] RED-BEFORE: GET /identity/businesses/:businessId answers the four payment secrets as {configured:true} only to every reader (STAFF on role defaults, STAFF with settings:write, ADMIN, the owner, the co-owner, SUPER_ADMIN), the non-secret payment settings kept; the distinguished owner of bizL (no membership) is refused (owner ruling D-104: 403 'No access to this business', no secret in the body)", async () => {
+    const refused = await getBusiness(ID.legacyOwner, ID.bizL);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ statusCode: 403, message: 'No access to this business' });
+    expect(refused.body).not.toHaveProperty('metaData');
+    expect(leakedKeys(refused.body), 'legacyOwner: secret values').toEqual([]);
     const readers: Array<[string, string]> = [
       [ID.staff, ID.bizP], [ID.staffW, ID.bizP], [ID.admin, ID.bizP], [ID.owner, ID.bizP],
-      [ID.coOwner, ID.bizP], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizP],
+      [ID.coOwner, ID.bizP], [ID.superAdmin, ID.bizP],
     ];
     // The census: which reader received which secret value.
     const census: Record<string, SecretKey[]> = {};
@@ -436,8 +441,14 @@ describe('R0-SEC2c PATCH /identity/businesses/:businessId writes payment secrets
     }
   });
 
-  it('[SEC2c-W06] RED-BEFORE: every owner arm may write a secret (the co-owner, the distinguished owner of bizL with no membership, a SUPER_ADMIN): 200, the value stored, the response masked', async () => {
-    const cases: Array<[string, string]> = [[ID.coOwner, ID.bizP], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizP]];
+  it("[SEC2c-W06] RED-BEFORE: every owner arm may write a secret (the co-owner, a SUPER_ADMIN): 200, the value stored, the response masked; the distinguished owner of bizL with no membership is refused (owner ruling D-104: 403 'No access to this business', bizL byte-identical)", async () => {
+    await reset(ID.bizL);
+    const beforeL = await businessRowText(ID.bizL);
+    const refused = await patchBusiness(ID.legacyOwner, ID.bizL, { metaData: { wipayApiKey: `${P}WIPAY_NEW_legacyOwner` } });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ statusCode: 403, message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'bizL byte-identical').toBe(beforeL);
+    const cases: Array<[string, string]> = [[ID.coOwner, ID.bizP], [ID.superAdmin, ID.bizP]];
     for (const [actor, biz] of cases) {
       await reset(biz);
       const NEW = `${P}WIPAY_NEW_${actor.slice(P.length)}`;

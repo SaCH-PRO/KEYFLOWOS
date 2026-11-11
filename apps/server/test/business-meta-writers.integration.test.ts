@@ -1475,11 +1475,13 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
   const SUPER = `${R}superadmin`;
   // W4-D94-SEO-OWNER review SEC-D94-1 (D-94; MW-29): owners of another
   // business who are only members of this one, one per arm of the owner rule.
-  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds no
-  // membership in it; XT_MEMBER_OWNER holds its OWNER membership.
+  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds an ADMIN
+  // membership in it (owner ruling D-104, W10-OWNER-MEMBERSHIP: the ownerId
+  // arm counts only with a Membership row, and BusinessGuard admits members
+  // only); XT_MEMBER_OWNER holds its OWNER membership.
   const XT_BIZ = `${R}xt_other_biz`;
   const XT_MEMBER_OWNER = `${R}xt_owner_membership`; // OWNER membership of XT_BIZ (not its ownerId); STAFF here
-  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (no membership there); ADMIN here
+  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (ADMIN membership there, D-104); ADMIN here
   let ga4Svc: any;
   let gscSvc: any;
 
@@ -1493,7 +1495,7 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
       await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
     }
     await db.business.create({ data: { id: XT_BIZ, name: `${XT_BIZ}-name`, ownerId: XT_DIST_OWNER, currency: 'TTD' } });
-    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN']] as const) {
+    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN'], [XT_DIST_OWNER, XT_BIZ, 'ADMIN']] as const) {
       await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_${businessId.slice(P.length)}`, userId: id, businessId, role } });
     }
     ga4Svc = app.get(SeoGa4);

@@ -50,8 +50,15 @@
  *               any service runs. RED-BEFORE: aging, customer balance,
  *               safe-to-spend, journal-entries, money-moves and the forecast
  *               answered 200 with the figures.
- *   BRS-12      todo (CR-A6-02 / SEC-A5A6-03, outside the write set): a
- *               distinguished owner (Business.ownerId) with no Membership row.
+ *   BRS-12      W10-OWNER-MEMBERSHIP (owner ruling D-104, was it.todo): the
+ *               distinguished owner (Business.ownerId) with no Membership row
+ *               is refused by BusinessGuard 'No access to this business' on
+ *               every Books read, also GET expense-breakdown, which carries no
+ *               module gate (RED-BEFORE: 200 there, and ModuleScopeGuard's
+ *               'Not a member of this business' on the gated reads); after the
+ *               operator backfill (apps/server/scripts/
+ *               backfill-owner-memberships.ts --apply) writes its OWNER
+ *               Membership it reads the owner's figures.
  *
  * Fixtures: one TTD business (CASH basis); an invoice of 345.67 PAID by a
  * SUCCESSFUL payment with its INCOME posting (DR CASH / CR REVENUE 345.67,
@@ -96,6 +103,8 @@ const ID = {
   staffDefault: `${P}staffDefault`,
   outsider: `${P}outsider`,
   superAdmin: `${P}superAdmin`,
+  /** BRS-12 (D-104): Business.ownerId with no Membership row. */
+  distOwner: `${P}distOwner`,
   biz: `${P}biz`,
   contactPaid: `${P}contactPaid`,
   contactOpen: `${P}contactOpen`,
@@ -128,6 +137,7 @@ async function cleanup() {
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -569,5 +579,47 @@ describe('FOLLOW3-A6 review SEC-A5A6-04 (BRS-11): a SUPER_ADMIN with no Membersh
 });
 
 describe('FOLLOW3-A6 review CR-A6-02 / SEC-A5A6-03 (BRS-12): the distinguished owner without a Membership row', () => {
-  it.todo("[BRS-12] BLOCKED outside the write set (core/auth/module-scope.guard.ts) or pending a ruling: a distinguished owner (Business.ownerId) with no Membership row, whom BusinessGuard and ensureAccess admit, reads the Books reads as at base; ModuleScopeGuard (the D-57 trial-balance gate, which already refused this owner on GET trial-balance at base) refuses it 'Not a member of this business', as on every revenue-scoped route");
+  it("[BRS-12] (W10-OWNER-MEMBERSHIP, D-104, was it.todo) the distinguished owner (Business.ownerId) with no Membership row is refused 403 'No access to this business' by BusinessGuard on the six Books reads, the trial balance, journal-entries, money-moves, the cashflow forecast and GET expense-breakdown (no module gate) before any service runs; after the operator's reviewed backfill writes its OWNER Membership (--include-conflicting: another OWNER holds this business, review SEC-W10OM-2) it reads the owner's figures", async () => {
+    // The distinguished owner: Business.ownerId names them and no Membership
+    // row does (ID.owner keeps its OWNER membership; it is no longer ownerId).
+    // Fixture setup only; restored in `finally`.
+    await db.user.create({ data: { id: ID.distOwner, email: `${P}distOwner@test.local`, name: ID.distOwner, role: 'USER' } });
+    await db.business.update({ where: { id: ID.biz }, data: { ownerId: ID.distOwner } });
+    try {
+      expect(await db.membership.count({ where: { businessId: ID.biz, userId: ID.distOwner } })).toBe(0);
+      clearSpies();
+      const routes = [...READS.map((r) => r.route()), 'trial-balance', 'journal-entries', 'money-moves', 'cashflow-forecast', 'expense-breakdown'];
+      for (const route of routes) {
+        const res = await get(route, ID.distOwner);
+        expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+        expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"/);
+      }
+      for (const [name, spy] of Object.entries(SPY)) expect(spy, name).not.toHaveBeenCalled();
+
+      // D-104: the operator script writes the missing OWNER Membership (scoped
+      // to this suite's business: the CLI scans every business). ID.owner holds
+      // OWNER here, so this is the with_another_owner class the default run
+      // skips (review SEC-W10OM-2): written only once reviewed.
+      const { backfillOwnerMemberships } = await import('../scripts/backfill-owner-memberships');
+      const skipped = await backfillOwnerMemberships({ db, apply: true, businessIds: [ID.biz] });
+      expect(skipped).toMatchObject({ businessesScanned: 1, missingOwnerMembership: 1, withAnotherOwner: 1, skippedWithAnotherOwner: 1, written: 0, failed: 0 });
+      expect(await db.membership.count({ where: { businessId: ID.biz, userId: ID.distOwner } })).toBe(0);
+      const counts = await backfillOwnerMemberships({ db, apply: true, includeConflicting: true, businessIds: [ID.biz] });
+      expect(counts).toMatchObject({ businessesScanned: 1, missingOwnerMembership: 1, withAnotherOwner: 1, skippedWithAnotherOwner: 0, written: 1, failed: 0 });
+      const rows = await db.membership.findMany({ where: { businessId: ID.biz, userId: ID.distOwner }, select: { role: true } });
+      expect(rows).toEqual([{ role: 'OWNER' }]);
+
+      for (const read of READS) {
+        const res = await get(read.route(), ID.distOwner);
+        expect(res.status, `${read.id}: ${JSON.stringify(res.body)}`).toBe(200);
+        expect(read.figures(res.body), read.id).toEqual(expectedOf(read));
+      }
+      const breakdown = await get('expense-breakdown', ID.distOwner);
+      expect(breakdown.status, JSON.stringify(breakdown.body)).toBe(200);
+      expect(breakdown.body).toEqual({ items: [] });
+    } finally {
+      await db.business.update({ where: { id: ID.biz }, data: { ownerId: ID.owner } });
+    }
+  }, 60_000);
 });

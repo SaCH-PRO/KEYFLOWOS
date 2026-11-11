@@ -470,11 +470,13 @@ describe('R0-09d business-genesis answers cannot change the business profile for
     expect(await profile(ID.bizG)).toMatchObject({ name: `${P}coowner-name`, currency: 'EUR', country: 'BB', businessIntent: `${P}coowner intent` });
   });
 
-  it('[D11G-G07] pinned: the distinguished owner (Business.ownerId) with no membership row changes the four Business fields (201)', async () => {
+  it("[D11G-G07] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: changes the four Business fields): the distinguished owner (Business.ownerId) with no membership row is refused (403 'No access to this business'), the Business row byte-identical", async () => {
     await reset(ID.bizL);
+    const before = await businessRowText(ID.bizL);
     const res = await answers(ID.legacyOwner, ID.bizL, { businessName: `${P}legacy-name`, currency: 'USD', country: 'GY', businessIntent: `${P}legacy intent` });
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(await profile(ID.bizL)).toMatchObject({ name: `${P}legacy-name`, currency: 'USD', country: 'GY', businessIntent: `${P}legacy intent` });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
   });
 
   it('[D11G-G08] pinned: a SUPER_ADMIN with no membership keeps the platform bypass BusinessGuard grants: changes the four Business fields (201)', async () => {
@@ -550,14 +552,21 @@ describe('R0-09d template apply cannot change the business profile for a non-own
     expect(await db.product.count({ where: { businessId: ID.bizT, name: TEMPLATE_PRODUCT } })).toBe(1);
   });
 
-  it('[D11G-T05] positive controls: a second OWNER membership that is not Business.ownerId, the distinguished owner (Business.ownerId, no membership) and a SUPER_ADMIN with no membership apply the template (201)', async () => {
-    for (const [actor, businessId] of [[ID.coOwner, ID.bizT], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizS]] as const) {
+  it("[D11G-T05] positive controls: a second OWNER membership that is not Business.ownerId and a SUPER_ADMIN with no membership apply the template (201); the distinguished owner (Business.ownerId, no membership) is refused (owner ruling D-104: 403 'No access to this business'), the Business row byte-identical and nothing else written", async () => {
+    for (const [actor, businessId] of [[ID.coOwner, ID.bizT], [ID.superAdmin, ID.bizS]] as const) {
       await reset(businessId);
       const res = await applyTemplate(actor, businessId);
       expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(201);
       expect(await profile(businessId), actor).toMatchObject({ industry: TEMPLATE_INDUSTRY, archetype: TEMPLATE_ARCHETYPE });
       expect((await templateResidue(businessId)).usages, actor).toBe(1);
     }
+    await reset(ID.bizL);
+    const before = await businessRowText(ID.bizL);
+    const refused = await applyTemplate(ID.legacyOwner, ID.bizL);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+    expect(await businessRowText(ID.bizL), 'the Business row is byte-identical').toBe(before);
+    expect(await templateResidue(ID.bizL), 'nothing else written').toEqual({ products: 0, services: 0, categories: 0, usages: 0 });
   });
 
   it("[D11G-T06] RED-BEFORE (review SEC-T1): the owner check is bound to the route's business: a STAFF member of bizT who owns another business (OWNER membership and Business.ownerId of bizO) is refused on bizT (403), also when the x-business-id header, ?businessId= and the body's businessId all name bizO; both Business rows byte-identical, nothing else written in either; on bizO itself the apply is the owner's (201)", async () => {

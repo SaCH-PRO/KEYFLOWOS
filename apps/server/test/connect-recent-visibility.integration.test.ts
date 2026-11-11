@@ -476,11 +476,14 @@ describe('W7-RECENT-CONTACTS-VISIBILITY: starting a Google Suite connection keep
     }
   });
 
-  it('[V93E-B03] control: the owner, the distinguished owner (Business.ownerId, no membership row) and a SUPER_ADMIN with no membership get the Google URL for a consent without gmail; its state names them, the business and the services', async () => {
+  it('[V93E-B03] control: the owner and a SUPER_ADMIN with no membership get the Google URL for a consent without gmail; its state names them, the business and the services; the distinguished owner (Business.ownerId, no membership row) is refused by BusinessGuard (owner ruling D-104: 403, no URL)', async () => {
     for (const services of NON_GMAIL_CONSENTS) {
       expectAuthUrl(await suiteAuthUrl(ID.biz, ID.owner, { services }), ID.biz, ID.owner, services);
-      expectAuthUrl(await suiteAuthUrl(ID.bizDist, ID.distOwner, { services }), ID.bizDist, ID.distOwner, services);
       expectAuthUrl(await suiteAuthUrl(ID.biz, ID.superAdmin, { services }), ID.biz, ID.superAdmin, services);
+      const refused = await suiteAuthUrl(ID.bizDist, ID.distOwner, { services });
+      expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+      expect(JSON.stringify(refused.body)).toContain('No access to this business');
+      expect(JSON.stringify(refused.body)).not.toContain('accounts.google.com');
     }
   });
 

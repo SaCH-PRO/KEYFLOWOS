@@ -10,7 +10,8 @@
  * switch the kill switch off or raise the tier ceiling to 4.
  *
  * Required, and pinned here: only OWNER or ADMIN (the owner of record,
- * Business.ownerId, counts as OWNER; SUPER_ADMIN keeps the platform bypass
+ * Business.ownerId, counts as OWNER, with a Membership row since owner ruling
+ * D-104; SUPER_ADMIN keeps the platform bypass
  * BusinessGuard grants) may write the profile, and nobody may raise
  * maxTierWithoutApproval above the approval tier they hold themselves (the
  * Membership rule in core/authority/approval-tier.ts: OWNER 4, ADMIN 3, STAFF 0
@@ -435,10 +436,12 @@ for (const pipeline of PIPELINES) {
       expect((await snapshot())[ID.bizA]).toEqual(a);
     });
 
-    it("the owner of record of C (Business.ownerId, no membership row) writes C's profile at the OWNER tier", async () => {
+    it("owner ruling D-104 (W10-OWNER-MEMBERSHIP; was: writes C's profile at the OWNER tier): the owner of record of C (Business.ownerId, no membership row) is refused (403) and nothing is written", async () => {
+      const before = await snapshot();
       const res = await patch(pipeline, { user: ID.founderC, query: { businessId: ID.bizC }, body: { maxTierWithoutApproval: 4, globalKillSwitch: false } });
-      expect(res.status, describeBody(res)).toBe(200);
-      expect(await profile(ID.bizC)).toEqual({ ...BASELINE[ID.bizC], globalKillSwitch: false, maxTierWithoutApproval: 4 });
+      expect(res.status, describeBody(res)).toBe(403);
+      expect(await snapshot()).toEqual(before);
+      expect(await profile(ID.bizC)).toEqual(BASELINE[ID.bizC]);
     });
 
     it("SUPER_ADMIN naming A writes A's profile (the platform bypass BusinessGuard grants)", async () => {

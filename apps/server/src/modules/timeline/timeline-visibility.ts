@@ -284,14 +284,10 @@ export async function resolveTimelineViewer(prisma: PrismaService, businessId: s
     where: { userId_businessId: { userId, businessId } },
     select: { role: true, permissionScopes: true },
   });
-  let role: string;
-  if (membership) {
-    role = membership.role;
-  } else {
-    const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId }, select: { id: true } });
-    if (!owned) throw new ForbiddenException('Not a member of this business');
-    role = 'OWNER';
-  }
+  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access
+  // rule; a Business.ownerId with no Membership row is refused as anyone else is.
+  if (!membership) throw new ForbiddenException('Not a member of this business');
+  const role: string = membership.role;
 
   const scopes: Record<string, string> =
     membership?.permissionScopes && typeof membership.permissionScopes === 'object'

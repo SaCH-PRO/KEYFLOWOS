@@ -324,10 +324,13 @@ describe('R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11)', ()
     expect((await db.business.findUnique({ where: { id: ID.bizB } })).timezone).toBe('Europe/London');
   });
 
-  it('[R0-09-P10] pinned: the distinguished owner (Business.ownerId) with no membership row edits its own business (200), as BusinessGuard admits it', async () => {
+  it("[R0-09-P10] owner ruling D-104 (W10-OWNER-MEMBERSHIP; was pinned: edits its own business): the distinguished owner (Business.ownerId) with no membership row is refused by BusinessGuard (403 'No access to this business'), the timezone unchanged", async () => {
+    const before = (await db.business.findUnique({ where: { id: ID.bizC } })).timezone;
     const res = await patch(ID.legacyOwner, ID.bizC, { timezone: 'Asia/Tokyo' });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect((await db.business.findUnique({ where: { id: ID.bizC } })).timezone).toBe('Asia/Tokyo');
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ statusCode: 403, message: 'No access to this business' });
+    expect((await db.business.findUnique({ where: { id: ID.bizC } })).timezone).toBe(before);
+    expect(before).not.toBe('Asia/Tokyo');
   });
 
   it('[R0-09-P11] pinned: a SUPER_ADMIN with no membership keeps the platform bypass BusinessGuard already grants (200)', async () => {

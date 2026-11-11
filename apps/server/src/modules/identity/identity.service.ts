@@ -177,6 +177,13 @@ export class IdentityService {
    */
   private static readonly BOOTSTRAP_RETRY_BASE_MS = 15;
 
+  /**
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-3): the 403 code
+   * POST /identity/bootstrap answers a caller recorded as Business.ownerId of
+   * their bootstrap business who holds no Membership there.
+   */
+  static readonly OWNER_MEMBERSHIP_REQUIRED = 'OWNER_MEMBERSHIP_REQUIRED';
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
@@ -194,11 +201,11 @@ export class IdentityService {
    * were plainly a member of. Membership is the ordinary authenticated-human to
    * Business relationship, so it leads the predicate.
    *
-   * `ownerId` stays as the second arm on purpose. It is distinguished-owner
-   * compatibility metadata, and until the founding-Membership backfill has run
-   * everywhere it is the only thing keeping pre-existing legitimate owners
-   * discoverable. It is a compatibility fallback, not a second source of truth,
-   * and it is not removed by this packet.
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP): Membership is the single rule.
+   * The `ownerId` compatibility arm is gone: an owner recorded only as
+   * Business.ownerId is refused by BusinessGuard, so listing them a workspace
+   * they cannot open helped no one. scripts/backfill-owner-memberships.ts
+   * (operator, dry run by default) writes their OWNER Membership.
    *
    * Tenant scoping: `Business` is the tenant root and carries no businessId, so
    * it is absent from BUSINESS_ID_MODELS and the S0 isolation extension injects
@@ -212,13 +219,7 @@ export class IdentityService {
   async listBusinesses(userId: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
     const items = await this.prisma.client.business.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { members: { some: { userId } } },
-          { ownerId: userId },
-        ],
-      },
+      where: { deletedAt: null, members: { some: { userId } } },
     });
     return items.map((b) => sanitizeBusiness(b));
   }
@@ -395,7 +396,11 @@ export class IdentityService {
     });
     if (membership?.role === 'OWNER') return;
     const owned = await this.prisma.client.business.findFirst({
-      where: { id: businessId, ownerId: actor.id },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
+      // Of any role: the owner rule's distinguished-owner arm (D-11/D-94/D-99) is pinned with an ADMIN
+      // membership (business-meta-writers MW-28, gmail.service.spec R0-CMF5-U05); whether D-104 also
+      // retires it (an OWNER Membership only) is referred to the owner (review SEC-W10OM-4).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
       select: { id: true },
     });
     if (owned) return;
@@ -1628,17 +1633,43 @@ export class IdentityService {
               orderBy: { createdAt: 'asc' },
             });
 
-            const business =
-              existingBusiness ||
-              (await tx.business.create({
-                data: {
-                  name: businessName,
-                  ownerId: userId,
-                  onboardingStep: 'welcome',
-                  onboardingStartedAt: new Date(),
-                },
-              }));
+            if (existingBusiness) {
+              // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-3):
+              // Membership is the single rule for business access, and only the
+              // operator backfill (scripts/backfill-owner-memberships.ts, dry
+              // run first) writes a missing OWNER row. The bootstrap writes no
+              // Membership on a business it did not create in this call, and
+              // never changes one: it used to upsert { role: 'OWNER' }, so one
+              // sign-in re-admitted an owner D-104 refuses (one recorded only
+              // as Business.ownerId, or one a co-owner removed) and promoted a
+              // Business.ownerId holding STAFF to OWNER. A caller with no
+              // Membership on the business they are recorded as owning is
+              // refused here, and the business is not answered to them.
+              const member = await tx.business.findFirst({
+                where: { id: existingBusiness.id, members: { some: { userId } } },
+                select: { id: true },
+              });
+              if (!member) {
+                throw new ForbiddenException({
+                  code: IdentityService.OWNER_MEMBERSHIP_REQUIRED,
+                  message:
+                    'Your access to this workspace has to be restored by an administrator before you can sign in to it. Contact support.',
+                });
+              }
+              return { business: existingBusiness, isNewBusiness: false };
+            }
 
+            const business = await tx.business.create({
+              data: {
+                name: businessName,
+                ownerId: userId,
+                onboardingStep: 'welcome',
+                onboardingStartedAt: new Date(),
+              },
+            });
+
+            // The founding OWNER row of the business just created (KF-EXEC-TENANT-001).
+            // `update: {}`: a row already there is kept exactly as it is.
             await tx.membership.upsert({
               where: {
                 userId_businessId: { userId, businessId: business.id },
@@ -1648,12 +1679,10 @@ export class IdentityService {
                 businessId: business.id,
                 role: 'OWNER',
               },
-              update: {
-                role: 'OWNER',
-              },
+              update: {},
             });
 
-            return { business, isNewBusiness: !existingBusiness };
+            return { business, isNewBusiness: true };
           },
           { isolationLevel: 'Serializable' },
         );

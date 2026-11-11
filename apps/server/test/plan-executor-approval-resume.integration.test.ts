@@ -265,6 +265,11 @@ beforeAll(async () => {
 
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.biz, name: 'V19B Biz', ownerId: ID.owner } });
+  // W10-OWNER-MEMBERSHIP (owner ruling D-104): the owner holds the OWNER
+  // Membership the operator backfill writes. A plan whose member is an owner
+  // recorded only as Business.ownerId is refused at the run-time gate before
+  // dispatch, so the KEY-03 retry cases would never reach the tool (fixture change).
+  await db.membership.create({ data: { userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
 }, 120_000);
 
 afterAll(async () => {

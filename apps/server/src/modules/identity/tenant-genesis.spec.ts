@@ -128,7 +128,7 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect($transaction.mock.calls[0][1]).toEqual({ isolationLevel: 'Serializable' });
   });
 
-  it('reuses the existing bootstrap Business instead of creating a second one', async () => {
+  it('reuses the existing bootstrap Business instead of creating a second one, and writes no Membership on it (owner ruling D-104, review SEC-W10OM-3: the caller is checked to be a member)', async () => {
     const { tx, calls } = txRecorder();
     tx.business.findFirst = vi.fn(async () => {
       calls.push('business.findFirst');
@@ -142,7 +142,30 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(out.isNewBusiness).toBe(false);
     expect(out.business.id).toBe('biz-existing');
     expect(tx.business.create).not.toHaveBeenCalled();
-    expect(calls).toEqual(['business.findFirst', 'membership.upsert']);
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(calls).toEqual(['business.findFirst', 'business.findFirst']);
+    expect(tx.business.findFirst.mock.calls[1]).toEqual([{ where: { id: 'biz-existing', members: { some: { userId: 'user-1' } } }, select: { id: true } }]);
+  });
+
+  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, review SEC-W10OM-3): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership there is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
+    const { tx, calls } = txRecorder();
+    let read = 0;
+    tx.business.findFirst = vi.fn(async () => {
+      calls.push('business.findFirst');
+      read += 1;
+      return read === 1 ? { id: 'biz-existing', name: 'Existing' } : null;
+    });
+    const $transaction = vi.fn(async (fn: any) => fn(tx));
+    const service = buildIdentity({ $transaction });
+
+    const error = await ensure(service, 'user-1', 'Ignored Name').then(() => null, (e: unknown) => e);
+
+    expect((error as any)?.getStatus?.()).toBe(403);
+    expect((error as any)?.getResponse?.()).toMatchObject({ code: 'OWNER_MEMBERSHIP_REQUIRED' });
+    expect(tx.business.create).not.toHaveBeenCalled();
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(tx.membership.create).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
   });
 
   it('retries on a write conflict and converges on the winner’s Business', async () => {
@@ -193,23 +216,20 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
 // ── Discovery ──────────────────────────────────────────────────────────────
 
 describe('IdentityService.listBusinesses — Membership-first discovery', () => {
-  it('matches on Membership as well as ownerId', async () => {
+  it('matches on Membership only: the ownerId compatibility arm is gone (W10-OWNER-MEMBERSHIP, D-104)', async () => {
     const findMany = vi.fn(async () => []);
     const service = buildIdentity({ business: { findMany } });
 
     await service.listBusinesses('user-1');
 
     const where = findMany.mock.calls[0][0].where;
-    expect(where.deletedAt).toBeNull();
-    expect(where.OR).toEqual([
-      { members: { some: { userId: 'user-1' } } },
-      { ownerId: 'user-1' },
-    ]);
+    expect(where).toEqual({ deletedAt: null, members: { some: { userId: 'user-1' } } });
   });
 
   it('no longer filters on ownerId alone', async () => {
     // The pre-packet predicate was `{ ownerId, deletedAt: null }` with no OR at
-    // all, which returned an empty list for every non-owner member.
+    // all, which returned an empty list for every non-owner member. Since D-104
+    // ownerId is no arm at all.
     const findMany = vi.fn(async () => []);
     const service = buildIdentity({ business: { findMany } });
 
@@ -217,7 +237,8 @@ describe('IdentityService.listBusinesses — Membership-first discovery', () => 
 
     const where = findMany.mock.calls[0][0].where;
     expect(where.ownerId).toBeUndefined();
-    expect(Array.isArray(where.OR)).toBe(true);
+    expect(where.OR).toBeUndefined();
+    expect(where.members).toEqual({ some: { userId: 'user-1' } });
   });
 
   it('still refuses an empty userId', async () => {

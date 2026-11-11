@@ -39,9 +39,9 @@
  *   - SEC-V109b-2: the POST key/command 'do'/'auto'/'draft' response is
  *     projected exactly as GET key/commands projects the row it wrote, so a
  *     member cannot read by POSTing what GET withholds from them;
- *   - CR-V109b-1: a business owner (Business.ownerId) without an OWNER
- *     Membership, whom BusinessGuard admits, is not refused: they read every
- *     row with its data, as before V1-09b.
+ *   - CR-V109b-1, superseded by owner ruling D-104 (W10-OWNER-MEMBERSHIP): a
+ *     business owner (Business.ownerId) without a Membership row read every
+ *     row with its data; BusinessGuard now refuses them as any non-member.
  *
  * Every seeded row id starts with `v09b_` and is hard-deleted in beforeAll and
  * afterAll, matched through sqlLikePrefix() from test/helpers/sql-like.js.
@@ -594,21 +594,22 @@ describe("SEC-V109b-2 the POST key/command 'do'/'draft' response is projected as
   });
 });
 
-describe('CR-V109b-1 a business owner without an OWNER membership (a legacy business BusinessGuard admits) is not refused', () => {
-  it('GET key/commands: 200 with every row of the business and its data, as before V1-09b', async () => {
-    const rows = await listed(ID.orphanOwner, ID.bizOrphan);
-
-    expect(ids(rows)).toEqual([ID.orphanOther, ID.orphanOwn].sort());
-    expect(byId(rows, ID.orphanOwn).groundedData).toEqual({ contactCount: 0, totalRevenue: PAID_TOTAL, businessId: ID.bizOrphan });
-    expect(byId(rows, ID.orphanOther).rawInput).toBe(ORPHAN_OTHER_INPUT);
+describe('CR-V109b-1, superseded by owner ruling D-104 (W10-OWNER-MEMBERSHIP): a business owner (Business.ownerId) without a membership row is refused as any non-member is', () => {
+  it('GET key/commands: 403, no row of the business and none of its data (was: 200 with every row, CR-V109b-1)', async () => {
+    const res = await list(ID.orphanOwner, ID.bizOrphan);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain(ORPHAN_OTHER_INPUT);
+    expect(JSON.stringify(res.body)).not.toContain(ID.orphanOwn);
+    expect(JSON.stringify(res.body)).not.toContain(String(PAID_TOTAL));
   });
 
-  it("POST key/command 'do': 201, unprojected", async () => {
+  it("POST key/command 'do': 403 and no command written (was: 201, unprojected)", async () => {
+    const before = await db.keyCommand.count({ where: { businessId: ID.bizOrphan } });
     const res = await post(ID.orphanOwner, 'follow up with everyone', 'do', ID.bizOrphan);
     try {
-      expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(res.body).not.toHaveProperty('dataWithheld');
-      expect(Array.isArray(res.body.actions)).toBe(true);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body).not.toHaveProperty('actions');
+      expect(await db.keyCommand.count({ where: { businessId: ID.bizOrphan } })).toBe(before);
     } finally {
       await db.keyCommand.deleteMany({ where: { businessId: ID.bizOrphan, userId: ID.orphanOwner, rawInput: 'follow up with everyone' } });
     }
