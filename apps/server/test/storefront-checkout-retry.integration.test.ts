@@ -100,6 +100,20 @@
  *           writes anything or emits store_order.refunded (whose listener
  *           booked an Expense for the order total)
  *
+ * W10-STORE-PAYMENT-INTENT (D-18; money-state-writer-inventory's 'no-money'
+ * todo for createStorePayment, owner V1-33-PUB-CHECKOUT-RETRY-OFFLINE):
+ *
+ *   V33-28  POST /payments/create-checkout (the anonymous generic checkout,
+ *           the REAL PaymentsController and PaymentsService on a second app
+ *           over the same database) with a cash or manual gateway for a CASH
+ *           storefront order answers a clean 400, never 500, and writes no
+ *           Payment row: createStorePayment wrote a PENDING intent naming the
+ *           MarketplaceOrder id as its invoice_id (a foreign key to invoices),
+ *           so the write failed (500), and nothing would have settled or
+ *           retired such a row. The order stays PENDING, and the operator's
+ *           offline completion then settles it once (one invoice, one cash
+ *           payment, one posting, one store_order.paid), again a no-op
+ *
  * Added with the fix (not in the tests-first commit): V33-12 and the
  * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
  * Added with the review repairs: V33-13..V33-20 (V33-CR-1, SEC-V33-3,
@@ -1077,5 +1091,97 @@ describe('Trial-N repair round 2 recheck: D-69 before the order, and the refund 
 
     expect(await moneyCounts(), 'no invoice, payment or posting').toEqual(before);
     expect(seen.filter((e) => e.name === 'store_order.refunded'), 'no store_order.refunded').toEqual([]);
+  });
+});
+
+/**
+ * W10-STORE-PAYMENT-INTENT (D-18): the generic checkout, the one route that
+ * reaches createStorePayment's CASH / MANUAL branch (the storefront checkout
+ * starts no session for those methods). A second app over the same database
+ * serves the REAL PaymentsController and PaymentsService; the suite app's own
+ * PrismaService, InvoiceWorkflowService and RevenuePostingService back it, and
+ * no provider connector is provided, so nothing reaches a provider. Same filter
+ * and pipe as app-bootstrap.ts, so the status codes are the production ones.
+ */
+describe('W10-STORE-PAYMENT-INTENT: the generic checkout with a cash or manual gateway for a storefront order (D-18)', () => {
+  let paymentsApp: any;
+
+  beforeAll(async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+    const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+    const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+    const { PaymentsService } = await import('../src/modules/payments/payments.service');
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
+
+    // CommerceService is not on the storefront-order path of the generic checkout.
+    const payments = new PaymentsService(
+      app.get(PrismaService),
+      {} as any,
+      app.get(InvoiceWorkflowService),
+      app.get(RevenuePostingService),
+    );
+    const moduleRef = await Test.createTestingModule({
+      controllers: [PaymentsController],
+      providers: [PublicRateLimitGuard, { provide: REDIS_CLIENT, useValue: redis }, { provide: PaymentsService, useValue: payments }],
+    }).compile();
+    paymentsApp = moduleRef.createNestApplication();
+    paymentsApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    paymentsApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await paymentsApp.init();
+  }, 60_000);
+
+  afterAll(async () => {
+    try { await paymentsApp?.close(); } catch { /* best-effort */ }
+  });
+
+  function genericCheckout(payableId: string, gateway: string) {
+    return request(paymentsApp.getHttpServer())
+      .post('/payments/create-checkout')
+      .send({ payableType: 'storefront_order', payableId, gateway });
+  }
+
+  it('V33-28 (W10-STORE-PAYMENT-INTENT, D-18) a cash or manual gateway answers a clean 400 (never 500) and writes no PENDING payment row; the offline completion still settles the order once', async () => {
+    const placed = await checkout(SLUG.a, cart());
+    expect(placed.status, JSON.stringify(placed.body)).toBe(201);
+    const order = placed.body.order as { id: string; orderNumber: string };
+    const before = await moneyCounts();
+    seen = [];
+
+    for (const gateway of ['cash', 'manual']) {
+      const res = await genericCheckout(order.id, gateway);
+      // At 134eeeb4: createStorePayment writes a PENDING intent with invoice_id = the order id, the foreign key to
+      // invoices refuses it (P2003) and the checkout answers 500.
+      expect(res.status, `${gateway}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(JSON.stringify(res.body), `${gateway}: says why`).toMatch(/paid offline/);
+    }
+
+    expect(await moneyCounts(), 'no invoice, payment or posting').toEqual(before);
+    expect(
+      await db.payment.count({ where: { OR: [{ invoiceId: order.id }, { providerPaymentId: { startsWith: `manual_${order.id}` } }] } }),
+      'no PENDING intent naming the order',
+    ).toBe(0);
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}/${stored.paymentMethod}`, 'the order is untouched').toBe('PENDING/PENDING/CASH');
+
+    // The offline completion settles it once; a second completion writes nothing.
+    const done = await completeOffline(ID.owner, order.id);
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.paymentStatus).toBe('PAID');
+    const again = await completeOffline(ID.owner, order.id);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    const { invoice } = await expectOneOfflinePayment(order, 'cash', ID.owner);
+    const paid = seen.filter((e) => e.name === 'store_order.paid');
+    expect(paid.map((e) => e.payload?.invoiceId), 'one store_order.paid carrying the invoiceId').toEqual([invoice.id]);
+
+    // A paid order has nothing left to check out: still a clean 400, nothing written.
+    const afterPaid = await moneyCounts();
+    const late = await genericCheckout(order.id, 'cash');
+    expect(late.status, JSON.stringify(late.body)).toBe(400);
+    expect(await moneyCounts()).toEqual(afterPaid);
   });
 });

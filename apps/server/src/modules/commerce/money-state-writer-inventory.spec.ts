@@ -96,11 +96,12 @@ export const MONEY_STATE_WRITERS: Inventory = {
       'member and retires the pending row PENDING -> CONFIRMED (compare-and-set on status)',
   },
   'apps/server/src/modules/payments/payments.service.ts': {
-    ops: { create: 5 },
+    ops: { create: 4 },
     why:
       'provider settlement: createPaymentWithPosting / createRefundWithPosting(ByInvoice) (row + posting in one ' +
-      'transaction); FAILED records (PayPal capture; the WiPay callback writes none since V1-05); the CASH / MANUAL PENDING ' +
-      'store checkout intent (the Stripe store checkout writes none since the trial-N review, G6ML-4). ' +
+      'transaction); FAILED records (PayPal capture; the WiPay callback writes none since V1-05). No store checkout ' +
+      'writes an intent: Stripe none since the trial-N review (G6ML-4), CASH / MANUAL none since W10-STORE-PAYMENT-INTENT ' +
+      '(D-18; createStorePayment was the fifth create). ' +
       'Per function: PAYMENTS_MODULE_WRITERS below (V1-15c). payments-ops.service.ts writes none since ' +
       'W10-REFUND-CHARGE-DOOR (D-14): refundCharge records through createRefundWithPosting (PAYMENTS_MODULE_DOOR_CALLERS)',
   },
@@ -252,20 +253,12 @@ export const PAYMENTS_MODULE_WRITERS: Record<string, WriterClass> = {
       'the FAILED record of a PayPal capture call that failed (PayPal took nothing); a COMPLETED capture goes through ' +
       'createPaymentWithPosting (V1-15c) and is never recorded FAILED, even when that transaction aborts (review SEC-V15C-2, CR-V15C-1)',
   },
-  'apps/server/src/modules/payments/payments.service.ts#createStorePayment': {
-    kind: 'no-money',
-    why:
-      'the PENDING checkout intent of a CASH / MANUAL storefront order; the settled row is written through the door by ' +
-      'StoreOrderService.completeCheckout (the offline completion). The Stripe store checkout writes no intent since the ' +
-      'trial-N review (G6ML-4)',
-    todo: {
-      owner: 'V1-33-PUB-CHECKOUT-RETRY-OFFLINE',
-      what:
-        'the intent puts the MarketplaceOrder id in payments.invoice_id, which has a foreign key to invoices, so the write ' +
-        'fails for a storefront order, and nothing settles or retires a PENDING intent. The storefront checkout never ' +
-        'reaches it (CASH / MANUAL start no session); only the generic checkout with a cash or manual gateway does, and gets 500',
-    },
-  },
+  // W10-STORE-PAYMENT-INTENT (D-18): createStorePayment is no longer a writer. It was 'no-money' with a todo owned by
+  // V1-33-PUB-CHECKOUT-RETRY-OFFLINE: the PENDING intent of a CASH / MANUAL storefront order put the MarketplaceOrder
+  // id in payments.invoice_id (a foreign key to invoices), so the write failed (the generic checkout with a cash or
+  // manual gateway answered 500) and nothing settled or retired such a row. It now writes none: the order row carries
+  // its payment state and StoreOrderService.completeCheckout writes the settled row through the door (the live case
+  // below; storefront-checkout-retry V33-28).
 };
 
 /**
@@ -418,7 +411,8 @@ describe('V1-15c Payment writers of the payments module, by function (no silent 
   it('reads the payments module and attributes its writers (this gate is not vacuous)', () => {
     const sites = Object.entries(MODULE_FILES).flatMap(([file, source]) => writeSites(file, source));
     // W10-REFUND-CHARGE-DOOR: refundCharge writes no Payment row any more (MSW-07); createRefundWithPosting is its door.
-    expect(sites.map((s) => s.fn)).toEqual(expect.arrayContaining(['createPaymentWithPosting', 'createRefundWithPosting', 'createStorePayment']));
+    // W10-STORE-PAYMENT-INTENT (D-18): nor does createStorePayment; capturePaypalOrder's FAILED record stands in for it.
+    expect(sites.map((s) => s.fn)).toEqual(expect.arrayContaining(['createPaymentWithPosting', 'createRefundWithPosting', 'capturePaypalOrder']));
   });
 
   it('MSW-04: every Payment writer of the payments module is classified, and each class holds in the source', () => {
@@ -468,10 +462,10 @@ describe('V1-15c Payment writers of the payments module, by function (no silent 
   it('MSW-06: every todo names an owning packet that is in the build map, and every unposted writer has one', () => {
     const map = readFileSync(join(REPO, 'docs', 'reconstruction', 'BUILD-MAP-001.md'), 'utf8');
     const owners = Object.entries(PAYMENTS_MODULE_WRITERS).flatMap(([key, c]) => ('todo' in c && c.todo ? [[key, c.todo.owner]] : []));
-    // W10-REFUND-CHARGE-DOOR: refundCharge's todo is closed (MSW-07 below), so createStorePayment's is the one left.
-    expect(owners.map(([key]) => key)).toEqual(
-      expect.arrayContaining(['apps/server/src/modules/payments/payments.service.ts#createStorePayment']),
-    );
+    // W10-REFUND-CHARGE-DOOR closed refundCharge's todo (MSW-07 below) and W10-STORE-PAYMENT-INTENT (D-18) closed
+    // createStorePayment's (the live case below), so none is open. A writer todo added later names its owning packet
+    // (the loops below) and is listed here.
+    expect(owners.map(([key]) => key), 'open writer todos').toEqual([]);
     for (const [key, owner] of owners) expect(map, `${key} names ${owner}`).toContain(`\`${owner}\``);
     for (const [key, c] of Object.entries(PAYMENTS_MODULE_WRITERS)) {
       if (c.kind === 'unposted') expect(c.todo?.owner, `${key} is unposted with no owning packet`).toMatch(/^V1-\d+[a-z]?-[A-Z0-9-]+$/);
@@ -500,6 +494,32 @@ describe('V1-15c Payment writers of the payments module, by function (no silent 
       `${key} does not call recordGatewayRefund`,
       `${key} writes Payment itself`,
     ]);
+  });
+
+  it('V1-33-PUB-CHECKOUT-RETRY-OFFLINE: createStorePayment writes no Payment row (W10-STORE-PAYMENT-INTENT, D-18, was it.todo): a CASH / MANUAL storefront order gets no PENDING intent naming the order as its invoice; the order row carries its payment state and StoreOrderService.completeCheckout writes the settled row through the door', () => {
+    const file = `${PAYMENTS_MODULE}payments.service.ts`;
+    const source = MODULE_FILES[file];
+    const body = memberSource(source, 'createStorePayment');
+    expect(body, 'createStorePayment is in the source and still serves CASH / MANUAL').toMatch(/'CASH'[\s\S]*'MANUAL'/);
+    expect(writeSites(file, source).filter((s) => s.fn === 'createStorePayment'), 'createStorePayment writes no Payment row').toEqual([]);
+    expect(PAYMENTS_MODULE_WRITERS[`${file}#createStorePayment`], 'createStorePayment is no longer classified as a writer').toBeUndefined();
+    // The settled row: completeCheckout is the storefront order's one Payment writer (MONEY_STATE_WRITERS).
+    const storeOrder = 'apps/server/src/modules/site/store-order.service.ts';
+    expect(writeSites(storeOrder, readFileSync(join(REPO, storeOrder), 'utf8')).map((s) => `${s.fn} ${s.op}`)).toEqual(['completeCheckout create']);
+    // Self-test: the CASH / MANUAL branch as it was at 134eeeb4 (the PENDING intent, invoiceId = the order id) is a
+    // writer the classification no longer admits.
+    const before = [
+      'export class PaymentsService {',
+      '  async createStorePayment(input: any) {',
+      "    if (input.method === 'CASH' || input.method === 'MANUAL') {",
+      "      const payment = await this.prisma.client.payment.create({ data: { status: 'PENDING', invoiceId: input.orderId } });",
+      '    }',
+      '  }',
+      '}',
+    ].join('\n');
+    expect(compareToClassification({ [file]: before }, PAYMENTS_MODULE_WRITERS)).toContain(
+      `${file}:4 (createStorePayment) writes Payment (create) and is not classified`,
+    );
   });
 
   for (const [key, c] of Object.entries(PAYMENTS_MODULE_WRITERS)) {
