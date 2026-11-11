@@ -250,14 +250,21 @@ export class AiController {
     return { status: 'ok', module: 'ai' };
   }
 
+  /**
+   * W10-ADVISOR-TIMELINE (review SEC-W9TO-2; owner ruling D-63, timeline-scope TS-13e): this built the
+   * model's prompt from the business's ten newest Activity titles and every figure for any member. The
+   * member who asks is now the chat's viewer (AiAdvisorService.chat): filtered, not refused.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/ai/chat')
   async chat(
     @Param('businessId') businessId: string,
     @Body() body: { message: string; history?: Array<{ role: string; content: string }> },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.advisor.chat(businessId, body.message, body.history);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    return this.advisor.chat(businessId, body.message, body.history, viewer);
   }
 
   /**

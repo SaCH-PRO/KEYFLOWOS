@@ -68,6 +68,12 @@ const CONTACT_EDIT_ACTIONS: ReadonlySet<string> = new Set(['change_status', 'tog
  * (CrmJourneyService.generateAiInsight) and the card without money
  * (ContactInsightService.getSnapshot, which serves such a member, or a call
  * naming none, the money-free card instead of the cached one).
+ *
+ * W10-MONEY-SIGNALS-REST (owner ruling D-100; review residuals SEC-W9MR-3 /
+ * SEC-W9MR-4): ai-revenue-opportunities and ai-reengagement pass the session
+ * member too, so a member without revenue read is served no opportunity and
+ * every money figure 0 (CrmAiService.revenueOpportunityScan), and no stored
+ * lead score (CrmAiService.bulkReengagementSuggestions).
  */
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -397,7 +403,8 @@ export class CrmAiController {
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-reengagement')
   async aiReengagement(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
-    return this.crmAi.bulkReengagementSuggestions(businessId, await this.contactScope(businessId, req.user.id));
+    // W10-MONEY-SIGNALS-REST (D-100, SEC-W9MR-4): the viewer, so a revenue-none member is served no stored lead score.
+    return this.crmAi.bulkReengagementSuggestions(businessId, await this.contactScope(businessId, req.user.id), req.user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -406,7 +413,8 @@ export class CrmAiController {
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-revenue-opportunities')
   async aiRevenueOpportunities(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
-    return this.crmAi.revenueOpportunityScan(businessId, await this.contactScope(businessId, req.user.id));
+    // W10-MONEY-SIGNALS-REST (D-100, SEC-W9MR-3): the viewer, so a revenue-none member is served no money signal.
+    return this.crmAi.revenueOpportunityScan(businessId, await this.contactScope(businessId, req.user.id), req.user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)

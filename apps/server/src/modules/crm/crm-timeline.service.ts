@@ -1,11 +1,16 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
-import type { Prisma } from '@prisma/client';
+import { CONTACT_EVENT_TYPES_BY_CATEGORY, normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
+import type { ContactEvent, Invoice, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase } from './crm.helpers';
 import { TimelineService } from '../timeline/timeline.service';
-import { readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
+import {
+  TIMELINE_SCAN_LIMIT,
+  crmRowCarriesMoney,
+  readVisibleActivityPage,
+  resolveTimelineViewer,
+} from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
@@ -53,6 +58,24 @@ function contactEventCopyCategory(type: string, data: unknown): 'COMMERCE' | 'CO
   }
   return 'CONTACT';
 }
+
+/**
+ * A ContactEvent as the feed rule (canReadActivityRow, timeline-visibility.ts)
+ * judges it: the row of its CRM copy (module crm, naming the contact; logEvent),
+ * its type as action and type, its data. GET contacts/:contactId/events
+ * (listContactEvents) and the highlights timeline (buildTimeline withoutMoney;
+ * W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1, owner rulings D-100, D-90
+ * and D-63) judge the same row.
+ */
+function contactEventActivityRow(event: Pick<ContactEvent, 'type' | 'contactId' | 'data'>) {
+  return { module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data };
+}
+
+/** The ContactEvents buildTimeline reads: the 10 newest. */
+const TIMELINE_EVENTS = 10;
+
+/** The batch buildTimeline reads money-free events in (eventsWithoutMoney). */
+const EVENT_SCAN_BATCH = 100;
 
 @Injectable()
 export class CrmTimelineService {
@@ -220,7 +243,7 @@ export class CrmTimelineService {
         skip,
         take,
       });
-      return events.map((event) => ({ module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data, event }));
+      return events.map((event) => ({ ...contactEventActivityRow(event), event }));
     });
     return page.map((row) => row.event);
   }
@@ -816,30 +839,64 @@ export class CrmTimelineService {
     return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
   }
 
-  async buildTimeline(businessId: string, limit = 20): Promise<TimelineEntry[]> {
+  /**
+   * The business's recent CRM rows (the 10 newest ContactEvents, 8 notes, 8
+   * tasks, 6 invoices, 6 bookings), newest first, cut to `limit`. With no
+   * options every row of the business is read, as before (the owner's
+   * highlights).
+   *
+   * W10-MONEY-SIGNALS-REST (owner rulings D-63 and D-100; review residuals
+   * SEC-W9MR-1 and SEC-W9MR-2 remainder), for CrmStatsService.flowHighlights:
+   * - `contacts`: each read keeps only the rows of the contacts matching it
+   *   (the viewer's visibility clause, the rule GET contacts/:contactId
+   *   applies), so another member's PRIVATE contact takes no place and is
+   *   never named;
+   * - `withoutMoney`: no invoice is read and every ContactEvent the feed rule
+   *   withholds from a member without revenue read is left out before the 10
+   *   are taken, so none takes any of the 10 places (eventsWithoutMoney). The
+   *   rule is GET contacts/:contactId/events' (canReadActivityRow ->
+   *   crmRowCarriesMoney): a sales_revenue type (@keyflow/shared), and since
+   *   the W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1 (D-100, D-90,
+   *   D-63) also any other type whose data carries an amount (e.g.
+   *   payment.completed, store_order.paid / refunded,
+   *   autopilot.payment_recovery), which the entry's type alone (the rule
+   *   timelineEntryCarriesMoney applies) does not show.
+   */
+  async buildTimeline(
+    businessId: string,
+    limit = 20,
+    options: { contacts?: Prisma.ContactWhereInput | null; withoutMoney?: boolean } = {},
+  ): Promise<TimelineEntry[]> {
+    const ofContacts = options.contacts ? { contact: options.contacts } : {};
+    const eventWhere: Prisma.ContactEventWhereInput = {
+      businessId,
+      ...ofContacts,
+      // The sales_revenue types are left out in the query (rows the rule withholds anyway, fewer reads).
+      ...(options.withoutMoney ? { type: { notIn: [...CONTACT_EVENT_TYPES_BY_CATEGORY.sales_revenue] } } : {}),
+    };
     const [events, notes, tasks, invoices, bookings] = await Promise.all([
-      this.prisma.client.contactEvent.findMany({
-        where: { businessId },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      }),
+      options.withoutMoney
+        ? this.eventsWithoutMoney(eventWhere)
+        : this.prisma.client.contactEvent.findMany({ where: eventWhere, orderBy: { createdAt: 'desc' }, take: TIMELINE_EVENTS }),
       this.prisma.client.contactNote.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
       this.prisma.client.contactTask.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 6,
-      }),
+      options.withoutMoney
+        ? Promise.resolve([] as Invoice[])
+        : this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, ...ofContacts },
+            orderBy: { createdAt: 'desc' },
+            take: 6,
+          }),
       this.prisma.client.booking.findMany({
-        where: { businessId, deletedAt: null },
+        where: { businessId, deletedAt: null, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 6,
       }),
@@ -924,5 +981,39 @@ export class CrmTimelineService {
     ];
 
     return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
+  }
+
+  /**
+   * W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1 (owner rulings D-100,
+   * D-90 and D-63): the TIMELINE_EVENTS newest of the ContactEvents `where`
+   * matches that carry no money by the feed rule. Each event is judged as
+   * listContactEvents (GET contacts/:contactId/events) judges it, the row of
+   * its CRM copy (contactEventActivityRow), by crmRowCarriesMoney: a
+   * sales_revenue type, or data carrying a MONEY_DATA_FIELDS field (e.g.
+   * payment.completed, store_order.paid / refunded, autopilot.payment_recovery
+   * with an amount). For the highlights' viewer that is canReadActivityRow's
+   * whole verdict on such a row: the route requires crm read and `where` keeps
+   * the contacts they may open, so a member without revenue read is withheld
+   * exactly the money rows. The events are read newest first in batches, in a
+   * total order (createdAt, then id), so a withheld row takes none of the
+   * places, until TIMELINE_EVENTS are kept, the events run out or
+   * TIMELINE_SCAN_LIMIT have been examined (readVisibleActivityPage's bound).
+   */
+  private async eventsWithoutMoney(where: Prisma.ContactEventWhereInput): Promise<ContactEvent[]> {
+    const kept: ContactEvent[] = [];
+    let skip = 0;
+    while (kept.length < TIMELINE_EVENTS && skip < TIMELINE_SCAN_LIMIT) {
+      const take = Math.min(EVENT_SCAN_BATCH, TIMELINE_SCAN_LIMIT - skip);
+      const batch = await this.prisma.client.contactEvent.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      kept.push(...batch.filter((event) => !crmRowCarriesMoney(contactEventActivityRow(event))));
+      if (batch.length < take) break;
+      skip += batch.length;
+    }
+    return kept.slice(0, TIMELINE_EVENTS);
   }
 }

@@ -1559,7 +1559,27 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async bulkReengagementSuggestions(businessId: string, scope?: ContactScope) {
+  /**
+   * W10-MONEY-SIGNALS-REST (owner ruling D-100; review residuals SEC-W9MR-3 /
+   * SEC-W9MR-4): whether `viewerUserId` reads revenue (resolveTimelineViewer,
+   * the rule GET contacts applies). A call that names no viewer is served as
+   * before (naturalLanguageSearch's rule).
+   */
+  private async viewerReadsRevenue(businessId: string, viewerUserId?: string): Promise<boolean> {
+    return !viewerUserId || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
+  }
+
+  /**
+   * The stale contacts (no interaction for 30 days) the caller may open, the
+   * most urgent first. W10-MONEY-SIGNALS-REST (owner ruling D-100; review
+   * residual SEC-W9MR-4): for a `viewerUserId` without revenue read every
+   * suggestion's leadScore is withheld (null), as GET contacts serves it
+   * without includeStats: the stored score carries the invoice terms (+10 a
+   * paid, -5 an unpaid invoice). The order is the owner's and money-free
+   * (staleness, then the status urgency; the lead score places none).
+   */
+  async bulkReengagementSuggestions(businessId: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = await this.viewerReadsRevenue(businessId, viewerUserId);
     const now = new Date();
     const staleThreshold = new Date(now.getTime() - 30 * 86400000);
 
@@ -1613,7 +1633,8 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         email: c.email,
         status: c.status,
         daysSinceLastInteraction: daysSince,
-        leadScore: c.leadScore,
+        // D-100 (W10-MONEY-SIGNALS-REST): the stored lead score is withheld from a member without revenue read.
+        leadScore: readsRevenue ? c.leadScore : null,
         recommendedAction,
         urgency,
         suggestedSequence,
@@ -1632,7 +1653,20 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async revenueOpportunityScan(businessId: string, scope?: ContactScope) {
+  /**
+   * The revenue opportunities among the CLIENT and PROSPECT contacts the
+   * caller may open. W10-MONEY-SIGNALS-REST (owner rulings D-100, D-63 and
+   * D-90; review residual SEC-W9MR-3): a `viewerUserId` without revenue read
+   * is served the scan's shape with no money signal, as GET .../predictive-revenue
+   * serves it (SEC-W7CMV-1): no opportunity, since each one is picked by a
+   * money signal ('Hot prospect' by the stored lead score, which carries the
+   * invoice terms, 'Repeat business' by the last invoice's age, 'Upsell' by
+   * the paid total) and carries the paid total and an estimate from it;
+   * totalEstimatedRevenue 0; contactsAnalyzed (a contact count) as for the
+   * owner. No invoice is read for that member.
+   */
+  async revenueOpportunityScan(businessId: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = await this.viewerReadsRevenue(businessId, viewerUserId);
     const contacts = await this.db.contact.findMany({
       where: { ...this.contactWhere(businessId, scope), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
@@ -1642,6 +1676,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         lastInteractionAt: true,
       },
     });
+    if (!readsRevenue) {
+      return { opportunities: [], totalEstimatedRevenue: 0, contactsAnalyzed: contacts.length };
+    }
 
     const contactIds = contacts.map(c => c.id);
     const invoices = await this.db.invoice.findMany({

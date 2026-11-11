@@ -48,9 +48,9 @@
  *   here through the real writers, so the rule withholds them from a member
  *   who may not open that contact. TS-13d (SEC-W9TO-1: the rows those writers
  *   stored before, contactId null) is live in data-cleanup-scripts
- *   (W10-DATA-CLEANUP-SCRIPTS, D-115: an operator backfill, no rule change);
- *   TS-13e (SEC-W9TO-2: the KEY chat prompt's recent Activity titles) is a
- *   follow-up outside that write set (it.todo).
+ *   (W10-DATA-CLEANUP-SCRIPTS, D-115: an operator backfill, and one rule term
+ *   for the rows it withholds, DCS-T07); TS-13e (SEC-W9TO-2: the KEY chat
+ *   prompt's recent Activity titles) is live since W10-ADVISOR-TIMELINE (below).
  *   TS-14 (ST-3) is live since W5-BRIEFING-SCOPE (D-63): the morning briefing
  *   (AiController.morningBriefing) reads through the same rule.
  *   TS-15..TS-17 (W6-BRIEFINGS-SCOPE, D-63; reviews SEC-W5BS-1, SEC-W5BS-2,
@@ -87,6 +87,19 @@
  *   serves each revenue reader only the revenue actions GET revenue-actions
  *   serves them (servedRevenueActions), filled past the ones withheld, cached
  *   or not.
+ *   TS-13e (W10-ADVISOR-TIMELINE, D-63; was it.todo, review SEC-W9TO-2):
+ *   live. The KEY advisor chat (POST ai/chat, AiAdvisorService.chat) builds
+ *   its prompt from the rows the timeline rule serves the member who asks and
+ *   the figures they read, as the daily briefing does (TS-20a). It reads
+ *   through the same rule, so a row stored before W9 that names a contact
+ *   only in its text (contactId null) reaches the chat and the daily
+ *   briefing until the operator runs the W10 timeline backfill (TS-13d,
+ *   D-115, live in data-cleanup-scripts).
+ *   W10-ADVISOR-TIMELINE review (SEC-W10AT-1..3): the two AI prompts read
+ *   through the rule the backfill treats (SEC-W10AT-1), and TS-13e claims only
+ *   the rows that carry their contact. GET ai/cash-flow-forecast (TS-13f,
+ *   D-100) and POST ai/simulate (TS-13g, D-63, D-100) are follow-ups outside
+ *   that write set (it.todo).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -906,9 +919,279 @@ describe('W9-TEXT-ONLY-CONTACT-WRITERS review follow-ups outside the write set (
   // (W10-DATA-CLEANUP-SCRIPTS, owner ruling D-115, was it.todo): the operator script
   // apps/server/scripts/backfill-timeline-contact-links.ts sets the stored rows' contactId from
   // the invoice's / intake's contact in the same business, and moves a row whose source is gone
-  // to a module the table does not map (OWNER and ADMIN only); the timeline rule is unchanged.
+  // to a module the table does not map (OWNER and ADMIN only, each also needing read on the
+  // row's original module: the D-115 term of canReadActivityRow, DCS-T07). Review SEC-W10AT-1:
+  // both AI prompts (POST ai/chat, GET ai/briefing) read through the same rule, so the backfill
+  // treats them too.
+  // TS-13e (review SEC-W9TO-2, D-63) is live below (W10-ADVISOR-TIMELINE, was it.todo): the KEY
+  // chat's prompt is built from the rows the timeline rule serves the member and the figures they read.
+  // Until the D-115 backfill runs, the rows of TS-13d reach that prompt too (review SEC-W10AT-1).
+});
+
+/**
+ * W10-ADVISOR-TIMELINE (review SEC-W9TO-2; owner ruling D-63, with D-100 for the money signals):
+ * TS-13e, live (it was it.todo). POST /ai/businesses/:businessId/ai/chat (AiController.chat ->
+ * AiAdvisorService.chat, the web's business-profile review reply and KEY chat) built the model's
+ * system prompt from the business's 10 newest Activity titles and every figure (revenue collected,
+ * outstanding and overdue, bookings, expenses, the momentum score, the genome's monthly revenue
+ * target) for any member, whatever they read. The member who asks is now the chat's TimelineViewer,
+ * as W7-BRIEFINGS-REST made them the daily briefing's (TS-20a): filtered, not refused. The OWNER's
+ * prompt is the business's whole prompt, as before.
+ *
+ * The real AiController and AiAdvisorService run on their own app over this suite's PrismaService and
+ * identity header, with the real guards. No provider traffic: AiUsageService is a stand-in that
+ * records what each call sends and answers a fixed reply; BlueprintService is a stand-in whose genome
+ * names a monthly revenue target; StrategicIntelligenceService and every other collaborator are empty
+ * stand-ins the route never calls. The case writes its own rows (dated after every other row of the
+ * business, so they are its newest), invoices and expense, and removes them when it ends.
+ */
+describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeline the member is served (TS-13e)', () => {
+  let chatApp: any;
+  /** What each AI call sent (its feature, every message joined). */
+  const chatCalls: Array<{ feature: string; text: string }> = [];
+  const MESSAGE = 'v84a how is my business doing?';
+  const REPLY = 'v84a advisor reply';
+  const TARGET = 12345;
+  afterAll(async () => {
+    if (chatApp) await chatApp.close();
+  });
+
+  async function chatModule(): Promise<any> {
+    if (!chatApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+      const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+      const { StrategicIntelligenceService } = await import('../src/modules/ai/strategic-intelligence.service');
+      const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+          AiAdvisorService,
+          {
+            provide: AiUsageService,
+            useValue: {
+              callAi: async (opts: { feature: string; messages?: Array<{ content: string }> }) => {
+                chatCalls.push({ feature: opts.feature, text: (opts.messages ?? []).map((m) => m.content).join('\n') });
+                if (opts.feature === 'chat') return { content: REPLY, usage: {} };
+                throw new Error(`v84a: unexpected AI feature ${opts.feature}`);
+              },
+            },
+          },
+          { provide: StrategicIntelligenceService, useValue: {} },
+          {
+            provide: BlueprintService,
+            useValue: {
+              getBlueprintContext: async () => ({
+                completeness: 100,
+                summary: 'v84a genome summary',
+                identity: { mission: 'v84a mission' },
+                goals: {},
+                customerModel: {},
+                brand: { voice: 'v84a warm' },
+                constraints: {},
+                financials: { monthlyTarget: TARGET },
+              }),
+            },
+          },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      chatApp = ref.createNestApplication();
+      // Identity attachment only, as the suite's app does. No guard is overridden.
+      chatApp.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers[HEADER];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      chatApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await chatApp.init();
+    }
+    return chatApp;
+  }
+
+  /** The member's chat: the answer and the prompt the model was sent. */
+  async function chat(user: string, biz = ID.bizA): Promise<{ status: number; body: any; prompt: string }> {
+    const server = (await chatModule()).getHttpServer();
+    const from = chatCalls.length;
+    const res = await request(server).post(`/ai/businesses/${biz}/ai/chat`).set(HEADER, user).send({ message: MESSAGE });
+    const prompt = chatCalls.slice(from).filter((c) => c.feature === 'chat').map((c) => c.text).join('\n');
+    return { status: res.status, body: res.body, prompt };
+  }
+
+  /** The titles of the prompt's "Recent Activity:" line, in order. */
+  function recent(prompt: string): string[] {
+    const line = prompt.split('\n').find((l) => l.startsWith('Recent Activity: '));
+    expect(line, 'the prompt names its recent activity').toBeTruthy();
+    const list = (line as string).slice('Recent Activity: '.length);
+    return list ? list.split('; ') : [];
+  }
+
+  it("TS-13e (W10-ADVISOR-TIMELINE, D-63, was it.todo): POST /ai/businesses/:businessId/ai/chat builds the model's prompt only from the Activity rows the timeline rule serves the member (the ten newest they may read, filled past the rows withheld: no row that carries a contact they may not open in its contactId or as its contact entity, no money row without revenue read, no row of a module they do not read; a row stored before W9 that names a contact only in its text is TS-13d, D-115) and the figures they read (revenue, outstanding and the genome's revenue target need revenue read, expenses need expenses read, bookings need bookings read, the contact count is the contacts they may list, the momentum score needs revenue, crm and bookings read and is answered null otherwise); a view-all ADMIN keeps the money rows and figures but not the 'Invoice <n> sent to <PRIVATE contact name>' row that carries that contact; the OWNER's prompt is the business's whole prompt, as before", async () => {
+    const chatRow = (key: string) => `${P}chat_${key}`;
+    const HIDDEN = 'Invoice v84a-INV-CH1 sent to v84a Hidden Client';
+    const PAY = Array.from({ length: 9 }, (_, i) => `v84a chat payment TTD ${640 + i}`);
+    const TEAM_NOTE = 'v84a chat TEAM contact note';
+    const BOOKING = 'v84a chat booking row';
+    const PRIV_NOTE = 'v84a chat PRIVATE contact note';
+    const ROWS: Array<Seed & { action?: string; entityType?: string; entityId?: string; title: string }> = [
+      // KEY send_invoice's row as its writer stores it since W9-TEXT-ONLY-CONTACT-WRITERS (contactId set).
+      { key: 'invPriv', module: 'commerce', action: 'invoice_sent', entityType: 'invoice', entityId: `${P}inv_chat_sent`, contactId: ID.cPriv, title: HIDDEN },
+      ...PAY.map((title, i) => ({ key: `pay${i}`, module: 'commerce', category: 'PAYMENT', revenueImpact: 640 + i, title })),
+      { key: 'crmTeam', module: 'crm', contactId: ID.cTeam, title: TEAM_NOTE },
+      { key: 'booking', module: 'bookings', category: 'BOOKING', title: BOOKING },
+      { key: 'crmPriv', module: 'crm', contactId: ID.cPriv, title: PRIV_NOTE },
+    ];
+    // Newer than every other row of the business (the main rows sit on DAY at local noon).
+    const newest = Math.max(Date.now(), DAY.getTime()) + 2 * 86_400_000;
+    try {
+      await db.activity.createMany({
+        data: ROWS.map((s, i) => ({
+          id: chatRow(s.key),
+          businessId: ID.bizA,
+          module: s.module,
+          action: s.action ?? `${P}chat_${s.key}`,
+          entityType: s.entityType ?? 'v84a_entity',
+          entityId: s.entityId ?? null,
+          title: s.title,
+          category: s.category ?? null,
+          contactId: s.contactId ?? null,
+          revenueImpact: s.revenueImpact ?? null,
+          occurredAt: new Date(newest - i * 1000),
+          createdAt: new Date(newest - i * 1000),
+        })),
+      });
+      // The figures: one invoice paid, one sent and overdue, one expense this month.
+      await db.invoice.createMany({
+        data: [
+          { id: `${P}inv_chat_paid`, invoiceNumber: 'v84a-INV-CH2', status: 'PAID', subtotal: 9137, total: 9137, currency: 'TTD', paidAt: new Date(), businessId: ID.bizA, contactId: ID.cTeam },
+          { id: `${P}inv_chat_due`, invoiceNumber: 'v84a-INV-CH3', status: 'SENT', subtotal: 2468, total: 2468, currency: 'TTD', dueDate: new Date(Date.now() - 5 * 86_400_000), businessId: ID.bizA, contactId: ID.cTeam },
+        ],
+      });
+      await db.expense.create({ data: { id: `${P}exp_chat`, businessId: ID.bizA, description: 'v84a chat expense', amount: 1357, date: new Date() } });
+
+      // The figures as the business holds them (other cases' rows included), for the OWNER's prompt.
+      const money = (n: number) => `$${n.toLocaleString()} TTD`;
+      const paid = (await db.invoice.aggregate({ where: { businessId: ID.bizA, deletedAt: null, status: 'PAID' }, _sum: { total: true } }))._sum.total ?? 0;
+      expect(paid).toBeGreaterThanOrEqual(9137);
+      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const spent = (await db.expense.aggregate({ where: { businessId: ID.bizA, deletedAt: null, date: { gte: startOfMonth } }, _sum: { amount: true } }))._sum.amount ?? 0;
+      expect(spent).toBeGreaterThanOrEqual(1357);
+      // The contacts each member may list (the CRM list rule, visibilityClause M7).
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { resolveTimelineViewer } = await import('../src/modules/timeline/timeline-visibility');
+      const { visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
+      const listable = async (user: string): Promise<number> => {
+        const viewer = await resolveTimelineViewer(app.get(PrismaService), ID.bizA, user);
+        const clause = visibilityClause(viewer.crmAccess, user);
+        return db.contact.count({ where: { businessId: ID.bizA, deletedAt: null, ...(clause ? { AND: [clause] } : {}) } });
+      };
+      const contactsAll = await db.contact.count({ where: { businessId: ID.bizA, deletedAt: null } });
+      const FIGURES = ['Revenue:', 'Outstanding:', 'Expenses this month:', 'Bookings:', 'Momentum Score:', 'Monthly revenue target:', 'Contacts:'];
+      const shown = (prompt: string) => FIGURES.filter((f) => prompt.includes(f));
+
+      // OWNER control: the ten newest rows and every figure, exactly the whole prompt (no viewer).
+      const owner = await chat(ID.owner);
+      expect(owner.status, JSON.stringify(owner.body).slice(0, 300)).toBe(201);
+      expect(owner.body.reply).toBe(REPLY);
+      expect(recent(owner.prompt), 'OWNER: the ten newest rows').toEqual([HIDDEN, ...PAY]);
+      expect(shown(owner.prompt), 'OWNER: every figure').toEqual(FIGURES);
+      expect(owner.prompt).toContain(`Revenue: ${money(paid)} collected`);
+      expect(owner.prompt).toContain(`Expenses this month: ${money(spent)}`);
+      expect(owner.prompt).toContain(`Contacts: ${contactsAll} total`);
+      expect(owner.prompt).toContain(`Monthly revenue target: $${TARGET.toLocaleString()}`);
+      expect(typeof owner.body.context?.momentumScore).toBe('number');
+      const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+      const from = chatCalls.length;
+      await chatApp.get(AiAdvisorService).chat(ID.bizA, MESSAGE);
+      const whole = chatCalls.slice(from).map((c) => c.text).join('\n');
+      expect(owner.prompt, "OWNER: the business's whole prompt").toBe(whole);
+
+      // view-all ADMIN: every money row and figure, not the row naming the owner's PRIVATE contact;
+      // the page is filled past it (the TEAM contact's note is the tenth row).
+      const admin = await chat(ID.admin);
+      expect(admin.status, JSON.stringify(admin.body).slice(0, 300)).toBe(201);
+      expect(recent(admin.prompt), 'ADMIN: the ten newest rows served').toEqual([...PAY, TEAM_NOTE]);
+      expect(admin.prompt).not.toContain('Hidden Client');
+      expect(admin.prompt).not.toContain('v84a-INV-CH1');
+      expect(shown(admin.prompt), 'ADMIN: every figure').toEqual(FIGURES);
+      expect(admin.prompt).toContain(`Revenue: ${money(paid)} collected`);
+      const adminContacts = await listable(ID.admin);
+      expect(adminContacts, "ADMIN may not list the owner's PRIVATE contacts").toBeLessThan(contactsAll);
+      expect(admin.prompt).toContain(`Contacts: ${adminContacts} total`);
+      expect(typeof admin.body.context?.momentumScore).toBe('number');
+
+      // crm 'none', revenue read (bookings, expenses, ai absent: none): the money rows and revenue
+      // figures only; no row naming a contact, no contact count, no bookings, expenses or momentum.
+      const crmNone = await chat(ID.staffCrmNone);
+      expect(crmNone.status, JSON.stringify(crmNone.body).slice(0, 300)).toBe(201);
+      const crmNoneRecent = recent(crmNone.prompt);
+      expect(crmNoneRecent.slice(0, 9), 'staffCrmNone: the money rows').toEqual(PAY);
+      for (const withheld of [HIDDEN, TEAM_NOTE, BOOKING, PRIV_NOTE, 'v84a private contact event', 'v84a crmTeam row']) {
+        expect(crmNoneRecent, `staffCrmNone: ${withheld}`).not.toContain(withheld);
+      }
+      expect(shown(crmNone.prompt), 'staffCrmNone: the figures it reads').toEqual(['Revenue:', 'Outstanding:', 'Monthly revenue target:']);
+      expect(crmNone.prompt).toContain(`Revenue: ${money(paid)} collected`);
+      expect(crmNone.body.context?.momentumScore, 'staffCrmNone: momentum withheld').toBeNull();
+
+      // revenue 'none' (crm, bookings, operations read): no money row, no revenue figure.
+      const revNone = await chat(ID.staffRevNone);
+      expect(revNone.status, JSON.stringify(revNone.body).slice(0, 300)).toBe(201);
+      const revNoneRecent = recent(revNone.prompt);
+      expect(revNoneRecent.slice(0, 2), 'staffRevNone: the rows it reads, filled past the money rows').toEqual([TEAM_NOTE, BOOKING]);
+      expect(revNoneRecent, 'staffRevNone: the PRIVATE contact note').not.toContain(PRIV_NOTE);
+      for (const withheld of ['v84a chat payment', 'Hidden Client', 'Payment recorded: TTD 150', 'v84a-INV-1', '9,137', '2,468', '1,357', '12,345']) {
+        expect(revNone.prompt, `staffRevNone: ${withheld}`).not.toContain(withheld);
+      }
+      expect(shown(revNone.prompt), 'staffRevNone: the figures it reads').toEqual(['Bookings:', 'Contacts:']);
+      expect(revNone.prompt).toContain(`Contacts: ${await listable(ID.staffRevNone)} total`);
+      expect(revNone.body.context?.momentumScore, 'staffRevNone: momentum withheld').toBeNull();
+      expect(JSON.stringify(revNone.body)).not.toContain('9137');
+
+      // Tenant control: B's owner is refused A's chat, and no model call is made for it.
+      const before = chatCalls.length;
+      expect((await chat(ID.ownerB)).status).toBe(403);
+      expect(chatCalls.slice(before)).toEqual([]);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}chat_`)}`);
+      // Raw SQL: Invoice and Expense are soft-deleted models (fixture-cleanup-integrity.spec.ts).
+      await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_chat_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM expenses WHERE id LIKE ${sqlLikePrefix(`${P}exp_chat`)}`);
+    }
+  });
+});
+
+/**
+ * W10-ADVISOR-TIMELINE review (SEC-W10AT-2, SEC-W10AT-3; owner rulings D-63, D-100): two other
+ * AiController routes beside the chat serve a member the business's figures, contacts or rows whatever
+ * they read. Both were reproduced on the real database before they were recorded here (a temporary
+ * case in the W10-ADVISOR-TIMELINE describe, through its chat app, removed). The packet's write set is
+ * the chat (AiController.chat, AiAdvisorService.chat), so each is a follow-up outside it.
+ */
+describe('W10-ADVISOR-TIMELINE review follow-ups outside the write set (TS-13f, TS-13g)', () => {
   it.todo(
-    "TS-13e (review SEC-W9TO-2, D-63): POST /ai/businesses/:businessId/ai/chat (AiController.chat: AuthGuard + BusinessGuard, no viewer; AiAdvisorService.chat and getBusinessContext, outside the packet's write set) puts the business's 10 newest Activity titles in the model's system prompt unfiltered, so the KEY chat of a view-all ADMIN, a crm 'none' member and a revenue 'none' member carries 'Invoice <n> sent to <PRIVATE contact name>' (and money titles such as 'Payment recorded: TTD 150') whatever the row's contactId, with the business's revenue, outstanding and expense figures; a follow-up packet passes the member as a TimelineViewer and builds the prompt from the rows the timeline rule serves them and the figures they read, as W7-BRIEFINGS-REST did for generateDailyBriefing (TS-20a)",
+    "TS-13f (W10-ADVISOR-TIMELINE review SEC-W10AT-2, D-100, D-63, D-57): GET /ai/businesses/:businessId/ai/cash-flow-forecast (AiController.cashFlowForecast, AuthGuard + BusinessGuard only -> AiAdvisorService.predictCashFlow), which the web's reports cash-flow view and revenue projection chart call (client.ts fetchCashFlowForecast), answers a member without revenue read 200 with currentBalance, projectedBalance, dailyRevenueRate and dailyExpenseRate (reproduced as the revenue 'none' member with one PAID invoice of 7777: currentBalance 7777, projectedBalance 10369.33, dailyRevenueRate 86.41) and, past five outstanding invoices, an alert naming their total; it should refuse that member (403, no figure) as GET commerce/businesses/:businessId/cash-flow-forecast does (TS-20e), a revenue reader and the OWNER keeping the forecast; the route and the web views' answer to a 403 are outside the packet's write set",
+  );
+  it.todo(
+    "TS-13g (W10-ADVISOR-TIMELINE review SEC-W10AT-3, D-63, D-100): POST /ai/businesses/:businessId/ai/simulate (AiController.simulate, AuthGuard + BusinessGuard only -> AiAdvisorService.simulateScenario) puts JSON.stringify(getBusinessContext) in the model's prompt for any member and returns the model's simulation to them: the first and last names of the business's five newest contacts whatever their visibility (the owner's PRIVATE contacts included), the revenue collected, outstanding and overdue figures, expenses, bookings, the momentum score and the business's ten newest Activity titles unfiltered (reproduced as the revenue 'none' member: the prompt carried '\"firstName\": \"Priv\"', '\"totalRevenue\": 7777' and an 'Invoice <n> sent to <hidden contact>' row); it should build that prompt only from what the member reads, as POST ai/chat does since W10-ADVISOR-TIMELINE (TS-13e: the rows the timeline rule serves them, the figures of the modules they read, only contacts they may open), the OWNER's prompt staying whole; simulateScenario and the route are outside the packet's write set",
   );
 });
 

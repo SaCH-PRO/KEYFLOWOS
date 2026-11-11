@@ -48,6 +48,24 @@
  * no invoice follow-up before the cap of 6, and the timeline's money rows are
  * left out before its cut to 20, so unpaid invoices crowd nothing out.
  *
+ * W10-MONEY-SIGNALS-REST (owner rulings D-100 and D-63) closes the W9 residuals:
+ *   - SEC-W9MR-3: GET .../ai-revenue-opportunities (CrmAiService.revenueOpportunityScan)
+ *     serves a member without revenue read no opportunity (each is picked by a
+ *     money signal) and every money figure 0;
+ *   - SEC-W9MR-4: GET .../ai-reengagement (bulkReengagementSuggestions) serves
+ *     that member every leadScore null, in the owner's (money-free) order;
+ *   - SEC-W9MR-1 residual: GET .../highlights is worked out from the contacts
+ *     the viewer may open whenever a visibility rule hides some (cards, overdue
+ *     reminders, next actions, segment contacts and counts, timeline entries,
+ *     service-affinity bookings), a member with revenue read included; the
+ *     owner's highlights are unchanged (a third business, biz3);
+ *   - SEC-W9MR-2 remainder: the timeline's event read leaves the money-type
+ *     ContactEvent rows out in the query, so they take none of its 10 places.
+ * Its review repair SEC-W10MSR-1 (D-100, D-90, D-63; a fourth business, biz4):
+ * that read judges each event by the feed rule GET contacts/:c/events applies,
+ * so an event of another type whose data carries an amount (payment.completed,
+ * store_order.paid / refunded, autopilot.payment_recovery) is left out too.
+ *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
  * 4 to ai-search; the ai-search matrix is also run on the service directly.
@@ -154,6 +172,8 @@ let crmAi: any;
 async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_insight_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -250,8 +270,9 @@ beforeAll(async () => {
   );
   contactInsight = new ContactInsightService(prisma, aiGateway as any, new BestChannelService(prisma), events);
   // CrmAiService: the real natural-language search (POST ai-search) over the recorder; the
-  // sequences service is on no path here.
-  crmAi = new CrmAiService(prisma, aiGateway as any, {} as any, new CrmListsService(prisma), crmTimeline, crmService);
+  // sequences service is a stand-in with no sequence (GET ai-reengagement lists them, W10-MONEY-SIGNALS-REST).
+  const sequences = { listSequences: async () => [] };
+  crmAi = new CrmAiService(prisma, aiGateway as any, sequences as any, new CrmListsService(prisma), crmTimeline, crmService);
 
   const moduleRef = await Test.createTestingModule({
     controllers: [CrmController, CrmAiController],
@@ -793,6 +814,69 @@ describe('W8-MONEY-SIGNALS: a member without revenue read sees no money signal (
       }
     }
   });
+
+  // ---- W10-MONEY-SIGNALS-REST (owner ruling D-100): the AI scans W9-MONEY-RANKING left open ----------
+
+  type Opportunity = { contactId: string; opportunityType: string; totalRevenue: number; estimatedValue: number; leadScore: number | null };
+  /** The scan's opportunities by contact id (the scan reads its contacts in no order). */
+  const byContact = (opportunities: Opportunity[]) => [...opportunities].sort((a, b) => a.contactId.localeCompare(b.contactId));
+
+  it("SEC-W9MR-3 (D-100, D-63, D-90): GET .../ai-revenue-opportunities (CrmAiService.revenueOpportunityScan) serves a member without revenue read the scan's shape with no money signal: no opportunity (each one is picked by a money signal: 'Hot prospect' by the stored lead score with its invoice terms, 'Repeat business' by the last invoice's age, 'Upsell' by the paid total), totalEstimatedRevenue 0, contactsAnalyzed as the owner's; the owner and a member with revenue read keep the opportunities with their totals (W10-MONEY-SIGNALS-REST, D-100, was it.todo)", async () => {
+    await storeScores();
+    const owner = await ok(ID.owner, 'ai-revenue-opportunities');
+    // The owner's: cLow a 'Hot prospect' by its stored score (60 = 50 + its paid invoice's 10; 50 without it), cHigh and cMid 'Upsell' by their paid totals.
+    const full = byContact(owner.opportunities as Opportunity[]);
+    expect(full.map((o) => [o.contactId, o.opportunityType.split(' ')[0]])).toEqual(
+      [[ID.cHigh, 'Upsell'], [ID.cLow, 'Hot'], [ID.cMid, 'Upsell']].sort((a, b) => a[0].localeCompare(b[0])),
+    );
+    expect(full.find((o) => o.contactId === ID.cLow)!.leadScore).toBe(STORED_SCORE[ID.cLow]);
+    expect(full.find((o) => o.contactId === ID.cHigh)!.totalRevenue).toBeCloseTo(MONEY.PAID_HIGH, 2);
+    expect(owner.totalEstimatedRevenue).toBeGreaterThan(0);
+    expect(owner.contactsAnalyzed).toBe(3);
+
+    const withheld = await ok(ID.noRev, 'ai-revenue-opportunities');
+    expect(withheld).toEqual({ opportunities: [], totalEstimatedRevenue: 0, contactsAnalyzed: owner.contactsAnalyzed });
+    expectNoAmount(withheld, "revenue 'none' GET ai-revenue-opportunities");
+
+    // Control: a member with revenue read gets the owner's scan.
+    const rev = await ok(ID.rev, 'ai-revenue-opportunities');
+    expect({ ...rev, opportunities: byContact(rev.opportunities) }).toEqual({ ...owner, opportunities: full });
+
+    // The service: named a viewer without revenue read, the same; the owner, a revenue reader or no viewer (as before), the full scan.
+    expect(await crmAi.revenueOpportunityScan(ID.biz, null, ID.noRev)).toEqual(withheld);
+    for (const viewer of [ID.owner, ID.rev, undefined]) {
+      const scan = await crmAi.revenueOpportunityScan(ID.biz, null, viewer);
+      expect({ ...scan, opportunities: byContact(scan.opportunities) }, String(viewer)).toEqual({ ...owner, opportunities: full });
+    }
+  });
+
+  it("SEC-W9MR-4 (D-100): GET .../ai-reengagement (CrmAiService.bulkReengagementSuggestions) serves a member without revenue read every suggestion's leadScore null (the stored score carries the invoice terms, +10 a paid and -5 an unpaid invoice: the SEC-W8MS-1 class), in the owner's money-free order (staleness, then the status urgency; the lead score places none); the owner and a member with revenue read keep the stored score (W10-MONEY-SIGNALS-REST, D-100, was it.todo)", async () => {
+    await storeScores();
+    // Every contact stale, oldest interaction first: cHigh, cMid, cNone, cLow.
+    for (const [id, days] of [[ID.cHigh, 50], [ID.cMid, 45], [ID.cNone, 40], [ID.cLow, 35]] as const) {
+      await db.contact.update({ where: { id }, data: { lastInteractionAt: new Date(Date.now() - days * 86_400_000) } });
+    }
+    // The urgency sort puts the PROSPECT (high) before the others (medium), which keep their staleness order;
+    // the stored score order would be cMid (65), cLow and cHigh (60), cNone (50).
+    const ORDER = [ID.cLow, ID.cHigh, ID.cMid, ID.cNone];
+
+    const owner = await ok(ID.owner, 'ai-reengagement');
+    const ownerRows = owner.suggestions as Array<{ contactId: string; leadScore: number | null }>;
+    expect(ownerRows.map((s) => s.contactId)).toEqual(ORDER);
+    expect(ownerRows.map((s) => s.leadScore)).toEqual(ORDER.map((id) => STORED_SCORE[id]));
+
+    const withheld = await ok(ID.noRev, 'ai-reengagement');
+    expect(withheld).toEqual({ ...owner, suggestions: ownerRows.map((row) => ({ ...row, leadScore: null })) });
+
+    // Control: a member with revenue read gets the owner's suggestions with the stored score.
+    expect(await ok(ID.rev, 'ai-reengagement')).toEqual(owner);
+
+    // The service: named a viewer without revenue read, the same; the owner, a revenue reader or no viewer (as before), the stored score.
+    expect(await crmAi.bulkReengagementSuggestions(ID.biz, null, ID.noRev)).toEqual(withheld);
+    for (const viewer of [ID.owner, ID.rev, undefined]) {
+      expect(await crmAi.bulkReengagementSuggestions(ID.biz, null, viewer), String(viewer)).toEqual(owner);
+    }
+  });
 });
 
 // ---- W9-MONEY-RANKING review repairs (owner ruling D-100) -----------------------------------------
@@ -933,9 +1017,266 @@ describe('W9-MONEY-RANKING review repairs: the highlights of a member without re
     }
   });
 
-  // Open, outside the W9-MONEY-RANKING write set (crm-ai.service.ts: naturalLanguageSearch only; crm-stats.service.ts:
-  // the money-free highlights only, "OWNER and revenue readers unchanged"): follow-up packets.
-  it.todo("SEC-W9MR-3 (D-100, D-63, D-90): GET .../ai-revenue-opportunities (CrmAiService.revenueOpportunityScan, crm read only) serves a member without revenue read each contact's paid totalRevenue, estimatedValue and the totalEstimatedRevenue, and picks 'Hot prospect' by the stored leadScore with its invoice terms; outside the W9-MONEY-RANKING write set (revenueOpportunityScan, crm-ai.controller.ts): follow-up packet");
-  it.todo("SEC-W9MR-4 (D-100): GET .../ai-reengagement (CrmAiService.bulkReengagementSuggestions) serves that member the stored leadScore with its invoice terms (+10 a paid, -5 an unpaid invoice), the SEC-W8MS-1 class on a sibling route; outside the W9-MONEY-RANKING write set (bulkReengagementSuggestions, crm-ai.controller.ts): follow-up packet");
-  it.todo("SEC-W9MR-1 residual (pre-existing): GET .../highlights reads its segments (contacts and counts) and timeline for the whole business, and a member with revenue read gets the cached high-potential cards and next actions of the whole business, so another member's PRIVATE contact can be named there; scoping the business-wide cached payload per viewer changes what revenue readers are served (the packet keeps them unchanged): follow-up packet");
+});
+
+// ---- W10-MONEY-SIGNALS-REST (owner rulings D-63, D-100): the highlights residuals ------------------
+
+/**
+ * W10-MONEY-SIGNALS-REST, on a third business of this suite (biz3), so the
+ * other two keep the orders the cases above pin. Contacts, all the owner's:
+ *   c3Team  LEAD, TEAM (older): a SENT invoice (TEAM_OWE, due in 5 days), an overdue task, a note,
+ *           one COMPLETED booking of s3 (60 days ago), one non-money ContactEvent (communication.call)
+ *           and, newer than it, 11 money-type ContactEvents (invoice.sent);
+ *   c3Priv  CLIENT, PRIVATE, no share (newer): a SENT invoice past its due date (PRIV_OWE), an
+ *           overdue task, a note, two COMPLETED bookings of s3 (60 days ago). Neither STAFF member
+ *           (crm read; revenue 'none' or revenue read) may open it.
+ */
+const ID3 = {
+  biz: `${P}biz3`,
+  cTeam: `${P}c3Team`,
+  cPriv: `${P}c3Priv`,
+  service: `${P}s3`,
+  callEvent: `${P}c3ev_call`,
+  moneyEvents: Array.from({ length: 11 }, (_, k) => `${P}c3ev_money${String(k).padStart(2, '0')}`),
+};
+const PRIV_OWE = 913.37;
+const TEAM_OWE = 217.43;
+const S3_PRICE = 150;
+const PRIVATE_NAME3 = 'V94E PrivSecretThree';
+const TEAM_NAME3 = 'V94E c3Team';
+
+/** GET /crm/businesses/:biz3/<routePath> as `user`. */
+function call3(user: string, routePath: string) {
+  return request(app.getHttpServer()).get(`/crm/businesses/${ID3.biz}/${routePath}`).set('x-test-user', user);
+}
+
+async function ok3(user: string, routePath: string) {
+  const res = await call3(user, routePath);
+  expect(res.status, `${user} GET biz3 ${routePath}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+  return res.body;
+}
+
+type Highlights = {
+  highlights: { highPotential: Array<Record<string, any>>; overdueReminders: Array<Record<string, any>>; serviceAffinity: Array<Record<string, any>> };
+  segments: Array<{ key: string; count: number; contacts: Array<{ id: string }> }>;
+  timeline: Array<{ id: string; type: string; title: string; contactId: string }>;
+  nextActions: Array<{ id: string; contactId: string }>;
+};
+
+describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contacts the viewer may open (D-63, D-100, real DB)', () => {
+  const rowsOf = { note: {} as Record<string, string>, task: {} as Record<string, string>, invoice: {} as Record<string, string>, bookings: {} as Record<string, string[]> };
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: ID3.biz, name: 'V94E Biz3', ownerId: ID.owner, metaData: { features: { ai_tools: true } } } });
+    await db.membership.create({ data: { id: `${P}m3_owner`, userId: ID.owner, businessId: ID3.biz, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m3_noRev`, userId: ID.noRev, businessId: ID3.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}m3_rev`, userId: ID.rev, businessId: ID3.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+    await db.service.create({ data: { id: ID3.service, name: 'V94E service three', duration: 60, price: S3_PRICE, businessId: ID3.biz } });
+
+    const now = Date.now();
+    const ago = (minutes: number) => new Date(now - minutes * 60_000);
+    const contact = (id: string, minutesAgo: number, status: string, extra: Record<string, unknown> = {}) =>
+      db.contact.create({
+        data: {
+          id, businessId: ID3.biz, firstName: 'V94E', lastName: id.slice(P.length), status, visibility: 'TEAM', ownerId: ID.owner,
+          email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`, createdAt: ago(minutesAgo), ...extra,
+        },
+      });
+    await contact(ID3.cTeam, 180, 'LEAD');
+    await contact(ID3.cPriv, 170, 'CLIENT', { visibility: 'PRIVATE', lastName: 'PrivSecretThree' });
+
+    const old = new Date(now - 60 * 86_400_000);
+    for (const [contactId, amount, dueInDays, bookings] of [[ID3.cTeam, TEAM_OWE, 5, 1], [ID3.cPriv, PRIV_OWE, -3, 2]] as const) {
+      const tag = contactId.slice(P.length);
+      rowsOf.task[contactId] = `${P}${tag}_task`;
+      await db.contactTask.create({
+        data: { id: rowsOf.task[contactId], businessId: ID3.biz, contactId, title: `V94E task ${tag}`, dueDate: new Date(now - 86_400_000), createdAt: ago(100) },
+      });
+      rowsOf.note[contactId] = `${P}${tag}_note`;
+      await db.contactNote.create({ data: { id: rowsOf.note[contactId], businessId: ID3.biz, contactId, body: `V94E note ${tag}`, createdAt: ago(95) } });
+      rowsOf.invoice[contactId] = `${P}${tag}_inv`;
+      await db.invoice.create({
+        data: {
+          id: rowsOf.invoice[contactId], invoiceNumber: `V94E-${tag}`, status: 'SENT', subtotal: amount, total: amount, currency: 'TTD',
+          businessId: ID3.biz, contactId, dueDate: new Date(now + dueInDays * 86_400_000), createdAt: ago(90),
+          items: { create: [{ id: `${P}${tag}_inv_item1`, description: `V94E ${tag}`, quantity: 1, unitPrice: amount, total: amount }] },
+        },
+      });
+      rowsOf.bookings[contactId] = [];
+      for (let k = 0; k < bookings; k += 1) {
+        const bookingId = `${P}${tag}_booking${k}`;
+        await db.booking.create({
+          data: {
+            id: bookingId, businessId: ID3.biz, contactId, serviceId: ID3.service, status: 'COMPLETED',
+            startTime: old, endTime: new Date(old.getTime() + 60 * 60_000), createdAt: ago(85 - k),
+          },
+        });
+        rowsOf.bookings[contactId].push(bookingId);
+      }
+    }
+
+    // c3Team's events: the non-money one first, then 11 newer money-type ones (more than the 10 the timeline reads).
+    await db.contactEvent.create({ data: { id: ID3.callEvent, businessId: ID3.biz, contactId: ID3.cTeam, type: 'communication.call', data: {}, source: 'v94e', createdAt: ago(30) } });
+    for (const [k, id] of ID3.moneyEvents.entries()) {
+      await db.contactEvent.create({ data: { id, businessId: ID3.biz, contactId: ID3.cTeam, type: 'invoice.sent', data: {}, source: 'v94e', createdAt: ago(20 - k) } });
+    }
+  }, 60_000);
+
+  const ids = (rows: Array<{ contactId: string }>) => rows.map((row) => row.contactId);
+  const segmentsByKey = (payload: Highlights) => new Map(payload.segments.map((segment) => [segment.key, segment]));
+
+  it("SEC-W9MR-1 residual (D-63, D-100): GET .../highlights is worked out from the contacts the viewer may open whenever a visibility rule hides some (visibilityClause, the rule GET contacts/:c applies): a member with revenue read is served no high-potential card, overdue reminder, next action, segment contact or count, timeline entry or service-affinity booking of another member's PRIVATE contact, and a member without revenue read no segment contact or count, timeline entry or service-affinity booking of it either; the owner's highlights are unchanged and name it in every part (W10-MONEY-SIGNALS-REST, D-63, was it.todo)", async () => {
+    for (const user of [ID.noRev, ID.rev]) expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+
+    // Control: the owner's highlights name c3Priv in every part.
+    const owner: Highlights = await ok3(ID.owner, 'highlights');
+    expect(ids(owner.highlights.highPotential)).toEqual([ID3.cPriv, ID3.cTeam]);
+    expect(ids(owner.highlights.overdueReminders)).toEqual([ID3.cPriv, ID3.cTeam]);
+    expect(owner.nextActions.map((action) => action.id)).toEqual(
+      [ID3.cPriv, ID3.cTeam].flatMap((id) => [`${id}-invoice`, `${id}-task-overdue`, `${id}-task`]),
+    );
+    const ownerSegments = segmentsByKey(owner);
+    expect([ownerSegments.get('top-clients')!.count, ownerSegments.get('top-clients')!.contacts.map((c) => c.id)]).toEqual([1, [ID3.cPriv]]);
+    expect([ownerSegments.get('cold-with-unpaid')!.count, ownerSegments.get('cold-with-unpaid')!.contacts.map((c) => c.id)]).toEqual([2, [ID3.cPriv, ID3.cTeam]]);
+    expect(owner.timeline.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      rowsOf.note[ID3.cPriv], rowsOf.task[ID3.cPriv], rowsOf.invoice[ID3.cPriv], ...rowsOf.bookings[ID3.cPriv],
+    ]));
+    expect(owner.highlights.serviceAffinity).toEqual([{
+      serviceId: ID3.service, serviceName: 'V94E service three', bookings: 3, revenue: 3 * S3_PRICE,
+      topContact: { id: ID3.cPriv, name: PRIVATE_NAME3, bookings: 2 },
+    }]);
+
+    /** The viewer's segments: the owner's keys (but `dropped`), each count and contact list without c3Priv. */
+    const expectSegmentsWithoutPrivate = (served: Highlights, why: string, dropped: string[] = []) => {
+      expect(served.segments.map((s) => s.key), why).toEqual(owner.segments.map((s) => s.key).filter((key) => !dropped.includes(key)));
+      for (const segment of served.segments) {
+        const ownerSegment = ownerSegments.get(segment.key)!;
+        const ownerIds = ownerSegment.contacts.map((c) => c.id);
+        expect(segment.count, `${why} ${segment.key} count`).toBe(ownerSegment.count - (ownerIds.includes(ID3.cPriv) ? 1 : 0));
+        expect(segment.contacts.map((c) => c.id), `${why} ${segment.key} contacts`).toEqual(ownerIds.filter((id) => id !== ID3.cPriv));
+      }
+    };
+
+    // A member with revenue read: every part from c3Team only, its money kept.
+    const rev: Highlights = await ok3(ID.rev, 'highlights');
+    expect(ids(rev.highlights.highPotential)).toEqual([ID3.cTeam]);
+    expect(rev.highlights.highPotential[0].outstandingBalance).toBeCloseTo(TEAM_OWE, 2);
+    expect(ids(rev.highlights.overdueReminders)).toEqual([ID3.cTeam]);
+    expect(rev.nextActions.map((action) => action.id)).toEqual([`${ID3.cTeam}-invoice`, `${ID3.cTeam}-task-overdue`, `${ID3.cTeam}-task`]);
+    expectSegmentsWithoutPrivate(rev, 'revenue read');
+    expect([segmentsByKey(rev).get('cold-with-unpaid')!.count, segmentsByKey(rev).get('top-clients')!.count]).toEqual([1, 0]);
+    expect(rev.timeline.map((entry) => entry.id)).toEqual(owner.timeline.filter((entry) => entry.contactId !== ID3.cPriv).map((entry) => entry.id));
+    expect(rev.timeline.map((entry) => entry.id)).toContain(rowsOf.invoice[ID3.cTeam]);
+    expect(rev.highlights.serviceAffinity).toEqual([{
+      serviceId: ID3.service, serviceName: 'V94E service three', bookings: 1, revenue: S3_PRICE,
+      topContact: { id: ID3.cTeam, name: TEAM_NAME3, bookings: 1 },
+    }]);
+    expect(JSON.stringify(rev)).not.toContain(ID3.cPriv);
+    expect(JSON.stringify(rev)).not.toContain('PrivSecretThree');
+
+    // A member without revenue read: the same contact rule, and no money (D-100).
+    const withheld: Highlights = await ok3(ID.noRev, 'highlights');
+    expect(ids(withheld.highlights.highPotential)).toEqual([ID3.cTeam]);
+    expect(withheld.highlights.overdueReminders).toEqual([]);
+    expect(withheld.nextActions.map((action) => action.id)).toEqual([`${ID3.cTeam}-task-overdue`, `${ID3.cTeam}-task`]);
+    expectSegmentsWithoutPrivate(withheld, "revenue 'none'", ['cold-with-unpaid']);
+    expect(withheld.timeline.length).toBeGreaterThan(0);
+    for (const entry of withheld.timeline) expect(entry.contactId, entry.id).toBe(ID3.cTeam);
+    expect(withheld.highlights.serviceAffinity).toEqual([{
+      serviceId: ID3.service, serviceName: 'V94E service three', bookings: 1, revenue: 0,
+      topContact: { id: ID3.cTeam, name: TEAM_NAME3, bookings: 1 },
+    }]);
+    expect(JSON.stringify(withheld)).not.toContain(ID3.cPriv);
+    expect(JSON.stringify(withheld)).not.toContain('PrivSecretThree');
+    for (const amount of [PRIV_OWE, TEAM_OWE]) expect(JSON.stringify(withheld)).not.toContain(String(amount));
+  });
+
+  it("SEC-W9MR-2 remainder (D-100) (W10-MONEY-SIGNALS-REST): GET .../highlights leaves the money-type ContactEvent rows out of the timeline's event read itself (CrmTimelineService.buildTimeline reads the 10 newest events), so a member without revenue read is served the non-money event the 11 newer invoice.sent events would push out of those 10: that member's timeline is c3Team's call event, note, task and booking; the owner's and a revenue-read member's timeline keep the 10 newest events, all invoice.sent", async () => {
+    const withheld: Highlights = await ok3(ID.noRev, 'highlights');
+    expect(withheld.timeline.filter((entry) => entry.type === 'event').map((entry) => [entry.id, entry.title])).toEqual([[ID3.callEvent, 'communication.call']]);
+    expect(withheld.timeline.map((entry) => entry.id).sort()).toEqual(
+      [ID3.callEvent, rowsOf.note[ID3.cTeam], rowsOf.task[ID3.cTeam], ...rowsOf.bookings[ID3.cTeam]].sort(),
+    );
+
+    const newestTen = [...ID3.moneyEvents].reverse().slice(0, 10);
+    for (const user of [ID.owner, ID.rev]) {
+      const full: Highlights = await ok3(user, 'highlights');
+      expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestTen);
+    }
+  });
+});
+
+// ---- W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1: a fourth business (biz4) ----
+const ID4 = {
+  biz: `${P}biz4`,
+  cTeam: `${P}c4Team`,
+  callEvent: `${P}c4ev_call`,
+  moneyEvents: Array.from({ length: 11 }, (_, k) => `${P}c4ev_money${String(k).padStart(2, '0')}`),
+};
+/**
+ * ContactEvent types outside the sales_revenue category whose rows here carry
+ * an amount in data (a MONEY_DATA_FIELDS field, which crmRowCarriesMoney reads),
+ * so the feed rule withholds them from a member without revenue read.
+ */
+const DATA_MONEY_TYPES = ['payment.completed', 'store_order.paid', 'store_order.refunded', 'autopilot.payment_recovery'];
+const EVENT_AMOUNT = 777.31;
+
+async function ok4(user: string, routePath: string) {
+  const res = await request(app.getHttpServer()).get(`/crm/businesses/${ID4.biz}/${routePath}`).set('x-test-user', user);
+  expect(res.status, `${user} GET biz4 ${routePath}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+  return res.body;
+}
+
+describe('W10-MONEY-SIGNALS-REST review repair: the highlights timeline judges each ContactEvent by the feed rule (D-100, D-90, D-63, real DB)', () => {
+  beforeAll(async () => {
+    await db.business.create({ data: { id: ID4.biz, name: 'V94E Biz4', ownerId: ID.owner, metaData: { features: { ai_tools: true } } } });
+    await db.membership.create({ data: { id: `${P}m4_owner`, userId: ID.owner, businessId: ID4.biz, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${P}m4_noRev`, userId: ID.noRev, businessId: ID4.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}m4_rev`, userId: ID.rev, businessId: ID4.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+
+    const now = Date.now();
+    const ago = (minutes: number) => new Date(now - minutes * 60_000);
+    await db.contact.create({
+      data: {
+        id: ID4.cTeam, businessId: ID4.biz, firstName: 'V94E', lastName: 'c4Team', status: 'LEAD', visibility: 'TEAM', ownerId: ID.owner,
+        email: `${P}c4team@contacts.test`, createdAt: ago(180),
+      },
+    });
+    // c4Team's events: the non-money one first, then 11 newer ones (more than the 10 the timeline reads)
+    // whose type is no sales_revenue type but whose data carries an amount.
+    await db.contactEvent.create({ data: { id: ID4.callEvent, businessId: ID4.biz, contactId: ID4.cTeam, type: 'communication.call', data: {}, source: 'v94e', createdAt: ago(30) } });
+    for (const [k, id] of ID4.moneyEvents.entries()) {
+      await db.contactEvent.create({
+        data: {
+          id, businessId: ID4.biz, contactId: ID4.cTeam, type: DATA_MONEY_TYPES[k % DATA_MONEY_TYPES.length],
+          data: { amount: EVENT_AMOUNT, currency: 'TTD' }, source: 'v94e', createdAt: ago(20 - k),
+        },
+      });
+    }
+  }, 60_000);
+
+  it("SEC-W10MSR-1 (D-100, D-90, D-63) (W10-MONEY-SIGNALS-REST review): GET .../highlights serves a member without revenue read no ContactEvent the feed rule withholds from them (canReadActivityRow: a crm row whose data carries an amount, whatever its type, e.g. payment.completed, store_order.paid, store_order.refunded, autopilot.payment_recovery), exactly as GET contacts/:c/events withholds them, and those rows take none of the timeline's 10 event places: that member's timeline is c4Team's call event; the owner's and a revenue-read member's timeline keep the 10 newest events", async () => {
+    const newestFirst = [...ID4.moneyEvents].reverse();
+
+    // The feed rule, as GET contacts/:c/events applies it (W6-CONTACT-EVENTS-MONEY): the owner reads every
+    // event, the member without revenue read the call event only.
+    const ownerEvents = (await ok4(ID.owner, `contacts/${ID4.cTeam}/events`)) as Array<{ id: string; type: string }>;
+    expect(ownerEvents.map((event) => event.id)).toEqual([...newestFirst, ID4.callEvent]);
+    expect(new Set(ownerEvents.map((event) => event.type))).toEqual(new Set([...DATA_MONEY_TYPES, 'communication.call']));
+    const withheldEvents = (await ok4(ID.noRev, `contacts/${ID4.cTeam}/events`)) as Array<{ id: string }>;
+    expect(withheldEvents.map((event) => event.id)).toEqual([ID4.callEvent]);
+
+    // The highlights timeline judges the events by the same rule.
+    const withheld: Highlights = await ok4(ID.noRev, 'highlights');
+    expect(withheld.timeline.map((entry) => [entry.id, entry.type, entry.title])).toEqual([[ID4.callEvent, 'event', 'communication.call']]);
+    const text = JSON.stringify(withheld);
+    for (const id of ID4.moneyEvents) expect(text).not.toContain(id);
+    for (const type of DATA_MONEY_TYPES) expect(text).not.toContain(type);
+    expect(text).not.toContain(String(EVENT_AMOUNT));
+
+    for (const user of [ID.owner, ID.rev]) {
+      const full: Highlights = await ok4(user, 'highlights');
+      expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestFirst.slice(0, 10));
+    }
+  });
 });
