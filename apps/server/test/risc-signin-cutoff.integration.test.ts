@@ -38,6 +38,17 @@
  * and the ban by user id. Redis is an in-memory map shared by the middleware
  * and RiscService. Nothing leaves the process.
  *
+ * W10-RISC-RESET (owner ruling D-113, extends D-101; reviews SEC-W9RPC-1/2,
+ * CR-W9RPC-2): after a cutoff a PASSWORD session stays refused until the user
+ * completes a password reset through KEYFLOW after the cutoff, even once a
+ * Google or emailed-link sign-in has cleared the rest; the real
+ * IdentityPasswordService records the reset (users.meta_data.
+ * passwordResetAfterCutoffAt) and the clearing under the User row lock, and
+ * POST /identity/login and /identity/refresh name the refusal
+ * (password_reset_required) instead of answering a session the API refuses.
+ * GoTrue's password grant and refresh are stubbed (IdentitySignupService),
+ * and the password policy (its breach lookup is a provider call) is too.
+ *
  * FIXTURES: every row carries the `v94a_` prefix (users from the token sub,
  * their identities, RISC events by jti) or hangs off a `v94a_` user (the
  * bootstrap workspace and membership); hard-deleted by raw SQL in FK order in
@@ -91,6 +102,10 @@ const ID = {
   // D-101 (W9-RISC-PASSWORD-CUTOFF).
   d101: `${P}u_d101`,
   d101Race: `${P}u_d101_race`,
+  // D-113 (W10-RISC-RESET).
+  d113: `${P}u_d113`,
+  d113Reset: `${P}u_d113_reset`,
+  d113Login: `${P}u_d113_login`,
 };
 const EMAIL = {
   victim: `${P}victim@test.local`,
@@ -103,6 +118,9 @@ const EMAIL = {
   legacy: `${P}legacy@test.local`,
   d101: `${P}d101@test.local`,
   d101Race: `${P}d101-race@test.local`,
+  d113: `${P}d113@test.local`,
+  d113Reset: `${P}d113-reset@test.local`,
+  d113Login: `${P}d113-login@test.local`,
 };
 /** The Google subs GoTrue holds for each user (its verified google identity). */
 const GSUB = {
@@ -116,6 +134,9 @@ const GSUB = {
   legacy: `${P}gsub-legacy`,
   d101: `${P}gsub-d101`,
   d101Race: `${P}gsub-d101-race`,
+  d113: `${P}gsub-d113`,
+  d113Reset: `${P}gsub-d113-reset`,
+  d113Login: `${P}gsub-d113-login`,
 };
 type Who = keyof typeof ID;
 const WHO = Object.keys(ID) as Who[];
@@ -179,6 +200,20 @@ const supabaseAdminStub = {
   isConfigured: () => true,
   getClient: () => ({ auth: { admin: gotrueAdmin } }),
   signOut: vi.fn(async () => false),
+  // D-113: the password reset's provider calls (mail the link, set the password).
+  sendRecoveryEmail: vi.fn(async () => undefined),
+  updateUserPassword: vi.fn(async () => undefined),
+};
+
+/** D-113 / CR-W9RPC-2: GoTrue's password grant and refresh, as IdentitySignupService makes them. */
+const signupStub = {
+  signInWithPassword: vi.fn(),
+  refreshSession: vi.fn(),
+};
+/** The auth audit ledger and rate limits (no-ops), recorded so a case can read what was audited. */
+const authSecStub = {
+  enforce: vi.fn(async () => undefined),
+  audit: vi.fn(async (_row: Record<string, unknown>) => undefined),
 };
 
 async function cleanup() {
@@ -285,6 +320,27 @@ async function metaOf(id: string): Promise<Record<string, unknown>> {
 
 const me = (bearer: string) => request(app.getHttpServer()).get('/identity/me').set('Authorization', `Bearer ${bearer}`);
 
+/** D-113: an obviously fake new password (the policy is a stub; at least 12 characters for the DTO). */
+const NEW_PASSWORD = 'v94a-new-passphrase-not-real';
+
+/**
+ * D-113: the shipped password reset, end to end through the real controller
+ * and IdentityPasswordService: POST /identity/forgot-password records the
+ * recovery request (the link's mail goes to the GoTrue stub), then the web
+ * posts the recovery-link session in the BODY of POST /identity/reset-password
+ * (the implicit flow's 'otp' session, opened at `recoveredAt`).
+ */
+async function resetPassword(user: Who, recoveredAt: number) {
+  const forgot = await request(app.getHttpServer()).post('/identity/forgot-password').send({ email: EMAIL[user] });
+  expect(forgot.status).toBe(201);
+  const recovery = await accessToken(user, recoveredAt, recoveredAt, `${user}-recovery-${recoveredAt}`, 'otp');
+  return request(app.getHttpServer()).post('/identity/reset-password').send({ accessToken: recovery, password: NEW_PASSWORD });
+}
+
+/** What the auth audit ledger was handed for `email` (AuthSecurityService.audit rows). */
+const auditedFor = (email: string) =>
+  authSecStub.audit.mock.calls.map((c) => c[0] as Record<string, unknown>).filter((row) => row.email === email);
+
 async function bootstrap(user: Who, body: Record<string, unknown> = {}) {
   const now = Math.floor(Date.now() / 1000);
   return request(app.getHttpServer())
@@ -332,6 +388,7 @@ beforeAll(async () => {
   const { BusinessContextService } = await import('../src/modules/identity/business-context.service');
   const { AuthSecurityService } = await import('../src/modules/identity/auth-security.service');
   const { IdentityPasswordService } = await import('../src/modules/identity/identity-password.service');
+  const { PasswordPolicyService } = await import('../src/modules/identity/password-policy.service');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
@@ -350,11 +407,15 @@ beforeAll(async () => {
       // Not on the bootstrap or /identity/me path.
       { provide: BlueprintService, useValue: { inferFromOnboarding: async () => null } },
       { provide: DefaultTriggersService, useValue: {} },
-      { provide: IdentitySignupService, useValue: {} },
+      // D-113 / CR-W9RPC-2: GoTrue's password grant and refresh.
+      { provide: IdentitySignupService, useValue: signupStub },
       { provide: BusinessContextService, useValue: {} },
       { provide: AiUsageService, useValue: {} },
-      { provide: AuthSecurityService, useValue: { enforce: async () => undefined, audit: async () => undefined } },
-      { provide: IdentityPasswordService, useValue: {} },
+      { provide: AuthSecurityService, useValue: authSecStub },
+      // D-113: the real password reset over the real database; its policy's
+      // breach lookup is a provider call, so the policy is a stub.
+      IdentityPasswordService,
+      { provide: PasswordPolicyService, useValue: { validate: async () => undefined } },
       { provide: SupabaseAdminService, useValue: supabaseAdminStub },
       { provide: REDIS_CLIENT, useValue: redis },
     ],
@@ -628,7 +689,10 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
    * dated 20s or more after the event, ahead of this server's clock however
    * slow the run, so the clearing is dated at them.
    */
-  it('D-101 (W9-RISC-PASSWORD-CUTOFF): against Postgres, after a RISC cutoff a password session is refused; a Google session is admitted and records signInCutoffClearedAt; a password session authenticated after the clearing is admitted while the one between the cutoff and the clearing stays refused; a new RISC event re-arms the restriction', async () => {
+  // D-113 (W10-RISC-RESET) amends this case: a password session after the
+  // Google clearing is no longer admitted (it waits for a password reset, see
+  // the D-113 case below); it was admitted under D-101 as first worded.
+  it('D-101 (W9-RISC-PASSWORD-CUTOFF), amended by D-113 (W10-RISC-RESET): against Postgres, after a RISC cutoff a password session is refused; a Google session is admitted and records signInCutoffClearedAt; a password session authenticated after the clearing stays refused without a password reset, as does the one between the cutoff and the clearing; a new RISC event re-arms the restriction', async () => {
     expect((await bootstrap('d101')).status).toBe(201);
     await riscEvent(GSUB.d101, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
     const cutoff = (await cutoffOf(ID.d101)) as number;
@@ -644,7 +708,8 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
     expect(admitted.body).toMatchObject({ id: ID.d101 });
     expect(await metaOf(ID.d101)).toMatchObject({ signInCutoffAt: cutoff, signInCutoffClearedAt: cutoff + 20, googleSignInDisabled: true });
 
-    expect((await me(await accessToken('d101', cutoff + 21, cutoff + 21, 'd101-password', 'password'))).status).toBe(200);
+    // D-113: no password reset after the cutoff yet, so a password session stays refused after the clearing.
+    expect((await me(await accessToken('d101', cutoff + 21, cutoff + 21, 'd101-password', 'password'))).status).toBe(401);
     expect((await me(hijacker)).status).toBe(401);
     // A refresh of the hijacker's session: new iat (verifyLocal refuses one more than 60s ahead), same original sign-in.
     expect((await me(await accessToken('d101', cutoff + 1, cutoff + 30, 'd101-hijacker', 'password'))).status).toBe(401);
@@ -707,33 +772,164 @@ describe('W8-RISC-SIGNIN-CUTOFF (D-97) — UserIdentity from the verified record
   });
 
   /**
-   * D-101 review SEC-W9RPC-1 / CR-W9RPC-1 (confirmed; the fix is outside
-   * W9-RISC-PASSWORD-CUTOFF's write set). The product's only emailed link is
-   * the password-recovery link, and the web posts its session in the BODY of
-   * POST /identity/reset-password, never as a bearer, so AuthMiddleware never
-   * judges it and IdentityPasswordService.completeReset records no clearing.
-   * completeReset then writes the logout cutoff, and the password sign-in the
-   * web sends the user to ("Password updated. Please sign in.") is refused on
-   * every request; after account-disabled/hijacking, when Google sign-in waits
-   * on Google recovering the account, the user has no way in. Follow-up:
-   * completeReset calls recordSignInCutoffCleared (core/auth/auth.middleware.ts)
-   * with the recovery session's authentication time once the password is
-   * updated, and this case runs against Postgres with the real
-   * IdentityPasswordService.
+   * D-113 (W10-RISC-RESET; owner ruling, extends D-101: review SEC-W9RPC-2).
+   * A Google or emailed-link sign-in after the cutoff clears the REST of the
+   * restriction, not the password: whoever set a password through the
+   * pre-event GoTrue session still knows it. A password session stays refused
+   * until the user completes a password reset through KEYFLOW after the
+   * cutoff (the existing reset flow, whose GoTrue password update ends every
+   * session of the user, the hijacker's pre-event one included); one
+   * authenticated after the reset is admitted, one before it stays refused.
+   * The sign-ins below are dated ahead of this server's clock (within the 60s
+   * verifyLocal allows), so the clearing and the reset are dated at them.
    */
-  it.todo(
-    'D-101 review SEC-W9RPC-1 / CR-W9RPC-1: after a RISC cutoff, a completed POST /identity/reset-password (the recovery session in the body, as the web sends it) records signInCutoffClearedAt, so the password session the user then opens is admitted while the hijacker\'s earlier one stays refused',
-  );
+  it('D-113 (W10-RISC-RESET): against Postgres, after a RISC cutoff and a Google sign-in that cleared the rest, a password session is still refused until the user completes a password reset through KEYFLOW (POST /identity/reset-password); a password session authenticated after the reset is admitted, one before it stays refused', async () => {
+    expect((await bootstrap('d113')).status).toBe(201);
+    await riscEvent(GSUB.d113, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const cutoff = (await cutoffOf(ID.d113)) as number;
+    expect(typeof cutoff).toBe('number');
+
+    const hijacker = await accessToken('d113', cutoff + 1, cutoff + 1, 'd113-hijacker', 'password');
+    expect((await me(hijacker)).status).toBe(401);
+    // The real user signs in with Google: admitted, and it clears the rest.
+    expect((await me(await accessToken('d113', cutoff + 20, cutoff + 20, 'd113-google'))).status).toBe(200);
+    expect(await metaOf(ID.d113)).toMatchObject({ signInCutoffAt: cutoff, signInCutoffClearedAt: cutoff + 20 });
+
+    // A password session after that clearing (the password the hijacker set
+    // through the pre-event GoTrue session) is still refused: no reset yet.
+    const beforeReset = await accessToken('d113', cutoff + 21, cutoff + 21, 'd113-password-before-reset', 'password');
+    expect((await me(beforeReset)).status).toBe(401);
+    expect((await metaOf(ID.d113)).passwordResetAfterCutoffAt).toBeUndefined();
+
+    // The user resets the password through KEYFLOW.
+    const reset = await resetPassword('d113', cutoff + 30);
+    expect(reset.status).toBe(201);
+    expect(reset.body).toMatchObject({ status: 'ok' });
+    expect(supabaseAdminStub.updateUserPassword).toHaveBeenCalledWith(ID.d113, NEW_PASSWORD);
+    expect(await metaOf(ID.d113)).toMatchObject({
+      signInCutoffAt: cutoff,
+      signInCutoffClearedAt: cutoff + 20,
+      passwordResetAfterCutoffAt: cutoff + 30,
+    });
+
+    // A password session authenticated after the reset is admitted ...
+    const afterReset = await me(await accessToken('d113', cutoff + 31, cutoff + 31, 'd113-password-after-reset', 'password'));
+    expect(afterReset.status).toBe(200);
+    expect(afterReset.body).toMatchObject({ id: ID.d113 });
+    // ... and the ones before it stay refused, refreshed or not.
+    expect((await me(beforeReset)).status).toBe(401);
+    expect((await me(await accessToken('d113', cutoff + 21, cutoff + 40, 'd113-password-before-reset', 'password'))).status).toBe(401);
+    expect((await me(hijacker)).status).toBe(401);
+  });
 
   /**
-   * D-101 review CR-W9RPC-2 (confirmed; outside the write set): after a
-   * cutoff, POST /identity/login (and /identity/refresh) still answer status
-   * 'authenticated' and audit login_success for a password session
-   * AuthMiddleware refuses on every request; the web stores the token, its
-   * bootstrap gets a 401 and it shows a generic error. Follow-up in
-   * identity.controller.ts.
+   * D-101 review SEC-W9RPC-1 / CR-W9RPC-1, closed by D-113 (W10-RISC-RESET).
+   * The product's only emailed link is the password-recovery link, and the
+   * web posts its session in the BODY of POST /identity/reset-password, never
+   * as a bearer, so AuthMiddleware never judged it and completeReset recorded
+   * nothing: after "Password updated. Please sign in." the password session
+   * was refused on every request. completeReset now records, under the User
+   * row lock, that the password was reset after the cutoff
+   * (passwordResetAfterCutoffAt) and clears the cutoff restriction
+   * (recordSignInCutoffCleared) with the recovery session's authentication
+   * time, here with no Google sign-in at all.
    */
-  it.todo(
-    'D-101 review CR-W9RPC-2: after a RISC cutoff, POST /identity/login (and /identity/refresh) neither answers authenticated nor audits login_success for a password session AuthMiddleware refuses, and says to sign in with Google or an emailed link',
-  );
+  it("D-101 review SEC-W9RPC-1 / CR-W9RPC-1: after a RISC cutoff, a completed POST /identity/reset-password (the recovery session in the body, as the web sends it) records signInCutoffClearedAt and passwordResetAfterCutoffAt, so the password session the user then opens is admitted while the hijacker's earlier one stays refused (W10-RISC-RESET, D-113, was it.todo)", async () => {
+    expect((await bootstrap('d113Reset')).status).toBe(201);
+    await riscEvent(GSUB.d113Reset, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const cutoff = (await cutoffOf(ID.d113Reset)) as number;
+    expect(typeof cutoff).toBe('number');
+
+    const hijacker = await accessToken('d113Reset', cutoff + 1, cutoff + 1, 'd113-reset-hijacker', 'password');
+    expect((await me(hijacker)).status).toBe(401);
+
+    const reset = await resetPassword('d113Reset', cutoff + 20);
+    expect(reset.status).toBe(201);
+    expect(await metaOf(ID.d113Reset)).toMatchObject({
+      signInCutoffAt: cutoff,
+      signInCutoffClearedAt: cutoff + 20,
+      passwordResetAfterCutoffAt: cutoff + 20,
+    });
+
+    const admitted = await me(await accessToken('d113Reset', cutoff + 21, cutoff + 21, 'd113-reset-password', 'password'));
+    expect(admitted.status).toBe(200);
+    expect(admitted.body).toMatchObject({ id: ID.d113Reset });
+    expect((await me(hijacker)).status).toBe(401);
+    // A refresh of the hijacker's session: new iat, same original sign-in.
+    expect((await me(await accessToken('d113Reset', cutoff + 1, cutoff + 30, 'd113-reset-hijacker', 'password'))).status).toBe(401);
+  });
+
+  /**
+   * D-101 review CR-W9RPC-2, under D-113 (W10-RISC-RESET). POST
+   * /identity/login and /identity/refresh receive the session from GoTrue
+   * itself; after a cutoff they answered 'authenticated' (and audited
+   * login_success) for a password session AuthMiddleware then refused on
+   * every request, and the web showed a generic error. They now judge the
+   * issued session by the same rule and answer 401 with the code
+   * password_reset_required, which the web sign-in shows with the reset link.
+   * Once the reset is recorded the same login answers 'authenticated'.
+   */
+  it('D-101 review CR-W9RPC-2: after a RISC cutoff, POST /identity/login (and /identity/refresh) neither answers authenticated nor audits login_success for a password session AuthMiddleware refuses, and names the code password_reset_required (W10-RISC-RESET, D-113, was it.todo)', async () => {
+    expect((await bootstrap('d113Login')).status).toBe(201);
+    await riscEvent(GSUB.d113Login, RISC_EVENT_TYPES.ACCOUNT_DISABLED, 'hijacking');
+    const cutoff = (await cutoffOf(ID.d113Login)) as number;
+    expect(typeof cutoff).toBe('number');
+
+    // GoTrue accepts the password (the one the hijacker set, say) and issues a session.
+    const passwordSession = await accessToken('d113Login', cutoff + 5, cutoff + 5, 'd113-login-1', 'password');
+    signupStub.signInWithPassword.mockResolvedValueOnce({
+      accessToken: passwordSession,
+      refreshToken: 'v94a-refresh-not-real-1',
+      userId: ID.d113Login,
+    });
+    authSecStub.audit.mockClear();
+    const login = await request(app.getHttpServer())
+      .post('/identity/login')
+      .send({ email: EMAIL.d113Login, password: 'v94a-some-passphrase-not-real' });
+    expect(login.status).toBe(401);
+    expect(login.body).toMatchObject({ code: 'password_reset_required' });
+    expect(String(login.body.message)).toMatch(/password reset required after a security event/i);
+    expect(login.body.accessToken).toBeUndefined();
+    expect(login.body.status).toBeUndefined();
+    expect((await me(passwordSession)).status).toBe(401);
+    const audited = auditedFor(EMAIL.d113Login);
+    expect(audited.some((row) => row.event === 'login_success')).toBe(false);
+    expect(audited).toContainEqual(
+      expect.objectContaining({ event: 'login_failure', outcome: 'failure', reason: 'password_reset_required' }),
+    );
+
+    // A refresh of that session is refused the same way.
+    signupStub.refreshSession.mockResolvedValueOnce({
+      accessToken: await accessToken('d113Login', cutoff + 5, cutoff + 15, 'd113-login-1', 'password'),
+      refreshToken: 'v94a-refresh-not-real-2',
+    });
+    const refreshed = await request(app.getHttpServer()).post('/identity/refresh').send({ refreshToken: 'v94a-refresh-not-real-1' });
+    expect(refreshed.status).toBe(401);
+    expect(refreshed.body).toMatchObject({ code: 'password_reset_required' });
+    expect(refreshed.body.accessToken).toBeUndefined();
+
+    // Negative control: a Google session's refresh is answered as before.
+    const googleRefreshed = await accessToken('d113Login', cutoff + 10, cutoff + 16, 'd113-login-google');
+    signupStub.refreshSession.mockResolvedValueOnce({ accessToken: googleRefreshed, refreshToken: 'v94a-refresh-not-real-3' });
+    const google = await request(app.getHttpServer()).post('/identity/refresh').send({ refreshToken: 'v94a-refresh-not-real-g' });
+    expect(google.status).toBe(201);
+    expect(google.body).toMatchObject({ status: 'ok', accessToken: googleRefreshed });
+
+    // After the reset the same login answers authenticated, and audits login_success.
+    expect((await resetPassword('d113Login', cutoff + 20)).status).toBe(201);
+    const afterReset = await accessToken('d113Login', cutoff + 21, cutoff + 21, 'd113-login-2', 'password');
+    signupStub.signInWithPassword.mockResolvedValueOnce({
+      accessToken: afterReset,
+      refreshToken: 'v94a-refresh-not-real-4',
+      userId: ID.d113Login,
+    });
+    authSecStub.audit.mockClear();
+    const ok = await request(app.getHttpServer())
+      .post('/identity/login')
+      .send({ email: EMAIL.d113Login, password: NEW_PASSWORD });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ status: 'authenticated', accessToken: afterReset });
+    expect(auditedFor(EMAIL.d113Login)).toContainEqual(expect.objectContaining({ event: 'login_success' }));
+    expect((await me(afterReset)).status).toBe(200);
+  });
 });

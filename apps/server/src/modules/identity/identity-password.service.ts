@@ -16,6 +16,9 @@ import {
   logoutRevocationCutoff,
   logoutRevocationKey,
   logoutRevocationValue,
+  recordPasswordResetAfterCutoff,
+  recordSignInCutoffCleared,
+  signInCutoffOf,
 } from '../../core/auth/auth.middleware';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
@@ -340,6 +343,30 @@ export class IdentityPasswordService {
     if (email) {
       await this.bestEffort(userId, 'consume the recovery request', () => this.redis.del(recoveryRequestKey(email)));
     }
+
+    // D-113 (W10-RISC-RESET; closes D-101 review SEC-W9RPC-1 / CR-W9RPC-1):
+    // after a RISC sign-in cutoff a password session stays refused until the
+    // user completes a password reset through KEYFLOW after the cutoff. This
+    // is that reset, so once GoTrue holds the new password (and has ended
+    // every session of the user, the hijacker's pre-event one included) it is
+    // recorded, under the User row lock, as passwordResetAfterCutoffAt, and the
+    // recovery-link session, an emailed link, clears the rest of the
+    // restriction (recordSignInCutoffCleared), as AuthMiddleware would had it
+    // arrived as a bearer. Both re-read the row under the lock and write only
+    // when it holds a cutoff the recovery session was authenticated after;
+    // the unlocked read first spares every other reset the lock. The password
+    // is already set, so a failure is logged, not thrown: password sign-ins
+    // then stay refused (fail closed) and the user can reset again.
+    await this.bestEffort(userId, 'record the password reset after the sign-in cutoff (D-113)', async () => {
+      const row = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { metaData: true } });
+      if (signInCutoffOf(row?.metaData) === null) return;
+      const recorded = await recordPasswordResetAfterCutoff(this.prisma.client, userId, session.authenticatedAt);
+      const cleared =
+        session.authenticatedAt === null
+          ? 'not_after_cutoff'
+          : await recordSignInCutoffCleared(this.prisma.client, userId, session.authenticatedAt);
+      this.logger.log(`D-113: password reset for ${userId} after the sign-in cutoff: reset ${recorded}, clearing ${cleared}`);
+    });
 
     return { userId, email, providerSignedOut };
   }

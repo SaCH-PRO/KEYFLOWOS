@@ -68,8 +68,15 @@ const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
  */
 type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'signin_cutoff' | 'local_sessions' | 'provider_ban';
 
-/** Whether handleEvent ends the user's sessions (terminateUserSessions) for this event. */
-function endsSessions(eventType: string, reason: string | undefined): boolean {
+/**
+ * Whether handleEvent ends the user's sessions (terminateUserSessions) for this
+ * event: sessions-revoked, tokens-revoked, token-revoked, and account-disabled
+ * with reason hijacking. Exported (W10-RISC-RESET) as the one classification:
+ * the UserIdentity backfill (apps/server/scripts/backfill-google-identities.ts)
+ * imports it to count the stored `no_matching_user` events that were never
+ * applied, instead of keeping a copy that could drift.
+ */
+export function endsSessions(eventType: string, reason: string | undefined): boolean {
   return (
     eventType === RISC_EVENT_TYPES.SESSIONS_REVOKED ||
     eventType === RISC_EVENT_TYPES.TOKENS_REVOKED ||
@@ -384,10 +391,15 @@ export class RiscService {
    * user record for the token's own subject), never the request body's.
    *
    * Residual (D-97 review SEC-W8RSC-3, docs/auth-pathway.md): nothing wrote
-   * UserIdentity before that packet and there is no backfill, so an account
-   * last signed in with Google before it resolves no user here until its owner
-   * signs in again; receiveEvent logs such a session-ending event for the
-   * operator. user_metadata (user-editable at GoTrue) is never used to match.
+   * UserIdentity before that packet, so an account last signed in with Google
+   * before it resolves no user here until its owner signs in again or the
+   * operator runs the backfill (W9-IDENTITY-BACKFILL-SCRIPT:
+   * apps/server/scripts/backfill-google-identities.ts, `pnpm
+   * backfill:google-identities`, dry run by default), which writes bootstrap's
+   * row from GoTrue's verified records; an event that arrived before the
+   * backfill is not replayed (review SEC-W9IBS-1). receiveEvent logs such a
+   * session-ending event for the operator. user_metadata (user-editable at
+   * GoTrue) is never used to match.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
