@@ -53,16 +53,12 @@
  *      there but names another contact), the row's own data merged around it;
  *      title, detail and entity stay.
  *
- *      OPEN (review SEC-W10DCS-1 / CR-W10DCS-1, outside this packet's write
- *      set): the unmapped branch reads the role only, so a withheld intake row
- *      (module 'communications' before, which needed crm read) is served to an
- *      ADMIN whose crm access is explicitly 'none', who was not served it
- *      before. No column the rule reads ties an unmapped row to crm (only a
- *      named contact does, and naming an id that is no contact of the
- *      business would hide the row from every ADMIN). The smallest rule change: in canReadActivityRow, a
- *      row of module WITHHELD_MODULE also needs read on
- *      activityModuleScope(data.d115.module). data-cleanup-scripts DCS-T07
- *      (it.todo) is its negative control.
+ *      The timeline rule also requires read on the scope of the row's
+ *      original module (data.d115.module) for a row of WITHHELD_MODULE, so a
+ *      withheld intake row (module 'communications' before, read on crm) is
+ *      not served to an ADMIN whose crm access is explicitly 'none' (review
+ *      SEC-W10DCS-1 / CR-W10DCS-1; timeline-visibility.ts
+ *      D115_WITHHELD_MODULE; data-cleanup-scripts DCS-T07).
  *   3. Left as is: an approved intake whose intake names no contact (the
  *      sender is no contact of the business, or the contact was deleted and
  *      the intake's link set null). The W9 writer stores exactly that row

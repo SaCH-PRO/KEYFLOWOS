@@ -36,9 +36,9 @@
  * Review repairs (D-115): an invoice row is linked only when its title names
  * the invoice's contact as the writer formats it (SEC-W10DCS-2: updateInvoice
  * re-points a SENT invoice's contact; DCS-T06, business C); a withheld intake
- * row is served to an ADMIN whose crm access is 'none' until the timeline rule
- * gains a D-115 term outside this packet's write set (SEC-W10DCS-1 /
- * CR-W10DCS-1; DCS-T07, it.todo). An intake of A whose contact is B's
+ * row is not served to an ADMIN whose crm access is 'none', as the timeline
+ * rule also reads the scope of a withheld row's original module (SEC-W10DCS-1 /
+ * CR-W10DCS-1; DCS-T07, a trial-Z seam). An intake of A whose contact is B's
  * (oldInCrossContact) is the intake side's negative control for the tenant
  * binding, as oldInvCrossContact is the invoice side's (SEC-W10DCS-3): it is
  * withheld, never linked to B's contact.
@@ -88,7 +88,7 @@ const ID = {
   staffOwned: `${P}staffOwned`,   // crm read, crm_view 'owned', revenue read
   staffCrmNone: `${P}staffCrmNone`, // crm none, revenue read
   staffFull: `${P}staffFull`,     // STAFF with crm and revenue read (view-all)
-  adminCrmNone: `${P}adminCrmNone`, // C only: ADMIN with explicit crm 'none', revenue read (D-114: explicit scopes bind ADMINs)
+  adminCrmNone: `${P}adminCrmNone`, // C (and A from DCS-T07): ADMIN with explicit crm 'none', revenue read (D-114: explicit scopes bind ADMINs)
   ownerB: `${P}ownerB`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -748,7 +748,33 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     }
   });
 
-  it.todo(
-    "[DCS-T07] (review SEC-W10DCS-1 / CR-W10DCS-1, D-115 with D-114's principle) an ADMIN whose crm access is explicitly 'none' is not served a withheld message_intake.approved row (nor its sender or subject), as it was not served the row before the backfill: OPEN, the rule term is outside this packet's write set (timeline-visibility.ts canReadActivityRow: a row of module d115_withheld also needs read on the scope of its data.d115.module); no column the rule reads today ties an unmapped row to crm",
-  );
+  it("[DCS-T07] (review SEC-W10DCS-1 / CR-W10DCS-1, D-115 with D-114's principle) (trial-Z seam, was it.todo) an ADMIN whose crm access is explicitly 'none' is not served a withheld message_intake.approved row (nor its sender or subject), as it was not served the row before the backfill: a row of module d115_withheld also needs read on the scope of its data.d115.module; the withheld invoice rows (module 'commerce', revenue) are still served to that ADMIN, who reads revenue, and a STAFF member is served no withheld row", async () => {
+    const { WITHHELD_MODULE } = await import('../scripts/backfill-timeline-contact-links');
+    const { canReadActivityRow, D115_WITHHELD_MODULE } = await import('../src/modules/timeline/timeline-visibility');
+    expect(D115_WITHHELD_MODULE, 'the rule and the script name the same marker').toBe(WITHHELD_MODULE);
+    const crmAccess = { isOwner: false, isSuperAdmin: false, viewAll: true, editScope: 'any', reassign: false, deleteScope: 'none', level: 'read' } as any;
+    const adminCrmNone = { businessId: ID.bizA, userId: ID.adminCrmNone, readsUnmapped: true, readable: new Set(['revenue', 'ai'] as any), crmAccess };
+    const staffEvery = { ...adminCrmNone, readsUnmapped: false, readable: new Set(['crm', 'revenue', 'ai'] as any) };
+    const intake = { module: 'communications', category: 'AI', contactId: null, entityType: 'message_intake', entityId: INTAKE.gone, data: { intentType: 'quote_request', results: [] } };
+    const withheldIntake = { ...intake, module: WITHHELD_MODULE, data: { ...intake.data, d115: { withheld: 'source_gone', module: 'communications', category: 'AI' } } };
+    expect(canReadActivityRow(adminCrmNone, intake), 'before the backfill: a communications row is read on crm (D-63 (iii))').toBe(false);
+    expect(canReadActivityRow(adminCrmNone, withheldIntake), 'after the backfill: the same row, withheld').toBe(false);
+    expect(canReadActivityRow(staffEvery, withheldIntake), 'a STAFF member reading crm').toBe(false);
+    expect(canReadActivityRow({ ...adminCrmNone, readable: new Set(['crm', 'revenue', 'ai'] as any) }, withheldIntake), 'an ADMIN reading crm').toBe(true);
+
+    // Over the real routes: the same ADMIN shape as C's, given a membership of A (whose rows DCS-T02 backfilled).
+    await db.membership.create({
+      data: { id: `${P}m_adminCrmNone_bizA`, userId: ID.adminCrmNone, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { crm: 'none', revenue: 'read', ai: 'read' } },
+    });
+    const withheldIntakes = ['oldInGone', 'oldInOtherBiz', 'oldInCrossContact'].map(act);
+    const withheldInvoices = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact'].map(act);
+    const seen = await served(ID.adminCrmNone, ID.bizA);
+    for (const key of READS) {
+      for (const id of withheldIntakes) expect(seen[key], `adminCrmNone ${key}`).not.toContain(id);
+      expect(seen[key], `adminCrmNone ${key}`).toEqual(expect.arrayContaining(withheldInvoices));
+    }
+    for (const text of [`${P}gone-sender@test.local`, 'v96o gone subject', `${P}b-sender@test.local`, 'v96o B subject', `${P}cross-sender@test.local`, 'v96o cross subject']) {
+      expect(seen.text, text).not.toContain(text);
+    }
+  });
 });

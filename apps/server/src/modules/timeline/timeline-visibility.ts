@@ -185,6 +185,32 @@ export function activityModuleScope(module: string | null | undefined): Canonica
   return ACTIVITY_MODULE_SCOPES[key];
 }
 
+/**
+ * The module the D-115 operator backfill (scripts/backfill-timeline-contact-links.ts,
+ * WITHHELD_MODULE) files a withheld row under. It is unmapped, so only OWNER and
+ * ADMIN read such a row (D-63), and the row keeps its original module under
+ * data.d115.module.
+ */
+export const D115_WITHHELD_MODULE = 'd115_withheld';
+
+/**
+ * The scope of the module a D-115 withheld row had before the backfill; null for
+ * any other row, or when the stored original module is unmapped. Review
+ * SEC-W10DCS-1 / CR-W10DCS-1 (D-115 with D-114's principle): the backfill must
+ * not serve a row to an ADMIN whose explicit scopes withheld it before, e.g. a
+ * message_intake.approved row (communications, read on crm) to an ADMIN whose
+ * crm access is 'none'.
+ */
+function withheldSourceScope(row: ActivityRowLike): CanonicalModule | null {
+  if (typeof row.module !== 'string' || row.module.trim().toLowerCase() !== D115_WITHHELD_MODULE) return null;
+  const data = row.data;
+  if (!data || typeof data !== 'object') return null;
+  const d115 = (data as Record<string, unknown>).d115;
+  if (!d115 || typeof d115 !== 'object') return null;
+  const original = (d115 as Record<string, unknown>).module;
+  return typeof original === 'string' ? activityModuleScope(original) : null;
+}
+
 /** The fields of an Activity row the rule reads. */
 export interface ActivityRowLike {
   module?: string | null;
@@ -292,6 +318,8 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
   const scope = activityModuleScope(row.module);
   if (scope === null) {
     if (!viewer.readsUnmapped) return false;
+    const source = withheldSourceScope(row);
+    if (source !== null && !viewer.readable.has(source)) return false;
   } else if (!viewer.readable.has(scope)) {
     return false;
   }
