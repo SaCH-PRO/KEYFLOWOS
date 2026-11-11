@@ -114,10 +114,26 @@
  *           offline completion then settles it once (one invoice, one cash
  *           payment, one posting, one store_order.paid), again a no-op
  *
+ * W10-WIPAY-KEY (owner ruling D-105: WiPay checkout is offered only to a
+ * business that has connected its own WiPay key; tenants no longer share the
+ * platform's WiPay account):
+ *
+ *   SEC-V33-2 (was a todo) the storefront WiPay success callback (the REAL
+ *           PaymentsController and PaymentsService on a second app, settling
+ *           through the REAL StoreOrderService) settles an order only on
+ *           WiPay's keyed proof with the business's OWN API key (V1-05): a
+ *           public-values hash, the platform key's proof for a store with no
+ *           key of its own and another store's key are refused 400 with
+ *           nothing written; the store's own key settles its order once
+ *   V33-29  with the platform's WiPay pair set, a WiPay checkout on a store
+ *           with no WiPay key of its own is refused 400 WIPAY_KEY_REQUIRED
+ *           before the order is written
+ *
  * Added with the fix (not in the tests-first commit): V33-12 and the
  * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
  * Added with the review repairs: V33-13..V33-20 (V33-CR-1, SEC-V33-3,
- * V33-CR-2, V33-CR-3, SEC-V33-1) and the todo for SEC-V33-2.
+ * V33-CR-2, V33-CR-3, SEC-V33-1) and the todo for SEC-V33-2 (live since
+ * W10-WIPAY-KEY).
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
@@ -139,9 +155,10 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { createHash } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -198,6 +215,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function cleanup() {
   for (const sql of [
+    // W10-WIPAY-KEY: the WiPay callback's provider-event claims (transaction ids embed P).
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -1035,13 +1054,7 @@ describe('V1-33 CASH-order offline completion (operator, revenue:write)', () => 
     expect(paymentCalls.map((c) => c.orderId), 'only the failed first call').toEqual([orderId]);
   });
 
-  it.todo(
-    "SEC-V33-2 (routed to its own security packet, outside V1-33's write set): the WiPay success hash " +
-      '(payments.service.ts handleWipayCallback) is md5(transaction_id+order_id+total+status) with no secret, so a forged ' +
-      'success callback settles a storefront order through updatePaymentStatus(PAID). Not guarded in StoreOrderService: a ' +
-      'CASH order may legitimately be paid online later (payments.service.ts storefront_order checkout), and its genuine ' +
-      'provider callback reaches the same door; the fix is a keyed signature check in payments.service.ts',
-  );
+  // SEC-V33-2 is live since W10-WIPAY-KEY: see the describe 'W10-WIPAY-KEY: ...' at the end of this file.
 });
 
 describe('Trial-N repair round 2 recheck: D-69 before the order, and the refund route (G6PUB-RC1-1, G6PUB-RC1-3)', () => {
@@ -1183,5 +1196,189 @@ describe('W10-STORE-PAYMENT-INTENT: the generic checkout with a cash or manual g
     const late = await genericCheckout(order.id, 'cash');
     expect(late.status, JSON.stringify(late.body)).toBe(400);
     expect(await moneyCounts()).toEqual(afterPaid);
+  });
+});
+
+/**
+ * W10-WIPAY-KEY (owner ruling D-105; SEC-V33-2): WiPay is taken only by a
+ * business with its own WiPay key, and every WiPay success is keyed with it.
+ * A second app over the same database serves the REAL PaymentsController and
+ * PaymentsService (the WiPay callback), settling through the suite app's REAL
+ * StoreOrderService (completeCheckout: invoice, payment, posting), so a
+ * callback that verifies books real money. The platform's WiPay pair
+ * (WIPAY_API_KEY, WIPAY_ACCOUNT_NUMBER) is set inside each case only, as a
+ * deployment that still carries it would; no provider is called.
+ */
+describe("W10-WIPAY-KEY: WiPay only with the business's own key, every WiPay success keyed with it (D-105)", () => {
+  /** Store A's own WiPay key (bizA metaData.wipayApiKey, seeded above). */
+  const STORE_A_KEY = `${P}wipay_key`;
+  const PLATFORM_KEY = `${P}platform_wipay_key`;
+  const PLATFORM_ACCOUNT = `${P}platform_wipay_account`;
+  const WIPAY_KEY_REQUIRED = 'WIPAY_KEY_REQUIRED';
+  const PREVIOUS_WIPAY_ENV: Record<string, string | undefined> = {};
+  let callbackApp: any;
+
+  const md5 = (s: string) => createHash('md5').update(s).digest('hex');
+  /** WiPay's documented response hash (D-19): md5(transaction_id + original total, 2 decimals + API key). */
+  const keyedHash = (transactionId: string, total: number, apiKey: string) => md5(`${transactionId}${total.toFixed(2)}${apiKey}`);
+
+  function setPlatformPair() {
+    process.env.WIPAY_API_KEY = PLATFORM_KEY;
+    process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
+  }
+  function clearPlatformPair() {
+    delete process.env.WIPAY_API_KEY;
+    delete process.env.WIPAY_ACCOUNT_NUMBER;
+  }
+
+  function wipayCallback(q: Record<string, string>) {
+    return request(callbackApp.getHttpServer()).get('/payments/wipay/callback').query(q);
+  }
+
+  async function wipayClaims(): Promise<number> {
+    return db.webhookEvent.count({ where: { provider: 'wipay', providerEventId: { startsWith: P } } });
+  }
+
+  beforeAll(async () => {
+    for (const k of ['WIPAY_API_KEY', 'WIPAY_ACCOUNT_NUMBER']) PREVIOUS_WIPAY_ENV[k] = process.env[k];
+    clearPlatformPair();
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+    const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+    const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+    const { PaymentsService } = await import('../src/modules/payments/payments.service');
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
+    const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+
+    // CommerceService and the provider connectors are not on the WiPay callback's storefront path.
+    const payments = new PaymentsService(
+      app.get(PrismaService),
+      {} as any,
+      app.get(InvoiceWorkflowService),
+      app.get(RevenuePostingService),
+      undefined,
+      undefined,
+      app.get(StoreOrderService),
+    );
+    const moduleRef = await Test.createTestingModule({
+      controllers: [PaymentsController],
+      providers: [PublicRateLimitGuard, { provide: REDIS_CLIENT, useValue: redis }, { provide: PaymentsService, useValue: payments }],
+    }).compile();
+    callbackApp = moduleRef.createNestApplication();
+    callbackApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    callbackApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await callbackApp.init();
+  }, 60_000);
+
+  afterEach(() => {
+    clearPlatformPair();
+  });
+
+  afterAll(async () => {
+    try { await callbackApp?.close(); } catch { /* best-effort */ }
+    for (const [k, v] of Object.entries(PREVIOUS_WIPAY_ENV)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("SEC-V33-2 (W10-WIPAY-KEY, D-105, was it.todo) the storefront WiPay success callback settles an order only on WiPay's keyed proof with the business's own API key: a public-values hash, the platform key's proof for a store with no key of its own, another store's key and the platform key on a keyed store's order are refused 400 with nothing written; the store's own key settles its order once through the door and the replay writes nothing", async () => {
+    // Store B has no WiPay key of its own. Its order was placed with WiPay before D-105 (the order door now
+    // refuses that: V33-29), so the CASH order is moved to an unpaid WiPay order directly.
+    const placedB = await checkout(SLUG.b, cart(ID.prodB, 'CASH'));
+    expect(placedB.status, JSON.stringify(placedB.body)).toBe(201);
+    const orderB = placedB.body.order as { id: string };
+    await db.marketplaceOrder.update({ where: { id: orderB.id }, data: { paymentMethod: 'WIPAY', paymentStatus: 'UNPAID' } });
+    const placedA = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'));
+    expect(placedA.status, JSON.stringify(placedA.body)).toBe(201);
+    const orderA = placedA.body.order as { id: string; orderNumber: string };
+    const beforeA = await moneyCounts(ID.bizA);
+    const beforeB = await moneyCounts(ID.bizB);
+    const claimsBefore = await wipayClaims();
+    seen = [];
+
+    const total = ORDER_TOTAL.toFixed(2);
+    const success = (txn: string, orderId: string, key: string) => ({ transaction_id: txn, order_id: orderId, status: 'success', total, hash: keyedHash(txn, ORDER_TOTAL, key) });
+    const forged = { transaction_id: `${P}wtx_public`, order_id: orderB.id, status: 'success', total };
+    const attempts: Array<[string, Record<string, string>]> = [
+      // V1-05 closed the unkeyed hash this todo named (green at 1a9ca4fd: a regression pin).
+      ['the public-values hash md5(transaction_id + order_id + total + status)', { ...forged, hash: md5(`${forged.transaction_id}${forged.order_id}${forged.total}${forged.status}`) }],
+      // D-105. At 1a9ca4fd: 200 'Payment successful' and store B's order PAID (invoice, payment, posting).
+      ["the platform key's proof for store B's order (no key of its own)", success(`${P}wtx_platform_b`, orderB.id, PLATFORM_KEY)],
+      ["store A's key on store B's order", success(`${P}wtx_a_on_b`, orderB.id, STORE_A_KEY)],
+      ["the platform key's proof for store A's order", success(`${P}wtx_platform_a`, orderA.id, PLATFORM_KEY)],
+    ];
+    setPlatformPair();
+    try {
+      for (const [label, query] of attempts) {
+        await clearRateLimits();
+        const res = await wipayCallback(query);
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, label).not.toHaveProperty('success', true);
+      }
+    } finally {
+      clearPlatformPair();
+    }
+
+    expect(await moneyCounts(ID.bizB), 'store B: no invoice, payment or posting').toEqual(beforeB);
+    expect(await moneyCounts(ID.bizA), 'store A: no invoice, payment or posting').toEqual(beforeA);
+    for (const id of [orderB.id, orderA.id]) {
+      expect((await db.marketplaceOrder.findUnique({ where: { id } })).paymentStatus, id).toBe('UNPAID');
+    }
+    expect(await wipayClaims(), 'no transaction is claimed').toBe(claimsBefore);
+    expect(seen.filter((e) => e.name === 'store_order.paid'), 'no store_order.paid').toEqual([]);
+
+    // Store A's own key settles its own order once, through completeCheckout.
+    const own = success(`${P}wtx_a_own`, orderA.id, STORE_A_KEY);
+    await clearRateLimits();
+    const ok = await wipayCallback(own);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toMatchObject({ success: true, invoiceId: orderA.id, message: 'Payment successful' });
+    expect((await db.marketplaceOrder.findUnique({ where: { id: orderA.id } })).paymentStatus).toBe('PAID');
+    const invoices = await invoicesOf(orderA);
+    expect(invoices.map((i) => `${i.invoiceNumber}:${i.status}`)).toEqual([`INV-${orderA.orderNumber}:PAID`]);
+    const rows = await db.payment.findMany({ where: { invoiceId: invoices[0].id } });
+    expect(rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}:${p.currency}`)).toEqual([
+      `wipay:${P}wtx_a_own:SUCCESSFUL:${ORDER_TOTAL}:TTD`,
+    ]);
+    const settled = await moneyCounts(ID.bizA);
+    expect(settled.payments).toBe(beforeA.payments + 1);
+
+    const replay = await wipayCallback(own);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+    expect(replay.body).toMatchObject({ success: true, message: 'Duplicate callback ignored' });
+    expect(await moneyCounts(ID.bizA), 'the replay writes nothing').toEqual(settled);
+    expect(seen.filter((e) => e.name === 'store_order.paid').length, 'one store_order.paid').toBe(1);
+    expect(await moneyCounts(ID.bizB)).toEqual(beforeB);
+  });
+
+  it('V33-29 (W10-WIPAY-KEY, D-105) with the platform WiPay pair set, a WiPay checkout on a store with no WiPay key of its own is refused 400 WIPAY_KEY_REQUIRED before the order is written: no order, no store_order.created, no payment session, no retry slot; a store with its own pair still checks out with WiPay', async () => {
+    const before = await orderCount(ID.bizB);
+    const keyRowsBefore = await db.idempotencyKey.count({ where: { businessId: ID.bizB } });
+    setPlatformPair();
+    try {
+      for (const key of [undefined, `${P}key_29`]) {
+        const res = await checkout(SLUG.b, cart(ID.prodB, 'WIPAY'), key);
+        // At 1a9ca4fd: 201, an order and a WiPay session into the platform's account.
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+        expect(res.body.code).toBe(WIPAY_KEY_REQUIRED);
+        expect(JSON.stringify(res.body)).toMatch(/WiPay is not configured for this business/);
+      }
+      expect(await orderCount(ID.bizB), 'no order is written').toBe(before);
+      expect(created(), 'no store_order.created').toEqual([]);
+      expect(paymentCalls, 'no payment session is started').toEqual([]);
+      expect(await db.idempotencyKey.count({ where: { businessId: ID.bizB } }), 'no retry slot').toBe(keyRowsBefore);
+
+      // Control: store A has its own pair.
+      const ok = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'));
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      expect(paymentCalls.map((c) => c.method)).toEqual(['WIPAY']);
+    } finally {
+      clearPlatformPair();
+    }
   });
 });
