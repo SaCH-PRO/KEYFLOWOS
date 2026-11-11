@@ -11,9 +11,9 @@ import type { PrismaService } from '../prisma/prisma.service';
  * records the clearing here (epoch seconds), once, under the User row lock,
  * dated when it is recorded or at that session's sign-in if later (review
  * CR-W9RPC-3, recordSignInCutoffCleared in auth.middleware.ts). From then on
- * a session authenticated after this time is admitted by any method; one
- * authenticated between the cutoff and this time is admitted only when it is
- * itself a Google or emailed-link sign-in. A later session-ending event
+ * a session authenticated after this time is admitted by any method but a
+ * password (D-113 below); one authenticated between the cutoff and this time
+ * is admitted only when it is itself a Google or emailed-link sign-in. A later session-ending event
  * removes it with the new cutoff (RiscService), so the restriction holds
  * again. D-113 (W10-RISC-RESET; closes reviews SEC-W9RPC-1/2, CR-W9RPC-2):
  * the clearing does not admit a password session. A session whose original

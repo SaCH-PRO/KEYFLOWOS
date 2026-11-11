@@ -629,7 +629,7 @@ export class AuthMiddleware implements NestMiddleware {
    *                          or that cannot say when. D-101: a session
    *                          authenticated after it is admitted only when it
    *                          signed in with Google or an emailed link
-   *                          (`opts.signedInWithGoogleOrEmailLink`), and the
+   *                          (read from `opts.supabaseToken`), and the
    *                          first such session records the clearing
    *                          (signInCutoffClearedAt, dated when recorded:
    *                          CR-W9RPC-3); after the clearing, a session of

@@ -60,19 +60,19 @@ From `apps/server` (reads `DATABASE_URL` from the repo-root `.env`):
 
 ```bash
 # 1. Dry run (the default): counts only, writes nothing.
-pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts
+pnpm backfill:owner-memberships
 
 # 2. The businesses to review (another member holds OWNER): ids only.
-pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --list-conflicting
+pnpm backfill:owner-memberships --list-conflicting
 
 # 3. Write the plain class (each grant audited).
-pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply
+pnpm backfill:owner-memberships --apply
 
 # 4. Only after reviewing the list: write the with_another_owner class too.
-pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply --include-conflicting
+pnpm backfill:owner-memberships --apply --include-conflicting
 
 # 5. Re-run: idempotent; written reads 0.
-pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply
+pnpm backfill:owner-memberships --apply
 ```
 
 The output is counts only (no business, user, name or email), except the

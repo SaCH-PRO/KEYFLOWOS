@@ -20,7 +20,8 @@
     "proof:release0": "node ../../scripts/proof-admission/release0.mjs",
     "backfill:google-identities": "tsx --env-file ../../.env scripts/backfill-google-identities.ts",
     "cleanup:custom-field-values": "tsx --env-file ../../.env scripts/cleanup-cross-tenant-custom-field-values.ts",
-    "backfill:timeline-contacts": "tsx --env-file ../../.env scripts/backfill-timeline-contact-links.ts"
+    "backfill:timeline-contacts": "tsx --env-file ../../.env scripts/backfill-timeline-contact-links.ts",
+    "backfill:owner-memberships": "tsx --env-file ../../.env scripts/backfill-owner-memberships.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",
