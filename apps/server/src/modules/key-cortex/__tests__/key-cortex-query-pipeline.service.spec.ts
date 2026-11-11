@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyCortexQueryPipelineService } from '../key-cortex-query-pipeline.service';
 import { AdaptiveRouterService } from '../adaptive-router.service';
 import { KeyCortexMemoryRetrievalService } from '../key-cortex-memory-retrieval.service';
+import { UnifiedMemoryRetrievalService } from '../unified-memory-retrieval.service';
 
 const mockPrisma = {
   client: {
@@ -26,6 +27,10 @@ const mockPrisma = {
     },
     business: {
       findFirst: vi.fn(async () => ({ id: 'biz-1' })),
+    },
+    // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R2: the cognition-memory rows of the chat's reader.
+    cognitionMemory: {
+      findMany: vi.fn(async () => [] as Array<{ id: string }>),
     },
   },
 };
@@ -213,6 +218,9 @@ function createPipeline({
   executorService,
   eventService,
   autonomyOrchestrator,
+  toolRegistry,
+  prisma = mockPrisma,
+  memoryRetrieval,
 }: {
   memoryFragments?: any[];
   router?: AdaptiveRouterService;
@@ -222,10 +230,13 @@ function createPipeline({
   executorService?: any;
   eventService?: any;
   autonomyOrchestrator?: any;
+  toolRegistry?: any;
+  prisma?: any;
+  memoryRetrieval?: KeyCortexMemoryRetrievalService;
 } = {}) {
   return new KeyCortexQueryPipelineService(
     mockModelGateway as any,
-    mockPrisma as any,
+    prisma as any,
     mockRedis as any,
     mockPersonalityService as any,
     mockContextService as any,
@@ -239,7 +250,7 @@ function createPipeline({
     mockSystemPromptService as any,
     mockStructuredOutputService as any,
     mockMoodDetectionService as any,
-    makeMemoryRetrieval(memoryFragments),
+    memoryRetrieval ?? makeMemoryRetrieval(memoryFragments),
     router,
     connectorService,
     commandService,
@@ -251,6 +262,7 @@ function createPipeline({
     undefined, // trustExplanation
     undefined, // learningService
     autonomyOrchestrator,
+    toolRegistry,
   );
 }
 
@@ -327,7 +339,8 @@ describe('KeyCortexQueryPipelineService — Phase C wiring', () => {
     const memoryService = (pipeline as any).memoryRetrieval as KeyCortexMemoryRetrievalService;
     expect((memoryService as any).unifiedMemory.retrieveContext).toHaveBeenCalledWith(
       'biz-1',
-      expect.objectContaining({ query: 'What is our revenue forecast?', limit: 10 }),
+      // W10-CORTEX-CHAT-SCOPE review CR-W10CCS-1: 10 fragments plus the headroom of what the chat leaves out.
+      expect.objectContaining({ query: 'What is our revenue forecast?', limit: 160 }),
     );
   });
 
@@ -420,7 +433,7 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
         expect(unified.retrieveContext).toHaveBeenCalledTimes(1);
         expect(unified.retrieveContext).toHaveBeenCalledWith(
           'biz-1',
-          expect.objectContaining({ query: 'What is our revenue forecast?', limit: 10, ...narrowed }),
+          expect.objectContaining({ query: 'What is our revenue forecast?', limit: 160, ...narrowed }),
         );
         const systemPrompt = mockPromptContextService.buildMessages.mock.calls[0][2] as string;
         expect(systemPrompt).toContain('v96r business-wide fact');
@@ -429,6 +442,328 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
       }
     },
   );
+});
+
+// W10-CORTEX-CHAT-SCOPE review repairs SEC-W10CCS-R2 and CR-W10CCS-1 (D-57): the memory block processQuery and
+// its stream path render holds only the reader's own cognition memory (what that member typed and KEY's answer
+// to them), and what the chat leaves out does not empty the block (buildMemoryContext's headroom rule).
+describe('W10-CORTEX-CHAT-SCOPE review: the chat memory block holds only the reader\'s own cognition memory and keeps its headroom', () => {
+  const fragment = (id: string, sourceType: string, title: string, content: string, entityType: string | null = null) => ({
+    id,
+    sourceType,
+    title,
+    content,
+    entityType,
+    timestamp: new Date(),
+    confidence: 0.9,
+    relevanceScore: 0.9,
+    recencyScore: 0.9,
+    rankScore: 0.9,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockModelGateway.complete.mockResolvedValue({
+      content: 'Hello',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { totalTokens: 10, estimatedCost: 0.001 },
+      fallbackUsed: false,
+    });
+    mockModelGateway.streamComplete.mockImplementation(async function* () {
+      yield { content: 'Done.', provider: 'openai', model: 'gpt-4o' };
+    });
+    mockSessionService.getOrCreateSession.mockResolvedValue(mockSession);
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+  });
+
+  const runPath = async (pipeline: KeyCortexQueryPipelineService, path: 'processQuery' | 'streamQuery') => {
+    const query = { text: 'What did we decide?', businessId: 'biz-1', userId: 'user-1' } as any;
+    const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+    if (path === 'processQuery') await pipeline.processQuery(query, flags);
+    else for await (const _chunk of pipeline.streamQuery(query, flags)) void _chunk;
+    return mockPromptContextService.buildMessages.mock.calls[0][2] as string;
+  };
+
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'SEC-W10CCS-R2 (W10-CORTEX-CHAT-SCOPE review, D-57) %s: another member\'s cognition memory (their typed chat and KEY\'s answer to them) never reaches the system prompt; the reader\'s own does, and a requester who is no member reads none',
+    async (path) => {
+      const fragments = [
+        fragment('cog_own', 'cognition_memory', 'Memory fragment', 'Query: v96r the reader typed\nRecommendation: v96r KEY answer to the reader'),
+        fragment('cog_other', 'cognition_memory', 'Memory fragment', 'Query: v96r the owner typed\nRecommendation: v96r KEY answer to the owner: net profit 48213'),
+        fragment('mf_fact', 'ai_memory', 'fact', 'v96r business-wide fact'),
+      ];
+
+      // A member: the cognition rows are read by id, in the business, for the reader.
+      mockPromptContextService.buildMessages.mockClear();
+      mockPrisma.client.cognitionMemory.findMany.mockImplementationOnce(async () => [{ id: 'cog_own' }]);
+      const member = await runPath(createPipeline({ memoryFragments: fragments }), path);
+      expect(mockPrisma.client.cognitionMemory.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['cog_own', 'cog_other'] }, businessId: 'biz-1', userId: 'user-1' },
+        select: { id: true },
+      });
+      expect(member).toContain('v96r the reader typed');
+      expect(member).toContain('v96r KEY answer to the reader');
+      expect(member).not.toContain('v96r the owner typed');
+      expect(member).not.toContain('48213');
+      expect(member).toContain('v96r business-wide fact');
+
+      // A requester who is no member of the business: no cognition memory at all, and no row is read.
+      mockPromptContextService.buildMessages.mockClear();
+      mockPrisma.client.cognitionMemory.findMany.mockClear();
+      (mockPrisma.client.business.findFirst as any).mockImplementationOnce(async () => null);
+      const outsider = await runPath(createPipeline({ memoryFragments: fragments }), path);
+      expect(mockPrisma.client.cognitionMemory.findMany).not.toHaveBeenCalled();
+      expect(outsider).not.toContain('[cognition_memory]');
+      expect(outsider).toContain('v96r business-wide fact');
+
+      // The owner check fails: none of it is read (fail closed).
+      mockPromptContextService.buildMessages.mockClear();
+      mockPrisma.client.cognitionMemory.findMany.mockImplementationOnce(async () => {
+        throw new Error('cognition store down');
+      });
+      const failed = await runPath(createPipeline({ memoryFragments: fragments }), path);
+      expect(failed).not.toContain('[cognition_memory]');
+      expect(failed).toContain('v96r business-wide fact');
+    },
+  );
+
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'CR-W10CCS-1 (W10-CORTEX-CHAT-SCOPE review) %s: in an active business whose most recent memory is tool-call records, the real memory store still fills the block (10 fragments plus headroom, cut to 10 after what the chat leaves out)',
+    async (path) => {
+      const now = Date.now();
+      const empty = { findMany: async () => [] };
+      const store = {
+        client: {
+          ...mockPrisma.client,
+          aiMemory: {
+            findMany: async () =>
+              Array.from({ length: 12 }, (_, i) => ({
+                id: `v96r_fact_${i}`,
+                category: 'fact',
+                key: `v96r_fact_${i}`,
+                value: `v96r business fact ${i}`,
+                confidence: 0.9,
+                createdAt: new Date(now - (10 + i) * 864e5),
+              })),
+          },
+          genomeMemoryEvent: empty,
+          temporalFlowMemory: empty,
+          cognitionMemory: empty,
+          cognitiveEvent: empty,
+          aiExecutionLog: empty,
+          cortexActionLog: empty,
+          businessEvent: {
+            findMany: async () =>
+              Array.from({ length: 12 }, (_, i) => ({
+                id: `v96r_ledger_${i}`,
+                eventType: 'ACTION_EXECUTED',
+                subjectType: 'tool_execution',
+                subjectId: 'v96r_tool',
+                actorType: 'ai',
+                actorId: null,
+                action: 'executed',
+                before: null,
+                after: { result: `v96r another member's tool answer ${i}` },
+                metadata: {},
+                createdAt: new Date(now - i * 60_000),
+              })),
+          },
+        },
+      };
+      const memoryRetrieval = new KeyCortexMemoryRetrievalService(
+        new UnifiedMemoryRetrievalService(store as any, { search: async () => [] } as any),
+      );
+      const pipeline = createPipeline({ prisma: store, memoryRetrieval });
+
+      // Asked for 10 alone, the store answers ten tool-call records: the block was empty.
+      const top10 = await memoryRetrieval.retrieveContext('biz-1', { query: 'What did we decide?', limit: 10, userId: 'user-1' });
+      expect(top10.map((f) => f.entityType)).toEqual(Array(10).fill('tool_execution'));
+
+      const fragments = await (pipeline as any).chatMemoryFragments({ businessId: 'biz-1', userId: 'user-1', text: 'What did we decide?' });
+      expect(fragments).toHaveLength(10);
+      expect(fragments.every((f: any) => f.sourceType === 'ai_memory')).toBe(true);
+
+      const prompt = await runPath(pipeline, path);
+      expect(prompt).toContain('=== RELEVANT MEMORY ===');
+      expect(prompt).toContain('v96r business fact 0');
+      expect(prompt).not.toContain("another member's tool answer");
+    },
+  );
+});
+
+// W10-CORTEX-CHAT-SCOPE review repair SEC-W10CCS-R1 (owner rulings D-71, D-57, D-73): the model's tool calls on
+// POST cortex/chat and the chat stream run through KeyCortexToolLoopService (registry.execute), which reads no
+// membership. Each call is now held, for the member the chat runs for, to the rule the plan queue holds a plan's
+// member to (memberToolRunAuthority, no principal) before the tool loop sees it.
+describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool calls are held to the plan queue rule (memberToolRunAuthority, D-71)', () => {
+  const toolRoute = {
+    taskCategory: 'general',
+    layers: ['ethics'],
+    promptVariant: 'concise',
+    includeGenomeContext: false,
+    includeMemoryContext: false,
+    includeActions: true,
+    complexity: 'simple',
+    domain: 'general',
+    urgency: 'low',
+    emotionalWeight: 'low',
+    timeHorizon: 'tactical',
+    dataRequirement: 'none',
+  };
+  const call = (id: string, name: string) => ({ id, type: 'function', function: { name, arguments: '{}' } });
+  const PNL = 'finance_profit_and_loss';
+  const CONTACTS = 'crm_list_contacts';
+  const ORGAN = 'cortex.execute_tool';
+
+  /** The member the chat runs for: the business owner by Business.ownerId, or a membership row (null: none) and a User role. */
+  function setup(member: { owner?: boolean; membership?: { role: string; permissionScopes: Record<string, string> | null } | null; role?: string; fail?: boolean }) {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockSessionService.getOrCreateSession.mockResolvedValue(mockSession);
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+    const prisma = {
+      client: {
+        ...mockPrisma.client,
+        business: {
+          findFirst: vi.fn(async (args: any) => (member.owner && args?.where?.ownerId === 'user-1' ? { id: 'biz-1' } : null)),
+        },
+        user: { findUnique: vi.fn(async () => ({ role: member.role ?? 'USER' })) },
+        membership: {
+          findUnique: vi.fn(async () => {
+            if (member.fail) throw new Error('membership store down');
+            return member.membership ?? null;
+          }),
+        },
+      },
+    };
+    const toolRegistry = { buildGatewayDefinitions: vi.fn(() => []) };
+    const pipeline = createPipeline({ router: { route: vi.fn(async () => toolRoute) } as any, toolRegistry, prisma });
+    // The tool loop answers for the calls it is handed, one 'success' action each.
+    mockToolLoopService.handleToolCalls.mockImplementation(async (completion: any) => ({
+      content: 'v96r loop answer',
+      actions: (completion.toolCalls ?? []).map((tc: any) => ({
+        actionType: tc.function.name.toUpperCase().replace(/\./g, '_'),
+        status: 'success',
+        description: `Executed ${tc.function.name}`,
+      })),
+    }));
+    const query = { text: 'what is my P&L and who are my contacts?', businessId: 'biz-1', userId: 'user-1', enableActions: true } as any;
+    const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+    return {
+      prisma,
+      chat: async (calls: any[]) => {
+        mockModelGateway.complete.mockResolvedValueOnce({
+          content: '',
+          toolCalls: calls,
+          provider: 'openai',
+          model: 'gpt-4o',
+          usage: { totalTokens: 10, estimatedCost: 0.001 },
+          fallbackUsed: false,
+        });
+        return pipeline.processQuery(query, flags);
+      },
+      stream: async (calls: any[]) => {
+        mockModelGateway.streamComplete.mockImplementationOnce(async function* () {
+          for (const [index, c] of calls.entries()) {
+            yield { toolCall: { index, id: c.id, name: c.function.name, argumentsDelta: c.function.arguments }, provider: 'openai', model: 'gpt-4o' };
+          }
+        });
+        const chunks: any[] = [];
+        for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+        return chunks;
+      },
+      /** The tool names each tool-loop call was handed. */
+      looped: () => mockToolLoopService.handleToolCalls.mock.calls.map(([completion]: any[]) => completion.toolCalls.map((tc: any) => tc.function.name)),
+    };
+  }
+
+  afterAll(() => {
+    mockToolLoopService.handleToolCalls.mockReset();
+    mockToolLoopService.handleToolCalls.mockResolvedValue(null);
+  });
+
+  const blocked = (actionType: string, error: string | RegExp) =>
+    expect.objectContaining({ actionType, status: 'blocked', error: typeof error === 'string' ? error : expect.stringMatching(error) });
+
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-57, D-71) processQuery: a STAFF member with revenue none is refused the P&L tool, and the whole-book contact read a plan refuses them, before the tool loop; a tool their scopes reach still runs', async () => {
+    const t = setup({ membership: { role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'write', expenses: 'read' } } });
+
+    const response = await t.chat([call('tc_1', PNL), call('tc_2', CONTACTS), call('tc_3', 'expenses_list')]);
+
+    expect(t.looped()).toEqual([['expenses_list']]);
+    expect(response.actions).toEqual([
+      expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'success' }),
+      blocked('FINANCE_PROFIT_AND_LOSS', 'Insufficient permissions: revenue requires read access (you have none)'),
+      blocked('CRM_LIST_CONTACTS', /^Tool "crm_list_contacts" is executed from here only for the business owner: /),
+    ]);
+    expect(response.message.content).toContain('v96r loop answer');
+    expect(response.message.content).toContain('I did not run finance_profit_and_loss: Insufficient permissions: revenue requires read access (you have none)');
+  });
+
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-71) processQuery: when every call is refused the tool loop is not run at all, and a dotted organ or legacy cortex tool (cortex.execute_tool runs any tool by name) is refused to a member by default', async () => {
+    const t = setup({ membership: { role: 'ADMIN', permissionScopes: null } });
+
+    const response = await t.chat([call('tc_1', ORGAN), call('tc_2', '')]);
+
+    expect(mockToolLoopService.handleToolCalls).not.toHaveBeenCalled();
+    expect(response.actions).toEqual([
+      blocked('CORTEX_EXECUTE_TOOL', 'Tool "cortex.execute_tool" is mapped to no module scope, so it is not executed from this route'),
+      blocked('EXECUTE_TOOL', 'A tool call that names no tool is not run'),
+    ]);
+    expect(response.message.content).toContain('I did not run cortex.execute_tool: ');
+  });
+
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-104) processQuery: a requester with no membership, or a member read that fails, has every call refused (fail closed)', async () => {
+    const outsider = setup({ membership: null });
+    const refused = await outsider.chat([call('tc_1', 'expenses_list')]);
+    expect(mockToolLoopService.handleToolCalls).not.toHaveBeenCalled();
+    expect(refused.actions).toEqual([blocked('EXPENSES_LIST', 'Not a member of this business')]);
+
+    const failing = setup({ fail: true });
+    const failed = await failing.chat([call('tc_1', 'expenses_list'), call('tc_2', PNL)]);
+    expect(mockToolLoopService.handleToolCalls).not.toHaveBeenCalled();
+    expect(failed.actions).toEqual([
+      blocked('EXPENSES_LIST', /failed closed\): membership store down$/),
+      blocked('FINANCE_PROFIT_AND_LOSS', /failed closed\): membership store down$/),
+    ]);
+  });
+
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review) processQuery control: the business owner (Business.ownerId) has every call run as before, the completion handed on unchanged, and a turn with no tool call reads no member', async () => {
+    const t = setup({ owner: true });
+    const calls = [call('tc_1', PNL), call('tc_2', CONTACTS), call('tc_3', ORGAN)];
+    const response = await t.chat(calls);
+    expect(t.looped()).toEqual([[PNL, CONTACTS, ORGAN]]);
+    expect(mockToolLoopService.handleToolCalls.mock.calls[0][0].toolCalls).toBe(calls);
+    expect(response.actions?.map((a) => a.status)).toEqual(['success', 'success', 'success']);
+    expect(response.message.content).not.toContain('I did not run');
+
+    const quiet = setup({ membership: { role: 'STAFF', permissionScopes: null } });
+    await quiet.chat([]);
+    expect(quiet.prisma.client.membership.findUnique).not.toHaveBeenCalled();
+    expect(quiet.prisma.client.business.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-57, D-71) streamQuery: the streamed tool calls are held to the same rule: the refused ones never reach the tool loop and are reported blocked, the allowed one runs', async () => {
+    const t = setup({ membership: { role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'write', expenses: 'read' } } });
+
+    const chunks = await t.stream([call('tc_1', PNL), call('tc_2', CONTACTS), call('tc_3', 'expenses_list')]);
+
+    expect(t.looped()).toEqual([['expenses_list']]);
+    expect(chunks.filter((c) => c.type === 'action_delta').map((c) => c.action)).toEqual([
+      expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'success' }),
+      expect.objectContaining({ actionType: 'FINANCE_PROFIT_AND_LOSS', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CRM_LIST_CONTACTS', status: 'blocked' }),
+    ]);
+    const text = chunks.filter((c) => c.type === 'text_delta').map((c) => c.content).join('');
+    expect(text).toContain('I did not run finance_profit_and_loss: Insufficient permissions: revenue requires read access (you have none)');
+
+    // control: the owner has all three run
+    const owner = setup({ owner: true });
+    await owner.stream([call('tc_1', PNL), call('tc_2', CONTACTS), call('tc_3', 'expenses_list')]);
+    expect(owner.looped()).toEqual([[PNL, CONTACTS, 'expenses_list']]);
+  });
 });
 
 // KF-EXEC-AUTH-FAIL-CLOSED-001. Authority uncertainty may only narrow what can

@@ -126,6 +126,11 @@
  *   onBehalfOfUserId as the audit-only actor (and action-dispatcher.service.ts to name the plan's member),
  *   outside the W10-CORTEX-CHAT-SCOPE write set.
  *
+ * W10-CORTEX-CHAT-SCOPE review repairs: the chat's memory block keeps only the reader's own cognition
+ * memory (SEC-W10CCS-R2; buildMemoryContext's same gap stays an it.todo, outside the write set), and the
+ * model's tool calls on the chat are held to the plan queue's member rule before the registry runs them
+ * (SEC-W10CCS-R1: memberToolRunAuthority, D-71, D-57), in ID.toolBiz.
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -157,6 +162,11 @@ const ID = {
   outsider: `${P}outsider`,
   /** W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): a business whose AiExecutionLog rows one bridged flow call writes. */
   flowBiz: `${P}biz_flow`,
+  /**
+   * W10-CORTEX-CHAT-SCOPE review (SEC-W10CCS-R1): a business whose chat runs the model's tool calls (owned by
+   * ID.owner, no membership row; ID.member is a STAFF member with revenue none).
+   */
+  toolBiz: `${P}biz_tools`,
 };
 
 const TOOL_OK = 'v19c.create_ticket';
@@ -218,6 +228,7 @@ async function cleanup() {
     `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cognitive_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tool_outcome_scores WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -399,6 +410,12 @@ beforeAll(async () => {
   });
   await db.aiMemory.create({
     data: { businessId: ID.memBiz, category: 'fact', key: `${P}shared_fact`, value: 'v19c memory: a business-wide fact' },
+  });
+
+  // W10-CORTEX-CHAT-SCOPE review (SEC-W10CCS-R1): a STAFF member held to explicit scopes (revenue none, D-57).
+  await db.business.create({ data: { id: ID.toolBiz, name: 'V19C Chat Tools Biz', ownerId: ID.owner } });
+  await db.membership.create({
+    data: { userId: ID.member, businessId: ID.toolBiz, role: 'STAFF', permissionScopes: { revenue: 'none', crm: 'write', expenses: 'read' } },
   });
 }, 120_000);
 
@@ -1268,6 +1285,195 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       expect(secretLines[0], path).toMatch(/^\[cortex_action_log\] key_inbox\.get_thread: /);
       expect(owner, path).not.toContain(OWNER_INPUT_SECRET);
       expect(owner, path).not.toContain('[business_event]');
+    }
+  });
+
+  // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R2 (D-57): CognitionMemory is a per-member store, and processQuery
+  // writes one row on every turn (KeyCortexLearningService.recordObservation: what the member typed, verbatim,
+  // and KEY's whole answer to them). The rows below are that shape; they are removed when the case ends.
+  it("SEC-W10CCS-R2 (W10-CORTEX-CHAT-SCOPE review, D-57): POST /cortex/chat and its stream render only the reader's own cognition memory: another member's typed chat and KEY's answer to them never reach the system prompt, and a requester who is no member reads none", async () => {
+    const OWNER_SAID = 'V19C-COGNITION-OWNER';
+    const MEMBER_SAID = 'V19C-COGNITION-MEMBER';
+    const observation = (userId: string, label: string, said: string) => ({
+      businessId: ID.memBiz,
+      userId,
+      sessionId: `${P}sess_cognition_${label}`,
+      query: `${said} typed: what is our net profit this quarter?`,
+      recommendation: `${said} KEY answered: net profit 48213`,
+      userResponse: 'no_action',
+      confidence: 0.7,
+    });
+    await db.cognitionMemory.createMany({
+      data: [observation(ID.owner, 'owner', OWNER_SAID), observation(ID.member, 'member', MEMBER_SAID)],
+    });
+    try {
+      for (const path of ['processQuery', 'streamQuery'] as const) {
+        const member = await chatPromptFor(ID.member, path);
+        expect(member, path).toContain(`[cognition_memory]`);
+        expect(member, path).toContain(`${MEMBER_SAID} typed`);
+        expect(member, path).toContain(`${MEMBER_SAID} KEY answered`);
+        expect(member, path).not.toContain(OWNER_SAID);
+
+        for (const userId of [ID.outsider, undefined]) {
+          const prompt = await chatPromptFor(userId, path);
+          expect(prompt, `${path} ${String(userId)}`).not.toContain('[cognition_memory]');
+          expect(prompt, `${path} ${String(userId)}`).toContain('v19c memory: a business-wide fact');
+        }
+
+        // The owner (by Business.ownerId) reads their own, not the member's.
+        const owner = await chatPromptFor(ID.owner, path);
+        expect(owner, path).toContain(`${OWNER_SAID} typed`);
+        expect(owner, path).not.toContain(MEMBER_SAID);
+      }
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+    }
+  });
+
+  it.todo(
+    'SEC-W10CCS-R2 residual (W10-CORTEX-CHAT-SCOPE review; follow-up packet, outside the W10-CORTEX-CHAT-SCOPE write set): ' +
+      'key-cortex-prompt-context.service.ts buildMemoryContext, whose aiMemory block processQuery and its stream path also ' +
+      "hand buildMessages, still renders every member's cognition memory (CognitionMemory rows: another member's typed " +
+      "chat and KEY's answer to them, read business-wide by UnifiedMemoryRetrievalService) into a member's prompt; it " +
+      "should keep only the reader's own rows, as the pipeline's chatMemoryFragments now does (D-57). Not a regression: " +
+      'the W9 buildMemoryContext rule has the same gap.',
+  );
+
+  /**
+   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: a chat turn (processQuery or its stream) in ID.toolBiz in which the
+   * model calls `tools`, run through the real KeyCortexToolLoopService over the registry the app wires to its
+   * ledgers (auditedRegistry, the efferent bridge's flow tools in it, dispatched to `chain`). The member is read
+   * from the real rows. `dispatched`: the tools the dispatcher was reached for (its action is a stand-in here, so
+   * no ledger or CRM read runs).
+   */
+  async function chatToolTurnFor(userId: string, tools: string[], path: 'processQuery' | 'streamQuery') {
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const { KeyCortexToolLoopService } = await import('../src/modules/key-cortex/key-cortex-tool-loop.service');
+    // The P&L needs its period (the registry validates a call's input against the tool's schema).
+    const args = (name: string) => (name === 'finance_profit_and_loss' ? { from: '2026-01-01', to: '2026-10-31' } : {});
+    const calls = tools.map((name, i) => ({ id: `${P}tc_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args(name)) } }));
+    const gateway = {
+      complete: vi.fn(async (request: any) =>
+        request.tools
+          ? { content: '', toolCalls: calls, provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }
+          : { content: 'v19c answer over the tool results', provider: 'openai', model: 'stand-in' },
+      ),
+      streamComplete: async function* () {
+        for (const [index, c] of calls.entries()) {
+          yield { toolCall: { index, id: c.id, name: c.function.name, argumentsDelta: c.function.arguments }, provider: 'openai', model: 'stand-in' };
+        }
+      },
+    };
+    // Positionally, as Nest constructs it: gateway, prisma, registry, lifecycle, orchestrator, safety, autonomy level.
+    const loop = new KeyCortexToolLoopService(gateway as any, prisma, auditedRegistry, undefined, undefined, undefined, {
+      resolve: async () => ({ level: 2 }),
+    } as any);
+    const session = { id: `${P}sess_chat_tools`, businessId: ID.toolBiz, userId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: false, includeMemoryContext: false,
+      includeActions: true, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      gateway as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      { buildContextSnapshot: async () => ({ businessId: ID.toolBiz, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      {
+        getOrCreateSession: async () => session,
+        generateId: () => `${P}msg`,
+        saveMessage: async () => undefined,
+        updateSessionCognitionMetadata: async () => undefined,
+        updateRunningSummary: async () => undefined,
+      } as any,
+      { buildMemoryContext: async () => ({}), buildMessages: () => [] } as any,
+      loop,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      {} as any,
+      { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: undefined, confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      undefined, // memory retrieval
+      { route: async () => route } as any,
+      undefined, // connector
+      undefined, // command
+      undefined, // executor
+      undefined, // context v2
+      undefined, // genome bridge
+      undefined, // events
+      undefined, // proactive
+      undefined, // trust explanation
+      undefined, // learning
+      undefined, // autonomy orchestrator
+      auditedRegistry,
+    );
+    const dispatched: string[] = [];
+    const realAction = chain.executeToolAction;
+    chain.executeToolAction = async (_businessId: string, toolName: string) => {
+      dispatched.push(toolName);
+      return { v19c: `stand-in answer of ${toolName}` };
+    };
+    try {
+      const query = { text: 'what is my P&L and who are my contacts?', businessId: ID.toolBiz, userId } as any;
+      const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+      if (path === 'processQuery') {
+        const response = await pipeline.processQuery(query, flags);
+        return { dispatched, actions: response.actions ?? [], text: response.message.content };
+      }
+      const chunks: any[] = [];
+      for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+      return {
+        dispatched,
+        actions: chunks.filter((c) => c.type === 'action_delta').map((c) => c.action),
+        text: chunks.filter((c) => c.type === 'text_delta').map((c) => c.content).join(''),
+      };
+    } finally {
+      chain.executeToolAction = realAction;
+    }
+  }
+
+  // W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1 (D-57, D-71): the model's tool calls on the chat run through the
+  // registry, which reads no membership, and a bridged flow tool dispatches with no principal. Each call is held
+  // to the plan queue's rule for the member first (memberToolRunAuthority, no principal), over the real rows.
+  it('SEC-W10CCS-R1 (W10-CORTEX-CHAT-SCOPE review, D-57, D-71): POST /cortex/chat and its stream hold the model\'s tool calls to the rule the plan queue holds a plan\'s member to: a STAFF member with revenue none is refused the P&L and the whole-book contact read before the registry runs either, a tool their scopes reach still runs, and the business owner has every call run', async () => {
+    const PNL = 'finance_profit_and_loss';
+    const CONTACTS = TOOL_FLOW_BRIDGED; // crm_list_contacts
+    expect(auditedRegistry.hasTool(PNL)).toBe(true);
+    for (const path of ['processQuery', 'streamQuery'] as const) {
+      const member = await chatToolTurnFor(ID.member, [PNL, CONTACTS, 'expenses_list'], path);
+      expect(member.dispatched, path).toEqual(['expenses_list']);
+      expect(member.actions, path).toEqual([
+        expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'success' }),
+        expect.objectContaining({ actionType: 'FINANCE_PROFIT_AND_LOSS', status: 'blocked' }),
+        expect.objectContaining({ actionType: 'CRM_LIST_CONTACTS', status: 'blocked' }),
+      ]);
+      expect(member.text, path).toContain('I did not run finance_profit_and_loss: Insufficient permissions: revenue requires read access (you have none)');
+      expect(member.text, path).toContain('I did not run crm_list_contacts: Tool "crm_list_contacts" is executed from here only for the business owner');
+
+      // control: the owner by Business.ownerId (no membership row) has all three run
+      const owner = await chatToolTurnFor(ID.owner, [PNL, CONTACTS, 'expenses_list'], path);
+      expect(owner.dispatched, path).toEqual([PNL, CONTACTS, 'expenses_list']);
+      expect(owner.actions.map((a: any) => a.status), path).toEqual(['success', 'success', 'success']);
+      expect(owner.text, path).not.toContain('I did not run');
+
+      // a user with no membership in the business, and who does not own it, has none run
+      const outsider = await chatToolTurnFor(ID.outsider, ['expenses_list'], path);
+      expect(outsider.dispatched, path).toEqual([]);
+      expect(outsider.actions, path).toEqual([
+        expect.objectContaining({ actionType: 'EXPENSES_LIST', status: 'blocked', description: 'Not run: Not a member of this business' }),
+      ]);
     }
   });
 });
