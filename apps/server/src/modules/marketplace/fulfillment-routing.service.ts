@@ -6,6 +6,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { appendOrderTimeline } from './order-metadata';
 
 export interface OrderStatusTimelineEntry {
   status: string;
@@ -230,21 +231,15 @@ export class FulfillmentRoutingService {
         const hasDropship = existingRoutes.some((r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID');
         const finalStatus = hasDropship ? 'supplier_ordered' : 'routed';
         const now = new Date().toISOString();
-        const existingMeta = (order.metadata as OrderMetadata) ?? {};
-        const existingTimeline: OrderStatusTimelineEntry[] = existingMeta.statusTimeline ?? [];
-        await this.prisma.client.marketplaceOrder.update({
-          where: { id: orderId },
-          data: {
-            status: finalStatus,
-            metadata: {
-              ...existingMeta,
-              statusTimeline: [
-                ...existingTimeline,
-                { status: finalStatus, timestamp: now, note: 'Order status advanced after payment — routes already created' },
-              ],
-            },
-          },
-        });
+        // W10-SOP-FIX (SOP-V4): status and step in one statement (order-metadata.ts), not the metadata read above
+        // written back over what the paid marking, autoRouteOrder and the paid listeners wrote meanwhile.
+        await appendOrderTimeline(
+          this.prisma.client,
+          businessId,
+          orderId,
+          [{ status: finalStatus, timestamp: now, note: 'Order status advanced after payment — routes already created' }],
+          { status: finalStatus },
+        );
       }
       return existingRoutes;
     }
@@ -297,8 +292,6 @@ export class FulfillmentRoutingService {
       (r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID',
     );
     const now = new Date().toISOString();
-    const existingMeta = (order.metadata as OrderMetadata) ?? {};
-    const existingTimeline: OrderStatusTimelineEntry[] = existingMeta.statusTimeline ?? [];
 
     const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
     const finalStatus = isPaid ? (hasDropship ? 'supplier_ordered' : 'routed') : normalizedStatus;
@@ -312,16 +305,10 @@ export class FulfillmentRoutingService {
       timelineEntries.push({ status: 'routed', timestamp: now, note: 'Order routed — awaiting processing' });
     }
 
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: {
-        status: finalStatus,
-        metadata: {
-          ...existingMeta,
-          statusTimeline: [...existingTimeline, ...timelineEntries],
-        },
-      },
-    });
+    // W10-SOP-FIX (SOP-V4): status and steps in one statement. The metadata read with the order at the top was written
+    // back whole, over the paid marking's step, autoRouteOrder's step and the paid listener's contact link written while
+    // the routes were created (and this order is routed by mark_paid and StoreOrderRoutingListener together).
+    await appendOrderTimeline(this.prisma.client, businessId, orderId, timelineEntries, { status: finalStatus });
 
     return routes;
   }
@@ -1140,21 +1127,14 @@ export class FulfillmentRoutingService {
 
     if (allReady) {
       const now = new Date().toISOString();
-      const orderMeta = (route.order.metadata as OrderMetadata) ?? {};
-      const existingTimeline: OrderStatusTimelineEntry[] = orderMeta.statusTimeline ?? [];
-      await this.prisma.client.marketplaceOrder.update({
-        where: { id: route.orderId },
-        data: {
-          status: 'picking_packing',
-          metadata: {
-            ...orderMeta,
-            statusTimeline: [
-              ...existingTimeline,
-              { status: 'picking_packing', timestamp: now, note: 'All preorder items ready — advanced to pick/pack' },
-            ],
-          },
-        },
-      });
+      // W10-SOP-FIX (SOP-V4): status and step in one statement, not the metadata read with the route written back.
+      await appendOrderTimeline(
+        this.prisma.client,
+        businessId,
+        route.orderId,
+        [{ status: 'picking_packing', timestamp: now, note: 'All preorder items ready — advanced to pick/pack' }],
+        { status: 'picking_packing' },
+      );
     }
 
     return updatedRoute;
