@@ -2869,19 +2869,12 @@ export class PaymentsService {
     returnUrl?: string;
   }): Promise<{ paymentId?: string; redirectUrl?: string; status: string }> {
     if (input.method === 'CASH' || input.method === 'MANUAL') {
-      const payment = await this.prisma.client.payment.create({
-        data: {
-          provider: 'manual',
-          providerPaymentId: `manual_${input.orderId}_${Date.now()}`,
-          amount: input.amount,
-          currency: input.currency,
-          status: 'PENDING',
-          method: input.method.toLowerCase(),
-          invoiceId: input.orderId,
-          businessId: input.businessId,
-        },
-      });
-      return { paymentId: payment.id, status: 'PENDING_PAYMENT' };
+      // W10-STORE-PAYMENT-INTENT (D-18): no provider session and no Payment row. The PENDING intent written here
+      // put the MarketplaceOrder id in payments.invoice_id, a foreign key to invoices, so the write failed (the
+      // generic checkout answered 500), and nothing would have settled or retired it. The order row carries its
+      // payment state (paymentStatus PENDING, paymentMethod CASH / MANUAL), and the operator's offline completion
+      // (StoreOrderService.completeOfflineOrder -> completeCheckout) writes the settled row through the door.
+      return { status: 'PENDING_PAYMENT' };
     }
 
     if (input.method === 'WIPAY') {
@@ -3349,6 +3342,13 @@ export class PaymentsService {
         businessId: order.businessId,
         returnUrl: input.returnUrl || input.successUrl,
       });
+      // W10-STORE-PAYMENT-INTENT (D-18): a cash or manual gateway starts nothing online (createStorePayment writes
+      // no intent for it); the order is paid offline and recorded by the business. A clean 400, never 500.
+      if (result.status === 'PENDING_PAYMENT') {
+        throw new BadRequestException(
+          'A cash or manual payment starts no online checkout: this order is paid offline and the business records it',
+        );
+      }
       if (result.redirectUrl) {
         return { type: 'redirect', redirectUrl: result.redirectUrl };
       }
