@@ -84,7 +84,8 @@
  *           400, and PATCH .../status 'refunded' 400, all writing nothing; the
  *           owner's refund is the D-14 refund on its invoice (no Expense)
  *   V87-11  SEC-R3-1 remainder: the fulfil refund of an order with no payment
- *           on the books (a STANDARD order marked paid by 'mark_paid') books
+ *           on the books (a STANDARD order stored paid/PAID with no payment:
+ *           what 'mark_paid' wrote before D-112, a legacy row) books
  *           an Expense, so it takes revenue write (403) and an amount above 0
  *           and up to the order total (400 otherwise); PATCH 'refunded' is 400
  *   V87-12  SEC-R3-2: the site refund route refunds an order created paid on
@@ -995,10 +996,15 @@ describe('G6PUB-R3-STORE-ORDER-DOORS review repairs: an order created paid (D-77
     const created = await marketCreate(ID.owner, paidBody({ paymentOnCreation: false }), B);
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const order = created.body;
-    const markPaid = await fulfil(ID.owner, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, B);
+    // W10-STORE-ORDER-PAID (D-112): the fulfil mark_paid action now records the payment through the paid door (a
+    // checkout invoice, storefront-paid-event V18-T2c), so an order stored paid/PAID with no payment on the books is
+    // what mark_paid wrote before D-112: a legacy row, written here as mark_paid wrote it.
+    const markPaid = await db.marketplaceOrder.update({
+      where: { id: order.id },
+      data: { status: 'paid', paymentStatus: 'PAID', paymentMethod: 'CASH' },
+    });
     await settle();
-    expect(markPaid.status, JSON.stringify(markPaid.body)).toBe(201);
-    expect(`${markPaid.body.status}/${markPaid.body.paymentStatus}`).toBe('paid/PAID');
+    expect(`${markPaid.status}/${markPaid.paymentStatus}`).toBe('paid/PAID');
     expect((await invoicesOf(order, B)).map((i) => i.invoiceNumber), 'no checkout invoice: nothing paid through the paid door').not.toContain(
       `INV-${order.orderNumber}`,
     );
