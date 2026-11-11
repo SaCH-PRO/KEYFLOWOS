@@ -12,7 +12,11 @@
  * never offered: the gateway lists leave PayPal out
  * (PaymentsService.getAvailableGateways) and every PayPal order and capture
  * for it is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called
- * (createPaypalOrder, capturePaypalOrder, createStorePayment). The web
+ * (createPaypalOrder, capturePaypalOrder, createStorePayment); a storefront
+ * PayPal checkout of such an order is refused before the order is written
+ * (StoreOrderService.createOrder, review SEC-W10PPC-1), and the storefront
+ * checkout drops PayPal when the gateway list leaves it out
+ * (checkout-flow.tsx, review PPC-REV-02). The web
  * payment settings keep a copy (PAYPAL_CURRENCIES in payments-tab.tsx) to say
  * why PayPal is missing for the business currency; paypal-currency.spec.ts
  * fails if the two differ.

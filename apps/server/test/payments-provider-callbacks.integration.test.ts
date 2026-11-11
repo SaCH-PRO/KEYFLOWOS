@@ -464,6 +464,23 @@ async function seedInvoice(id: string, businessId: string, contactId: string, to
   await db.paymentLink.create({ data: { id: `${id}_link`, token: tokenOf(id), invoiceId: id, businessId, active: true } });
 }
 
+/**
+ * W10-PAYPAL-CURRENCY (D-106): the EUR business (its ledger posts EUR, D-13), its chart of accounts and its contact,
+ * seeded once. Review PPC-REV-01: every case that uses it calls this (the PayPal describe's beforeAll, PC-08d and
+ * PC-15), so a case selected on its own (-t) still has its business; seeding it only in one describe's beforeAll left
+ * PC-08d and PC-15 without it when run alone.
+ */
+let eurSeeded: Promise<void> | null = null;
+function ensureEurBusiness(): Promise<void> {
+  eurSeeded ??= (async () => {
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    await seedBusiness(ID.bizEur, 'EUR');
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizEur);
+    await db.contact.create({ data: { id: ID.contactEur, businessId: ID.bizEur, firstName: 'V05A', lastName: 'Eur', email: `${P}eur@test.local` } });
+  })();
+  return eurSeeded;
+}
+
 beforeAll(async () => {
   // This run's own rate-limit keys (PublicRateLimitGuard reads it in NODE_ENV=test).
   process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
@@ -1059,10 +1076,7 @@ describe('review V05-SEC-3: the platform WiPay key verifies only payables that p
 describe('V1-05: a PayPal capture is bound to its invoice, amount and currency and recorded through the ledger door', () => {
   beforeAll(async () => {
     // W10-PAYPAL-CURRENCY (D-106): a EUR business, whose EUR invoices PayPal takes and whose ledger posts EUR (D-13).
-    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
-    await seedBusiness(ID.bizEur, 'EUR');
-    await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizEur);
-    await db.contact.create({ data: { id: ID.contactEur, businessId: ID.bizEur, firstName: 'V05A', lastName: 'Eur', email: `${P}eur@test.local` } });
+    await ensureEurBusiness();
   });
 
   it('PC-06: orders naming another invoice, a wrong amount, a wrong currency (both ways) or no currency get 400 before PayPal captures anything; no row, no posting', async () => {
@@ -1220,6 +1234,8 @@ describe('W10-PAYPAL-CURRENCY: PayPal is not offered for a currency PayPal does 
   });
 
   it("PC-08d (W10-PAYPAL-CURRENCY, D-106): the storefront surface: the gateway list the storefront reads (getAvailableGateways, what GET /site/storefront/public/:slug/gateways answers) offers no PayPal for a TTD, JMD, BBD, GYD or XCD amount, nor for a TTD business's cart in no currency; createStorePayment and the generic storefront checkout of a TTD order's PayPal order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called, the order UNPAID; control: USD and EUR are offered PayPal in their own currency and a USD storefront order's checkout makes a USD order", async () => {
+    // Review PPC-REV-01: the EUR control's business, also when this case runs alone.
+    await ensureEurBusiness();
     await withPaypalEnv(async () => {
       const before = paypalCalls();
       // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } for every amount.
@@ -1421,7 +1437,9 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
 
   it("PC-15 (G6PUB-SEC-4): the storefront PayPal order is made in the order's own currency, and a CAPTURE.COMPLETED settles a storefront order only for its total in its currency, naming PayPal (G6ML-3)", async () => {
     // W10-PAYPAL-CURRENCY (D-106): shown on a EUR order (it was the TTD storefront order, which PayPal does not
-    // support: its PayPal order is now refused before PayPal is called, PC-08d).
+    // support: its PayPal order is now refused before PayPal is called, PC-08d). Review PPC-REV-01: the EUR business
+    // is seeded here too, so this case runs alone.
+    await ensureEurBusiness();
     const eurOrder = `${P}storeEur`;
     await db.marketplaceOrder.create({
       data: {

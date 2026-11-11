@@ -111,10 +111,16 @@
  *           GYD or XCD amount, and the PayPal checkout of a TTD cart is
  *           refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called
  *           (the PayPal SDK client is stubbed in this case only); control: a
- *           USD cart is offered PayPal and checks out a USD order. The order
- *           itself is still written before the refusal, as it was before
- *           D-106 when PayPal refused the TTD order (StoreOrderService is
- *           outside the W10-PAYPAL-CURRENCY write set)
+ *           USD cart is offered PayPal and checks out a USD order
+ *   V87-16b review SEC-W10PPC-1: that refusal comes before the order is
+ *           written (StoreOrderService.createOrder, as WiPay's, V87-05): no
+ *           order, no store_order.created, no retry slot and no promo use,
+ *           retried or not. At the packet head 0d9babbe each attempt wrote an
+ *           UNPAID PayPal order and counted a use of a limited promo code
+ *           before createStorePayment refused it. Control: a USD cart's PayPal
+ *           checkout with its promo code writes one order and counts one use
+ *           (the real PromoCodeService over real promo_codes rows, this case
+ *           only)
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard,
@@ -129,7 +135,7 @@
  * middleware that reads `x-test-user` and attaches the seeded user, as
  * AuthMiddleware does after token verification. Stand-ins off the money path:
  * the CRM timeline, stats, lists, flow and custom-field caches,
- * SubscriptionsService (contact limit allowed), PublicEventsService, PromoCodeService,
+ * SubscriptionsService (contact limit allowed), PublicEventsService, PromoCodeService (the real one in V87-16b),
  * InventoryRiskService, TransactionalEmailService, the revenue-posting
  * timeline, ExpensesService (a recorder: store_order.refunded books one), and
  * MarketplaceService.autoRouteOrder (fulfilment routing, held so it writes
@@ -220,6 +226,8 @@ async function cleanup() {
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V87-16b's promo codes (the business delete cascades them too).
+    `DELETE FROM promo_codes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -1227,6 +1235,71 @@ describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106
       expect(usd.body.payment).toMatchObject({ status: 'PAYPAL_AWAITING_APPROVAL' });
       expect(ordered.map((units) => `${units[0].amount.currencyCode}:${units[0].amount.value}`)).toEqual([`USD:${ORDER_TOTAL.toFixed(2)}`]);
     } finally {
+      clientSpy.mockRestore();
+      for (const [k, v] of Object.entries(previous)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("V87-16b (W10-PAYPAL-CURRENCY review SEC-W10PPC-1, D-106): the PayPal checkout of a TTD cart is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before the order is written, retried or not: no order, no store_order.created, no retry slot, the limited promo code's use not counted, PayPal never called; control: a USD cart's PayPal checkout with its promo code writes one order and counts one use", async () => {
+    const paypalEnv = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
+    const previous = Object.fromEntries(Object.keys(paypalEnv).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, paypalEnv);
+    const ordered: any[] = [];
+    const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
+      client: {},
+      ordersController: {
+        createOrder: vi.fn(async (req: any) => {
+          ordered.push(req?.body?.purchaseUnits);
+          return { result: { id: `${P}pp_order_16b_${ordered.length}`, links: [] } };
+        }),
+      },
+    });
+    // The real PromoCodeService over real promo_codes rows, for this case only (the harness stands it in otherwise):
+    // a TTD store's code limited to 3 uses, and a USD store's code (the control).
+    const { PromoCodeService } = await import('../src/modules/site/promo-code.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const standIn = storeOrders.promoCodeService;
+    storeOrders.promoCodeService = new PromoCodeService(app.get(PrismaService));
+    const CODE = 'V87C16B';
+    const ttdPromo = await db.promoCode.create({ data: { id: `${P}promo_ttd`, businessId: ID.bizA, code: CODE, type: 'PERCENT', value: 10, maxUses: 3 } });
+    const usdPromo = await db.promoCode.create({ data: { id: `${P}promo_usd`, businessId: ID.bizUsd, code: CODE, type: 'PERCENT', value: 10 } });
+    const usesOf = async (id: string) => (await db.promoCode.findUnique({ where: { id }, select: { currentUses: true } })).currentUses;
+    try {
+      const before = await counts(ID.bizA);
+      seen = [];
+      // Once without a retry key, then twice with the same one (a retried checkout).
+      for (const extra of [{}, { idempotencyKey: `${P}key_16b` }, { idempotencyKey: `${P}key_16b` }]) {
+        await clearRateLimits();
+        const res = await checkout(SLUG.a, cart(ID.prodA, 'PAYPAL', { promoCode: CODE, returnUrl: RETURN_URL, ...extra }));
+        // At 0d9babbe: 400 from createStorePayment, after the order committed and the promo use was counted.
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+        expect(res.body).toMatchObject({
+          code: 'PAYPAL_CURRENCY_UNSUPPORTED',
+          message: 'PayPal does not support TTD: this order cannot be paid with PayPal. Choose another payment method.',
+        });
+      }
+      await settle();
+      // At 0d9babbe: orders +2 (the retried key replays the second), slots +1, and the promo code at 2 of its 3 uses.
+      expect(await counts(ID.bizA), 'no order, no retry slot').toEqual(before);
+      expect(storeEvents(), 'no store_order.created').toEqual([]);
+      expect(await usesOf(ttdPromo.id), "the promo code's use is not counted").toBe(0);
+      expect(clientSpy, 'PayPal is never called').not.toHaveBeenCalled();
+
+      // Control: a USD cart's PayPal checkout with its promo code writes one order and counts one use.
+      const usdBefore = await counts(ID.bizUsd);
+      await clearRateLimits();
+      const usd = await checkout(SLUG.usd, cart(ID.prodUsd, 'PAYPAL', { promoCode: CODE, returnUrl: RETURN_URL }));
+      await settle();
+      expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+      expect(usd.body.order).toMatchObject({ paymentMethod: 'PAYPAL', currency: 'USD', promoCodeId: usdPromo.id });
+      expect((await counts(ID.bizUsd)).orders).toBe(usdBefore.orders + 1);
+      expect(await usesOf(usdPromo.id)).toBe(1);
+      expect(ordered.map((units) => units[0].amount.currencyCode)).toEqual(['USD']);
+    } finally {
+      storeOrders.promoCodeService = standIn;
       clientSpy.mockRestore();
       for (const [k, v] of Object.entries(previous)) {
         if (v === undefined) delete process.env[k];

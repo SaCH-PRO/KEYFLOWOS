@@ -86,33 +86,50 @@ const paymentMethods: { id: PaymentMethod; name: string; description: string; ic
  * WiPay merchant pair; GET /site/storefront/public/:slug/gateways). Until it
  * answers, or when it cannot, WiPay is not offered, so it is never the silent
  * default of a checkout the server would refuse.
+ *
+ * W10-PAYPAL-CURRENCY review (PPC-REV-02; owner ruling D-106): PayPal is not
+ * offered once that answer leaves it out (a currency PayPal does not support,
+ * such as TTD, or a store with no PayPal configured); it was listed for every
+ * cart, as the default of a TTD cart with no WiPay. Until the server answers,
+ * or when it cannot, PayPal stays listed: the server refuses a PayPal checkout
+ * it cannot take before the order is written (StoreOrderService.createOrder,
+ * SEC-W10PPC-1).
  */
-function paymentMethodsFor(currency: string, wipayTaken: boolean) {
-  const takesWipay = wipayTaken && (currency ?? "").trim().toUpperCase() === "TTD";
-  return paymentMethods.filter((pm) => pm.id !== "wipay" || takesWipay);
+function paymentMethodsFor(currency: string, gateways: StorefrontGateways | null) {
+  const takesWipay = gateways?.wipay === true && (currency ?? "").trim().toUpperCase() === "TTD";
+  const takesPaypal = gateways === null || gateways.paypal;
+  return paymentMethods.filter((pm) => (pm.id !== "wipay" || takesWipay) && (pm.id !== "paypal" || takesPaypal));
 }
 
-/** Whether the storefront takes WiPay for this currency, as the server answers it (false until it does). */
-function useWipayTaken(slug: string, currency: string): boolean {
+/** Which of WiPay and PayPal the server's storefront gateway list carries for a cart. */
+type StorefrontGateways = { wipay: boolean; paypal: boolean };
+
+/**
+ * The storefront's gateway list for this currency, as the server answers it:
+ * null until it does, or when it cannot (a failed read, or no list).
+ */
+function useStorefrontGateways(slug: string, currency: string): StorefrontGateways | null {
   const code = (currency ?? "").trim().toUpperCase();
   const key = `${slug}|${code}`;
-  const [answer, setAnswer] = useState<{ key: string; wipay: boolean } | null>(null);
+  const [answer, setAnswer] = useState<{ key: string; gateways: StorefrontGateways | null } | null>(null);
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
     const path = `/site/storefront/public/${encodeURIComponent(slug)}/gateways?currency=${encodeURIComponent(code)}`;
     apiGet<Array<{ id: string }>>(path)
       .then(({ data }) => {
-        if (!cancelled) setAnswer({ key, wipay: Array.isArray(data) && data.some((g) => g?.id === "wipay") });
+        if (cancelled) return;
+        const listed = (id: string) => Array.isArray(data) && data.some((g) => g?.id === id);
+        setAnswer({ key, gateways: Array.isArray(data) ? { wipay: listed("wipay"), paypal: listed("paypal") } : null });
       })
       .catch(() => {
-        if (!cancelled) setAnswer({ key, wipay: false });
+        if (!cancelled) setAnswer({ key, gateways: null });
       });
     return () => {
       cancelled = true;
     };
   }, [slug, code, key]);
-  return answer?.key === key ? answer.wipay : false;
+  return answer?.key === key ? answer.gateways : null;
 }
 
 export function CheckoutFlow({
@@ -149,11 +166,12 @@ export function CheckoutFlow({
   });
 
   const [selectedShippingZone, setSelectedShippingZone] = useState<string | null>(null);
-  const wipayTaken = useWipayTaken(business.slug, cartCurrency);
-  const offeredPaymentMethods = paymentMethodsFor(cartCurrency, wipayTaken);
+  const storefrontGateways = useStorefrontGateways(business.slug, cartCurrency);
+  const offeredPaymentMethods = paymentMethodsFor(cartCurrency, storefrontGateways);
   // Null until the customer picks one: the first offered method is the default, re-read once the server answers.
   const [chosenPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
-  // A method this cart is not offered (WiPay for a non-TTD cart, or for a business without WiPay) is never the one sent.
+  // A method this cart is not offered (WiPay for a non-TTD cart, or for a business without WiPay; PayPal once the
+  // server's list leaves it out, D-106) is never the one sent.
   const selectedPayment: PaymentMethod = chosenPayment && offeredPaymentMethods.some((pm) => pm.id === chosenPayment)
     ? chosenPayment
     : offeredPaymentMethods[0].id;
