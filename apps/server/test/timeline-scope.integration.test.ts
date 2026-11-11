@@ -89,7 +89,15 @@
  *   TS-13e (W10-ADVISOR-TIMELINE, D-63; was it.todo, review SEC-W9TO-2):
  *   live. The KEY advisor chat (POST ai/chat, AiAdvisorService.chat) builds
  *   its prompt from the rows the timeline rule serves the member who asks and
- *   the figures they read, as the daily briefing does (TS-20a).
+ *   the figures they read, as the daily briefing does (TS-20a). It reads
+ *   through the same rule, so a row stored before W9 that names a contact
+ *   only in its text (contactId null) still reaches the chat and the daily
+ *   briefing (TS-13d, D-115: the W10 timeline backfill).
+ *   W10-ADVISOR-TIMELINE review (SEC-W10AT-1..3): TS-13d now names the two
+ *   AI prompts among the reads that serve those rows, and TS-13e claims only
+ *   the rows that carry their contact. GET ai/cash-flow-forecast (TS-13f,
+ *   D-100) and POST ai/simulate (TS-13g, D-63, D-100) are follow-ups outside
+ *   that write set (it.todo).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -906,10 +914,11 @@ describe('W9-TEXT-ONLY-CONTACT-WRITERS (D-63): rows that name a contact only in 
  */
 describe('W9-TEXT-ONLY-CONTACT-WRITERS review follow-ups outside the write set (TS-13d, TS-13e)', () => {
   it.todo(
-    "TS-13d (review SEC-W9TO-1, D-63): rows the two writers stored before W9-TEXT-ONLY-CONTACT-WRITERS keep contactId null, so a KEY invoice_sent row ({ module 'commerce', entityType 'invoice', entityId <invoice>, title 'Invoice <n> sent to <PRIVATE contact name>' }) is still served on /events, the day's summary and the legacy route to a view-all ADMIN, a crm_view 'owned' and a crm 'none' revenue reader, and a message_intake.approved row ({ module 'communications', entityType 'message_intake', entityId <intake>, detail '<intent> from <sender email> — <subject>' }) to ADMIN and the crm_view 'owned' member, none of whom may open that contact (namedContacts reads contactId, and entityId only for entityType 'contact'); the treatment is not in the packet's write set or authority: a backfill of activities.contact_id from invoices.contact_id / message_intakes.contact_id on the same business (a data change), the rule resolving these two entity types to their contact at read time (timeline-visibility.ts, which the packet may not change), or an owner ruling that accepts the stored rows",
+    "TS-13d (review SEC-W9TO-1, W10-ADVISOR-TIMELINE review SEC-W10AT-1, D-63, D-115): rows the two writers stored before W9-TEXT-ONLY-CONTACT-WRITERS keep contactId null, so a KEY invoice_sent row ({ module 'commerce', entityType 'invoice', entityId <invoice>, title 'Invoice <n> sent to <PRIVATE contact name>' }) is still served on /events, the day's summary and the legacy route, and put in the model's prompt by POST ai/chat (its 'Recent Activity:' line, the ten newest rows served) and GET ai/briefing (its 'Yesterday's activity:' line, the rows of the last day served), to a view-all ADMIN, a crm_view 'owned' and a crm 'none' revenue reader, and a message_intake.approved row ({ module 'communications', entityType 'message_intake', entityId <intake>, detail '<intent> from <sender email> — <subject>' }) to ADMIN and the crm_view 'owned' member, none of whom may open that contact (namedContacts reads contactId, and entityId only for entityType 'contact'; both AI prompts read through the same rule, AiAdvisorService.visibleActivityTitles); the treatment is owner ruling D-115, the W10 timeline backfill (an operator script, dry-run by default, sets activities.contact_id from the invoice or message intake behind the row; a row whose source is gone is served only to OWNER and ADMIN), outside this suite's packets' write sets",
   );
   // TS-13e (review SEC-W9TO-2, D-63) is live below (W10-ADVISOR-TIMELINE, was it.todo): the KEY
   // chat's prompt is built from the rows the timeline rule serves the member and the figures they read.
+  // Until the D-115 backfill runs, the rows of TS-13d reach that prompt too (review SEC-W10AT-1).
 });
 
 /**
@@ -1029,7 +1038,7 @@ describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeli
     return list ? list.split('; ') : [];
   }
 
-  it("TS-13e (W10-ADVISOR-TIMELINE, D-63, was it.todo): POST /ai/businesses/:businessId/ai/chat builds the model's prompt only from the Activity rows the timeline rule serves the member (the ten newest they may read, filled past the rows withheld: no row naming a contact they may not open, no money row without revenue read, no row of a module they do not read) and the figures they read (revenue, outstanding and the genome's revenue target need revenue read, expenses need expenses read, bookings need bookings read, the contact count is the contacts they may list, the momentum score needs revenue, crm and bookings read and is answered null otherwise); a view-all ADMIN keeps the money rows and figures but not 'Invoice <n> sent to <PRIVATE contact name>'; the OWNER's prompt is the business's whole prompt, as before", async () => {
+  it("TS-13e (W10-ADVISOR-TIMELINE, D-63, was it.todo): POST /ai/businesses/:businessId/ai/chat builds the model's prompt only from the Activity rows the timeline rule serves the member (the ten newest they may read, filled past the rows withheld: no row that carries a contact they may not open in its contactId or as its contact entity, no money row without revenue read, no row of a module they do not read; a row stored before W9 that names a contact only in its text is TS-13d, D-115) and the figures they read (revenue, outstanding and the genome's revenue target need revenue read, expenses need expenses read, bookings need bookings read, the contact count is the contacts they may list, the momentum score needs revenue, crm and bookings read and is answered null otherwise); a view-all ADMIN keeps the money rows and figures but not the 'Invoice <n> sent to <PRIVATE contact name>' row that carries that contact; the OWNER's prompt is the business's whole prompt, as before", async () => {
     const chatRow = (key: string) => `${P}chat_${key}`;
     const HIDDEN = 'Invoice v84a-INV-CH1 sent to v84a Hidden Client';
     const PAY = Array.from({ length: 9 }, (_, i) => `v84a chat payment TTD ${640 + i}`);
@@ -1161,6 +1170,22 @@ describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeli
       await db.$executeRawUnsafe(`DELETE FROM expenses WHERE id LIKE ${sqlLikePrefix(`${P}exp_chat`)}`);
     }
   });
+});
+
+/**
+ * W10-ADVISOR-TIMELINE review (SEC-W10AT-2, SEC-W10AT-3; owner rulings D-63, D-100): two other
+ * AiController routes beside the chat serve a member the business's figures, contacts or rows whatever
+ * they read. Both were reproduced on the real database before they were recorded here (a temporary
+ * case in the W10-ADVISOR-TIMELINE describe, through its chat app, removed). The packet's write set is
+ * the chat (AiController.chat, AiAdvisorService.chat), so each is a follow-up outside it.
+ */
+describe('W10-ADVISOR-TIMELINE review follow-ups outside the write set (TS-13f, TS-13g)', () => {
+  it.todo(
+    "TS-13f (W10-ADVISOR-TIMELINE review SEC-W10AT-2, D-100, D-63, D-57): GET /ai/businesses/:businessId/ai/cash-flow-forecast (AiController.cashFlowForecast, AuthGuard + BusinessGuard only -> AiAdvisorService.predictCashFlow), which the web's reports cash-flow view and revenue projection chart call (client.ts fetchCashFlowForecast), answers a member without revenue read 200 with currentBalance, projectedBalance, dailyRevenueRate and dailyExpenseRate (reproduced as the revenue 'none' member with one PAID invoice of 7777: currentBalance 7777, projectedBalance 10369.33, dailyRevenueRate 86.41) and, past five outstanding invoices, an alert naming their total; it should refuse that member (403, no figure) as GET commerce/businesses/:businessId/cash-flow-forecast does (TS-20e), a revenue reader and the OWNER keeping the forecast; the route and the web views' answer to a 403 are outside the packet's write set",
+  );
+  it.todo(
+    "TS-13g (W10-ADVISOR-TIMELINE review SEC-W10AT-3, D-63, D-100): POST /ai/businesses/:businessId/ai/simulate (AiController.simulate, AuthGuard + BusinessGuard only -> AiAdvisorService.simulateScenario) puts JSON.stringify(getBusinessContext) in the model's prompt for any member and returns the model's simulation to them: the first and last names of the business's five newest contacts whatever their visibility (the owner's PRIVATE contacts included), the revenue collected, outstanding and overdue figures, expenses, bookings, the momentum score and the business's ten newest Activity titles unfiltered (reproduced as the revenue 'none' member: the prompt carried '\"firstName\": \"Priv\"', '\"totalRevenue\": 7777' and an 'Invoice <n> sent to <hidden contact>' row); it should build that prompt only from what the member reads, as POST ai/chat does since W10-ADVISOR-TIMELINE (TS-13e: the rows the timeline rule serves them, the figures of the modules they read, only contacts they may open), the OWNER's prompt staying whole; simulateScenario and the route are outside the packet's write set",
+  );
 });
 
 /**
