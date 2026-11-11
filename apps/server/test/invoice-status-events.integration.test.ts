@@ -1995,3 +1995,338 @@ describe('SEC-V42C-1: one reopen, one invoice.reopened (the reconcile reads unde
     expect(eventsFor(inv)).toEqual([]);
   });
 });
+
+/**
+ * W10-REOPEN-REVERSALS review repairs (owner ruling D-102), each RED before the repair:
+ *   SEC-W10RR-1  the referral award and its reversal write the referrer under its row lock (they were
+ *                read-modify-writes of the whole custom object): eight invoices of eight contacts the
+ *                same referrer referred, paid, then reopened, with their handlers run together, earn
+ *                80 / 8 and give all of it back (0 / 0); every referred contact loses its mark
+ *   SEC-W10RR-2  a cancelled review request re-armed by a new payment is addressed to the contact who
+ *                paid now (the invoice moved to another contact while SENT, or the contact's email
+ *                changed), not the refunded recipient the first payment stored
+ *   SEC-W10RR-3  the lead-score ledger is the crm-network's own referral notes (source crm-network, no
+ *                USER actor): notes of the same kind a crm:write member logs through POST
+ *                .../contacts/:contactId/events neither stop a payment's bump, nor shield it from the
+ *                reversal, nor take 15 from a bystander
+ *   CR-REOPEN-1  each of the five paid handlers reads PAID before its write and again after it, and
+ *                undoes its own write when the invoice was reopened meanwhile (the SEC-A9-1 pattern of
+ *                RevenueActionService): a paid handler that finishes after the reopen handler leaves no
+ *                referral credit, lead-score bump, project advance, invoice_paid margin snapshot or
+ *                PENDING review request on the SENT invoice; a stale invoice.paid delivered after the
+ *                reopen writes nothing
+ *   CR-REOPEN-2  the reopen takes back the bump the payment applied (recorded on its referral.deal_won
+ *                note), not a fixed 15: a referrer at 95 is bumped to 100 (the cap) and goes back to 95
+ */
+describe('W10-REOPEN-REVERSALS review repairs (owner ruling D-102)', () => {
+  let rrSeq = 0;
+
+  async function rrContact(id: string, extra: Record<string, unknown> = {}) {
+    return db.contact.create({
+      data: { id, businessId: ID.biz, firstName: 'V42c', lastName: id.slice(P.length), email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, ...extra },
+    });
+  }
+
+  async function rrInvoice(id: string, contactId: string, productId: string | null = null) {
+    rrSeq += 1;
+    return db.invoice.create({
+      data: {
+        id,
+        invoiceNumber: `V42C-RR-${String(rrSeq).padStart(3, '0')}`,
+        status: 'SENT',
+        sentAt: new Date(PAST_DUE.getTime() - 14 * 24 * 60 * 60 * 1000),
+        dueDate: PAST_DUE,
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        businessId: ID.biz,
+        contactId,
+        items: { create: [{ id: `${id}_item1`, description: `V42C RR item ${rrSeq}`, quantity: 1, unitPrice: TOTAL, total: TOTAL, productId }] },
+      },
+    });
+  }
+
+  const customOf = async (id: string) => ((await db.contact.findUnique({ where: { id } })).custom ?? {}) as Record<string, any>;
+  const creditOf = async (id: string) => {
+    const c = await customOf(id);
+    return { balance: c.referralRewardBalance ?? 0, earned: c.referralRewardsEarned ?? 0 };
+  };
+  const scoreOf = async (id: string) => (await db.contact.findUnique({ where: { id }, select: { leadScore: true } })).leadScore;
+  /** The crm-network's own referral notes on a contact for an invoice (the ledger), oldest first. */
+  const networkNotes = async (contactId: string, inv: string) =>
+    (await db.contactEvent.findMany({
+      where: { businessId: ID.biz, contactId, type: 'note.created', source: 'crm-network', data: { path: ['invoiceId'], equals: inv } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    })) as any[];
+  const reviewJob = async (inv: string) =>
+    db.scheduledAgentJob.findFirst({ where: { businessId: ID.biz, entityId: inv, checkpoint: `review_invoice_${inv}` } });
+
+  /** A gate: everything awaiting `opened` waits until open() is called. */
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return { opened, open };
+  }
+
+  it('SEC-W10RR-1 (D-102, RED before): eight invoices of eight contacts the same referrer referred are paid, their award handlers run together, then each is fully refunded and the reversals run together -> the referrer earns 80 / 8 and gives all of it back, 0 / 0 (the award and the reversal write it under its row lock); every referred contact loses its mark and keeps its referral', async () => {
+    const N = 8;
+    const referrer = `${P}rrRefReferrer`;
+    await rrContact(referrer, { custom: {} });
+    const referred = Array.from({ length: N }, (_, i) => `${P}rrRef${i}`);
+    const invoices = Array.from({ length: N }, (_, i) => `${P}invRrRef${i}`);
+    for (let i = 0; i < N; i += 1) {
+      await rrContact(referred[i], { custom: { referralSourceId: referrer } });
+      await rrInvoice(invoices[i], referred[i]);
+    }
+    const svc = referralRewards as any;
+    const proto = Object.getPrototypeOf(svc);
+    const paidGate = gate();
+    const reopenGate = gate();
+    const paidRuns: Promise<unknown>[] = [];
+    const reopenRuns: Promise<unknown>[] = [];
+    // Each handler delivery for these invoices is held until all N have arrived, then all run at once.
+    svc.onInvoicePaid = (payload: any) => {
+      if (!invoices.includes(payload?.invoice?.id)) return proto.onInvoicePaid.call(svc, payload);
+      const run = paidGate.opened.then(() => proto.onInvoicePaid.call(svc, payload));
+      paidRuns.push(run);
+      return run;
+    };
+    svc.onInvoiceReopened = (payload: any) => {
+      if (!invoices.includes(payload?.invoice?.id)) return proto.onInvoiceReopened.call(svc, payload);
+      const run = reopenGate.opened.then(() => proto.onInvoiceReopened.call(svc, payload));
+      reopenRuns.push(run);
+      return run;
+    };
+    try {
+      const payments: any[] = [];
+      for (let i = 0; i < N; i += 1) payments.push(await paid(invoices[i], 100, `V42C-RR-REF-${i}`));
+      await vi.waitFor(() => expect(paidRuns).toHaveLength(N), WAIT);
+      paidGate.open();
+      await Promise.all(paidRuns);
+      expect(await creditOf(referrer), 'every award is credited').toEqual({ balance: 10 * N, earned: N });
+      for (const id of referred) expect(await customOf(id)).toMatchObject({ referralRewardEarned: true });
+
+      for (let i = 0; i < N; i += 1) await fullRefund(invoices[i], payments[i].id, `v42c rr referral ${i}`);
+      await vi.waitFor(() => expect(reopenRuns).toHaveLength(N), WAIT);
+      reopenGate.open();
+      await Promise.all(reopenRuns);
+      // RED before: each reversal read the referrer, then wrote its balance less 10 over the others' writes (40 / 4, 60 / 6).
+      expect(await creditOf(referrer), 'every credit is taken back').toEqual({ balance: 0, earned: 0 });
+      for (const id of referred) {
+        const c = await customOf(id);
+        expect(c.referralRewardEarned ?? false, `${id} may earn it again`).toBe(false);
+        expect(c.referralRewardInvoiceId, `${id}: no award left to reverse`).toBeUndefined();
+        expect(c.referralSourceId, 'the referral itself stays').toBe(referrer);
+      }
+      await settle();
+      expect(await creditOf(referrer)).toEqual({ balance: 0, earned: 0 });
+    } finally {
+      paidGate.open();
+      reopenGate.open();
+      delete svc.onInvoicePaid;
+      delete svc.onInvoiceReopened;
+    }
+  }, 60_000);
+
+  it('SEC-W10RR-2 (D-102, RED before): a refunded invoice moved to another contact while SENT (updateInvoice refuses only PAID / PARTIALLY_PAID) and paid again re-arms its review request addressed to the contact who paid now; a contact whose email changed is asked at the new address; the runner sends to them and never to the refunded recipient', async () => {
+    const oldC = `${P}rrRvOld`;
+    const newC = `${P}rrRvNew`;
+    const inv = `${P}invRrReview`;
+    const oldEmail = `${oldC.toLowerCase()}@test.local`;
+    const newEmail = `${newC.toLowerCase()}@test.local`;
+    const movedEmail = `${P}rrrvnew_moved@test.local`;
+    await rrContact(oldC);
+    await rrContact(newC);
+    await rrInvoice(inv, oldC);
+
+    const p1 = await paid(inv, 100, 'V42C-RR-RV-1');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'PENDING' }), WAIT);
+    const first = await reviewJob(inv);
+    expect(first.payload).toMatchObject({ contactId: oldC, contactEmail: oldEmail });
+    await fullRefund(inv, p1.id, 'v42c rr review old');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ id: first.id, status: 'CANCELLED' }), WAIT);
+
+    // The SENT invoice is moved to another contact, and that contact pays it.
+    await db.invoice.update({ where: { id: inv }, data: { contactId: newC } });
+    const p2 = await paid(inv, 100, 'V42C-RR-RV-2');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ id: first.id, status: 'PENDING' }), WAIT);
+    // RED before: the re-armed job kept the first payment's payload (the refunded contact's address).
+    expect((await reviewJob(inv)).payload).toMatchObject({
+      contactId: newC,
+      contactEmail: newEmail,
+      contactName: `V42c ${newC.slice(P.length)}`,
+      entityType: 'invoice',
+    });
+
+    // The paying contact's email changes before the next refund and payment: the re-arm reads it again.
+    await fullRefund(inv, p2.id, 'v42c rr review new');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'CANCELLED' }), WAIT);
+    await db.contact.update({ where: { id: newC }, data: { email: movedEmail } });
+    await paid(inv, 100, 'V42C-RR-RV-3');
+    await vi.waitFor(async () => expect(await reviewJob(inv)).toMatchObject({ status: 'PENDING' }), WAIT);
+    expect((await reviewJob(inv)).payload).toMatchObject({ contactId: newC, contactEmail: movedEmail });
+
+    // The runner sends the request, once due, to the contact who paid, at their address now.
+    await db.scheduledAgentJob.update({ where: { id: first.id }, data: { scheduledFor: new Date(Date.now() - 60_000) } });
+    await reviewSolicitation.processPendingJobs();
+    const sent = transactionalSends.filter((s) => s.type === 'review_request' && [oldEmail, newEmail, movedEmail].includes(String(s.recipientEmail)));
+    expect(sent.map((s) => s.recipientEmail)).toEqual([movedEmail]);
+    expect(await reviewJob(inv)).toMatchObject({ status: 'COMPLETED' });
+  }, 40_000);
+
+  it('SEC-W10RR-3 (D-102, RED before): the lead-score reversal reads only the crm-network\'s own referral notes (source crm-network, no USER actor): a referral.deal_won note a crm:write member logs on the referrer before the payment does not stop its bump; a referral.deal_reopened note logged on the referrer does not shield the bump from the refund; a referral.deal_won note logged on a bystander takes nothing from them', async () => {
+    const referrer = `${P}rrNetReferrer`;
+    const referredC = `${P}rrNetReferred`;
+    const victim = `${P}rrNetVictim`;
+    const inv = `${P}invRrNet`;
+    await rrContact(referrer, { leadScore: 20 });
+    await rrContact(referredC);
+    await rrContact(victim, { leadScore: 50 });
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: referredC, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, referredC);
+    const timelineSvc = (crmNetwork as any).timeline;
+    // What POST crm/businesses/:businessId/contacts/:contactId/events writes (crm.controller createEvent).
+    const memberNote = (contactId: string, kind: string) =>
+      timelineSvc.logContactEvent({
+        businessId: ID.biz,
+        contactId,
+        type: 'note.created',
+        data: { description: 'v42c member note', kind, invoiceId: inv, referredContactId: referredC },
+        actorType: 'USER',
+        actorId: ID.owner,
+        source: 'crm',
+      });
+
+    await memberNote(referrer, 'referral.deal_won');
+    const p = await paid(inv, 100, 'V42C-RR-NET');
+    await vi.waitFor(async () => expect(await scoreOf(referrer), 'the member note does not stop the payment\'s bump').toBe(35), WAIT);
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won']), WAIT);
+
+    await memberNote(referrer, 'referral.deal_reopened');
+    await memberNote(victim, 'referral.deal_won');
+    await fullRefund(inv, p.id, 'v42c rr network');
+    // RED before: { referrer: 35, victim: 35 } (the member notes shielded the bump and moved the bystander).
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']), WAIT);
+    await settle();
+    expect({ referrer: await scoreOf(referrer), victim: await scoreOf(victim) }).toEqual({ referrer: 20, victim: 50 });
+    expect(await networkNotes(victim, inv), 'the bystander gets no system note').toEqual([]);
+  }, 30_000);
+
+  it('CR-REOPEN-2 (D-102, RED before): the reopen takes back the bump the payment applied, recorded on its referral.deal_won note: a referrer at 95 is bumped to 100 (the cap) and goes back to 95, not 85; paying again bumps it again and the next reopen takes that back', async () => {
+    const referrer = `${P}rrCapReferrer`;
+    const referredC = `${P}rrCapReferred`;
+    const inv = `${P}invRrCap`;
+    await rrContact(referrer, { leadScore: 95 });
+    await rrContact(referredC);
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: referredC, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, referredC);
+
+    const p = await paid(inv, 100, 'V42C-RR-CAP');
+    await vi.waitFor(async () => expect(await scoreOf(referrer)).toBe(100), WAIT);
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => [e.data.kind, e.data.bump])).toEqual([['referral.deal_won', 5]]), WAIT);
+    await fullRefund(inv, p.id, 'v42c rr cap');
+    // RED before: 85 (a fixed 15 taken back).
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']), WAIT);
+    expect(await scoreOf(referrer)).toBe(95);
+
+    await db.contact.update({ where: { id: referrer }, data: { leadScore: 30 } });
+    const p2 = await paid(inv, 100, 'V42C-RR-CAP-2');
+    await vi.waitFor(async () => expect(await scoreOf(referrer)).toBe(45), WAIT);
+    await fullRefund(inv, p2.id, 'v42c rr cap again');
+    await vi.waitFor(async () => expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened', 'referral.deal_won', 'referral.deal_reopened']), WAIT);
+    expect(await scoreOf(referrer)).toBe(30);
+  }, 30_000);
+
+  it('CR-REOPEN-1 (D-102, RED before): the five paid handlers each pass their PAID check and are held before their write while the full refund\'s reopen handlers run and find nothing to undo; released, each writes, reads the invoice SENT and undoes its own write: no referral credit, no lead-score bump, the project back to ACTIVE, the margin snapshot invoice_paid_reversed, the review request CANCELLED (the runner sends nothing); the stale invoice.paid delivered again to each writes nothing', async () => {
+    const referrer = `${P}rrLateReferrer`;
+    const late = `${P}rrLate`;
+    const inv = `${P}invRrLate`;
+    const project = `${P}prj_rr_late`;
+    await rrContact(referrer, { leadScore: 20, custom: {} });
+    await rrContact(late, { custom: { referralSourceId: referrer } });
+    await db.contactRelationship.create({ data: { businessId: ID.biz, fromContactId: late, toContactId: referrer, type: 'referred_by' } });
+    await rrInvoice(inv, late, D102.product);
+    await db.project.create({ data: { id: project, businessId: ID.biz, name: project, status: 'ACTIVE', invoiceId: inv, contactId: late } });
+
+    const release = gate();
+    const held: string[] = [];
+    const paidRuns: Promise<unknown>[] = [];
+    // [service, its write step (held once for this invoice), whether a call of that step is this invoice's]
+    const holds: Array<[any, string, (...a: any[]) => boolean]> = [
+      [referralRewards, 'checkAndAwardReward', (...a) => a[3] === inv],
+      [crmNetwork, 'bumpOnDealWon', (...a) => a[3] === inv],
+      [projectRevenue, 'transition', (...a) => a[1] === project],
+      [marginListener, 'captureForInvoice', (...a) => a[1] === inv],
+      [reviewSolicitation, 'scheduleReviewRequest', (...a) => a[1] === inv],
+    ];
+    for (const [svc, step, mine] of holds) {
+      const proto = Object.getPrototypeOf(svc);
+      let once = false;
+      svc[step] = async (...args: any[]) => {
+        if (mine(...args) && !once) {
+          once = true;
+          held.push(`${svc.constructor.name}.${step}`);
+          await release.opened;
+        }
+        return proto[step].apply(svc, args);
+      };
+      svc.onInvoicePaid = (payload: any) => {
+        const run = proto.onInvoicePaid.call(svc, payload);
+        if (payload?.invoice?.id === inv) paidRuns.push(run);
+        return run;
+      };
+    }
+    try {
+      const p = await paid(inv, 100, 'V42C-RR-LATE');
+      const paidPayload = emitted.find((e) => e.name === 'invoice.paid' && e.payload?.invoice?.id === inv)!.payload;
+      await vi.waitFor(() => expect([...held].sort()).toEqual([
+        'CrmNetworkService.bumpOnDealWon',
+        'MarginOnPaymentListener.captureForInvoice',
+        'ProjectRevenueListener.transition',
+        'ReferralRewardService.checkAndAwardReward',
+        'ReviewSolicitationService.scheduleReviewRequest',
+      ]), WAIT);
+      await fullRefund(inv, p.id, 'v42c rr late');
+      // The reopen's handlers ran first and found nothing to undo.
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle();
+      expect(await reviewJob(inv)).toBeNull();
+      expect(await scoreOf(referrer)).toBe(20);
+
+      release.open();
+      expect(paidRuns).toHaveLength(5);
+      await Promise.all(paidRuns);
+      await settle();
+      expect((await invoiceRow(inv)).status).toBe('SENT');
+      // RED before: credit 10 / 1, score 35, IN_PROGRESS, ['invoice_paid'], PENDING.
+      expect(await creditOf(referrer), 'no referral credit for the reopened invoice').toEqual({ balance: 0, earned: 0 });
+      expect((await customOf(late)).referralRewardEarned ?? false).toBe(false);
+      expect(await scoreOf(referrer), 'no lead-score bump').toBe(20);
+      expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']);
+      expect((await db.project.findUnique({ where: { id: project } })).status, 'the advance is stepped back').toBe('ACTIVE');
+      const snaps = await db.marginSnapshot.findMany({ where: { invoiceId: inv } });
+      expect(snaps.map((s: any) => s.snapshotReason), 'the snapshot is marked reversed').toEqual(['invoice_paid_reversed']);
+      expect(await reviewJob(inv), 'the review request is cancelled').toMatchObject({ status: 'CANCELLED' });
+      await db.scheduledAgentJob.updateMany({ where: { businessId: ID.biz, entityId: inv }, data: { scheduledFor: new Date(Date.now() - 60_000) } });
+      await reviewSolicitation.processPendingJobs();
+      expect(transactionalSends.filter((s) => s.recipientEmail === `${late.toLowerCase()}@test.local`), 'nobody is asked for a review').toEqual([]);
+
+      // A stale invoice.paid delivered again after the reopen: each paid handler reads SENT and writes nothing.
+      for (const [svc] of holds) await Object.getPrototypeOf(svc).onInvoicePaid.call(svc, paidPayload);
+      await settle();
+      expect(await creditOf(referrer)).toEqual({ balance: 0, earned: 0 });
+      expect(await scoreOf(referrer)).toBe(20);
+      expect((await networkNotes(referrer, inv)).map((e) => e.data.kind)).toEqual(['referral.deal_won', 'referral.deal_reopened']);
+      expect((await db.project.findUnique({ where: { id: project } })).status).toBe('ACTIVE');
+      expect((await db.marginSnapshot.findMany({ where: { invoiceId: inv } })).map((s: any) => s.snapshotReason)).toEqual(['invoice_paid_reversed']);
+      expect(await reviewJob(inv), 'the CANCELLED request is not re-armed').toMatchObject({ status: 'CANCELLED' });
+      expect(sentEmails).toHaveLength(0);
+    } finally {
+      release.open();
+      for (const [svc, step] of holds) {
+        delete svc[step];
+        delete svc.onInvoicePaid;
+      }
+    }
+  }, 40_000);
+});

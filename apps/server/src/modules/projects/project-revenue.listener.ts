@@ -43,6 +43,14 @@ export class ProjectRevenueListener {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
+  /**
+   * W10-REOPEN-REVERSALS review repair CR-REOPEN-1 (owner ruling D-102; the
+   * SEC-A9-1 pattern of RevenueActionService): the invoice is read PAID before
+   * the advance and again after. A stale delivery (the invoice reopened since)
+   * advances nothing; an advance written after the refund's reopen handler ran
+   * (and found no recorded move to undo) is stepped back here, by the same
+   * record and compare-and-set, so it is undone once.
+   */
   @OnEvent('invoice.paid', { async: true })
   async onInvoicePaid(payload: { invoice?: { id?: string }; businessId: string }) {
     const invoiceId = payload.invoice?.id;
@@ -50,6 +58,7 @@ export class ProjectRevenueListener {
     const cfg = await this.resolveConfig(payload.businessId);
     if (!cfg.enabled) return;
     try {
+      if ((await this.invoiceStatus(payload.businessId, invoiceId)) !== 'PAID') return;
       const projects = await this.prisma.client.project.findMany({
         where: { businessId: payload.businessId, invoiceId, status: cfg.fromStatus, deletedAt: null },
         select: { id: true },
@@ -59,6 +68,9 @@ export class ProjectRevenueListener {
         if (cfg.fromStatus !== cfg.toStatusOnInvoicePaid) {
           await this.recordMove(payload.businessId, p.id, ADVANCED, cfg.fromStatus, cfg.toStatusOnInvoicePaid, invoiceId, 'invoice.paid');
         }
+      }
+      if (projects.length > 0 && (await this.invoiceStatus(payload.businessId, invoiceId)) !== 'PAID') {
+        await this.stepBackAdvancesOf(payload.businessId, invoiceId);
       }
     } catch (err: any) {
       this.logger.warn(`project advance from invoice failed: ${(err as Error).message}`);
@@ -84,40 +96,53 @@ export class ProjectRevenueListener {
     try {
       const status = await this.invoiceStatus(businessId, invoiceId);
       if (status == null || status === 'PAID') return;
-      const moves = await this.prisma.client.businessEvent.findMany({
-        where: {
-          businessId,
-          subjectType: 'project',
-          eventType: { in: [ADVANCED, REVERTED] },
-          actorId: ACTOR_ID,
-          metadata: { path: ['invoiceId'], equals: invoiceId },
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        select: { subjectId: true, eventType: true, before: true, after: true },
-      });
-      const lastMove = new Map<string, (typeof moves)[number]>();
-      for (const m of moves) if (!lastMove.has(m.subjectId)) lastMove.set(m.subjectId, m);
-      let reverted = 0;
-      for (const [projectId, move] of lastMove) {
-        if (move.eventType !== ADVANCED) continue;
-        const left = (move.before as { status?: string } | null)?.status;
-        const set = (move.after as { status?: string } | null)?.status;
-        if (!left || !set) continue;
-        const back = await this.prisma.client.project.updateMany({
-          where: { id: projectId, businessId, invoiceId, status: set, deletedAt: null },
-          data: { status: left },
-        });
-        if (back.count !== 1) continue;
-        await this.recordMove(businessId, projectId, REVERTED, set, left, invoiceId, 'invoice.reopened');
-        reverted += 1;
-        this.logger.log(`Project ${projectId} ${set} → ${left} (reason: invoice.reopened)`);
-      }
+      const reverted = await this.stepBackAdvancesOf(businessId, invoiceId);
       if (reverted > 0 && (await this.invoiceStatus(businessId, invoiceId)) === 'PAID') {
         await this.onInvoicePaid({ invoice: { id: invoiceId }, businessId });
       }
     } catch (err) {
       this.logger.warn(`project step-back on invoice reopen failed: ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS (D-102): steps back each project whose last recorded
+   * move for this invoice is a paid advance, while it is still in the status
+   * that advance set (compare-and-set), and records the reversal. Shared by the
+   * reopen handler and the paid handler's check after its write (review repair
+   * CR-REOPEN-1): whichever runs second finds the move reverted. Returns how
+   * many projects it stepped back.
+   */
+  private async stepBackAdvancesOf(businessId: string, invoiceId: string): Promise<number> {
+    const moves = await this.prisma.client.businessEvent.findMany({
+      where: {
+        businessId,
+        subjectType: 'project',
+        eventType: { in: [ADVANCED, REVERTED] },
+        actorId: ACTOR_ID,
+        metadata: { path: ['invoiceId'], equals: invoiceId },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { subjectId: true, eventType: true, before: true, after: true },
+    });
+    const lastMove = new Map<string, (typeof moves)[number]>();
+    for (const m of moves) if (!lastMove.has(m.subjectId)) lastMove.set(m.subjectId, m);
+    let reverted = 0;
+    for (const [projectId, move] of lastMove) {
+      if (move.eventType !== ADVANCED) continue;
+      const left = (move.before as { status?: string } | null)?.status;
+      const set = (move.after as { status?: string } | null)?.status;
+      if (!left || !set) continue;
+      const back = await this.prisma.client.project.updateMany({
+        where: { id: projectId, businessId, invoiceId, status: set, deletedAt: null },
+        data: { status: left },
+      });
+      if (back.count !== 1) continue;
+      await this.recordMove(businessId, projectId, REVERTED, set, left, invoiceId, 'invoice.reopened');
+      reverted += 1;
+      this.logger.log(`Project ${projectId} ${set} → ${left} (reason: invoice.reopened)`);
+    }
+    return reverted;
   }
 
   private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {

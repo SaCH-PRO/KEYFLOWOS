@@ -52,11 +52,56 @@ export class ReferralRewardService {
     };
   }
 
+  /**
+   * W10-REOPEN-REVERSALS review repair CR-REOPEN-1 (owner ruling D-102; the
+   * SEC-A9-1 pattern of RevenueActionService): the invoice is read PAID before
+   * the award and again after it. A stale delivery (the invoice reopened since)
+   * awards nothing; an award written after the refund's reopen handler ran (and
+   * found no mark to reverse) is reversed here, by the same claim, so it is
+   * reversed once whichever of the two gets there first.
+   */
   @OnEvent('invoice.paid')
   async onInvoicePaid(payload: InvoicePaidPayload) {
     const inv = payload.invoice as any;
-    if (!inv.contactId) return;
-    await this.checkAndAwardReward(payload.businessId, inv.contactId, inv.total ?? 0, inv.id);
+    if (!inv?.contactId || !inv?.id) return;
+    const businessId = payload.businessId;
+    try {
+      if ((await this.invoiceStatus(businessId, inv.id)) !== 'PAID') return;
+      const awarded = await this.checkAndAwardReward(businessId, inv.contactId, inv.total ?? 0, inv.id);
+      if (awarded && (await this.invoiceStatus(businessId, inv.id)) !== 'PAID') {
+        await this.reverseRewardOfInvoice(businessId, inv.id);
+      }
+    } catch (err) {
+      this.logger.warn(`referral reward award failed for invoice ${inv.id}: ${(err as Error).message}`);
+    }
+  }
+
+  private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {
+    const row = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { status: true },
+    });
+    return row?.status ?? null;
+  }
+
+  /**
+   * W10-REOPEN-REVERSALS review repair SEC-W10RR-1 (D-102): the contact row,
+   * read under its row lock (FOR UPDATE) inside the caller's transaction. The
+   * award and the reversal take the referred contact's lock, then the
+   * referrer's, so the referrer's credit is never a read-modify-write another
+   * award or reversal overwrites.
+   */
+  private async lockedContact(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    contactId: string,
+  ): Promise<{ id: string; custom: Prisma.JsonObject; email: string | null } | null> {
+    const rows = await tx.$queryRaw<Array<{ id: string; custom: Prisma.JsonValue | null; email: string | null }>>`
+      SELECT id, custom, email FROM contacts WHERE id = ${contactId} AND business_id = ${businessId} FOR UPDATE`;
+    const row = rows[0];
+    if (!row) return null;
+    const custom = row.custom && typeof row.custom === 'object' && !Array.isArray(row.custom) ? (row.custom as Prisma.JsonObject) : {};
+    return { id: row.id, custom: { ...custom }, email: row.email };
   }
 
   /**
@@ -91,41 +136,44 @@ export class ReferralRewardService {
     }
   }
 
+  /**
+   * W10-REOPEN-REVERSALS review repair SEC-W10RR-1 (D-102): the claim and the
+   * referrer's take-back run in one transaction under the row locks (the
+   * referred contact's, then the referrer's): the mark is claimed only while it
+   * still names this invoice, and the referrer's balance and count are read and
+   * written under its lock, so concurrent reversals (and awards) of the same
+   * referrer each take back their own credit.
+   */
   private async reverseRewardOfInvoice(businessId: string, invoiceId: string): Promise<{ contactId: string } | null> {
-    const referred = await this.prisma.client.contact.findFirst({
+    const found = await this.prisma.client.contact.findFirst({
       where: { businessId, custom: { path: [REWARD_INVOICE_KEY], equals: invoiceId } },
-      select: { id: true, custom: true },
+      select: { id: true },
     });
-    if (!referred) return null;
-    const custom: Prisma.JsonObject = { ...((referred.custom as Prisma.JsonObject | null) ?? {}) };
-    const referrerId = custom[REWARD_REFERRER_KEY] as string | undefined;
-    const credit = Number(custom[REWARD_REFERRER_AMOUNT_KEY] ?? 0);
-    delete custom.referralRewardEarned;
-    delete custom.referralRewardAmount;
-    delete custom[REWARD_INVOICE_KEY];
-    delete custom[REWARD_REFERRER_KEY];
-    delete custom[REWARD_REFERRER_AMOUNT_KEY];
-    // The claim: only the reversal that still finds this invoice on the mark writes.
-    const claimed = await this.prisma.client.contact.updateMany({
-      where: { id: referred.id, businessId, custom: { path: [REWARD_INVOICE_KEY], equals: invoiceId } },
-      data: { custom },
-    });
-    if (claimed.count !== 1) return null;
+    if (!found) return null;
+    const reversed = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      const referred = await this.lockedContact(tx, businessId, found.id);
+      // The claim: only the reversal that still finds this invoice on the mark writes.
+      if (!referred || referred.custom[REWARD_INVOICE_KEY] !== invoiceId) return null;
+      const custom = referred.custom;
+      const referrerId = custom[REWARD_REFERRER_KEY] as string | undefined;
+      const credit = Number(custom[REWARD_REFERRER_AMOUNT_KEY] ?? 0);
+      delete custom.referralRewardEarned;
+      delete custom.referralRewardAmount;
+      delete custom[REWARD_INVOICE_KEY];
+      delete custom[REWARD_REFERRER_KEY];
+      delete custom[REWARD_REFERRER_AMOUNT_KEY];
+      await tx.contact.update({ where: { id: referred.id }, data: { custom } });
 
-    if (referrerId) {
-      const referrer = await this.prisma.client.contact.findFirst({
-        where: { id: referrerId, businessId },
-        select: { id: true, custom: true },
-      });
+      const referrer = referrerId ? await this.lockedContact(tx, businessId, referrerId) : null;
       if (referrer) {
-        const referrerCustom = (referrer.custom as Prisma.JsonObject | null) ?? {};
-        const balance = Number(referrerCustom.referralRewardBalance ?? 0);
-        const earned = Number(referrerCustom.referralRewardsEarned ?? 0);
-        await this.prisma.client.contact.update({
+        const balance = Number(referrer.custom.referralRewardBalance ?? 0);
+        const earned = Number(referrer.custom.referralRewardsEarned ?? 0);
+        await tx.contact.update({
           where: { id: referrer.id },
           data: {
             custom: {
-              ...referrerCustom,
+              ...referrer.custom,
               // A credit already spent is not clawed back below zero.
               referralRewardBalance: Math.max(0, Math.round((balance - credit) * 100) / 100),
               referralRewardsEarned: Math.max(0, earned - 1),
@@ -133,9 +181,10 @@ export class ReferralRewardService {
           },
         });
       }
-    }
-    this.logger.log(`D-102: reversed the referral reward earned by invoice ${invoiceId}`);
-    return { contactId: referred.id };
+      return { contactId: referred.id };
+    });
+    if (reversed) this.logger.log(`D-102: reversed the referral reward earned by invoice ${invoiceId}`);
+    return reversed;
   }
 
   @OnEvent('booking.completed')
@@ -150,59 +199,66 @@ export class ReferralRewardService {
     await this.checkAndAwardReward(payload.businessId, booking.contactId, service?.price ?? 0);
   }
 
-  private async checkAndAwardReward(businessId: string, contactId: string, orderValue: number, invoiceId?: string) {
+  /**
+   * Awards the referral reward once per referred contact. W10-REOPEN-REVERSALS
+   * review repair SEC-W10RR-1 (D-102): the check and both writes run in one
+   * transaction under the referred contact's row lock, then the referrer's (the
+   * reversal's order), so concurrent awards of one referrer each add their
+   * credit and a referred contact is awarded once. Returns whether it awarded.
+   */
+  private async checkAndAwardReward(businessId: string, contactId: string, orderValue: number, invoiceId?: string): Promise<boolean> {
     const config = this.getConfig(businessId);
-    if (!config?.enabled || orderValue < config.minOrderValue) return;
+    if (!config?.enabled || orderValue < config.minOrderValue) return false;
 
-    const contact = await this.prisma.client.contact.findUnique({
-      where: { id: contactId },
-      select: { custom: true, firstName: true, lastName: true, email: true },
-    });
-    if (!contact) return;
+    const awardedTo = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      const contact = await this.lockedContact(tx, businessId, contactId);
+      if (!contact) return null;
 
-    const custom = (contact.custom as Record<string, any>) ?? {};
-    const referralSourceId = custom.referralSourceId as string | undefined;
-    const rewardAlreadyEarned = custom.referralRewardEarned as boolean | undefined;
-    if (!referralSourceId || rewardAlreadyEarned) return;
+      const custom = contact.custom;
+      const referralSourceId = custom.referralSourceId as string | undefined;
+      const rewardAlreadyEarned = custom.referralRewardEarned as boolean | undefined;
+      if (!referralSourceId || rewardAlreadyEarned) return null;
 
-    // Award reward to referrer
-    const referrer = await this.prisma.client.contact.findUnique({
-      where: { id: referralSourceId, businessId },
-      select: { id: true, custom: true, email: true },
-    });
-    if (!referrer) return;
+      // Award reward to referrer
+      const referrer = await this.lockedContact(tx, businessId, referralSourceId);
+      if (!referrer) return null;
 
-    const referrerCustom = (referrer.custom as Record<string, any>) ?? {};
-    const referrerBalance = (referrerCustom.referralRewardBalance as number) ?? 0;
+      const referrerCustom = referrer.custom;
+      const referrerBalance = Number(referrerCustom.referralRewardBalance ?? 0);
 
-    await this.prisma.client.contact.update({
-      where: { id: referrer.id },
-      data: {
-        custom: {
-          ...referrerCustom,
-          referralRewardBalance: referrerBalance + config.referrerReward,
-          referralRewardsEarned: (referrerCustom.referralRewardsEarned ?? 0) + 1,
+      await tx.contact.update({
+        where: { id: referrer.id },
+        data: {
+          custom: {
+            ...referrerCustom,
+            referralRewardBalance: referrerBalance + config.referrerReward,
+            referralRewardsEarned: Number(referrerCustom.referralRewardsEarned ?? 0) + 1,
+          },
         },
-      },
-    });
+      });
 
-    // Mark referred contact as rewarded
-    await this.prisma.client.contact.update({
-      where: { id: contactId },
-      data: {
-        custom: {
-          ...custom,
-          referralRewardEarned: true,
-          referralRewardAmount: config.referredReward,
-          // W10-REOPEN-REVERSALS (D-102): what a reopen of this invoice reverses.
-          ...(invoiceId
-            ? { [REWARD_INVOICE_KEY]: invoiceId, [REWARD_REFERRER_KEY]: referrer.id, [REWARD_REFERRER_AMOUNT_KEY]: config.referrerReward }
-            : {}),
+      // Mark referred contact as rewarded
+      await tx.contact.update({
+        where: { id: contact.id },
+        data: {
+          custom: {
+            ...custom,
+            referralRewardEarned: true,
+            referralRewardAmount: config.referredReward,
+            // W10-REOPEN-REVERSALS (D-102): what a reopen of this invoice reverses.
+            ...(invoiceId
+              ? { [REWARD_INVOICE_KEY]: invoiceId, [REWARD_REFERRER_KEY]: referrer.id, [REWARD_REFERRER_AMOUNT_KEY]: config.referrerReward }
+              : {}),
+          },
         },
-      },
+      });
+      return referrer.email;
     });
+    if (awardedTo === null) return false;
 
-    this.logger.log(`Awarded ${config.currency} ${config.referrerReward} referral reward to ${referrer.email}`);
+    this.logger.log(`Awarded ${config.currency} ${config.referrerReward} referral reward to ${awardedTo}`);
+    return true;
   }
 
   async getReferralStats(businessId: string, contactId: string) {
