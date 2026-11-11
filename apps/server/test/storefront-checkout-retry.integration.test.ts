@@ -122,9 +122,13 @@
  *           PaymentsController and PaymentsService on a second app, settling
  *           through the REAL StoreOrderService) settles an order only on
  *           WiPay's keyed proof with the business's OWN API key (V1-05): a
- *           public-values hash, the platform key's proof for a store with no
- *           key of its own and another store's key are refused 400 with
- *           nothing written; the store's own key settles its order once
+ *           public-values hash, another store's key and the platform key on
+ *           a keyed store's order are refused 400 with nothing written; the
+ *           platform key's proof for a store with no key of its own (a
+ *           checkout into the platform's account started before D-105)
+ *           settles nothing and is kept as a refused claim, the store told
+ *           once (review SEC-W10WK-2); the store's own key settles its order
+ *           once
  *   V33-29  with the platform's WiPay pair set, a WiPay checkout on a store
  *           with no WiPay key of its own is refused 400 WIPAY_KEY_REQUIRED
  *           before the order is written
@@ -1286,7 +1290,7 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key, every WiPay suc
     }
   });
 
-  it("SEC-V33-2 (W10-WIPAY-KEY, D-105, was it.todo) the storefront WiPay success callback settles an order only on WiPay's keyed proof with the business's own API key: a public-values hash, the platform key's proof for a store with no key of its own, another store's key and the platform key on a keyed store's order are refused 400 with nothing written; the store's own key settles its order once through the door and the replay writes nothing", async () => {
+  it("SEC-V33-2 (W10-WIPAY-KEY, D-105, was it.todo; review SEC-W10WK-2) the storefront WiPay success callback settles an order only on WiPay's keyed proof with the business's own API key: a public-values hash, another store's key and the platform key on a keyed store's order are refused 400 with nothing written; the platform key's proof for a store with no key of its own settles nothing and is kept as a refused claim, the store told once; the store's own key settles its order once through the door and the replay writes nothing", async () => {
     // Store B has no WiPay key of its own. Its order was placed with WiPay before D-105 (the order door now
     // refuses that: V33-29), so the CASH order is moved to an unpaid WiPay order directly.
     const placedB = await checkout(SLUG.b, cart(ID.prodB, 'CASH'));
@@ -1307,11 +1311,10 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key, every WiPay suc
     const attempts: Array<[string, Record<string, string>]> = [
       // V1-05 closed the unkeyed hash this todo named (green at 1a9ca4fd: a regression pin).
       ['the public-values hash md5(transaction_id + order_id + total + status)', { ...forged, hash: md5(`${forged.transaction_id}${forged.order_id}${forged.total}${forged.status}`) }],
-      // D-105. At 1a9ca4fd: 200 'Payment successful' and store B's order PAID (invoice, payment, posting).
-      ["the platform key's proof for store B's order (no key of its own)", success(`${P}wtx_platform_b`, orderB.id, PLATFORM_KEY)],
       ["store A's key on store B's order", success(`${P}wtx_a_on_b`, orderB.id, STORE_A_KEY)],
       ["the platform key's proof for store A's order", success(`${P}wtx_platform_a`, orderA.id, PLATFORM_KEY)],
     ];
+    const platformB = success(`${P}wtx_platform_b`, orderB.id, PLATFORM_KEY);
     setPlatformPair();
     try {
       for (const [label, query] of attempts) {
@@ -1319,6 +1322,16 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key, every WiPay suc
         const res = await wipayCallback(query);
         expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
         expect(res.body, label).not.toHaveProperty('success', true);
+      }
+      // D-105. At 1a9ca4fd: 200 'Payment successful' and store B's order PAID (invoice, payment, posting). At
+      // 332eed5c: 400 with nothing kept (review SEC-W10WK-2, WK-CR-1). The proof is WiPay's genuine word that the
+      // money reached the platform's account (a checkout started before D-105): it settles nothing and is kept.
+      for (const attempt of ['first', 'replay']) {
+        await clearRateLimits();
+        const res = await wipayCallback(platformB);
+        expect(res.status, `the platform key's proof for store B's order (${attempt}): ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body, attempt).toMatchObject({ success: false, invoiceId: orderB.id });
+        expect(res.body.message, attempt).toMatch(/platform's WiPay account/);
       }
     } finally {
       clearPlatformPair();
@@ -1329,7 +1342,15 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key, every WiPay suc
     for (const id of [orderB.id, orderA.id]) {
       expect((await db.marketplaceOrder.findUnique({ where: { id } })).paymentStatus, id).toBe('UNPAID');
     }
-    expect(await wipayClaims(), 'no transaction is claimed').toBe(claimsBefore);
+    const keptB = await db.webhookEvent.findMany({ where: { provider: 'wipay', providerEventId: `${P}wtx_platform_b` } });
+    expect(keptB.map((k: any) => `${k.eventType}|${k.businessId}`), "store B's platform-account payment is kept refused").toEqual([
+      `refused:platform-account|${ID.bizB}`,
+    ]);
+    const toldB = await db.notification.findMany({ where: { businessId: ID.bizB, type: 'payment.refused' } });
+    expect(toldB.map((n: any) => n.data), 'store B is told once').toEqual([
+      expect.objectContaining({ provider: 'wipay', transactionId: `${P}wtx_platform_b`, payableType: 'order', payableId: orderB.id, reason: 'platform-account' }),
+    ]);
+    expect(await wipayClaims(), 'no other transaction is claimed').toBe(claimsBefore + 1);
     expect(seen.filter((e) => e.name === 'store_order.paid'), 'no store_order.paid').toEqual([]);
 
     // Store A's own key settles its own order once, through completeCheckout.

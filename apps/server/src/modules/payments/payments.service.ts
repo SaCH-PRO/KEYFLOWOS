@@ -19,6 +19,7 @@ import { WiPayConnector } from '../../core/connectors/implementations/wipay.conn
 import {
   WIPAY_CURRENCY,
   WIPAY_KEY_REQUIRED,
+  platformWipayKeyForTransition,
   resolveWipayMerchant,
   wipayMerchantComplete,
   wipayTakesCurrency,
@@ -159,6 +160,15 @@ function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undef
  * payment was not recorded because the invoice is VOID.
  */
 const INVOICE_VOID_REFUSAL = 'refused:invoice_void';
+
+/**
+ * W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (owner ruling D-105; the D-76
+ * `refused:<reason>` mark): the event type a WiPay transaction's
+ * webhook_events row is kept under when its success was paid into the
+ * platform's WiPay account (a checkout started before D-105) and so was not
+ * recorded on the business's payable (refuseWipayPlatformAccount).
+ */
+const WIPAY_PLATFORM_ACCOUNT_REFUSAL = 'refused:platform-account';
 
 /**
  * W3-VOID-PROVIDER-RACE review CR-VPR-1: createRefundWithPostingByInvoice's
@@ -2583,7 +2593,12 @@ export class PaymentsService {
    * business's own (wipayApiKey), for an invoice and a storefront order alike,
    * never the platform's. A storefront order of a business with no WiPay key
    * of its own is settled by no callback, and a success proved with one
-   * business's key is refused for another business's payable.
+   * business's key is refused for another business's payable. Review
+   * SEC-W10WK-1: WiPay's public sandbox key ('123') saved as a business's key
+   * is no key (resolveWipayMerchant). Review SEC-W10WK-2 / WK-CR-1: a success
+   * the platform key proves for a business with no key of its own (a checkout
+   * into the platform's account started before D-105) settles nothing and is
+   * kept refused and told (refuseWipayPlatformAccount), not a bare 400.
    */
   async handleWipayCallback(queryParams: WipayCallbackParams): Promise<{ success: boolean; invoiceId?: string; message: string }> {
     const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -2624,10 +2639,27 @@ export class PaymentsService {
     // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): for an invoice that is an amount a checkout of it asked for,
     // as kept when it asked (review SEC-CAP-1..3, CR-CAP-1: wipayRequestedInvoiceTotals), or the whole
     // total a checkout made before it asked for.
-    const requestedTotal = (invoice ? await this.wipayRequestedInvoiceTotals(invoice) : [Number(order!.total)]).find((t) =>
-      PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash),
-    );
+    const requestedTotals = invoice ? await this.wipayRequestedInvoiceTotals(invoice) : [Number(order!.total)];
+    const requestedTotal = requestedTotals.find((t) => PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash));
     if (requestedTotal === undefined) {
+      // W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (the D-105 deploy transition): a business with no WiPay key of
+      // its own checked out into the platform's WiPay account until D-105. A success the platform key proves for
+      // such a business's payable is WiPay's word that money reached the platform's account: it settles nothing,
+      // and is kept refused and told (refuseWipayPlatformAccount) instead of a 400 that records nothing.
+      const platformKey = apiKey ? null : platformWipayKeyForTransition();
+      const platformTotal = platformKey
+        ? requestedTotals.find((t) => PaymentsService.wipayProofVerifies(platformKey, transaction_id, t, hash))
+        : undefined;
+      if (platformTotal !== undefined) {
+        return this.refuseWipayPlatformAccount({
+          transactionId: transaction_id!,
+          payableType: invoice ? 'invoice' : 'order',
+          payableId: order_id,
+          businessId,
+          currency: invoice ? invoice.currency : order!.currency,
+          total: platformTotal,
+        });
+      }
       this.logger.error(
         `WiPay callback for ${order_id} refused: ${apiKey ? 'its hash is not WiPay\'s keyed response hash' : 'no WiPay API key is configured to verify it'}`,
       );
@@ -2797,6 +2829,96 @@ export class PaymentsService {
       success: false,
       invoiceId: input.payableId,
       message: `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only: this ${input.payableType} is in ${currency}, so the payment was not recorded`,
+    };
+  }
+
+  /**
+   * W10-WIPAY-KEY review SEC-W10WK-2 / WK-CR-1 (owner ruling D-105; the D-76
+   * pattern of refuseWipayCurrency): the deploy transition. Until D-105 a
+   * business with no WiPay setting of its own checked out into the platform's
+   * WiPay account, and its success callbacks were keyed with the platform's
+   * key. A checkout started before D-105 and paid after it is therefore proved
+   * with the platform key (WIPAY_API_KEY, platformWipayKeyForTransition) for a
+   * payable of a business that now has no key verifying it: the money sits in
+   * the platform's account, not the business's. Nothing is recorded as money:
+   * no Payment row, no posting, the invoice and the storefront order as they
+   * were. The transaction's webhook_events row is kept, marked
+   * `refused:platform-account` with the payable's business, so every
+   * redelivery is a no-op, and the business is told once (a 'payment.refused'
+   * notification, reason 'platform-account'). The payer is answered
+   * { success: false }. It used to be a 400 'Invalid WiPay callback
+   * signature' with only a log line, so nothing in the system recorded the
+   * money (the review's repro: PC-11 at 332eed5c).
+   *
+   * Reconciliation (operator): the platform's WiPay account holds each such
+   * payment; webhook_events rows with provider 'wipay' and event_type
+   * 'refused:platform-account' name the transaction and the business, and the
+   * business's notification carries the payable and the amount. They are
+   * passed on or refunded by hand from the platform's WiPay account.
+   *
+   * Only a proof the platform key verifies over an amount this server asked
+   * for on that payable reaches here (the platform key is the secret behind
+   * it), and only for a business with no WiPay key of its own: a business
+   * with its own key is checked against its own key alone. WiPay's proof
+   * names no order_id, so which keyless payable such a success is kept
+   * against is the caller's choice; it is kept once, settles nothing and only
+   * names where the money went.
+   */
+  private async refuseWipayPlatformAccount(input: {
+    transactionId: string;
+    payableType: 'invoice' | 'order';
+    payableId: string;
+    businessId: string;
+    currency: string | null | undefined;
+    total: number;
+  }): Promise<{ success: boolean; invoiceId?: string; message: string }> {
+    const currency = normalizeCurrency(input.currency) || PaymentsService.WIPAY_CURRENCY;
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'wipay',
+      input.transactionId,
+      WIPAY_PLATFORM_ACCOUNT_REFUSAL,
+      input.businessId,
+    );
+    if (fresh) {
+      this.logger.error(
+        `WiPay transaction ${input.transactionId} for ${input.payableType} ${input.payableId} (business ${input.businessId}) ` +
+          `not recorded: it was paid into the platform's WiPay account by a checkout started before D-105 (proved with ` +
+          `WIPAY_API_KEY); reconcile it from the platform's WiPay account (webhook_events '${WIPAY_PLATFORM_ACCOUNT_REFUSAL}')`,
+      );
+      await this.prisma.client.notification
+        .create({
+          data: {
+            businessId: input.businessId,
+            type: 'payment.refused',
+            title: 'WiPay payment not recorded',
+            body:
+              `WiPay reported a successful payment (transaction ${input.transactionId}) of ${currency} ` +
+              `${Number(input.total).toFixed(2)} for ${input.payableType} ${input.payableId}. It was paid into the ` +
+              "platform's WiPay account, not yours, by a checkout started before WiPay needed your own key, so it was " +
+              'not recorded. Contact support to have it passed on to you or refunded, then record it by hand.',
+            data: {
+              provider: 'wipay',
+              transactionId: input.transactionId,
+              payableType: input.payableType,
+              payableId: input.payableId,
+              currency,
+              total: input.total,
+              reason: 'platform-account',
+            },
+          },
+        })
+        .catch((e: unknown) =>
+          this.logger.error(
+            `Could not notify business ${input.businessId} of WiPay platform-account transaction ${input.transactionId}: ${e instanceof Error ? e.message : e}`,
+          ),
+        );
+    }
+    return {
+      success: false,
+      invoiceId: input.payableId,
+      message:
+        `This payment was made into the platform's WiPay account, not the business's, so it was not recorded on this ` +
+        `${input.payableType}; the business has been told`,
     };
   }
 

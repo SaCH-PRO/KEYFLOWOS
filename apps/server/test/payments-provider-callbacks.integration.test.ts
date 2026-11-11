@@ -64,11 +64,15 @@
  *          URL carry no key; a live checkout with no account number is 400
  *          before WiPay is called; the invoice checkout's return URL must be
  *          on an allowed origin (review V05-SEC-3)
- *   PC-11  the platform key (WIPAY_API_KEY) verifies no tenant's payable: a
+ *   PC-11  the platform key (WIPAY_API_KEY) settles no tenant's payable: a
  *          business with its own account number and no key of its own is
  *          refused (review V05-SEC-3) and, since D-105, so is a business with
  *          no WiPay setting of its own (it checked out into the platform's
- *          account and the platform key settled it)
+ *          account and the platform key settled it). Review SEC-W10WK-2 /
+ *          WK-CR-1 (the D-105 deploy transition): such a proof is WiPay's
+ *          genuine word that money reached the platform's account, so it is
+ *          kept as a refused claim (refused:platform-account) with the
+ *          business, which is told once; nothing is settled
  *   PC-11b with no shared key a verified success books only against a payable
  *          of the business whose own key proved it (W10-WIPAY-KEY, D-105; was
  *          a todo): business A's proof is refused for business B's invoice
@@ -135,6 +139,11 @@
  *          id, storefront) and every WiPay checkout for it (pay link, generic
  *          invoice and storefront checkouts, createStorePayment) is refused
  *          400 WIPAY_KEY_REQUIRED before WiPay is called; nothing is written
+ *   PC-21  review SEC-W10WK-1: WiPay's public sandbox key ('123') saved as a
+ *          business's own key is no key: WiPay is not offered, its checkouts
+ *          are refused WIPAY_KEY_REQUIRED and a sandbox-keyed success settles
+ *          nothing (PC-21b, the refusal at the payment-secret write, is a
+ *          todo: identity.service.ts is outside this packet's write set)
  *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
@@ -277,6 +286,8 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)} OR provider_payment_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    // Review SEC-W10WK-2: the payment.refused notices PC-11 checks (the business delete cascades them too).
+    `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR token LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -833,34 +844,88 @@ describe('review V05-SEC-1: the WiPay checkouts never hand the API key to the pa
 });
 
 describe('review V05-SEC-3: the platform WiPay key verifies only payables that pay into the platform account', () => {
-  it("PC-11 (review V05-SEC-3; W10-WIPAY-KEY, D-105): with WIPAY_API_KEY set, the platform key settles no tenant's payable: a business with its own WiPay account number and no key of its own, and a business with no WiPay setting of its own (on the platform's account before D-105), get 400 for a callback keyed with the platform key; nothing is written", async () => {
+  it("PC-11 (review V05-SEC-3; W10-WIPAY-KEY, D-105; review SEC-W10WK-2, WK-CR-1): with WIPAY_API_KEY set, the platform key settles no tenant's payable: for a business with no WiPay key of its own (its own account number only, or no WiPay setting at all: on the platform's account before D-105) a success proved with the platform key settles nothing and is kept as a refused claim (refused:platform-account) with that business, which is told once; the invoices and the storefront order stay unpaid and the replay adds nothing", async () => {
+    const storeNoKey = `${P}storeNoKeyPlatform`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: storeNoKey,
+        businessId: ID.bizNoKey,
+        orderNumber: `${P}SO-0021`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    storeOrders.updatePaymentStatus.mockClear();
+    wipayEvents.emitPaymentReceived.mockClear();
     process.env.WIPAY_API_KEY = PLATFORM_KEY;
     try {
+      // Review V05-SEC-3: a business with its own account number and no key of its own (its checkouts were refused
+      // since NEW-1). At the V05 head: 200 'Payment successful' and a SUCCESSFUL row.
       const own = `${P}wtx_platform_own_account`;
-      const refused = await wipay({ transaction_id: own, order_id: ID.invOwnAccount, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(own, TOTAL, PLATFORM_KEY) });
-      // At the packet head: 200 'Payment successful' and a SUCCESSFUL row (the platform key verified every keyless tenant).
-      expect(refused.status, JSON.stringify(refused.body)).toBe(400);
-      expect(await rowsOf(ID.invOwnAccount)).toEqual([]);
-      expect(await claims('wipay', own)).toBe(0);
-      expect(await invoiceStatus(ID.invOwnAccount)).toBe('SENT');
-
-      // D-105: a business with no WiPay setting of its own no longer pays into the platform's account, so the
-      // platform key proves nothing for it either. At 1a9ca4fd: 200 'Payment successful', a SUCCESSFUL row, PAID.
+      // D-105: a business with no WiPay setting of its own checked out into the platform's account until
+      // 1a9ca4fd, where this proof answered 200 'Payment successful' with a SUCCESSFUL row and the invoice PAID.
       const txn = `${P}wtx_platform`;
-      const keyless = await wipay({ transaction_id: txn, order_id: ID.invPlatform, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(txn, TOTAL, PLATFORM_KEY) });
-      expect(keyless.status, JSON.stringify(keyless.body)).toBe(400);
-      expect(keyless.body).not.toHaveProperty('success', true);
-      expect(await rowsOf(ID.invPlatform)).toEqual([]);
-      expect(await claims('wipay', txn)).toBe(0);
-      expect(await postingCount(ID.invPlatform)).toBe(0);
-      expect(await invoiceStatus(ID.invPlatform)).toBe('SENT');
+      const storeTxn = `${P}wtx_platform_store`;
+      const cases: Array<[string, string, string, number, string]> = [
+        ['own account, no key: invoice', own, ID.invOwnAccount, TOTAL, ID.bizOwnAccount],
+        ['no WiPay setting: invoice', txn, ID.invPlatform, TOTAL, ID.bizNoKey],
+        ['no WiPay setting: storefront order', storeTxn, storeNoKey, STORE_TOTAL, ID.bizNoKey],
+      ];
+      for (const [label, t, payable, total, biz] of cases) {
+        const q = { transaction_id: t, order_id: payable, status: 'success', total: total.toFixed(2), hash: keyedHash(t, total, PLATFORM_KEY) };
+        // At 332eed5c (review SEC-W10WK-2, WK-CR-1): 400 'Invalid WiPay callback signature' and nothing kept but a
+        // log line, while the money WiPay took sat in the platform's account.
+        for (const attempt of ['first', 'replay']) {
+          const res = await wipay(q);
+          expect(res.status, `${label} (${attempt}): ${JSON.stringify(res.body)}`).toBe(200);
+          expect(res.body, `${label} (${attempt})`).toMatchObject({ success: false, invoiceId: payable });
+          expect(res.body.message, `${label} (${attempt})`).toMatch(/platform's WiPay account/);
+        }
+        const kept = await db.webhookEvent.findMany({ where: { provider: 'wipay', providerEventId: t } });
+        expect(kept.map((k: any) => `${k.eventType}|${k.businessId}`), label).toEqual([`refused:platform-account|${biz}`]);
+        const told = await db.notification.findMany({
+          where: { businessId: biz, type: 'payment.refused', data: { path: ['transactionId'], equals: t } },
+        });
+        expect(told, `${label}: told once`).toHaveLength(1);
+        expect(told[0].data, label).toMatchObject({ provider: 'wipay', transactionId: t, payableId: payable, total, reason: 'platform-account' });
+        expect(told[0].body, label).toMatch(/not recorded/);
+      }
+      for (const inv of [ID.invOwnAccount, ID.invPlatform]) {
+        expect(await rowsOf(inv), inv).toEqual([]);
+        expect(await postingCount(inv), inv).toBe(0);
+        expect(await invoiceStatus(inv), inv).toBe('SENT');
+      }
+      expect(storeOrders.updatePaymentStatus, 'the storefront order is not settled').not.toHaveBeenCalled();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: storeNoKey } })).paymentStatus).toBe('UNPAID');
+      expect(wipayEvents.emitPaymentReceived, 'no payment-received event').not.toHaveBeenCalled();
       await expectBalanced(ID.bizNoKey);
+      await expectBalanced(ID.bizOwnAccount);
+
+      // Only a proof the platform key verifies over an amount this server asked for is kept: over another total it
+      // is refused 400 with nothing kept.
+      const otherTotal = `${P}wtx_platform_other_total`;
+      const res = await wipay({ transaction_id: otherTotal, order_id: ID.invPlatform, status: 'success', total: '1.00', hash: keyedHash(otherTotal, 1, PLATFORM_KEY) });
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(await claims('wipay', otherTotal)).toBe(0);
     } finally {
       delete process.env.WIPAY_API_KEY;
     }
+
+    // Without WIPAY_API_KEY nothing recognises the platform's proof: 400, nothing kept, as any unverified proof.
+    const unset = `${P}wtx_platform_unset`;
+    const noEnv = await wipay({ transaction_id: unset, order_id: ID.invPlatform, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(unset, TOTAL, PLATFORM_KEY) });
+    expect(noEnv.status, JSON.stringify(noEnv.body)).toBe(400);
+    expect(await claims('wipay', unset)).toBe(0);
+    expect(await rowsOf(ID.invPlatform)).toEqual([]);
   });
 
-  it("PC-11b (W10-WIPAY-KEY, D-105, was it.todo): with no shared key a verified success books only against a payable of the business whose own key proved it: a proof keyed with business A's key is refused (400, nothing written) for business B's invoice and storefront order of the same total, B's for A's, and the platform key's for a keyless business's invoice; the same proof settles A's own invoice once", async () => {
+  it("PC-11b (W10-WIPAY-KEY, D-105, was it.todo; review SEC-W10WK-2): with no shared key a verified success books only against a payable of the business whose own key proved it: a proof keyed with business A's key is refused (400, nothing written) for business B's invoice and storefront order of the same total, B's for A's, and the platform key's for A's invoice; the platform key's proof for a keyless business's invoice settles nothing (kept refused, PC-11); the same proof settles A's own invoice once", async () => {
     // WiPay's documented proof md5(transaction_id + total + API key) (D-19) names no order_id. Before D-105 a
     // success proved by the shared platform key could be booked against the payable of any keyless tenant of the
     // same total. With each business on its own key (D-105) the key names the business, so a proof verifies only
@@ -894,6 +959,7 @@ describe('review V05-SEC-3: the platform WiPay key verifies only payables that p
     const txnA = `${P}wtx_cross_a`;
     const txnB = `${P}wtx_cross_b`;
     const txnP = `${P}wtx_cross_platform`;
+    const txnPA = `${P}wtx_cross_platform_a`;
     process.env.WIPAY_API_KEY = PLATFORM_KEY;
     process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
     try {
@@ -901,14 +967,19 @@ describe('review V05-SEC-3: the platform WiPay key verifies only payables that p
         ["A's proof on B's invoice", txnA, invB, WIPAY_KEY],
         ["A's proof on B's storefront order", txnA, orderB, WIPAY_KEY],
         ["B's proof on A's invoice", txnB, invA, B_KEY],
-        // At 1a9ca4fd: 200 'Payment successful' (the platform key verified every keyless tenant's payable).
-        ["the platform key's proof on a keyless business's invoice", txnP, ID.invNoKey, PLATFORM_KEY],
+        // Review SEC-W10WK-2: A has its own key, so the platform key is not even read for its payables.
+        ["the platform key's proof on A's invoice", txnPA, invA, PLATFORM_KEY],
       ];
       for (const [label, txn, orderId, key] of attempts) {
         const res = await success(txn, orderId, key);
         expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
         expect(res.body, label).not.toHaveProperty('success', true);
       }
+      // At 1a9ca4fd: 200 'Payment successful' (the platform key verified every keyless tenant's payable). Review
+      // SEC-W10WK-2: it settles nothing and is kept refused with the keyless business (PC-11).
+      const platform = await success(txnP, ID.invNoKey, PLATFORM_KEY);
+      expect(platform.status, JSON.stringify(platform.body)).toBe(200);
+      expect(platform.body).toMatchObject({ success: false, invoiceId: ID.invNoKey });
     } finally {
       delete process.env.WIPAY_API_KEY;
       delete process.env.WIPAY_ACCOUNT_NUMBER;
@@ -917,7 +988,9 @@ describe('review V05-SEC-3: the platform WiPay key verifies only payables that p
       expect(await rowsOf(inv), inv).toEqual([]);
       expect(await invoiceStatus(inv), inv).toBe('SENT');
     }
-    for (const txn of [txnA, txnB, txnP]) expect(await claims('wipay', txn), txn).toBe(0);
+    for (const txn of [txnA, txnB, txnPA]) expect(await claims('wipay', txn), txn).toBe(0);
+    const keptP = await db.webhookEvent.findMany({ where: { provider: 'wipay', providerEventId: txnP } });
+    expect(keptP.map((k: any) => `${k.eventType}|${k.businessId}`)).toEqual([`refused:platform-account|${ID.bizNoKey}`]);
     expect(storeOrders.updatePaymentStatus, "B's storefront order is not settled").not.toHaveBeenCalled();
 
     // Control: A's proof settles A's own invoice once.
@@ -1443,4 +1516,97 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key (D-105)", () => 
     // Control: a business with its own key and account is still offered WiPay, for TTD.
     expect((await payments.getAvailableGateways(ID.bizKeyed, 'TTD')).map((g) => g.id)).toContain('wipay');
   });
+
+  it("PC-21 (W10-WIPAY-KEY review SEC-W10WK-1, D-105): WiPay's public sandbox key ('123') is no key: a business that saved it as its own key, with its own account number, is not offered WiPay (pay-link, bare-id and storefront gateway lists; its connector is not connected), every WiPay checkout for it is refused 400 WIPAY_KEY_REQUIRED before WiPay is called, and a success proved with the sandbox key settles neither its invoice nor its storefront order (400, nothing written), with or without the platform key", async () => {
+    const biz = `${P}bizSandbox`;
+    const contact = `${P}contactSandbox`;
+    const inv = `${P}invSandbox`;
+    const order = `${P}storeSandbox`;
+    await seedBusiness(biz, 'TTD', { wipayApiKey: WIPAY_SANDBOX_KEY, wipayAccountNumber: `${P}sandbox_account` });
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(biz);
+    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V05A', lastName: 'Sandbox', email: `${P}sandbox@test.local` } });
+    await seedInvoice(inv, biz, contact, TOTAL, 'TTD');
+    await db.marketplaceOrder.create({
+      data: {
+        id: order,
+        businessId: biz,
+        orderNumber: `${P}SO-0022`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    storeOrders.updatePaymentStatus.mockClear();
+    const { WiPayConnector } = await import('../src/core/connectors/implementations/wipay.connector');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const connector = new WiPayConnector(app.get(PrismaService), eventStub as any, {} as any);
+
+    for (const platformKey of [undefined, PLATFORM_KEY]) {
+      const setting = platformKey ? 'platform key set' : 'no platform key';
+      if (platformKey) process.env.WIPAY_API_KEY = platformKey;
+      else delete process.env.WIPAY_API_KEY;
+
+      // At 332eed5c: ['wipay'] on every list and the connector 'connected'.
+      await clearRateLimits();
+      const byToken = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/gateways`);
+      expect(byToken.status, JSON.stringify(byToken.body)).toBe(200);
+      expect(byToken.body.map((g: { id: string }) => g.id), `${setting}: pay-link gateway list`).not.toContain('wipay');
+      const bare = await agent().get(`/payments/invoice/${encodeURIComponent(inv)}/gateways`);
+      expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+      expect(bare.body.map((g: { id: string }) => g.id), `${setting}: bare-id gateway list`).not.toContain('wipay');
+      expect((await payments.getAvailableGateways(biz, 'TTD')).map((g) => g.id), `${setting}: storefront gateway list`).not.toContain('wipay');
+      expect((await connector.healthCheck(biz)).status, `${setting}: connector`).not.toBe('connected');
+
+      // At 332eed5c: 201 checkouts into the account it named, verified by the public key.
+      const attempts: Array<[string, () => any]> = [
+        ['pay-link checkout', () => agent().post(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(inv))}/checkout`).send({ gateway: 'wipay', returnUrl: RETURN_URL })],
+        ['generic invoice checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: inv, gateway: 'wipay', returnUrl: RETURN_URL })],
+        ['generic storefront checkout', () => agent().post('/payments/create-checkout').send({ payableType: 'storefront_order', payableId: order, gateway: 'wipay', returnUrl: RETURN_URL })],
+      ];
+      for (const [label, send] of attempts) {
+        await clearRateLimits();
+        const res = await send();
+        expect(res.status, `${setting}: ${label}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, `${setting}: ${label}`).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+      }
+      const direct = await payments
+        .createStorePayment({ orderId: order, amount: STORE_TOTAL, currency: 'TTD', method: 'WIPAY', businessId: biz, returnUrl: RETURN_URL })
+        .then(() => null, (e: any) => e);
+      expect(direct?.getStatus?.(), `${setting}: createStorePayment refuses`).toBe(400);
+      expect(direct.getResponse()).toMatchObject({ code: WIPAY_KEY_REQUIRED, message: NO_KEY_MESSAGE });
+
+      // At 332eed5c (the reviewer's probe): 200 'Payment successful', the invoice PAID and the order settled, for a
+      // proof anyone computes: md5(transaction_id + total + '123').
+      const proofs: Array<[string, string, number]> = [
+        ['invoice', inv, TOTAL],
+        ['storefront order', order, STORE_TOTAL],
+      ];
+      for (const [what, payable, total] of proofs) {
+        const t = `${P}wtx_sandbox_${what === 'invoice' ? 'inv' : 'store'}_${platformKey ? 'p' : 'n'}`;
+        const res = await wipay({ transaction_id: t, order_id: payable, status: 'success', total: total.toFixed(2), hash: keyedHash(t, total, WIPAY_SANDBOX_KEY) });
+        expect(res.status, `${setting}: ${what}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, `${setting}: ${what}`).not.toHaveProperty('success', true);
+        expect(await claims('wipay', t), `${setting}: ${what}`).toBe(0);
+      }
+    }
+    delete process.env.WIPAY_API_KEY;
+
+    expect(providerRequests, 'WiPay is never called').toEqual([]);
+    expect(await rowsOf(inv)).toEqual([]);
+    expect(await postingCount(inv)).toBe(0);
+    expect(await invoiceStatus(inv)).toBe('SENT');
+    expect(storeOrders.updatePaymentStatus, 'the storefront order is not settled').not.toHaveBeenCalled();
+    expect((await db.marketplaceOrder.findUnique({ where: { id: order } })).paymentStatus).toBe('UNPAID');
+    expect(await db.notification.count({ where: { businessId: biz } }), 'no refusal notice: no proof verified').toBe(0);
+  });
+
+  it.todo(
+    "PC-21b (W10-WIPAY-KEY review SEC-W10WK-1, D-105): the owner's payment-secret write (the business profile PATCH, IdentityService applyPaymentSecretWrites) refuses WiPay's public sandbox key as the business's WiPay API key. Not in the W10-WIPAY-KEY write set (identity.service.ts); a stored '123' is already inert, read as no key everywhere (PC-21)",
+  );
 });
