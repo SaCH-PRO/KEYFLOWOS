@@ -68,7 +68,10 @@
  * KEY tool connect.scanDrive (KeyToolRegistryService: the driving member must be
  * the owner, else a refusal envelope and nothing run; control [V94D-J02]), and
  * [V94D-T07] POST /calendar/businesses/:b/sync/google/temporal-flow (control
- * [V94D-J03]: PATCH .../sync/settings stays a member's). For these cases the
+ * [V94D-J03]). Its review repair (SEC-W10GDR-1; D-99, D-111) gates the Google
+ * Calendar sync settings writes, PATCH /calendar/businesses/:b/sync/settings
+ * and its twin PATCH /bookings/businesses/:b/calendar/settings ([V94D-T08],
+ * control [V94D-J04]; the reads stay a member's). For these cases the
  * Drive pull (ConnectorIntelligenceService.syncGoogleDrive) and the calendar
  * pull (GoogleCalendarTemporalSyncService.syncBusiness) are recording
  * stand-ins, the KEY tool registry is the real KeyToolRegistryService with
@@ -1144,7 +1147,11 @@ describe('W10-GOOGLE-DOORS-REST: pulling the business Google Calendar into the t
     expect(temporalSync.syncBusiness).not.toHaveBeenCalled();
   });
 
-  it('[V94D-J03] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN pull the Google Calendar into the temporal flow (201, the pull\'s counts) and syncBusiness runs once for the route\'s business each time; the ruling covers start, sync and disconnect only, so PATCH .../sync/settings stays a member\'s (an ADMIN and a STAFF member each write a sync setting, 200, stored); a user with no membership is refused the pull by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
+  // W10-GOOGLE-DOORS-REST review repair (SEC-W10GDR-1): this control also
+  // pinned PATCH .../sync/settings as a member's; writing the Google Calendar
+  // sync settings is the owner's (D-99, D-111), proved at [V94D-T08] and
+  // [V94D-J04] below, so that half left this case.
+  it('[V94D-J03] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN pull the Google Calendar into the temporal flow (201, the pull\'s counts) and syncBusiness runs once for the route\'s business each time; a user with no membership is refused the pull by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing run', async () => {
     for (const [businessId, actor] of OWNER_ARMS) {
       temporalSync.syncBusiness.mockClear();
       const res = await temporalFlowSync(businessId, actor);
@@ -1154,23 +1161,117 @@ describe('W10-GOOGLE-DOORS-REST: pulling the business Google Calendar into the t
       expect(temporalSync.syncBusiness).toHaveBeenCalledWith(businessId);
     }
 
-    const settingsBefore = await storedSyncSettings(ID.biz);
-    for (const [member, pullExternal] of [[ID.admin, true], [ID.staff, false]] as const) {
-      const res = await patchSyncSettings(ID.biz, member, { pullExternal });
-      expect(res.status, `${member} settings ${JSON.stringify(res.body)}`).toBe(200);
-      expect(res.body).toMatchObject({ pullExternal });
-      expect(await storedSyncSettings(ID.biz), member).toMatchObject({ pullExternal });
-    }
-    await db.$executeRawUnsafe(
-      `UPDATE businesses SET calendar_sync_settings = $2::jsonb WHERE id = $1`,
-      ID.biz,
-      settingsBefore === null ? null : JSON.stringify(settingsBefore),
-    );
-
     temporalSync.syncBusiness.mockClear();
     expect((await temporalFlowSync(ID.biz, ID.stranger)).status, 'stranger').toBe(403);
     expect((await temporalFlowSync(ID.biz, undefined)).status, 'anonymous').toBe(401);
     expect(temporalSync.syncBusiness).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * W10-GOOGLE-DOORS-REST review repair (SEC-W10GDR-1; owner rulings D-99 and
+ * D-111): the Google Calendar sync settings. PATCH /calendar/businesses/:b/
+ * sync/settings and its twin PATCH /bookings/businesses/:b/calendar/settings
+ * (the one the web's Key Connect calendar panel writes) choose which of the
+ * owner's Google calendars the hourly resync reads and writes (calendarId),
+ * whether it runs at all (syncEnabled, syncDirection 'disabled') and in which
+ * direction, whether the owner's Google events are pulled in and whom they are
+ * shown to (pullExternal, defaultVisibility), and which KEYFLOW items are
+ * pushed into the owner's Google calendar (the per-type switches). Each of
+ * these starts, stops or re-points the sync of the Google connection, which
+ * D-99 gives the owner alone, and D-111 keeps changing a Google connection
+ * owner-only. The reads (settings, status, calendar status) stay a member's.
+ */
+const patchBookingsCalendarSettings = (businessId: string, actor: string | undefined, body: Record<string, unknown>) =>
+  as(agent().patch(`/bookings/businesses/${businessId}/calendar/settings`), actor).send(body);
+/** The Google Calendar sync configuration of `businessId`, as stored. */
+async function storedSyncConfig(businessId: string) {
+  const rows: Array<Record<string, unknown>> = await db.$queryRawUnsafe(
+    `SELECT calendar_id, calendar_sync_direction, calendar_sync_enabled, calendar_sync_settings FROM businesses WHERE id = $1`,
+    businessId,
+  );
+  return rows[0];
+}
+/** The configuration each settings case starts from: the primary calendar, two-way, on, no settings written. */
+const SYNC_CONFIG_START = { calendar_id: 'primary', calendar_sync_direction: 'two_way', calendar_sync_enabled: true, calendar_sync_settings: null };
+async function resetSyncConfig(businessId: string) {
+  await db.$executeRawUnsafe(
+    `UPDATE businesses SET calendar_id = 'primary', calendar_sync_direction = 'two_way', calendar_sync_enabled = true, calendar_sync_settings = NULL WHERE id = $1`,
+    businessId,
+  );
+}
+/**
+ * The settings writes a refused member tries at the platform door: the
+ * reviewer's probe (stop the sync, re-point it at another calendar, pull only),
+ * turning the pull of the owner's events on and showing them to everyone, and
+ * changing what is pushed into the owner's Google calendar.
+ */
+const REFUSED_SETTINGS_BODIES: Array<Record<string, unknown>> = [
+  { syncEnabled: false, calendarId: `${P}probe-cal`, syncDirection: 'pull' },
+  { pullExternal: true, defaultVisibility: 'PUBLIC' },
+  { booking: false, invoice_due: true },
+];
+
+describe('W10-GOOGLE-DOORS-REST review repair: changing the business Google Calendar sync settings is the business owner\'s (D-99, D-111; SEC-W10GDR-1)', () => {
+  it('[V94D-T08] (W10-GOOGLE-DOORS-REST review repair, D-99, D-111; SEC-W10GDR-1) RED-BEFORE: PATCH /calendar/businesses/:b/sync/settings (calendar id, sync switch and direction, external pull and its visibility, the per-type push switches) and its twin PATCH /bookings/businesses/:b/calendar/settings (calendar id, sync switch and direction) answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY before anything is written: the calendar id, sync direction, sync switch and sync settings stay exactly as they were and the stored Google Calendar connection is untouched', async () => {
+    await connect(ID.biz);
+    await resetSyncConfig(ID.biz);
+    for (const member of REFUSED) {
+      for (const body of REFUSED_SETTINGS_BODIES) {
+        expectGoogleOwnerOnly(await patchSyncSettings(ID.biz, member, body), `${member} sync/settings ${JSON.stringify(body)}`);
+        expect(await storedSyncConfig(ID.biz), `${member} ${JSON.stringify(body)}`).toEqual(SYNC_CONFIG_START);
+      }
+      expectGoogleOwnerOnly(
+        await patchBookingsCalendarSettings(ID.biz, member, { syncEnabled: false, calendarId: `${P}probe-cal2`, syncDirection: 'push' }),
+        `${member} bookings calendar/settings`,
+      );
+      expect(await storedSyncConfig(ID.biz), `${member} bookings calendar/settings`).toEqual(SYNC_CONFIG_START);
+      expect(await stored(ID.biz), member).toEqual(connectedRow(ID.biz));
+    }
+  });
+
+  it('[V94D-J04] control (W10-GOOGLE-DOORS-REST review repair, D-99, D-111): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN write the sync settings at both doors (200, stored: calendar id, direction, switch, external pull, visibility and a push switch); the settings, sync status and calendar status reads stay a member\'s (an ADMIN and a STAFF member get 200); a user with no membership is refused both writes by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing written', async () => {
+    for (const [businessId, actor] of OWNER_ARMS) {
+      await connect(businessId);
+      await resetSyncConfig(businessId);
+      const calendarId = `${P}owner-cal`;
+      const res = await patchSyncSettings(businessId, actor, {
+        syncEnabled: false, calendarId, syncDirection: 'pull', pullExternal: true, defaultVisibility: 'PRIVATE', invoice_due: true,
+      });
+      expect(res.status, `${actor} sync/settings ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body).toMatchObject({ calendarId, syncDirection: 'pull', syncEnabled: false, pullExternal: true, defaultVisibility: 'PRIVATE', invoice_due: true });
+      expect(await storedSyncConfig(businessId), actor).toMatchObject({
+        calendar_id: calendarId, calendar_sync_direction: 'pull', calendar_sync_enabled: false,
+        calendar_sync_settings: expect.objectContaining({ pullExternal: true, defaultVisibility: 'PRIVATE', invoice_due: true }),
+      });
+
+      const twin = await patchBookingsCalendarSettings(businessId, actor, { calendarId: `${P}owner-cal2`, syncDirection: 'push', syncEnabled: true });
+      expect(twin.status, `${actor} bookings calendar/settings ${JSON.stringify(twin.body)}`).toBe(200);
+      expect(twin.body).toEqual({ calendarId: `${P}owner-cal2`, syncDirection: 'push', syncEnabled: true });
+      expect(await storedSyncConfig(businessId), `${actor} twin`).toMatchObject({
+        calendar_id: `${P}owner-cal2`, calendar_sync_direction: 'push', calendar_sync_enabled: true,
+      });
+      await resetSyncConfig(businessId);
+    }
+
+    await connect(ID.biz);
+    for (const member of [ID.admin, ID.staff]) {
+      const settings = await as(agent().get(`/calendar/businesses/${ID.biz}/sync/settings`), member);
+      expect(settings.status, `${member} settings read ${JSON.stringify(settings.body)}`).toBe(200);
+      expect(settings.body).toMatchObject({ pullExternal: false, defaultVisibility: 'TEAM' });
+      const status = await as(agent().get(`/calendar/businesses/${ID.biz}/sync/status`), member);
+      expect(status.status, `${member} sync status ${JSON.stringify(status.body)}`).toBe(200);
+      expect(status.body).toMatchObject({ connected: true, calendarId: 'primary', syncDirection: 'two_way', syncEnabled: true });
+      const calendar = await calendarStatus(ID.biz, member);
+      expect(calendar.status, `${member} calendar status ${JSON.stringify(calendar.body)}`).toBe(200);
+      expect(calendar.body).toMatchObject({ connected: true, calendarId: 'primary' });
+    }
+
+    for (const [actor, code] of [[ID.stranger, 403], [undefined, 401]] as const) {
+      expect((await patchSyncSettings(ID.biz, actor, REFUSED_SETTINGS_BODIES[0])).status, `${actor} sync/settings`).toBe(code);
+      expect((await patchBookingsCalendarSettings(ID.biz, actor, { syncEnabled: false })).status, `${actor} bookings calendar/settings`).toBe(code);
+    }
+    expect(await storedSyncConfig(ID.biz)).toEqual(SYNC_CONFIG_START);
   });
 });
 

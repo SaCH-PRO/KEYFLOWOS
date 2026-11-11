@@ -759,12 +759,21 @@ export class BookingsController {
     return this.calendar.listAvailableCalendars(businessId);
   }
 
+  // W10-GOOGLE-DOORS-REST review repair (owner rulings D-99 and D-111;
+  // SEC-W10GDR-1, [V94D-T08]): calendarId, syncDirection and syncEnabled choose
+  // which of the owner's Google calendars the hourly resync reads and writes,
+  // which way it runs and whether it runs at all, so changing them is changing
+  // the sync of the Google connection: the owner's, as on the platform twin
+  // PATCH /calendar/businesses/:b/sync/settings (assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY, first). The calendar status and list reads stay a member's.
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/calendar/settings')
   async updateCalendarSettings(
     @Param('businessId') businessId: string,
     @Body() body: { calendarId?: string | null; syncDirection?: string; syncEnabled?: boolean },
+    @Req() req: { user?: GoogleConnectActor },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.calendar.updateSyncSettings(businessId, body);
   }
 
