@@ -1985,11 +1985,48 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless c
     }
   });
 
-  // The service-level half stays visible: the contract's request is the direct
-  // call itself, and refusing it is a commerce.service.ts change.
-  it.todo(
-    'RA-G16-01 (service half): commerce.markInvoicePaid(<copy>) called directly with no actor and no tenant still resolves ' +
-      '(payments-mark-paid MP-06s pins it). DEFERRED: refusing it is a commerce.service.ts change, outside the ' +
-      'R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR write set; no production caller passes that shape (RA-G16-01 census).',
-  );
+  // W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half, was it.todo):
+  // the contract's request is the direct call itself. A call that names
+  // neither an actor nor a tenant is refused at markInvoicePaid's entry,
+  // before the invoice is read: an unknown id gets the same 403 as a real one
+  // (a lookup would answer 404). Naming either still reaches the lookup, so
+  // every production caller (the census above: all name the tenant) is
+  // unchanged, and the legacy POST /webhooks/stripe never calls it (RA-G16-01).
+  it('RA-G16-01 (service half): commerce.markInvoicePaid(<copy>) called directly with no actor and no tenant is refused (ForbiddenException Not authorized to update this invoice) before any read or write: the copy stays SENT with no payment, no posting, no invoice.paid and business A\'s ledger unchanged; an unknown id gets the same 403, not the lookup\'s 404, while naming only a tenant or only an actor still reaches the lookup (404); the owner\'s call with its tenant then marks the copy PAID (W10-MARKPAID-ACTOR-REQUIRED, D-05, was it.todo)', async () => {
+    const copy = await createCopy('g16_01_svc', { status: 'SENT' });
+    const ledgerBefore = await ledgerCountA();
+
+    for (const call of [
+      () => commerce.markInvoicePaid(copy),
+      () => commerce.markInvoicePaid(copy, undefined, undefined),
+      () => commerce.markInvoicePaid(copy, null, undefined),
+      () => commerce.markInvoicePaid(copy, '', ''),
+    ]) {
+      const err = await rejectionOf(call());
+      expect(err).toBeInstanceOf(ForbiddenExceptionCtor);
+      expect((err as Error).message).toMatch(/Not authorized to update this invoice/);
+    }
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(await paymentCount(copy)).toBe(0);
+    expect(await postingsFor(copy)).toHaveLength(0);
+    expect(await paymentPostingsFor(copy)).toHaveLength(0);
+    expect(await ledgerCountA()).toBe(ledgerBefore);
+    expect(eventsFor('invoice.paid', copy)).toHaveLength(0);
+
+    // Before any read: an id no invoice has is refused the same way. A guard
+    // after the lookup would answer the lookup's NotFoundException here.
+    const unknown = `${P}invMut_g16_01_svc_unknown`;
+    const unknownErr = await rejectionOf(commerce.markInvoicePaid(unknown));
+    expect(unknownErr).toBeInstanceOf(ForbiddenExceptionCtor);
+    expect(unknownErr).not.toBeInstanceOf(NotFoundExceptionCtor);
+    // Naming either one still reaches the lookup (only the no-actor, no-tenant shape is refused).
+    expect(await rejectionOf(commerce.markInvoicePaid(unknown, undefined, ID.bizA))).toBeInstanceOf(NotFoundExceptionCtor);
+    expect(await rejectionOf(commerce.markInvoicePaid(unknown, ID.ownerA))).toBeInstanceOf(NotFoundExceptionCtor);
+
+    // Control: the refusal is the entry guard's; the owner's call with its tenant writes.
+    await commerce.markInvoicePaid(copy, ID.ownerA, ID.bizA);
+    expect(await invoiceStatus(copy)).toBe('PAID');
+    expect(await paymentCount(copy)).toBe(1);
+    expect(eventsFor('invoice.paid', copy)).toHaveLength(1);
+  });
 });

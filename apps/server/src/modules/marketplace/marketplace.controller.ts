@@ -157,13 +157,20 @@ export class MarketplaceController {
     return this.marketplaceService.createOrder(businessId, body, req?.user?.id ?? null);
   }
 
+  /**
+   * W10-STORE-ORDER-PAID (D-112): marking an order PAID (paymentStatus PAID)
+   * records its payment through the paid door, which takes a member with
+   * revenue write (403 otherwise); the recorder is the authenticated member,
+   * never a body field. A status change alone stays open to every member.
+   */
   @Patch('businesses/:businessId/orders/:orderId/status')
   updateOrderStatus(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.marketplaceService.updateOrderStatus(businessId, orderId, body.status, body);
+    return this.marketplaceService.updateOrderStatus(businessId, orderId, body.status, body, req?.user?.id ?? null);
   }
 
   @Get('businesses/:businessId/shipments')
@@ -274,7 +281,9 @@ export class MarketplaceController {
    * which takes a member with revenue write; the refunder is the authenticated
    * member, never a body field. Review (SEC-R3-1): so is the refund of an
    * order created paid (D-77), and any other order's refund (an Expense) takes
-   * revenue write too (MarketplaceService.fulfillOrder).
+   * revenue write too (MarketplaceService.fulfillOrder). W10-STORE-ORDER-PAID
+   * (D-112): so does 'mark_paid', which records the payment through the paid
+   * door with this member as the recorder; the other actions stay open.
    */
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/fulfill')

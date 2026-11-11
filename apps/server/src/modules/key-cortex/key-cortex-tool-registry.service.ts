@@ -249,6 +249,14 @@ export function auditErrorText(error: string | null | undefined, input: unknown)
 }
 
 /**
+ * How many times a call that filed an approval proposal tries to settle its
+ * idempotency key with it, and the pause before each retry (times the attempt
+ * number). W10-CLAIM-LEASE review, CR-CL-1: see settleWithProposal().
+ */
+const PROPOSAL_SETTLE_ATTEMPTS = 3;
+const PROPOSAL_SETTLE_BACKOFF_MS = 100;
+
+/**
  * The actor named on a call's CortexActionLog row (V1-19c review, SEC-V19c-2):
  * the one its caller names, else the authenticated member of the request the
  * call runs in, when the TenantInterceptor verified that request's tenant as
@@ -527,6 +535,17 @@ export class KeyCortexToolRegistryService {
         businessId: ctx.businessId,
         idempotencyKey: ctx.idempotencyKey,
         requestHash,
+        // What a D-103 takeover of a stranded claim is recorded for on the KEY
+        // execution log: this call's actor, tool, session, command and
+        // correlation, as its own run row names them (W10-CLAIM-LEASE review,
+        // SEC-W10CL-1). Attribution only; the claim is the key and the hash.
+        audit: {
+          actorId: auditActor(ctx),
+          toolName: name,
+          sessionId: ctx.sessionId,
+          commandId: ctx.commandId,
+          correlationId: ctx.correlationId,
+        },
       });
       if (answer.status === 'completed' || answer.status === 'failed') {
         const replay = this.replayOf(answer);
@@ -594,13 +613,10 @@ export class KeyCortexToolRegistryService {
           // and without a key); a call that presents this key again, approved
           // or not, is a retry of this request and gets this answer.
           if (claim) {
-            // The proposal is filed either way; a key that cannot be settled
-            // stays claimed (a retry is refused, it files nothing).
-            await this.idempotency.fail(claim, proposed.error as string, proposed).catch((err) => {
-              this.logger.warn(
-                `[execute][${ctx.businessId}] could not settle idempotency key ${claim?.idempotencyKey} with proposal ${proposalId}: ${(err as Error).message}`,
-              );
-            });
+            // The proposal is filed either way. See settleWithProposal(): a
+            // settle that fails is tried again, and a key that still cannot be
+            // settled stays claimed only until the claim lease runs out (D-103).
+            await this.settleWithProposal(claim, proposed, proposalId);
           }
           return proposed;
         }
@@ -997,6 +1013,44 @@ export class KeyCortexToolRegistryService {
       requiresApproval: tool.requiresApproval,
       tags: tool.tags,
     };
+  }
+
+  /**
+   * Settle the claim of a call that filed an approval proposal with that
+   * proposal (V1-19b review, SEC-V19b-2), so a retry of the request is
+   * answered with it instead of filing another. Never throws: the proposal is
+   * filed, and the caller's answer stands.
+   *
+   * A settle that throws is tried again, up to PROPOSAL_SETTLE_ATTEMPTS times
+   * (W10-CLAIM-LEASE review, CR-CL-1). It is safe to repeat: it writes only the
+   * claim this call still holds, so an attempt that did land answers false the
+   * next time and nothing is written twice. A key that still cannot be settled
+   * stays claimed, and a retry is refused while the claim is younger than the
+   * claim lease. Past the lease, owner ruling D-103 lets the next retry take
+   * the claim over (an unsettled claim cannot be told from one whose holder
+   * crashed), and that retry files another proposal: accepted under D-103, as
+   * it is for a tool that ran and whose outcome could not be stored. The
+   * takeover is on the KEY execution log, naming the tool and the member, and
+   * this logs an error naming the proposal, so the two proposals can be found.
+   */
+  private async settleWithProposal(claim: OpenClaim, proposed: KeyCortexToolResult, proposalId: string): Promise<void> {
+    for (let attempt = 1; attempt <= PROPOSAL_SETTLE_ATTEMPTS; attempt += 1) {
+      try {
+        // false: the claim is no longer this call's to settle; nothing to retry.
+        await this.idempotency.fail(claim, proposed.error as string, proposed);
+        return;
+      } catch (err) {
+        const message = `[execute][${claim.businessId}] could not settle idempotency key ${claim.idempotencyKey} with proposal ${proposalId} (attempt ${attempt} of ${PROPOSAL_SETTLE_ATTEMPTS}): ${(err as Error).message}`;
+        if (attempt < PROPOSAL_SETTLE_ATTEMPTS) {
+          this.logger.warn(message);
+          await new Promise((resolve) => setTimeout(resolve, PROPOSAL_SETTLE_BACKOFF_MS * attempt));
+        } else {
+          this.logger.error(
+            `${message}. The key stays claimed; after the claim lease a retry of this request can take it over and file another proposal (D-103).`,
+          );
+        }
+      }
+    }
   }
 
   /**

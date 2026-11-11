@@ -1881,6 +1881,8 @@ export class CommerceService {
    *   a guard establishes who is asking without constraining what is touched.
    *   REQUIRED when the actor is KEY: a system actor's authority comes from the
    *   tenant scope its caller established, and there is nothing else to check.
+   *   REQUIRED when there is no actor either (W10-MARKPAID-ACTOR-REQUIRED,
+   *   D-05; RA-G16-01 service half): a call naming neither is refused (403).
    * @param options.initiatedBy W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88,
    *   D-90): the member KEY's commerce_mark_invoice_paid or bulk PAID ran for,
    *   kept beside KEY exactly as markInvoicePaidFor keeps it for
@@ -1909,6 +1911,17 @@ export class CommerceService {
     businessId: string | undefined,
     options: { initiatedBy?: string | null },
   ) {
+    // W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half): a call that
+    // names neither an actor nor a tenant has nothing to check (no Membership)
+    // and nothing to bind the by-id lookup below to, so it could mark any
+    // invoice in any business paid. Refused here, before anything is read or
+    // written, as KEY without a tenant is. No production caller passes that
+    // shape (RA-G16-01 census: each names a tenant), and the legacy POST
+    // /webhooks/stripe never calls this (it records through the Stripe ledger
+    // door, R0-20b), so naming either one still reaches the lookup unchanged.
+    if (!actorId && !businessId) {
+      throw new ForbiddenException('Not authorized to update this invoice');
+    }
     const initiatedBy = CommerceService.keyInitiatedBy(actorId, options.initiatedBy);
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },

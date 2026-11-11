@@ -118,22 +118,60 @@
  *           unchanged); the payloads are the ones the real emitters put on the
  *           suite's bus
  *
- *           Not closed by V18-T2 (review STL-SEC-1, STL-SEC-2 / CR-W9SPL-1;
- *           it.todo, outside this packet's write set):
- *   V18-T2b the other store_order.paid listeners still act on that STANDARD
- *           order stored UNPAID: on the suite's bus
- *           CommerceIntegrationService.handleOrderPaid writes a store_order.paid
- *           contact timeline event, an "Order Payment Received" notification
- *           and a raw PAID INV-ORD-<n> invoice with no payment; ai.listener,
- *           journey-listener.service and calendar orders.listener do not read
- *           the stored payment status either
- *   V18-T2c the stored PAID these three listeners trust is written without a
- *           payment and without revenue write: PATCH .../status with
- *           paymentStatus PAID (AuthGuard, BusinessGuard and the rate limit
- *           only, so a revenue:read STAFF member) and the fulfil 'mark_paid'
- *           action set a STANDARD order not created paid to PAID, and the
- *           webhook, the paid timeline entry and the routing follow (V18-T2
- *           control 4 is that order). Needs an owner ruling
+ *           Not closed by V18-T2 (review STL-SEC-1, STL-SEC-2 / CR-W9SPL-1),
+ *           made live by W10-STORE-ORDER-PAID (FOLLOW11; owner ruling D-112):
+ *   V18-T2b the other store_order.paid listeners act only on an order stored
+ *           PAID in the event's business. For a STANDARD order set 'paid' by
+ *           PATCH .../status without a payment and stored UNPAID,
+ *           CommerceIntegrationService.handleOrderPaid (on the suite's bus)
+ *           writes no store_order.paid contact timeline event, no "Order Payment
+ *           Received" notification and no raw PAID INV-ORD-<n> invoice (it did
+ *           all three at the base); on their own bus, for that order, an UNPAID
+ *           storefront order and an event naming another business,
+ *           JourneyListenerService records no order_paid touchpoint and
+ *           CalendarOrdersListener projects nothing (both acted on the payload
+ *           at the base). AiListener is kept as it is and pinned: its only act
+ *           is dropping the named business's graph cache, so the next snapshot
+ *           is read from the stored rows and no payment claim is trusted.
+ *           Controls: the same order marked PAID by the owner through the paid
+ *           door (V18-T2c) is acted on by all four
+ *   V18-T2c D-112: a STANDARD order not created paid is marked PAID (PATCH
+ *           .../status with paymentStatus PAID, the fulfil 'mark_paid' action)
+ *           only by a member with revenue write, and only through the paid door
+ *           (StoreOrderService.completeCheckout, as D-77 does for an order
+ *           created paid): one PAID invoice INV-<orderNumber>, one SUCCESSFUL
+ *           payment recorded by that member, one balanced payment_recorded
+ *           posting and one store_order.paid naming the invoice. A revenue:read
+ *           STAFF member and a call with no member are refused 403 with nothing
+ *           written and no store_order.paid (at the base both wrote paid/PAID
+ *           with no payment, and the listener added a raw INV-ORD invoice); an
+ *           order with no customer to invoice is 400. Fulfilment status changes
+ *           stay open to the STAFF member. The routes are called through
+ *           MarketplaceController, so the actor is the signed-in member
+ *
+ *           W10-STORE-ORDER-PAID review repairs (D-112; findings SEC-SOP-1..4,
+ *           CR-W10SOP-1..5), each red at 3181cbb0 by the review's probes:
+ *   V18-T2d PATCH .../status takes plain strings (a Prisma operation object
+ *           such as paymentStatus {"set":"PAID"} passed the D-112 gate and was
+ *           stored: 400), and every payment field it writes (a settled state
+ *           such as COMPLETED or REFUNDED, a method, a reference) takes revenue
+ *           write (403); nothing is written
+ *   V18-T2e a status change records no payment and emits no store_order.paid:
+ *           no "order paid" automation (AgentTriggerService) for an order
+ *           stored UNPAID, and no replayed paid fan-out for an order stored
+ *           PAID outside the paid door (the Shopify sync's shape)
+ *   V18-T2f a marking's own writes (its timeline step, the customer it names)
+ *           are on the order before the door emits store_order.paid, so the
+ *           routing listener and the marking no longer overwrite each other; a
+ *           refused marking takes them back; the member's payment reference is
+ *           the order's paymentRef again
+ *   V18-T2g an order totalling 0 and a walk-in order (given its customer with
+ *           the marking) are marked PAID through the door; they were refused
+ *           for good
+ *   V18-T2h an order marked paid through the door is refunded through the
+ *           D-14 refund door (in full; a partial amount is 400)
+ *   V18-T2i / V18-T2j (it.todo, outside this packet's write set): a partial
+ *           refund through the door; COGS posted in the door's transaction
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -216,6 +254,7 @@ async function cleanup() {
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM webhooks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -465,6 +504,63 @@ async function paidTraces(businessId: string, orderId: string) {
   };
 }
 
+/**
+ * W10-STORE-ORDER-PAID review repairs (V18-T2d..V18-T2h): the marketplace
+ * route handlers over the suite's real MarketplaceService (the actor is the
+ * signed-in member, never a body field), the HTTP status a call is answered
+ * with, a STANDARD order of business A, and a member of A.
+ */
+async function marketRoutes() {
+  const { MarketplaceController } = await import('../src/modules/marketplace/marketplace.controller');
+  const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+  const market = app.get(MarketplaceService);
+  return { market, controller: new (MarketplaceController as any)(market, {}, {}) };
+}
+const signedIn = (userId: string | null) => ({ user: userId ? { id: userId } : undefined });
+const answered = (work: Promise<unknown>) =>
+  work.then(
+    () => 200,
+    (err: any) => (typeof err?.getStatus === 'function' ? err.getStatus() : `${err?.name}: ${err?.message}`),
+  );
+function standardOrderOfA(suffix: string, extra: Record<string, unknown> = {}) {
+  return db.marketplaceOrder.create({
+    data: {
+      businessId: ID.biz,
+      orderNumber: `${P}rp_${suffix}`,
+      type: 'STANDARD',
+      status: 'placed',
+      paymentStatus: 'UNPAID',
+      customerName: 'Vee Eighteen',
+      customerEmail: CUSTOMER_EMAIL,
+      subtotal: ORDER_TOTAL,
+      total: ORDER_TOTAL,
+      currency: 'TTD',
+      metadata: { statusTimeline: [{ status: 'placed', timestamp: '2026-11-01T10:00:00.000Z', note: 'Order placed' }] },
+      items: { create: [{ productId: ID.product, name: 'V18A Widget', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      ...extra,
+    },
+  });
+}
+/** A member of business A with the role's default scopes (a STAFF member's revenue access is read). */
+async function memberOfA(suffix: string, role = 'STAFF') {
+  const id = `${P}${suffix}`;
+  await db.user.upsert({ where: { id }, create: { id, email: `${P}${suffix}@test.local`, role: 'USER' }, update: {} });
+  await db.membership.upsert({
+    where: { userId_businessId: { userId: id, businessId: ID.biz } },
+    create: { id: `${id}_m`, userId: id, businessId: ID.biz, role },
+    update: {},
+  });
+  return id;
+}
+/** The order as stored: status/paymentStatus/paymentMethod/paymentRef/customerEmail, and its timeline steps. */
+async function orderShape(id: string) {
+  const o = await db.marketplaceOrder.findUnique({ where: { id } });
+  return {
+    row: `${o.status}/${o.paymentStatus}/${o.paymentMethod}/${o.paymentRef}/${o.customerEmail}`,
+    steps: (((o.metadata as any)?.statusTimeline ?? []) as any[]).map((t) => t.status),
+  };
+}
+
 afterAll(async () => {
   await settle();
   await cleanup();
@@ -704,7 +800,8 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
         currency: 'TTD',
       },
     });
-    const paidStandard = await market.updateOrderStatus(ID.biz, standard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' });
+    // W10-STORE-ORDER-PAID (D-112): marking a STANDARD order PAID takes a member with revenue write (the owner here).
+    const paidStandard = await market.updateOrderStatus(ID.biz, standard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' }, ID.owner);
     await settle();
     expect(`${paidStandard.status}/${paidStandard.paymentStatus}`).toBe('paid/PAID');
   });
@@ -776,7 +873,14 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
         currency: 'TTD',
       },
     });
-    const written = await market.updateOrderStatus(ID.biz, standard.id, 'CONFIRMED', { status: 'CONFIRMED', paymentMethod: 'BANK', paymentRef: `${P}std_ref` });
+    // W10-STORE-ORDER-PAID review (SEC-SOP-4): a payment field is written by a member with revenue write (the owner).
+    const written = await market.updateOrderStatus(
+      ID.biz,
+      standard.id,
+      'CONFIRMED',
+      { status: 'CONFIRMED', paymentMethod: 'BANK', paymentRef: `${P}std_ref` },
+      ID.owner,
+    );
     await settle();
     expect(`${written.status}/${written.paymentMethod}/${written.paymentRef}`).toBe(`CONFIRMED/BANK/${P}std_ref`);
   });
@@ -1016,17 +1120,19 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     const emittedPaid = (orderId: string) => seen.filter((e) => e.name === 'store_order.paid' && e.payload?.order?.id === orderId).map((e) => e.payload);
 
     try {
-      // (1) A STANDARD order set 'paid' by PATCH .../status with no payment: the real route emits store_order.paid
+      // (1) A STANDARD order set 'paid' by PATCH .../status with no payment: the real route emitted store_order.paid
       // for an order stored UNPAID (SEC-V18-3). At the base all three listeners acted on it. Only these three are
-      // asserted here: on the suite's bus CommerceIntegrationService still logs a store_order.paid timeline event,
-      // notifies 'Order Payment Received' and writes a PAID INV-ORD invoice for this order (V18-T2b, open).
+      // asserted here: the other listeners on the same order (CommerceIntegrationService on the suite's bus, the
+      // journey and calendar listeners and AiListener) are V18-T2b (W10-STORE-ORDER-PAID, D-112).
+      // W10-STORE-ORDER-PAID review (SEC-SOP-2): the route emits no store_order.paid any more (a status change records
+      // no payment); the payload it emitted, { order, businessId } (a queued or forged copy now), is delivered here.
       const unpaidStandard = await standardOrder('unpaid');
       seen = [];
       const patched = await market.updateOrderStatus(ID.biz, unpaidStandard.id, 'paid', { status: 'paid' });
       await settle();
       expect(`${patched.status}/${patched.paymentStatus}`, 'PATCH .../status paid without a payment').toBe('paid/UNPAID');
-      const [patchedEvent] = emittedPaid(unpaidStandard.id);
-      expect(patchedEvent, 'the route emitted store_order.paid').toBeTruthy();
+      expect(emittedPaid(unpaidStandard.id), 'the route emits no store_order.paid (SEC-SOP-2)').toEqual([]);
+      const patchedEvent = { order: patched, businessId: ID.biz };
       await deliver(patchedEvent);
       expect(await traces(unpaidStandard.id), 'STANDARD order stored UNPAID: from these three listeners no webhook, no RevenueEventListener timeline entry, no routing').toEqual(NOTHING);
       expect((await db.marketplaceOrder.findUnique({ where: { id: unpaidStandard.id } })).status, 'not routed').toBe('paid');
@@ -1039,11 +1145,12 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expect(await traces(unpaidStorefront.id), 'storefront order stored UNPAID: nothing').toEqual(NOTHING);
 
       // (3) A STANDARD order of A stored PAID (PATCH with paymentStatus PAID), its event naming business B:
-      // B holds no such order, so B's webhook, B's contact (same email) and B's routing see nothing. This stored
-      // PAID is itself written with no payment, by any member (STL-SEC-1): what the gate trusts is V18-T2c (open).
+      // B holds no such order, so B's webhook, B's contact (same email) and B's routing see nothing. Since
+      // W10-STORE-ORDER-PAID (D-112, V18-T2c) that PAID is written only through the paid door by a member with
+      // revenue write (the owner here), with its invoice, payment and posting (STL-SEC-1).
       const paidStandard = await standardOrder('paid');
       seen = [];
-      await market.updateOrderStatus(ID.biz, paidStandard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' });
+      await market.updateOrderStatus(ID.biz, paidStandard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' }, ID.owner);
       await settle();
       const [paidStandardEvent] = emittedPaid(paidStandard.id);
       expect(paidStandardEvent?.order?.paymentStatus).toBe('PAID');
@@ -1078,12 +1185,649 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     }
   });
 
-  // W9-STORE-PAID-LISTENERS review (D-18): what V18-T2 does not close, outside this packet's write set (the three listeners).
+  // W10-STORE-ORDER-PAID (FOLLOW11; owner ruling D-112): what V18-T2 did not close (review STL-SEC-1, STL-SEC-2 / CR-W9SPL-1).
+  it('V18-T2b (W10-STORE-ORDER-PAID, D-112, was it.todo; W9-STORE-PAID-LISTENERS review STL-SEC-2 / CR-W9SPL-1, D-18) the other store_order.paid listeners act only on an order stored PAID in the event\'s business: for a STANDARD order set paid by PATCH .../status without a payment and stored UNPAID, CommerceIntegrationService.handleOrderPaid writes no store_order.paid contact timeline event, no "Order Payment Received" notification and no raw PAID INV-ORD-<n> invoice; for that order, an UNPAID storefront order and an event naming another business, journey-listener.service records no order_paid touchpoint and calendar orders.listener projects nothing; ai.listener is kept and pinned (it only drops the named business\'s graph cache); control: the order marked PAID by the owner through the paid door is acted on by all four', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AiListener } = await import('../src/modules/ai/ai.listener');
+    const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
+    const { JourneyListenerService } = await import('../src/modules/growth-intelligence/journey-listener.service');
+    const { CustomerJourneyService } = await import('../src/modules/growth-intelligence/customer-journey.service');
+    const { CalendarOrdersListener } = await import('../src/modules/calendar/listeners/orders.listener');
+    const { CalendarProjectionService } = await import('../src/modules/calendar/calendar-projection.service');
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+
+    // What these three listeners ask for (their decisions are real; the writes are recorded).
+    const touchpoints: Array<{ businessId: string; contactId: string; touchpointType: string; value?: number; orderId?: string }> = [];
+    const projections: Array<{ businessId: string; sourceType: string; sourceId: string; type: string }> = [];
+    const invalidated: string[] = [];
+    const listenerModule = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
+      providers: [
+        PrismaService,
+        AiListener,
+        {
+          provide: BusinessGraphService,
+          useValue: {
+            invalidateCache: (businessId: string) => {
+              invalidated.push(businessId);
+            },
+          },
+        },
+        JourneyListenerService,
+        {
+          provide: CustomerJourneyService,
+          useValue: {
+            recordTouchpoint: async (input: any) => {
+              touchpoints.push({
+                businessId: input.businessId,
+                contactId: input.contactId,
+                touchpointType: input.touchpointType,
+                value: input.value,
+                orderId: input.metadata?.orderId,
+              });
+              return null;
+            },
+          },
+        },
+        CalendarOrdersListener,
+        {
+          provide: CalendarProjectionService,
+          useValue: {
+            upsertFromSource: async (input: any) => {
+              projections.push({ businessId: input.businessId, sourceType: input.sourceType, sourceId: input.sourceId, type: input.type });
+              return null;
+            },
+          },
+        },
+      ],
+    }).compile();
+    const listenerApp = listenerModule.createNestApplication();
+    await listenerApp.init();
+    const paidBus = listenerApp.get(EventEmitter2);
+    // Await the work an emit starts (the calendar listener is { async: true }: it starts on the next tick).
+    for (const instance of [listenerApp.get(JourneyListenerService), listenerApp.get(CalendarOrdersListener)] as Array<Record<string, any>>) {
+      for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(instance))) {
+        if (!name.startsWith('on') || typeof instance[name] !== 'function') continue;
+        const original = instance[name].bind(instance);
+        instance[name] = (...args: unknown[]) => {
+          const work = original(...args);
+          inflight.push(Promise.resolve(work));
+          return work;
+        };
+      }
+    }
+    const deliver = async (payload: any) => {
+      await paidBus.emitAsync('store_order.paid', payload);
+      for (let round = 0; round < 6; round += 1) {
+        await new Promise((r) => setImmediate(r));
+        await settle();
+      }
+    };
+    const tag = (businessId: string) => (businessId === ID.biz ? 'A' : businessId === ID.bizB ? 'B' : businessId);
+    const traces = (orderId: string) => ({
+      touchpoints: touchpoints
+        .filter((t) => t.orderId === orderId)
+        .map((t) => `${tag(t.businessId)}:${t.contactId === ID.contact ? 'contact' : t.contactId}:${t.touchpointType}:${t.value}`),
+      projections: projections.filter((p) => p.sourceId === orderId).map((p) => `${tag(p.businessId)}:${p.sourceType}:${p.type}`),
+    });
+    const NONE = { touchpoints: [], projections: [] };
+    const EXPECTED_SHIP_AT = '2026-12-15T10:00:00.000Z';
+    // MarketplaceOrder has no contactId column, so no real emitter's payload names a contact and the journey listener
+    // records nothing from one; each payload delivered here names the seeded contact, so the listener's decision is asserted.
+    const naming = (payload: any) => ({ ...payload, order: { ...payload.order, contactId: ID.contact } });
+    const emittedPaid = (orderId: string) => seen.filter((e) => e.name === 'store_order.paid' && e.payload?.order?.id === orderId).map((e) => e.payload);
+
+    try {
+      // (1) A STANDARD order set 'paid' by PATCH .../status with no payment (a fulfilment status change, open to any member):
+      // stored paid/UNPAID. The route emitted store_order.paid for it; since the W10-STORE-ORDER-PAID review (SEC-SOP-2)
+      // it emits none, and the payload it emitted ({ order, businessId }: a queued or forged copy now) is delivered here.
+      const order = await db.marketplaceOrder.create({
+        data: {
+          businessId: ID.biz,
+          orderNumber: `${P}std_t2b`,
+          type: 'STANDARD',
+          status: 'placed',
+          paymentStatus: 'UNPAID',
+          customerName: 'Vee Eighteen',
+          customerEmail: CUSTOMER_EMAIL,
+          subtotal: ORDER_TOTAL,
+          total: ORDER_TOTAL,
+          currency: 'TTD',
+          metadata: { expectedShipAt: EXPECTED_SHIP_AT },
+          items: { create: [{ productId: ID.product, name: 'V18A Widget', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+        },
+      });
+      seen = [];
+      const patched = await market.updateOrderStatus(ID.biz, order.id, 'paid', { status: 'paid' });
+      await settle();
+      expect(`${patched.status}/${patched.paymentStatus}`, 'PATCH .../status paid without a payment').toBe('paid/UNPAID');
+      expect(emittedPaid(order.id), 'the route emits no store_order.paid (SEC-SOP-2)').toEqual([]);
+      const patchedEvent = { order: patched, businessId: ID.biz };
+      // CommerceIntegrationService.handleOrderPaid on the suite's bus. At the base: a store_order.paid contact timeline
+      // event, an 'Order Payment Received' notification and a raw PAID INV-ORD-<n> invoice with no payment.
+      await events.emitAsync('store_order.paid', patchedEvent);
+      await settle();
+      const ignored = await paidTraces(ID.biz, order.id);
+      expect({ notifications: ignored.notifications, timeline: ignored.timeline }, 'CommerceIntegrationService: no notification, no paid timeline event').toEqual({
+        notifications: 0,
+        timeline: 0,
+      });
+      expect((await invoicesOf(order)).map((i) => i.invoiceNumber), 'no raw PAID INV-ORD invoice').toEqual([]);
+
+      invalidated.length = 0;
+      await deliver(naming(patchedEvent));
+      // At the base: an order_paid CONVERSION touchpoint of 80 for the contact, and the order projected on the calendar.
+      expect(traces(order.id), 'STANDARD order stored UNPAID: no journey touchpoint, no calendar projection').toEqual(NONE);
+      // AiListener, kept as it is (pinned): its only act is dropping the named business's graph cache, so the next
+      // snapshot is read from the stored rows (where the order is UNPAID); no payment claim of the payload is used.
+      expect(invalidated, 'AiListener: A\'s graph cache is dropped, nothing else').toEqual([ID.biz]);
+
+      // (2) An UNPAID storefront order's paid event (a queued or forged copy, as V18-05), with a ship date to project.
+      const storefront = await placeOrder();
+      const placed = await db.marketplaceOrder.findUnique({ where: { id: storefront.id } });
+      const storedUnpaid = await db.marketplaceOrder.update({
+        where: { id: storefront.id },
+        data: { metadata: { ...((placed.metadata as Record<string, unknown> | null) ?? {}), expectedShipAt: EXPECTED_SHIP_AT } },
+        include: { items: true },
+      });
+      expect(storedUnpaid.paymentStatus).toBe('UNPAID');
+      await deliver(naming({ order: storedUnpaid, businessId: ID.biz }));
+      expect(traces(storefront.id), 'storefront order stored UNPAID: nothing').toEqual(NONE);
+
+      // (3) Control: the owner marks the STANDARD order PAID through the paid door (V18-T2c).
+      seen = [];
+      await market.updateOrderStatus(ID.biz, order.id, 'paid', { status: 'paid', paymentStatus: 'PAID' }, ID.owner);
+      await settle();
+      const [paidEvent] = emittedPaid(order.id);
+      expect(paidEvent?.order?.paymentStatus).toBe('PAID');
+      const acted = await paidTraces(ID.biz, order.id);
+      expect({ notifications: acted.notifications, timeline: acted.timeline }, 'CommerceIntegrationService acts on the order stored PAID').toEqual({
+        notifications: 1,
+        timeline: 1,
+      });
+
+      // Its event naming business B: B holds no such order, so nothing in either (AiListener drops only B's cache).
+      invalidated.length = 0;
+      await deliver(naming({ ...paidEvent, businessId: ID.bizB }));
+      expect(traces(order.id), 'an event naming another business: nothing in either').toEqual(NONE);
+      expect(invalidated, 'AiListener: B\'s graph cache only (read again from B\'s own rows)').toEqual([ID.bizB]);
+
+      // The event in its own business: one touchpoint and one projection.
+      await deliver(naming(paidEvent));
+      expect(traces(order.id), 'the order stored PAID in its business: one journey touchpoint, one calendar projection').toEqual({
+        touchpoints: [`A:contact:order_paid:${ORDER_TOTAL}`],
+        projections: ['A:marketplace_order:SHIPMENT'],
+      });
+    } finally {
+      await settle();
+      await listenerApp.close();
+    }
+  });
+
+  it('V18-T2c (W10-STORE-ORDER-PAID, D-112, was it.todo; W9-STORE-PAID-LISTENERS review STL-SEC-1, D-18) a STANDARD order not created paid is marked PAID (PATCH .../status with paymentStatus PAID, the fulfil mark_paid action) only by a member with revenue write, through the paid door: a revenue:read STAFF member and a call with no member get 403 with nothing written and no store_order.paid; the owner gets one PAID invoice INV-<orderNumber>, one SUCCESSFUL payment the owner recorded and one balanced posting, and one store_order.paid naming the invoice (no INV-ORD invoice); a second marking writes nothing, an order with no customer to invoice is 400, and fulfilment status changes stay open to the STAFF member', async () => {
+    const { MarketplaceController } = await import('../src/modules/marketplace/marketplace.controller');
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+    // The route handlers over the suite's real MarketplaceService: the actor is the signed-in member, never a body field.
+    const controller = new (MarketplaceController as any)(market, {}, {});
+    const signedIn = (userId: string | null) => ({ user: userId ? { id: userId } : undefined });
+    const statusOf = (work: Promise<unknown>) =>
+      work.then(
+        () => 200,
+        (err: any) => (typeof err?.getStatus === 'function' ? err.getStatus() : `${err?.name}: ${err?.message}`),
+      );
+    // A revenue:read STAFF member of the business (the STAFF role default).
+    const STAFF = `${P}staff_t2c`;
+    await db.user.create({ data: { id: STAFF, email: `${P}staff_t2c@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${STAFF}_m`, userId: STAFF, businessId: ID.biz, role: 'STAFF' } });
+    // Fulfilment auto-routing runs un-awaited after mark_paid and is off this case's money path: held, and its call asserted.
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const standard = (suffix: string, customer: { customerEmail?: string } = { customerEmail: CUSTOMER_EMAIL }) =>
+      db.marketplaceOrder.create({
+        data: {
+          businessId: ID.biz,
+          orderNumber: `${P}std_t2c_${suffix}`,
+          type: 'STANDARD',
+          status: 'placed',
+          paymentStatus: 'UNPAID',
+          customerName: 'Vee Eighteen',
+          ...customer,
+          subtotal: ORDER_TOTAL,
+          total: ORDER_TOTAL,
+          currency: 'TTD',
+          items: { create: [{ productId: ID.product, name: 'V18A Widget', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+        },
+      });
+    const shape = async (id: string) => {
+      const stored = await db.marketplaceOrder.findUnique({ where: { id } });
+      return `${stored.status}/${stored.paymentStatus}`;
+    };
+    const paidEvents = () => seen.filter((e) => e.name === 'store_order.paid').map((e) => `${e.payload?.order?.id}:${e.payload?.invoiceId}`);
+
+    try {
+      const patchOrder = await standard('patch');
+      const markOrder = await standard('mark');
+      seen = [];
+      const before = await counts();
+
+      // Refused (403): a revenue:read STAFF member and a call with no member. At the base each was 200 paid/PAID with
+      // no invoice and no payment, its store_order.paid made the listener write a raw PAID INV-ORD invoice, and the
+      // V18-T2 listeners (webhook, paid timeline entry, routing) followed.
+      for (const actor of [STAFF, null]) {
+        expect(
+          await statusOf(controller.updateOrderStatus(ID.biz, patchOrder.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(actor))),
+          `PATCH .../status paid/PAID as ${actor}`,
+        ).toBe(403);
+        expect(
+          await statusOf(controller.fulfillOrder(ID.biz, markOrder.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(actor))),
+          `POST .../fulfill mark_paid as ${actor}`,
+        ).toBe(403);
+      }
+      await settle();
+      expect([await shape(patchOrder.id), await shape(markOrder.id)], 'refused: the orders as they were').toEqual(['placed/UNPAID', 'placed/UNPAID']);
+      expect(await counts(), 'refused: no invoice, payment or posting').toEqual(before);
+      expect(storeEvents(), 'refused: no store_order.paid').toEqual([]);
+      expect(routing, 'refused: nothing routed').not.toHaveBeenCalled();
+
+      // Fulfilment status changes stay open to the STAFF member (D-112), and write no money.
+      const moved = await controller.updateOrderStatus(ID.biz, patchOrder.id, { status: 'awaiting_payment' }, signedIn(STAFF));
+      const confirmed = await controller.fulfillOrder(ID.biz, markOrder.id, { action: 'confirm' }, signedIn(STAFF));
+      await settle();
+      expect([`${moved.status}/${moved.paymentStatus}`, `${confirmed.status}/${confirmed.paymentStatus}`]).toEqual([
+        'awaiting_payment/UNPAID',
+        'awaiting_payment/UNPAID',
+      ]);
+      expect(await counts(), 'a status change writes no money').toEqual(before);
+
+      // The owner (revenue write): PATCH .../status with paymentStatus PAID goes through the paid door.
+      seen = [];
+      const patched = await controller.updateOrderStatus(
+        ID.biz,
+        patchOrder.id,
+        { status: 'paid', paymentStatus: 'PAID', paymentMethod: 'BANK_TRANSFER' },
+        signedIn(ID.owner),
+      );
+      await settle();
+      expect(`${patched.status}/${patched.paymentStatus}`).toBe('paid/PAID');
+      const viaPatch = await expectOnePaidInvoice(patchOrder);
+      expect(`${viaPatch.payment.provider}:${viaPatch.payment.method}:${viaPatch.payment.recordedBy}`, 'the payment names its method and the member').toBe(
+        `bank_transfer:bank_transfer:${ID.owner}`,
+      );
+      expect(paidEvents(), 'one store_order.paid naming the invoice').toEqual([`${patchOrder.id}:${viaPatch.invoice.id}`]);
+
+      // ... and so does the fulfil mark_paid action, which still routes the paid order and notes the step.
+      seen = [];
+      const marked = await controller.fulfillOrder(
+        ID.biz,
+        markOrder.id,
+        { action: 'mark_paid', paymentMethod: 'CASH', note: 'cash at the counter' },
+        signedIn(ID.owner),
+      );
+      await settle();
+      expect(`${marked.status}/${marked.paymentStatus}`).toBe('paid/PAID');
+      const viaMark = await expectOnePaidInvoice(markOrder);
+      expect(`${viaMark.payment.provider}:${viaMark.payment.method}:${viaMark.payment.recordedBy}`).toBe(`cash:cash:${ID.owner}`);
+      expect(paidEvents(), 'one store_order.paid naming the invoice').toEqual([`${markOrder.id}:${viaMark.invoice.id}`]);
+      expect(routing, 'mark_paid routes the paid order').toHaveBeenCalledWith(ID.biz, markOrder.id, true);
+      const timeline = (((await db.marketplaceOrder.findUnique({ where: { id: markOrder.id } })).metadata as any)?.statusTimeline ?? []) as any[];
+      expect(timeline[timeline.length - 1], 'the fulfilment timeline notes the paid step').toMatchObject({ status: 'paid', note: 'cash at the counter' });
+
+      // A second marking writes nothing: the order's money is on its checkout invoice now (400). An order with no
+      // customer to make the invoice out to is refused (400) before anything is written.
+      const after = await counts();
+      seen = [];
+      expect(await statusOf(controller.fulfillOrder(ID.biz, markOrder.id, { action: 'mark_paid' }, signedIn(ID.owner))), 'mark_paid again').toBe(400);
+      expect(
+        await statusOf(controller.updateOrderStatus(ID.biz, patchOrder.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner))),
+        'PATCH paid/PAID again',
+      ).toBe(400);
+      const anonymous = await standard('anon', {});
+      expect(
+        await statusOf(controller.updateOrderStatus(ID.biz, anonymous.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner))),
+        'PATCH paid/PAID with no customer',
+      ).toBe(400);
+      expect(await statusOf(controller.fulfillOrder(ID.biz, anonymous.id, { action: 'mark_paid' }, signedIn(ID.owner))), 'mark_paid with no customer').toBe(400);
+      await settle();
+      expect(await shape(anonymous.id)).toBe('placed/UNPAID');
+      expect(await counts(), 'nothing more written').toEqual(after);
+      expect(storeEvents(), 'no further store_order.paid').toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2d (W10-STORE-ORDER-PAID review SEC-SOP-1, SEC-SOP-4; D-112, D-46) PATCH .../status takes plain strings and writing any payment field takes revenue write: a Prisma operation object ({"set":"PAID"} as paymentStatus, an object status, method or reference, also from the owner and in mark_paid) or a missing status is 400, and a revenue:read STAFF member writing paymentStatus COMPLETED or REFUNDED, a method or a reference is 403, with nothing written and no store_order event; the order stays an open payable, its status alone still moves, and the owner then marks it paid through the paid door', async () => {
+    const { controller } = await marketRoutes();
+    const STAFF = await memberOfA('staff_t2d');
+    const order = await standardOrderOfA('t2d');
+    const before = await counts();
+    const shape = await orderShape(order.id);
+    seen = [];
+
+    // At 3181cbb0 the first was 200 paid/PAID for the STAFF member with no payment, and the listener added a raw PAID
+    // INV-ORD invoice, its notification and its timeline event (review probe REVIEW-1).
+    const malformed: Array<[string, Record<string, unknown>]> = [
+      [STAFF, { status: 'paid', paymentStatus: { set: 'PAID' } }],
+      [ID.owner, { status: 'paid', paymentStatus: { set: 'PAID' } }],
+      [STAFF, { status: { set: 'refunded' } }],
+      [STAFF, { status: 'placed', paymentMethod: { set: 'CASH' } }],
+      [STAFF, { status: 'placed', paymentRef: ['x'] }],
+      [STAFF, { status: 'placed', paymentStatus: null }],
+      [STAFF, { paymentStatus: 'UNPAID' }],
+    ];
+    for (const [actor, body] of malformed) {
+      expect(await answered(controller.updateOrderStatus(ID.biz, order.id, body, signedIn(actor))), `PATCH ${JSON.stringify(body)} as ${actor}`).toBe(400);
+    }
+    expect(
+      await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentRef: { set: 'x' } }, signedIn(ID.owner))),
+      'mark_paid with an object reference',
+    ).toBe(400);
+    // At 3181cbb0 each was 200 and stored as sent: COMPLETED and REFUNDED took the order off the open payables, and
+    // REFUNDED made the owner's paid door answer 409 (review probe REVIEW-2).
+    for (const body of [
+      { status: 'placed', paymentStatus: 'COMPLETED' },
+      { status: 'placed', paymentStatus: 'REFUNDED' },
+      { status: 'placed', paymentMethod: 'BANK_TRANSFER' },
+      { status: 'placed', paymentRef: `${P}staff_ref` },
+      { status: 'placed', paymentRef: null },
+    ]) {
+      expect(await answered(controller.updateOrderStatus(ID.biz, order.id, body, signedIn(STAFF))), `PATCH ${JSON.stringify(body)} as STAFF`).toBe(403);
+    }
+    await settle();
+    expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(await paidTraces(ID.biz, order.id)).toMatchObject({ notifications: 0, timeline: 0 });
+    // PaymentsOpsService.listOpenPayables' order filter (payments-ops.service.ts): still an open payable.
+    const open = await db.marketplaceOrder.count({
+      where: { id: order.id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] }, status: { not: 'CANCELLED' } },
+    });
+    expect(open, 'still an open payable').toBe(1);
+
+    // Controls: its status alone still moves for the STAFF member (D-112), and the owner marks it paid through the door.
+    const moved = await controller.updateOrderStatus(ID.biz, order.id, { status: 'awaiting_payment' }, signedIn(STAFF));
+    expect(`${moved.status}/${moved.paymentStatus}`).toBe('awaiting_payment/UNPAID');
+    seen = [];
+    const paid = await controller.updateOrderStatus(ID.biz, order.id, { status: 'paid', paymentStatus: 'PAID', paymentMethod: 'CASH' }, signedIn(ID.owner));
+    await settle();
+    expect(`${paid.status}/${paid.paymentStatus}/${paid.paymentMethod}`).toBe('paid/PAID/CASH');
+    const { invoice } = await expectOnePaidInvoice(order);
+    expect(seen.filter((e) => e.name === 'store_order.paid').map((e) => e.payload?.invoiceId)).toEqual([invoice.id]);
+  });
+
+  it('V18-T2e (W10-STORE-ORDER-PAID review SEC-SOP-2, SEC-SOP-3; D-112) a status change records no payment, so it emits no store_order.paid: a revenue:read STAFF member\'s PATCH .../status paid on an order stored UNPAID starts none of the business\'s "order paid" automations (AgentTriggerService reads every event on the bus), and PATCH paid on an order stored PAID outside the paid door (the Shopify sync\'s shape), twice, writes no invoice, notification or paid timeline event; control: the owner\'s marking through the paid door emits one store_order.paid naming its invoice and starts the automation once', async () => {
+    const { controller } = await marketRoutes();
+    // (Importing AgentTriggerService transforms the AI module graph, about 4 s: this case has a 30 s timeout.)
+    const { AgentTriggerService } = await import('../src/modules/ai/agent-trigger.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const STAFF = await memberOfA('staff_t2e');
+    // The real AgentTriggerService over the suite's rows and bus, wired as its onModuleInit wires it (every event but
+    // plan.*), so it can be unwired after this case; its planner records the plans it is asked for.
+    const plans: Array<{ businessId: string; scope: unknown }> = [];
+    const agent = new (AgentTriggerService as any)(
+      app.get(PrismaService),
+      events,
+      { evaluateAutoApproval: async () => ({ autoApproved: false }) },
+      {
+        createPlan: async (businessId: string, input: { scope: unknown }) => {
+          plans.push({ businessId, scope: input.scope });
+          return { id: `${P}t2e_plan` };
+        },
+      },
+      {},
+      { log: async () => null },
+      { handleEvent: async () => [] },
+    );
+    const relay = (name: string | string[], payload: unknown) => {
+      if (typeof name === 'string' && !name.startsWith('plan.')) inflight.push(agent.handleEvent(name, payload));
+    };
+    events.onAny(relay);
+    await db.agentTrigger.create({
+      data: { businessId: ID.biz, name: 'V18-T2e when an order is paid', eventPattern: 'store_order.paid', objective: 'Thank the customer', enabled: true },
+    });
+    try {
+      const unpaid = await standardOrderOfA('t2e_unpaid');
+      seen = [];
+      const patched = await controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'paid' }, signedIn(STAFF));
+      await settle();
+      expect(`${patched.status}/${patched.paymentStatus}`, 'the status moves (open to every member)').toBe('paid/UNPAID');
+      expect(storeEvents(), 'no store_order.paid').toEqual([]);
+      // At 3181cbb0: a plan for business A, scope ['store_order.paid'] (review probe REVIEW-6).
+      expect(plans, 'no "order paid" automation for an unpaid order').toEqual([]);
+
+      // An order stored PAID with no checkout invoice: shopify.service.ts writes PAID for an order paid at Shopify.
+      const synced = await standardOrderOfA('t2e_synced', { paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+      const before = await counts();
+      for (const round of [1, 2]) {
+        const res = await controller.updateOrderStatus(ID.biz, synced.id, { status: 'paid' }, signedIn(STAFF));
+        await settle();
+        expect(`${res.status}/${res.paymentStatus}`, `PATCH paid, round ${round}`).toBe('paid/PAID');
+      }
+      // At 3181cbb0: a raw PAID INV-ORD invoice, and a notification and a timeline event for each call (REVIEW-4).
+      expect(storeEvents(), 'no store_order.paid').toEqual([]);
+      expect(await invoicesOf(synced), 'no INV-ORD invoice').toEqual([]);
+      expect(await counts()).toEqual(before);
+      expect(await paidTraces(ID.biz, synced.id)).toMatchObject({ notifications: 0, timeline: 0 });
+      expect(plans).toEqual([]);
+
+      // Control: the owner marks the unpaid order PAID through the paid door.
+      seen = [];
+      await controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner));
+      await settle();
+      const { invoice } = await expectOnePaidInvoice(unpaid);
+      expect(seen.filter((e) => e.name === 'store_order.paid').map((e) => e.payload?.invoiceId), 'one store_order.paid, naming the invoice').toEqual([invoice.id]);
+      expect(plans, 'the automation starts once').toEqual([{ businessId: ID.biz, scope: ['store_order.paid'] }]);
+    } finally {
+      events.offAny(relay);
+      await settle();
+      await db.agentTrigger.deleteMany({ where: { businessId: ID.biz } });
+    }
+  }, 30_000);
+
+  it('V18-T2f (W10-STORE-ORDER-PAID review CR-W10SOP-1, CR-W10SOP-4; D-112) what a marking writes on the order is written before the paid door emits store_order.paid: with StoreOrderRoutingListener routing each paid order as the event fires, every order keeps both its mark_paid step and the routing steps; a marking the door refuses takes its step and the customer it named back; the member\'s payment reference is the order\'s paymentRef again (PATCH and mark_paid), while the payment keeps the door\'s unique reference', async () => {
+    const { market, controller } = await marketRoutes();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    // mark_paid's own un-awaited auto-routing is held (another writer, at the base too); the routing listener, a
+    // { async: true } listener (it starts on a later tick), runs for real on the suite's bus over the suite's rows.
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    const onPaid = (payload: unknown) => {
+      inflight.push(new Promise((resolve) => setImmediate(() => resolve(listener.onStoreOrderPaid(payload)))));
+    };
+    events.on('store_order.paid', onPaid);
+    try {
+      // At 3181cbb0 the 'paid' step was written after the event and read-modify-wrote the timeline the listener
+      // rewrote at the same time: one of the two was lost (review probe: the paid step in 1 of 6, the routing steps in 2).
+      for (const n of [1, 2, 3, 4, 5, 6]) {
+        const order = await standardOrderOfA(`t2f_${n}`);
+        const marked = await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH', note: `cash ${n}` }, signedIn(ID.owner));
+        expect(marked.paymentStatus).toBe('PAID');
+        await settle();
+        const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+        const timeline = ((stored.metadata as any)?.statusTimeline ?? []) as any[];
+        expect(timeline.slice(0, 2).map((t) => `${t.status}:${t.note}`), `order ${n}: its mark_paid step`).toEqual(['placed:Order placed', `paid:cash ${n}`]);
+        expect(timeline.map((t) => t.status), `order ${n}: the routing listener's steps`).toContain('routed');
+        expect(stored.status, `order ${n}: routed`).toBe('routed');
+      }
+    } finally {
+      events.off('store_order.paid', onPaid);
+      await settle();
+    }
+    try {
+      // A marking the door refuses leaves the order as it was: its mark_paid step (the door resolves no contact for
+      // this customer: 400), and the customer a marking named for a cancelled walk-in order (the door: 409).
+      const unknown = await standardOrderOfA('t2f_unknown', { customerEmail: `${P}nobody@test.local` });
+      const cancelled = await standardOrderOfA('t2f_cancelled', { status: 'cancelled', customerEmail: null });
+      const before = await counts();
+      const shapes = [await orderShape(unknown.id), await orderShape(cancelled.id)];
+      seen = [];
+      expect(await answered(controller.fulfillOrder(ID.biz, unknown.id, { action: 'mark_paid', note: 'refused' }, signedIn(ID.owner))), 'no contact').toBe(400);
+      expect(
+        await answered(
+          controller.updateOrderStatus(ID.biz, cancelled.id, { status: 'paid', paymentStatus: 'PAID', customerEmail: CUSTOMER_EMAIL }, signedIn(ID.owner)),
+        ),
+        'a cancelled order',
+      ).toBe(409);
+      await settle();
+      expect([await orderShape(unknown.id), await orderShape(cancelled.id)], 'the orders as they were').toEqual(shapes);
+      expect(await counts()).toEqual(before);
+      expect(storeEvents()).toEqual([]);
+
+      // CR-W10SOP-4: the member's own reference. At 3181cbb0 PATCH dropped it (the order's paymentRef was the door's
+      // marketplace_paid_<id>_<hex>, and it was not noted anywhere).
+      const viaPatch = await standardOrderOfA('t2f_ref_patch');
+      await controller.updateOrderStatus(
+        ID.biz,
+        viaPatch.id,
+        { status: 'paid', paymentStatus: 'PAID', paymentMethod: 'BANK_TRANSFER', paymentRef: `${P}bankref_77` },
+        signedIn(ID.owner),
+      );
+      await settle();
+      const patched = await expectOnePaidInvoice(viaPatch);
+      expect((await orderShape(viaPatch.id)).row).toBe(`paid/PAID/BANK_TRANSFER/${P}bankref_77/${CUSTOMER_EMAIL}`);
+      expect(patched.payment.providerPaymentId, 'the payment keeps the door\'s unique reference').toMatch(new RegExp(`^marketplace_paid_${viaPatch.id}_`));
+      const viaMark = await standardOrderOfA('t2f_ref_mark');
+      await controller.fulfillOrder(ID.biz, viaMark.id, { action: 'mark_paid', paymentMethod: 'CASH', paymentRef: `${P}receipt_12` }, signedIn(ID.owner));
+      await settle();
+      await expectOnePaidInvoice(viaMark);
+      const markedRow = await db.marketplaceOrder.findUnique({ where: { id: viaMark.id } });
+      expect(`${markedRow.paymentMethod}/${markedRow.paymentRef}`).toBe(`CASH/${P}receipt_12`);
+      const steps = ((markedRow.metadata as any)?.statusTimeline ?? []) as any[];
+      expect(steps[steps.length - 1], 'the mark_paid step notes it too').toMatchObject({ status: 'paid', reference: `${P}receipt_12` });
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2g (W10-STORE-ORDER-PAID review CR-W10SOP-5; D-112) the orders the paid door refused for good are marked PAID through it: an order totalling 0 records a PAID invoice and a SUCCESSFUL payment of 0 by the member (nothing to post), and a walk-in order with no customer email or phone is given one with the marking (customerEmail, by mark_paid or PATCH), its invoice made out to that customer; with none, or one that is not an email or a phone, it is 400 and nothing is written, and a revenue:read member is 403; an order\'s own customer is never replaced', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      // A zero total (a 100% discount). At 3181cbb0: 400 "this order totals 0", and nothing else marks an order PAID.
+      const free = await standardOrderOfA('t2g_free', { discountAmount: ORDER_TOTAL, total: 0 });
+      seen = [];
+      const freeMarked = await controller.fulfillOrder(ID.biz, free.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner));
+      await settle();
+      expect(`${freeMarked.status}/${freeMarked.paymentStatus}`).toBe('paid/PAID');
+      const freeInvoices = await invoicesOf(free);
+      expect(freeInvoices.map((i) => `${i.invoiceNumber}:${i.status}:${Number(i.total)}`)).toEqual([`INV-${free.orderNumber}:PAID:0`]);
+      const freePayments = await paymentsOf(freeInvoices.map((i) => i.id));
+      expect(freePayments.map((p) => `${p.status}:${Number(p.amount)}:${p.recordedBy}`)).toEqual([`SUCCESSFUL:0:${ID.owner}`]);
+      expect(await postingsOf([freeInvoices[0].id, freePayments[0].id]), 'nothing to post for 0').toEqual([]);
+      expect(seen.filter((e) => e.name === 'store_order.paid').map((e) => e.payload?.invoiceId)).toEqual([freeInvoices[0].id]);
+
+      // A walk-in order: no customer email or phone (createOrder allows it for an order not created paid).
+      const walkIn = await standardOrderOfA('t2g_walkin', { customerName: 'Walk-in', customerEmail: null });
+      const STAFF = await memberOfA('staff_t2g');
+      const before = await counts();
+      const shape = await orderShape(walkIn.id);
+      seen = [];
+      for (const body of [{}, { customerEmail: 'not an email' }, { customerEmail: { set: CUSTOMER_EMAIL } }, { customerPhone: '12' }]) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, walkIn.id, { action: 'mark_paid', ...body }, signedIn(ID.owner))),
+          `mark_paid ${JSON.stringify(body)}`,
+        ).toBe(400);
+      }
+      expect(
+        await answered(controller.updateOrderStatus(ID.biz, walkIn.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner))),
+        'PATCH with no customer',
+      ).toBe(400);
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, walkIn.id, { action: 'mark_paid', customerEmail: CUSTOMER_EMAIL }, signedIn(STAFF))),
+        'a revenue:read member naming a customer',
+      ).toBe(403);
+      await settle();
+      expect(await orderShape(walkIn.id), 'the order as it was').toEqual(shape);
+      expect(await counts()).toEqual(before);
+      expect(storeEvents()).toEqual([]);
+
+      const marked = await controller.fulfillOrder(
+        ID.biz,
+        walkIn.id,
+        { action: 'mark_paid', paymentMethod: 'CASH', customerEmail: CUSTOMER_EMAIL },
+        signedIn(ID.owner),
+      );
+      await settle();
+      expect(`${marked.status}/${marked.paymentStatus}/${marked.customerEmail}`).toBe(`paid/PAID/${CUSTOMER_EMAIL}`);
+      const { invoice } = await expectOnePaidInvoice(walkIn);
+      expect(invoice.contactId, 'the invoice is made out to the customer named').toBe(ID.contact);
+
+      // PATCH .../status names one the same way; an order's own customer is never replaced by a marking.
+      const walkInPatch = await standardOrderOfA('t2g_walkin_patch', { customerName: 'Walk-in', customerEmail: null });
+      await controller.updateOrderStatus(ID.biz, walkInPatch.id, { status: 'paid', paymentStatus: 'PAID', customerEmail: CUSTOMER_EMAIL }, signedIn(ID.owner));
+      await settle();
+      await expectOnePaidInvoice(walkInPatch);
+      const own = await standardOrderOfA('t2g_own');
+      await controller.fulfillOrder(ID.biz, own.id, { action: 'mark_paid', customerEmail: `${P}someone_else@test.local` }, signedIn(ID.owner));
+      await settle();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: own.id } })).customerEmail).toBe(CUSTOMER_EMAIL);
+      await expectOnePaidInvoice(own);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2h (W10-STORE-ORDER-PAID review CR-W10SOP-2; D-112, D-14) an order marked paid through the paid door is refunded through the D-14 refund door: a partial refundAmount is 400 with nothing written (the door refunds in full; before D-112 it booked an Expense of the amount), and the full refund is a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, one store_order.refunded and no Expense', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const order = await standardOrderOfA('t2h');
+      await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner));
+      await settle();
+      const { invoice, payment } = await expectOnePaidInvoice(order);
+      const before = await counts();
+      const shape = await orderShape(order.id);
+      seen = [];
+      expenses.length = 0;
+
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'a partial refund',
+      ).toBe(400);
+      await settle();
+      expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
+      expect(await counts()).toEqual(before);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+
+      await controller.fulfillOrder(ID.biz, order.id, { action: 'refund', reason: 'returned' }, signedIn(ID.owner));
+      await settle();
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`.toUpperCase()).toBe('REFUNDED/REFUNDED');
+      const rows = await paymentsOf([invoice.id]);
+      expect(rows.map((p) => `${p.status}:${Number(p.amount)}:${p.recordedBy}`), 'the original kept, one negative refund row').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}:${ID.owner}`,
+        `REFUNDED:${-ORDER_TOTAL}:${ID.owner}`,
+      ]);
+      expect(rows[1].reference, 'the refund links to the payment').toBe(payment.providerPaymentId);
+      const reopened = await db.invoice.findUnique({ where: { id: invoice.id } });
+      expect(`${reopened.status}/${reopened.paidAt}`).toBe('SENT/null');
+      const postings = await postingsOf([invoice.id, payment.id, rows[1].id]);
+      const depositNet = money(
+        postings
+          .flatMap((t: any) => t.entries)
+          .filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+          .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+      );
+      expect(depositNet, 'the cash taken is given back on the ledger').toBe(0);
+      expect(storeEvents().filter((n) => n === 'store_order.refunded'), 'one store_order.refunded').toHaveLength(1);
+      expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
   it.todo(
-    'V18-T2b (W9-STORE-PAID-LISTENERS review STL-SEC-2 / CR-W9SPL-1; D-18, SEC-V18-3) the other store_order.paid listeners do not read the stored paymentStatus of a STANDARD order: for a STANDARD order set paid by PATCH .../status without a payment and stored UNPAID, CommerceIntegrationService.handleOrderPaid (commerce-integration.service.ts, its STANDARD branch) still writes a store_order.paid contact timeline event, an "Order Payment Received" notification and a raw PAID INV-ORD-<n> invoice with no payment, and ai.listener, journey-listener.service (order_paid touchpoint) and calendar orders.listener act on it too; follow-up packet',
+    "V18-T2i (W10-STORE-ORDER-PAID review CR-W10SOP-2; needs an owner ruling and StoreOrderService.refundOrder, outside this packet's write set) a partial refund of an order paid through the paid door is recorded on its invoice (D-14): a negative REFUNDED row of the amount refunded and its posting reversed by that amount. Before D-112 a marked-paid order had no payment on the books and its partial refund booked an Expense of the amount; the D-14 refund door refunds in full only (V18-T2h)",
   );
+
   it.todo(
-    'V18-T2c (W9-STORE-PAID-LISTENERS review STL-SEC-1; D-18, SEC-V18-3) the stored PAID the V18-T2 listeners trust is written with no payment and no revenue write: PATCH /marketplace/businesses/:businessId/orders/:orderId/status with paymentStatus PAID (marketplace.service.ts updateOrderStatus; AuthGuard, BusinessGuard and the rate limit only, so a revenue:read STAFF member) and the fulfil mark_paid action set a STANDARD order not created paid to paid/PAID, and the webhook, the paid timeline entry and the routing follow (V18-T2 control 4 is that order); needs an owner ruling (refuse a PAID write without revenue write, or take it through the paid door as D-77 does for an order created paid)',
+    "V18-T2j (W10-STORE-ORDER-PAID review CR-W10SOP-3, FIN3; needs StoreOrderService.completeCheckout, outside this packet's write set) the COGS leg of an order marked paid is posted in the paid door's transaction, so a COGS posting failure leaves the order unpaid with nothing recorded, as the base mark_paid did. Today, as for an order created paid (D-77), COGS is posted after the door commits, idempotently, and a failure is logged with nothing to post it again",
   );
 
   it('V18-T3 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, V1-33) live pin: CASH and MANUAL storefront orders reach PAID through POST /site/businesses/:businessId/orders/:orderId/complete-offline (revenue write, the signed-in member records it) with one invoice, one payment and one posting, a second completion writes nothing, and the store fulfillment panel\'s Complete offline action posts to that route (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04)', async () => {

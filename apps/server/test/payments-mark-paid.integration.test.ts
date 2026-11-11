@@ -131,9 +131,12 @@
  *          payment method) is acknowledged and records nothing on either endpoint; its
  *          checkout.session.async_payment_succeeded records it once, bound like any payment event;
  *          its async_payment_failed records nothing
- *   MP-06s the service shape markInvoicePaid(invoiceId) itself (no actor, no tenant) still takes
- *          the posted path; no production caller passes it any more (RA-G16-01 census in
- *          revenue-authorization.integration.test.ts)
+ *   MP-06s W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half): the service shape
+ *          markInvoicePaid(invoiceId) itself (no actor, no tenant), which no production caller
+ *          passes any more (RA-G16-01 census in revenue-authorization.integration.test.ts), is
+ *          refused (403) before the invoice is read (an unknown id gets the same 403, not 404);
+ *          nothing written. Named with its tenant and no actor it still takes the posted path
+ *          (PAID, one posted payment, recordedBy null)
  * The Stripe SDK is a stub (no provider traffic): its constructEvent verifies the
  * t=<ts>,v1=<HMAC-SHA256> header as Stripe documents it, and the Stripe ledger door verifies the
  * same header itself, so every delivery here is signed with the deployment secret.
@@ -875,8 +878,18 @@ describe('mark-paid records the remaining balance as a posted payment (G2)', () 
 });
 
 describe('every caller of markInvoicePaid takes the same posted path', () => {
-  it("MP-06s: the service shape markInvoicePaid(invoiceId) with no actor and no tenant (the legacy Stripe webhook's until R0-20b; no production caller passes it now, RA-G16-01) -> PAID with a posted payment, recordedBy null", async () => {
-    const invoice = await commerce.markInvoicePaid(ID.invWebhook);
+  it("MP-06s: the service shape markInvoicePaid(invoiceId) with no actor and no tenant (the legacy Stripe webhook's until R0-20b; no production caller passes it now, RA-G16-01) is refused (403) before the invoice is read and writes nothing (W10-MARKPAID-ACTOR-REQUIRED, D-05); named with its tenant and no actor it still takes the posted path -> PAID with a posted payment, recordedBy null", async () => {
+    const { ForbiddenException, NotFoundException } = await import('@nestjs/common');
+    // W10-MARKPAID-ACTOR-REQUIRED (D-05; RA-G16-01 service half): neither an actor nor a tenant -> refused.
+    await expect(commerce.markInvoicePaid(ID.invWebhook)).rejects.toBeInstanceOf(ForbiddenException);
+    await expectUntouched(ID.invWebhook, 'SENT');
+    // Before the read: an id no invoice has gets the same 403, not the lookup's 404.
+    const unknown = await commerce.markInvoicePaid(`${P}invNoSuchMp06s`).then(() => undefined, (err: unknown) => err);
+    expect(unknown).toBeInstanceOf(ForbiddenException);
+    expect(unknown).not.toBeInstanceOf(NotFoundException);
+
+    // The tenant named, no actor: the posted path, as before.
+    const invoice = await commerce.markInvoicePaid(ID.invWebhook, undefined, ID.biz);
     expect(invoice).toMatchObject({ id: ID.invWebhook, status: 'PAID' });
     const rows = await paymentsOf(ID.invWebhook);
     expect(rows).toHaveLength(1);
