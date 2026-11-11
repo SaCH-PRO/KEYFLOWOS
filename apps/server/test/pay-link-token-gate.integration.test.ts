@@ -129,14 +129,18 @@ const PROVIDER_ENV: Record<string, string> = {
   STRIPE_PUBLISHABLE_KEY: `${P}pk_test`,
   STRIPE_WEBHOOK_SECRET: `${P}whsec`,
   PUBLIC_URL_ALLOWLIST: 'https://pay.v46a.test',
-  WIPAY_API_KEY: `${P}wipay_key`,
-  WIPAY_ACCOUNT_NUMBER: '4600000000',
   PAYPAL_CLIENT_ID: `${P}pp_client`,
   PAYPAL_CLIENT_SECRET: `${P}pp_secret`,
   PAYPAL_WEBHOOK_ID: `${P}pp_webhook`,
   PAYPAL_ENVIRONMENT: 'sandbox',
 };
 const PREVIOUS_PROVIDER_ENV: Record<string, string | undefined> = {};
+/**
+ * W10-WIPAY-KEY (D-105): business A's own WiPay key and account (business.metaData). WiPay is offered only to a
+ * business with its own key; the platform pair (WIPAY_API_KEY, WIPAY_ACCOUNT_NUMBER) this suite set before D-105
+ * serves no tenant, so it is no longer set.
+ */
+const WIPAY_PAIR = { wipayApiKey: `${P}wipay_key`, wipayAccountNumber: '4600000000' };
 
 const RETURN_URL = 'https://pay.v46a.test/pay/link/return';
 const STRIPE_REDIRECT = 'https://checkout.v46a.test/stripe-session';
@@ -692,7 +696,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.ownerA, email: `${P}ownerA@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
   await db.business.create({
-    data: { id: ID.bizA, name: 'V46A Biz A', ownerId: ID.ownerA, currency: 'TTD', email: `${P}billing@test.local`, metaData: { bankAccountNumber: `${CANARY}acct` } },
+    data: { id: ID.bizA, name: 'V46A Biz A', ownerId: ID.ownerA, currency: 'TTD', email: `${P}billing@test.local`, metaData: { bankAccountNumber: `${CANARY}acct`, ...WIPAY_PAIR } },
   });
   await db.business.create({ data: { id: ID.bizB, name: 'V46A Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_ownerA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
@@ -1778,7 +1782,7 @@ describe('provider webhooks and callbacks keep working (V1-46b)', () => {
   it('TG-21: a WiPay success callback records the payment for an invoice whose link has been revoked', async () => {
     const q = { transaction_id: `${P}wipay_tx`, order_id: ID.invWhWipay, status: 'success', total: TOTAL.toFixed(2) };
     // V1-05 (D-19): WiPay's keyed proof over the requested total (the invoice's), which is the amount recorded.
-    const hash = createHash('md5').update(`${q.transaction_id}${TOTAL.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex');
+    const hash = createHash('md5').update(`${q.transaction_id}${TOTAL.toFixed(2)}${WIPAY_PAIR.wipayApiKey}`).digest('hex');
     const res = await agent().get('/payments/wipay/callback').query({ ...q, hash });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ success: true });

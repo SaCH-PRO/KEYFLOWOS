@@ -16,7 +16,13 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
-import { WIPAY_CURRENCY, resolveWipayMerchant, wipayMerchantComplete, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
+import {
+  WIPAY_CURRENCY,
+  WIPAY_KEY_REQUIRED,
+  resolveWipayMerchant,
+  wipayMerchantComplete,
+  wipayTakesCurrency,
+} from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
@@ -937,7 +943,10 @@ export class PaymentsService {
     // starts and its callbacks can be verified (wipayCheckoutTarget): a key
     // that verifies this business's payments and an account number to pay
     // into, both from one source (resolveWipayMerchant; repair round 2,
-    // G6RC-1: the business's own pair or the platform's, never mixed).
+    // G6RC-1). W10-WIPAY-KEY (D-105): that source is the business's own pair;
+    // a business with no WiPay key of its own is not offered WiPay (it was
+    // offered the platform's account). This list serves the pay link, the
+    // bare-id pay page and the storefront checkout (SiteController).
     // D-69 (G6ML-2): and only for a TTD amount, until WiPay's currency
     // parameter is verified from its documentation.
     const currency = payableCurrency ?? business?.currency ?? null;
@@ -2379,18 +2388,21 @@ export class PaymentsService {
 
   /**
    * The WiPay API key a callback is verified with: the key of the WiPay
-   * account the business's checkout pays into. That is the business's own
-   * (metaData.wipayApiKey); else, for a business that checks out into the
-   * platform's account (no WiPay setting of its own), the platform's
-   * (WIPAY_API_KEY). Review V05-SEC-3: a business with its own WiPay account
-   * but no key of its own gets null, so the platform key never settles a
-   * payable of a tenant whose money goes to another account. Nothing
-   * configured is null: the callback is refused, never checked against a
-   * default (WiPay's sandbox key is public).
+   * account the business's checkout pays into, the business's own
+   * (metaData.wipayApiKey). W10-WIPAY-KEY (D-105; SEC-V33-2, PC-11b): never
+   * the platform's (WIPAY_API_KEY). A business with no WiPay setting of its
+   * own used to check out into the platform's account and be verified by the
+   * platform key, so a success proved by that shared key could be booked
+   * against any such tenant's invoice or storefront order of the same total
+   * (WiPay's proof names no order_id). Now the key that proves a success
+   * names the business whose payable it may settle, invoice and storefront
+   * order alike. Review V05-SEC-3: a business with its own WiPay account but
+   * no key of its own gets null. Nothing configured is null: the callback is
+   * refused, never checked against a default (WiPay's sandbox key is public).
    */
   private static wipayApiKey(metaData: unknown): string | null {
-    // Trial-N repair round 2 (G6RC-1): the key of the one merchant the business resolves to, its own or the
-    // platform's (resolveWipayMerchant); the gateway list, the checkouts and the connector read the same pair.
+    // Trial-N repair round 2 (G6RC-1) and D-105: the key of the business's own merchant (resolveWipayMerchant);
+    // the gateway list, the checkouts and the connector read the same pair.
     return resolveWipayMerchant(metaData).apiKey;
   }
 
@@ -2431,6 +2443,12 @@ export class PaymentsService {
    * the payer was charged and nothing was recorded. The keyless sandbox
    * checkout is gone with it: no key verifies a sandbox callback either (the
    * public sandbox key is never a default), so it could settle nothing.
+   *
+   * W10-WIPAY-KEY (D-105): a business with no WiPay key of its own is refused
+   * with code WIPAY_KEY_REQUIRED, every checkout alike (pay link, generic
+   * invoice, event ticket and storefront checkouts, createStorePayment). It
+   * used to check out into the platform's account (WIPAY_API_KEY,
+   * WIPAY_ACCOUNT_NUMBER), which tenants no longer share.
    */
   private static wipayCheckoutTarget(metaData: unknown): {
     apiUrl: string;
@@ -2438,12 +2456,15 @@ export class PaymentsService {
     developerId: string;
     accountNumber?: string;
   } {
-    // Trial-N repair round 2 (G6RC-1): the key and the account are one merchant's, the business's own pair or the
-    // platform's (resolveWipayMerchant). A business with its own key and no account of its own is refused here; it
-    // was sent to the platform's account, whose callback its own key then refused.
+    // Trial-N repair round 2 (G6RC-1): the key and the account are one merchant's, the business's own pair
+    // (resolveWipayMerchant; D-105: never the platform's). A business with its own key and no account of its own is
+    // refused here; it was sent to the platform's account, whose callback its own key then refused.
     const { apiKey, accountNumber } = resolveWipayMerchant(metaData);
     if (!apiKey) {
-      throw new BadRequestException('WiPay is not configured for this business: no WiPay API key to verify its payments');
+      throw new BadRequestException({
+        code: WIPAY_KEY_REQUIRED,
+        message: 'WiPay is not configured for this business: no WiPay API key to verify its payments',
+      });
     }
     if (!accountNumber) {
       throw new BadRequestException('WiPay is not configured for this business: no WiPay account number');
@@ -2557,6 +2578,12 @@ export class PaymentsService {
    * used to write a FAILED row and claim the transaction id of the caller's
    * choosing; since the packet it was a 400 the pay page showed the payer
    * as 'Invalid WiPay callback signature'.
+   *
+   * W10-WIPAY-KEY (D-105; SEC-V33-2, PC-11b): the key is the PAYABLE'S
+   * business's own (wipayApiKey), for an invoice and a storefront order alike,
+   * never the platform's. A storefront order of a business with no WiPay key
+   * of its own is settled by no callback, and a success proved with one
+   * business's key is refused for another business's payable.
    */
   async handleWipayCallback(queryParams: WipayCallbackParams): Promise<{ success: boolean; invoiceId?: string; message: string }> {
     const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);

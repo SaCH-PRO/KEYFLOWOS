@@ -2286,11 +2286,16 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
       STRIPE_PUBLISHABLE_KEY: `${P}stripe_publishable_fake`,
       STRIPE_WEBHOOK_SECRET: `${P}stripe_webhook_fake`,
       PUBLIC_URL_ALLOWLIST: 'https://pay.v44a.test',
-      WIPAY_API_KEY: `${P}wipay_key_fake`,
-      WIPAY_ACCOUNT_NUMBER: '4400000000',
       PAYPAL_CLIENT_ID: `${P}paypal_client_fake`,
       PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake`,
     };
+    /**
+     * W10-WIPAY-KEY (D-105): the invoice business's own WiPay key and account (business.metaData), set for this
+     * describe only. WiPay is offered only to a business with its own key; the platform pair (WIPAY_API_KEY,
+     * WIPAY_ACCOUNT_NUMBER) this describe set before D-105 serves no tenant.
+     */
+    const WIPAY_PAIR = { wipayApiKey: `${P}wipay_key_fake`, wipayAccountNumber: '4400000000' };
+    let previousBizMeta: unknown;
     const previousEnv: Record<string, string | undefined> = {};
     const RETURN_URL = 'https://pay.v44a.test/pay/link/return';
     const STRIPE_BODY = { gateway: 'stripe', successUrl: `${RETURN_URL}?stripe=success`, cancelUrl: `${RETURN_URL}?stripe=cancel` };
@@ -2337,13 +2342,20 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
         process.env[k] = v;
       }
       globalThis.fetch = providerFetch as typeof fetch;
+      // W10-WIPAY-KEY (D-105): the invoice business connects its own WiPay pair.
+      previousBizMeta = (await db.business.findUnique({ where: { id: ID.biz }, select: { metaData: true } }))?.metaData ?? null;
+      const meta = previousBizMeta && typeof previousBizMeta === 'object' ? (previousBizMeta as Record<string, unknown>) : {};
+      await db.business.update({ where: { id: ID.biz }, data: { metaData: { ...meta, ...WIPAY_PAIR } } });
       const { PaymentsService } = await import('../src/modules/payments/payments.service');
       paypalSpy = vi.spyOn(commerceApp.get(PaymentsService) as any, 'getPaypalClient').mockImplementation(() => ({ client: {}, ordersController: paypalOrders }));
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       globalThis.fetch = realFetch;
       paypalSpy?.mockRestore();
+      // The pair is removed again (the business had no WiPay setting before this describe).
+      const restored = previousBizMeta && typeof previousBizMeta === 'object' ? previousBizMeta : {};
+      await db.business.update({ where: { id: ID.biz }, data: { metaData: restored } }).catch(() => undefined);
       for (const [k, v] of Object.entries(previousEnv)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
@@ -2370,7 +2382,7 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
           status: 'success',
           total: requested.toFixed(2),
           // WiPay's keyed proof: md5(transaction_id + the total this server requested + the API key) (V1-05, D-19).
-          hash: createHash('md5').update(`${txn}${requested.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex'),
+          hash: createHash('md5').update(`${txn}${requested.toFixed(2)}${WIPAY_PAIR.wipayApiKey}`).digest('hex'),
         });
     const lastCall = (match: (url: string) => boolean) => providerCalls.filter((p) => match(p.url)).at(-1)!;
     const stripeAmount = () => new URLSearchParams(lastCall((u) => u.startsWith('https://api.stripe.com/')).body).get('line_items[0][price_data][unit_amount]');

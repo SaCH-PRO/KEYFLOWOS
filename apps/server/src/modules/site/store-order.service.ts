@@ -16,6 +16,7 @@ import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import {
   WIPAY_CURRENCY,
+  WIPAY_KEY_REQUIRED,
   resolveWipayMerchant,
   wipayMerchantComplete,
   wipayTakesCurrency,
@@ -347,12 +348,17 @@ export class StoreOrderService {
       // checkouts read, resolveWipayMerchant). createStorePayment refused it
       // too, but only after the order and its promo use had committed, so every
       // attempt (and every retry) left another UNPAID order.
+      // W10-WIPAY-KEY (D-105): the pair is the business's own; a store with no
+      // WiPay key of its own (it used to check out into the platform's account)
+      // is refused with code WIPAY_KEY_REQUIRED, before anything is written.
       const business = await this.prisma.client.business.findUnique({
         where: { id: input.businessId },
         select: { metaData: true },
       });
-      if (!wipayMerchantComplete(resolveWipayMerchant(business?.metaData))) {
-        throw new BadRequestException('WiPay is not configured for this business: choose another payment method');
+      const merchant = resolveWipayMerchant(business?.metaData);
+      if (!wipayMerchantComplete(merchant)) {
+        const message = 'WiPay is not configured for this business: choose another payment method';
+        throw new BadRequestException(merchant.apiKey ? message : { code: WIPAY_KEY_REQUIRED, message });
       }
     }
 
