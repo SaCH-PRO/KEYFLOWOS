@@ -170,6 +170,10 @@ export class CommerceIntegrationService {
    * 'mark_paid' and PATCH .../status 'paid' routes, which record no invoice
    * and no payment) writes nothing, so no invoice, no 'paid' tag, no paid
    * timeline event and no "payment received" notification follow from it.
+   * W10-STORE-ORDER-PAID (V18-T2b, D-112): nor does one for an order of any
+   * type that is not stored PAID; since D-112 a STANDARD order is stored PAID
+   * only through the paid door (MarketplaceService.recordPaymentThroughDoor),
+   * whose emission carries its invoice.
    */
   @OnEvent('store_order.paid')
   async handleOrderPaid(payload: StoreOrderPaidPayload & { invoiceId?: string | null }) {
@@ -185,13 +189,17 @@ export class CommerceIntegrationService {
         this.logger.warn(`[CommerceIntegration] store_order.paid names order ${order.id}, not found in business ${payload.businessId}; ignored`);
         return;
       }
+      // W10-STORE-ORDER-PAID (V18-T2b, review STL-SEC-2 / CR-W9SPL-1; D-112): every order type is acted on only when
+      // stored PAID. PATCH .../status 'paid' alone (a fulfilment status change, open to any member) emits
+      // store_order.paid for a STANDARD order stored UNPAID, and this STANDARD branch wrote its contact timeline event,
+      // its "Order Payment Received" notification and a raw PAID INV-ORD invoice with no payment.
+      if ((stored.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+        this.logger.warn(
+          `[CommerceIntegration] store_order.paid for ${stored.type} order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (an order is paid through the paid door)`,
+        );
+        return;
+      }
       if (stored.type === STOREFRONT_ORDER_TYPE) {
-        if (stored.paymentStatus !== 'PAID') {
-          this.logger.warn(
-            `[CommerceIntegration] store_order.paid for storefront order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (only completeCheckout settles a storefront order)`,
-          );
-          return;
-        }
         // Settled means completeCheckout's invoice for THIS order exists in
         // this business (and is the one the event names, when it names one).
         const settled = await this.prisma.client.invoice.findFirst({

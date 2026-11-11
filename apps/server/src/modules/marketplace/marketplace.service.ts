@@ -19,6 +19,22 @@ import {
   StoreOrderRefundedPayload,
 } from '../../core/event-bus/events.types';
 
+/**
+ * D-77 / D-112: the method a payment a member records on a marketplace order
+ * is taken in. Offline methods only (the money is recorded here, not taken by
+ * a provider); anything else is recorded as 'manual'.
+ */
+const OFFLINE_RECORDED_METHODS = new Set(['cash', 'bank_transfer', 'check', 'manual']);
+function offlinePaymentMethod(requested: unknown): string {
+  const method = String(requested ?? 'manual').trim().toLowerCase();
+  return OFFLINE_RECORDED_METHODS.has(method) ? method : 'manual';
+}
+
+/** D-112: a payment status written on an order that marks it paid (any case, as assertNotPayingDoorOrder reads it). */
+function marksPaymentPaid(paymentStatus: unknown): boolean {
+  return typeof paymentStatus === 'string' && paymentStatus.toUpperCase() === 'PAID';
+}
+
 @Injectable()
 export class MarketplaceService {
   private readonly logger = new Logger(MarketplaceService.name);
@@ -446,8 +462,7 @@ export class MarketplaceService {
 
     const initialStatus = paidOnCreation ? 'paid' : 'placed';
     // D-77: an offline method only (the payment is recorded here, not taken by a provider).
-    const requestedMethod = String(data.paymentMethod ?? 'manual').trim().toLowerCase();
-    const offlineMethod = ['cash', 'bank_transfer', 'check', 'manual'].includes(requestedMethod) ? requestedMethod : 'manual';
+    const offlineMethod = offlinePaymentMethod(data.paymentMethod);
 
     // D-77: the order is written placed; the paid door below moves it to paid / PAID with its books.
     const order = await this.prisma.client.$transaction(async (tx) => {
@@ -727,7 +742,82 @@ export class MarketplaceService {
     );
   }
 
-  async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any) {
+  /**
+   * W10-STORE-ORDER-PAID (owner ruling D-112; V18-T2c, review STL-SEC-1): a
+   * STANDARD order not created paid is marked PAID (PATCH .../status with
+   * paymentStatus PAID, the fulfil 'mark_paid' action) only through the paid
+   * door, StoreOrderService.completeCheckout, as an order created paid is
+   * (D-77): one PAID invoice INV-<orderNumber>, one SUCCESSFUL payment of the
+   * order total recorded by the member (Payment.recordedBy, the posting's
+   * createdById), its payment_recorded posting and the revenue attribution in
+   * one transaction, then the order PAID and one store_order.paid carrying the
+   * invoice. Both routes wrote paid/PAID for any member (also revenue:read)
+   * with no invoice, no payment and no posting; their store_order.paid made
+   * the listener write a raw PAID INV-ORD invoice, and the paid listeners
+   * trusted that stored PAID. The caller has checked revenue write first
+   * (StoreOrderService.assertMemberMayRecordPayments, D-46: 403); this checks
+   * that there is a customer to invoice and an amount to record (400) before
+   * anything is written. The door refuses a cancelled or refunded order (409).
+   * The COGS leg follows the recorded sale (FIN3, idempotent).
+   */
+  private async recordPaymentThroughDoor(
+    order: {
+      id: string;
+      businessId: string;
+      total: number;
+      customerEmail: string | null;
+      customerPhone: string | null;
+    },
+    input: { actorId: string | null; paymentMethod?: unknown; paidStatus: string },
+  ) {
+    if (!order.customerEmail && !order.customerPhone) {
+      throw new BadRequestException(
+        'Marking an order paid records an invoice for its customer: give the order a customer email or phone first',
+      );
+    }
+    if (!(Number(order.total) > 0)) {
+      throw new BadRequestException('Marking an order paid records a payment of its total, and this order totals 0');
+    }
+    const method = offlinePaymentMethod(input.paymentMethod);
+    let recordedHere = true;
+    try {
+      await this.storeOrders().completeCheckout({
+        orderId: order.id,
+        paymentRef: `marketplace_paid_${order.id}_${randomBytes(16).toString('hex')}`,
+        provider: method,
+        method,
+        actorId: input.actorId,
+        paidStatus: input.paidStatus,
+        stockMovesOnFulfilment: true,
+        refuseClosedOrder: true,
+      });
+    } catch (err) {
+      // A concurrent marking committed first (INV-<orderNumber> is unique in the business): the order is paid once.
+      if ((err as { code?: string } | null)?.code !== 'P2002') throw err;
+      const settled = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: order.id, businessId: order.businessId },
+        select: { paymentStatus: true },
+      });
+      if ((settled?.paymentStatus ?? '').toUpperCase() !== 'PAID') throw err;
+      recordedHere = false;
+    }
+    const include = { items: { include: { product: true } }, shipments: true } as const;
+    const paid = recordedHere
+      ? await this.prisma.client.marketplaceOrder.update({ where: { id: order.id }, data: { paymentMethod: method.toUpperCase() }, include })
+      : await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: order.id, businessId: order.businessId }, include });
+    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is recorded.
+    await this.postOrderCogs(paid).catch((err) =>
+      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
+    );
+    return paid;
+  }
+
+  /**
+   * @param actorId the authenticated member (MarketplaceController). Marking
+   *   the order PAID (paymentStatus PAID) takes revenue write and records its
+   *   payment through the paid door with this member as the recorder (D-112).
+   */
+  async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
@@ -736,6 +826,32 @@ export class MarketplaceService {
     const onDoors = await this.moneyOnTheDoors(order);
     this.assertNotPayingDoorOrder(onDoors, status, paymentData?.paymentStatus);
     this.assertNoDoorPaymentFields(onDoors, paymentData);
+
+    // W10-STORE-ORDER-PAID (D-112, V18-T2c): paymentStatus PAID takes a member with revenue write (403 otherwise,
+    // nothing written), and an order not paid yet is marked PAID only through the paid door. Its status alone (a
+    // fulfilment change) stays open to every member.
+    const marksPaid = marksPaymentPaid(paymentData?.paymentStatus);
+    if (marksPaid) await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+    if (marksPaid && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+      let paid = await this.recordPaymentThroughDoor(order, {
+        actorId,
+        paymentMethod: paymentData?.paymentMethod,
+        paidStatus: typeof status === 'string' && status ? status : 'paid',
+      });
+      // The status asked for, where the door kept a fulfilment status already past it (completeCheckout does not rewind one).
+      if (typeof status === 'string' && status && paid.status !== status) {
+        paid = await this.prisma.client.marketplaceOrder.update({
+          where: { id: orderId },
+          data: { status },
+          include: { items: { include: { product: true } }, shipments: true },
+        });
+      }
+      // The door has emitted store_order.paid with its invoice; any other status keeps its own lifecycle event.
+      if (typeof status === 'string' && status && status.toLowerCase() !== 'paid') {
+        this.emitOrderLifecycleEvent(businessId, paid, status);
+      }
+      return paid;
+    }
 
     const updateData: any = { status };
     if (paymentData) {
@@ -1305,51 +1421,39 @@ export class MarketplaceService {
 
       case 'mark_paid': {
         this.assertNotPayingDoorOrder(await this.moneyOnTheDoors(order), 'paid');
+        // W10-STORE-ORDER-PAID (D-112, V18-T2c): a member with revenue write (403 otherwise, nothing written), and the
+        // payment recorded through the paid door (recordPaymentThroughDoor). This action used to set paid/PAID for any
+        // member with no invoice, payment or posting, and emitted store_order.paid itself.
+        await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+        if ((order.paymentStatus ?? '').toUpperCase() === 'PAID') {
+          throw new BadRequestException('This order is already marked paid');
+        }
         if (!canTransitionOrder(order.status, 'paid')) {
           throw new BadRequestException(`Cannot transition order from ${order.status} to paid`);
         }
-        newStatus = 'paid';
-        timeline.push({ status: 'paid', timestamp: now, note: data?.note });
-        if (data?.paymentMethod) updateData.paymentMethod = data.paymentMethod;
-        if (data?.paymentRef) updateData.paymentRef = data.paymentRef;
-        updateData.paymentStatus = 'PAID';
-        updateData.status = newStatus;
-        updateData.metadata = { ...meta, statusTimeline: [...timeline] };
-        // FIN3 — order status flip + COGS posting share a single
-        // transaction so a posting failure rolls the PAID write back.
-        const paidOrder = await this.prisma.client.$transaction(async (tx) => {
-          await tx.marketplaceOrder.update({ where: { id: orderId }, data: updateData });
-          const fresh = await tx.marketplaceOrder.findFirst({
-            where: { id: orderId },
-            include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
-          });
-          if (fresh) {
-            const items = fresh.items
-              .filter((i) => i.productId && i.quantity > 0)
-              .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
-            if (items.length > 0) {
-              await this.expensePosting.onProductSold(
-                {
-                  businessId,
-                  sourceType: 'MarketplaceOrder',
-                  sourceId: fresh.id,
-                  date: new Date(),
-                  currency: fresh.currency,
-                  items,
-                },
-                tx as unknown as import('@prisma/client').Prisma.TransactionClient,
-              );
-            }
-          }
-          return fresh;
+        // The door writes paid / PAID with its books and emits one store_order.paid carrying the invoice.
+        await this.recordPaymentThroughDoor(order, { actorId, paymentMethod: data?.paymentMethod, paidStatus: 'paid' });
+        // The fulfilment timeline (not money state), on the metadata as it is now; the member's own reference is noted here.
+        const current = await this.prisma.client.marketplaceOrder.findFirst({ where: { id: orderId, businessId }, select: { metadata: true } });
+        const currentMeta = (current?.metadata as Record<string, unknown> | null) ?? {};
+        const currentTimeline: unknown[] = Array.isArray(currentMeta.statusTimeline) ? currentMeta.statusTimeline : [];
+        const paidOrder = await this.prisma.client.marketplaceOrder.update({
+          where: { id: orderId },
+          data: {
+            metadata: {
+              ...currentMeta,
+              statusTimeline: [
+                ...currentTimeline,
+                { status: 'paid', timestamp: now, note: data?.note, ...(data?.paymentRef ? { reference: String(data.paymentRef) } : {}) },
+              ],
+            } as import('@prisma/client').Prisma.InputJsonValue,
+          },
+          include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
         });
         this.autoRouteOrder(businessId, orderId, true);
-        if (paidOrder) {
-          this.emitOrderLifecycleEvent(businessId, paidOrder, 'paid');
-          this.sendFulfillmentNotification(businessId, paidOrder, 'paid', data).catch((err) =>
-            this.logger.error(`Failed to send paid notification: ${(err as Error).message}`),
-          );
-        }
+        this.sendFulfillmentNotification(businessId, paidOrder, 'paid', data).catch((err) =>
+          this.logger.error(`Failed to send paid notification: ${(err as Error).message}`),
+        );
         return paidOrder;
       }
 
