@@ -1184,3 +1184,139 @@ describe('review repairs: briefing execute-all takes only the daily briefing, an
     expect(dispatchedFor(stepId)).toHaveLength(1);
   });
 });
+
+/**
+ * W10-KEY-PLAN-SCOPE (owner ruling D-114, amending D-71 for an explicit revenue 'none' only; D-57;
+ * W9-MONEY-REPORTS-KEY review SEC-W9MRK-1 and SEC-W9MRK-2). assertMemberSteps skipped every step check
+ * for an ADMIN (D-71: an ADMIN keeps every module), and memberPlanStepScopeRefusal held a money report
+ * step (finance.generate_pnl, analytics.create_report, analytics.export_report) to its module's scope
+ * alone, while POST cortex/execute also asks revenue:read for it (cortexCommandRefusal, D-57). D-114: an
+ * ADMIN whose explicit scope map sets revenue to none is refused money steps (the money reports and the
+ * invoice actions); an ADMIN with role-default scopes is unaffected, and keeps every other module. The
+ * plan read rule withholds such a step's stored output from a viewer without revenue read (SEC-W9MRK-2).
+ * The members below are added for this block only (the fixture sanity case above counts the others).
+ */
+describe('W10-KEY-PLAN-SCOPE (D-114, D-57): an explicit revenue none binds an ADMIN\'s money steps, a money report step needs revenue read, and its stored output follows the plan read rule', () => {
+  const KP = {
+    adminNoRev: `${P}admin_norev`, // ADMIN, explicit scope map: role defaults with revenue and bookings 'none'
+    adminDef: `${P}admin_def`, // ADMIN, no scope map (role defaults: revenue admin)
+    staffFinNoRev: `${P}staff_fin_norev`, // STAFF, role defaults + expenses and analytics write, revenue 'none'
+    staffFinRev: `${P}staff_fin_rev`, // STAFF, role defaults + expenses and analytics write (revenue read)
+  };
+  const MONEY_REPORT_STEPS = [
+    { module: 'finance', action: 'generate_pnl' },
+    { module: 'analytics', action: 'create_report' },
+    { module: 'analytics', action: 'export_report' },
+  ];
+  let visiblePlanSteps: (steps: any[], scope: any) => Promise<any[]>;
+  let aiController: any;
+
+  beforeAll(async () => {
+    ({ visiblePlanSteps } = await import('../src/modules/ai/graph-actions.controller') as any);
+    const { AiController } = await import('../src/modules/ai/ai.controller');
+    const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+    aiController = Object.create(AiController.prototype);
+    Object.assign(aiController, { prisma, executionLog: new AiExecutionLogService(prisma) });
+    const adminDefaults = defaultScopesForRole('ADMIN');
+    const staffDefaults = defaultScopesForRole('STAFF');
+    for (const id of Object.values(KP)) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    }
+    const member = (userId: string, role: string, permissionScopes?: Record<string, string>) =>
+      db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_biz`, userId, businessId: ID.biz, role, ...(permissionScopes ? { permissionScopes } : {}) } });
+    await member(KP.adminNoRev, 'ADMIN', { ...adminDefaults, revenue: 'none', bookings: 'none' });
+    await member(KP.adminDef, 'ADMIN');
+    await member(KP.staffFinNoRev, 'STAFF', { ...staffDefaults, expenses: 'write', analytics: 'write', revenue: 'none' });
+    await member(KP.staffFinRev, 'STAFF', { ...staffDefaults, expenses: 'write', analytics: 'write' });
+  });
+
+  it('PM-07 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-114; SEC-W9MRK-1): an ADMIN whose explicit scope map sets revenue to none is refused its own plan with a money step (finance.generate_pnl, analytics.create_report, analytics.export_report; commerce.create_invoice already was), executed by that ADMIN or run with no member: 403 before the claim, nothing routed, the plan still pending', async () => {
+    for (const step of [...MONEY_REPORT_STEPS, { module: 'commerce', action: 'create_invoice' }]) {
+      const label = `${step.module}.${step.action}`;
+      for (const path of ['member', 'creator'] as const) {
+        const planId = `${P}pm07_${step.action}_${path}`;
+        await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }, step], KP.adminNoRev);
+        const from = routed.length;
+        const run = path === 'member' ? planner.executePlan(planId, {}, asMember(KP.adminNoRev)) : planner.executePlan(planId, { traceId: planId });
+        const err = await run.catch((e: unknown) => e);
+        expect(err, `${label} ${path} ${String(err)}`).toBeInstanceOf(ForbiddenException);
+        expect(String((err as Error).message), `${label} ${path}`).toMatch(
+          step.module === 'commerce' ? /revenue requires write access \(you have none\)/ : /revenue requires read access \(you have none\).*D-114/,
+        );
+        expect(routedFor(planId, from), `${label} ${path}`).toEqual([]);
+        expect(await planRow(planId), `${label} ${path}`).toMatchObject({ status: 'pending', startedAt: null });
+      }
+    }
+  });
+
+  it('PM-08 regression control (W10-KEY-PLAN-SCOPE, D-114, D-71): an ADMIN with role-default scopes runs the same money steps; the ADMIN whose explicit map holds revenue runs a money report; the ADMIN whose map sets revenue to none still runs a step of a module its map denies (bookings) and a finance step that reads no money report; each step once, as that member', async () => {
+    for (const [planId, creator, steps] of [
+      [`${P}pm08_admindef`, KP.adminDef, [...MONEY_REPORT_STEPS, { module: 'commerce', action: 'create_invoice', params: INVOICE_ARGS }]],
+      [`${P}pm08_adminrev`, ID.admin, [{ module: 'finance', action: 'generate_pnl' }]],
+      [`${P}pm08_adminnorev`, KP.adminNoRev, [{ module: 'bookings', action: 'create_booking' }, { module: 'finance', action: 'record_expense' }]],
+    ] as const) {
+      await seedCortexPlan(planId, steps as any, creator);
+      const from = routed.length;
+      expect(await planner.executePlan(planId, {}, asMember(creator)), planId).toMatchObject({ planId, status: 'completed', executed: steps.length });
+      expect(routedFor(planId, from).map((r) => r.userId), planId).toEqual(steps.map(() => creator));
+    }
+  });
+
+  it('PM-09 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-57; SEC-W9MRK-1): a STAFF member holding the module\'s write scope but revenue none is refused a money report step, executed by that member or run with no member (nothing routed); the same plan runs for a STAFF member who also holds revenue read', async () => {
+    for (const step of MONEY_REPORT_STEPS) {
+      const label = `${step.module}.${step.action}`;
+      for (const path of ['member', 'creator'] as const) {
+        const planId = `${P}pm09_${step.action}_${path}`;
+        await seedCortexPlan(planId, [step], KP.staffFinNoRev);
+        const from = routed.length;
+        const run = path === 'member' ? planner.executePlan(planId, {}, asMember(KP.staffFinNoRev)) : planner.executePlan(planId, { traceId: planId });
+        const err = await run.catch((e: unknown) => e);
+        expect(err, `${label} ${path} ${String(err)}`).toBeInstanceOf(ForbiddenException);
+        expect(String((err as Error).message), `${label} ${path}`).toMatch(/revenue requires read access \(you have none\).*D-57/);
+        expect(routedFor(planId, from), `${label} ${path}`).toEqual([]);
+        expect(await planRow(planId), `${label} ${path}`).toMatchObject({ status: 'pending', startedAt: null });
+      }
+    }
+    const planId = `${P}pm09_rev`;
+    await seedCortexPlan(planId, MONEY_REPORT_STEPS, KP.staffFinRev);
+    const from = routed.length;
+    expect(await planner.executePlan(planId, {}, asMember(KP.staffFinRev))).toMatchObject({ planId, status: 'completed', executed: MONEY_REPORT_STEPS.length });
+    expect(routedFor(planId, from).map((r) => r.userId)).toEqual(MONEY_REPORT_STEPS.map(() => KP.staffFinRev));
+  });
+
+  it('PM-10 RED-BEFORE (W10-KEY-PLAN-SCOPE, D-114, D-57, D-74; SEC-W9MRK-2): the stored output of the money report steps an ADMIN with role-default scopes ran (stored as KeyCortexPlannerService steps, module.action with no tool) is withheld from the ADMIN whose explicit map sets revenue to none, on the plan read (visiblePlanSteps) and on GET ai/execution-logs (the KEY executor\'s rows), the steps still shown; the expense step keeps its output; the ADMIN with role-default scopes and the OWNER read every output', async () => {
+    const planId = `${P}pm10`;
+    const steps = [...MONEY_REPORT_STEPS, { module: 'finance', action: 'record_expense' }];
+    await db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId: KP.adminDef, objective: `v87b ${planId}`, status: 'pending',
+        steps: { create: steps.map((s, i) => ({ id: `${planId}_s${i + 1}`, order: i + 1, module: s.module, action: s.action, toolName: null, inputPayload: { marker: `${planId}_s${i + 1}` } })) },
+      },
+    });
+    expect(await planner.executePlan(planId, {}, asMember(KP.adminDef))).toMatchObject({ planId, status: 'completed', executed: steps.length });
+    const stored = (await db.aiPlan.findUnique({ where: { id: planId }, include: { steps: { orderBy: { order: 'asc' } } } })).steps;
+    expect(stored.map((s: any) => s.outputResult)).toEqual(steps.map((_s, i) => expect.objectContaining({ done: `${planId}_s${i + 1}` })));
+
+    const read = async (viewer: string) => {
+      const scope = await graphPlanReadScope(prisma, ID.biz, { id: viewer, role: 'USER' });
+      const planSteps = await visiblePlanSteps(stored, scope);
+      const page = await aiController.getExecutionLogs(ID.biz, { user: { id: viewer, role: 'USER' } }, undefined, undefined, '1000');
+      const rows = (page.logs as any[]).filter((l) => typeof l.inputSummary?.parameters?.marker === 'string' && l.inputSummary.parameters.marker.startsWith(`${planId}_s`));
+      rows.sort((a, b) => String(a.inputSummary.parameters.marker).localeCompare(String(b.inputSummary.parameters.marker)));
+      return { planSteps, rows };
+    };
+    const markers = steps.map((_s, i) => `${planId}_s${i + 1}`);
+
+    const denied = await read(KP.adminNoRev);
+    expect(denied.planSteps.map((s: any) => `${s.module}.${s.action}`)).toEqual(steps.map((s) => `${s.module}.${s.action}`));
+    expect(denied.planSteps.map((s: any) => s.outputResult)).toEqual([null, null, null, expect.objectContaining({ done: markers[3] })]);
+    expect(denied.rows.map((r) => r.inputSummary.parameters.marker)).toEqual(markers);
+    expect(denied.rows.map((r) => r.outputSummary)).toEqual([null, null, null, expect.objectContaining({ data: { done: markers[3] } })]);
+
+    for (const viewer of [KP.adminDef, ID.owner]) {
+      const served = await read(viewer);
+      expect(served.planSteps.map((s: any) => s.outputResult), viewer).toEqual(markers.map((m) => expect.objectContaining({ done: m })));
+      expect(served.rows.map((r) => r.outputSummary), viewer).toEqual(markers.map((m) => expect.objectContaining({ data: { done: m } })));
+    }
+  });
+});

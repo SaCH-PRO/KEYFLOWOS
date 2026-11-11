@@ -22,7 +22,7 @@ import { MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
 import { ReportsController } from './reports.controller';
 import { RevenueReportingController } from '../commerce/revenue-reporting.controller';
 import { CANONICAL_MODULE_TOOLS, JobRolePolicyService } from '../structure/job-role-policy.service';
-import { graphActionModuleScope, graphActionRequirement } from '../ai/graph-actions.controller';
+import { graphActionModuleScope, graphActionRequirement, graphPlanReadScope, visiblePlanSteps } from '../ai/graph-actions.controller';
 import {
   cortexCommandRefusal,
   cortexCommandRequirement,
@@ -30,6 +30,9 @@ import {
 } from '../key-cortex/key-cortex.controller';
 import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
 import { KeyCortexQueryPipelineService } from '../key-cortex/key-cortex-query-pipeline.service';
+import * as planAuthority from '../key-cortex/key-cortex-plan-authority';
+import { KeyCortexCapabilityRegistryService } from '../key-cortex/key-cortex-capability-registry.service';
+import { AiController } from '../ai/ai.controller';
 
 /** The KEY tool that reads what each revenue-gated report route reads. */
 const TOOL_ROUTE: ReadonlyArray<readonly [tool: string, handler: keyof ReportsController]> = [
@@ -341,12 +344,179 @@ describe('V1-81 review repairs: the KEY doors to the money reports need revenue:
   //    (cortexCommandRefusal or any membership read) applies, and the batch result data is returned.
   //    Pre-existing, and wider than the money reports: it holds for every registry action.
   //    W10-CORTEX-CHAT-SCOPE turned it live (below).
-  it.todo(
-    'SEC-W9MRK-1 / MRK-CR-1 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read (memberPlanStepScopeRefusal, D-57, D-71)',
-  );
-  it.todo(
-    'SEC-W9MRK-2 (follow-up packet, outside the W9-MONEY-REPORTS-KEY write set): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)',
-  );
+  //    W10-KEY-PLAN-SCOPE turned SEC-W9MRK-1 and SEC-W9MRK-2 live (below), under owner ruling D-114.
+
+  // SEC-W9MRK-1 / MRK-CR-1 (W10-KEY-PLAN-SCOPE, owner rulings D-57 and D-114): the plan door asks what the
+  // direct-command door asks. A member held to module scopes needs revenue:read for a money report step,
+  // on top of its module's own scope (memberPlanStepScopeRefusal). D-114 amends D-71's ADMIN bypass for an
+  // explicit revenue 'none' only: an ADMIN whose explicit scope map sets revenue to none (an absent key
+  // reads 'none', as ModuleScopeGuard reads it) is refused money steps, the money reports and the invoice
+  // actions (commerce); an ADMIN with role-default scopes keeps every step, and an ADMIN keeps every other
+  // module whatever its map says (adminPlanStepScopeRefusal).
+  it('SEC-W9MRK-1 / MRK-CR-1 (W10-KEY-PLAN-SCOPE, D-114, was it.todo): a KEY plan step finance.generate_pnl, analytics.create_report or analytics.export_report is refused to a member without revenue:read, and to an ADMIN whose explicit scope map sets revenue to none (memberPlanStepScopeRefusal, adminPlanStepScopeRefusal, D-57, D-71)', () => {
+    const { memberPlanStepScopeRefusal, adminPlanStepScopeRefusal, planStepReadsMoneyReport } = planAuthority as any;
+    for (const [module, action, moduleScope] of MONEY_REPORT_COMMANDS) {
+      const label = `${module}.${action}`;
+      expect(planStepReadsMoneyReport(module, action), label).toBe(true);
+      // the plan door asks what the direct-command door asks: the module's own scope, and revenue:read
+      expect(cortexCommandRequirement(module, action), label).toEqual({ scope: moduleScope, alsoRequires: { module: 'revenue', minLevel: 'read' } });
+      for (const scopes of [
+        { [moduleScope]: 'write' },
+        { [moduleScope]: 'admin', revenue: 'none' },
+        { [moduleScope]: 'admin', finance: 'admin', expenses: 'admin', analytics: 'admin', reports: 'admin' },
+        { [moduleScope]: 'admin', Revenue: 'read' },
+        { [moduleScope]: 'admin', revenue: 'owner' },
+      ]) {
+        const level = (scopes as Record<string, string>).revenue ?? 'none';
+        expect(memberPlanStepScopeRefusal(module, action, scopes), `${JSON.stringify(scopes)} -> ${label}`).toBe(
+          `Insufficient permissions: revenue requires read access (you have ${level}); plan step "${label}" reads a money report, so it is not run (D-57)`,
+        );
+      }
+      for (const level of ['read', 'write', 'admin']) {
+        expect(memberPlanStepScopeRefusal(module, action, { [moduleScope]: 'write', revenue: level }), `${label} revenue ${level}`).toBeNull();
+      }
+      // the module's own scope is still checked first (revenue alone is not the module's write scope)
+      expect(memberPlanStepScopeRefusal(module, action, { revenue: 'admin' }), label).toBe(
+        `Insufficient permissions: ${moduleScope} requires write access (you have none); plan step "${label}" is not run (D-71)`,
+      );
+    }
+
+    // D-114: an ADMIN whose explicit map sets revenue to none (or leaves it out) is refused every money step
+    const adminNoRevenue = { ...defaultScopesForRole('ADMIN'), revenue: 'none' };
+    const adminWithoutRevenueKey = Object.fromEntries(Object.entries(defaultScopesForRole('ADMIN')).filter(([key]) => key !== 'revenue'));
+    const moneySteps: ReadonlyArray<readonly [string, string]> = [
+      ...MONEY_REPORT_COMMANDS.map(([module, action]) => [module, action] as const),
+      ['commerce', 'create_invoice'],
+      ['commerce', 'process_payment'],
+      ['commerce', 'get_revenue_summary'],
+    ];
+    for (const [module, action] of moneySteps) {
+      const label = `${module}.${action}`;
+      for (const explicit of [adminNoRevenue, adminWithoutRevenueKey, { revenue: 'none' }, { revenue: 'Read' }]) {
+        const level = (explicit as Record<string, string>).revenue ?? 'none';
+        expect(adminPlanStepScopeRefusal(module, action, explicit), `${JSON.stringify(explicit)} -> ${label}`).toBe(
+          `Insufficient permissions: revenue requires read access (you have ${level}); plan step "${label}" is a money step, and an ADMIN whose revenue access is set to none runs no money step (D-114)`,
+        );
+      }
+      // control: role-default scopes (no explicit map) keep D-71; an explicit revenue read or above runs it
+      expect(adminPlanStepScopeRefusal(module, action, null), `${label} role defaults`).toBeNull();
+      for (const level of ['read', 'write', 'admin']) {
+        expect(adminPlanStepScopeRefusal(module, action, { ...adminNoRevenue, revenue: level }), `${label} revenue ${level}`).toBeNull();
+      }
+    }
+    // control: an ADMIN keeps every other module, whatever its explicit map says (D-114 amends D-71 for money steps only)
+    const denied = { revenue: 'none', expenses: 'none', bookings: 'none', analytics: 'none', crm: 'none' };
+    for (const [module, action] of [['finance', 'record_expense'], ['bookings', 'create_booking'], ['analytics', 'create_dashboard'], ['crm', 'update_contact'], [null, 'analyze']] as const) {
+      expect(adminPlanStepScopeRefusal(module, action, denied), `${module}.${action}`).toBeNull();
+    }
+  });
+
+  it('SEC-W9MRK-1 (W10-KEY-PLAN-SCOPE, D-57, D-114) control: the plan door and the direct-command door name the same money report actions (every registry action: planStepReadsMoneyReport exactly where cortexCommandRequirement also requires revenue:read)', () => {
+    const { planStepReadsMoneyReport } = planAuthority as any;
+    let money = 0;
+    for (const capability of new KeyCortexCapabilityRegistryService().getAllCapabilities()) {
+      for (const { name } of capability.actions) {
+        const requirement = cortexCommandRequirement(capability.module, name) as { alsoRequires?: unknown };
+        const label = `${String(capability.module)}.${name}`;
+        expect(planStepReadsMoneyReport(capability.module, name), label).toBe(!!requirement.alsoRequires);
+        if (requirement.alsoRequires) money += 1;
+      }
+    }
+    expect(money).toBe(MONEY_REPORT_COMMANDS.length);
+  });
+
+  // SEC-W9MRK-2 (W10-KEY-PLAN-SCOPE, owner rulings D-57, D-74 and D-114): the plan read rule (planStepReadRule,
+  // which GET ai/plans, GET ai/plans/:planId, GET cortex/plans/:planId and, through visibleExecutionLogs,
+  // GET ai/execution-logs apply) shows a money report KEY-cortex step to a viewer who reads its module, and
+  // its stored output (the whole report) only to one who also reads revenue. The viewer's scopes are the
+  // ones the real graphPlanReadScope reads from the membership row (an ADMIN's explicit map included).
+  it('SEC-W9MRK-2 (W10-KEY-PLAN-SCOPE, D-114, was it.todo): the stored output of a money-report KEY step is withheld from a plan or execution-log viewer without revenue:read (planStepReadRule, visibleExecutionLogs, D-57, D-74)', async () => {
+    const BIZ = 'biz_v96s_reads';
+    const VIEWER = 'usr_v96s_viewer';
+    const OWNER = 'usr_v96s_owner';
+    const REPORT = { revenue: 98765, netProfit: 4321, marker: 'v96s_money_report' };
+    const EXPENSE = { id: 'v96s_expense_row', amount: 12 };
+    const steps = [
+      ...MONEY_REPORT_COMMANDS.map(([module, action]) => ({ toolName: null, module, action, inputPayload: { period: 'month' }, outputResult: REPORT })),
+      { toolName: null, module: 'finance', action: 'record_expense', inputPayload: { amount: 12 }, outputResult: EXPENSE },
+    ];
+    const logs = steps.map((step, i) => ({
+      id: `log_v96s_${i}`,
+      businessId: BIZ,
+      userId: OWNER,
+      toolName: `${step.module}.${step.action}`,
+      module: step.module,
+      action: step.action,
+      inputSummary: { actorId: OWNER, parameters: step.inputPayload },
+      outputSummary: { data: step.outputResult, rolledBack: false },
+      errorMessage: null,
+      success: true,
+    }));
+    type Viewer = { role: string; permissionScopes: Record<string, string> | null };
+    const read = async (membership: Viewer) => {
+      const prisma = {
+        client: {
+          user: { findUnique: vi.fn(async () => ({ id: VIEWER, role: 'USER' })) },
+          membership: { findUnique: vi.fn(async () => membership) },
+          business: { findFirst: vi.fn(async () => null) },
+          aiExecutionLog: {
+            groupBy: vi.fn(async () => logs.map(({ toolName, action, module }) => ({ toolName, action, module }))),
+            findMany: vi.fn(async () => logs),
+            count: vi.fn(async () => logs.length),
+          },
+        },
+      };
+      const scope = await graphPlanReadScope(prisma as any, BIZ, { id: VIEWER, role: 'USER' });
+      const planSteps = await visiblePlanSteps(steps, scope);
+      const controller = Object.create(AiController.prototype);
+      Object.assign(controller, { prisma, executionLog: { getHistory: vi.fn(async () => ({ logs, total: logs.length, limit: 1000, offset: 0 })) } });
+      const served = await controller.getExecutionLogs(BIZ, { user: { id: VIEWER, role: 'USER' } }, undefined, undefined, '1000');
+      return { planSteps, logs: served.logs as typeof logs };
+    };
+    const moneyLabels = MONEY_REPORT_COMMANDS.map(([module, action]) => `${module}.${action}`);
+
+    // an ADMIN (who sees every plan) whose explicit map holds expenses and analytics but sets revenue to
+    // none, and a STAFF member reading its own plan with the same reads: each money report step is shown
+    // with its input, its output withheld; the expense step keeps its output
+    const withheldFrom: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: { ...defaultScopesForRole('ADMIN'), revenue: 'none' } },
+      { role: 'ADMIN', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'none' } },
+      { role: 'STAFF', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'none' } },
+    ];
+    for (const membership of withheldFrom) {
+      const who = JSON.stringify(membership);
+      const { planSteps, logs: served } = await read(membership);
+      expect(planSteps.map((s) => `${s.module}.${s.action}`), who).toEqual([...moneyLabels, 'finance.record_expense']);
+      for (const step of planSteps.slice(0, moneyLabels.length)) {
+        expect(step, `${who} ${step.module}.${step.action}`).toMatchObject({ outputResult: null, inputPayload: { period: 'month' } });
+      }
+      expect(planSteps[moneyLabels.length].outputResult, who).toEqual(EXPENSE);
+      if (membership.role === 'ADMIN') {
+        // GET ai/execution-logs: the same rule over the rows the KEY executor wrote for those steps
+        expect(served.map((l) => l.toolName), who).toEqual([...moneyLabels, 'finance.record_expense']);
+        for (const row of served.slice(0, moneyLabels.length)) {
+          expect(row, `${who} ${row.toolName}`).toMatchObject({ outputSummary: null, errorMessage: null, inputSummary: { parameters: { period: 'month' } } });
+        }
+        expect(served[moneyLabels.length].outputSummary, who).toEqual({ data: EXPENSE, rolledBack: false });
+      }
+    }
+
+    // control: an ADMIN with role-default scopes (revenue admin), an ADMIN whose explicit map holds revenue
+    // read, and a STAFF member with revenue read are served every output as stored
+    const servedTo: Viewer[] = [
+      { role: 'ADMIN', permissionScopes: null },
+      { role: 'ADMIN', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'read' } },
+      { role: 'STAFF', permissionScopes: { expenses: 'read', analytics: 'read', revenue: 'read' } },
+    ];
+    for (const membership of servedTo) {
+      const who = JSON.stringify(membership);
+      const { planSteps, logs: served } = await read(membership);
+      expect(planSteps.map((s) => s.outputResult), who).toEqual([REPORT, REPORT, REPORT, EXPENSE]);
+      if (membership.role === 'ADMIN') {
+        expect(served.map((l) => l.outputSummary), who).toEqual(steps.map((s) => ({ data: s.outputResult, rolledBack: false })));
+      }
+    }
+  });
 
   // SEC-W9MRK-3 (W10-CORTEX-CHAT-SCOPE, owner ruling D-57): a parsed chat command runs through the
   // executor POST cortex/execute runs a direct command through, so it is held to the same rule
