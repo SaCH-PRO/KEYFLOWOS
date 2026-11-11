@@ -844,6 +844,7 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
     expect(byStaffThenStart(offered.data as any[])).toEqual(byStaffThenStart(expected));
 
     // KEY offers the picker's slots less the business-hours starts whose buffer runs past 16:00Z (12:00 local).
+    // Since W10-BOOKING-BUFFER the picker leaves those out itself, so the filter below removes nothing.
     const close = utc(`${day}T16:00:00.000Z`).getTime();
     const bufferFits = (s: { endTime: string }) => utc(s.endTime).getTime() + 15 * 60_000 <= close;
     const pickerFor = async (staffId: string) => {
@@ -867,5 +868,175 @@ describe('V1-16 consumers of the business clock outside this packet (review CR-V
       const row = await db.booking.findUnique({ where: { id: booked.data.id } });
       expect([row.staffId, row.startTime.toISOString()]).toEqual([staffId, last]);
     }
+  });
+});
+
+/**
+ * W10-BOOKING-BUFFER (CR-W9KAT-1, the W9-KEY-AVAILABILITY-TZ review finding
+ * W9 repaired only in KEY's adapter). A service's buffer is time kept free
+ * after the appointment, and the paths disagreed on whether it must end by
+ * closing: createBooking and publicCreateBooking (assertWithinSchedule) count
+ * it against the business's closing time, while the picker
+ * (BookingsService.getAvailableSlots, behind the public slots route and KEY
+ * get_availability) and rescheduleBooking did not. The picker offered a start
+ * whose buffer ran past closing, both create paths refused it, and a
+ * reschedule moved a booking onto it. One rule on every path: on the
+ * business's hours the buffer ends by closing; a staff member's own hours are
+ * read without it, as every path already read them.
+ *
+ * bizU: Port_of_Spain, open Mondays 09:00-12:00 local (13:00Z-16:00Z) only.
+ * staffU1 works Mondays 10:00-12:00 local (14:00Z-16:00Z); staffU2 has no
+ * hours of their own, so the business's apply. svcU takes 60 minutes with a
+ * 15-minute buffer: on the business's hours an 11:00 local (15:00Z) start
+ * ends its buffer at 12:15, after closing.
+ */
+describe('W10-BOOKING-BUFFER: the picker, both create paths and reschedule read one buffer rule (CR-W9KAT-1)', () => {
+  const U = {
+    biz: `${P}bizU`,
+    contact: `${P}contactU`,
+    staff1: `${P}staffU1`,
+    staff2: `${P}staffU2`,
+    svc: `${P}svcU`,
+  };
+  const OUTSIDE_HOURS = 'The selected time is outside business hours.';
+  const RESCHEDULE_OUTSIDE_HOURS = 'The selected time is outside business hours (09:00 – 12:00).';
+  const OUTSIDE_STAFF_HOURS = 'The selected time is outside this staff member\'s available hours.';
+
+  beforeAll(async () => {
+    await db.business.create({
+      data: {
+        id: U.biz, name: 'V16A Biz U', ownerId: ID.ownerA, currency: 'TTD', timezone: POS,
+        businessHours: { mon: { open: '09:00', close: '12:00', closed: false }, tue: CLOSED, wed: CLOSED, thu: CLOSED, fri: CLOSED, sat: CLOSED, sun: CLOSED },
+      },
+    });
+    await db.membership.create({ data: { id: `${P}m_ownerA_U`, userId: ID.ownerA, businessId: U.biz, role: 'OWNER' } });
+    await db.contact.create({ data: { id: U.contact, businessId: U.biz, firstName: 'Uma', lastName: 'Client' } });
+    await db.contact.create({ data: { id: publicContactId(U.biz), businessId: U.biz, firstName: 'Pat', lastName: 'Public' } });
+    await db.staffMember.create({ data: { id: U.staff1, businessId: U.biz, name: 'Staff U One' } });
+    await db.availability.create({ data: { staffId: U.staff1, dayOfWeek: 1, startTime: '10:00', endTime: '12:00' } });
+    await db.staffMember.create({ data: { id: U.staff2, businessId: U.biz, name: 'Staff U Two' } });
+    await db.service.create({ data: { id: U.svc, businessId: U.biz, name: 'svcU', duration: 60, bufferMins: 15, price: 0 } });
+  });
+
+  /** The public slots route's answer for svcU on one day. */
+  async function pickerFor(day: string, staffId?: string): Promise<string[]> {
+    const res = await agent()
+      .get(`/bookings/public/businesses/${U.biz}/slots`)
+      .query({ serviceId: U.svc, date: day, ...(staffId ? { staffId } : {}) });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date).toBe(day);
+    return res.body.slots as string[];
+  }
+
+  /** KEY get_availability for svcU on one day, as the KEY connector dispatches it. */
+  function keyAvailability(day: string, staffId?: string) {
+    return keyBookings.execute({
+      module: 'bookings',
+      action: 'get_availability',
+      parameters: { serviceId: U.svc, from: day, to: day, ...(staffId ? { staffId } : {}) },
+      businessId: U.biz,
+      userId: ID.ownerA,
+      source: 'key_cortex',
+      timestamp: new Date(),
+      correlationId: `${P}corrU`,
+    });
+  }
+
+  const moveTo = (bookingId: string, start: Date) =>
+    agent()
+      .post(`/bookings/businesses/${U.biz}/bookings/${bookingId}/reschedule`)
+      .set(HEADER, ID.ownerA)
+      .send({ startTime: start.toISOString() });
+
+  /** Gives a booking's slot back (the overlap guard stops counting a CANCELLED booking). */
+  const release = (id: string) => db.booking.update({ where: { id }, data: { status: 'CANCELLED' } });
+
+  const inAppU = (staffId: string, start: Date) =>
+    inAppCreate({ businessId: U.biz, contactId: U.contact, serviceId: U.svc, staffId, start });
+  const publicU = (staffId: string, start: Date) =>
+    publicCreate({ businessId: U.biz, serviceId: U.svc, staffId, start });
+
+  it('W10-BOOKING-BUFFER: on the business\'s hours the picker and KEY get_availability leave out the starts whose buffer runs past closing, every start offered is bookable on both create paths and reschedulable, and the starts left out are refused by all three (CR-W9KAT-1)', async () => {
+    const day = '2030-01-07'; // a Monday
+    const offered = ['13:00', '13:30', '14:00', '14:30'].map((t) => `${day}T${t}:00.000Z`);
+    const leftOut = ['15:00', '15:30'].map((t) => `${day}T${t}:00.000Z`);
+
+    // The public slots route, with the staff member on the business's hours and with none
+    // (the service is then the resource): 09:00-10:30 local, the last ending its buffer at 11:45.
+    expect(await pickerFor(day, U.staff2)).toEqual(offered);
+    expect(await pickerFor(day)).toEqual(offered);
+
+    // KEY offers exactly the picker's starts, staff member by staff member: no rule of its own.
+    const key = await keyAvailability(day);
+    expect(key.success, key.error).toBe(true);
+    const asKey = (staffId: string, starts: string[]) => starts.map((s) => `${staffId} ${s}`);
+    expect((key.data as any[]).map((s) => `${s.staffId} ${s.startTime}`).sort()).toEqual(
+      [...asKey(U.staff1, await pickerFor(day, U.staff1)), ...asKey(U.staff2, offered)].sort(),
+    );
+
+    // Every start offered is bookable on the public and the in-app create path ...
+    for (const iso of offered) {
+      const pub = await publicU(U.staff2, utc(iso));
+      expect(pub.status, `public create at ${iso}: ${pub.body?.message}`).toBe(201);
+      await release(pub.body.bookingId);
+      const inApp = await inAppU(U.staff2, utc(iso));
+      expect(inApp.status, `in-app create at ${iso}: ${inApp.body?.message}`).toBe(201);
+      await release(inApp.body.id);
+    }
+    // ... and a booking can be rescheduled onto each of them.
+    const held = await inAppU(U.staff2, utc(offered[0]));
+    expect(held.status, held.body?.message).toBe(201);
+    for (const iso of [...offered].reverse()) {
+      const moved = await moveTo(held.body.id, utc(iso));
+      expect(moved.status, `reschedule to ${iso}: ${moved.body?.message}`).toBe(201);
+    }
+
+    // The starts the picker leaves out are refused by all three, and the refused move changes nothing.
+    for (const iso of leftOut) {
+      const pub = await publicU(U.staff2, utc(iso));
+      expect([pub.status, pub.body?.message], `public create at ${iso}`).toEqual([400, OUTSIDE_HOURS]);
+      const inApp = await inAppU(U.staff2, utc(iso));
+      expect([inApp.status, inApp.body?.message], `in-app create at ${iso}`).toEqual([400, OUTSIDE_HOURS]);
+      const moved = await moveTo(held.body.id, utc(iso));
+      expect([moved.status, moved.body?.message], `reschedule to ${iso}`).toEqual([400, RESCHEDULE_OUTSIDE_HOURS]);
+    }
+    const row = await db.booking.findUnique({ where: { id: held.body.id } });
+    expect([row.startTime.toISOString(), row.endTime.toISOString()]).toEqual([offered[0], `${day}T14:00:00.000Z`]);
+  });
+
+  it('CONTROL (W10-BOOKING-BUFFER, CR-W9KAT-1): a staff member\'s own hours are read without the buffer on every path: the picker\'s last start for them is bookable on both create paths and reschedulable, and the next is refused by all three', async () => {
+    const day = '2030-01-14'; // a Monday
+    const offered = ['14:00', '14:30', '15:00'].map((t) => `${day}T${t}:00.000Z`);
+    const last = utc(offered[offered.length - 1]); // 11:00 local: the appointment ends at 12:00, its buffer at 12:15
+    const next = utc(`${day}T15:30:00.000Z`); // 11:30 local: the appointment itself ends at 12:30
+
+    expect(await pickerFor(day, U.staff1)).toEqual(offered);
+    const key = await keyAvailability(day, U.staff1);
+    expect(key.success, key.error).toBe(true);
+    expect((key.data as any[]).map((s) => s.startTime)).toEqual(offered);
+
+    // The next start is refused on both create paths while nothing near it is booked ...
+    const pubNext = await publicU(U.staff1, next);
+    expect([pubNext.status, pubNext.body?.message]).toEqual([400, OUTSIDE_STAFF_HOURS]);
+    const inAppNext = await inAppU(U.staff1, next);
+    expect([inAppNext.status, inAppNext.body?.message]).toEqual([400, OUTSIDE_STAFF_HOURS]);
+
+    // ... the last start offered is bookable on both and reschedulable ...
+    const pub = await publicU(U.staff1, last);
+    expect(pub.status, pub.body?.message).toBe(201);
+    await release(pub.body.bookingId);
+    const inApp = await inAppU(U.staff1, last);
+    expect(inApp.status, inApp.body?.message).toBe(201);
+    await release(inApp.body.id);
+    const held = await inAppU(U.staff1, utc(offered[0]));
+    expect(held.status, held.body?.message).toBe(201);
+    const moved = await moveTo(held.body.id, last);
+    expect(moved.status, moved.body?.message).toBe(201);
+
+    // ... and a move to the next start is refused (the booking does not clash with itself).
+    const movedNext = await moveTo(held.body.id, next);
+    expect([movedNext.status, movedNext.body?.message]).toEqual([400, OUTSIDE_STAFF_HOURS]);
+    const row = await db.booking.findUnique({ where: { id: held.body.id } });
+    expect(row.startTime.toISOString()).toBe(last.toISOString());
   });
 });
