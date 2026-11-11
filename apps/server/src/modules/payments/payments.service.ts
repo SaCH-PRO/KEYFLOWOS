@@ -528,6 +528,69 @@ export class PaymentsService {
   }
 
   /**
+   * W10-REFUND-CHARGE-DOOR (SOT-10b; the V1-29 refund convention, owner
+   * rulings D-14 and D-102): the refund an operator or KEY made through
+   * PaymentsOpsService.refundCharge, recorded through the provider refund
+   * door. refundCharge wrote the negative REFUNDED row itself, with no
+   * reversal of the original's posting, and the provider's refund event then
+   * found the row by its refund id and posted nothing either: the refund never
+   * reached the ledger and the invoice was never reopened.
+   *
+   * The original is the business's SUCCESSFUL payment of `provider` recorded
+   * under the charge id itself, as refundCharge read it: a refund of a payment
+   * recorded under its Checkout Session or PaymentIntent id is recorded, linked
+   * and posted by the provider's refund event, as before. createRefundWithPosting
+   * writes the row (reference = the original's providerPaymentId) and
+   * RevenuePostingService.onPaymentRefunded's posting in one transaction under
+   * the invoice lock, deduped on the refund id and never more than what is
+   * left of the payment; a Stripe refund is counted against a cumulative
+   * charge.refunded row as the webhook counts it (stripeRefundToRecord). So
+   * whichever of this call and the provider's refund.created or charge.refunded
+   * comes first records and posts the refund, and the other adds nothing: it
+   * is posted once in total. The invoice is then reconciled as the provider
+   * refund door reconciles it (under 'keep'): a refund that unsettles it
+   * reopens it (D-14: SENT with paidAt cleared, or PARTIALLY_PAID), and that
+   * reopen undoes its money effects (D-102). A failed reconcile is logged, as
+   * the provider refund door logs it.
+   *
+   * Returns whether a row was recorded. A recording that fails throws, with
+   * nothing written: the provider refunded, and its refund event records it.
+   */
+  async recordGatewayRefund(input: {
+    businessId: string;
+    provider: string;
+    chargeId: string;
+    refund: { id: string; amount: number; currency: string };
+    reason?: string | null;
+  }): Promise<boolean> {
+    const { businessId, provider, chargeId, refund } = input;
+    if (!refund.id) return false;
+    const original: RefundOriginal | null = await this.prisma.client.payment.findFirst({
+      where: { businessId, provider, status: 'SUCCESSFUL', providerPaymentId: chargeId },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
+    });
+    if (!original) return false;
+    const amount = Math.abs(Number(refund.amount));
+    const persisted = await this.createRefundWithPosting(
+      original,
+      {
+        provider,
+        providerPaymentId: refund.id,
+        currency: (refund.currency || original.currency).toUpperCase(),
+        notes: input.reason ?? null,
+      },
+      provider === 'stripe'
+        ? (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: toCents(amount), charge: chargeId, cumulative: false })
+        : async () => amount,
+    ).catch(this.refundAlreadyRecorded(provider, refund.id));
+    if (!persisted) return false;
+    await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {
+      this.logger.warn(`${provider} refund ${refund.id} reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
+    });
+    return true;
+  }
+
+  /**
    * V1-29c (BR-08) — how much of a Stripe refund is not recorded yet, in
    * currency units, read under the invoice lock. `held`: the Stripe refund
    * rows of the original's charge (linked to the original, or, written before

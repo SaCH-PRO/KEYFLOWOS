@@ -13,6 +13,7 @@ import {
   RefundResult,
 } from '../../core/connectors/payment-gateway.interface';
 import { CurrencyRatesService } from './currency-rates.service';
+import { PaymentsService } from './payments.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 
 export type GatewayId = 'stripe' | 'paypal' | 'wipay';
@@ -38,6 +39,8 @@ export class PaymentsOpsService {
     @Inject(PayPalConnector) private readonly paypal: PayPalConnector,
     @Inject(WiPayConnector) private readonly wipay: WiPayConnector,
     @Inject(CurrencyRatesService) private readonly fx: CurrencyRatesService,
+    // W10-REFUND-CHARGE-DOOR: the provider refund door refundCharge records through.
+    @Inject(PaymentsService) private readonly payments: PaymentsService,
   ) {}
 
   private getGateway(id: GatewayId): IPaymentGatewayConnector {
@@ -159,33 +162,30 @@ export class PaymentsOpsService {
     if (!own) throw new NotFoundException('Charge not found');
     try {
       const refund = await gw.refundCharge(businessId, input);
-      // Best-effort: record in our payments table. Only a payment of this
-      // business recorded under the charge id itself, as before V1-15d: a
-      // refund of one recorded under its Checkout Session or PaymentIntent id
-      // is recorded, linked and posted by the provider's refund event (the
-      // V1-29c door).
+      // W10-REFUND-CHARGE-DOOR (SOT-10b; V1-29 refund convention, D-14, D-102):
+      // recorded through the provider refund door (PaymentsService
+      // .recordGatewayRefund): the linked negative REFUNDED row and its posting
+      // in one transaction, then the reconcile that reopens the invoice. This
+      // wrote the row itself, unposted, and the provider's refund event then
+      // posted nothing. Only a payment of this business recorded under the
+      // charge id itself, as before: a refund of one recorded under its
+      // Checkout Session or PaymentIntent id is recorded, linked and posted by
+      // the provider's refund event (the V1-29c door). The provider refunded
+      // already, so a recording that fails is logged, not thrown: it wrote
+      // nothing, and the provider's refund event records the refund.
       try {
-        const orig = await this.prisma.client.payment.findFirst({
-          where: { businessId, provider: gatewayId, status: 'SUCCESSFUL', providerPaymentId: input.chargeId },
-          select: { invoiceId: true, providerPaymentId: true },
+        await this.payments.recordGatewayRefund({
+          businessId,
+          provider: gatewayId,
+          chargeId: input.chargeId,
+          refund,
+          reason: input.reason ?? null,
         });
-        if (orig) {
-          await this.prisma.client.payment.create({
-            data: {
-              businessId,
-              invoiceId: orig.invoiceId,
-              amount: -Math.abs(refund.amount),
-              currency: refund.currency,
-              status: 'REFUNDED',
-              provider: gatewayId,
-              providerPaymentId: refund.id,
-              reference: orig.providerPaymentId,
-              notes: input.reason ?? null,
-            },
-          });
-        }
       } catch (e) {
-        this.logger.warn(`Failed to persist refund row: ${e instanceof Error ? e.message : e}`);
+        this.logger.warn(
+          `Refund ${refund.id} of ${gatewayId} charge ${input.chargeId} not recorded here (the provider's refund event records it): ` +
+            `${e instanceof Error ? e.message : e}`,
+        );
       }
       return refund;
     } catch (err: any) {
