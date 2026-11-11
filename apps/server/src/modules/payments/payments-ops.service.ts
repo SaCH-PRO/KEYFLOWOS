@@ -142,10 +142,18 @@ export class PaymentsOpsService {
     }
   }
 
+  /**
+   * W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07, R0-CMF2, D-90):
+   * `actorId` is who makes the refund, never a body field: the authenticated
+   * user of the payments-ops route (PaymentsOpsController.refund, a D-46
+   * SUPER_ADMIN member included) or KEY_SYSTEM_ACTOR_ID for KEY's
+   * payments_refund_charge. The refund door names it on what it records.
+   */
   async refundCharge(
     businessId: string,
     gatewayId: GatewayId,
     input: RefundInput,
+    actorId: string | null,
   ): Promise<RefundResult> {
     if (!input.chargeId) throw new BadRequestException('Charge id is required');
     const gw = this.getGateway(gatewayId);
@@ -180,6 +188,8 @@ export class PaymentsOpsService {
           chargeId: input.chargeId,
           refund,
           reason: input.reason ?? null,
+          // SEC-RCD-1 (R0-PL-07): the refunder, on the row, its posting and its feed row.
+          actorId,
         });
       } catch (e) {
         this.logger.warn(

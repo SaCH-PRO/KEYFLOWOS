@@ -4208,11 +4208,18 @@ ${triage.standingContext}`;
         // returns the gateway's refund record; report that, never the request —
         // a partial refund can come back at a different amount than asked for,
         // and the gateway is the authority on what actually happened.
-        const refund = await this.getPaymentsOps().refundCharge(businessId, args.gateway, {
-          chargeId: args.chargeId,
-          amount: args.amount,
-          reason: args.reason,
-        });
+        // W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07): KEY records the refund as its system
+        // actor, distinct from any human, as the manual refund door records KEY (SYSTEM).
+        const refund = await this.getPaymentsOps().refundCharge(
+          businessId,
+          args.gateway,
+          {
+            chargeId: args.chargeId,
+            amount: args.amount,
+            reason: args.reason,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+        );
         return { refund };
       }
 

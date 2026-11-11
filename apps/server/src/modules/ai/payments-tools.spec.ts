@@ -105,6 +105,16 @@ describe('the refund is treated as what it is', () => {
     expect(body).toMatch(/const refund = await this\.getPaymentsOps\(\)\.refundCharge/);
     expect(body).toMatch(/return \{ refund \}/);
   });
+
+  it('records the refund as KEY, its SYSTEM actor, never a person or a tool argument (W10-REFUND-CHARGE-DOOR review SEC-RCD-1, R0-PL-07)', () => {
+    // The refund door names the refunder on the refund row, its posting and its feed row; KEY is
+    // KEY_SYSTEM_ACTOR_ID there (SYSTEM), as the manual refund door records KEY.
+    const at = orchestrator.indexOf("case 'payments_refund_charge':");
+    const body = orchestrator.slice(at, orchestrator.indexOf('      case ', at + 10));
+    const call = body.slice(body.indexOf('.refundCharge('), body.indexOf('return { refund }'));
+    expect(call).toMatch(/,\s*KEY_SYSTEM_ACTOR_ID,?\s*\);/);
+    expect(call).not.toMatch(/args\.(actorId|userId|recordedBy)/);
+  });
 });
 
 describe('gateways are checked before they are used', () => {

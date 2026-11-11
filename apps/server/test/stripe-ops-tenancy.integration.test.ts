@@ -70,6 +70,12 @@
  *           partial refund): refund.created, a charge.refunded listing the
  *           refund and a charge.refunded carrying only the cumulative
  *           amount_refunded each post nothing more (posted once in total)
+ *   SOT-10d W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07, R0-CMF2, D-90):
+ *           the refund refundCharge records names its refunder, as the manual
+ *           refund door names it: the owner over HTTP, and KEY as its SYSTEM
+ *           actor, on the reversal or refund posting (createdById), the refund
+ *           row (recordedBy) and one FINANCE payment_refunded feed row written
+ *           in the refund transaction; Stripe's refund.created adds none
  *   SOT-11  FORGED CLAIM: a row of B that names A's charge (a reference B could
  *           sign for itself with its own webhook secret) does not make A's
  *           charge B's: B's refund is 404 with no write (the one call is the
@@ -110,6 +116,8 @@
  *           exactly as a plain STAFF user of A is (ModuleScopeGuard); a
  *           SUPER_ADMIN STAFF member whose explicit map grants revenue:write
  *           creates a link (201)
+ *   SOT-D46-06  NAMED (W10-REFUND-CHARGE-DOOR review SEC-RCD-1): the refund the
+ *           SUPER_ADMIN member of A makes names that admin, as SOT-10d
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, the global TenantInterceptor, GlobalHttpExceptionFilter and
@@ -138,6 +146,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { KEY_SYSTEM_ACTOR_ID } from '../src/core/auth/system-actor';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -184,6 +193,10 @@ const ID = {
   // W10-REFUND-CHARGE-DOOR (SOT-10b/10c): A's invoices paid by charges recorded under their charge ids.
   invA10: `${P}invA10`,
   invA11: `${P}invA11`,
+  // W10-REFUND-CHARGE-DOOR review SEC-RCD-1: A's invoices whose refundCharge refunds name their refunder.
+  invA12: `${P}invA12`,
+  invA13: `${P}invA13`,
+  invA14: `${P}invA14`,
 };
 
 /** Stripe-shaped ids (the prefix inside, so every globally unique value carries it). */
@@ -203,6 +216,9 @@ const S = {
   capA9: `cap_${P}A9`,
   chA10: `ch_${P}A10`, piA10: `pi_${P}A10`,
   chA11: `ch_${P}A11`, piA11: `pi_${P}A11`,
+  chA12: `ch_${P}A12`, piA12: `pi_${P}A12`,
+  chA13: `ch_${P}A13`, piA13: `pi_${P}A13`,
+  chA14: `ch_${P}A14`, piA14: `pi_${P}A14`,
 };
 
 const A_EMAIL = `alice.of.a.${P}@example.test`;
@@ -527,6 +543,60 @@ async function postingsOf(paymentId: string): Promise<string[]> {
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
   return txns.map((t: any) => `${t.type}:${t.status}:${Number(t.amount)}`);
+}
+
+/**
+ * W10-REFUND-CHARGE-DOOR: an invoice of A paid by a tagged platform charge, recorded under its charge id through the
+ * webhook door (as ch_A1 is), PAID with its payment posted once.
+ */
+async function paidUnderChargeId(invoiceId: string, n: number, chargeId: string, pi: string, totalMinor: number) {
+  const total = totalMinor / 100;
+  await db.invoice.create({
+    data: {
+      id: invoiceId, invoiceNumber: `V15D-RCD-${n}`, status: 'SENT', subtotal: total, total, currency: 'TTD',
+      businessId: ID.bizA, contactId: ID.contactA,
+      items: { create: [{ id: `${invoiceId}_item1`, description: `V15D refund door item ${n}`, quantity: 1, unitPrice: total, total }] },
+    },
+  });
+  accounts[PLATFORM_KEY].charges.push(charge(chargeId, totalMinor, { pi, name: 'Alice Customer-of-A', email: A_EMAIL, invoiceId }));
+  await stripeEvent(`${chargeId}_succeeded`, 'charge.succeeded', {
+    id: chargeId, amount: totalMinor, currency: 'ttd', payment_intent: pi, metadata: { invoiceId, businessId: ID.bizA },
+  });
+  const payment = await paymentBy(chargeId);
+  expect(payment).toMatchObject({ businessId: ID.bizA, invoiceId, status: 'SUCCESSFUL', amount: total, reference: pi });
+  expect(await postingsOf(payment.id)).toEqual([`INCOME:POSTED:${total}`]);
+  expect((await invoiceRow(invoiceId)).status).toBe('PAID');
+  return payment;
+}
+
+/**
+ * W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07, R0-CMF2, D-90): who each transaction one payment sourced names,
+ * as `type:status:createdById`, in posting order.
+ */
+async function postingActorsOf(paymentId: string): Promise<string[]> {
+  const txns = await db.financialTransaction.findMany({
+    where: { sourceType: 'Payment', sourceId: paymentId },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  return txns.map((t: any) => `${t.type}:${t.status}:${t.createdById}`);
+}
+
+/** SEC-RCD-1: the FINANCE payment_refunded feed rows of one payment, as `actorType:actorId:refundedBy:amount`. */
+async function refundFeedOf(businessId: string, paymentId: string): Promise<string[]> {
+  const rows = await db.activity.findMany({
+    where: { businessId, module: 'FINANCE', action: 'payment_refunded', entityType: 'payment', entityId: paymentId },
+    orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+  });
+  return rows.map((r: any) => `${r.actorType}:${r.actorId}:${r.data?.refundedBy}:${r.data?.amount}`);
+}
+
+/** SEC-RCD-1: the refund rows of an invoice (negative REFUNDED), as `providerPaymentId:recordedBy`. */
+async function refundRecordersOf(invoiceId: string): Promise<string[]> {
+  const rows = await db.payment.findMany({
+    where: { invoiceId, status: 'REFUNDED', amount: { lt: 0 } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  return rows.map((r: any) => `${r.providerPaymentId}:${r.recordedBy}`);
 }
 
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -929,30 +999,6 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
     ]);
   }, 60_000);
 
-  /**
-   * W10-REFUND-CHARGE-DOOR: an invoice of A paid by a tagged platform charge, recorded under its charge id through the
-   * webhook door (as ch_A1 is), PAID with its payment posted once.
-   */
-  async function paidUnderChargeId(invoiceId: string, n: number, chargeId: string, pi: string, totalMinor: number) {
-    const total = totalMinor / 100;
-    await db.invoice.create({
-      data: {
-        id: invoiceId, invoiceNumber: `V15D-RCD-${n}`, status: 'SENT', subtotal: total, total, currency: 'TTD',
-        businessId: ID.bizA, contactId: ID.contactA,
-        items: { create: [{ id: `${invoiceId}_item1`, description: `V15D refund door item ${n}`, quantity: 1, unitPrice: total, total }] },
-      },
-    });
-    accounts[PLATFORM_KEY].charges.push(charge(chargeId, totalMinor, { pi, name: 'Alice Customer-of-A', email: A_EMAIL, invoiceId }));
-    await stripeEvent(`${chargeId}_succeeded`, 'charge.succeeded', {
-      id: chargeId, amount: totalMinor, currency: 'ttd', payment_intent: pi, metadata: { invoiceId, businessId: ID.bizA },
-    });
-    const payment = await paymentBy(chargeId);
-    expect(payment).toMatchObject({ businessId: ID.bizA, invoiceId, status: 'SUCCESSFUL', amount: total, reference: pi });
-    expect(await postingsOf(payment.id)).toEqual([`INCOME:POSTED:${total}`]);
-    expect((await invoiceRow(invoiceId)).status).toBe('PAID');
-    return payment;
-  }
-
   it('SOT-10b: the refund of a payment recorded under its charge id posts and reopens the invoice (W10-REFUND-CHARGE-DOOR, D-14, was it.todo): refundCharge writes the linked negative row and reverses the posting in one transaction, before Stripe\'s refund.created, which then writes and posts nothing; the ledger agrees', async () => {
     const pay = await paidUnderChargeId(ID.invA10, 10, S.chA10, S.piA10, 20000);
     const mark = calls.length;
@@ -983,8 +1029,9 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
 
   it('SOT-10c (W10-REFUND-CHARGE-DOOR, D-14): after KEY\'s refundCharge recorded and posted a partial refund, Stripe\'s refund.created, a charge.refunded listing it and a charge.refunded carrying only the cumulative amount_refunded post nothing more: the refund is posted once in total', async () => {
     const pay = await paidUnderChargeId(ID.invA11, 11, S.chA11, S.piA11, 10000);
-    // As KEY's payments_refund_charge calls it (flow-orchestrator: getPaymentsOps().refundCharge).
-    const refund = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA11, amount: 30, reason: 'requested_by_customer' });
+    // As KEY's payments_refund_charge calls it (flow-orchestrator: getPaymentsOps().refundCharge, KEY as its system
+    // actor since review SEC-RCD-1, R0-PL-07).
+    const refund = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA11, amount: 30, reason: 'requested_by_customer' }, KEY_SYSTEM_ACTOR_ID);
     expect(refund).toMatchObject({ chargeId: S.chA11, amount: 30, currency: 'TTD', provider: 'stripe' });
 
     const rows = [`stripe:${S.chA11}:SUCCESSFUL:100:${S.piA11}`, `stripe:${refund.id}:REFUNDED:-30:${S.chA11}`];
@@ -1008,6 +1055,41 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
     await expectOnce('after charge.refunded listing the refund');
     await stripeEvent(`${S.chA11}_refunded_cumulative`, 'charge.refunded', { ...chargeNow });
     await expectOnce('after charge.refunded with the cumulative amount_refunded only');
+  }, 60_000);
+
+  it('SOT-10d (W10-REFUND-CHARGE-DOOR review SEC-RCD-1; R0-PL-07, R0-CMF2, D-90): the refund refundCharge records names who made it: the owner\'s refund over HTTP and KEY\'s (its SYSTEM actor) each write the refunder to the reversal or refund posting (createdById) and to the refund row (recordedBy), and one FINANCE payment_refunded feed row naming the refunder in the same transaction; Stripe\'s refund.created adds none', async () => {
+    // The owner's full refund over HTTP: the reversal of the whole payment.
+    const full = await paidUnderChargeId(ID.invA12, 12, S.chA12, S.piA12, 8000);
+    const res = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA12, reason: 'requested_by_customer' });
+    expect(res.status, flat(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ chargeId: S.chA12, amount: 80, provider: 'stripe' });
+    const ownerNamed = async (when: string) => {
+      // RED-BEFORE: INCOME:REVERSED:null, REVERSAL:POSTED:null; the refund row's recordedBy null; no feed row.
+      expect(await postingActorsOf(full.id), when).toEqual([`INCOME:REVERSED:null`, `REVERSAL:POSTED:${ID.ownerA}`]);
+      expect(await refundRecordersOf(ID.invA12), when).toEqual([`${res.body.id}:${ID.ownerA}`]);
+      expect(await refundFeedOf(ID.bizA, full.id), when).toEqual([`USER:${ID.ownerA}:${ID.ownerA}:80`]);
+    };
+    await ownerNamed('after refundCharge');
+    await deliverRefundEvents();
+    await ownerNamed('after refund.created');
+    expect((await invoiceRow(ID.invA12)).status).toBe('SENT');
+    await expectLedgerAgrees(ID.invA12, 0);
+
+    // KEY's partial refund (payments_refund_charge): KEY records as its SYSTEM actor (R0-PL-07), never as a person.
+    const part = await paidUnderChargeId(ID.invA13, 13, S.chA13, S.piA13, 10000);
+    const refund = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA13, amount: 25 }, KEY_SYSTEM_ACTOR_ID);
+    expect(refund).toMatchObject({ chargeId: S.chA13, amount: 25, provider: 'stripe' });
+    const keyNamed = async (when: string) => {
+      // RED-BEFORE: REFUND:POSTED:null; the refund row's recordedBy null; no feed row.
+      expect(await postingActorsOf(part.id), when).toEqual(['INCOME:POSTED:null', `REFUND:POSTED:${KEY_SYSTEM_ACTOR_ID}`]);
+      expect(await refundRecordersOf(ID.invA13), when).toEqual([`${refund.id}:${KEY_SYSTEM_ACTOR_ID}`]);
+      expect(await refundFeedOf(ID.bizA, part.id), when).toEqual([`SYSTEM:${KEY_SYSTEM_ACTOR_ID}:${KEY_SYSTEM_ACTOR_ID}:25`]);
+    };
+    await keyNamed('after refundCharge');
+    await deliverRefundEvents();
+    await keyNamed('after refund.created');
+    expect((await invoiceRow(ID.invA13)).status).toBe('PARTIALLY_PAID');
+    await expectLedgerAgrees(ID.invA13, 75);
   }, 60_000);
 });
 
@@ -1472,6 +1554,24 @@ describe('D-46: a platform SUPER_ADMIN who is not a member of the business is re
       expect(rows[0]).toBe(`paypal:${S.capA9}:SUCCESSFUL:40:null`);
       expect(rows.slice(1)).toEqual([expect.stringMatching(new RegExp(`^paypal:PPRF_${P}\\d+:REFUNDED:-40:${S.capA9}$`))]);
     });
+  }, 60_000);
+
+  it('SOT-D46-06 (W10-REFUND-CHARGE-DOOR review SEC-RCD-1; D-46, R0-PL-07, R0-CMF2): the refund the SUPER_ADMIN member of A makes through refundCharge names that admin on the refund posting (createdById), the refund row (recordedBy) and one FINANCE payment_refunded feed row; Stripe\'s refund.created adds none', async () => {
+    const pay = await paidUnderChargeId(ID.invA14, 14, S.chA14, S.piA14, 6000);
+    const res = await as(ID.saMemberA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA14, amount: 20 });
+    expect(res.status, flat(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ chargeId: S.chA14, amount: 20, provider: 'stripe' });
+    const adminNamed = async (when: string) => {
+      // RED-BEFORE: REFUND:POSTED:null; the refund row's recordedBy null; no feed row.
+      expect(await postingActorsOf(pay.id), when).toEqual(['INCOME:POSTED:null', `REFUND:POSTED:${ID.saMemberA}`]);
+      expect(await refundRecordersOf(ID.invA14), when).toEqual([`${res.body.id}:${ID.saMemberA}`]);
+      expect(await refundFeedOf(ID.bizA, pay.id), when).toEqual([`USER:${ID.saMemberA}:${ID.saMemberA}:20`]);
+    };
+    await adminNamed('after refundCharge');
+    await deliverRefundEvents();
+    await adminNamed('after refund.created');
+    expect((await invoiceRow(ID.invA14)).status).toBe('PARTIALLY_PAID');
+    await expectLedgerAgrees(ID.invA14, 40);
   }, 60_000);
 
   it('SOT-D46-02: the non-member SUPER_ADMIN\'s payment-link create and revoke (both DELETE routes) on A are 403 with zero provider calls; the SUPER_ADMIN member of A creates and revokes', async () => {

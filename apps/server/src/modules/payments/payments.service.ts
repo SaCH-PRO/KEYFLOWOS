@@ -366,12 +366,23 @@ export class PaymentsService {
    * (a manual refund, then the provider's event for the same money) is not
    * recorded twice, whichever arrives first: the manual refund answers 409
    * in the other order (CommerceService.refundableOf).
+   *
+   * W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07, R0-CMF2 ST-R011-2,
+   * D-90): `refunder` is the person (or KEY, its SYSTEM actor) who made the
+   * refund through PaymentsOpsService.refundCharge, named as the manual
+   * refund door names it: on the refund row's recordedBy, on the reversal or
+   * refund posting's createdById, and on one FINANCE payment_refunded feed
+   * row written through `tx` (auditInTransaction), so it commits with the
+   * refund, and a failed insert rolls the recording back (refundCharge logs
+   * it and the provider's refund event records the refund). A provider
+   * event names no refunder and passes none: unchanged.
    */
   private async createRefundWithPosting(
     original: RefundOriginal,
     refund: ProviderRefund,
     amountToRecord: (tx: Prisma.TransactionClient) => Promise<number>,
     alsoLinkedBy: string[] = [],
+    refunder?: { actorId: string | null },
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -399,11 +410,15 @@ export class PaymentsService {
           businessId: original.businessId,
           reference: original.providerPaymentId,
           notes: refund.notes,
+          // SEC-RCD-1 (R0-PL-07): the refunder refundCharge names.
+          ...(refunder ? { recordedBy: refunder.actorId } : {}),
         },
       });
       await this.revenuePosting.onPaymentRefunded(original.id, {
         tx: txClient,
         refund: { paymentId: created.id, amount },
+        // SEC-RCD-1 (R0-PL-07, R0-CMF2): the posting and its feed row name the refunder, in this transaction.
+        ...(refunder ? { createdById: refunder.actorId, auditInTransaction: true } : {}),
       });
       return created;
     });
@@ -555,6 +570,15 @@ export class PaymentsService {
    *
    * Returns whether a row was recorded. A recording that fails throws, with
    * nothing written: the provider refunded, and its refund event records it.
+   *
+   * Review SEC-RCD-1 (R0-PL-07, R0-CMF2 ST-R011-2, D-90): `actorId` is who
+   * made the refund (the authenticated user of the payments-ops route, a D-46
+   * SUPER_ADMIN member included, or KEY_SYSTEM_ACTOR_ID for KEY's
+   * payments_refund_charge), named on the refund row's recordedBy, the
+   * reversal or refund posting's createdById and one FINANCE payment_refunded
+   * feed row in the same transaction (KEY as SYSTEM, a person as USER), as
+   * the manual refund door names its refunder. A refund the provider's event
+   * records first names nobody, as before: no person is known to it.
    */
   async recordGatewayRefund(input: {
     businessId: string;
@@ -562,6 +586,7 @@ export class PaymentsService {
     chargeId: string;
     refund: { id: string; amount: number; currency: string };
     reason?: string | null;
+    actorId: string | null;
   }): Promise<boolean> {
     const { businessId, provider, chargeId, refund } = input;
     if (!refund.id) return false;
@@ -582,6 +607,8 @@ export class PaymentsService {
       provider === 'stripe'
         ? (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: toCents(amount), charge: chargeId, cumulative: false })
         : async () => amount,
+      [],
+      { actorId: input.actorId ?? null },
     ).catch(this.refundAlreadyRecorded(provider, refund.id));
     if (!persisted) return false;
     await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {

@@ -160,11 +160,18 @@ export class PaymentsOpsController {
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const gw = assertGateway(body.gateway);
-    return this.ops.refundCharge(businessId, gw, {
-      chargeId: body.chargeId,
-      amount: body.amount !== undefined ? Number(body.amount) : undefined,
-      reason: body.reason,
-    });
+    // W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07): the refunder is the
+    // authenticated user, never a body field.
+    return this.ops.refundCharge(
+      businessId,
+      gw,
+      {
+        chargeId: body.chargeId,
+        amount: body.amount !== undefined ? Number(body.amount) : undefined,
+        reason: body.reason,
+      },
+      req.user?.id ?? null,
+    );
   }
 
   @RequireModuleScope('revenue', 'read')
