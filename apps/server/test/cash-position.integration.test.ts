@@ -130,8 +130,23 @@
  *          command center do, on a computed and a cached read, and labels its
  *          figures with the normalized business currency
  *   CP-18  the overview's LOW_RUNWAY action is computed from business-currency
- *          cash alone and says nothing of other-currency cash (it.todo, awaiting
- *          a D-13 ruling)
+ *          cash alone and said nothing of other-currency cash.
+ *          W10-LOW-RUNWAY (owner ruling D-107; was it.todo): live. The alarm
+ *          stays, computed from the business currency's cash (its runway and
+ *          amountAtRisk), and its text lists the cash held in each other
+ *          currency, unconverted and never added, on a computed read and
+ *          inside the overview cache's TTL; the persisted row (KEYFLOW Today,
+ *          R3, GET revenue-actions) says the same. It reaches only revenue
+ *          readers, who read that cash on the overview and safe-to-spend too,
+ *          so no viewer it reaches has the figures withheld; a revenue-none
+ *          member is refused the overview (D-100)
+ *   CP-19  W10-LOW-RUNWAY review SEC-W10LR-1 (D-107): the LOW_RUNWAY text
+ *          copied each other-currency label into the owner's alarm, and an
+ *          account currency is free text (a module-none member can write one
+ *          through the account routes). The text lists only cash held under a
+ *          three-letter code, at most five (D-13's currencies first), and
+ *          counts the rest without echoing a label: bounded, never a sentence
+ *          a member typed for a currency
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1304,8 +1319,10 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
   // otherCurrencyCash key, the `currency` label read raw from
   // Business.currency. W9-FINANCE-OVERVIEW (D-13; was it.todo CP-17): the
   // overview reports the other currencies apart, from the same cash position
-  // it reads its cashBalance from, on every read (its 60s cache is checked
-  // against the business currency's figure only).
+  // it reads its cashBalance from, on every read (its 60s cache was checked
+  // against the business currency's figure only; W10-LOW-RUNWAY, D-107,
+  // checks the other currencies' figures too, which the LOW_RUNWAY text
+  // lists: CP-18).
   it('CP-17 (W9-FINANCE-OVERVIEW, was it.todo) (review CR-37c-01, D-13): the Finance overview reports other-currency cash apart (cashCurrency, otherCurrencyCash) as safe-to-spend and the OS command center do, and labels cashBalance with the normalized business currency, on a computed and on a cached read', async () => {
     // I holds TTD 150 beside USD 620 (CP-14, CP-15). A computed read.
     await redis.del(overviewKey(ID.bizI));
@@ -1349,5 +1366,140 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     expect(a.status).toBe(200);
     expect(a.body).toMatchObject({ currency: 'TTD', cashCurrency: 'TTD', otherCurrencyCash: [] });
   }, 60_000);
-  it.todo('CP-18 (review CR-37c-01) BLOCKED outside the V1-37c write set (finance-overview.service.ts) and awaiting a D-13 ruling: the LOW_RUNWAY action computed from business-currency cash says when other-currency cash exists (or is withheld), never a silent low-runway alarm beside USD reserves');
+
+  // Review CR-37c-01: the overview's LOW_RUNWAY action was computed from the business currency's
+  // cash alone and said nothing of the cash held in another currency, so a TTD business holding USD
+  // reserves read a bare low-runway alarm. W10-LOW-RUNWAY (owner ruling D-107; was it.todo CP-18):
+  // the alarm stays, computed from business-currency cash, and its text lists each other currency's
+  // cash unconverted (no exchange rate, never added). It is served only to revenue readers (the
+  // overview and the queue need revenue read: D-63, D-100), who read that cash on the overview and
+  // safe-to-spend too, so no viewer it reaches has the figures withheld.
+  it('CP-18 (W10-LOW-RUNWAY, D-107, was it.todo) (review CR-37c-01): the LOW_RUNWAY action stays computed from business-currency cash and its text lists the cash held in each other currency, unconverted and never added, on a computed read and inside the cache TTL, as its persisted row and a filtered revenue reader read it; a revenue-none member is refused; never a silent low-runway alarm beside USD reserves', async () => {
+    const lowRunway = (body: any) => (body.actions ?? []).filter((a: any) => a.type === 'LOW_RUNWAY');
+    const staffRead = `${P}staffIr`; // revenue read, crm none: the overview's D-63 path (actions read fresh)
+    const staffNone = `${P}staffIn`; // every module none
+    for (const [id, email, scopes] of [
+      [staffRead, `${P}staff_i_r@test.local`, { ...ALL_SCOPES_NONE, revenue: 'read' }],
+      [staffNone, `${P}staff_i_n@test.local`, ALL_SCOPES_NONE],
+    ] as const) {
+      await db.user.create({ data: { id, email, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizI, role: 'STAFF', permissionScopes: scopes } });
+    }
+
+    // I holds TTD 150 beside USD 625 (CP-14, CP-15, CP-17). A burn of 600 over the last six months
+    // (100 a month) leaves 1.5 months of TTD cash: the alarm is raised from TTD alone (USD added
+    // would read 7.75 months and raise none).
+    await db.expense.create({
+      data: { id: `${P}expI1`, businessId: ID.bizI, description: 'V34A rent I', amount: 600, currency: 'TTD', date: daysAgo(45) },
+    });
+    expect(await ledgerCashByCurrency(ID.bizI)).toEqual({ TTD: 150, USD: 625 });
+    await redis.del(overviewKey(ID.bizI));
+    let read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview).toMatchObject({ cashBalance: 150, cashCurrency: 'TTD', cashRunwayMonths: 1.5, otherCurrencyCash: [{ currency: 'USD', amount: 625 }] });
+    expect(lowRunway(read.overview), 'the alarm stays, computed from TTD cash, and lists the USD apart').toEqual([
+      expect.objectContaining({
+        title: 'Low cash runway',
+        amountAtRisk: 150,
+        detail: '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: USD 625.00.',
+      }),
+    ]);
+    expect(numbersIn(read.overview).filter(([, n]) => n === 775 || n === 7.8), 'no figure adds USD to TTD').toEqual([]);
+    // The persisted row (KEYFLOW Today, R3, GET revenue-actions read it) says the same.
+    const row = await db.revenueAction.findFirst({ where: { businessId: ID.bizI, type: 'LOW_RUNWAY', relatedType: 'business', relatedId: ID.bizI } });
+    expect(row?.detail).toBe(lowRunway(read.overview)[0].detail);
+    expect(Number(row?.amountAtRisk)).toBe(150);
+
+    // Inside the cache's TTL more USD lands, and a legacy row holds EUR (as a writer before the door
+    // left it): the TTD figure is unchanged, yet the action states each other currency's figure at
+    // once, each apart, in code order.
+    expect(await redis.exists(overviewKey(ID.bizI)), 'the overview is cached').toBe(1);
+    await postIn('USD', ID.bizI, 'i_cash_usd_cp18', 10, 'CASH', 'OTHER_INCOME');
+    await legacyPosting(ID.bizI, 'i_legacy_eur_cp18', 'eur', 12, 'CASH', 'OWNER_EQUITY');
+    expect(await ledgerCashByCurrency(ID.bizI)).toEqual({ EUR: 12, TTD: 150, USD: 635 });
+    read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview.otherCurrencyCash).toEqual([{ currency: 'EUR', amount: 12 }, { currency: 'USD', amount: 635 }]);
+    const detail = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: EUR 12.00, USD 635.00.';
+    expect(lowRunway(read.overview).map((a: any) => [a.amountAtRisk, a.detail])).toEqual([[150, detail]]);
+    expect((await db.revenueAction.findUnique({ where: { id: row.id } }))?.detail, 'the persisted row is not stale').toBe(detail);
+
+    // A revenue reader the queue is filtered for (D-63: read fresh, never the cached actions) reads
+    // the same text; a member without revenue read is refused the overview, figures and all (D-100).
+    const filtered = await overview(ID.bizI, staffRead);
+    expect(filtered.status, JSON.stringify(filtered.body).slice(0, 300)).toBe(200);
+    expect(lowRunway(filtered.body).map((a: any) => a.detail)).toEqual([detail]);
+    const refused = await overview(ID.bizI, staffNone);
+    expect(refused.status).toBe(403);
+    expect(JSON.stringify(refused.body)).not.toMatch(/USD|EUR|runway/i);
+
+    // The USD business J: the alarm is computed from USD cash; its TTD is listed apart.
+    await db.expense.create({
+      data: { id: `${P}expJ1`, businessId: ID.bizJ, description: 'V34A rent J', amount: 1200, currency: 'USD', date: daysAgo(45) },
+    });
+    await redis.del(overviewKey(ID.bizJ));
+    const j = await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
+    expect(j.overview).toMatchObject({ cashCurrency: 'USD', cashRunwayMonths: 1.5, otherCurrencyCash: [{ currency: 'TTD', amount: 40 }] });
+    expect(lowRunway(j.overview).map((a: any) => [a.amountAtRisk, a.detail])).toEqual([
+      [300, '~1.5 months at current burn, from USD cash only. Cash in other currencies, not included and not converted: TTD 40.00.'],
+    ]);
+
+    // A business whose cash is in its own currency alone: nothing to state; the text is as it was.
+    await db.expense.create({
+      data: { id: `${P}expA1`, businessId: ID.bizA, description: 'V34A rent A', amount: 6000, currency: 'TTD', date: daysAgo(45) },
+    });
+    await redis.del(overviewKey(ID.bizA));
+    const a = await overview(ID.bizA, ID.ownerA);
+    expect(a.status).toBe(200);
+    expect(a.body).toMatchObject({ cashBalance: 1025.05, otherCurrencyCash: [] });
+    expect(lowRunway(a.body).map((x: any) => [x.amountAtRisk, x.detail])).toEqual([[1025.05, '~1.0 months at current burn']]);
+  }, 60_000);
+
+  // Review SEC-W10LR-1 (W10-LOW-RUNWAY repair, owner ruling D-107): FinancialAccount.currency is free
+  // text. Create normalizes it, PATCH stores it raw, and the account routes check membership only,
+  // so a member whose every module scope is none can write one (the review ran that through the
+  // real routes). An opening on a CASH account linked to a non-cash chart row is never posted, so it
+  // never meets the D-13 currency check, yet the cash position bridges it under that label (CP-11).
+  // The LOW_RUNWAY text is the owner's priority-1 alarm: persisted, shown on the Finance overview and
+  // the revenue-actions queue, and put into the KEY chat prompt. It lists only cash held under a
+  // three-letter code, at most five (D-13's currencies first), and counts the rest without echoing a
+  // label, so its length stays bounded. The rows are written directly here (whichever writer stored
+  // them): the account routes' own check is outside this packet.
+  it('CP-19 (W10-LOW-RUNWAY repair, D-107) (review SEC-W10LR-1): the LOW_RUNWAY text never echoes an account currency that is not a three-letter code and lists at most five currencies, D-13 currencies first, counting the rest; a free-text label never reaches the alarm, its persisted row or a revenue reader, and the text stays bounded', async () => {
+    const lowRunway = (body: any) => (body.actions ?? []).filter((a: any) => a.type === 'LOW_RUNWAY');
+    const actionsOf = async (as: string) => {
+      const res = await overview(ID.bizI, as);
+      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+      return lowRunway(res.body).map((a: any) => [a.amountAtRisk, a.detail]);
+    };
+    const persisted = async () =>
+      (await db.revenueAction.findFirst({ where: { businessId: ID.bizI, type: 'LOW_RUNWAY', relatedType: 'business', relatedId: ID.bizI } }))?.detail;
+    const head = '~1.5 months at current burn, from TTD cash only. Cash in other currencies, not included and not converted: ';
+
+    // I holds TTD 150 beside EUR 12 and USD 635 (CP-18). A CASH account on the inventory row, its
+    // opening never posted, holds 5 under a sentence for a currency (create upper-cases it).
+    const injected = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+    const labelled = await legacyAccount(ID.bizI, 'V34A Label I', 'CASH', 'INVENTORY_ASSET', 5, daysAgo(1), injected);
+    const read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.overview.cashRunwayMonths, 'the runway is still TTD cash alone').toBe(1.5);
+    let detail = `${head}EUR 12.00, USD 635.00; 1 amount held under a label that is not a currency code (label not shown).`;
+    expect(lowRunway(read.overview).map((a: any) => [a.amountAtRisk, a.detail]), 'the label is counted, never echoed').toEqual([[150, detail]]);
+    expect(await persisted(), 'the persisted row (KEYFLOW Today, R3, GET revenue-actions)').toBe(detail);
+    expect(await actionsOf(`${P}staffIr`), 'a filtered revenue reader (CP-18)').toEqual([[150, detail]]);
+
+    // PATCH stores the label raw: 5000 characters. The text is unchanged and bounded.
+    await db.financialAccount.update({ where: { id: labelled.id }, data: { currency: 'x'.repeat(5000) } });
+    expect(await actionsOf(ID.ownerI)).toEqual([[150, detail]]);
+    expect(await persisted()).toBe(detail);
+    expect((await persisted())?.length).toBeLessThan(300);
+    expect(await persisted()).not.toMatch(/XXX|URGENT|WIRE/);
+
+    // Four more three-letter codes: six in all. Five are listed in code order, USD (a D-13 currency)
+    // kept before the legacy codes; the sixth is counted, never silently dropped.
+    for (const [code, amount] of [['AAA', 1], ['BBB', 2], ['CCC', 3], ['DDD', 4]] as const) {
+      await legacyAccount(ID.bizI, `V34A Code ${code} I`, 'CASH', 'INVENTORY_ASSET', amount, daysAgo(1), code);
+    }
+    detail = `${head}AAA 1.00, BBB 2.00, CCC 3.00, DDD 4.00, USD 635.00; 1 more currency (not listed); 1 amount held under a label that is not a currency code (label not shown).`;
+    expect(await actionsOf(ID.ownerI)).toEqual([[150, detail]]);
+    expect(await persisted()).toBe(detail);
+    expect(detail.length).toBeLessThan(300);
+  }, 60_000);
 });
