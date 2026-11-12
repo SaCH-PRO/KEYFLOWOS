@@ -19,6 +19,19 @@
  * PayPal and Stripe count as configured by the same reading of the business
  * settings and the platform env as the gateway list (paypalConfigured,
  * stripeConfigured; getAvailableGateways reads these two).
+ *
+ * Review SEC-W11SCM-1 (open, awaiting an owner ruling): that reading is the
+ * gateway list's and createStorePayment's as built before this packet. Each
+ * credential comes from the business settings or else the platform env, so the
+ * platform's PayPal / Stripe, alone or mixed with a store's own (its PayPal
+ * client id with the platform's secret, its Stripe publishable key with the
+ * platform's secret), count as the store's own, and createStorePayment then
+ * builds the provider client from the platform's credentials. D-105 ruled that
+ * out for WiPay only; whether the platform's PayPal and Stripe may stand in for
+ * a store's own needs its analogue. Until then the reading is not changed here
+ * (the gateway list, the checkout gate and createStorePayment must change
+ * together), and the packet's integration cases configure PayPal and Stripe
+ * only in the store's own settings (storefront-order-doors V87-17c, V87-17e).
  */
 
 /** The methods a storefront checkout may name (normalised). CASH and MANUAL start no provider session (D-18). */
@@ -42,13 +55,19 @@ function settingsOf(meta: unknown): Record<string, unknown> {
   return (meta as Record<string, unknown>) || {};
 }
 
-/** PayPal is configured for a business with a client id and secret, each from its settings or else the platform env. */
+/**
+ * PayPal is configured for a business with a client id and secret, each from its settings or else the platform env
+ * (as built; the platform fallback and the mixed pair await an owner ruling, SEC-W11SCM-1 above).
+ */
 export function paypalConfigured(meta: unknown): boolean {
   const m = settingsOf(meta);
   return Boolean((m.paypalClientId || process.env.PAYPAL_CLIENT_ID) && (m.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET));
 }
 
-/** Stripe is configured for a business with a publishable key, a secret key and a webhook secret, each from its settings or else the env. */
+/**
+ * Stripe is configured for a business with a publishable key, a secret key and a webhook secret, each from its
+ * settings or else the env (as built; the platform fallback and the mixed set await an owner ruling, SEC-W11SCM-1).
+ */
 export function stripeConfigured(meta: unknown): boolean {
   const m = settingsOf(meta);
   const publishable = m.stripePublishableKey || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;

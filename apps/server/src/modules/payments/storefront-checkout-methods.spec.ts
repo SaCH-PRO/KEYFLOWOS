@@ -16,6 +16,12 @@
  *           for exactly the same rows (one table drives both)
  *   SCM-04  the refusal bodies: PAYMENT_METHOD_UNSUPPORTED names the trimmed
  *           method, PAYMENT_METHOD_NOT_OFFERED names the provider
+ *   SCM-05  (todo) review SEC-W11SCM-1: whether the platform's PayPal / Stripe
+ *           env credentials, alone or mixed with a store's own, may count as
+ *           the store's own awaits an owner ruling (a D-105 analogue). The
+ *           SCM-03 rows marked "as built (SEC-W11SCM-1)" record the gateway
+ *           list's reading before this packet, kept so the gate and the list
+ *           agree; they are not a ruled expectation and change with the ruling
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -55,6 +61,9 @@ type Row = {
   stripe: boolean;
 };
 
+// Rows labelled "as built, SEC-W11SCM-1" admit the platform's env credentials, alone or mixed with a store's own: the
+// gateway list's reading before this packet, kept so the checkout gate and the list agree. Whether the platform's
+// PayPal / Stripe may stand in for a store's own awaits an owner ruling (a D-105 analogue); these rows change with it.
 const ROWS: Row[] = [
   { label: 'nothing anywhere', meta: null, env: {}, paypal: false, stripe: false },
   { label: 'empty settings', meta: {}, env: {}, paypal: false, stripe: false },
@@ -63,8 +72,8 @@ const ROWS: Row[] = [
   { label: 'PayPal id only in the settings', meta: { paypalClientId: PP_ID }, env: {}, paypal: false, stripe: false },
   { label: 'PayPal secret only in the settings', meta: { paypalClientSecret: PP_SECRET }, env: {}, paypal: false, stripe: false },
   { label: 'PayPal blank in the settings', meta: { paypalClientId: '', paypalClientSecret: '' }, env: {}, paypal: false, stripe: false },
-  { label: 'PayPal pair in the env', meta: null, env: { PAYPAL_CLIENT_ID: PP_ID, PAYPAL_CLIENT_SECRET: PP_SECRET }, paypal: true, stripe: false },
-  { label: 'PayPal id in the settings, secret in the env', meta: { paypalClientId: PP_ID }, env: { PAYPAL_CLIENT_SECRET: PP_SECRET }, paypal: true, stripe: false },
+  { label: 'PayPal pair in the env (as built, SEC-W11SCM-1)', meta: null, env: { PAYPAL_CLIENT_ID: PP_ID, PAYPAL_CLIENT_SECRET: PP_SECRET }, paypal: true, stripe: false },
+  { label: 'PayPal id in the settings, secret in the env (as built, SEC-W11SCM-1)', meta: { paypalClientId: PP_ID }, env: { PAYPAL_CLIENT_SECRET: PP_SECRET }, paypal: true, stripe: false },
   { label: 'PayPal id only in the env', meta: {}, env: { PAYPAL_CLIENT_ID: PP_ID }, paypal: false, stripe: false },
   {
     label: 'Stripe triple in the settings',
@@ -76,21 +85,21 @@ const ROWS: Row[] = [
   { label: 'Stripe without a webhook secret', meta: { stripePublishableKey: ST_PUB, stripeSecretKey: ST_SECRET }, env: {}, paypal: false, stripe: false },
   { label: 'Stripe secret only in the settings', meta: { stripeSecretKey: ST_SECRET }, env: {}, paypal: false, stripe: false },
   {
-    label: 'Stripe triple in the env',
+    label: 'Stripe triple in the env (as built, SEC-W11SCM-1)',
     meta: null,
     env: { STRIPE_PUBLISHABLE_KEY: ST_PUB, STRIPE_SECRET_KEY: ST_SECRET, STRIPE_WEBHOOK_SECRET: ST_WH },
     paypal: false,
     stripe: true,
   },
   {
-    label: 'Stripe with the NEXT_PUBLIC publishable key',
+    label: 'Stripe with the NEXT_PUBLIC publishable key (as built, SEC-W11SCM-1)',
     meta: {},
     env: { NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ST_PUB, STRIPE_SECRET_KEY: ST_SECRET, STRIPE_WEBHOOK_SECRET: ST_WH },
     paypal: false,
     stripe: true,
   },
   {
-    label: 'Stripe split between the settings and the env',
+    label: 'Stripe split between the settings and the env (as built, SEC-W11SCM-1)',
     meta: { stripePublishableKey: ST_PUB },
     env: { STRIPE_SECRET_KEY: ST_SECRET, STRIPE_WEBHOOK_SECRET: ST_WH },
     paypal: false,
@@ -184,4 +193,10 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE: the methods a storefront checkout may 
       message: 'Stripe is not configured for this business: choose another payment method',
     });
   });
+
+  // Review SEC-W11SCM-1 (pre-existing, not a regression of this packet): needs an owner ruling before the reading
+  // changes; the gateway list, this gate and createStorePayment must then change together.
+  it.todo(
+    "SCM-05 (W11-STORE-CHECKOUT-METHOD-GATE review SEC-W11SCM-1; awaiting an owner ruling, a D-105 analogue for PayPal and Stripe): whether the platform's PayPal / Stripe env credentials, alone or mixed with a store's own, may count as the store's own at the storefront gateway list and checkout; SCM-03's 'as built' rows change with that ruling",
+  );
 });

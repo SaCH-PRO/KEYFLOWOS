@@ -141,16 +141,39 @@
  *           (c) 'PAYPAL' on a USD cart of a store with no PayPal of its own
  *           and no platform PayPal env: PAYMENT_METHOD_NOT_OFFERED; (d)
  *           'STRIPE' with no Stripe configured: PAYMENT_METHOD_NOT_OFFERED
- *   V87-17c controls: 'paypal' and ' PAYPAL ' on a USD cart with PayPal
- *           configured (env, getPaypalClient stubbed as in V87-16) are PAYPAL
- *           orders, each asking PayPal for one USD order; 'cash' is a CASH
- *           order, PENDING, with no session (D-18); 'wipay' on a TTD cart of a
- *           store with a merchant pair is a WiPay redirect (global fetch
- *           stubbed for WiPay's host, this case only)
+ *   V87-17c controls: 'paypal' and ' PAYPAL ' on a USD cart of a store with
+ *           its own PayPal pair in its settings (no platform PayPal env;
+ *           getPaypalClient stubbed as in V87-16) are PAYPAL orders, each
+ *           asking PayPal, through a client built from that store's own pair,
+ *           for one USD order; 'cash' is a CASH order, PENDING, with no
+ *           session (D-18); 'wipay' on a TTD cart of a store with a merchant
+ *           pair is a WiPay redirect (global fetch stubbed for WiPay's host)
  *   V87-17d POST /payments/create-checkout {payableType: 'storefront_order',
  *           gateway: 'paypal'} for an UNPAID USD order of a store with no
  *           PayPal is 400 PAYMENT_METHOD_NOT_OFFERED (it was a plain Error,
  *           500) and writes nothing
+ *
+ * Review repairs (W11-STORE-CHECKOUT-METHOD-GATE review; reproduced at the
+ * packet head 2cef0303):
+ *
+ *   SEC-W11SCM-2  no case proved the gate reads the checkout business's own
+ *           PayPal or Stripe settings: every PayPal control configured PayPal
+ *           through the platform env and there was no Stripe control, so a
+ *           gate that ignored the store's settings and refused Stripe always
+ *           passed all 24 packet tests. V87-17c now configures the store's own
+ *           pair (above), and
+ *   V87-17e a PayPal pair and Stripe keys held by another business open
+ *           neither for this store (400 PAYMENT_METHOD_NOT_OFFERED before the
+ *           write; its gateway list offers neither, the holder's both); the
+ *           store's own Stripe keys admit 'stripe': a 201 STRIPE order whose
+ *           one Stripe session (global fetch stubbed for Stripe's API host) is
+ *           made with that store's secret key and names that store and order
+ *   SEC-W11SCM-1  (not changed here) the gate, like the gateway list and
+ *           createStorePayment before this packet, counts the platform's
+ *           PayPal / Stripe env credentials, alone or mixed with a store's
+ *           own, as the store's; whether they may stand in for a store's own
+ *           awaits an owner ruling (a D-105 analogue). No case in this suite
+ *           configures PayPal or Stripe through the platform env.
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard,
@@ -170,9 +193,10 @@
  * timeline, ExpensesService (a recorder: store_order.refunded books one), and
  * MarketplaceService.autoRouteOrder (fulfilment routing, held so it writes
  * nothing behind a case). No provider is called: the PayPal SDK client is
- * stubbed where a PayPal order is made (V87-16, V87-16b, V87-17c), and the one
- * WiPay session (V87-17c) goes to a global fetch stub for WiPay's host; every
- * other WiPay checkout here is refused before WiPay would be called.
+ * stubbed where a PayPal order is made (V87-16, V87-16b, V87-17c), the one
+ * WiPay session (V87-17c) and the one Stripe session (V87-17e) go to a global
+ * fetch stub for WiPay's and Stripe's hosts; every other WiPay checkout here is
+ * refused before WiPay would be called.
  * PaymentsController is mounted for the generic storefront checkout (V87-17d).
  *
  * Fixtures: prefix `v87c_` (registered in test/helpers/fixture-prefixes.json);
@@ -1350,7 +1374,7 @@ describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106
 });
 
 describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names only a method it can start, refused before the order is written', () => {
-  /** The platform provider credentials the gateway list falls back to: unset in every case here unless a case sets them. */
+  /** The platform provider credentials the gateway list falls back to (SEC-W11SCM-1): unset in every case here. */
   const PROVIDER_ENV = [
     'PAYPAL_CLIENT_ID',
     'PAYPAL_CLIENT_SECRET',
@@ -1363,13 +1387,41 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
   const PROMO_TTD_17 = `${P}promo_ttd_17`;
   const PROMO_USD_17 = `${P}promo_usd_17`;
   const WIPAY_REDIRECT = 'https://tt.wipayfinancial.com/v1/gateway_live/pay/v87c-session';
+  const STRIPE_SESSION = `${P}cs_17e`;
+  const STRIPE_REDIRECT = 'https://checkout.stripe.com/c/pay/v87c-session';
+  /**
+   * Review SEC-W11SCM-2: a store's OWN PayPal pair and Stripe keys, set in its business settings by the cases that
+   * need them (obviously fake values). No case here configures PayPal or Stripe through the platform env: whether the
+   * platform's credentials may stand in for a store's own awaits an owner ruling (SEC-W11SCM-1, a D-105 analogue).
+   */
+  const OWN_PAYPAL = { paypalClientId: `${P}own_paypal_client_fake`, paypalClientSecret: `${P}own_paypal_secret_fake` };
+  const OWN_STRIPE = {
+    stripePublishableKey: `${P}own_stripe_publishable_fake`,
+    stripeSecretKey: `${P}own_stripe_secret_fake`,
+    stripeWebhookSecret: `${P}own_stripe_webhook_fake`,
+  };
   let savedEnv: Record<string, string | undefined> = {};
+  /** The settings of the two stores the cases give provider credentials to, restored after each case. */
+  let savedSettings: Record<string, unknown> = {};
   let promoStandIn: unknown;
   /** The WiPay requests the checkouts made (global fetch stubbed; any other host is an unexpected network call). */
   let wipayRequests: Array<{ url: string; body: string }> = [];
+  /** The Stripe Checkout Session requests the checkouts made (the same stub answers Stripe's API host). */
+  let stripeRequests: Array<{ url: string; body: string; authorization: string | null }> = [];
   let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
 
   const usesOf = async (id: string) => (await db.promoCode.findUnique({ where: { id }, select: { currentUses: true } })).currentUses;
+  /** Adds provider credentials to a store's settings (its WiPay merchant pair kept). */
+  const giveSettings = async (businessId: string, extra: Record<string, unknown>) => {
+    await db.business.update({ where: { id: businessId }, data: { metaData: { ...((savedSettings[businessId] as object) ?? {}), ...extra } } });
+  };
+  /** The gateway ids a storefront's public gateway list offers for a USD amount. */
+  const usdGatewayIds = async (slug: string): Promise<string[]> => {
+    await clearRateLimits();
+    const res = await agent().get(`/site/storefront/public/${encodeURIComponent(slug)}/gateways?currency=USD`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return res.body.map((g: { id: string }) => g.id);
+  };
 
   beforeAll(async () => {
     // Limited promo codes (3 uses) of the TTD store and the USD store, counted by the real PromoCodeService.
@@ -1385,18 +1437,35 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
     promoStandIn = storeOrders.promoCodeService;
     storeOrders.promoCodeService = new PromoCodeService(app.get(PrismaService));
+    savedSettings = {};
+    for (const id of [ID.bizA, ID.bizUsd]) {
+      savedSettings[id] = (await db.business.findUnique({ where: { id }, select: { metaData: true } })).metaData;
+    }
     wipayRequests = [];
+    stripeRequests = [];
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
       const url = String(input?.url ?? input);
-      if (!new URL(url).host.endsWith('wipayfinancial.com')) throw new Error(`v87c: unexpected network call to ${url}`);
+      const host = new URL(url).host;
+      if (host === 'api.stripe.com') {
+        const headers = new Headers(init?.headers ?? {});
+        stripeRequests.push({ url, body: String(init?.body ?? ''), authorization: headers.get('authorization') });
+        return new Response(JSON.stringify({ id: STRIPE_SESSION, url: STRIPE_REDIRECT }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (!host.endsWith('wipayfinancial.com')) throw new Error(`v87c: unexpected network call to ${url}`);
       wipayRequests.push({ url, body: String(init?.body ?? '') });
       return new Response(null, { status: 302, headers: { location: WIPAY_REDIRECT } });
     }) as typeof fetch);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     fetchSpy?.mockRestore();
     fetchSpy = undefined;
+    for (const [id, metaData] of Object.entries(savedSettings)) {
+      await db.business.update({ where: { id }, data: { metaData: metaData ?? undefined } });
+    }
     storeOrders.promoCodeService = promoStandIn;
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
@@ -1453,23 +1522,31 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
     }
   });
 
-  it("V87-17c (W11-STORE-CHECKOUT-METHOD-GATE, F-21; D-18, D-69) controls: the method is read trimmed and in any case: 'paypal' and ' PAYPAL ' on a USD cart with PayPal configured are 201 PAYPAL orders, each asking PayPal for one USD order; 'cash' is a 201 CASH order, PENDING, with no session; 'wipay' on a TTD cart of a store with a merchant pair is 201 with a WiPay redirect", async () => {
-    Object.assign(process.env, { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` });
-    // The PayPal SDK client (the provider edge), stubbed as in V87-16: it records the orders it is asked for.
+  it("V87-17c (W11-STORE-CHECKOUT-METHOD-GATE, F-21; D-18, D-69, D-106; review SEC-W11SCM-2) controls: the method is read trimmed and in any case: 'paypal' and ' PAYPAL ' on a USD cart of a store with its own PayPal pair in its settings (no platform PayPal env) are 201 PAYPAL orders, each asking PayPal, through a client built from that store's own pair, for one USD order; 'cash' is a 201 CASH order, PENDING, with no session; 'wipay' on a TTD cart of a store with a merchant pair is 201 with a WiPay redirect", async () => {
+    // Review SEC-W11SCM-2: PayPal is the store's own (its settings), not the platform env (unset by beforeEach), so the
+    // gate is proven to read the checkout business's settings: a gate that ignored them refused these checkouts 400.
+    await giveSettings(ID.bizUsd, OWN_PAYPAL);
+    // The PayPal SDK client (the provider edge), stubbed as in V87-16: it records the credentials it is built from
+    // and the orders it is asked for.
     const ordered: any[] = [];
-    const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
-      client: {},
-      ordersController: {
-        createOrder: vi.fn(async (req: any) => {
-          ordered.push(req?.body?.purchaseUnits);
-          return { result: { id: `${P}pp_order_17c_${ordered.length}`, links: [] } };
-        }),
-      },
+    const builtFrom: unknown[][] = [];
+    const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockImplementation((...credentials: unknown[]) => {
+      builtFrom.push(credentials);
+      return {
+        client: {},
+        ordersController: {
+          createOrder: vi.fn(async (req: any) => {
+            ordered.push(req?.body?.purchaseUnits);
+            return { result: { id: `${P}pp_order_17c_${ordered.length}`, links: [] } };
+          }),
+        },
+      };
     });
     try {
       for (const method of ['paypal', ' PAYPAL ']) {
         const before = await counts(ID.bizUsd);
         const asked = ordered.length;
+        const built = builtFrom.length;
         await clearRateLimits();
         const res = await checkout(SLUG.usd, cart(ID.prodUsd, method, { returnUrl: RETURN_URL }));
         await settle();
@@ -1483,6 +1560,9 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
           ordered.slice(asked).map((units) => `${units[0].amount.currencyCode}:${units[0].amount.value}`),
           `${JSON.stringify(method)}: one USD PayPal order`,
         ).toEqual([`USD:${ORDER_TOTAL.toFixed(2)}`]);
+        expect(builtFrom.slice(built), `${JSON.stringify(method)}: the PayPal client is built from the store's own pair`).toEqual([
+          [OWN_PAYPAL.paypalClientId, OWN_PAYPAL.paypalClientSecret],
+        ]);
       }
 
       // D-18: CASH starts no session and is PENDING. At fb00af1c 'cash' went to createStorePayment: 400 after the write.
@@ -1535,6 +1615,67 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
       expect(await counts(ID.bizUsd), 'nothing written').toEqual(before);
       const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
       expect(`${stored.status}/${stored.paymentStatus}/${stored.paymentMethod}`).toBe('PENDING/UNPAID/null');
+    } finally {
+      paypalClient.mockRestore();
+    }
+  });
+
+  it("V87-17e (W11-STORE-CHECKOUT-METHOD-GATE, F-21; D-106; review SEC-W11SCM-2): the gate reads the checkout business's own settings: a PayPal pair and Stripe keys held by another business open neither PayPal nor Stripe for this store (400 PAYMENT_METHOD_NOT_OFFERED before the order is written, no provider called; its gateway list offers neither while the holder's offers both); the store's own Stripe keys (no platform Stripe env) admit 'stripe': a 201 STRIPE order whose one Stripe session is made with that store's secret key and names that store and order", async () => {
+    const paypalClient = vi.spyOn(payments as any, 'getPaypalClient');
+    const notOffered = (name: string) => ({
+      code: 'PAYMENT_METHOD_NOT_OFFERED',
+      message: `${name} is not configured for this business: choose another payment method`,
+    });
+    try {
+      // (a) Another business (bizA) holds a PayPal pair and Stripe keys; this store (bizUsd) holds neither, and the
+      // platform env has none (beforeEach). Control: the holder's own gateway list offers both for a USD amount.
+      await giveSettings(ID.bizA, { ...OWN_PAYPAL, ...OWN_STRIPE });
+      const holder = await usdGatewayIds(SLUG.a);
+      expect(`${holder.includes('paypal')}/${holder.includes('stripe')}`, 'the holder is offered PayPal and Stripe').toBe('true/true');
+      const other = await usdGatewayIds(SLUG.usd);
+      expect(`${other.includes('paypal')}/${other.includes('stripe')}`, "another business's credentials offer nothing here").toBe('false/false');
+      for (const [method, name] of [['PAYPAL', 'PayPal'], ['stripe', 'Stripe']] as const) {
+        const before = await counts(ID.bizUsd);
+        seen = [];
+        await clearRateLimits();
+        const res = await checkout(SLUG.usd, cart(ID.prodUsd, method, { returnUrl: RETURN_URL }));
+        await settle();
+        expect(res.status, `${method}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body, method).toMatchObject(notOffered(name));
+        expect(await counts(ID.bizUsd), `${method}: no order, no retry slot`).toEqual(before);
+        expect(storeEvents(), `${method}: no store_order.created`).toEqual([]);
+      }
+      expect(paypalClient, 'PayPal is never called').not.toHaveBeenCalled();
+      expect(fetchSpy, 'no provider request (Stripe, WiPay)').not.toHaveBeenCalled();
+
+      // (b) This store's own Stripe keys, in its settings: the gate admits 'stripe' (a gate that refused Stripe
+      // whatever the settings, or read another business's, answered 400 here) and the session is the store's.
+      await giveSettings(ID.bizUsd, OWN_STRIPE);
+      const own = await usdGatewayIds(SLUG.usd);
+      expect(own.includes('stripe'), "the store's own Stripe keys offer Stripe").toBe(true);
+      const before = await counts(ID.bizUsd);
+      await clearRateLimits();
+      const res = await checkout(SLUG.usd, cart(ID.prodUsd, 'stripe', { returnUrl: RETURN_URL }));
+      await settle();
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.order).toMatchObject({ paymentMethod: 'STRIPE', currency: 'USD' });
+      expect(res.body.payment).toEqual({ paymentId: STRIPE_SESSION, status: 'REDIRECT', redirectUrl: STRIPE_REDIRECT });
+      expect((await db.marketplaceOrder.findUnique({ where: { id: res.body.order.id } })).paymentMethod, 'stored normalised').toBe('STRIPE');
+      expect((await counts(ID.bizUsd)).orders).toBe(before.orders + 1);
+      expect(stripeRequests, 'one Stripe Checkout Session').toHaveLength(1);
+      expect(stripeRequests[0].authorization, "made with the store's own secret key").toBe(`Bearer ${OWN_STRIPE.stripeSecretKey}`);
+      const sent = new URLSearchParams(stripeRequests[0].body);
+      expect(
+        [
+          sent.get('metadata[businessId]'),
+          sent.get('client_reference_id'),
+          sent.get('line_items[0][price_data][currency]'),
+          sent.get('line_items[0][price_data][unit_amount]'),
+        ].join('|'),
+        'the session names this store, the order and its USD total',
+      ).toBe(`${ID.bizUsd}|${res.body.order.id}|usd|${ORDER_TOTAL * 100}`);
+      expect(paypalClient, 'PayPal is never called').not.toHaveBeenCalled();
+      expect(wipayRequests, 'no WiPay session').toEqual([]);
     } finally {
       paypalClient.mockRestore();
     }
