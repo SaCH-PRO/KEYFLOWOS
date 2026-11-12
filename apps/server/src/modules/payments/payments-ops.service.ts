@@ -148,12 +148,18 @@ export class PaymentsOpsService {
    * user of the payments-ops route (PaymentsOpsController.refund, a D-46
    * SUPER_ADMIN member included) or KEY_SYSTEM_ACTOR_ID for KEY's
    * payments_refund_charge. The refund door names it on what it records.
+   *
+   * W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): `options.initiatedBy`
+   * is the member KEY's payments_refund_charge ran for (never a tool
+   * argument), kept beside KEY as data.initiatedBy on the refund's feed row
+   * only; `actorId` stays the refunder. The owner's route passes none.
    */
   async refundCharge(
     businessId: string,
     gatewayId: GatewayId,
     input: RefundInput,
     actorId: string | null,
+    options: { initiatedBy?: string | null } = {},
   ): Promise<RefundResult> {
     if (!input.chargeId) throw new BadRequestException('Charge id is required');
     const gw = this.getGateway(gatewayId);
@@ -190,6 +196,8 @@ export class PaymentsOpsService {
           reason: input.reason ?? null,
           // SEC-RCD-1 (R0-PL-07): the refunder, on the row, its posting and its feed row.
           actorId,
+          // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member KEY refunded for, audit data on the feed row.
+          initiatedBy: options.initiatedBy ?? null,
         });
       } catch (e) {
         this.logger.warn(

@@ -4243,6 +4243,10 @@ ${triage.standingContext}`;
         // and the gateway is the authority on what actually happened.
         // W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07): KEY records the refund as its system
         // actor, distinct from any human, as the manual refund door records KEY (SYSTEM).
+        // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member the turn runs for is kept beside
+        // KEY as initiatedBy (audit data on the refund's feed row, never the refunder), as
+        // commerce_mark_invoice_paid keeps it; never a tool argument.
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
         const refund = await this.getPaymentsOps().refundCharge(
           businessId,
           args.gateway,
@@ -4252,6 +4256,7 @@ ${triage.standingContext}`;
             reason: args.reason,
           },
           KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy },
         );
         return { refund };
       }
