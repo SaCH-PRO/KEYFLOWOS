@@ -5,6 +5,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
 import { BUSINESS_META_PAYMENT_SECRET_KEYS, sanitizeBusiness } from '../../core/security/sanitize-business';
+import { isWipayPublicSandboxKey } from '../../core/connectors/implementations/wipay-merchant';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 import type { UserIdentityDataDto } from './dto/bootstrap.dto';
 import {
@@ -74,11 +75,23 @@ export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc'] as co
 export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
 
 /**
+ * W11-WIPAY-SANDBOX-KEY-WRITE (owner ruling D-105, review SEC-W10WK-1 part 2,
+ * PC-21b): the 400 code updateBusiness answers a metaData.wipayApiKey that is
+ * WiPay's public sandbox key ('123', compared trimmed) with. That key is no key
+ * wherever it is stored (wipay-merchant.ts: WiPay is not offered, every checkout
+ * is refused WIPAY_KEY_REQUIRED), so the save is refused instead of succeeding
+ * silently, and nothing in the PATCH is written.
+ */
+export const WIPAY_SANDBOX_KEY_REFUSED = 'WIPAY_SANDBOX_KEY_REFUSED';
+
+/**
  * R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY: how the profile PATCH writes the payment
  * secrets (BUSINESS_META_PAYMENT_SECRET_KEYS) a Business read never answers.
  * `merged` is the stored metaData with the caller's bag spread over it; for
  * each secret the caller named:
- *   - a non-blank string is a new secret: stored trimmed;
+ *   - a non-blank string is a new secret: stored trimmed (a wipayApiKey that
+ *     is WiPay's public sandbox key never reaches here: updateBusiness refuses
+ *     it first, WIPAY_SANDBOX_KEY_REFUSED);
  *   - null is an explicit clear: the key is removed;
  *   - anything else (blank, the {configured} marker a read answers, any other
  *     value) is no new secret: the stored value stays as it was, or stays
@@ -472,6 +485,19 @@ export class IdentityService {
             message: `metaData.${key} cannot be written through the business profile; it is saved through its own settings route.`,
           });
         }
+      }
+      // W11-WIPAY-SANDBOX-KEY-WRITE (D-105, SEC-W10WK-1): WiPay's public sandbox key is
+      // not the business's WiPay API key. Refused before the slug check, the row lock and
+      // any read or write. Only a string is a new secret (applyPaymentSecretWrites): a
+      // non-string keeps the stored value (SEC2c-W02) and null still clears a stored '123'.
+      const wipayApiKey: unknown = Object.prototype.hasOwnProperty.call(input.metaData, 'wipayApiKey')
+        ? input.metaData.wipayApiKey
+        : undefined;
+      if (typeof wipayApiKey === 'string' && isWipayPublicSandboxKey(wipayApiKey)) {
+        throw new BadRequestException({
+          code: WIPAY_SANDBOX_KEY_REFUSED,
+          message: "WiPay's public sandbox key is not a WiPay API key: enter the API key of your own WiPay account.",
+        });
       }
     }
 
