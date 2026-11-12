@@ -212,8 +212,8 @@
  * it (the pair lock locks existing rows only), and createStockRowOrConflict
  * answered every unique violation with 409 'held by another record; ask an
  * operator to repair it', also when the row was the business's own, created a
- * moment earlier by a concurrent writer. Each case below except RC-36 was red
- * at 488b35d5:
+ * moment earlier by a concurrent writer. Each case below was red at 488b35d5
+ * (RC-36 by its upsert's run count alone, since the review pin):
  *
  *   RC-34 transfers of M from the first and from the second warehouse into a
  *         third where M has no row, each held after its first stock write
@@ -224,12 +224,21 @@
  *         pair, each held once it has read no row of the pair until the other
  *         has (the receipt reads it after its first stock write): both
  *         commit, the purchase order received once.
- *   RC-36 (green before and after) a pair a planted row holds still answers
- *         the 409 for a transfer, a receipt and POST .../inventory, writing
- *         nothing, each transaction run at most twice.
+ *   RC-36 (its answers the same before and after) a pair a planted row
+ *         holds still answers the 409 for a transfer, a receipt and POST
+ *         .../inventory, writing nothing. Review SRR-CR-1: each transaction is
+ *         run exactly once (the holder read finds another business_id; at
+ *         488b35d5 the upsert ran twice); 'at most twice' let a run again of
+ *         every 409 pass.
  *   RC-37 a transfer note that is not text (42, an object, an array, true)
  *         answered 500 (PrismaClientValidationError). Now 400 'Transfer note
  *         must be text', nothing written; a text note is stored as sent.
+ *   RC-38 (review SRR-CR-2) the receipt as the loser: a purchase order
+ *         received, held at its read of a new pair while POST .../inventory
+ *         creates the business's own row there and commits, runs its
+ *         transaction once more and is received once. RC-35 always has the
+ *         transfer lose, so the receipt's run again was taken by no case:
+ *         without it this answers the 'ask an operator' 409, PO SHIPPED.
  *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
@@ -2494,7 +2503,7 @@ describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the s
     }
   });
 
-  it("RC-36 (W11-STOCK-ROW-RACE; packet case RC-33, a characterization; D-137 planted rows left for an operator) a pair a planted row holds (this business's id on the other business's product or warehouse) still answers 409 'ask an operator' for B's transfer, B's purchase order received and B's POST .../inventory, writes nothing, names no id, and runs each call's transaction at most twice", async () => {
+  it("RC-36 (W11-STOCK-ROW-RACE; packet case RC-33, a characterization; D-137 planted rows left for an operator) a pair a planted row holds (this business's id on the other business's product or warehouse) still answers 409 'ask an operator' for B's transfer, B's purchase order received and B's POST .../inventory, writes nothing, names no id, and runs each call's transaction once (the pair's holder is read and is not B's own row, so no run again)", async () => {
     await plantRows([
       [ID.plantedXBInB2, ID.productXB, ID.warehouseB2],
       [ID.plantedXB2InB, ID.productXB2, ID.warehouseB],
@@ -2562,10 +2571,13 @@ describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the s
       [ID.plantedXBInB2]: [ID.biz, IN_STOCK, 0, 5],
       [ID.plantedXB2InB]: [ID.biz, IN_STOCK, 0, 5],
     });
-    // One run, then at most one more (the run again a pair the business's own row holds gets): never a loop.
-    expect(Object.fromEntries(Object.entries(runs).map(([name, n]) => [name, n >= 1 && n <= 2 ? 'once or twice' : n]))).toEqual(
-      Object.fromEntries(Object.keys(outcomes).map((name) => [name, 'once or twice'])),
-    );
+    // W11-STOCK-ROW-RACE review (SRR-CR-1; D-137): each call's transaction runs exactly once. retryOnOwnStockRowRace
+    // reads the pair's holder after the 409 and finds another business_id (the planted row's), so the 409 is answered
+    // straight away; only a pair the business's own row holds is run again (RC-34, RC-35, RC-38). Pinned at once, not
+    // 'at most twice': with the holder read removed (every 409 run again), each call ran twice and still answered the
+    // planted row's 409, which the earlier bound let pass. At 488b35d5 the upsert ran twice (SEC-UPS-1 ran every P2002
+    // again).
+    expect(runs).toEqual(Object.fromEntries(Object.keys(outcomes).map((name) => [name, 1])));
   });
 
   it("RC-37 (W11-STOCK-ROW-RACE; packet case RC-34) a transfer note that is not text (42, an object, an array, true), as the route's body or a KEY tool's arguments send it, is refused with 400 'Transfer note must be text' before anything is written; a text note is stored on both movements exactly as sent (not trimmed), and a transfer with no note or a null note commits with none", async () => {
@@ -2624,5 +2636,74 @@ describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the s
       'no note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
       'a null note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
     });
+  });
+
+  it("RC-38 (W11-STOCK-ROW-RACE review SRR-CR-2; D-137 keeps the 409 for planted rows only) a purchase order received with a line of M into the third warehouse (no row yet), held once it has read no row of that pair while POST .../inventory creates the business's own row there (5) and commits: the receipt loses the create, its transaction runs once more and adds to that row: it answers RECEIVED (not 409 'ask an operator'), the row holds 5 + 3, and the purchase order is received once (one RECEIPT movement, one ledger posting, one purchaseOrder.received)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productM, warehouseId: ID.warehouse3 });
+    const received = countReceivedEvents();
+    // RC-35 always has the transfer lose (the receipt creates the row as soon as it is let go, while the transfer first
+    // updates its source row), so the receipt's run again was never taken there. Here the receipt is the loser by
+    // construction: it is held at its first read of the new pair (it has locked nothing of that pair: no row exists)
+    // until the upsert, started only then, has created the row and committed. The receipt's run again (the third
+    // transaction) passes the hold and repeats the W11-PO-RECEIPT-CLAIM status compare-and-set: its first run rolled
+    // back, so the purchase order is still SHIPPED and is received once.
+    let readByReceipt!: () => void;
+    const receiptRead = new Promise<void>((resolve) => (readByReceipt = resolve));
+    let letGo!: () => void;
+    const upsertDone = new Promise<void>((resolve) => (letGo = resolve));
+    let heldTransaction: number | undefined;
+    let releasedBy: 'the upsert' | 'the window' | undefined;
+    const hook = hookStockWrites(async (no, args) => {
+      if (heldTransaction !== undefined || args?.where?.warehouseId !== ID.warehouse3) return;
+      heldTransaction = no;
+      readByReceipt();
+      releasedBy = await Promise.race([upsertDone.then(() => 'the upsert' as const), sleep(HOLD_WINDOW_MS).then(() => 'the window' as const)]);
+    }, 'findFirst');
+    try {
+      const before = await stockState();
+      const receipt = receiveAnswer(po.id);
+      const receiptHeldFirst = await Promise.race([receiptRead.then(() => true), sleep(HOLD_WINDOW_MS).then(() => false)]);
+      const upsert = await upsertAnswer(upsertByRoute(ID.biz, { productId: ID.productM, warehouseId: ID.warehouse3, quantity: 5 }));
+      letGo();
+      const answer = await receipt;
+      const transactions = hook.transactions();
+      hook.restore();
+      const after = await stockState();
+      // With the receipt's retryOnOwnStockRowRace removed (its transaction run once): '409: ... ask an operator to
+      // repair it', the purchase order SHIPPED, no RECEIPT movement, no ledger posting, no purchaseOrder.received.
+      expect({
+        receiptHeldFirst,
+        releasedBy,
+        upsert,
+        receipt: answer,
+        transactions,
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        receiptHeldFirst: true,
+        releasedBy: 'the upsert',
+        upsert: 'committed',
+        receipt: 'committed',
+        // The receipt's first run, the upsert, the receipt's run again.
+        transactions: 3,
+        newRows: [[ID.biz, 5 + 3, 0]],
+        status: 'RECEIVED',
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        movementsWritten: 1,
+      });
+    } finally {
+      letGo();
+      hook.restore();
+      received.stop();
+      await resetBusinessStock();
+    }
   });
 });
