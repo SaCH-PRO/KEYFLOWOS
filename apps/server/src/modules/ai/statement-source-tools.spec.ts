@@ -230,3 +230,79 @@ describe('the arsenal still adds up', () => {
     }
   });
 });
+
+/**
+ * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's: an OWNER
+ * membership of the business). reconcile_connect_statement_source stores a Drive folder or a free-form
+ * Gmail search on an account, and reconcile_sweep_statements reads the business's Gmail or Drive with it
+ * and imports what it finds into the books. Setting one up or running one is the business owner's on KEY,
+ * as on the web: the authority map (graphActionRequirement) makes both owner-only, so every surface that
+ * reads it refuses them to anyone else before dispatch, and the dispatcher's own two cases refuse anyone
+ * but the owner, and a run with no member, before StatementSourceService is reached. Reading the source
+ * configuration (reconcile_list_statement_sources) stays with the revenue readers.
+ */
+describe('W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): a statement sweep of the business Gmail or Drive is the owner\'s on KEY', () => {
+  const OWNER_ONLY_TOOLS = ['reconcile_connect_statement_source', 'reconcile_sweep_statements'];
+
+  it('[V97R-S01] D-132: graphActionRequirement gives reconcile_connect_statement_source and reconcile_sweep_statements ownerOnly naming D-99 (refused before dispatch to everyone but the owner on the plan queue, an approved proposal, the graph route, the cortex chat and the Pro Auto monitor), keeping their revenue write scope; reconcile_list_statement_sources carries no owner rule', async () => {
+    const { graphActionRequirement } = await import('./graph-actions.controller');
+    for (const name of OWNER_ONLY_TOOLS) {
+      const requirement = graphActionRequirement(name) as { scopes: Array<{ module: string; minLevel: string }>; ownerOnly?: string } | null;
+      expect(requirement, name).not.toBeNull();
+      expect('refused' in requirement!, name).toBe(false);
+      expect(requirement!.ownerOnly, name).toMatch(/^D-99: .*Google mailbox or Drive/);
+      expect(requirement!.scopes, name).toEqual([{ module: 'revenue', minLevel: 'write' }]);
+    }
+    const listing = graphActionRequirement('reconcile_list_statement_sources') as { scopes: unknown[]; ownerOnly?: string; ownerOnlyWithoutPrincipal?: string };
+    expect(listing.ownerOnly).toBeUndefined();
+    expect(listing.ownerOnlyWithoutPrincipal).toBeUndefined();
+    expect(listing.scopes).toEqual([{ module: 'revenue', minLevel: 'read' }]);
+  }, 60_000);
+
+  it('[V97R-S02] D-132 (fail closed): a dispatcher call of either tool with no member to judge (no action, a surface with no principal and no member it runs for, the Pro Auto monitor run for no member, a plan id naming no plan of this business) is refused 403 GOOGLE_CONNECT_OWNER_ONLY before StatementSourceService is resolved', async () => {
+    const { FlowOrchestratorService } = await import('./flow-orchestrator.service');
+    const resolved = vi.fn();
+    const prisma = {
+      client: {
+        aiPlan: { findFirst: vi.fn(async () => null) },
+        user: { findUnique: vi.fn(async () => null) },
+        membership: { findUnique: vi.fn(async () => null) },
+        business: { findFirst: vi.fn(async () => null) },
+      },
+    };
+    const flow = Object.assign(Object.create(FlowOrchestratorService.prototype), { prisma, moduleRef: { get: resolved } });
+    const ARGS: Record<string, Record<string, unknown>> = {
+      reconcile_connect_statement_source: { accountId: 'v97r_acc', gmailQuery: 'from:anyone' },
+      reconcile_sweep_statements: { accountId: 'v97r_acc', source: 'gmail' },
+    };
+    const NO_MEMBER: Array<Record<string, unknown> | undefined> = [
+      undefined,
+      { surface: 'INBOUND_CONVERSATION' },
+      { surface: 'PRO_AUTO_MONITOR' },
+      { surface: 'PLAN_QUEUE', planId: 'v97r_no_such_plan' },
+    ];
+    for (const name of OWNER_ONLY_TOOLS) {
+      for (const action of NO_MEMBER) {
+        const who = `${name} ${JSON.stringify(action)}`;
+        const err: any = await flow.executeToolAction('v97r_biz', name, ARGS[name], action).then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(err, who).not.toBeNull();
+        expect(err.getStatus?.(), who).toBe(403);
+        expect(err.getResponse?.().code, who).toBe('GOOGLE_CONNECT_OWNER_ONLY');
+      }
+    }
+    expect(resolved).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('[V97R-S03] D-132: both handlers check the owner before they reach getStatementSources(); the listing (a read of the source configuration) does not', () => {
+    for (const name of OWNER_ONLY_TOOLS) {
+      const body = handlerBody(name);
+      const check = body.indexOf('await this.assertStatementSourceOwner(businessId, action)');
+      expect(check, `${name} checks no owner`).toBeGreaterThan(-1);
+      expect(check, `${name} reaches StatementSourceService first`).toBeLessThan(body.indexOf('this.getStatementSources()'));
+    }
+    expect(handlerBody('reconcile_list_statement_sources')).not.toMatch(/assertStatementSourceOwner/);
+  });
+});

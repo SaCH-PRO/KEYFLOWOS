@@ -86,6 +86,30 @@
  * recording stand-in (its disconnect is real), ContactSyncService.syncAll is
  * real, and the Outlook Contacts sync is a recording stand-in.
  *
+ * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the
+ * owner is D-125's): setting up and running a bank-statement sweep of the
+ * business's Gmail or Drive is the owner's, on the web and on KEY. The defect:
+ * POST /finance/businesses/:b/accounts/:a/statement-sources (a Drive folder or
+ * a free-form Gmail search stored on the account) and .../statement-sources/
+ * :source/sweep (StatementSourceService.sweepGmail / sweepDrive: it searches
+ * the business mailbox or Drive and imports every statement-like attachment
+ * into the account) checked membership alone (FinanceController.ensureAccess),
+ * so any member, read-only STAFF included, chose which of the owner's mail KEY
+ * reads into the books; on KEY, reconcile_connect_statement_source and
+ * reconcile_sweep_statements needed revenue write and nothing more. [V94D-L01]
+ * (the routes refuse an ADMIN, a STAFF member and the owner of another
+ * business 403 GOOGLE_CONNECT_OWNER_ONLY, the account's metadata unchanged and
+ * the mailbox and Drive never read), [V94D-L02] (the owner arms set sources and
+ * sweep) and [V94D-L03] (KEY: the authority map and the dispatcher's own two
+ * cases refuse anyone but the owner on every surface; the Pro Auto monitor run
+ * for the owner still sweeps). For these cases FinanceController is mounted
+ * with the real StatementSourceService over the real PrismaService and real
+ * FinancialAccount rows; its Gmail and Drive transports are recording
+ * stand-ins answering no mail and no files, and its bank import a stand-in no
+ * case reaches. The KEY dispatcher is the real
+ * FlowOrchestratorService.executeToolAction over the real PrismaService, its
+ * service lookup recording what it resolves.
+ *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business and membership rows, AuthGuard, BusinessGuard,
  * BookingsController, GoogleDriveController, CalendarController,
@@ -218,6 +242,34 @@ const keyToolAudit = { logToolExecution: vi.fn(async () => 'v94d_audit') };
 /** W10-GOOGLE-DOORS-REST: the real KeyToolRegistryService (resolved in beforeAll). */
 let keyTools: any;
 
+/**
+ * W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the Gmail and Drive transports behind the real
+ * StatementSourceService, recording stand-ins that find no mail and no files (a refused door or
+ * tool never reaches them), and its bank import, which no case here reaches.
+ */
+const statementGmail = {
+  searchMessages: vi.fn(async (_businessId: string, _query: string, _max?: number) => [] as Array<{ id: string }>),
+  getMessageWithAttachments: vi.fn(async () => ({ attachments: [] as unknown[] })),
+  getAttachment: vi.fn(async () => Buffer.from('')),
+};
+const statementDrive = {
+  listFiles: vi.fn(async (_businessId: string, _options: Record<string, unknown>) => ({ files: [] as Array<{ id: string; name?: string }> })),
+  downloadBinary: vi.fn(async () => ({ base64: '' })),
+};
+const statementBankImport = { ingest: vi.fn(async () => ({ inserted: 0 })) };
+function clearStatementTransports() {
+  for (const fn of [...Object.values(statementGmail), ...Object.values(statementDrive), statementBankImport.ingest]) fn.mockClear();
+}
+/** W11-GOOGLE-STATEMENT-SOURCE-OWNER: the bank account of each business whose statement sources the cases set and sweep. */
+const STATEMENT_ACCOUNT: Record<string, string> = { [`${P}biz`]: `${P}fa_biz`, [`${P}bizother`]: `${P}fa_bizother` };
+/** The metadata each account starts every case with: an import profile and both sources configured. */
+function statementAccountMetadata(businessId: string) {
+  return {
+    importProfile: { dateColumn: 'Posted', amountColumn: 'Value (TTD)' },
+    statementSources: { driveFolderId: `${businessId}-statement-folder`, gmailQuery: `from:${businessId}-bank@test.local` },
+  };
+}
+
 let db: any;
 let app: any;
 
@@ -225,6 +277,13 @@ async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
   for (const sql of [
     `DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-GOOGLE-STATEMENT-SOURCE-OWNER: the statement accounts, their chart rows, a sweep's health
+    // row (none is expected) and the stored KEY plan [V94D-L03] dispatches for.
+    `DELETE FROM key_cortex_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bank_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -375,6 +434,33 @@ beforeAll(async () => {
   const { FinanceOverviewService } = await import('../src/modules/finance/finance-overview.service');
   const { CommandService } = await import('../src/modules/command/command.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the statement-source doors, with the real
+  // StatementSourceService; FinanceController's other collaborators, which no case here reaches.
+  const { FinanceController } = await import('../src/modules/finance/finance.controller');
+  const { StatementSourceService } = await import('../src/modules/finance/statement-source.service');
+  const financeUnused = await Promise.all([
+    import('../src/modules/finance/ledger-balance.service').then((m) => m.LedgerBalanceService),
+    import('../src/modules/finance/finance-accounts.service').then((m) => m.FinanceAccountsService),
+    import('../src/modules/finance/finance-coa.service').then((m) => m.FinanceCoaService),
+    import('../src/modules/finance/finance-tax-rate.service').then((m) => m.FinanceTaxRateService),
+    import('../src/modules/finance/finance-settings.service').then((m) => m.FinanceSettingsService),
+    import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
+    import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
+    import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
+    import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
+    import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
+    import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
+    import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
+    import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
+    import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
+    import('../src/modules/finance/posting.service').then((m) => m.PostingService),
+    import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
+    import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
+    import('../src/modules/finance/accounting-period.service').then((m) => m.AccountingPeriodService),
+    import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
+    import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
+    import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
+  ]);
 
   // What tsc emits for DriveIntakeController's constructor (it declares its
   // dependencies by type only, and this transform emits no decorator metadata),
@@ -388,7 +474,7 @@ beforeAll(async () => {
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [BookingsController, GoogleDriveController, CalendarController, MicrosoftOAuthController, ConnectorController, ConnectController, DriveIntakeController],
+    controllers: [BookingsController, GoogleDriveController, CalendarController, MicrosoftOAuthController, ConnectorController, ConnectController, DriveIntakeController, FinanceController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -464,6 +550,14 @@ beforeAll(async () => {
       { provide: FinanceOverviewService, useValue: {} },
       { provide: CommandService, useValue: {} },
       { provide: TimelineService, useValue: {} },
+      // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): the real StatementSourceService over the real
+      // PrismaService, its Gmail and Drive transports and bank import the recording stand-ins above.
+      {
+        provide: StatementSourceService,
+        useFactory: (prisma: any) => new StatementSourceService(prisma, statementDrive as any, statementGmail as any, statementBankImport as any),
+        inject: [PrismaService],
+      },
+      ...financeUnused.map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
 
@@ -514,6 +608,20 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_${ID.otherOwner}_other`, userId: ID.otherOwner, businessId: ID.bizOther, role: 'OWNER' } });
   await connect(ID.biz);
   await connect(ID.bizOther);
+  // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): a bank account on each business, with its chart row.
+  for (const businessId of [ID.biz, ID.bizOther]) {
+    await db.chartOfAccount.create({ data: { id: `${P}coa_${businessId}`, businessId, name: 'V94D Bank', type: 'ASSET', subtype: 'bank' } });
+    await db.financialAccount.create({
+      data: {
+        id: STATEMENT_ACCOUNT[businessId],
+        businessId,
+        chartOfAccountId: `${P}coa_${businessId}`,
+        name: 'V94D Statement Account',
+        type: 'BANK',
+        metadata: statementAccountMetadata(businessId),
+      },
+    });
+  }
 
   // The provider stand-in (SEC-W8GCO-1 cases): Google's token exchange and
   // userinfo answer with PROVIDER_ACCOUNT for any code; anything else is refused,
@@ -1294,3 +1402,174 @@ describe('W10-GOOGLE-DOORS-REST review repair: changing the business Google Cale
 // Connect handleSync (google_drive) and the Drive intake queue's handleSync
 // toast res.error, which carries the server's message; the temporal-flow pull
 // (lib/api/temporal-flow.ts syncGoogleCalendarToTemporalFlow) has no web caller.
+
+/** W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): POST .../accounts/:a/statement-sources on `businessId`'s statement account. */
+const setStatementSources = (businessId: string, actor: string | undefined, body: Record<string, unknown>) =>
+  as(agent().post(`/finance/businesses/${businessId}/accounts/${STATEMENT_ACCOUNT[businessId]}/statement-sources`), actor).send(body);
+/** W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132): POST .../accounts/:a/statement-sources/:source/sweep. */
+const sweepStatements = (businessId: string, source: 'gmail' | 'drive', actor: string | undefined) =>
+  as(agent().post(`/finance/businesses/${businessId}/accounts/${STATEMENT_ACCOUNT[businessId]}/statement-sources/${source}/sweep`), actor).send({});
+/** Put `businessId`'s statement account back to the metadata it was seeded with (raw SQL). */
+async function resetStatementAccount(businessId: string) {
+  await db.$executeRawUnsafe(
+    `UPDATE financial_accounts SET metadata = $2::jsonb WHERE id = $1`,
+    STATEMENT_ACCOUNT[businessId],
+    JSON.stringify(statementAccountMetadata(businessId)),
+  );
+}
+/** The statement account's metadata of `businessId`, as stored (its text, to compare byte for byte). */
+async function statementMetadataText(businessId: string): Promise<string> {
+  const rows: Array<{ metadata: string }> = await db.$queryRawUnsafe(
+    `SELECT metadata::text AS metadata FROM financial_accounts WHERE id = $1`,
+    STATEMENT_ACCOUNT[businessId],
+  );
+  return rows[0]?.metadata;
+}
+/** A KEY call's refusal as { status, code }, or null when it resolved. */
+const keyCallRefusal = (p: Promise<unknown>) =>
+  p.then(
+    () => null,
+    (err: any) => ({ status: typeof err?.getStatus === 'function' ? err.getStatus() : undefined, code: typeof err?.getResponse === 'function' ? err.getResponse()?.code : undefined }),
+  );
+
+describe('W11-GOOGLE-STATEMENT-SOURCE-OWNER: setting up and running a bank-statement sweep of the business Gmail or Drive is the business owner\'s, on the web and on KEY (D-132, D-99)', () => {
+  it('[V94D-L01] (W11-GOOGLE-STATEMENT-SOURCE-OWNER, D-132) RED-BEFORE: POST /finance/businesses/:b/accounts/:a/statement-sources (a Drive folder or a free-form Gmail search stored on the account), .../statement-sources/gmail/sweep and .../statement-sources/drive/sweep answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY: the account\'s metadata (its sources and import profile) stays byte-identical and the business Gmail and Drive are never read', async () => {
+    await resetStatementAccount(ID.biz);
+    const before = await statementMetadataText(ID.biz);
+    clearStatementTransports();
+    for (const member of REFUSED) {
+      expectGoogleOwnerOnly(await setStatementSources(ID.biz, member, { gmailQuery: 'from:anyone' }), `${member} statement-sources`);
+      expectGoogleOwnerOnly(await sweepStatements(ID.biz, 'gmail', member), `${member} gmail sweep`);
+      expectGoogleOwnerOnly(await sweepStatements(ID.biz, 'drive', member), `${member} drive sweep`);
+      expect(await statementMetadataText(ID.biz), member).toBe(before);
+    }
+    expect(statementGmail.searchMessages).not.toHaveBeenCalled();
+    expect(statementDrive.listFiles).not.toHaveBeenCalled();
+    expect(statementBankImport.ingest).not.toHaveBeenCalled();
+  });
+
+  it('[V94D-L02] control (W11-GOOGLE-STATEMENT-SOURCE-OWNER, D-132, D-125): the owner, a co-owner by OWNER membership and the distinguished owner on their own business set the account\'s sources (201, the merged sources answered and stored, the import profile kept) and sweep its Gmail and Drive (201, the sweep\'s counts), the Gmail and Drive stand-ins called once each with the route\'s business; a SUPER_ADMIN with no membership stays refused by the controller\'s own membership check (403, not the owner code, unchanged), a user with no membership by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing read or written', async () => {
+    for (const [businessId, actor] of OWNER_ARMS.filter(([, a]) => a !== ID.superAdmin)) {
+      await resetStatementAccount(businessId);
+      clearStatementTransports();
+      const query = `from:${P}statements@test.local`;
+      const folder = `${businessId}-statement-folder`;
+      const set = await setStatementSources(businessId, actor, { gmailQuery: query });
+      expect(set.status, `${actor} ${JSON.stringify(set.body)}`).toBe(201);
+      expect(set.body).toEqual({ driveFolderId: folder, gmailQuery: query });
+      const stored = JSON.parse(await statementMetadataText(businessId));
+      expect(stored.statementSources, actor).toEqual({ driveFolderId: folder, gmailQuery: query });
+      expect(stored.importProfile, actor).toEqual(statementAccountMetadata(businessId).importProfile);
+
+      const gmail = await sweepStatements(businessId, 'gmail', actor);
+      expect(gmail.status, `${actor} gmail ${JSON.stringify(gmail.body)}`).toBe(201);
+      expect(gmail.body).toMatchObject({ accountId: STATEMENT_ACCOUNT[businessId], source: 'gmail', filesConsidered: 0, imported: 0, errors: [] });
+      expect(statementGmail.searchMessages).toHaveBeenCalledTimes(1);
+      expect(statementGmail.searchMessages).toHaveBeenCalledWith(businessId, expect.stringContaining(query), 25);
+
+      const drive = await sweepStatements(businessId, 'drive', actor);
+      expect(drive.status, `${actor} drive ${JSON.stringify(drive.body)}`).toBe(201);
+      expect(drive.body).toMatchObject({ accountId: STATEMENT_ACCOUNT[businessId], source: 'drive', filesConsidered: 0, imported: 0, errors: [] });
+      expect(statementDrive.listFiles).toHaveBeenCalledTimes(1);
+      expect(statementDrive.listFiles).toHaveBeenCalledWith(businessId, expect.objectContaining({ folderId: folder }));
+      expect(statementBankImport.ingest).not.toHaveBeenCalled();
+    }
+
+    await resetStatementAccount(ID.biz);
+    const before = await statementMetadataText(ID.biz);
+    clearStatementTransports();
+    for (const [actor, code] of [[ID.superAdmin, 403], [ID.stranger, 403], [undefined, 401]] as const) {
+      for (const res of [
+        await setStatementSources(ID.biz, actor, { gmailQuery: 'from:anyone' }),
+        await sweepStatements(ID.biz, 'gmail', actor),
+        await sweepStatements(ID.biz, 'drive', actor),
+      ]) {
+        expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(code);
+        expect(res.body.code, `${actor} ${JSON.stringify(res.body)}`).not.toBe('GOOGLE_CONNECT_OWNER_ONLY');
+      }
+    }
+    expect(await statementMetadataText(ID.biz)).toBe(before);
+    expect(statementGmail.searchMessages).not.toHaveBeenCalled();
+    expect(statementDrive.listFiles).not.toHaveBeenCalled();
+  });
+
+  it('[V94D-L03] (W11-GOOGLE-STATEMENT-SOURCE-OWNER, D-132) RED-BEFORE (KEY): memberToolRunAuthority answers the ADMIN and a STAFF member with explicit revenue write a refusal naming the owner rule for reconcile_connect_statement_source and reconcile_sweep_statements, and null for the owner and the co-owner; the dispatcher (FlowOrchestratorService.executeToolAction) refuses both tools 403 GOOGLE_CONNECT_OWNER_ONLY before StatementSourceService is resolved for the ADMIN\'s and the STAFF member\'s chat turn (CHAT), a plan queue run of a stored plan whose member is the ADMIN (PLAN_QUEUE) and a KEY-cortex turn run for the ADMIN (CORTEX_BRIDGE), the account unchanged and Gmail and Drive never read; the Pro Auto monitor run for the owner (PRO_AUTO_MONITOR, D-93) and the co-owner\'s chat turn still sweep, and reconcile_list_statement_sources stays an ADMIN\'s', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { StatementSourceService } = await import('../src/modules/finance/statement-source.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { memberToolRunAuthority } = await import('../src/modules/ai/plan-step-authority');
+    const prisma = app.get(PrismaService);
+    const statementSources = app.get(StatementSourceService);
+    const resolved: unknown[] = [];
+    const flow: any = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma,
+      moduleRef: {
+        get: (token: unknown) => {
+          resolved.push(token);
+          return token === StatementSourceService ? statementSources : undefined;
+        },
+      },
+    });
+    const accountId = STATEMENT_ACCOUNT[ID.biz];
+    const TOOLS: Record<string, Record<string, unknown>> = {
+      reconcile_connect_statement_source: { accountId, gmailQuery: 'from:anyone' },
+      reconcile_sweep_statements: { accountId, source: 'gmail' },
+    };
+    const planId = `${P}plan_admin`;
+    // The STAFF member holds revenue write explicitly here, so what refuses them is the owner rule, not a scope.
+    await db.membership.update({ where: { id: `${P}m_${ID.staff}` }, data: { permissionScopes: { bookings: 'write', revenue: 'write' } } });
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.biz, userId: ID.admin, objective: `${P}sweep the bank statements`, status: 'approved' } });
+    try {
+      await resetStatementAccount(ID.biz);
+      const before = await statementMetadataText(ID.biz);
+      clearStatementTransports();
+      const REFUSED_RUNS: Array<[string, Record<string, unknown>]> = [
+        ['the ADMIN\'s chat turn', { surface: 'CHAT', principalUserId: ID.admin }],
+        ['the STAFF member\'s chat turn', { surface: 'CHAT', principalUserId: ID.staff }],
+        ['the ADMIN\'s stored plan on the queue', { surface: 'PLAN_QUEUE', planId, planStepId: `${P}step` }],
+        ['a KEY-cortex turn run for the ADMIN', { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.admin }],
+      ];
+      for (const [tool, args] of Object.entries(TOOLS)) {
+        for (const member of [ID.admin, ID.staff]) {
+          const { refusal } = await memberToolRunAuthority(prisma, ID.biz, member, tool);
+          expect(refusal, `${member} ${tool}`).toMatch(/only for the business owner: D-99: .*Google mailbox or Drive/);
+        }
+        for (const owner of [ID.owner, ID.coOwner]) {
+          expect((await memberToolRunAuthority(prisma, ID.biz, owner, tool)).refusal, `${owner} ${tool}`).toBeNull();
+        }
+        for (const [who, action] of REFUSED_RUNS) {
+          expect(await keyCallRefusal(flow.executeToolAction(ID.biz, tool, { ...args }, action)), `${who}: ${tool}`).toEqual({
+            status: 403,
+            code: 'GOOGLE_CONNECT_OWNER_ONLY',
+          });
+        }
+      }
+      expect(resolved, 'StatementSourceService is resolved for no refused run').toEqual([]);
+      expect(await statementMetadataText(ID.biz)).toBe(before);
+      expect(statementGmail.searchMessages).not.toHaveBeenCalled();
+      expect(statementDrive.listFiles).not.toHaveBeenCalled();
+
+      // Controls: the Pro Auto monitor run for the owner (D-93) sweeps Gmail, the co-owner's chat turn Drive.
+      const monitor = await flow.executeToolAction(ID.biz, 'reconcile_sweep_statements', { accountId, source: 'gmail' }, { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: ID.owner });
+      expect(monitor).toEqual({ imported: 0, filesConsidered: 0, skipped: 0, errors: [] });
+      expect(statementGmail.searchMessages).toHaveBeenCalledTimes(1);
+      expect(statementGmail.searchMessages).toHaveBeenCalledWith(ID.biz, expect.stringContaining(`from:${ID.biz}-bank@test.local`), 25);
+      const coOwner = await flow.executeToolAction(ID.biz, 'reconcile_sweep_statements', { accountId, source: 'drive' }, { surface: 'CHAT', principalUserId: ID.coOwner });
+      expect(coOwner).toEqual({ imported: 0, filesConsidered: 0, skipped: 0, errors: [] });
+      expect(statementDrive.listFiles).toHaveBeenCalledTimes(1);
+      expect(statementDrive.listFiles).toHaveBeenCalledWith(ID.biz, expect.objectContaining({ folderId: `${ID.biz}-statement-folder` }));
+      expect(resolved).toEqual([StatementSourceService, StatementSourceService]);
+
+      // Reading the source configuration stays a member's (D-132 covers setting up and running a sweep).
+      expect((await memberToolRunAuthority(prisma, ID.biz, ID.admin, 'reconcile_list_statement_sources')).refusal).toBeNull();
+      const listing = await flow.executeToolAction(ID.biz, 'reconcile_list_statement_sources', {}, { surface: 'CHAT', principalUserId: ID.admin });
+      expect(listing.accounts).toEqual([
+        expect.objectContaining({ accountId, driveFolderId: `${ID.biz}-statement-folder`, gmailQuery: `from:${ID.biz}-bank@test.local`, automatic: true }),
+      ]);
+      expect(statementBankImport.ingest).not.toHaveBeenCalled();
+    } finally {
+      await db.membership.update({ where: { id: `${P}m_${ID.staff}` }, data: { permissionScopes: { bookings: 'write' } } });
+      await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id = $1`, planId);
+    }
+  });
+});
