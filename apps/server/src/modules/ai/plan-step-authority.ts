@@ -43,6 +43,9 @@ import {
  * re-enters the dispatcher for any tool) or maps to no module scope (an MCP tool, an unknown name)
  * is refused, as assertMayRunGraphAction refuses it to every member.
  */
+/** PR195-PORT (D-73): tools that write the ledger though their module scope is neither revenue nor expenses. */
+const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid']);
+
 export function noMemberToolRefusal(toolName: string): string | null {
   const requirement = graphActionRequirement(toolName);
   if (!requirement) {
@@ -81,6 +84,12 @@ export function noMemberToolRefusal(toolName: string): string | null {
   // an owner by Business.ownerId alone or a SUPER_ADMIN who is no member: 403) still counts toward it.
   if (toolName === 'call_create_task') {
     return `"${toolName}" names a contact and records the member it runs for as the caller, and a KEY plan or monitor with no member principal has no member to record (D-73)`;
+  }
+  // PR195-PORT (D-73; owner PR #195 part 2): marking a payroll run paid now posts the disbursement to the
+  // ledger (PayrollService.markRunPaid -> the ledger door), so it is a money write though its route reads the
+  // operations scope; a run with no member principal does not pay payroll. Narrower than before the port.
+  if (NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName)) {
+    return `"${toolName}" posts the business's money to the ledger, and a KEY plan or monitor with no member principal writes no money (D-73)`;
   }
   const money = requirement.scopes.find(
     (s) => (s.module === 'revenue' || s.module === 'expenses') && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write,

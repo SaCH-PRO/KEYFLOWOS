@@ -24,8 +24,9 @@ import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
  *   PA-02  KEY's payroll_mark_paid keeps its authority map entry: operations
  *          write as the canonical module tool, operations in the graph-action
  *          map, risk tier 3 (D-36: KEY needs admin), no revenue gate added
- *          (D-98 reads route tables, and the route is unchanged), and a run
- *          with no member principal is refused nothing new (D-73).
+ *          (D-98 reads route tables, and the route is unchanged). A run with
+ *          no member principal is now refused mark-paid (D-73: it writes no
+ *          money, and mark-paid now posts to the ledger): narrower, not wider.
  *   PA-03  the registry describes the posting and the payment account / method
  *          arguments the service now requires.
  *   PA-04  the REST handler names the signed-in member as the posting's actor
@@ -60,7 +61,10 @@ describe('payroll mark-paid authority is unchanged by the port (PR195-PORT)', ()
     expect(requirement && 'scopes' in requirement ? requirement.scopes.map((s) => s.module) : requirement).toEqual(['operations']);
     expect(requirement && 'scopes' in requirement ? requirement.ownerOnly : undefined).toBeUndefined();
     expect(keyRevenueWriteLevel('payroll_mark_paid')).toBeNull();
-    expect(noMemberToolRefusal('payroll_mark_paid')).toBeNull();
+    // D-73: a plan with no member principal writes no money. Mark-paid now posts the disbursement to the
+    // ledger, so such a run is refused it (narrower than the head, never wider); approve stays as it was.
+    expect(noMemberToolRefusal('payroll_mark_paid')).toMatch(/no member principal writes no money \(D-73\)/);
+    expect(noMemberToolRefusal('payroll_approve_run')).toBeNull();
     const t = tool('payroll_mark_paid');
     expect(t.riskTier).toBe(3);
     expect(t.riskLevel).toBe('high');
