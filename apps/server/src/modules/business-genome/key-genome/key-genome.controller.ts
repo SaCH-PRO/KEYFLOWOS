@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../../core/auth/module-scope.guard';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -504,8 +505,19 @@ export class KeyGenomeController {
 
   // ---------------------------------------------------------------------------
   // Phase 13: Finance Genome
+  //
+  // W11-GENOME-FINANCE-SCOPE, owner ruling D-128 (option a): the genome's
+  // financial metrics, snapshot recompute, signals and recommendations are
+  // written by members with revenue write; reading the metrics and snapshots
+  // (revenue, profit, cash, receivables, payables, runway) needs revenue read
+  // (D-100: a member without revenue read sees no money signals at all).
+  // BusinessGuard checks membership only, so each of these seven handlers adds
+  // ModuleScopeGuard, as the finance controller's money reads do. The other
+  // key-genome routes are unchanged.
   // ---------------------------------------------------------------------------
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100, D-128
   @Get('finance/metrics')
   async listFinanceMetrics(
     @Param('businessId') businessId: string,
@@ -524,6 +536,8 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128 (option a)
   @Post('finance/metrics')
   async upsertFinanceMetric(
     @Param('businessId') businessId: string,
@@ -532,11 +546,15 @@ export class KeyGenomeController {
     return this.financeMetrics.upsertMetric({ ...body, businessId });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100, D-128
   @Get('finance/snapshot')
   async getFinanceSnapshot(@Param('businessId') businessId: string) {
     return this.financeGenome.getLatestFinanceSnapshot(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128 (option a)
   @Post('finance/snapshot/compute')
   async computeFinanceSnapshot(
     @Param('businessId') businessId: string,
@@ -545,6 +563,8 @@ export class KeyGenomeController {
     return this.financeGenome.computeFinanceSnapshot(businessId, period);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100, D-128
   @Get('finance/snapshots')
   async listFinanceSnapshots(
     @Param('businessId') businessId: string,
@@ -559,11 +579,15 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128 (option a)
   @Post('finance/signals/generate')
   async generateFinanceSignals(@Param('businessId') businessId: string) {
     return this.financeGenome.generateFinanceSignals(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128 (option a)
   @Post('finance/recommendations/generate')
   async generateFinanceRecommendations(@Param('businessId') businessId: string) {
     return this.financeGenome.generateFinanceRecommendations(businessId);

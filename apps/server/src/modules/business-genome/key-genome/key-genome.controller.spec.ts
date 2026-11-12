@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../../core/auth/module-scope.guard';
 import { KeyGenomeController } from './key-genome.controller';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
@@ -249,6 +250,12 @@ async function makeController() {
     .overrideGuard(AuthGuard)
     .useValue({ canActivate: () => true })
     .overrideGuard(BusinessGuard)
+    .useValue({ canActivate: () => true })
+    // W11-GENOME-FINANCE-SCOPE (D-128, D-100): the seven finance handlers carry
+    // ModuleScopeGuard; this unit spec calls handlers directly, as with the two
+    // guards above. The revenue gate itself is proven against a real database in
+    // test/key-genome-finance-scope.integration.test.ts.
+    .overrideGuard(ModuleScopeGuard)
     .useValue({ canActivate: () => true })
     .compile();
 
