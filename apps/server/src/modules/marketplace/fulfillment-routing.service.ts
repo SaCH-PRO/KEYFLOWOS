@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, Inject, NotFoundException } from '@nestjs/common';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -27,6 +27,15 @@ type RoutingTx = BusinessMetaTx;
  */
 const ROUTING_LOCK_NAMESPACE = 'marketplace-order-routing:';
 export const ROUTING_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
+
+/**
+ * W11-PO-RECEIPT-CLAIM: the 409 a purchase order status change answers when
+ * the status it read before its write was changed by another request first
+ * (advancePurchaseOrderStatus compares and sets that status). Not marked
+ * retryable: D-134 rules such a 409 final for a KEY plan step
+ * (inventory_advance_purchase_order); the caller reloads the purchase order.
+ */
+export const PURCHASE_ORDER_CHANGED = 'The purchase order was changed by another request; reload it and try again';
 
 /**
  * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): how many times routeOrder runs
@@ -1257,16 +1266,18 @@ export class FulfillmentRoutingService {
         // W11-PO-LINES review (SEC-POL-4): the purchase order moves from the status read above, compared and set here.
         // The status was read before this transaction and the update did not compare it, so two receipts of one SHIPPED
         // purchase order at once both committed and added its stock twice (two RECEIPT movements). The second now waits
-        // for the first's row lock (behind the stock locks above, as before), reads RECEIVED, updates nothing and is
-        // refused as a receipt after the first is (400), its transaction rolled back with nothing written.
+        // for the first's row lock (behind the stock locks above, as before), reads RECEIVED and updates nothing.
+        // W11-PO-RECEIPT-CLAIM: this is the transaction's first purchase order write, and a lost claim is a 409 (the
+        // purchase order was changed by another request after it was read), no longer the transition table's 400 (that
+        // stays for a RECEIVED made after the first committed: it reads RECEIVED above). Thrown before any route, stock
+        // row, movement or posting is written, the transaction rolls back and purchaseOrder.received is not emitted. A
+        // line into a pair with no stock row takes no stock lock: this update's row lock serializes the two receipts,
+        // and the loser's update matches nothing once the winner commits.
         const moved = await tx.purchaseOrder.updateMany({
           where: { id: poId, businessId, status: po.status },
           data: updateData,
         });
-        if (moved.count !== 1) {
-          const now = await tx.purchaseOrder.findFirst({ where: { id: poId, businessId }, select: { status: true } });
-          throw new BadRequestException(`Cannot transition PO from ${now?.status ?? po.status} to ${targetStatus}`);
-        }
+        if (moved.count !== 1) throw new ConflictException(PURCHASE_ORDER_CHANGED);
         const updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: poId } });
 
         await tx.fulfillmentRoute.updateMany({
@@ -1381,10 +1392,18 @@ export class FulfillmentRoutingService {
         return updated;
       });
     } else {
-      updatedPO = await this.prisma.client.purchaseOrder.update({
-        where: { id: poId },
-        data: updateData,
-      });
+      // W11-PO-RECEIPT-CLAIM: compared and set on the status read above, as the receipt is. Written unconditionally, two
+      // changes from SUBMITTED at once (to ACKNOWLEDGED and to DRAFT) both answered and the last write won. One update
+      // (the row and its status checked together, Prisma P2025 when it no longer matches): the loser answers 409.
+      updatedPO = await this.prisma.client.purchaseOrder
+        .update({
+          where: { id: poId, businessId, status: po.status },
+          data: updateData,
+        })
+        .catch((err: unknown) => {
+          if ((err as { code?: unknown } | null)?.code === 'P2025') throw new ConflictException(PURCHASE_ORDER_CHANGED);
+          throw err;
+        });
     }
 
     if (targetStatus === 'RECEIVED') {
