@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, Logger, Inject, Optional, UnauthorizedException } from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac, randomBytes } from 'crypto';
@@ -16,6 +16,49 @@ import { GoogleCalendarConnector } from '../../core/connectors/implementations/g
  * verify through verifyState below.
  */
 export const GOOGLE_CALENDAR_STATE_FLOW = 'google-calendar';
+
+/**
+ * W11-CALENDAR-NAMES-SCOPE (owner ruling D-120, read with D-125 and D-116):
+ * the names of the owner's Google calendars (listAvailableCalendars below:
+ * every calendar the owner's connection can write to, by name) are listed to
+ * the owner and ADMINs only. STAFF may see that a calendar is connected
+ * (getCalendarStatus, served to every member by GET
+ * /bookings/businesses/:b/calendar/status and GET
+ * /calendar/businesses/:b/sync/status), not its names.
+ */
+export const CALENDAR_NAMES_OWNER_OR_ADMIN = 'CALENDAR_NAMES_OWNER_OR_ADMIN';
+const CALENDAR_NAMES_OWNER_OR_ADMIN_MESSAGE =
+  'Only the business owner or an admin can see the names of the Google calendars';
+
+export type CalendarNamesReader = { id?: string; role?: string };
+
+/**
+ * W11-CALENDAR-NAMES-SCOPE (D-120): who may read the calendar names of
+ * `businessId`. The owner is whoever holds an OWNER membership of this
+ * business (D-125: a co-owner counts; the recorded-owner field Business.ownerId
+ * grants nothing on its own, so a recorded owner holding only a STAFF
+ * membership is STAFF, D-116); an ADMIN membership is admitted too. A platform
+ * SUPER_ADMIN keeps the bypass BusinessGuard (and the D-99 owner doors,
+ * assertGoogleConnectOwner) already grant on these routes. No actor is 401;
+ * anyone else 403 CALENDAR_NAMES_OWNER_OR_ADMIN. The two routes that list the
+ * names (GET /calendar/businesses/:b/sync/calendars and GET
+ * /bookings/businesses/:b/calendar/list) call it first, after AuthGuard and
+ * BusinessGuard and before any Google call.
+ */
+export async function assertCalendarNamesReader(
+  prisma: PrismaService,
+  businessId: string,
+  actor: CalendarNamesReader | undefined,
+): Promise<void> {
+  if (!actor?.id) throw new UnauthorizedException('Authentication required');
+  if (actor.role === 'SUPER_ADMIN') return;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: actor.id, businessId } },
+    select: { role: true },
+  });
+  if (membership?.role === 'OWNER' || membership?.role === 'ADMIN') return;
+  throw new ForbiddenException({ code: CALENDAR_NAMES_OWNER_OR_ADMIN, message: CALENDAR_NAMES_OWNER_OR_ADMIN_MESSAGE });
+}
 
 interface OAuthState {
   flow: typeof GOOGLE_CALENDAR_STATE_FLOW;

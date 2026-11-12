@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { BookingWaitlistService } from './booking-waitlist.service';
-import { CalendarService } from './calendar.service';
+import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -753,9 +753,19 @@ export class BookingsController {
     return { success: true };
   }
 
+  // W11-CALENDAR-NAMES-SCOPE (owner ruling D-120, read with D-125): the names
+  // of the owner's Google calendars are listed to an OWNER-membership holder
+  // and an ADMIN only (assertCalendarNamesReader, 403
+  // CALENDAR_NAMES_OWNER_OR_ADMIN first, before any Google call), as on the
+  // platform twin GET /calendar/businesses/:b/sync/calendars. STAFF learn that
+  // a calendar is connected from GET .../calendar/status, which stays a member's.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/list')
-  async listAvailableCalendars(@Param('businessId') businessId: string) {
+  async listAvailableCalendars(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: CalendarNamesReader },
+  ) {
+    await assertCalendarNamesReader(this.prisma, businessId, req.user);
     return this.calendar.listAvailableCalendars(businessId);
   }
 
@@ -765,7 +775,8 @@ export class BookingsController {
   // which way it runs and whether it runs at all, so changing them is changing
   // the sync of the Google connection: the owner's, as on the platform twin
   // PATCH /calendar/businesses/:b/sync/settings (assertGoogleConnectOwner, 403
-  // GOOGLE_CONNECT_OWNER_ONLY, first). The calendar status and list reads stay a member's.
+  // GOOGLE_CONNECT_OWNER_ONLY, first). The calendar status read stays a member's;
+  // the calendar list is the owner's and ADMINs' (D-120, W11-CALENDAR-NAMES-SCOPE).
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/calendar/settings')
   async updateCalendarSettings(
