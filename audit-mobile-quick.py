@@ -1,17 +1,61 @@
 #!/usr/bin/env python3
-"""Quick mobile viewport audit for KEYFLOWOS."""
+"""Quick mobile viewport audit for KEYFLOWOS.
+
+The login comes from the environment, never from source:
+    KEYFLOWOS_AUDIT_EMAIL=... KEYFLOWOS_AUDIT_PASSWORD=... python3 audit-mobile-quick.py
+"""
 import asyncio
 import json
 import os
+import re
+import sys
+import traceback
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright, Route
-import re
+# Checked before Playwright is imported, so a missing login stops the run
+# before any browser launch, HTTP call or output directory.
+EMAIL = os.environ.get("KEYFLOWOS_AUDIT_EMAIL", "")
+PASSWORD = os.environ.get("KEYFLOWOS_AUDIT_PASSWORD", "")
+_MISSING = [
+    name
+    for name, value in (("KEYFLOWOS_AUDIT_EMAIL", EMAIL), ("KEYFLOWOS_AUDIT_PASSWORD", PASSWORD))
+    if not value
+]
+if _MISSING:
+    print(
+        f"audit-mobile-quick.py: {' and '.join(_MISSING)} must be set to the audit "
+        "login; refusing to run.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+REDACTED = "[REDACTED]"
+
+
+def redact(value):
+    """Replace the login values with [REDACTED] in a string, list or dict.
+
+    Playwright appends its call log to an error message, and the call log
+    line for page.fill repeats the typed value verbatim (fill("<value>")).
+    So any error text can hold the password, and
+    audit-output/mobile-results.json is a tracked file. Everything printed or
+    written passes through here.
+    """
+    if isinstance(value, str):
+        for secret in sorted({PASSWORD, EMAIL}, key=len, reverse=True):
+            value = value.replace(secret, REDACTED)
+        return value
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact(item) for key, item in value.items()}
+    return value
+
+
+from playwright.async_api import async_playwright, Route  # noqa: E402
 
 BASE_URL = "http://localhost:5000"
-EMAIL = "keyflowos.tt@gmail.com"
-PASSWORD = "S@chin1997"
 OUT_DIR = "audit-output"
 
 ROUTES = [
@@ -47,20 +91,29 @@ async def main():
 
         print("Logging in on mobile...", flush=True)
         await page.goto(urljoin(BASE_URL, "/auth/login"), wait_until="load")
-        await page.fill('input[type="email"]', EMAIL)
-        await page.fill('input[type="password"]', PASSWORD)
-        await page.click('button[type="submit"]')
+        login_error = ""
         try:
-            await page.wait_for_url("**/app/**", timeout=15000)
-        except Exception:
-            await asyncio.sleep(2)
+            await page.fill('input[type="email"]', EMAIL)
+            await page.fill('input[type="password"]', PASSWORD)
+            await page.click('button[type="submit"]')
+        except Exception as e:
+            # str(e) ends with Playwright's call log, which repeats the filled value.
+            login_error = redact(str(e))
+        else:
+            try:
+                await page.wait_for_url("**/app/**", timeout=15000)
+            except Exception:
+                await asyncio.sleep(2)
 
-        if "/app" not in page.url:
-            results.append({"step": "login", "status": "failed", "url": page.url})
-            print(f"Login failed: {page.url}", flush=True)
+        if login_error or "/app" not in page.url:
+            failure = {"step": "login", "status": "failed", "url": page.url}
+            if login_error:
+                failure["error"] = login_error
+            results.append(failure)
+            print(f"Login failed: {page.url}" + (f"\n{login_error}" if login_error else ""), flush=True)
             await browser.close()
             with open(os.path.join(OUT_DIR, "mobile-results.json"), "w") as f:
-                json.dump(results, f, indent=2)
+                json.dump(redact(results), f, indent=2)
             return
 
         print(f"Login success: {page.url}", flush=True)
@@ -84,18 +137,24 @@ async def main():
                     await page.screenshot(path=path, full_page=True)
                 except Exception:
                     path = None
-                entry.update({"status": "failed", "error": str(e), "url": page.url, "errors": list(console_errors), "screenshot": path})
+                entry.update({"status": "failed", "error": redact(str(e)), "url": page.url, "errors": list(console_errors), "screenshot": path})
                 console_errors.clear()
-                print(f"{route} FAILED: {e}", flush=True)
+                print(f"{route} FAILED: {redact(str(e))}", flush=True)
             results.append(entry)
             await asyncio.sleep(2)
 
         await browser.close()
 
+    results = redact(results)
     with open(os.path.join(OUT_DIR, "mobile-results.json"), "w") as f:
         json.dump(results, f, indent=2)
     print(json.dumps(results, indent=2), flush=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        # An uncaught Playwright error's traceback carries its call log.
+        sys.stderr.write(redact(traceback.format_exc()))
+        sys.exit(1)

@@ -20,7 +20,7 @@
 ## 🚀 Quick Start (Local Development)
 
 ### Prerequisites
-- Node.js 20.x (see `.nvmrc`)
+- Node.js 22.x (the exact version is pinned in `.nvmrc`)
 - pnpm 9.15.0
 - PostgreSQL 15+
 - Redis (optional, for sessions/cache)

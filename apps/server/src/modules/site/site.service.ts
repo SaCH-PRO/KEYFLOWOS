@@ -1,12 +1,17 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
 
 interface StorefrontEvent {
   type: string;
   itemId: string | null;
   timestamp: string;
 }
+
+/** The newest storefront events Business.metaData.storefrontEvents keeps. */
+const STOREFRONT_EVENT_LIMIT = 1000;
 
 interface FunnelStage {
   stage: string;
@@ -74,50 +79,54 @@ export class SiteService {
     return meta.storefront ?? {};
   }
 
+  /**
+   * FOLLOW3-D12: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (an owner's
+   * cleared payment secret, a storefront event) is not undone by this one's copy.
+   */
   async updateStorefrontConfig(businessId: string, config: Record<string, any>) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) throw new NotFoundException('Business not found');
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) throw new NotFoundException('Business not found');
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const existing = meta.storefront ?? {};
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const existing = meta.storefront ?? {};
 
-    const ARRAY_KEYS = new Set(['sections', 'faqEntries']);
-    const DIRECT_REPLACE_KEYS = new Set(['policies', 'storeSettings', 'contactOptions']);
+      const ARRAY_KEYS = new Set(['sections', 'faqEntries']);
+      const DIRECT_REPLACE_KEYS = new Set(['policies', 'storeSettings', 'contactOptions']);
 
-    const merged: Record<string, any> = { ...existing };
-    for (const key of Object.keys(config)) {
-      if (ARRAY_KEYS.has(key) || Array.isArray(config[key])) {
-        merged[key] = config[key];
-      } else if (DIRECT_REPLACE_KEYS.has(key)) {
-        merged[key] = { ...(existing[key] ?? {}), ...config[key] };
-      } else if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
-        merged[key] = { ...(existing[key] ?? {}), ...config[key] };
-      } else {
-        merged[key] = config[key];
+      const merged: Record<string, any> = { ...existing };
+      for (const key of Object.keys(config)) {
+        if (ARRAY_KEYS.has(key) || Array.isArray(config[key])) {
+          merged[key] = config[key];
+        } else if (DIRECT_REPLACE_KEYS.has(key)) {
+          merged[key] = { ...(existing[key] ?? {}), ...config[key] };
+        } else if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
+          merged[key] = { ...(existing[key] ?? {}), ...config[key] };
+        } else {
+          merged[key] = config[key];
+        }
       }
-    }
 
-    if (merged.faqEntries && Array.isArray(merged.faqEntries)) {
-      merged.faqEntries = merged.faqEntries.slice(0, 50);
-    }
-    if (merged.sections && Array.isArray(merged.sections)) {
-      merged.sections = merged.sections.slice(0, 20);
-    }
-    if (merged.merchandising?.featuredItemIds) {
-      merged.merchandising.featuredItemIds = merged.merchandising.featuredItemIds.slice(0, 8);
-    }
+      if (merged.faqEntries && Array.isArray(merged.faqEntries)) {
+        merged.faqEntries = merged.faqEntries.slice(0, 50);
+      }
+      if (merged.sections && Array.isArray(merged.sections)) {
+        merged.sections = merged.sections.slice(0, 20);
+      }
+      if (merged.merchandising?.featuredItemIds) {
+        merged.merchandising.featuredItemIds = merged.merchandising.featuredItemIds.slice(0, 8);
+      }
 
-    const updated = await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, storefront: merged },
-      },
-      select: { metaData: true },
+      const updated = await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: { ...meta, storefront: merged },
+        },
+        select: { metaData: true },
+      });
+      return ((updated.metaData as Record<string, any>) ?? {}).storefront ?? {};
     });
-    return ((updated.metaData as Record<string, any>) ?? {}).storefront ?? {};
   }
 
   async getPublicStorefront(slug: string) {
@@ -155,14 +164,17 @@ export class SiteService {
     const storefrontEvents: StorefrontEvent[] = meta.storefrontEvents ?? [];
     const completedOrdersCount = storefrontEvents.filter((e) => e.type === 'checkout_complete').length;
 
+    // Public projections (V1-23, M36): never the whole Service or Product row.
     const [services, products, shippingZones] = await Promise.all([
       this.prisma.client.service.findMany({
         where: { businessId: business.id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
+        select: PUBLIC_SERVICE_SELECT,
       }),
       this.prisma.client.product.findMany({
         where: { businessId: business.id, deletedAt: null, isActive: true },
         orderBy: { createdAt: 'desc' },
+        select: PUBLIC_PRODUCT_SELECT,
       }),
       this.prisma.client.shippingZone.findMany({
         where: { businessId: business.id, isActive: true },
@@ -201,29 +213,46 @@ export class SiteService {
     if (!type || !this.ALLOWED_EVENT_TYPES.has(type)) return { tracked: false };
     if (itemId && itemId.length > 100) return { tracked: false };
 
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) return;
-
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const events: StorefrontEvent[] = meta.storefrontEvents ?? [];
-
-    events.push({
+    const event: StorefrontEvent = {
       type,
       itemId: itemId ?? null,
       timestamp: new Date().toISOString(),
-    });
+    };
 
-    const bounded = events.slice(-1000);
-
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, storefrontEvents: bounded },
-      },
-    });
+    // FOLLOW3-D12 (R0-SEC2c review SEC2c-ST-1, case SEC2c-C03; review
+    // D12-ST-1 / CR-D12-1): this public, unauthenticated route (60 per minute
+    // per IP) used to read metaData and write the whole bag back, so an
+    // owner's payment secret cleared or rotated between the read and the write
+    // was stored again, and two events in flight together recorded one. It is
+    // one statement now: it appends this event to the stored storefrontEvents
+    // (keeping the newest STOREFRONT_EVENT_LIMIT) and writes back no other key.
+    // The UPDATE takes the row lock itself and, under READ COMMITTED, computes
+    // the new value from the newest committed row after any wait, so nothing
+    // that commits meanwhile is undone and no event is lost; no read lock is
+    // held across round trips and no pooled connection is held by an
+    // interactive transaction, so a burst of events cannot exhaust the shared
+    // pool or time out the owner's PATCH. A soft-deleted or unknown business
+    // matches no row: nothing is written and the route answers nothing, as
+    // before.
+    const written = await this.prisma.client.$executeRaw`
+      UPDATE businesses
+         SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END)
+               || jsonb_build_object('storefrontEvents', (
+                    SELECT COALESCE(jsonb_agg(kept.value ORDER BY kept.n), '[]'::jsonb)
+                      FROM (
+                        SELECT e.value, e.n
+                          FROM jsonb_array_elements(
+                                 (CASE WHEN jsonb_typeof(meta_data -> 'storefrontEvents') = 'array'
+                                       THEN meta_data -> 'storefrontEvents' ELSE '[]'::jsonb END)
+                                 || jsonb_build_array(${JSON.stringify(event)}::jsonb)
+                               ) WITH ORDINALITY AS e(value, n)
+                         ORDER BY e.n DESC
+                         LIMIT ${STOREFRONT_EVENT_LIMIT}::int
+                      ) AS kept
+                  )),
+             updated_at = NOW()
+       WHERE id = ${businessId} AND deleted_at IS NULL`;
+    if (written === 0) return;
 
     return { tracked: true };
   }

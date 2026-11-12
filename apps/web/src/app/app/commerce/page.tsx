@@ -21,10 +21,12 @@ import {
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { MobileActionSheet, type MobileActionSheetItem } from "@/components/ui/mobile-action-sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type RecordDetailEntity } from "@/components/ui/record-detail-drawer";
 import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
 import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
@@ -34,7 +36,7 @@ import { useModuleEvent } from "@/hooks/use-module-events";
 /* AI centralized in Cockpit */
 import { usePlan } from "@/hooks/use-plan";
 
-import { useCommerceShell } from "./hooks/use-commerce-shell";
+import { useCommerceShell, type UseCommerceShellReturn } from "./hooks/use-commerce-shell";
 import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useActionQueue } from "./hooks/use-action-queue";
@@ -143,22 +145,39 @@ export default function CommercePage() {
     [overview.handleTabChange],
   );
 
+  // The tab follows ?tab for as long as the page is mounted, not only on its
+  // first render. Next keeps this page mounted across a search-param-only
+  // navigation, so a nav door back to /app/commerce (Money > Quotes is
+  // ?tab=pipeline&view=quotes, Money > Sales has no tab) clicked while already
+  // here changed the URL and left the old tab on screen (R0-08b F2). The tab
+  // only leaves the URL by such a navigation, so no tab means the Snapshot.
+  // handleTabChange writes its tab back through replaceState, which Next feeds
+  // into useSearchParams, so following the URL there is a no-op.
+  const paramTab = searchParams.get("tab");
   useEffect(() => {
-    const paramTab = searchParams.get("tab");
-    if (!paramTab) return;
+    if (!paramTab) {
+      setActiveTab("snapshot");
+      return;
+    }
     if (VALID_TABS.has(paramTab as RevenueTabKey)) {
       setActiveTab(paramTab as RevenueTabKey);
     } else if (["products", "billing", "insights"].includes(paramTab)) {
       setActiveTab("snapshot");
     } else if (["quotes", "invoices", "payments"].includes(paramTab)) {
-      // Redirect old tabs to pipeline
+      // Redirect old tabs to pipeline. CR-W9WCN-1 (W9-WEB-COMMERCE-NAV
+      // review): the pipeline follows ?view while mounted and no ?view is its
+      // All view, so the rewrite names the view the legacy tab meant (the
+      // command palette, new-entity menu and contact actions still push
+      // ?tab=quotes / ?tab=invoices). ?tab=payments has no pipeline view.
       setActiveTab("pipeline");
       const url = new URL(window.location.href);
       url.searchParams.set("tab", "pipeline");
+      if (paramTab === "quotes" || paramTab === "invoices") {
+        url.searchParams.set("view", paramTab);
+      }
       window.history.replaceState({}, "", url.toString());
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time read of the URL `tab` param
-  }, []);
+  }, [paramTab]);
 
   useEffect(() => {
     const recordType = searchParams.get("recordType");
@@ -168,6 +187,33 @@ export default function CommercePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time deep-link read
   }, []);
+
+  // R0-CMF5-GMAIL-CONNECT-BINDING: Google consent (from Revenue, Marketing or
+  // the Google Suite sign-in) lands here with gmail=pending&pending=<id>. Nothing
+  // is linked yet: the owner is shown the mailbox the consent was completed with
+  // and connects it with one more click, or declines. gmail=error says why the
+  // sign-in did not get that far. The parameters are a one-time hand-off, so
+  // they leave the URL once read and a reload does not replay them.
+  const gmail = shell.integrations as UseCommerceShellReturn["integrations"] | undefined;
+  const loadPendingGmail = gmail?.loadPendingGmail;
+  const gmailParam = searchParams.get("gmail");
+  const gmailPendingParam = searchParams.get("pending");
+  const gmailReasonParam = searchParams.get("reason");
+  useEffect(() => {
+    if (!businessId || !gmailParam) return;
+    if (gmailParam === "pending" && gmailPendingParam && loadPendingGmail) {
+      void loadPendingGmail(gmailPendingParam);
+    } else if (gmailParam === "error") {
+      toast.error(
+        gmailReasonParam === "invalid_state"
+          ? "That Gmail sign-in expired or was already used. Connect Gmail again."
+          : "Gmail could not be connected. Try again.",
+      );
+    }
+    const url = new URL(window.location.href);
+    for (const key of ["gmail", "pending", "reason", "google", "services", "email"]) url.searchParams.delete(key);
+    window.history.replaceState({}, "", url.toString());
+  }, [businessId, gmailParam, gmailPendingParam, gmailReasonParam, loadPendingGmail]);
 
   useEffect(() => {
     if (billing.pendingPrefill?.targetSegment) {
@@ -313,12 +359,14 @@ export default function CommercePage() {
   return (
     <KeyflowUnifiedShell
       module="revenue"
-      pageTitle="Revenue"
+      pageTitle={NAV_ROUTE_LABELS["/app/commerce"]}
       availableActions={["Create invoice", "Send quote", "Record payment", "Set up recurring billing"]}
     >
+    {/* Header label under decision D-09 — the nav and the breadcrumb read the
+        same constant, so the screen is called what the rail called it. */}
     <WorkspaceShell
       icon={TrendingUp}
-      title="Revenue"
+      title={NAV_ROUTE_LABELS["/app/commerce"]}
       subtitle="Quotes, invoices, collections, and cashflow actions."
       tabs={tabsForShell}
       activeTab={activeTab}
@@ -448,6 +496,19 @@ export default function CommercePage() {
         open={paymentRecorderOpen}
         onClose={() => setPaymentRecorderOpen(false)}
       />
+
+      {gmail?.pendingGmail && (
+        <ConfirmDialog
+          open
+          title={`Connect ${gmail.pendingGmail.email}?`}
+          message={`Invoices, reminders, receipts and quotes will be sent from ${gmail.pendingGmail.email}. Connect it only if this is the mailbox you just signed in with.`}
+          confirmLabel={gmail.confirmingGmail ? "Connecting..." : "Connect mailbox"}
+          busy={gmail.confirmingGmail}
+          cancelLabel="Not this mailbox"
+          onConfirm={() => void gmail.handleConfirmPendingGmail()}
+          onCancel={gmail.handleCancelPendingGmail}
+        />
+      )}
 
       {/* Progressive prompts centralized in Cockpit */}
     </WorkspaceShell>

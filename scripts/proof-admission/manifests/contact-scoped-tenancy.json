@@ -1,0 +1,34 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-12-CT-TENANT-ROUTES",
+  "proofScope": "contact-scoped-tenancy-real-database",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "suites": [
+    "test/contact-scoped-tenancy.integration.test.ts"
+  ],
+  "requiredCases": [
+    "R0-12 fixture sanity (real rows) [R0-12-X01] seeded both tenants with a contact value and a run step each",
+    "R0-12 contact custom-field values are bound to the path tenant [R0-12-C01] RED-BEFORE: a member of A naming B's contact under A's path is not found (404) and gets none of B's values",
+    "R0-12 contact custom-field values are bound to the path tenant [R0-12-C02] B's contact and an absent contact answer identically under A's path (no existence oracle)",
+    "R0-12 contact custom-field values are bound to the path tenant [R0-12-C03] a member of A on B's path is refused by the business guard (403)",
+    "R0-12 contact custom-field values are bound to the path tenant [R0-12-C04] positive control: A reads its own contact's values on its own path (200)",
+    "R0-12 contact custom-field values are bound to the path tenant [R0-12-C05] positive control: B reads its own contact's values on its own path (200), so the denial is not vacuous",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V01] RED-BEFORE-REPAIR: a STAFF view-all member naming the owner's PRIVATE contact is not found (404) and gets none of its values",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V02] RED-BEFORE-REPAIR: a STAFF crm_view=owned member naming the owner's TEAM contact is not found (404) and gets none of its values",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V03] a contact the member may not see and an absent contact answer identically (no existence oracle)",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V04] positive control: a STAFF view-all member reads the owner's TEAM contact's values (200)",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V05] positive control: a STAFF view-all member reads a PRIVATE contact explicitly shared to them (200)",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V06] positive control: a STAFF crm_view=owned member reads the PRIVATE contact they own (200)",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V07] positive control: the OWNER reads the PRIVATE and TEAM contacts' values (200), so the STAFF denials are not vacuous",
+    "R0-12 contact custom-field values follow the actor's CRM visibility [R0-12-V08] for every actor and contact of A, the values route answers 200 exactly when the contact detail resolver finds the contact",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F01] RED-BEFORE: a member of A naming B's flow and run under A's path is not found (404) and gets none of B's steps",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F02] RED-BEFORE: B's run under A's own flow is not found (404) and gets none of B's steps",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F03] B's run and an absent run answer identically under A's path (no existence oracle)",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F04] A's run under another of A's flows is not found (404): the run is bound to the path flow too",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F05] a member of A on B's path is refused by the business guard (403)",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F06] positive control: A reads its own run steps on its own path (200)",
+    "R0-12 flow-run steps are bound to the path tenant [R0-12-F07] positive control: B reads its own run steps on its own path (200), so the denial is not vacuous",
+    "R0-12 tenant state after the attempts [R0-12-S01] every seeded row of both tenants is byte-identical after the cross-tenant attempts"
+  ]
+}

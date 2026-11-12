@@ -1,14 +1,15 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { BookingWaitlistService } from './booking-waitlist.service';
-import { CalendarService } from './calendar.service';
+import { CalendarService, assertCalendarNamesReader, type CalendarNamesReader } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
 import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
 import { WaitlistQueryDto } from './dto/waitlist-query.dto';
@@ -18,9 +19,10 @@ import { appUrl } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
-import { CatalogService } from '../catalog/catalog.service';
+import { CatalogService, PUBLIC_SERVICE_SELECT, PUBLIC_STAFF_SELECT } from '../catalog/catalog.service';
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitizeRequired, sanitizeString } from '../../core/utils/sanitize';
+import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
 
 @Controller('bookings')
 export class BookingsController {
@@ -52,14 +54,19 @@ export class BookingsController {
     return this.bookings.getBookingStats(businessId, orgUnitId);
   }
 
+  /**
+   * V1-84 (CR-V28-4): the body says who cancelled (cancelledBy). Only a
+   * customer cancel forfeits a paid deposit (D-26); a CANCELLED sent without
+   * an initiator is a customer cancel (D-65), as before the field existed.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/bookings/:bookingId/status')
   updateBookingStatus(
     @Param('businessId') businessId: string,
     @Param('bookingId') bookingId: string,
-    @Body('status') status: string,
+    @Body() body: UpdateBookingStatusDto,
   ) {
-    return this.bookings.updateBookingStatus(businessId, bookingId, status as BookingStatus);
+    return this.bookings.updateBookingStatus(businessId, bookingId, body?.status as BookingStatus, body?.cancelledBy ?? 'CUSTOMER');
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -119,11 +126,18 @@ export class BookingsController {
   createBooking(
     @Param('businessId') businessId: string,
     @Body() body: CreateBookingDto,
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body.contactId) {
       throw new BadRequestException('contactId is required');
     }
+    // The member's CRM view bounds which contact they may book (V1-06 review):
+    // a contact GET contacts/:id would answer 404 for them is a 404 here too.
+    // AuthGuard has already refused a request without a user.
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) throw new UnauthorizedException('Authentication required');
     return this.bookings.createBooking({
+      actorUserId,
       businessId,
       contactId: body.contactId,
       serviceId: body.serviceId,
@@ -138,23 +152,33 @@ export class BookingsController {
     });
   }
 
+  /**
+   * The public service and staff lists the booking page reads (V1-23, M36):
+   * projected rows only (no invoice timing, deposit terms or sourceProductId;
+   * no hourlyRate or maxHoursPerWeek), and a 404 when the storefront is off,
+   * as publicCreateBooking already refuses a closed store.
+   */
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/services')
-  publicListServices(@Param('businessId') businessId: string) {
+  async publicListServices(@Param('businessId') businessId: string) {
+    await this.catalog.assertPublicStore(businessId);
     return this.prisma.client.service.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { name: 'asc' },
+      select: PUBLIC_SERVICE_SELECT,
     });
   }
 
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/staff')
-  publicListStaff(@Param('businessId') businessId: string) {
+  async publicListStaff(@Param('businessId') businessId: string) {
+    await this.catalog.assertPublicStore(businessId);
     return this.prisma.client.staffMember.findMany({
       where: { businessId, deletedAt: null },
       orderBy: { name: 'asc' },
+      select: PUBLIC_STAFF_SELECT,
     });
   }
 
@@ -169,6 +193,10 @@ export class BookingsController {
    * Read-only, so no honeypot: that guard exists to catch bots submitting
    * forms, and refusing to answer "when are you open" would just push the
    * widget back to asking people to type an ISO timestamp.
+   *
+   * A closed or unknown storefront is a 404 (assertPublicStore), like the
+   * service and staff lists beside it (V1-23): a closed store's open times,
+   * derived from its business hours and existing bookings, are not public.
    */
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
@@ -188,6 +216,7 @@ export class BookingsController {
     if (!parts) throw new BadRequestException('date must be YYYY-MM-DD');
     const day = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
     if (Number.isNaN(day.getTime())) throw new BadRequestException('date must be a valid date');
+    await this.catalog.assertPublicStore(businessId);
     return this.bookings.getAvailableSlots({
       businessId,
       serviceId: sanitizeRequired(serviceId, 'serviceId', 200),
@@ -467,9 +496,25 @@ export class BookingsController {
     );
   }
 
+  /**
+   * W8-GOOGLE-CONSENT-OWNER (owner ruling D-99; W7 review SEC-W7RCV-2): the
+   * Google Calendar connection is the business owner's to start and to
+   * disconnect (assertGoogleConnectOwner: OWNER membership, Business.ownerId
+   * or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY, first). The status
+   * read and the event routes stay open to members. Review repairs: the
+   * platform twins of these doors (POST /calendar/businesses/:b/sync/google/
+   * connect, disconnect and resync) follow the same rule (SEC-W8GCO-2), and the
+   * state this URL carries is tagged for the Google Calendar connection and
+   * good for one callback (CalendarService.verifyState, SEC-W8GCO-1), so no
+   * other door's state completes the calendar callback below.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/auth-url')
-  getCalendarAuthUrl(@Param('businessId') businessId: string) {
+  async getCalendarAuthUrl(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     const url = this.calendar.getAuthUrl(businessId);
     return { url };
   }
@@ -503,9 +548,14 @@ export class BookingsController {
     return this.calendar.getCalendarStatus(businessId);
   }
 
+  // W8-GOOGLE-CONSENT-OWNER (D-99): disconnecting is the owner's, as starting is.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/calendar/disconnect')
-  async disconnectCalendar(@Param('businessId') businessId: string) {
+  async disconnectCalendar(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: GoogleConnectActor },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     await this.calendar.disconnectCalendar(businessId);
     return { success: true };
   }
@@ -703,18 +753,38 @@ export class BookingsController {
     return { success: true };
   }
 
+  // W11-CALENDAR-NAMES-SCOPE (owner ruling D-120, read with D-125): the names
+  // of the owner's Google calendars are listed to an OWNER-membership holder
+  // and an ADMIN only (assertCalendarNamesReader, 403
+  // CALENDAR_NAMES_OWNER_OR_ADMIN first, before any Google call), as on the
+  // platform twin GET /calendar/businesses/:b/sync/calendars. STAFF learn that
+  // a calendar is connected from GET .../calendar/status, which stays a member's.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/calendar/list')
-  async listAvailableCalendars(@Param('businessId') businessId: string) {
+  async listAvailableCalendars(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: CalendarNamesReader },
+  ) {
+    await assertCalendarNamesReader(this.prisma, businessId, req.user);
     return this.calendar.listAvailableCalendars(businessId);
   }
 
+  // W10-GOOGLE-DOORS-REST review repair (owner rulings D-99 and D-111;
+  // SEC-W10GDR-1, [V94D-T08]): calendarId, syncDirection and syncEnabled choose
+  // which of the owner's Google calendars the hourly resync reads and writes,
+  // which way it runs and whether it runs at all, so changing them is changing
+  // the sync of the Google connection: the owner's, as on the platform twin
+  // PATCH /calendar/businesses/:b/sync/settings (assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY, first). The calendar status read stays a member's;
+  // the calendar list is the owner's and ADMINs' (D-120, W11-CALENDAR-NAMES-SCOPE).
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/calendar/settings')
   async updateCalendarSettings(
     @Param('businessId') businessId: string,
     @Body() body: { calendarId?: string | null; syncDirection?: string; syncEnabled?: boolean },
+    @Req() req: { user?: GoogleConnectActor },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.calendar.updateSyncSettings(businessId, body);
   }
 

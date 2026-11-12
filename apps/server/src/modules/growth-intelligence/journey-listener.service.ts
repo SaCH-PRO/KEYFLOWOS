@@ -21,6 +21,7 @@ import {
   StoreOrderPaidPayload,
 } from '../../core/event-bus/events.types';
 import { CustomerJourneyService, type Channel, type JourneyStage } from './customer-journey.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 interface RecordHint {
   channel: Channel;
@@ -38,7 +39,30 @@ interface RecordHint {
 export class JourneyListenerService {
   private readonly logger = new Logger(JourneyListenerService.name);
 
-  constructor(@Inject(CustomerJourneyService) private readonly journeys: CustomerJourneyService) {}
+  constructor(
+    @Inject(CustomerJourneyService) private readonly journeys: CustomerJourneyService,
+    // W10-STORE-ORDER-PAID (V18-T2b): the stored order behind a store_order.paid (PrismaModule is global).
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
+
+  /** W10-STORE-ORDER-PAID (V18-T2b; D-112): the order, read in the event's business, is stored PAID. */
+  private async isStoredOrderPaid(businessId: string | undefined | null, orderId: unknown): Promise<boolean> {
+    if (!businessId || typeof orderId !== 'string') return false;
+    try {
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: orderId, businessId },
+        select: { paymentStatus: true },
+      });
+      if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
+      this.logger.warn(
+        `store_order.paid for order ${orderId} not stored PAID in business ${businessId} (${stored ? stored.paymentStatus : 'not found'}); no touchpoint`,
+      );
+      return false;
+    } catch (err) {
+      this.logger.warn(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
+      return false;
+    }
+  }
 
   private async record(businessId: string | undefined | null, contactId: string | undefined | null, hint: RecordHint) {
     if (!businessId || !contactId) return;
@@ -129,10 +153,21 @@ export class JourneyListenerService {
     });
   }
 
+  /**
+   * W10-STORE-ORDER-PAID (V18-T2b, review STL-SEC-2 / CR-W9SPL-1; D-112, D-18):
+   * the order_paid CONVERSION touchpoint is recorded only for an order stored
+   * PAID in the event's business, as the W9 listeners read it. PATCH
+   * .../orders/:id/status 'paid' alone (open to any member) emitted
+   * store_order.paid for a STANDARD order stored UNPAID (no longer since the
+   * W10-STORE-ORDER-PAID review, SEC-SOP-2), and a queued or forged
+   * copy can name an unpaid order or another business's order; each recorded a
+   * conversion of the order total. Nothing is recorded otherwise.
+   */
   @OnEvent('store_order.paid')
   async onStoreOrderPaid(payload: StoreOrderPaidPayload) {
     const order = payload.order as { id?: string; contactId?: string; total?: number; currency?: string } | undefined;
     if (!order?.contactId) return;
+    if (!(await this.isStoredOrderPaid(payload.businessId, order.id))) return;
     await this.record(payload.businessId, order.contactId, {
       channel: 'direct',
       source: 'storefront',

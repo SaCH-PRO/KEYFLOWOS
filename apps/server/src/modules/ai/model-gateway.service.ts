@@ -1,10 +1,11 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
+import { keyDisabled } from '../../core/config/env';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
 
@@ -117,6 +118,93 @@ export interface StreamChunk {
   fallbackUsed?: boolean;
   fallbackProvider?: AiProvider;
   error?: string;
+  /** On an error chunk emitted because no provider could be dispatched to (R0-07): the 503 body's code. */
+  code?: AiUnavailableCode;
+  /** V1-24: on the error chunk of a dispatch refused because KEY_DISABLED is set. */
+  reason?: AiDisabledReason;
+}
+
+/**
+ * Why AI dispatch was refused before any provider was called (R0-07). AI is an
+ * optional service: with nothing to dispatch to, complete() throws a 503 whose
+ * body carries one of these codes and `service: 'ai'`, which the global filter
+ * renders as { statusCode: 503, code, message, details: { service: 'ai' } }.
+ *
+ *   provider_not_configured  no candidate provider has a key (env or BYOK) or URL, or
+ *                            KEY is switched off on this server (KEY_DISABLED, V1-24);
+ *                            the second case also carries reason 'key_disabled'
+ *   provider_unavailable     candidates are configured but the circuit of every credential
+ *                            dispatch would use (platform env key or the business's BYOK key)
+ *                            is open
+ *
+ * A provider that was called and failed is neither: its own error propagates.
+ */
+export type AiUnavailableCode = 'provider_not_configured' | 'provider_unavailable';
+
+/**
+ * V1-24-KEY-KILL-SWITCHES (D-17): the reason a KEY_DISABLED refusal carries
+ * beside code provider_not_configured. The code is deliberately the existing
+ * one: every consumer of the R0-07 503 (the web's no-retry list, the voice and
+ * cortex controllers that pass the code through) already treats it as "nothing
+ * to dispatch to on this deployment", which is what an operator's off switch
+ * means; the reason (rendered under `details` by the global filter) and the
+ * message say why.
+ */
+export type AiDisabledReason = 'key_disabled';
+
+/**
+ * V1-24 review (SEC-V124-1, V124-CR-1): what KEY_DISABLED does NOT stop yet.
+ * The paths that reach an AI provider without the gateway, each with the file
+ * that holds it. scheduler-kill-switch.spec.ts pins this list against a census
+ * of direct provider calls in apps/server/src: a new direct path that ignores
+ * the switch fails there, and a path that reads keyDisabled() must leave this
+ * list (and the boot line).
+ *
+ * V1-24b-KEY-OFF-SWITCH-COVERAGE: EMPTY. Every direct path now reads the
+ * switch before it builds a provider client: KEY voice speak/listen and KEY
+ * document embeddings (key-cortex-voice / key-cortex-document), the
+ * embedding, vision and audio helpers (ai-usage.service.ts), the phone
+ * realtime bridge, ElevenLabs text-to-speech, and the diagnostics OpenAI key
+ * check.
+ *
+ * V1-24b review (SEC-V124b-2): and the indirect path. A LiveKit KEY voice
+ * session (livekit.service.ts) dispatches the KEY voice agent, which streams
+ * the member's audio to OpenAI Realtime from another process; it is refused
+ * before any room, dispatch or token. That worker (apps/voice-agent) reads
+ * KEY_DISABLED from its own environment and rejects every job while it is set.
+ */
+export const KEY_DISABLED_NOT_COVERED: ReadonlyArray<{ file: string; path: string }> = [];
+
+/**
+ * V1-24 (D-17), V1-24b: the refusal of an AI call made while KEY_DISABLED is
+ * set, for the gateway and for every path that calls a provider directly. The
+ * R0-07 structured 503 with code provider_not_configured (see AiDisabledReason
+ * for why the code is reused) and reason 'key_disabled'; the message keeps the
+ * 'No AI providers available' prefix for log readers.
+ */
+export function keyDisabledRefusal(): ServiceUnavailableException {
+  const code: AiUnavailableCode = 'provider_not_configured';
+  const reason: AiDisabledReason = 'key_disabled';
+  const message = 'No AI providers available: KEY is switched off on this server (KEY_DISABLED)';
+  return new ServiceUnavailableException({ code, reason, service: 'ai', message, error: 'Service Unavailable' });
+}
+
+/** The boot warning KEY_DISABLED produces: what it stops, and anything it does not stop yet. */
+export function keyDisabledBootLine(): string {
+  const stops =
+    'KEY_DISABLED is set: KEY is switched off on this server. Every model-gateway dispatch answers 503 and reaches no AI provider, ' +
+    'and the KEY cortex crons do not run. The direct provider paths (KEY voice speak/listen, the embedding, vision and audio helpers, ' +
+    'KEY document embeddings, the phone realtime bridge, ElevenLabs text-to-speech, the diagnostics OpenAI check) refuse before they build a client, ' +
+    'and a LiveKit KEY voice session is refused before any room, agent dispatch or join token. ' +
+    'The KEY voice agent worker (apps/voice-agent, OpenAI Realtime) is a separate process: it rejects every job only while KEY_DISABLED is set ' +
+    'in its own environment (the repo-root .env it loads at start), so set it there too.';
+  if (KEY_DISABLED_NOT_COVERED.length === 0) return stops;
+  return (
+    stops +
+    ' NOT covered yet (they call their provider directly whenever its key is configured; ' +
+    'unset AI_INTEGRATIONS_OPENAI_API_KEY, OPENAI_API_KEY and ELEVENLABS_API_KEY to stop them): ' +
+    KEY_DISABLED_NOT_COVERED.map((p) => p.path).join('; ')
+  );
 }
 
 export interface ProviderHealth {
@@ -576,7 +664,18 @@ export class ModelGatewayService {
   private readonly openai: OpenAI;
   private readonly providerClients = new Map<AiProvider, { configured: boolean }>();
   private readonly providerMetrics = new Map<AiProvider, ProviderMetrics>();
+  /** Circuits of the platform's env keys, one per provider. */
   private readonly circuitBreakers = new Map<AiProvider, CircuitBreakerState>();
+  /**
+   * Circuits of business-supplied (BYOK) keys, one per credential (R0-07 review
+   * ST-1). A circuit belongs to the credential that failed: a business that
+   * saves a revoked or junk key opens only that key's circuit, so it can never
+   * make the platform key - or another business's key - look unavailable, and a
+   * failing platform key does not stop a business whose own key works. Keyed by
+   * provider and a SHA-256 digest of the key, never the key itself. An entry is
+   * dropped on success and when its cooldown expires; the map is capped.
+   */
+  private readonly byokCircuitBreakers = new Map<string, CircuitBreakerState>();
   private readonly preferencesCache = new Map<string, { data: AiPreferences; expiresAt: number }>();
   private readonly encryptionKey: Buffer;
   private readonly byokEncryptionAvailable: boolean;
@@ -588,7 +687,10 @@ export class ModelGatewayService {
   private static readonly RETRY_DELAY_MS = 500;
   private static readonly CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
   private static readonly CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly MAX_BYOK_CIRCUITS = 10_000;
   private static readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+  /** V1-24: whether this process has logged the KEY_DISABLED boot line. */
+  private static keyDisabledAnnounced = false;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -617,6 +719,14 @@ export class ModelGatewayService {
     // `configured` is false, so dispatch skips the provider. If something ever
     // bypasses that check the call fails with OpenAI's own 401, which is a
     // recoverable request error rather than a dead process.
+    if (keyDisabled() && !ModelGatewayService.keyDisabledAnnounced) {
+      // V1-24 (D-17): one boot line per process (the module graph builds more
+      // than one gateway), so an operator (and the Release 0 journey) can see the
+      // switch reached the server. Dispatch reads the switch per call. The line
+      // names the direct provider paths the switch does not cover yet.
+      ModelGatewayService.keyDisabledAnnounced = true;
+      this.logger.warn(keyDisabledBootLine());
+    }
     const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
     if (!openaiKey) {
       this.logger.warn(
@@ -721,6 +831,9 @@ export class ModelGatewayService {
   }
 
   async complete(request: GatewayRequest): Promise<GatewayResponse> {
+    // V1-24 (D-17): KEY_DISABLED refuses before anything is read or called.
+    if (keyDisabled()) throw this.keyDisabledRefusal();
+
     if (!this.routingTableLoaded) {
       await this.loadRoutingConfig();
     }
@@ -825,7 +938,34 @@ export class ModelGatewayService {
       }
     }
 
-    throw lastError || new Error('No AI providers available');
+    throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
+  }
+
+  /**
+   * The structured 503 for a dispatch that found nothing to call (R0-07). The
+   * message keeps its old prefix, 'No AI providers available', for log readers.
+   */
+  private noProviderAvailable(
+    candidates: Array<{ provider: AiProvider }>,
+    preferences: AiPreferences,
+  ): ServiceUnavailableException {
+    const code: AiUnavailableCode = candidates.some((c) => this.isProviderConfigured(c.provider, preferences))
+      ? 'provider_unavailable'
+      : 'provider_not_configured';
+    const message = code === 'provider_not_configured'
+      ? 'No AI providers available: no AI provider is configured for this deployment or business'
+      : 'No AI providers available: every configured AI provider is temporarily unavailable';
+    return new ServiceUnavailableException({ code, service: 'ai', message, error: 'Service Unavailable' });
+  }
+
+  /**
+   * V1-24 (D-17): the refusal of a dispatch made while KEY_DISABLED is set. The
+   * R0-07 structured 503 with code provider_not_configured (see AiDisabledReason
+   * for why the code is reused) and reason 'key_disabled'; the message keeps the
+   * 'No AI providers available' prefix for log readers.
+   */
+  private keyDisabledRefusal(): ServiceUnavailableException {
+    return keyDisabledRefusal();
   }
 
   private async recordCostFromResponse(
@@ -913,6 +1053,16 @@ export class ModelGatewayService {
   }
 
   async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
+    // V1-24 (D-17): the same refusal complete() throws, as one error chunk, before
+    // anything is read or called. AiUsageService.trackAndStream writes no usage
+    // row for a stream that ends on a coded refusal chunk (V1-24b, SEC-V124-2).
+    if (keyDisabled()) {
+      const refusal = this.keyDisabledRefusal();
+      const body = refusal.getResponse() as { code: AiUnavailableCode; reason: AiDisabledReason };
+      yield { type: 'error', error: refusal.message, code: body.code, reason: body.reason };
+      return;
+    }
+
     if (!this.routingTableLoaded) {
       await this.loadRoutingConfig();
     }
@@ -987,7 +1137,7 @@ export class ModelGatewayService {
         }
 
         const latencyMs = Date.now() - startTime;
-        this.recordProviderSuccess(candidate.provider, latencyMs);
+        this.recordProviderSuccess(candidate.provider, latencyMs, preferences);
 
         const usage = lastUsageChunk?.usage ?? {
           promptTokens: 0,
@@ -1014,16 +1164,24 @@ export class ModelGatewayService {
         return;
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider);
+        this.recordProviderError(candidate.provider, preferences);
         this.logger.error(
           `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
       }
     }
 
+    if (lastError) {
+      yield { type: 'error', error: lastError.message, fallbackUsed, fallbackProvider };
+      return;
+    }
+    // Nothing was dispatched: the same refusal complete() throws, as a chunk.
+    const refusal = this.noProviderAvailable(effectiveCandidates, preferences);
+    const body = refusal.getResponse() as { code: AiUnavailableCode };
     yield {
       type: 'error',
-      error: lastError?.message || 'No AI providers available',
+      error: refusal.message,
+      code: body.code,
       fallbackUsed,
       fallbackProvider,
     };
@@ -1816,6 +1974,33 @@ export class ModelGatewayService {
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
+    return this.isProviderConfigured(provider, preferences) && !this.isCircuitOpen(provider, preferences);
+  }
+
+  /** The business's own key for this provider, which dispatch uses in place of the platform's. */
+  private byokKeyFor(provider: AiProvider, preferences: AiPreferences): string | undefined {
+    switch (provider) {
+      case 'openai': return preferences.byokOpenai;
+      case 'anthropic': return preferences.byokAnthropic;
+      case 'xai': return preferences.byokXai;
+      case 'kimi': return preferences.byokKimi;
+      case 'google': return preferences.byokGoogle;
+      case 'native': return preferences.byokNative;
+      default: return undefined;
+    }
+  }
+
+  /**
+   * The BYOK circuit id of the credential a dispatch to this provider would use,
+   * or null when it would use the platform's env key (circuit: `circuitBreakers`).
+   */
+  private byokCircuitId(provider: AiProvider, preferences?: AiPreferences): string | null {
+    const key = preferences ? this.byokKeyFor(provider, preferences) : undefined;
+    return key ? `${provider}:${createHash('sha256').update(key).digest('hex')}` : null;
+  }
+
+  /** A key (env or BYOK) or base URL exists for this provider; says nothing about its circuit. */
+  private isProviderConfigured(provider: AiProvider, preferences: AiPreferences): boolean {
     let configured = false;
     if (provider === 'openai') {
       configured = !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
@@ -1839,11 +2024,16 @@ export class ModelGatewayService {
       configured = !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
     }
 
-    return configured && !this.isCircuitOpen(provider);
+    return configured;
   }
 
-  private isCircuitOpen(provider: AiProvider): boolean {
-    const state = this.circuitBreakers.get(provider);
+  /**
+   * Whether the circuit of the credential a dispatch would use is open. Without
+   * preferences (provider health), the platform key's circuit.
+   */
+  private isCircuitOpen(provider: AiProvider, preferences?: AiPreferences): boolean {
+    const byokId = this.byokCircuitId(provider, preferences);
+    const state = byokId ? this.byokCircuitBreakers.get(byokId) : this.circuitBreakers.get(provider);
     if (!state) return false;
 
     if (state.openUntil && state.openUntil.getTime() > Date.now()) {
@@ -1852,8 +2042,12 @@ export class ModelGatewayService {
 
     // Reset expired open state
     if (state.openUntil && state.openUntil.getTime() <= Date.now()) {
-      state.openUntil = null;
-      state.failures = 0;
+      if (byokId) {
+        this.byokCircuitBreakers.delete(byokId);
+      } else {
+        state.openUntil = null;
+        state.failures = 0;
+      }
     }
 
     return false;
@@ -1873,7 +2067,7 @@ export class ModelGatewayService {
         const result = await this.callProvider(request, provider, model, preferences);
         const latencyMs = Date.now() - startTime;
 
-        this.recordProviderSuccess(provider, latencyMs);
+        this.recordProviderSuccess(provider, latencyMs, preferences);
 
         return {
           ...result,
@@ -1884,7 +2078,7 @@ export class ModelGatewayService {
         };
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(provider);
+        this.recordProviderError(provider, preferences);
 
         if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
@@ -2651,7 +2845,7 @@ export class ModelGatewayService {
 
       let reason: string | undefined;
       if (!available) {
-        reason = this.isCircuitOpen(provider)
+        reason = this.isCircuitOpen(provider, preferences)
           ? 'Temporarily unavailable after repeated failures'
           : 'No API key configured';
       }
@@ -2971,7 +3165,12 @@ export class ModelGatewayService {
     return result;
   }
 
-  private recordProviderSuccess(provider: AiProvider, latencyMs: number): void {
+  /**
+   * A call succeeded. With the dispatch's preferences, the success resets the
+   * circuit of the credential that was used (a BYOK success never resets the
+   * platform key's circuit); without them, the platform key's.
+   */
+  private recordProviderSuccess(provider: AiProvider, latencyMs: number, preferences?: AiPreferences): void {
     const metrics = this.providerMetrics.get(provider);
     if (metrics) {
       metrics.totalCalls++;
@@ -2982,6 +3181,11 @@ export class ModelGatewayService {
     }
 
     // Reset circuit breaker on success
+    const byokId = this.byokCircuitId(provider, preferences);
+    if (byokId) {
+      this.byokCircuitBreakers.delete(byokId);
+      return;
+    }
     const circuit = this.circuitBreakers.get(provider);
     if (circuit) {
       circuit.failures = 0;
@@ -2989,7 +3193,12 @@ export class ModelGatewayService {
     }
   }
 
-  private recordProviderError(provider: AiProvider): void {
+  /**
+   * A call failed. With the dispatch's preferences, the failure counts against
+   * the circuit of the credential that was used (R0-07 review ST-1): a BYOK
+   * key's failures open only that key's circuit. Without them, the platform's.
+   */
+  private recordProviderError(provider: AiProvider, preferences?: AiPreferences): void {
     const metrics = this.providerMetrics.get(provider);
     if (metrics) {
       metrics.totalCalls++;
@@ -2997,7 +3206,22 @@ export class ModelGatewayService {
       metrics.lastErrorAt = new Date();
     }
 
-    const circuit = this.circuitBreakers.get(provider);
+    const byokId = this.byokCircuitId(provider, preferences);
+    let circuit: CircuitBreakerState | undefined;
+    if (byokId) {
+      circuit = this.byokCircuitBreakers.get(byokId);
+      if (!circuit) {
+        if (this.byokCircuitBreakers.size >= ModelGatewayService.MAX_BYOK_CIRCUITS) {
+          // Oldest first (Map keeps insertion order).
+          const oldest = this.byokCircuitBreakers.keys().next().value;
+          if (oldest !== undefined) this.byokCircuitBreakers.delete(oldest);
+        }
+        circuit = { failures: 0, lastFailureAt: null, openUntil: null };
+        this.byokCircuitBreakers.set(byokId, circuit);
+      }
+    } else {
+      circuit = this.circuitBreakers.get(provider);
+    }
     if (circuit) {
       circuit.failures++;
       circuit.lastFailureAt = new Date();
@@ -3005,7 +3229,7 @@ export class ModelGatewayService {
       if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
         circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
         this.logger.warn(
-          `Circuit breaker opened for ${provider} until ${circuit.openUntil.toISOString()}`,
+          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} until ${circuit.openUntil.toISOString()}`,
         );
       }
     }

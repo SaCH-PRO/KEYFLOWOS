@@ -1,6 +1,7 @@
 import { Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { RevenueReportPreset, RevenueReportingService } from './revenue-reporting.service';
 
 const VALID_PRESETS: RevenueReportPreset[] = [
@@ -23,7 +24,11 @@ const VALID_PRESETS: RevenueReportPreset[] = [
 export class RevenueReportingController {
   constructor(@Inject(RevenueReportingService) private readonly reporting: RevenueReportingService) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // V1-81 (FOLLOW3-A7-MONEY-REPORTS, owner ruling D-57; SEC-V37b-1 residual):
+  // every preset reads invoice revenue, so it needs revenue:read like the
+  // commerce invoice reads; the guard refuses before the preset is resolved.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/revenue-reports/:preset')
   async getPreset(
     @Param('businessId') businessId: string,

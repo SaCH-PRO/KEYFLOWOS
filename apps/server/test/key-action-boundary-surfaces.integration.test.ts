@@ -268,8 +268,12 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
 
     it('E8 — the executor plugin admits a proposal by its id against its sealed envelope, or not at all', async () => {
       const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
+      // W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2: the plugin reads who the proposal runs for (the
+      // executing ADMIN, who holds operations write) through PrismaService, as in the app.
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      fx.provide(PrismaService, fx.prisma);
       const plugin = new KeyCortexActionExecutorPlugin({ register() {} } as any, {} as any, fx.moduleRef as any);
-      const wrapper = { sourceType: 'AI_PLAN' as const, title: 'Step', actionType: 'EXECUTE_TOOL' as const, payload: { toolName: TOOL, inputPayload: { ...ARGS } } };
+      const wrapper ={ sourceType: 'AI_PLAN' as const, title: 'Step', actionType: 'EXECUTE_TOOL' as const, payload: { toolName: TOOL, inputPayload: { ...ARGS } } };
 
       // Not approved: refused.
       const pending = await fx.proposals.create(ID.bizA, wrapper);
@@ -321,13 +325,42 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
       expect(result).toMatchObject({ notExecuted: true, requiresApproval: true, data: { proposalId: row.id } });
     });
 
+    /**
+     * V1-31b-KEY-ACTION-ROUTES-BIND: the graph-actions route executes only a
+     * plan step the server holds (by planId and planStepId), under the tool's
+     * module write scope (helpdesk_ is operations; STAFF defaults to operations
+     * read, so this staff member is given operations write). It is the same
+     * staff caller and the same stored tool and arguments as before.
+     */
+    async function graphStep(n: number) {
+      const planId = `${ID.bizA}_e10plan${n}`;
+      const planStepId = `${ID.bizA}_e10step${n}`;
+      await fx.db.aiPlanStep.deleteMany({ where: { planId } });
+      await fx.db.aiPlan.deleteMany({ where: { id: planId } });
+      await fx.db.aiPlan.create({
+        data: {
+          id: planId,
+          businessId: ID.bizA,
+          userId: ID.staff,
+          objective: 'E10',
+          status: 'draft',
+          steps: { create: [{ id: planStepId, order: 1, toolName: TOOL, action: 'Open a ticket', inputPayload: { ...ARGS }, status: 'pending' }] },
+        },
+      });
+      const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+      await fx.db.membership.update({ where: { id: ID.mStaff }, data: { permissionScopes: { ...defaultScopesForRole('STAFF'), operations: 'write' } } });
+      const planner = { updateStepStatus: async (id: string, status: string) => fx.db.aiPlanStep.update({ where: { id }, data: { status } }) };
+      return { planId, planStepId, planner };
+    }
+
     it('E10 — GraphActionsController: an authenticated caller is asked to confirm; quick-confirm is no longer ignored', async () => {
       await fx.setAutonomy(null); // default policy: tier 2 needs a confirmation
       const { GraphActionsController } = await import('../src/modules/ai/graph-actions.controller');
       const { EventEmitter2 } = await import('@nestjs/event-emitter');
-      const controller: any = new (GraphActionsController as any)({}, {}, {}, fx.oversight, orchestrator, {}, {}, fx.prisma, new EventEmitter2());
+      const step = await graphStep(1);
+      const controller: any = new (GraphActionsController as any)({}, {}, step.planner, fx.oversight, orchestrator, executionLog, {}, fx.prisma, new EventEmitter2());
 
-      const response = await controller.executeAction(ID.bizA, { toolName: TOOL, args: { ...ARGS } }, { user: { id: ID.staff } });
+      const response = await controller.executeAction(ID.bizA, { planId: step.planId, planStepId: step.planStepId }, { user: { id: ID.staff } });
       expect(response).toMatchObject({ success: false, requiresConfirmation: true, requiresApproval: false });
       expect(response.confirmationId).toEqual(expect.any(String));
       await noTickets();
@@ -340,12 +373,51 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
       expect(await fx.tickets(ID.bizA)).toHaveLength(1);
     });
 
+    /**
+     * V1-31b review CR-5: a step the boundary holds for a confirmation is not
+     * spent. Asking again before confirming answers the same action (it was a
+     * 409 that ran nothing); once the action ran, asking again settles the step
+     * with the recorded outcome, and nothing runs twice.
+     */
+    it('E10 — asking again before confirming answers the same action; after it ran, the step is settled once', async () => {
+      await fx.setAutonomy(null); // default policy: tier 2 needs a confirmation
+      const { GraphActionsController } = await import('../src/modules/ai/graph-actions.controller');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const step = await graphStep(3);
+      const controller: any = new (GraphActionsController as any)({}, {}, step.planner, fx.oversight, orchestrator, executionLog, {}, fx.prisma, new EventEmitter2());
+      const ask = () => controller.executeAction(ID.bizA, { planId: step.planId, planStepId: step.planStepId }, { user: { id: ID.staff } });
+      const stepStatus = async () => (await fx.db.aiPlanStep.findUnique({ where: { id: step.planStepId } }))?.status;
+
+      const first = await ask();
+      expect(first).toMatchObject({ success: false, requiresConfirmation: true });
+      expect(await stepStatus()).toBe('pending');
+
+      const second = await ask();
+      expect(second).toMatchObject({ success: false, requiresConfirmation: true, confirmationId: first.confirmationId });
+      await noTickets();
+      expect(await fx.actions(ID.bizA)).toHaveLength(1);
+
+      await fx.boundary.confirmAndExecute(ID.bizA, first.confirmationId, ID.staff);
+      expect(await fx.tickets(ID.bizA)).toHaveLength(1);
+
+      const third = await ask();
+      expect(third).toMatchObject({ success: true });
+      expect(await stepStatus()).toBe('completed');
+      expect(await fx.tickets(ID.bizA)).toHaveLength(1);
+      await expect(ask()).rejects.toMatchObject({ status: 409 });
+      // The boundary's record names the requester; the run is on record under the member who asked (SEC-V131b-5).
+      expect(await fx.action(first.confirmationId)).toMatchObject({ requested_by: ID.staff });
+      const logged = executionLog.log.mock.calls.map(([entry]: any[]) => entry).filter((e: any) => e.planStepId === step.planStepId);
+      expect(logged.map((e: any) => [e.action, e.userId, e.success])).toEqual([['graph_action:execute', ID.staff, true]]);
+    });
+
     it('E10 — with autonomy that clears tier 2, a trusted caller’s action runs, and is attributed', async () => {
       const { GraphActionsController } = await import('../src/modules/ai/graph-actions.controller');
       const { EventEmitter2 } = await import('@nestjs/event-emitter');
-      const controller: any = new (GraphActionsController as any)({}, {}, {}, fx.oversight, orchestrator, {}, {}, fx.prisma, new EventEmitter2());
+      const step = await graphStep(2);
+      const controller: any = new (GraphActionsController as any)({}, {}, step.planner, fx.oversight, orchestrator, executionLog, {}, fx.prisma, new EventEmitter2());
 
-      const response = await controller.executeAction(ID.bizA, { toolName: TOOL, args: { ...ARGS } }, { user: { id: ID.staff } });
+      const response = await controller.executeAction(ID.bizA, { planId: step.planId, planStepId: step.planStepId }, { user: { id: ID.staff } });
       expect(response.success).toBe(true);
       const [row] = await fx.actions(ID.bizA);
       expect(row.outcome_evidence.principalChain).toMatchObject({ requestedBy: ID.staff, executedFor: ID.staff, executedBy: ID.staff, approvedBy: null });

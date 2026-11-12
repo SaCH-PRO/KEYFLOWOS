@@ -9,10 +9,16 @@ import {
   Post,
   Put,
   Query,
+  Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
+import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
 import {
   GoogleFormsMappingService,
@@ -56,7 +62,40 @@ export class ConnectController {
     @Inject(GoogleBusinessProfileService) private readonly bp: GoogleBusinessProfileService,
     @Inject(ConnectorFormMappingService)
     private readonly connectorForms: ConnectorFormMappingService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * W7-RECENT-CONTACTS-VISIBILITY (the residual W6-CONNECT-TAG-MERGE recorded;
+   * CONTACTS-v1 RECORD VISIBILITY, the clause D-37 and D-64 apply): the recent
+   * Google and Outlook contacts lists name CRM contacts (name, email, phone,
+   * company, status, tags), so each follows the rule GET contacts/:contactId
+   * applies. First its crm read gate: both routes carry ModuleScopeGuard +
+   * RequireModuleScope('crm', 'read') as that route does (review SEC-W7RCV-1),
+   * so a member whose scope map has no crm key or crm none is refused 403
+   * before the list is read; resolveCrmAccess alone would read an absent key
+   * as read (view-all) for STAFF, and crm none as "my book", and list them
+   * contacts. Then its visibility: each list keeps only the contacts the
+   * caller may open (resolveCrmAccess + visibilityClause, through
+   * contactVisibilityFilter): a view-all member sees
+   * TEAM and SHARED contacts, their own and those shared with them; a member
+   * without view-all (crm_view owned) only their own and those shared with
+   * them. The owner and a SUPER_ADMIN (no filter) get the list exactly as
+   * before. The access is resolved before the list is read. A hidden contact
+   * leaves the page it was on, so a restricted member may get fewer rows than
+   * `limit`.
+   */
+  private async recentForMember<T extends { id: string }>(
+    businessId: string,
+    actorUserId: string | undefined,
+    read: () => Promise<T[]>,
+  ): Promise<T[]> {
+    if (!actorUserId) throw new UnauthorizedException('Authentication required');
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const rows = await read();
+    const visible = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, rows.map((row) => row.id));
+    return visible ? rows.filter((row) => visible(row.id)) : rows;
+  }
 
   // ----- Google Forms -----
   @Get('businesses/:businessId/forms')
@@ -103,6 +142,11 @@ export class ConnectController {
     return this.formsMapping.getMapping(businessId, formId);
   }
 
+  /**
+   * W9-FORMS-QUOTE-GATE review SEC-W9FQG-1 (D-46): a mapping that creates
+   * quotes is saved only by a member with revenue:write, whom the mapping
+   * records as its configuring member, so the route passes its caller.
+   */
   @Post('businesses/:businessId/forms/:formId/mapping')
   saveFormMapping(
     @Param('businessId') businessId: string,
@@ -114,6 +158,7 @@ export class ConnectController {
       opportunityDefaults?: OpportunityDefaults | null;
       autoCreate?: boolean;
     },
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!Array.isArray(body?.fieldMappings)) {
       throw new BadRequestException('fieldMappings array is required');
@@ -125,6 +170,7 @@ export class ConnectController {
       fieldMappings: body.fieldMappings,
       opportunityDefaults: body.opportunityDefaults ?? null,
       autoCreate: body.autoCreate,
+      actorUserId: req.user?.id ?? null,
     });
   }
 
@@ -136,20 +182,29 @@ export class ConnectController {
     return this.formsMapping.deleteMapping(businessId, formId);
   }
 
+  /**
+   * W9-FORMS-QUOTE-GATE (SEC-D92R-1 follow-up; D-46): a run creates the quotes
+   * its mapping asks for only as a member with revenue:write (and while the
+   * mapping's configuring member holds it), so both routes pass their caller
+   * (AuthGuard's user); a run whose caller may not is refused with 403 before
+   * any response is read (review CR-W9FQG-2: not a 201 with zero counts).
+   */
   @Post('businesses/:businessId/forms/:formId/backfill')
   backfillFormResponses(
     @Param('businessId') businessId: string,
     @Param('formId') formId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.formsMapping.backfill(businessId, formId);
+    return this.formsMapping.backfill(businessId, formId, req.user?.id ?? null);
   }
 
   @Post('businesses/:businessId/forms/:formId/process-new')
   processNewFormResponses(
     @Param('businessId') businessId: string,
     @Param('formId') formId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.formsMapping.processNewResponses(businessId, formId);
+    return this.formsMapping.processNewResponses(businessId, formId, req.user?.id ?? null);
   }
 
   // ----- Connector Forms (Typeform / Jotform / Webhook) -----
@@ -221,8 +276,17 @@ export class ConnectController {
   }
 
   // ----- Contacts -----
+  // W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T05]; review SEC-W9GD-2):
+  // the Google Contacts sync is the owner's to start, as its contact-source
+  // twins resync google_contacts and sync-all are (they run the same
+  // GoogleContactsSyncService.sync): assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY first, before anything is synced.
   @Post('businesses/:businessId/contacts/sync')
-  syncContacts(@Param('businessId') businessId: string) {
+  async syncContacts(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.contacts.sync(businessId);
   }
 
@@ -231,12 +295,19 @@ export class ConnectController {
     return this.contacts.getStatus(businessId);
   }
 
+  // W7-RECENT-CONTACTS-VISIBILITY: only the linked contacts the caller may open,
+  // behind GET contacts/:contactId's crm read gate (review SEC-W7RCV-1).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @Get('businesses/:businessId/contacts/recent')
   getContactsRecent(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('limit') limit?: string,
   ) {
-    return this.contacts.getRecent(businessId, limit ? Number(limit) : undefined);
+    return this.recentForMember(businessId, req?.user?.id, () =>
+      this.contacts.getRecent(businessId, limit ? Number(limit) : undefined),
+    );
   }
 
   @Get('businesses/:businessId/contacts/mapping-rules')
@@ -244,12 +315,16 @@ export class ConnectController {
     return this.contacts.getMappingRules(businessId);
   }
 
+  // W5-D92-RESIDUALS review SEC-D92R-3: the member saving the rules is the
+  // actor its default-owner checks run for (naming another member needs
+  // crm_reassign, as on the CRM create, PATCH and reassign paths).
   @Put('businesses/:businessId/contacts/mapping-rules')
   saveContactsRules(
     @Param('businessId') businessId: string,
     @Body() body: Partial<ContactMappingRules>,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.contacts.saveMappingRules(businessId, body ?? {});
+    return this.contacts.saveMappingRules(businessId, body ?? {}, req?.user?.id);
   }
 
   // ----- Outlook Contacts -----
@@ -263,12 +338,19 @@ export class ConnectController {
     return this.outlook.getStatus(businessId);
   }
 
+  // W7-RECENT-CONTACTS-VISIBILITY: as the Google Contacts list above (crm read
+  // gate, review SEC-W7RCV-1).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('crm', 'read')
   @Get('businesses/:businessId/outlook-contacts/recent')
   getOutlookRecent(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('limit') limit?: string,
   ) {
-    return this.outlook.getRecent(businessId, limit ? Number(limit) : undefined);
+    return this.recentForMember(businessId, req?.user?.id, () =>
+      this.outlook.getRecent(businessId, limit ? Number(limit) : undefined),
+    );
   }
 
   @Get('businesses/:businessId/outlook-contacts/mapping-rules')
@@ -276,12 +358,14 @@ export class ConnectController {
     return this.outlook.getMappingRules(businessId);
   }
 
+  // SEC-D92R-3: as the Google Contacts rules above.
   @Put('businesses/:businessId/outlook-contacts/mapping-rules')
   saveOutlookRules(
     @Param('businessId') businessId: string,
     @Body() body: Partial<OutlookContactMappingRules>,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.outlook.saveMappingRules(businessId, body ?? {});
+    return this.outlook.saveMappingRules(businessId, body ?? {}, req?.user?.id);
   }
 
   // ----- Cross-Source Contact Sync -----
@@ -290,8 +374,26 @@ export class ConnectController {
     return this.contactSync.getSummary(businessId);
   }
 
+  /**
+   * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T03]): sync-all syncs
+   * Google Contacts whenever it is connected (ContactSyncService.syncAll reads
+   * contactsAccessToken), so while it is connected the run is the owner's
+   * (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY before any source
+   * is synced). The smaller of the two changes the packet allowed: refuse the
+   * run rather than skip the Google source, so syncAll is unchanged. With
+   * Google Contacts not connected it syncs no Google source and stays a
+   * member's (Outlook Contacts is a Microsoft connection, outside D-99).
+   */
   @Post('businesses/:businessId/contact-sources/sync-all')
-  syncAllSources(@Param('businessId') businessId: string) {
+  async syncAllSources(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
+  ) {
+    const google = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { contactsAccessToken: true },
+    });
+    if (google?.contactsAccessToken) await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.contactSync.syncAll(businessId);
   }
 
@@ -311,22 +413,34 @@ export class ConnectController {
     return this.contactSync.setSignatureParsingEnabled(businessId, !!body?.enabled);
   }
 
+  // W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T03]): syncing or
+  // disconnecting the Google Contacts source is the owner's
+  // (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY first, before
+  // anything is synced or cleared). The Outlook source is unchanged.
   @Post('businesses/:businessId/contact-sources/:source/resync')
-  resyncSource(
+  async resyncSource(
     @Param('businessId') businessId: string,
     @Param('source') source: string,
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    if (source === 'google_contacts') return this.contacts.sync(businessId);
+    if (source === 'google_contacts') {
+      await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
+      return this.contacts.sync(businessId);
+    }
     if (source === 'outlook_contacts') return this.outlook.sync(businessId);
     throw new BadRequestException(`Unknown source "${source}"`);
   }
 
   @Delete('businesses/:businessId/contact-sources/:source')
-  disconnectSource(
+  async disconnectSource(
     @Param('businessId') businessId: string,
     @Param('source') source: string,
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
-    if (source === 'google_contacts') return this.contacts.disconnect(businessId);
+    if (source === 'google_contacts') {
+      await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
+      return this.contacts.disconnect(businessId);
+    }
     if (source === 'outlook_contacts') return this.outlook.disconnect(businessId);
     throw new BadRequestException(`Unknown source "${source}"`);
   }

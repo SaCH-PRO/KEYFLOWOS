@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /**
  * The amygdala — what, out of everything KEY noticed, actually matters.
@@ -137,6 +138,8 @@ export class KeyCortexSalienceService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledAppraisal(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {

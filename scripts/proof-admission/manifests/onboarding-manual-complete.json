@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-32-ONBOARD-COMPLETE-SERVER",
+  "proofScope": "onboarding-manual-complete-real-database",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "suites": [
+    {
+      "path": "test/onboarding-manual-complete.integration.test.ts",
+      "needsDist": true
+    }
+  ],
+  "requiredCases": [
+    "harness — the real built server is serving with AI off dist/main.js exists (build before running this)",
+    "harness — the real built server is serving with AI off reached /readyz on a free port, against DATABASE_URL, with AI_DISABLED=1 and no AI provider key",
+    "harness — the real built server is serving with AI off bootstraps four fresh owners, each with one business that has not completed onboarding",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) the owner sets business name, currency and timezone through the profile route",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) a member of another business gets 403 on /complete and nothing changes",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: a STAFF member with role-default scopes gets 403 on /complete and nothing is written",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) POST /complete succeeds (201 {complete: true}) with the three-pillar score below the minimum",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) the three-pillar score is reported as a recommendation, not a gate",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) onboardingComplete is true and the onboarding state reports complete",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) LEDGER: completion wrote exactly one demo contact and one DRAFT demo invoice, and no FinancialTransaction or LedgerEntry",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: completion and the legal disclaimer acceptance are recorded against the owner in team_activity_logs",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) a second /complete answers alreadyComplete and writes nothing more",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) ST-R032-1: on a completed business, a STAFF member is still refused (authority is checked before the replay)",
+    "a fresh owner completes onboarding with the minimal profile and no AI (D-03) no model-gateway dispatch: no ai_usage_logs row and no AI or outbound line in the server log during completion",
+    "without the minimal profile, completion is refused with the missing fields blank name, currency and timezone: 403 listing all three, and nothing is written",
+    "without the minimal profile, completion is refused with the missing fields a malformed currency or timezone counts as missing: 403 listing them, and nothing is written",
+    "without the minimal profile, completion is refused with the missing fields once the owner supplies a valid name, currency and timezone, the same business completes",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass an ADMIN granted settings:write gets 403 ONBOARDING_COMPLETE_FORBIDDEN and nothing is written",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass an ADMIN on the role-default scopes (settings write by default) gets 403 and nothing is written",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass a STAFF member granted settings:write gets 403 and nothing is written",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass the business owner completes the same business, and is recorded as the actor",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass on the completed business, the ADMIN granted settings:write is still refused (authority is checked before the replay)",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass a SUPER_ADMIN with no membership completes a fresh business (the platform bypass, as BusinessGuard) and is recorded as the actor",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass SEC03-1: a business flagged complete outside /complete (no onboardingCompletedAt, as the profile PATCH leaves it) still refuses an ADMIN, and nothing is written",
+    "R0-SEC-03 (D-11): only the business owner may complete; settings:write does not admit a member; SUPER_ADMIN keeps its platform bypass SEC03-1: the owner's /complete on that flagged business is not alreadyComplete: it records completedAt, the demo data, the disclaimer and the owner as the actor",
+    "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) a STAFF member on the role-default scopes sending {onboardingComplete: true} gets 403; the Business row is unchanged and the genome gate input stays unset",
+    "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) an ADMIN granted settings:write sending {onboardingComplete: true} with a profile field gets 403; the Business row is unchanged and the genome gate input stays unset",
+    "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) the owner's PATCH of a profile field still applies (200); an onboardingComplete: true beside it is dropped and the genome gate input stays unset",
+    "R0-SEC-04 SEC03-1 closure (R0-09 landed): PATCH /identity/businesses/:id cannot finish onboarding (D-11) on the business the owner completed, no one's {onboardingComplete: false} un-completes it (403 for STAFF and the settings:write ADMIN, dropped for the owner), so /complete does not run again",
+    "R0-SEC-04 SEC03-2: concurrent POST /complete from the owner completes once three simultaneous /complete calls: all answer complete, exactly one is not alreadyComplete, and one onboarding_completed row, one disclaimer acceptance and one demo seed are written",
+    "characterization — the non-AI genome editor path (PATCH /blueprint) after PATCH /blueprint with founder, business and market fields, /complete succeeds and no AI was used"
+  ]
+}

@@ -12,6 +12,7 @@ import {
   type ModuleLauncherItem,
 } from "@/components/ui/module-launcher-sheet";
 import type { NavItem, NavSection } from "@/lib/nav-config";
+import { navItemsForOperationsAccess, sectionsForOperationsAccess, useOperationsAccess } from "./operations-nav";
 
 interface MobileBottomNavV2Props {
   pathname: string;
@@ -47,11 +48,16 @@ export function MobileBottomNavV2({
   mobileDrawerOpen,
   setMobileDrawerOpen,
   unreadCount,
-  visibleOperateSections = [],
-  visibleBuildSections = [],
-  visibleMoreNav = [],
+  visibleOperateSections: operateSectionsIn = [],
+  visibleBuildSections: buildSectionsIn = [],
+  visibleMoreNav: moreNavIn = [],
 }: MobileBottomNavV2Props) {
   const [launcherOpen, setLauncherOpen] = useState(false);
+  // W7-WEB-OPS-SCOPE (D-40): the launcher lists no Purchasing entry for a member the server refuses operations.
+  const operationsAccess = useOperationsAccess();
+  const visibleOperateSections = sectionsForOperationsAccess(operateSectionsIn, operationsAccess);
+  const visibleBuildSections = sectionsForOperationsAccess(buildSectionsIn, operationsAccess);
+  const visibleMoreNav = navItemsForOperationsAccess(moreNavIn, operationsAccess);
 
   const openLauncher = () => {
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {

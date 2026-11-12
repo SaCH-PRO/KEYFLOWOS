@@ -449,6 +449,10 @@ export class MessageIntakeOrchestrator {
         action: 'message_intake.approved',
         entityType: 'message_intake',
         entityId: intakeId,
+        // W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2, owner ruling D-63): the detail is the plan's
+        // summary of the sender's message, so the row carries the intake's contactId; the timeline
+        // rule then serves it only to members who may open that contact (timeline-scope TS-13b).
+        contactId: intake.contactId ?? undefined,
         title: 'Message intake approved',
         detail: plan.summary,
         category: 'AI',

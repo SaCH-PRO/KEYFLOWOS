@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -10,9 +10,17 @@ import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
+}
+
+/** W5-AGENT-TRIGGERS-AUTHORITY (D-73): the authenticated member who writes an agent trigger. */
+function triggerWriter(req: AuthenticatedRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new UnauthorizedException('Authentication required');
+  return id;
 }
 
 @Controller('ai')
@@ -152,18 +160,11 @@ export class AgentController {
       autoExecute?: boolean;
       maxRiskTier?: number;
     },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.prisma.client.agentTrigger.create({
-      data: {
-        businessId,
-        name: body.name,
-        eventPattern: body.eventPattern,
-        condition: (body.condition ?? undefined) as any,
-        objective: body.objective,
-        autoExecute: body.autoExecute ?? false,
-        maxRiskTier: body.maxRiskTier ?? 2,
-      },
-    });
+    // W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93; CV-08m): the rule records the member who created it,
+    // and its plans run as them; a member's word-for-word copy of a default rule is theirs, not the system's.
+    return createAgentTrigger(this.prisma, businessId, triggerWriter(req), body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -179,12 +180,17 @@ export class AgentController {
       enabled: boolean;
       autoExecute: boolean;
       maxRiskTier: number;
+      schedule: string | null;
     }>,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.prisma.client.agentTrigger.update({
-      where: { id: triggerId, businessId },
-      data: body as any,
-    });
+    // W5-AGENT-TRIGGERS-AUTHORITY (D-93, D-73; CV-08m; review SEC-W5AT-1..3, CR-W5AT-1): only the
+    // business owner switches on, switches off or edits a default rule that runs as the owner (403
+    // AGENT_TRIGGER_OWNER_ONLY), schedules a rule or changes a scheduled one (403
+    // AGENT_TRIGGER_SCHEDULE_OWNER_ONLY); a rule a member created is theirs and the owner's to write (403
+    // AGENT_TRIGGER_CREATOR_ONLY) and keeps its creator, whoever writes it. Only the member-writable
+    // fields of the body are written.
+    return updateAgentTrigger(this.prisma, businessId, triggerId, triggerWriter(req), body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -225,10 +231,18 @@ export class AgentController {
     );
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE review SEC-V42B-3: only the actions req.user may
+   * undo, by the rule POST agent/undo/:undoId applies (UndoService
+   * getUndoableActionsFor): no entity ids of a module below write, of a
+   * contact they cannot see, or of a type no one may undo.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/undo')
-  async getUndoableActions(@Param('businessId') businessId: string) {
-    const actions = await this.undoService.getRecentActions(businessId);
+  async getUndoableActions(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) return { error: 'Authentication required' };
+    const actions = await this.undoService.getUndoableActionsFor(businessId, userId);
     return {
       actions: actions.map((a) => ({
         id: a.id,
@@ -241,6 +255,13 @@ export class AgentController {
     };
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE (SEC-V42-1): the undo id is the client's; the
+   * service resolves it only inside the guarded business (404 otherwise, the
+   * same as an unknown id) and requires req.user to hold write on the module of
+   * what is undone. No canUndo pre-check here: it read the record before the
+   * tenant check and told another business's id apart from an unknown one.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/agent/undo/:undoId')
   async undoAction(
@@ -251,12 +272,7 @@ export class AgentController {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
 
-    const check = this.undoService.canUndo(undoId);
-    if (!check.canUndo) {
-      return { success: false, message: check.reason };
-    }
-
-    const result = await this.undoService.undo(undoId, userId);
+    const result = await this.undoService.undo(undoId, userId, businessId);
     return result;
   }
 

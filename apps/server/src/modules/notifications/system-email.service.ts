@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
+// W4-HOUSEKEEPING (9B-D2): the one address redactor, shared with TransactionalEmailService.
+import { redactAddresses } from '../../core/security/redaction';
 
 export type SystemEmailProviderOutcome = 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
 
@@ -126,16 +128,18 @@ export class SystemEmailService {
         );
       }
 
+      // Logs never carry the recipient (9B-D2, IA-044): only the outcome, the
+      // provider id or code, and provider text with any address redacted.
       const id = result.data?.id ?? '';
-      this.logger.log(`Sent transactional email to ${args.to} (id=${id})`);
+      this.logger.log(`Sent transactional email (id=${id})`);
       return { id };
     } catch (err: unknown) {
       if (err instanceof SystemEmailSendError) {
-        this.logger.error(`Resend send failed for ${args.to}: ${err.message}`);
+        this.logger.error(`Resend send failed (${err.providerCode ?? 'unknown'}): ${redactAddresses(err.message)}`);
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Resend send outcome unknown for ${args.to}: ${message}`);
+      this.logger.error(`Resend send outcome unknown: ${redactAddresses(message)}`);
       throw new SystemEmailSendError(
         `Failed to send email: ${message}`,
         'OUTCOME_UNKNOWN',

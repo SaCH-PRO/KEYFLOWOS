@@ -35,6 +35,13 @@
  * stays unmounted; mounting it is a legitimate product decision. It asserts that
  * whenever that happens, every procedure taking a businessId has already checked
  * the caller is entitled to it.
+ *
+ * D-68 (owner ruling, 2026-11-03): the endpoint is unmounted by default.
+ * AppModule takes TrpcModule only through trpcModuleImports(), which answers
+ * [TrpcModule] when TRPC_ENABLED=1 and nothing otherwise, so a default server
+ * has no /trpc handler and no TrpcModule providers. The last describe below
+ * pins that wiring; test/trpc-mount-flag.integration.test.ts boots the built
+ * server both ways and measures it over HTTP.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -194,6 +201,34 @@ describe('the tRPC routers cannot be mounted into a tenant leak', () => {
     expect(fixed, 'these are listed as broken but no longer call assertBusinessRole — remove them').toEqual(
       [],
     );
+  });
+});
+
+describe('D-68: /trpc is mounted only when TRPC_ENABLED=1', () => {
+  it('[D-68 RED-BEFORE] trpcModuleImports answers [TrpcModule] for exactly "1" and nothing for any other value', async () => {
+    const mod = await import('./trpc.module');
+    expect(typeof mod.trpcModuleImports, 'trpc.module.ts exports no trpcModuleImports()').toBe('function');
+    expect(mod.trpcModuleImports('1')).toEqual([mod.TrpcModule]);
+    for (const value of [undefined, '', '0', 'true', 'TRUE', 'yes', 'on', ' 1', '1 ', '01', '2']) {
+      expect(mod.trpcModuleImports(value), `TRPC_ENABLED=${JSON.stringify(value)} mounted /trpc`).toEqual([]);
+    }
+    // trpc.module.ts pulls in @keyflow/api and the diagnostics module graph;
+    // the first import takes seconds, not the 5s default's milliseconds.
+  }, 120_000);
+
+  it('[D-68 RED-BEFORE] AppModule reaches TrpcModule only through trpcModuleImports(), and nothing else imports it', () => {
+    const appModule = fs.readFileSync(path.join(SERVER_SRC, 'app.module.ts'), 'utf8');
+    expect(appModule, 'AppModule does not spread trpcModuleImports() into its imports').toMatch(
+      /imports:\s*\[[\s\S]*\.\.\.trpcModuleImports\(\)\s*,[\s\S]*\]/,
+    );
+
+    // Any other reference would put TrpcModule (its middleware and providers)
+    // back into the default application, flag or no flag.
+    const elsewhere = walk(SERVER_SRC)
+      .filter((f) => path.basename(f) !== 'trpc.module.ts')
+      .filter((f) => /\bTrpcModule\b/.test(fs.readFileSync(f, 'utf8')))
+      .map((f) => path.relative(SERVER_SRC, f));
+    expect(elsewhere, 'these name TrpcModule directly instead of going through trpcModuleImports()').toEqual([]);
   });
 });
 

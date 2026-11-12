@@ -13,6 +13,7 @@ import {
   type SequenceGraph,
   type SequenceNode,
 } from './crm-sequence-graph.util';
+import { schedulersDisabled } from '../../core/config/env';
 
 const MAX_RETRIES = 3;
 const BRANCH_RECHECK_INTERVAL_MS = 60 * 60 * 1000; // re-poll branch nodes hourly
@@ -53,6 +54,11 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
   }
 
   onModuleInit() {
+    // V1-24: DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test stops it.
+    if (schedulersDisabled()) {
+      this.logger.log('[CrmSequenceScheduler] Disabled via env');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.processDueEnrollments().catch((err) => {
         this.logger.error('Error processing due enrollments', err);

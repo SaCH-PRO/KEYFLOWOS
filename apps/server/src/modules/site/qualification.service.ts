@@ -1,7 +1,9 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { CrmService } from '../crm/crm.service';
+import { PUBLIC_PRODUCT_SELECT } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 
 export interface QualificationAnswer {
@@ -38,33 +40,44 @@ export class QualificationService {
     return meta.qualificationFlow ?? null;
   }
 
+  /**
+   * FOLLOW3-D13: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (an owner's
+   * cleared payment secret) is not undone by this one's copy.
+   */
   async updateQualificationConfig(businessId: string, config: Record<string, any>) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, any>) ?? {};
-    const updated = { ...meta, qualificationFlow: config };
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: updated },
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = (business?.metaData as Record<string, any>) ?? {};
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, qualificationFlow: config } },
+      });
     });
     return config;
   }
 
+  /**
+   * The public store behind a slug or id, as the guided selector's two routes
+   * see it. A store that is closed (storeEnabled false), soft-deleted or
+   * unknown answers one 404, 'Store not found', so neither route tells an
+   * anonymous caller that a closed store exists (CF-56 parity, as
+   * CatalogService.assertPublicStore). W10-QUALIFICATION-PUBLIC review
+   * SEC-W10QP-1: qualification-flow answered a closed store 'Store is
+   * currently unavailable' while scoreAndRecommend answered 'Store not found'.
+   */
+  private async findPublicStore(slugOrId: string) {
+    const select = { id: true, metaData: true, storeEnabled: true } as const;
+    const business =
+      (await this.prisma.client.business.findFirst({ where: { slug: slugOrId, deletedAt: null }, select })) ??
+      (await this.prisma.client.business.findFirst({ where: { id: slugOrId, deletedAt: null }, select }));
+    if (!business || !business.storeEnabled) throw new NotFoundException('Store not found');
+    return business;
+  }
+
+  /** SEC-W10QP-1: a closed or soft-deleted store is the unknown store's 404 (findPublicStore). */
   async getPublicQualificationFlow(slug: string) {
-    let business = await this.prisma.client.business.findFirst({
-      where: { slug },
-      select: { id: true, metaData: true, storeEnabled: true },
-    });
-    if (!business) {
-      business = await this.prisma.client.business.findFirst({
-        where: { id: slug },
-        select: { id: true, metaData: true, storeEnabled: true },
-      });
-    }
-    if (!business) throw new NotFoundException('Store not found');
-    if (!business.storeEnabled) throw new NotFoundException('Store is currently unavailable');
+    const business = await this.findPublicStore(slug);
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const flow = meta.qualificationFlow;
@@ -83,18 +96,19 @@ export class QualificationService {
     };
   }
 
+  /**
+   * W10-QUALIFICATION-PUBLIC (review SEC-V123-3, the V1-23 / M36 public
+   * projection contract): a store that is closed (storeEnabled false) or
+   * soft-deleted answers exactly as an unknown one, 404 'Store not found',
+   * before any product is read or any journey written, as the other public
+   * catalog reads do (CatalogService.assertPublicStore, CF-56). allProducts is
+   * the storefront projection (PUBLIC_PRODUCT_SELECT): executionMeta,
+   * downloadUrl, licenseTerms, sku and the rest stay private. The scorer reads
+   * executionModel server-side (it never needed executionMeta); only the
+   * recommendation's executionModel, the visitor's chosen style, goes back.
+   */
   async scoreAndRecommend(slug: string, answers: QualificationAnswer[]) {
-    let business = await this.prisma.client.business.findFirst({
-      where: { slug },
-      select: { id: true, metaData: true },
-    });
-    if (!business) {
-      business = await this.prisma.client.business.findFirst({
-        where: { id: slug },
-        select: { id: true, metaData: true },
-      });
-    }
-    if (!business) throw new NotFoundException('Store not found');
+    const business = await this.findPublicStore(slug);
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const flow = meta.qualificationFlow ?? {};
@@ -102,11 +116,7 @@ export class QualificationService {
 
     const products = await this.prisma.client.product.findMany({
       where: { businessId: business.id, deletedAt: null, isActive: true },
-      select: {
-        id: true, name: true, price: true, currency: true, category: true,
-        description: true, imageUrl: true, duration: true,
-        executionModel: true, executionMeta: true,
-      },
+      select: { ...PUBLIC_PRODUCT_SELECT, executionModel: true },
     });
 
     const answerMap = new Map(answers.map(a => [a.questionId, a]));
@@ -213,38 +223,61 @@ export class QualificationService {
     return {
       journeyId: journey.id,
       recommendations,
-      allProducts: products.map(p => ({
-        id: p.id,
-        name: p.name,
-        price: p.price,
-        currency: p.currency,
-        category: p.category,
-        description: p.description,
-        imageUrl: p.imageUrl,
-        executionModel: p.executionModel,
-        executionMeta: p.executionMeta,
-      })),
+      // The public product projection only (W10-QUALIFICATION-PUBLIC, M36).
+      allProducts: products.map(({ executionModel: _executionModel, ...publicFields }) => publicFields),
     };
   }
 
+  /**
+   * The journey behind a public select or intake step, only while its store is
+   * open. A journey whose store has since closed (storeEnabled false) or been
+   * soft-deleted answers exactly as an unknown journey, 404 'Journey not
+   * found', before anything is written (CF-56, as findPublicStore).
+   * W10-QUALIFICATION-PUBLIC review SEC-W10QP-2: a journey written while the
+   * store was open kept answering 201 after it closed.
+   */
+  private async findPublicJourney(journeyId: string) {
+    const journey = await this.prisma.client.qualificationJourney.findFirst({
+      where: { id: journeyId, business: { deletedAt: null, storeEnabled: true } },
+    });
+    if (!journey) throw new NotFoundException('Journey not found');
+    return journey;
+  }
+
+  /**
+   * SEC-W10QP-2 (CF-56 / M36): the journey's store must be open
+   * (findPublicJourney); productId must be one of that store's own listed
+   * products (active, not deleted: the set scoreAndRecommend offers), so
+   * another tenant's or an unlisted product is a 400 and is never stored; the
+   * response is the four fields the storefront needs, never the journey row
+   * (businessId, sessionId, the customer, answers, scores, intakeData).
+   */
   async selectPackage(
     journeyId: string,
     productId: string,
     executionModel?: string,
     customer?: { name?: string; email?: string; visitorId?: string; referralCode?: string },
   ) {
-    const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
-    if (!journey) throw new NotFoundException('Journey not found');
+    const journey = await this.findPublicJourney(journeyId);
+
+    const product = productId
+      ? await this.prisma.client.product.findFirst({
+          where: { id: productId, businessId: journey.businessId, deletedAt: null, isActive: true },
+          select: { id: true },
+        })
+      : null;
+    if (!product) throw new BadRequestException('Product not found or unavailable');
 
     const updated = await this.prisma.client.qualificationJourney.update({
       where: { id: journeyId },
       data: {
-        selectedProductId: productId,
+        selectedProductId: product.id,
         executionModelChosen: executionModel ?? null,
         customerName: customer?.name ?? journey.customerName,
         customerEmail: customer?.email ?? journey.customerEmail,
         status: 'package_selected',
       },
+      select: { id: true, status: true, selectedProductId: true, executionModelChosen: true },
     });
 
     const customerEmail = customer?.email ?? journey.customerEmail ?? null;
@@ -290,9 +323,9 @@ export class QualificationService {
     return updated;
   }
 
+  /** SEC-W10QP-2 (CF-56): a closed or soft-deleted store's journey is the unknown journey's 404 (findPublicJourney). */
   async submitAssetIntake(journeyId: string, intakeData: Record<string, any>) {
-    const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
-    if (!journey) throw new NotFoundException('Journey not found');
+    await this.findPublicJourney(journeyId);
 
     // Return only what the storefront renders. The full row carries
     // customerEmail, customerName, answers, scores and businessId, none of

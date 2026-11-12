@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import * as mammoth from 'mammoth';
 import sanitizeHtml from 'sanitize-html';
 import { GoogleDriveConnector } from '../../core/connectors/implementations/google-drive.connector';
@@ -34,11 +34,21 @@ const RICH_HTML_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowProtocolRelative: false,
 };
 
+/**
+ * W8-GOOGLE-CONSENT-OWNER review repair (owner ruling D-99; SEC-W8GCO-1): the
+ * flow tag a state minted by getAuthUrl carries. GOOGLE_STATE_SECRET also signs
+ * the bookings calendar, CRM contact import, Gmail and Google Suite states (and
+ * the Microsoft one when MICROSOFT_STATE_SECRET is unset) in the same
+ * base64(payload.hmac) format, so only the tag tells a Drive state apart. The
+ * web proxy (apps/web/src/app/api/crm/google/callback) routes on it too.
+ */
+const DRIVE_FLOW = 'drive';
+
 interface OAuthState {
   businessId: string;
   nonce: string;
   exp: number;
-  flow?: string;
+  flow: typeof DRIVE_FLOW;
 }
 
 export interface DriveFile {
@@ -67,6 +77,13 @@ export class GoogleDriveService {
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
+  /**
+   * W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-1): nonces of Drive
+   * states this process has accepted, with their expiry; an entry leaves once
+   * its state would have expired anyway. Per process, as the CRM (SEC-GIS-3),
+   * Gmail (R0-07) and Google Suite (SEC-CMF5-R1) stores are.
+   */
+  private readonly acceptedStateNonces = new Map<string, number>();
 
   private getRedirectUri(): string {
     const explicit = process.env.DRIVE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI;
@@ -110,12 +127,25 @@ export class GoogleDriveService {
     return Buffer.from(`${payload}.${signature}`).toString('base64');
   }
 
+  /**
+   * The state the Drive OAuth callback may complete, or null. Besides the
+   * signature and expiry, W8-GOOGLE-CONSENT-OWNER review repair (owner ruling
+   * D-99; SEC-W8GCO-1): only a state getAuthUrl minted for Drive (its flow tag)
+   * that names a business is good here, so a bookings calendar, CRM, Gmail,
+   * Google Suite or Microsoft state signed with the same secret (each obtainable
+   * at a door the D-99 Drive owner gate does not cover) is refused; and a state
+   * is good for one callback (its nonce is recorded when it is accepted), so a
+   * captured or logged callback URL cannot connect Drive again within its 10
+   * minutes. getAuthUrl is behind the D-99 owner gate, so only the owner (or a
+   * SUPER_ADMIN) can obtain a state this accepts.
+   */
   verifyState(signedState: string): OAuthState | null {
     try {
       if (!this.stateSecret) {
         this.logger.error('Cannot verify state: GOOGLE_STATE_SECRET not configured');
         return null;
       }
+      if (typeof signedState !== 'string' || signedState.length === 0) return null;
 
       const decoded = Buffer.from(signedState, 'base64').toString('utf-8');
       const lastDotIndex = decoded.lastIndexOf('.');
@@ -130,13 +160,34 @@ export class GoogleDriveService {
         return null;
       }
 
-      const state: OAuthState = JSON.parse(payload);
-      if (state.exp < Date.now()) {
+      const state = JSON.parse(payload) as Partial<OAuthState> | null;
+      const now = Date.now();
+      if (!state || typeof state.exp !== 'number' || state.exp < now) {
         this.logger.warn('Drive OAuth state expired');
         return null;
       }
+      if (state.flow !== DRIVE_FLOW) {
+        this.logger.warn('OAuth state was not issued for the Google Drive connection');
+        return null;
+      }
+      if (typeof state.businessId !== 'string' || state.businessId.length === 0) {
+        this.logger.warn('Drive OAuth state names no business');
+        return null;
+      }
+      if (typeof state.nonce !== 'string' || state.nonce.length === 0) {
+        this.logger.warn('Drive OAuth state has no nonce');
+        return null;
+      }
+      for (const [nonce, exp] of this.acceptedStateNonces) {
+        if (exp < now) this.acceptedStateNonces.delete(nonce);
+      }
+      if (this.acceptedStateNonces.has(state.nonce)) {
+        this.logger.warn('Drive OAuth state already used');
+        return null;
+      }
+      this.acceptedStateNonces.set(state.nonce, state.exp);
 
-      return state;
+      return state as OAuthState;
     } catch {
       this.logger.warn('Failed to verify Drive OAuth state');
       return null;
@@ -150,9 +201,11 @@ export class GoogleDriveService {
 
     const state: OAuthState = {
       businessId,
-      nonce: Math.random().toString(36).substring(2),
+      // SEC-W8GCO-1: the nonce is the single-use key verifyState records, so it
+      // comes from a cryptographic source (Math.random() is predictable in V8).
+      nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + 10 * 60 * 1000,
-      flow: 'drive',
+      flow: DRIVE_FLOW,
     };
 
     const signedState = this.signState(state);

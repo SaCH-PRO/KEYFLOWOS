@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "description": "Native DAST probes (V1-13-SEC-NATIVE-DAST). Every protected route probed here is AuthGuard-first, so an anonymous call and a call carrying a credential authentication must refuse (malformed bearer, alg none, wrong key, expired, wrong audience, foreign issuer) must answer 401 and nothing else: a 403 there means authentication accepted the caller and a business guard refused it, which a verifier bypass also produces (review SEC-DAST-1). The env-key tokens are signed with SUPABASE_JWT_SECRET, the key the server verifies with, so the expired, wrong-audience and foreign-issuer probes reach the exp, aud and iss checks; the valid-token control (no iss: the server runs NODE_ENV=test with no SUPABASE_URL) must answer 403 from BusinessGuard, which also proves the server holds that key (review SEC-DAST-2). A 404 means the route is absent and proves nothing. Run against a locally started server only: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json with NATIVE_DAST_BASE_URL set to a loopback URL and SUPABASE_JWT_SECRET set to the server's value.",
+  "base_url_env": "NATIVE_DAST_BASE_URL",
+  "probes": [
+    {
+      "id": "public.healthz",
+      "method": "GET",
+      "path": "/healthz",
+      "expected_status": [200],
+      "body_must_include": ["\"status\":\"ok\""]
+    },
+    {
+      "id": "r0.contacts.list",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "r0.contacts.list_malformed_bearer",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_alg_none",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "none", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_wrong_key",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "random-key", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_expired",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "env-key", "key_env": "SUPABASE_JWT_SECRET", "exp_in_s": -3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_wrong_audience",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "env-key", "key_env": "SUPABASE_JWT_SECRET", "exp_in_s": 3600, "claims": { "aud": "native-dast-not-authenticated", "role": "authenticated" } },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_foreign_issuer",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "env-key", "key_env": "SUPABASE_JWT_SECRET", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated", "iss": "https://native-dast.invalid/auth/v1" } },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.contacts.list_jwt_valid_non_member",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "bearer_jwt": { "signing": "env-key", "key_env": "SUPABASE_JWT_SECRET", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "expected_status": [403],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.list",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.list_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.invoices.detail",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.detail_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.payments.record",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json" },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.record_malformed_bearer",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json", "authorization": "Bearer definitely-not-a-valid-token" },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.payments.record_jwt_alg_none",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json" },
+      "bearer_jwt": { "signing": "none", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.payments.record_jwt_wrong_key",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json" },
+      "bearer_jwt": { "signing": "random-key", "exp_in_s": 3600, "claims": { "aud": "authenticated", "role": "authenticated" } },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "r0.payments.tenant_list",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/payments",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.tenant_list_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/payments",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    },
+    {
+      "id": "protected.admin_risc.erase",
+      "method": "POST",
+      "path": "/admin/risc/users/native-dast-user/erase",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "protected.business_genome.constitution_latest",
+      "method": "GET",
+      "path": "/business-genome/businesses/native-dast-business/constitution/latest",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "expected_status": [401],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard_malformed_bearer",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401],
+      "protected": true,
+      "invalid_credential": true
+    }
+  ],
+  "forbidden_body_patterns": [
+    "PrismaClientKnownRequestError",
+    "PrismaClientValidationError",
+    "node_modules/",
+    "node_modules\\\\",
+    "at processTicksAndRejections",
+    "UnhandledPromiseRejection",
+    "TypeError:"
+  ]
+}

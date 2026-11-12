@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
@@ -210,6 +210,86 @@ function sanitizePayload(input: unknown): PresencePayload {
   return cleaned;
 }
 
+/**
+ * W7-SLUG-PRESENCE-DRAFT repair (owner ruling D-11, review CR-1; SEC-W7SPD-2,
+ * CRR-1): beside the presence payload, the stored draft payload remembers the
+ * slugs the owner's PATCH /identity/businesses/:businessId replaced (the
+ * draft's slug and Business.slug before the PATCH). The key is not part of
+ * presenceSchema, so fromJson and sanitizePayload drop it from every response,
+ * preview and published page, and a client cannot send it; saveDraft carries
+ * it from the stored row to the next. A non-owner's editor loaded before the
+ * PATCH still sends one of those slugs with every save and autosave; saveDraft
+ * reads it as that stale copy, keeps the draft's slug and saves the content,
+ * instead of refusing a slug change the member never made. A remembered slug
+ * is never put on the draft or on Business.slug for a non-owner.
+ */
+const REPLACED_SLUGS_KEY = 'replacedSlugs';
+/** How many replaced slugs a draft remembers (the latest ones). */
+const REPLACED_SLUGS_MAX = 20;
+
+/** The slugs the owner's PATCH replaced, as the stored draft payload remembers them. */
+function replacedSlugsOf(stored: Prisma.JsonValue | null | undefined): string[] {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return [];
+  const list = (stored as Prisma.JsonObject)[REPLACED_SLUGS_KEY];
+  return Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string') : [];
+}
+
+/** The draft payload to store: the cleaned presence payload and the replaced slugs it remembers (none: no key). */
+function withReplacedSlugs(cleaned: PresencePayload, replaced: string[]): Prisma.InputJsonValue {
+  const json = asJson(cleaned) as Prisma.InputJsonObject;
+  return (replaced.length ? { ...json, [REPLACED_SLUGS_KEY]: replaced } : json) as Prisma.InputJsonValue;
+}
+
+/**
+ * W7-SLUG-PRESENCE-DRAFT (owner ruling D-11, review CR-1): the stored draft
+ * payload once the owner's PATCH /identity/businesses/:businessId has moved
+ * Business.slug to `businessSlug` (IdentityService.updateBusiness writes it in
+ * the PATCH's transaction, under the business row lock and a lock on the draft
+ * row). The draft cannot tell a stale slug (the address before the PATCH) from
+ * a pending one (saved by the owner, not yet published), and the PATCH is the
+ * owner's latest word on the address, so a draft carrying either takes the
+ * PATCHed slug: the owner's next publish cannot put an older address back on
+ * Business.slug. A slug the presence payload cannot carry (presenceSchema.slug)
+ * leaves the draft without one, so the publish keeps the PATCHed Business.slug.
+ * Repair SEC-W7SPD-2 / CRR-1: the draft's replaced slug and
+ * `previousBusinessSlug` (Business.slug before the PATCH) join the slugs the
+ * draft remembers (REPLACED_SLUGS_KEY), so a non-owner's editor still holding
+ * one of them keeps saving content. Only the slug and that key change; the rest
+ * of the stored payload stays as stored. Undefined when there is nothing to
+ * write: the draft carries no slug, or already carries this one.
+ */
+export function draftPayloadFollowingBusinessSlug(
+  stored: Prisma.JsonValue | null | undefined,
+  businessSlug: string,
+  previousBusinessSlug?: string | null,
+): Prisma.InputJsonObject | undefined {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return undefined;
+  const { slug: draftSlug, ...rest } = stored as Prisma.JsonObject;
+  if (typeof draftSlug !== 'string' || draftSlug === businessSlug) return undefined;
+  delete rest[REPLACED_SLUGS_KEY];
+  const replaced = [...replacedSlugsOf(stored), draftSlug, previousBusinessSlug]
+    .filter((s): s is string => typeof s === 'string' && s.length > 0 && s !== businessSlug);
+  // Each slug once, at its latest position; the latest REPLACED_SLUGS_MAX are kept.
+  const remembered = replaced.filter((s, i) => replaced.lastIndexOf(s) === i).slice(-REPLACED_SLUGS_MAX);
+  const carried = presenceSchema.shape.slug.safeParse(businessSlug).success;
+  return {
+    ...rest,
+    ...(carried ? { slug: businessSlug } : {}),
+    [REPLACED_SLUGS_KEY]: remembered,
+  } as Prisma.InputJsonObject;
+}
+
+/** The Prisma client inside an interactive transaction (the shape catalog.service.ts names). */
+type TransactionClient = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+/** saveDraft's transaction: it waits only behind an in-flight PATCH of the same business (SEC-W7SPD-1). */
+const SAVE_DRAFT_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
+
+/** The authenticated caller of a presence write, as AuthMiddleware attaches it (req.user). */
+export type PresenceActor = { id: string; role?: string };
+
+/** R0-09b (owner ruling D-11): the refusal a non-owner gets for saving a new public slug in the draft. */
+export const PRESENCE_SLUG_OWNER_ONLY = 'PRESENCE_SLUG_OWNER_ONLY';
+
 type Diff = { path: string; before: unknown; after: unknown };
 function diffPayload(a: unknown, b: unknown, path = ''): Diff[] {
   const diffs: Diff[] = [];
@@ -287,20 +367,57 @@ export class PresenceService {
     };
   }
 
-  async saveDraft(businessId: string, payload: unknown, userId?: string) {
+  /**
+   * Any member may save the draft (BusinessGuard), except that a non-owner may
+   * not put a new public slug in it (R0-09b, owner ruling D-11): a slug that is
+   * neither the Business's current slug nor the one the draft already carries
+   * answers 403 PRESENCE_SLUG_OWNER_ONLY and nothing is saved. Keeping the
+   * draft's slug, or sending none, is today's rule (see assertSlugOwner).
+   *
+   * W7-SLUG-PRESENCE-DRAFT repair (D-11, review CR-1):
+   * - SEC-W7SPD-2 / CRR-1: a non-owner whose editor was loaded before the
+   *   owner's PATCH /identity/businesses/:id moved the slug still sends the
+   *   replaced slug with every save and autosave. A slug the draft remembers
+   *   as replaced (REPLACED_SLUGS_KEY) is that stale copy, not a change: the
+   *   save keeps the draft's own slug (none, when the draft has none) and
+   *   saves the content (200). Any other new slug is still refused.
+   * - SEC-W7SPD-1: the check and the write run in one transaction that first
+   *   takes FOR SHARE on the businesses row. The PATCH holds FOR NO KEY UPDATE
+   *   on that row while it moves Business.slug and the draft's slug, so a save
+   *   that arrives during the PATCH waits for it and checks against the
+   *   committed slugs, and a PATCH that arrives during a save waits for the
+   *   save and moves the slug of what it saved.
+   */
+  async saveDraft(businessId: string, payload: unknown, actor?: PresenceActor) {
     const cleaned = sanitizePayload(payload);
-    const existing = await this.prisma.client.sitePageDraft.findUnique({ where: { businessId } });
-    const data = {
-      payload: asJson(cleaned),
-      status: 'DRAFT',
-      lastSavedById: userId ?? null,
-      version: existing ? existing.version + 1 : 1,
-    };
-    const upserted = await this.prisma.client.sitePageDraft.upsert({
-      where: { businessId },
-      update: data,
-      create: { ...data, businessId },
-    });
+    const upserted = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId} FOR SHARE`;
+      const existing = await tx.sitePageDraft.findUnique({ where: { businessId } });
+      const replaced = replacedSlugsOf(existing?.payload);
+      if (cleaned.slug !== undefined) {
+        const draftSlug = existing ? fromJson(existing.payload).slug : undefined;
+        if (cleaned.slug !== draftSlug && cleaned.slug !== (await this.businessSlug(businessId, tx))) {
+          if (!replaced.includes(cleaned.slug)) {
+            await this.assertSlugOwner(businessId, actor, tx);
+          } else if (!(await this.isSlugOwner(businessId, actor, tx))) {
+            // A non-owner's stale copy of a slug the owner's PATCH replaced: the draft keeps its own.
+            if (draftSlug === undefined) delete cleaned.slug;
+            else cleaned.slug = draftSlug;
+          }
+        }
+      }
+      const data = {
+        payload: withReplacedSlugs(cleaned, replaced),
+        status: 'DRAFT',
+        lastSavedById: actor?.id ?? null,
+        version: existing ? existing.version + 1 : 1,
+      };
+      return tx.sitePageDraft.upsert({
+        where: { businessId },
+        update: data,
+        create: { ...data, businessId },
+      });
+    }, SAVE_DRAFT_TX_OPTIONS);
     return {
       id: upserted.id,
       version: upserted.version,
@@ -358,16 +475,44 @@ export class PresenceService {
     };
   }
 
-  async publish(businessId: string, userId?: string) {
+  /**
+   * Publishing puts the draft live and, for the owner, copies the draft's slug
+   * onto Business.slug, the public address.
+   *
+   * R0-09b (owner ruling D-11, review R09-ST-2): only the owner (or a
+   * SUPER_ADMIN) moves Business.slug. Any member may publish, but a
+   * non-owner's publish never changes the address: when the draft's slug
+   * differs from Business.slug, the page goes live at the current Business.slug
+   * (the published payload carries that slug), Business.slug is not written,
+   * and the draft keeps its slug for the owner's next publish. A draft slug
+   * differs either because the owner saved a new one that is still pending, or
+   * because the owner moved Business.slug through PATCH /identity/businesses/:id
+   * after the draft was seeded; the draft cannot tell the two apart, and
+   * neither may block a non-owner's content publish (review CR-1). A publish
+   * that leaves the slug as it is does not rewrite the Business row.
+   * W7-SLUG-PRESENCE-DRAFT (D-11, review CR-1): the PATCH now carries the
+   * draft's slug along in its transaction (draftPayloadFollowingBusinessSlug),
+   * so the owner's publish no longer puts a slug the PATCH replaced back; a
+   * stale slug can only remain in a draft saved and left over from before
+   * that change.
+   */
+  async publish(businessId: string, actor?: PresenceActor) {
+    const userId = actor?.id;
     const draft = await this.prisma.client.sitePageDraft.findUnique({ where: { businessId } });
     if (!draft) throw new BadRequestException('No draft to publish');
     const cleaned = sanitizePayload(draft.payload);
+    const liveSlug = await this.businessSlug(businessId);
+    const draftSlugDiffers = !!cleaned.slug && cleaned.slug !== liveSlug;
+    const slugChange = draftSlugDiffers && (await this.isSlugOwner(businessId, actor));
+    const toPublish: PresencePayload = draftSlugDiffers && !slugChange
+      ? { ...cleaned, slug: liveSlug ?? undefined }
+      : cleaned;
     const existing = await this.prisma.client.sitePagePublished.findUnique({ where: { businessId } });
     const nextVersion = (existing?.version ?? 0) + 1;
     const published = await this.prisma.client.sitePagePublished.upsert({
       where: { businessId },
       update: {
-        payload: asJson(cleaned),
+        payload: asJson(toPublish),
         version: nextVersion,
         publishedAt: new Date(),
         publishedById: userId ?? null,
@@ -375,7 +520,7 @@ export class PresenceService {
       },
       create: {
         businessId,
-        payload: asJson(cleaned),
+        payload: asJson(toPublish),
         version: nextVersion,
         publishedById: userId ?? null,
       },
@@ -385,7 +530,7 @@ export class PresenceService {
       where: { businessId },
       data: { status: 'PUBLISHED' },
     });
-    if (cleaned.slug) {
+    if (slugChange) {
       try {
         await this.prisma.client.business.update({ where: { id: businessId }, data: { slug: cleaned.slug } });
       } catch (err: any) {
@@ -446,6 +591,65 @@ export class PresenceService {
     }
     this.events.emit('SITE_UNPUBLISHED', { businessId, version: updated.version });
     return { id: updated.id, unpublishedAt: updated.unpublishedAt };
+  }
+
+  private async businessSlug(businessId: string, client: TransactionClient = this.prisma.client): Promise<string | null> {
+    const business = await client.business.findFirst({ where: { id: businessId }, select: { slug: true } });
+    return business?.slug ?? null;
+  }
+
+  /**
+   * R0-09b-D11-SIBLING-WRITES, owner ruling D-11 (2026-10-31): editing the
+   * business profile is OWNER only, regardless of granted scopes. Of the
+   * owner-only profile fields (the ones PATCH /identity/businesses/:businessId
+   * writes: name, slug, currency, timezone, tax, store settings and the rest),
+   * the presence routes write exactly one onto the Business row: slug, at
+   * publish. Branding, sections, seo and customDomain live in site_page_drafts
+   * and site_pages_published only, so those edits keep the BusinessGuard rule
+   * (any member) and are not gated here. saveDraft refuses a non-owner a new
+   * slug (assertSlugOwner); publish asks isSlugOwner and, for a non-owner,
+   * publishes at the current address instead of refusing.
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The rule is restated rather than imported, as
+   * R0-08c did: IdentityModule imports AiModule, which reaches SiteModule
+   * through KeyCortexModule. No actor is not the owner (fails closed).
+   */
+  private async isSlugOwner(
+    businessId: string,
+    actor: PresenceActor | undefined,
+    client: TransactionClient = this.prisma.client,
+  ): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
+  /** 403 PRESENCE_SLUG_OWNER_ONLY unless the actor is the owner (see isSlugOwner). */
+  private async assertSlugOwner(
+    businessId: string,
+    actor: PresenceActor | undefined,
+    client: TransactionClient = this.prisma.client,
+  ): Promise<void> {
+    if (await this.isSlugOwner(businessId, actor, client)) return;
+    throw new ForbiddenException({
+      code: PRESENCE_SLUG_OWNER_ONLY,
+      message: 'Only the business owner can change the public site address (slug).',
+    });
   }
 
   async getPublishedBySlug(slug: string) {

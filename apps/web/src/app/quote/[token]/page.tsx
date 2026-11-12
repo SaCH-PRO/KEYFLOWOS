@@ -93,6 +93,9 @@ export default function PublicQuotePage() {
   const [respondError, setRespondError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  // V1-QUOTE-CHAIN-finish (SEC-5): set when an accept was refused because the
+  // business edited the quote after this page loaded it.
+  const [termsNotice, setTermsNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -121,12 +124,26 @@ export default function PublicQuotePage() {
     if (!token) return;
     setRespondState("submitting");
     setRespondError(null);
-    const { data, error } = await acceptPublicQuote(token);
+    // V1-QUOTE-CHAIN-finish (SEC-5): accept exactly the terms on screen.
+    const { data, error, rawError } = await acceptPublicQuote(token, quote?.termsVersion);
     if (error || !data) {
+      const code = rawError?.code;
+      if (code === "quote_terms_changed" || code === "quote_terms_version_required") {
+        // The business changed the quote after this page loaded it: show the
+        // current terms and let the customer decide on those.
+        const fresh = await fetchPublicQuote(token);
+        if (fresh.data) setQuote(fresh.data);
+        setRespondState("idle");
+        setTermsNotice(
+          "This quote was updated after you opened it. Please review the updated quote below before accepting it.",
+        );
+        return;
+      }
       setRespondState("error");
       setRespondError(error || "Failed to accept quote.");
       return;
     }
+    setTermsNotice(null);
     setQuote((prev) => (prev ? { ...prev, ...data } : data));
     setRespondState("done");
   };
@@ -296,6 +313,12 @@ export default function PublicQuotePage() {
 
         {canRespond && (
           <Card className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">
+            {termsNotice && (
+              <p role="status" className="mb-3 flex items-start gap-2 text-sm text-amber-200">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-300" />
+                <span>{termsNotice}</span>
+              </p>
+            )}
             {!showRejectForm ? (
               <div className="flex flex-col sm:flex-row gap-3">
                 <Button

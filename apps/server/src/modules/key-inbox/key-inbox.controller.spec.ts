@@ -4,6 +4,7 @@ import { KeyInboxService } from './key-inbox.service';
 import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
 import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 import { BusinessEventService } from '../business-events/business-event.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 describe('KeyInboxController', () => {
   function makeController() {
@@ -36,7 +37,20 @@ describe('KeyInboxController', () => {
       getReport: vi.fn().mockResolvedValue({ id: 'intel_1', scope: 'WEEKLY' }),
     } as unknown as KeyInboxIntelligenceService;
 
-    const controller = new KeyInboxController(keyInbox, executor, intelligence, businessEvents);
+    // V1-31b: executeAction checks the member's module scope (an OWNER here) and claims the
+    // suggestion in idempotency_keys before it runs (real database: test/key-action-routes-bind).
+    const prisma = {
+      client: {
+        membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) },
+        idempotencyKey: {
+          create: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      },
+    } as unknown as PrismaService;
+
+    const controller = new KeyInboxController(keyInbox, executor, intelligence, businessEvents, prisma);
     return { controller, keyInbox, executor, intelligence, businessEvents };
   }
 

@@ -5,7 +5,9 @@ import { RulesService, SYSTEM_RULES } from './rules.service';
 import { SignalsService } from './signals.service';
 import { CommandBridgeService } from './command-bridge.service';
 import { HealthScoreService } from './health-score.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class ScheduledScansService implements OnModuleInit {
@@ -31,6 +33,7 @@ export class ScheduledScansService implements OnModuleInit {
   // empirically, not assumed.) The work stays in runAllScans() so callers and
   // tests are unchanged; only the scheduled entry point is guarded.
   runAllScansTick(): void {
+    if (schedulersDisabled()) return;
     runGuarded('ScheduledScansService', () => this.runAllScans(), this.logger);
   }
 
@@ -93,11 +96,19 @@ export class ScheduledScansService implements OnModuleInit {
           case 'invoice_overdue': {
             const invoices = await this.prisma.client.invoice.findMany({
               where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } },
-              select: { id: true, contactId: true, total: true, dueDate: true },
+              select: {
+                id: true, contactId: true, total: true, currency: true, dueDate: true,
+                // V1-41c: this tenant's own rows (M31), read by the balance contract below.
+                payments: { where: { businessId }, select: { amount: true, status: true } },
+              },
             });
             for (const inv of invoices) {
-              const paymentSum = await this.prisma.client.payment.aggregate({ where: { invoiceId: inv.id }, _sum: { amount: true } });
-              const remaining = Number(inv.total ?? 0) - Number(paymentSum._sum.amount ?? 0);
+              // V1-41c-MONEY-ROW-COUNTERS: what is left is the V1-36 balance
+              // contract (balanceOfStoredRows: SUCCESSFUL in, refunds out,
+              // integer cents). The status-blind sum of every row read PENDING
+              // intents and extracted amounts, FAILED attempts and CONFIRMED
+              // extracted rows as money received, and dropped overdue invoices.
+              const remaining = balanceOfStoredRows(Number(inv.total ?? 0), inv.payments, inv.currency).remaining;
               if (remaining <= 0) continue;
               await this.signals.upsertSignal(
                 businessId,

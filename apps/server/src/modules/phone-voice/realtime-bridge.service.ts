@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import WebSocket from 'ws';
+import { keyDisabled } from '../../core/config/env';
 
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime';
 
@@ -32,6 +33,13 @@ export class RealtimeBridgeService {
     tools: RealtimeToolDef[];
     events: RealtimeBridgeEvents;
   }): Promise<{ sendAudio: (base64Mulaw: string) => void; close: () => void } | null> {
+    // V1-24b (SEC-V124-1): with KEY switched off no call audio reaches OpenAI.
+    // null is this bridge's refusal (the caller closes the call stream), given
+    // before the key is read or a socket is opened.
+    if (keyDisabled()) {
+      this.logger.warn('Realtime bridge refused: KEY is switched off on this server (KEY_DISABLED)');
+      return null;
+    }
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
     if (!apiKey) {
       this.logger.error('Realtime bridge: AI_INTEGRATIONS_OPENAI_API_KEY is not set');

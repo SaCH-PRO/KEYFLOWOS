@@ -4,6 +4,9 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { DATA_QUALITY_KINDS } from './crm-data-quality.util';
+import { crmRowCarriesMoney, readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 export type TopOpenDeal = {
   id: string;
@@ -37,6 +40,84 @@ export type ContactMeta = {
 export type ContactWithStats = Contact & {
   meta?: ContactMeta;
 };
+
+/**
+ * W7-CONTACT-MONEY-VIEWS review repair SEC-W7CMV-3 (V55-13i; owner rulings
+ * D-90 and D-63): the Contact.riskFlags entries ContactInsightService.recompute
+ * derives from the contact's invoices (revenue rows, D-63): 'unpaid_invoices'
+ * (an unpaid invoice), 'poor_payment_history' (its paymentReliability) and
+ * 'declining_engagement' (a paid total above 0).
+ */
+const REVENUE_RISK_FLAGS: ReadonlySet<string> = new Set(['unpaid_invoices', 'poor_payment_history', 'declining_engagement']);
+
+/**
+ * The Contact.opportunities entries it derives from the contact's quotes and
+ * invoices (SEC-W7CMV-3; D-90 / D-63): 'pending_quotes' (a quote not accepted)
+ * and 'upsell_ready' (a paid total above 500, a revenue threshold like the
+ * insight's 'high-value' tag).
+ */
+const REVENUE_OPPORTUNITIES: ReadonlySet<string> = new Set(['pending_quotes', 'upsell_ready']);
+
+/** A stored riskFlags / opportunities list without the `revenue` entries; any other stored value as it is. */
+function withoutRevenueSignals(value: Prisma.JsonValue | null, revenue: ReadonlySet<string>): Prisma.JsonValue | null {
+  return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
+}
+
+/**
+ * W9-MONEY-RANKING (owner ruling D-100; SEC-W8MS-3): a contact's stats with no
+ * invoice term: meta's lead score without +10 a paid and -5 an unpaid invoice
+ * (attachContactStats' terms; the score withoutListMoney in crm.service.ts
+ * serves a member without revenue read) and its invoice figures 0.
+ */
+function withoutInvoiceTerms(contact: ContactWithStats): ContactWithStats {
+  const meta = contact.meta;
+  if (!meta) return contact;
+  return {
+    ...contact,
+    meta: {
+      ...meta,
+      leadScore: meta.leadScore - meta.paidInvoices * 10 + meta.unpaidInvoices * 5,
+      outstandingBalance: 0,
+      unpaidInvoices: 0,
+      paidInvoices: 0,
+      oldestUnpaidInvoiceDueAt: null,
+      totalRevenue: 0,
+      invoiceCount: 0,
+    },
+  };
+}
+
+/** The entries GET .../highlights serves in its timeline (CrmTimelineService.buildTimeline's default cut). */
+const HIGHLIGHTS_TIMELINE_ENTRIES = 20;
+
+/** A contact scope no contact matches: the highlights of a member without revenue read when the call names no viewer (fail closed). */
+const NO_CONTACT: Prisma.ContactWhereInput = { id: { in: [] } };
+
+/**
+ * W11-CRM-SEGMENTS-VISIBLE (F-10, D-63) and its review repair SEC-W11SV-1
+ * (D-133): the live contacts of the business a CRM count reads: all of them
+ * with no visibility clause, else the base AND the clause.
+ */
+function viewerContactWhere(businessId: string, visibility: Prisma.ContactWhereInput | null): Prisma.ContactWhereInput {
+  return visibility ? { ...contactWhereBase(businessId), AND: [visibility] } : contactWhereBase(businessId);
+}
+
+/**
+ * W8-MONEY-SIGNALS review repair SEC-W8MS-3 / W9-MONEY-RANKING review repair
+ * SEC-W9MR-2 (owner ruling D-100): whether a highlights timeline entry carries
+ * money: an invoice row ('Total <amount> <currency>') or a ContactEvent row of
+ * a money type (crmRowCarriesMoney, the feed's rule). A member without revenue
+ * read is served neither (crm.controller.ts withoutHighlightsMoney).
+ *
+ * An entry carries no data, so this cannot see an event of another type whose
+ * data carries an amount (e.g. payment.completed, store_order.paid): that one
+ * is judged on its row, data included, before the entry is made
+ * (CrmTimelineService.buildTimeline withoutMoney; W10-MONEY-SIGNALS-REST review
+ * repair SEC-W10MSR-1, D-100, D-90, D-63). This stays as the backstop.
+ */
+export function timelineEntryCarriesMoney(entry: { type: string; title: string }): boolean {
+  return entry.type === 'invoice' || (entry.type === 'event' && crmRowCarriesMoney({ module: 'crm', type: entry.title }));
+}
 
 type ContactHighlight = {
   contactId: string;
@@ -146,28 +227,83 @@ export class CrmStatsService {
     return 'Unnamed';
   }
 
-  private async assertContact(businessId: string, contactId: string) {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-    });
+  /**
+   * Resolve one contact the way the list path does.
+   *
+   * With an actor, the row must satisfy the actor's effective CRM visibility
+   * (`resolveCrmAccess` + `visibilityClause`, the same rule `listContacts`
+   * applies) as well as the tenant predicate. A row the actor may not see is
+   * reported exactly like an absent one, so a forbidden PRIVATE record is
+   * never disclosed, and nothing related to it is read.
+   *
+   * Without an actor the tenant predicate alone applies, as before. That is
+   * the system context: automation, the flow executor and the KEY adapter
+   * reach this through `CrmService.contactDetail` with no caller identity.
+   */
+  private async assertContact(businessId: string, contactId: string, actorUserId?: string) {
+    const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    if (actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const visClause = visibilityClause(access, actorUserId);
+      if (visClause) {
+        where.AND = [visClause];
+      }
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
     return contact;
   }
 
-  async getContactStats(businessId: string) {
+  /**
+   * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100) and its
+   * review repair SEC-W11SV-1 (owner ruling D-133, the CRM count widgets): the
+   * visibility clause a CRM count read for `viewerUserId` ANDs onto its
+   * contact where (resolveCrmAccess + visibilityClause, the rule GET
+   * contacts/:contactId and GET .../highlights apply). Null when no rule hides
+   * a contact from that viewer (the OWNER, SUPER_ADMIN) or the call names no
+   * viewer (a system caller): the counts are then the whole business's.
+   * resolveCrmAccess refuses a non-member (ForbiddenException).
+   */
+  private async viewerContactVisibility(businessId: string, viewerUserId?: string): Promise<Prisma.ContactWhereInput | null> {
+    if (!viewerUserId) return null;
+    return visibilityClause(await resolveCrmAccess(this.prisma, businessId, viewerUserId), viewerUserId) as Prisma.ContactWhereInput | null;
+  }
+
+  /**
+   * The contact stats (GET .../contact-stats): totalCount, countByStatus,
+   * countBySource, recentGrowth (six weeks) and topTags. A viewer no
+   * visibility rule hides a contact from (the OWNER, SUPER_ADMIN), or a call
+   * that names no viewer, gets the business-wide stats, cached for it under
+   * `${businessId}:getContactStats`, as before.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133:
+   * CRM count widgets count only the contacts the member may open; the owner
+   * sees business-wide figures): any other viewer gets every figure over the
+   * contacts they may open, as GET .../segments counts them, so another
+   * member's PRIVATE contact is neither counted nor named by its source or
+   * tags. Not cached (neither read nor written): the visibility is that
+   * viewer's and is read at each request.
+   */
+  async getContactStats(businessId: string, viewerUserId?: string) {
+    const visibility = await this.viewerContactVisibility(businessId, viewerUserId);
     const cacheKey = `${businessId}:getContactStats`;
-    const cached = await this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (!visibility) {
+      const cached = await this.cache.get(cacheKey);
+      if (cached) return cached;
+    }
+
+    // SEC-W11SV-1 (D-133): with a visibility clause every figure's where is the base AND the clause.
+    const base = viewerContactWhere(businessId, visibility);
 
     const totalCount = await this.prisma.client.contact.count({
-      where: contactWhereBase(businessId),
+      where: base,
     });
 
     const statusGroups = await this.prisma.client.contact.groupBy({
       by: ['status'],
-      where: contactWhereBase(businessId),
+      where: base,
       _count: { id: true },
     });
     const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
@@ -177,7 +313,7 @@ export class CrmStatsService {
 
     const sourceGroups = await this.prisma.client.contact.groupBy({
       by: ['source'],
-      where: contactWhereBase(businessId),
+      where: base,
       _count: { id: true },
     });
     const countBySource = sourceGroups.map((g) => ({
@@ -198,7 +334,7 @@ export class CrmStatsService {
       weekEnd.setDate(weekEnd.getDate() + 7);
       const count = await this.prisma.client.contact.count({
         where: {
-          ...contactWhereBase(businessId),
+          ...base,
           createdAt: { gte: weekStart, lt: weekEnd },
         },
       });
@@ -206,7 +342,7 @@ export class CrmStatsService {
     }
 
     const allContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: base,
       select: { tags: true },
     });
     const tagCounts = new Map<string, number>();
@@ -221,7 +357,8 @@ export class CrmStatsService {
       .slice(0, 10);
 
     const result = { totalCount, countByStatus, countBySource, recentGrowth, topTags };
-    await this.cache.set(cacheKey, result);
+    // SEC-W11SV-1 (D-133): a viewer's stats are never written to the business cache.
+    if (!visibility) await this.cache.set(cacheKey, result);
     return result;
   }
 
@@ -568,14 +705,54 @@ export class CrmStatsService {
     return { groups: groups.slice(0, 20) };
   }
 
-  async contactDetail(params: { businessId: string; contactId: string }) {
-    const contact = await this.assertContact(params.businessId, params.contactId);
+  /**
+   * Contact detail projection. `actorUserId` is the caller whose CRM
+   * visibility bounds the lookup (the HTTP route always supplies it); omitted
+   * only by system-context callers, which keep the tenant-only predicate.
+   *
+   * W7-CONTACT-MONEY-VIEWS (V55-13h; CR-W6CEM-1, owner rulings D-90 and D-63,
+   * the V1-84 timeline rule): `actorUserId` is also the reading member whose
+   * revenue read decides the money in the response (GET contacts/:id and the
+   * dossier's contact and meta). One without revenue read is served no money
+   * row and no money figure: `events` are the ContactEvents GET .../events
+   * serves them (the rule of CrmTimelineService.listContactEvents, V55-13e,
+   * read here through Prisma: the money events withheld, the 50 filled from
+   * older events), the contact's invoices are not read (`invoices` is empty,
+   * so meta's invoice figures, totalRevenue and outstandingBalance included,
+   * are 0 and its lead score has no invoice term), and the contact's stored
+   * lifetimeValue / averageSpend (the paid total ContactInsightService
+   * writes) are null. Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): so is
+   * its stored paymentReliability (the paid / total invoice score, which GET
+   * .../revenue-summary already serves that member as null), and its stored
+   * riskFlags / opportunities lose the entries ContactInsightService derives
+   * from the contact's invoices and quotes (REVENUE_RISK_FLAGS,
+   * REVENUE_OPPORTUNITIES); the other entries stay. Not closed here (outside
+   * this write set, follow-up CR-W7CMV-2): GET /crm/businesses/:b/contacts
+   * (CrmService.listContacts) still serves the same stored fields, and sorts
+   * and filters on revenue, to the same member, so until that list is closed
+   * this withholding does not keep them from that member. Before it the route served
+   * every event, invoice total and revenue figure on crm read alone. The owner,
+   * a member with revenue read and a system-context caller get every row and
+   * figure, as before.
+   */
+  async contactDetail(params: { businessId: string; contactId: string; actorUserId?: string }) {
+    const contact = await this.assertContact(params.businessId, params.contactId, params.actorUserId);
+    const viewer = params.actorUserId ? await resolveTimelineViewer(this.prisma, params.businessId, params.actorUserId) : null;
+    const readsRevenue = viewer === null || viewer.readable.has('revenue');
+    const eventWhere = { businessId: params.businessId, contactId: params.contactId };
     const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
-      this.prisma.client.contactEvent.findMany({
-        where: { businessId: params.businessId, contactId: params.contactId },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+      viewer
+        ? // The rule CrmTimelineService.listContactEvents applies to GET .../events (V55-13e):
+          // each event judged as the feed judges its CRM copy (module crm, naming the contact).
+          readVisibleActivityPage(this.prisma, viewer, 50, async (skip, take) => {
+            const rows = await this.prisma.client.contactEvent.findMany({ where: eventWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip, take });
+            return rows.map((event) => ({ module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data, event }));
+          }).then((page) => page.map((row) => row.event))
+        : this.prisma.client.contactEvent.findMany({
+            where: eventWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+          }),
       this.prisma.client.contactNote.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },
         orderBy: { createdAt: 'desc' },
@@ -586,25 +763,31 @@ export class CrmStatsService {
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
-        select: {
-          id: true,
-          status: true,
-          total: true,
-          currency: true,
-          dueDate: true,
-          issueDate: true,
-          createdAt: true,
-          paidAt: true,
-        },
-      }),
+      readsRevenue
+        ? this.prisma.client.invoice.findMany({
+            where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
+            select: {
+              id: true,
+              status: true,
+              total: true,
+              currency: true,
+              dueDate: true,
+              issueDate: true,
+              createdAt: true,
+              paidAt: true,
+            },
+          })
+        : [],
       this.prisma.client.booking.findMany({
         where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
         select: { id: true, status: true, startTime: true, endTime: true, serviceId: true, staffId: true },
       }),
+      // Only the contact's own business's definitions (SEC-R015c-3 review SF-1,
+      // W9-CUSTOM-FIELDS-TENANT): the tenant extension never reaches the
+      // included definition, so a value row bound to another business's
+      // definition would serve its label, description and options here.
       this.prisma.client.contactCustomFieldValue.findMany({
-        where: { contactId: params.contactId },
+        where: { contactId: params.contactId, definition: { businessId: params.businessId } },
         include: { definition: true },
       }),
     ]);
@@ -677,15 +860,49 @@ export class CrmStatsService {
       meta.overdueTasks * 5 +
       (contact.status === 'CLIENT' ? 5 : 0);
 
-    return { contact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
+    // W7-CONTACT-MONEY-VIEWS (V55-13h; D-90 / D-63): the stored amounts on the contact row itself.
+    // Review repair SEC-W7CMV-3 (V55-13i; D-90 / D-63): and the stored signals
+    // read from the same invoice and quote rows, so this read agrees with
+    // GET .../revenue-summary (paymentReliability null for that member).
+    const servedContact: Contact = readsRevenue
+      ? contact
+      : {
+          ...contact,
+          lifetimeValue: null,
+          averageSpend: null,
+          paymentReliability: null,
+          riskFlags: withoutRevenueSignals(contact.riskFlags, REVENUE_RISK_FLAGS),
+          opportunities: withoutRevenueSignals(contact.opportunities, REVENUE_OPPORTUNITIES),
+        };
+    return { contact: servedContact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 
-  async segmentSummary(input: { businessId: string }) {
+  /**
+   * The CRM segment counts. A viewer no visibility rule hides a contact from
+   * (the OWNER, SUPER_ADMIN), or a call that names no viewer, gets the counts
+   * of the whole business, cached for it under `${businessId}:segmentSummary`,
+   * as before.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63, the contact rule, and
+   * D-100): any other viewer gets every count over the contacts they may open
+   * (resolveCrmAccess + visibilityClause, as flowHighlights and GET
+   * contacts/:contactId apply it), so another member's PRIVATE contact is not
+   * counted, for a member with revenue read too; the invoice and booking terms
+   * are unchanged. Not cached (neither read nor written): the visibility is
+   * that viewer's and is read at each request. resolveCrmAccess refuses a
+   * non-member (ForbiddenException). The controller still serves unpaid 0 to a
+   * member without revenue read (D-100, SEC-W8MS-3).
+   */
+  async segmentSummary(input: { businessId: string; viewerUserId?: string }) {
+    const visibility = await this.viewerContactVisibility(input.businessId, input.viewerUserId);
     const cacheKey = `${input.businessId}:segmentSummary`;
-    const cached = await this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (!visibility) {
+      const cached = await this.cache.get(cacheKey);
+      if (cached) return cached;
+    }
 
-    const base = contactWhereBase(input.businessId);
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; D-63): with a visibility clause every count's where is the base AND the clause.
+    const base = viewerContactWhere(input.businessId, visibility);
     const now = new Date();
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -715,37 +932,104 @@ export class CrmStatsService {
       this.prisma.client.contact.count({ where: { ...base, relationshipHealth: 'DORMANT' } }),
     ]);
     const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
-    await this.cache.set(cacheKey, segResult);
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; D-63): a viewer's counts are never written to the business cache.
+    if (!visibility) await this.cache.set(cacheKey, segResult);
     return segResult;
   }
 
-  async flowHighlights(input: { businessId: string }): Promise<FlowHighlightsPayload> {
+  /**
+   * The CRM highlights. A viewer no visibility rule hides a contact from (the
+   * OWNER, SUPER_ADMIN) with revenue read, or a call that names no viewer
+   * with `readsRevenue` absent or true, gets the payload of the whole
+   * business, cached for it, as before.
+   *
+   * W10-MONEY-SIGNALS-REST (owner rulings D-63 and D-100; review residuals
+   * SEC-W9MR-1 and SEC-W9MR-2 remainder): any other viewer gets every part
+   * worked out from the contacts they may open (buildHighlights), a member
+   * with revenue read included, so another member's PRIVATE contact is never
+   * named or counted there; W9-MONEY-RANKING (D-100): with `readsRevenue`
+   * false (a member without revenue read) no money signal chooses, places or
+   * crowds out an entry, and a call naming no viewer reads no contact (fails
+   * closed). Not cached: the visibility is that viewer's and is read at each
+   * request.
+   */
+  async flowHighlights(input: { businessId: string; readsRevenue?: boolean; viewerUserId?: string }): Promise<FlowHighlightsPayload> {
+    const readsRevenue = input.readsRevenue !== false;
+    const visibility = input.viewerUserId
+      ? (visibilityClause(await resolveCrmAccess(this.prisma, input.businessId, input.viewerUserId), input.viewerUserId) as Prisma.ContactWhereInput | null)
+      : null;
+    if (!readsRevenue || visibility) {
+      // W10-MONEY-SIGNALS-REST (D-63, D-100): worked out for this viewer, not cached; no viewer reads no contact (fails closed).
+      return this.buildHighlights(input.businessId, readsRevenue, input.viewerUserId ? visibility : NO_CONTACT);
+    }
     const cacheKey = `${input.businessId}:flowHighlights`;
     const cached = await this.cache.get<FlowHighlightsPayload>(cacheKey);
     if (cached) return cached;
 
+    const flowResult = await this.buildHighlights(input.businessId, true, null);
+    await this.cache.set(cacheKey, flowResult);
+    return flowResult;
+  }
+
+  /**
+   * The highlights of the contacts matching `scope` (null: every contact of
+   * the business, the owner's payload as before).
+   *
+   * W10-MONEY-SIGNALS-REST (owner ruling D-63, the contact rule; review
+   * residual SEC-W9MR-1): every part is read from the contacts `scope` admits,
+   * the viewer's visibility clause (resolveCrmAccess + visibilityClause, the
+   * rule GET contacts/:contactId applies), so another member's PRIVATE contact
+   * is never a card, an overdue reminder, a next action, a segment contact or
+   * count, a timeline entry or a service-affinity booking or top contact, for
+   * a member with revenue read too:
+   * - the 200 newest such contacts, with their stats, give highPotential,
+   *   overdueReminders and nextActions;
+   * - the segments count and list only such contacts (buildSegmentInsights);
+   * - service affinity counts their bookings only (buildServiceAffinity);
+   * - the timeline reads their rows only (CrmTimelineService.buildTimeline).
+   *
+   * With `readsRevenue` false (a member without revenue read; W9-MONEY-RANKING,
+   * owner ruling D-100, review repairs SEC-W9MR-1 / SEC-W9MR-2) no money signal
+   * chooses, places or crowds out an entry: each contact's stats are taken
+   * without the invoice terms (withoutInvoiceTerms: the lead score without +10
+   * a paid / -5 an unpaid invoice, the score that member's list and segment
+   * rows carry; balance, unpaid count and due date 0 or null), so the
+   * high-potential cards are ranked by the money-free score and no invoice
+   * follow-up takes an action's place before the cap of 6; there are no
+   * overdue reminders and no 'cold-with-unpaid' segment; the timeline is read
+   * without money (timelineWithoutMoney). The controller then projects what
+   * is left for that member (crm.controller.ts withoutHighlightsMoney).
+   */
+  private async buildHighlights(businessId: string, readsRevenue: boolean, scope: Prisma.ContactWhereInput | null): Promise<FlowHighlightsPayload> {
+    // A related row's contact, as the viewer may open it (live and within the clause).
+    const visibleContact: Prisma.ContactWhereInput | null = scope ? { deletedAt: null, AND: [scope] } : null;
     const rawContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(input.businessId),
+      where: scope ? { ...contactWhereBase(businessId), AND: [scope] } : contactWhereBase(businessId),
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    const contacts = rawContacts.length > 0
-      ? await this.attachContactStats(input.businessId, rawContacts)
+    const withStats = rawContacts.length > 0
+      ? await this.attachContactStats(businessId, rawContacts)
       : [];
+    const contacts = readsRevenue ? withStats : withStats.map(withoutInvoiceTerms);
     const [segments, serviceAffinity, timeline] = await Promise.all([
-      this.buildSegmentInsights(input.businessId),
-      this.buildServiceAffinity(input.businessId),
-      this.timeline.buildTimeline(input.businessId),
+      this.buildSegmentInsights(businessId, scope, readsRevenue),
+      this.buildServiceAffinity(businessId, visibleContact),
+      readsRevenue
+        ? this.timeline.buildTimeline(businessId, HIGHLIGHTS_TIMELINE_ENTRIES, { contacts: visibleContact })
+        : this.timelineWithoutMoney(businessId, visibleContact),
     ]);
-    const flowResult = {
+    return {
       highlights: {
         highPotential: this.buildHighlightCards(contacts, 4, (meta) => meta.leadScore),
-        overdueReminders: this.buildHighlightCards(
-          contacts,
-          4,
-          (meta) => meta.outstandingBalance,
-          (contact) => (contact.meta?.outstandingBalance ?? 0) > 0,
-        ),
+        overdueReminders: readsRevenue
+          ? this.buildHighlightCards(
+              contacts,
+              4,
+              (meta) => meta.outstandingBalance,
+              (contact) => (contact.meta?.outstandingBalance ?? 0) > 0,
+            )
+          : [],
         serviceAffinity,
       },
       segments,
@@ -753,24 +1037,86 @@ export class CrmStatsService {
       nextActions: this.buildNextActions(contacts),
       aiNextActions: [],
     };
-    await this.cache.set(cacheKey, flowResult);
-    return flowResult;
   }
 
-  async getContactsPollState(businessId: string) {
+  /**
+   * W9-MONEY-RANKING review repair SEC-W9MR-2 (owner ruling D-100): the
+   * timeline for a member without revenue read. CrmTimelineService.buildTimeline
+   * reads it without money (no invoice; every ContactEvent the feed rule
+   * withholds from that member, a sales_revenue type or data carrying an
+   * amount, left out before its 10 events are taken, so they take none of the
+   * places: W10-MONEY-SIGNALS-REST, SEC-W9MR-2 remainder and review repair
+   * SEC-W10MSR-1, D-100, D-90) and with no cut, from the
+   * rows of the contacts `contacts` admits (D-63); any entry that still
+   * carries money (timelineEntryCarriesMoney) is left out, then the timeline
+   * is cut to the 20 the highlights serve.
+   */
+  private async timelineWithoutMoney(businessId: string, contacts: Prisma.ContactWhereInput | null): Promise<TimelineEntry[]> {
+    const entries = await this.timeline.buildTimeline(businessId, Number.POSITIVE_INFINITY, { contacts, withoutMoney: true });
+    return entries.filter((entry) => !timelineEntryCarriesMoney(entry)).slice(0, HIGHLIGHTS_TIMELINE_ENTRIES);
+  }
+
+  /**
+   * The contacts poll (GET .../contacts/poll): the newest contact edit and the
+   * contact count, which the contacts list polls to refetch on a change.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133,
+   * "the contacts poll"): named a viewer a visibility rule hides contacts
+   * from, both are worked out over the contacts that viewer may open, so a
+   * hidden contact's existence or edit time is not told; the OWNER,
+   * SUPER_ADMIN and a call naming no viewer keep the business-wide figures.
+   */
+  async getContactsPollState(businessId: string, viewerUserId?: string) {
+    const where = viewerContactWhere(businessId, await this.viewerContactVisibility(businessId, viewerUserId));
     const [result, totalCount] = await Promise.all([
       this.prisma.client.contact.aggregate({
-        where: contactWhereBase(businessId),
+        where,
         _max: { updatedAt: true },
       }),
       this.prisma.client.contact.count({
-        where: contactWhereBase(businessId),
+        where,
       }),
     ]);
     return {
       lastUpdatedAt: result._max.updatedAt?.toISOString() ?? null,
       totalCount,
     };
+  }
+
+  /**
+   * W11-CRM-COUNTS-RULING review repair SEC-W11CCR-1 (owner ruling D-133: CRM
+   * count widgets count only the contacts the member may open; the owner sees
+   * business-wide figures): the contact figures of GET .../data-quality/stats
+   * for `viewerUserId` (totalContacts, averageScore and the open issueCounts by
+   * kind), worked out as CrmDataQualityService.getStats works them out but over
+   * the live contacts the viewer may open (and those contacts' open issues), so
+   * comparing them with GET .../contact-stats tells nothing of a hidden
+   * contact. Null when no visibility rule hides a contact from that viewer
+   * (the OWNER, SUPER_ADMIN): the business-wide stats stand. Not cached.
+   */
+  async dataQualityCountsFor(
+    businessId: string,
+    viewerUserId: string,
+  ): Promise<{ totalContacts: number; averageScore: number; issueCounts: Record<string, number> } | null> {
+    const visibility = await this.viewerContactVisibility(businessId, viewerUserId);
+    if (!visibility) return null;
+    const contacts = viewerContactWhere(businessId, visibility);
+    const [byKind, totalContacts, scoreAgg] = await Promise.all([
+      this.prisma.client.contactDataIssue.groupBy({
+        by: ['kind'],
+        where: { businessId, status: 'open', contact: { is: contacts } },
+        _count: { _all: true },
+      }),
+      this.prisma.client.contact.count({ where: contacts }),
+      this.prisma.client.contact.aggregate({
+        where: { AND: [contacts, { dataQualityScore: { not: null } }] },
+        _avg: { dataQualityScore: true },
+      }),
+    ]);
+    const issueCounts: Record<string, number> = {};
+    for (const kind of DATA_QUALITY_KINDS) issueCounts[kind] = 0;
+    for (const row of byKind) issueCounts[row.kind] = row._count._all;
+    return { totalContacts, averageScore: Math.round(scoreAgg._avg.dataQualityScore ?? 100), issueCounts };
   }
 
   async toggleFavorite(businessId: string, contactId: string) {
@@ -785,9 +1131,21 @@ export class CrmStatsService {
     return { isFavorite, contact: updated };
   }
 
-  async getFavorites(businessId: string) {
+  /**
+   * The business's favourite contacts (GET .../contacts/favorites):
+   * isFavorite is a business-wide flag on contact.custom.
+   *
+   * W11-CRM-COUNTS-RULING review repair SEC-W11CCR-2 (owner ruling D-63, the
+   * contact rule): named a viewer a visibility rule hides contacts from, only
+   * the favourites that viewer may open (resolveCrmAccess + visibilityClause,
+   * the rule GET contacts/:contactId applies), so another member's PRIVATE
+   * contact is never listed; the OWNER, SUPER_ADMIN and a call naming no
+   * viewer (CrmService.getFavorites, a system caller) keep every favourite of
+   * the business.
+   */
+  async getFavorites(businessId: string, viewerUserId?: string) {
     const allContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: viewerContactWhere(businessId, await this.viewerContactVisibility(businessId, viewerUserId)),
       orderBy: { updatedAt: 'desc' },
     });
     return allContacts.filter((c) => {
@@ -823,7 +1181,15 @@ export class CrmStatsService {
     };
   }
 
-  private async buildSegmentInsights(businessId: string): Promise<SegmentInsight[]> {
+  /**
+   * The highlights' segments. W10-MONEY-SIGNALS-REST (owner ruling D-63;
+   * SEC-W9MR-1 residual): with a `scope` (the viewer's visibility clause) each
+   * segment counts and lists only the contacts it admits; null, every contact
+   * of the business, as before. Without revenue read (D-100) the
+   * 'cold-with-unpaid' segment, whose members are the contacts with an unpaid
+   * invoice, is not read (the controller leaves it out for that member too).
+   */
+  private async buildSegmentInsights(businessId: string, scope: Prisma.ContactWhereInput | null = null, readsRevenue = true): Promise<SegmentInsight[]> {
     const now = new Date();
     const startOfWeek = new Date(now);
     startOfWeek.setHours(0, 0, 0, 0);
@@ -872,14 +1238,16 @@ export class CrmStatsService {
 
     const insights: SegmentInsight[] = [];
     for (const def of definitions) {
+      if (!readsRevenue && def.key === 'cold-with-unpaid') continue;
       const take = def.take ?? 6;
+      const where: Prisma.ContactWhereInput = scope ? { ...def.countWhere, AND: [scope] } : def.countWhere;
       const [rawContacts, count] = await Promise.all([
         this.prisma.client.contact.findMany({
-          where: def.countWhere,
+          where,
           orderBy: { createdAt: 'desc' },
           take,
         }),
-        this.prisma.client.contact.count({ where: def.countWhere }),
+        this.prisma.client.contact.count({ where }),
       ]);
       const contactsWithStats = rawContacts.length > 0
         ? await this.attachContactStats(businessId, rawContacts)
@@ -895,10 +1263,17 @@ export class CrmStatsService {
     return insights;
   }
 
-  private async buildServiceAffinity(businessId: string): Promise<ServiceAffinity[]> {
+  /**
+   * The highlights' service affinity. W10-MONEY-SIGNALS-REST (owner ruling
+   * D-63; SEC-W9MR-1 residual): with `visibleContact` (the contacts the
+   * viewer may open) only their bookings are counted and only one of them is a
+   * service's top contact; null, every booking of the business, as before.
+   */
+  private async buildServiceAffinity(businessId: string, visibleContact: Prisma.ContactWhereInput | null = null): Promise<ServiceAffinity[]> {
+    const bookingWhere: Prisma.BookingWhereInput = { businessId, deletedAt: null, ...(visibleContact ? { contact: visibleContact } : {}) };
     const serviceStats = await this.prisma.client.booking.groupBy({
       by: ['serviceId'],
-      where: { businessId, deletedAt: null },
+      where: bookingWhere,
       _count: { serviceId: true },
       orderBy: { _count: { serviceId: 'desc' } },
       take: 5,
@@ -911,7 +1286,7 @@ export class CrmStatsService {
     const serviceMap = new Map(services.map((service) => [service.id, service]));
     const contactStats = await this.prisma.client.booking.groupBy({
       by: ['serviceId', 'contactId'],
-      where: { businessId, deletedAt: null, serviceId: { in: serviceIds } },
+      where: { ...bookingWhere, serviceId: { in: serviceIds } },
       _count: { contactId: true },
     });
     const contactIds = Array.from(new Set(contactStats.map((stat) => stat.contactId)));

@@ -4,6 +4,64 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 
 export { DEFAULT_AGENT_TRIGGERS } from './default-triggers.constants';
 
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93; D-73): the default rule an agent trigger is, or null.
+ * A rule seedForBusiness wrote is system-created, so the plans it fires run with the business owner
+ * as their member (AgentTriggerService.handleEvent records the owner on the plan). AgentTrigger has no
+ * member column, and its condition JSON is stored as POST/PUT agent/triggers receive it, so a member
+ * recorded in the row could be forged by any member; the rule is known as the system's by its source
+ * instead: the seeded name, event, objective and condition, at no higher risk tier than seeded. A rule
+ * a member changed in any of them is theirs and fires plans with no member (D-73); a member who copies
+ * a default rule word for word gets only what that default does. Review SEC-D93-3: the condition is
+ * part of the rule (a copy of 'New Lead' with no condition fires on every contact created), and a
+ * plan stored with no member is never taken as a default rule's at run time (systemPlanMember), so a
+ * copy this answers null for fires plans that run as no member.
+ *
+ * W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93; review SEC-D93-3, case CV-08m): the shape alone no longer
+ * decides. POST agent/triggers records the member who created the rule in its stored condition
+ * (agent-trigger.service.ts, agentTriggerWriter; a client's own key of that name is dropped), and the
+ * seeded rules never carry one, so a rule a member created (an exact copy of a default included) is
+ * never recognised here: it runs as that member. Switching a seeded rule on, off or editing it is the
+ * business owner's alone (ownerRunDefaultTrigger, which asks this on the rule's content with the
+ * recorded creator aside), and the owner's write records no member in it (review CR-W5AT-1,
+ * SEC-W5AT-3), so it stays the system's and runs as whoever owns the business when it fires.
+ */
+export function defaultAgentTriggerFor(trigger: {
+  name: string;
+  eventPattern: string;
+  objective: string;
+  condition?: unknown;
+  maxRiskTier?: number | null;
+}): (typeof DEFAULT_AGENT_TRIGGERS)[number] | null {
+  const condition = canonicalJson(trigger.condition ?? null);
+  return (
+    DEFAULT_AGENT_TRIGGERS.find(
+      (rule) =>
+        rule.name === trigger.name &&
+        rule.eventPattern === trigger.eventPattern &&
+        rule.objective === trigger.objective &&
+        canonicalJson(('condition' in rule ? rule.condition : null) ?? null) === condition &&
+        (trigger.maxRiskTier == null || trigger.maxRiskTier <= rule.maxRiskTier),
+    ) ?? null
+  );
+}
+
+/**
+ * `value` as JSON with every object's keys in order, so a stored JSON column compares by content
+ * (W5-AGENT-TRIGGERS-AUTHORITY review SEC-W5AT-1: updateAgentTrigger asks whether a write changed a
+ * rule's filter with it).
+ */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 
 @Injectable()
 export class DefaultTriggersService {

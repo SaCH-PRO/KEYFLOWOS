@@ -32,7 +32,8 @@ import { AccordionGroup, AccordionSection } from "./accordion-section";
 import { DeliveryConfigPanel } from "./delivery-config-panel";
 import { ShippingZonesPanel } from "./shipping-zones-panel";
 import { HoursEditor, type BusinessHoursMap } from "./hours-editor";
-import { FulfillmentPanel, type Order } from "./fulfillment-panel";
+import { FulfillmentPanel, canCompleteOffline, type Order } from "./fulfillment-panel";
+import { OrdersPanel } from "./orders-panel";
 import { QualificationConfig } from "./qualification-config";
 import type { StorefrontConfig, StoreStatus, DeliveryMethod, Product } from "@/lib/client";
 
@@ -299,6 +300,9 @@ function FulfillmentPipeline({ orders }: { orders: Order[] }) {
   );
 }
 
+/** Order statuses nothing more happens on (either vocabulary, compared upper-cased). */
+const FINISHED_ORDER_STATUSES = new Set(["DELIVERED", "COMPLETED", "CANCELLED", "REFUNDED"]);
+
 function OrdersSnapshot({ businessId }: { businessId: string }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
@@ -334,8 +338,18 @@ function OrdersSnapshot({ businessId }: { businessId: string }) {
     );
   }
 
-  const pending = orders.filter((o) => ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED"].includes(o.status));
-  const completed = orders.filter((o) => ["DELIVERED", "CANCELLED", "REFUNDED"].includes(o.status));
+  // Trial-N recheck G6PUB-RC1-2: statuses are compared upper-cased, and every
+  // order not finished is active. The marketplace fulfil route writes its own
+  // lowercase vocabulary on the same orders (its Confirm answers
+  // 'awaiting_payment'), and such an order fell out of both lists, with its
+  // Complete offline action. An order waiting for its cash (an unpaid CASH or
+  // MANUAL storefront order) is always shown, never cut by the 3 / 2 caps;
+  // older orders are in All Orders below.
+  const finished = (o: Order) => FINISHED_ORDER_STATUSES.has((o.status ?? "").toUpperCase());
+  const pending = orders.filter((o) => !finished(o));
+  const awaitingPayment = orders.filter(canCompleteOffline);
+  const activeOthers = pending.filter((o) => !canCompleteOffline(o));
+  const completed = orders.filter((o) => finished(o) && !canCompleteOffline(o));
 
   return (
     <div className="space-y-3 pt-2">
@@ -370,10 +384,10 @@ function OrdersSnapshot({ businessId }: { businessId: string }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {pending.length > 0 && (
+          {awaitingPayment.length > 0 && (
             <>
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Active</p>
-              {pending.slice(0, 3).map((order) => (
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Awaiting payment</p>
+              {awaitingPayment.map((order) => (
                 <FulfillmentPanel
                   key={order.id}
                   businessId={businessId}
@@ -381,8 +395,21 @@ function OrdersSnapshot({ businessId }: { businessId: string }) {
                   onUpdate={handleOrderUpdate}
                 />
               ))}
-              {pending.length > 3 && (
-                <p className="text-[10px] text-center" style={{ color: "hsl(var(--kf-muted-foreground))" }}>+{pending.length - 3} more active orders</p>
+            </>
+          )}
+          {activeOthers.length > 0 && (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--kf-muted-foreground))" }}>Active</p>
+              {activeOthers.slice(0, 3).map((order) => (
+                <FulfillmentPanel
+                  key={order.id}
+                  businessId={businessId}
+                  order={order}
+                  onUpdate={handleOrderUpdate}
+                />
+              ))}
+              {activeOthers.length > 3 && (
+                <p className="text-[10px] text-center" style={{ color: "hsl(var(--kf-muted-foreground))" }}>+{activeOthers.length - 3} more active orders</p>
               )}
             </>
           )}
@@ -617,6 +644,11 @@ export function OperationsMode({
 
           <AccordionSection title="Order Fulfillment" subtitle="View and manage customer orders" icon={Package} accentColor={primaryColor} defaultOpen>
             <OrdersSnapshot businessId={businessId} />
+          </AccordionSection>
+
+          {/* Trial-N recheck G6PUB-RC1-2: the full store order list (the latest 100, searchable), so every order, Complete offline included, is reachable past the snapshot. */}
+          <AccordionSection title="All Orders" subtitle="Every store order, searchable" icon={Package} accentColor={primaryColor}>
+            <OrdersPanel />
           </AccordionSection>
 
           <AccordionSection title="Delivery Methods (Advanced)" subtitle="Shipping, pickup, digital — storefront-level config" icon={Truck} accentColor={infoColor}>

@@ -8,6 +8,8 @@ import {
   Query,
   UseGuards,
   Request,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -20,6 +22,23 @@ import { DecideApprovalStepDto } from './dto/decide-approval-step.dto';
 import { DelegateApprovalStepDto } from './dto/delegate-approval-step.dto';
 import { ListApprovalsQueryDto } from './dto/list-approvals-query.dto';
 
+type PrincipalRequest = ExpressRequest & { user?: { id?: string } };
+
+/**
+ * The authenticated caller (V1-31). These routes used to fall back to
+ * 'system' when the request carried no user, so a request, a decision, a
+ * delegation or a cancellation could be recorded against a principal nobody
+ * authenticated as. AuthGuard sets req.user on every route here; a request
+ * that reaches a handler without one is refused, before any lookup or write.
+ */
+function principalOf(req: PrincipalRequest | undefined): string {
+  const id = req?.user?.id;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new UnauthorizedException('An authenticated user is required');
+  }
+  return id;
+}
+
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class ApprovalController {
@@ -30,11 +49,12 @@ export class ApprovalController {
   async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateApprovalRequestDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const requesterId = principalOf(req);
     return this.approvals.createRequest({
       businessId,
-      requesterId: req.user?.id ?? 'system',
+      requesterId,
       requestType: body.requestType,
       title: body.title,
       description: body.description,
@@ -58,22 +78,63 @@ export class ApprovalController {
     });
   }
 
+  /**
+   * The requests whose current step waits on the caller, in the path business
+   * only (getPendingForUser filters on businessId and the caller's id).
+   *
+   * Declared BEFORE `approvals/:approvalId` (R0-13f): Express answers with the
+   * first matching route, and below it this route was answered by getById as
+   * approval 'pending-for-me' (404), so the approvals and operations screens
+   * always showed an empty "waiting on me" list. route-shadowing.spec.ts keeps
+   * the order.
+   */
+  @Get('businesses/:businessId/approvals/pending-for-me')
+  @RateLimit(60, 60_000)
+  async pendingForMe(
+    @Param('businessId') businessId: string,
+    @Request() req: PrincipalRequest,
+  ) {
+    return this.approvals.getPendingForUser(businessId, principalOf(req));
+  }
+
+  /**
+   * The request `approvalId` when it belongs to the path business, else the
+   * not-found an unknown id gets (R0-13f review). ApprovalRequestService's
+   * per-request methods look a request up by id alone, and BusinessGuard proves
+   * only that the caller belongs to the path business, so without this a
+   * member of any business could read, decide, delegate, cancel or escalate
+   * another tenant's request through their own business's path. Every
+   * per-request handler below calls it first; the request's businessId never
+   * changes, so the check holds for the call that follows.
+   */
+  private async requestInBusiness(businessId: string, approvalId: string) {
+    const request = await this.approvals.getById(approvalId);
+    if (request.businessId !== businessId) throw new NotFoundException('Approval request not found');
+    return request;
+  }
+
   @Get('businesses/:businessId/approvals/:approvalId')
   @RateLimit(60, 60_000)
-  async getById(@Param('approvalId') approvalId: string) {
-    return this.approvals.getById(approvalId);
+  async getById(
+    @Param('businessId') businessId: string,
+    @Param('approvalId') approvalId: string,
+  ) {
+    return this.requestInBusiness(businessId, approvalId);
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/approve')
   @RateLimit(20, 60_000)
   async approve(
+    @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DecideApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
+    await this.requestInBusiness(businessId, approvalId);
     return this.approvals.decideStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       decision: 'approve',
       comment: body.comment,
     });
@@ -82,13 +143,16 @@ export class ApprovalController {
   @Post('businesses/:businessId/approvals/:approvalId/reject')
   @RateLimit(20, 60_000)
   async reject(
+    @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DecideApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
+    await this.requestInBusiness(businessId, approvalId);
     return this.approvals.decideStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       decision: 'reject',
       comment: body.comment,
     });
@@ -97,13 +161,16 @@ export class ApprovalController {
   @Post('businesses/:businessId/approvals/:approvalId/delegate')
   @RateLimit(20, 60_000)
   async delegate(
+    @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DelegateApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
+    await this.requestInBusiness(businessId, approvalId);
     return this.approvals.delegateStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       delegatedTo: body.delegatedTo,
       comment: body.comment,
     });
@@ -112,27 +179,28 @@ export class ApprovalController {
   @Delete('businesses/:businessId/approvals/:approvalId')
   @RateLimit(20, 60_000)
   async cancel(
-    @Param('approvalId') approvalId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
-  ) {
-    return this.approvals.cancelRequest(approvalId, req.user?.id ?? 'system');
-  }
-
-  @Get('businesses/:businessId/approvals/pending-for-me')
-  @RateLimit(60, 60_000)
-  async pendingForMe(
     @Param('businessId') businessId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Param('approvalId') approvalId: string,
+    @Request() req: PrincipalRequest,
   ) {
-    return this.approvals.getPendingForUser(businessId, req.user?.id ?? 'system');
+    const actorId = principalOf(req);
+    await this.requestInBusiness(businessId, approvalId);
+    return this.approvals.cancelRequest(approvalId, actorId);
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/escalate')
   @RateLimit(10, 60_000)
   async escalate(
+    @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: { reason?: string },
+    @Request() req: PrincipalRequest,
   ) {
+    // Escalation records no actor (escalateRequest takes none), but it moves
+    // the request to a terminal state, so it needs a principal like every
+    // other write here (V1-31 review SEC-V131-3).
+    principalOf(req);
+    await this.requestInBusiness(businessId, approvalId);
     return this.approvals.escalateRequest(approvalId, body.reason);
   }
 }

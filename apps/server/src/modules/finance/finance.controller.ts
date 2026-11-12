@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, Param, Patch, Post, Query, Req, Res,
+  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -8,7 +8,9 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { ReceivablesService } from './receivables.service';
 import { LedgerBalanceService } from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
@@ -32,11 +34,15 @@ import { MoneyMovesService } from './money-moves.service';
 import { CashReserveService } from './cash-reserve.service';
 import { BankRuleService, type CreateBankRuleInput, type UpdateBankRuleInput } from './bank-rule.service';
 import { RecurringJournalEntryService, type CreateRecurringJournalEntryInput, type UpdateRecurringJournalEntryInput } from './recurring-journal-entry.service';
-import { CreditNoteService, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
+import { CreditNoteService, RESERVED_CREDIT_NOTE_NUMBER_PREFIX, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
 import { AccountingPeriodService, type CreateAccountingPeriodInput, type CloseAccountingPeriodInput } from './accounting-period.service';
 import { BankConnectionService, type CreateBankConnectionInput, type UpdateBankConnectionInput } from './bank-connection.service';
 import { ExchangeRateService, type CreateExchangeRateInput } from './exchange-rate.service';
 import { FixedAssetService, type CreateFixedAssetInput, type UpdateFixedAssetInput } from './fixed-asset.service';
+import { SystemEmailSendError } from '../notifications/system-email.service';
+import { redactAddresses } from '../../core/security/redaction';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -92,6 +98,11 @@ export class FinanceController {
     @Req() req: Request,
   ) {
     const userId = (req as any).user?.id as string | undefined;
+    // FOLLOW3-A5 (F2 PF-03): the membership check every sibling Books write
+    // runs. BusinessGuard lets a SUPER_ADMIN through, so without it a
+    // SUPER_ADMIN with no Membership posted into any business's ledger.
+    if (!userId) throw new ForbiddenException('No access to this business');
+    await this.ensureAccess(userId, businessId);
     const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
     const input: PostingInput = {
       businessId,
@@ -112,13 +123,21 @@ export class FinanceController {
     return this.posting.post(input);
   }
 
+  // FOLLOW3-A6 review SEC-A5A6-02 (D-57): the manual journal lines are
+  // general-ledger lines (BRS-01), so the list needs revenue:read too; and
+  // SEC-A5A6-04: the membership check, so a non-member SUPER_ADMIN (whom
+  // ModuleScopeGuard and BusinessGuard pass) reads no ledger line.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('journal-entries')
   async listJournalEntries(
     @Param('businessId') businessId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('accountId') accountId?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const where: any = { businessId, type: 'ADJUSTMENT' };
     if (from || to) {
       where.date = {};
@@ -139,6 +158,22 @@ export class FinanceController {
   }
 
   // ---------- General Ledger & Trial Balance ----------
+  // FOLLOW3-A6 (owner ruling D-57): the Books reads that carry revenue and
+  // cash figures (general ledger, per-account balance, receivables aging,
+  // customer balance, overview, safe-to-spend) need revenue:read, the
+  // trial-balance gate below; no new module key. ModuleScopeGuard runs after
+  // the class guards and refuses a revenue:none member with 403 before the
+  // handler, so nothing is read or seeded for them. Review SEC-A5A6-02: the
+  // routes that serve the same figures again (GET journal-entries, the
+  // accountant export ZIP, its signed URL and its email, money-moves and the
+  // cashflow forecast) carry the same gate. Review SEC-A5A6-04: each of these
+  // reads also runs ensureAccess, so a non-member SUPER_ADMIN (whom
+  // BusinessGuard and ModuleScopeGuard pass) is refused on every one.
+  // A distinguished owner (Business.ownerId) with no Membership row is refused
+  // by BusinessGuard and ensureAccess (owner ruling D-104, W10-OWNER-MEMBERSHIP;
+  // review CR-A6-02, BRS-12).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('general-ledger')
   async getGeneralLedger(
     @Param('businessId') businessId: string,
@@ -159,6 +194,15 @@ export class FinanceController {
     });
   }
 
+  /**
+   * V1-37b review SEC-V37b-1: the trial balance carries the REVENUE rows per
+   * currency, so it needs revenue:read (ModuleScopeGuard, the gate of the
+   * commerce revenue reads): a member whose revenue scope is none is refused
+   * with 403 before anything is read. FOLLOW3-A6 (D-57) applies the same
+   * gate to the sibling Books reads that carry revenue and cash figures.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('trial-balance')
   async getTrialBalance(
     @Param('businessId') businessId: string,
@@ -167,12 +211,17 @@ export class FinanceController {
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
     const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : undefined);
+    // V1-37b (V1-37 review ST-V37-3 / RV37-01): the service answers one row per
+    // (account, currency). Each item carries its currency, so an account that
+    // saw TTD and USD is two labelled items, never two unlabelled ones a
+    // client keys or totals by account alone.
     return {
       items: result.map((r) => ({
         accountId: r.accountId,
         systemKey: r.systemKey,
         name: r.name,
         type: r.type,
+        currency: r.currency,
         debit: r.debit.toString(),
         credit: r.credit.toString(),
         net: r.net.toString(),
@@ -180,6 +229,8 @@ export class FinanceController {
     };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('trial-balance/account/:accountId')
   async getAccountBalance(
     @Param('businessId') businessId: string,
@@ -188,21 +239,33 @@ export class FinanceController {
     @Query('asOf') asOf?: string,
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
+    // FOLLOW3-A5: the balance is an aggregate by accountId alone (aggregate is
+    // not tenant-hooked), so the account must be the route business's own
+    // chart row first; another business's id answers like an unknown one.
+    const account = await this.prisma.client.chartOfAccount.findFirst({
+      where: { id: accountId, businessId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
     const balance = await this.ledgerBalance.getAccountBalance(accountId, asOf ? new Date(asOf) : undefined);
     return { accountId, balance: balance.toString() };
   }
 
   private async ensureAccess(userId: string, businessId: string) {
     const biz = await this.prisma.client.business.findFirst({
-      where: { id: businessId, OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+      where: { id: businessId, members: { some: { userId } } },
       select: { id: true },
     });
     if (!biz) throw new ForbiddenException('No access to this business');
   }
 
   // ---------- Receivables (FIN2) ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('receivables/aging')
-  async aging(@Param('businessId') businessId: string, @Query('asOf') asOf?: string) {
+  async aging(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }, @Query('asOf') asOf?: string) {
+    await this.ensureAccess(req.user.id, businessId);
     const date = asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : new Date();
     const [report, ledgerAr] = await Promise.all([
       this.receivables.getAging(businessId, date),
@@ -211,21 +274,34 @@ export class FinanceController {
     return { ...report, ledgerArBalance: ledgerAr };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('customers/:contactId/balance')
   async customerBalance(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('asOf') asOf?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const date = asOf ? new Date(asOf) : new Date();
     return this.receivables.getCustomerBalance(businessId, contactId, date);
   }
 
   // ---------- Overview ----------
+  /**
+   * W9-FINANCE-OVERVIEW (TS-22g; review SEC-W8RA-4, CR-W8RA-2; owner ruling D-63): the overview's
+   * revenue actions are served to the member as GET revenue-actions serves them, so the member is
+   * passed as the viewer (resolveTimelineViewer, the revenue-actions routes' own); revenue read stays
+   * the gate (ModuleScopeGuard, D-57).
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('overview')
   async getOverview(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.overview.getOverview(businessId);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, req.user.id);
+    return this.overview.getOverview(businessId, viewer);
   }
 
   @Get('expense-breakdown')
@@ -333,7 +409,9 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accounts.create(businessId, body);
+    // V1-37b (V1-34 review CR-34-01): create posts the opening balance through
+    // the ledger door; the caller is recorded as its author.
+    return this.accounts.create(businessId, body, { userId: req.user.id });
   }
   @Patch('accounts/:id')
   async updateAccount(
@@ -433,6 +511,12 @@ export class FinanceController {
     await this.ensureAccess(req.user.id, businessId);
     return this.settings.get(businessId);
   }
+  /**
+   * R0-09f (owner ruling D-11, R0-09d sweep): Business.defaultTaxRate is a field
+   * of the owner-only business profile, so a non-owner's change to it is
+   * refused (403 BUSINESS_PROFILE_OWNER_ONLY) before anything is written; the
+   * other finance settings keep ensureAccess (any member).
+   */
   @Patch('settings')
   async patchSettings(
     @Param('businessId') businessId: string,
@@ -440,7 +524,8 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.settings.update(businessId, body);
+    const input = await this.settings.assertTaxRateOwner(businessId, body ?? {}, req.user);
+    return this.settings.update(businessId, input);
   }
 
   // ---------- Bank Rules ----------
@@ -648,6 +733,11 @@ export class FinanceController {
    * `gmailQuery`    — Gmail search syntax, e.g. `from:republicbank.com`.
    *
    * Both are swept nightly. Either can be run on demand below.
+   *
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's): a
+   * source names which of the business's mail or Drive files are read into the books, so setting one
+   * up is the business owner's (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY before anything
+   * is stored), as running a sweep is below.
    */
   @Post('accounts/:accountId/statement-sources')
   async setStatementSources(
@@ -657,10 +747,16 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.statementSources.setSources(businessId, accountId, body);
   }
 
-  /** Run a configured source now rather than waiting for the nightly sweep. */
+  /**
+   * Run a configured source now rather than waiting for the nightly sweep.
+   *
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): it reads the business Gmail or Drive, so it is the
+   * business owner's (403 GOOGLE_CONNECT_OWNER_ONLY before either is read).
+   */
   @Post('accounts/:accountId/statement-sources/:source/sweep')
   async sweepStatementSource(
     @Param('businessId') businessId: string,
@@ -669,6 +765,7 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     if (source === 'drive') return this.statementSources.sweepDrive(businessId, accountId);
     if (source === 'gmail') return this.statementSources.sweepGmail(businessId, accountId);
     throw new BadRequestException('source must be "drive" or "gmail"');
@@ -936,6 +1033,12 @@ export class FinanceController {
   ) { return this.payTaxLiability(businessId, id, body, req); }
 
   // ---------- FIN7: Accountant Export ZIP ----------
+  // FOLLOW3-A6 review SEC-A5A6-02 (D-57, every money report): the ZIP holds
+  // trial-balance.csv, general-ledger.csv and ar-aging.csv, the figures the
+  // trial-balance gate and the six Books reads refuse a revenue:none member,
+  // so the stream, the signed URL and the email below need revenue:read.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accountant-export.zip')
   async accountantExportStream(
     @Param('businessId') businessId: string,
@@ -969,6 +1072,8 @@ export class FinanceController {
    * `(start, end)` (legacy/short form). Each may be a YYYY-MM-DD string or
    * a full ISO timestamp.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('accountant-export')
   async accountantExportSigned(
     @Param('businessId') businessId: string,
@@ -1018,25 +1123,38 @@ export class FinanceController {
   }
 
   // ---------- Safe to Spend ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('safe-to-spend')
-  async getSafeToSpend(@Param('businessId') businessId: string) {
+  async getSafeToSpend(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.safeToSpend.calculate(businessId);
   }
 
   // ---------- Cashflow Forecast ----------
+  // Review SEC-A5A6-02/04: the forecast opens on the cash balance and counts
+  // the open receivables (the safe-to-spend and aging figures), and money-moves
+  // below names the overdue receivables total: revenue:read and membership.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('cashflow-forecast')
   async getCashflowForecast(
     @Param('businessId') businessId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('days') days?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const daysNum = days ? parseInt(days, 10) : 90;
     if (days && Number.isNaN(daysNum)) throw new BadRequestException('Invalid days');
     return this.cashflowForecast.forecast(businessId, daysNum);
   }
 
   // ---------- Money Moves ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('money-moves')
-  async getMoneyMoves(@Param('businessId') businessId: string) {
+  async getMoneyMoves(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.moneyMoves.generate(businessId);
   }
 
@@ -1045,6 +1163,8 @@ export class FinanceController {
    * business's configured `accountantEmail` when `to` is omitted; pass
    * `saveRecipient: true` to persist a new address as the new default.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('accountant-export/email')
   async accountantExportEmailSend(
     @Param('businessId') businessId: string,
@@ -1071,16 +1191,28 @@ export class FinanceController {
     if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
       throw new BadRequestException('periodStart / periodEnd are not valid dates');
     }
-    return this.accountantExportEmail.send({
-      businessId,
-      periodStart,
-      periodEnd,
-      basis: body?.basis,
-      to: body?.to ?? null,
-      message: body?.message ?? null,
-      saveRecipient: Boolean(body?.saveRecipient),
-      userId: req.user.id,
-    });
+    try {
+      return await this.accountantExportEmail.send({
+        businessId,
+        periodStart,
+        periodEnd,
+        basis: body?.basis,
+        to: body?.to ?? null,
+        message: body?.message ?? null,
+        saveRecipient: Boolean(body?.saveRecipient),
+        userId: req.user.id,
+      });
+    } catch (err) {
+      // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): this error escapes to the
+      // global filter, whose 500 line logs its stack and whose error registry
+      // keeps its message. The sink's message can quote the recipient, so the
+      // same error class, outcome and provider code go on with any address
+      // redacted (and no cause attached). The 500 response is unchanged.
+      if (err instanceof SystemEmailSendError) {
+        throw new SystemEmailSendError(redactAddresses(err.message), err.outcome, err.providerCode);
+      }
+      throw err;
+    }
   }
 
   // ---------- Cash Reserve Buckets ----------
@@ -1123,6 +1255,16 @@ export class FinanceController {
   }
 
   // ---------- Credit Notes ----------
+  // V1-44b (V1-44 review SEC-V44-1, owner ruling D-57): a credit note moves
+  // money once applied (a revenue reversal, the receivable reduced, the
+  // invoice credited), so every credit-note write (create, PATCH, apply, void,
+  // DELETE) needs revenue:write, the invoice status door's gate, and the reads
+  // (list, detail: invoice total, status, contactId) need revenue:read.
+  // ModuleScopeGuard runs after the class guards and refuses before the
+  // handler, so a refused call reads and writes nothing; ensureAccess still
+  // refuses a non-member SUPER_ADMIN (D-46), whom both guards pass.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('credit-notes')
   async listCreditNotes(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1130,6 +1272,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes')
   async createCreditNote(
     @Param('businessId') businessId: string,
@@ -1137,15 +1281,28 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    // V1-44b review (SEC-V44b-R1, CRR-V44b-1): 'CN-DRIVE-' numbers belong to
+    // the Drive-intake plan steps, which answer a note carrying their number
+    // as their own; a member-made one would be applied in the approver's name.
+    if (
+      typeof body?.creditNoteNumber === 'string' &&
+      body.creditNoteNumber.trim().toUpperCase().startsWith(RESERVED_CREDIT_NOTE_NUMBER_PREFIX)
+    ) {
+      throw new BadRequestException(`Credit note numbers starting ${RESERVED_CREDIT_NOTE_NUMBER_PREFIX} are reserved for Drive intake`);
+    }
     return this.creditNotes.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('credit-notes/:id')
   async getCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('credit-notes/:id')
   async updateCreditNote(
     @Param('businessId') businessId: string,
@@ -1157,6 +1314,8 @@ export class FinanceController {
     return this.creditNotes.update(businessId, id, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes/:id/apply')
   async applyCreditNote(
     @Param('businessId') businessId: string,
@@ -1167,12 +1326,18 @@ export class FinanceController {
     return this.creditNotes.apply(businessId, id, { userId: req.user?.id });
   }
 
+  // V1-44b (SEC-V44-5): the member who voids is recorded on the reversal
+  // posting of an APPLIED note, as apply records the member on the original.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('credit-notes/:id/void')
   async voidCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.creditNotes.void(businessId, id);
+    return this.creditNotes.void(businessId, id, { userId: req.user?.id });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('credit-notes/:id')
   async deleteCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1211,7 +1376,8 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accountingPeriods.update(businessId, id, body);
+    // V1-15b repair2 (review SEC9-1): the owner's or an admin's call, like close / reopen.
+    return this.accountingPeriods.update(businessId, id, body, { actorId: req.user?.id });
   }
 
   @Post('accounting-periods/:id/close')
@@ -1234,7 +1400,8 @@ export class FinanceController {
   @Delete('accounting-periods/:id')
   async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accountingPeriods.remove(businessId, id);
+    // V1-15b repair2 (review SEC9-1): the owner's or an admin's call, like close / reopen.
+    return this.accountingPeriods.remove(businessId, id, { actorId: req.user?.id });
   }
 
   // ---------- Bank Connections ----------

@@ -21,7 +21,7 @@
  * These tests pin the payload shape the client now sends, so a future edit to
  * either side breaks here rather than in production.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ValidationPipe } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -122,4 +122,32 @@ describe('server route verbs the client must match', () => {
     expect(CONTROLLER).not.toMatch(/@Post\('invoices\/:invoiceId\/(paid|status)/);
     expect(CONTROLLER).not.toMatch(/@Post\('quotes\/:quoteId\/status/);
   });
+});
+
+/**
+ * KF-REVENUE-AUTH-PROJECTION-001 — the handler's path/body agreement check.
+ *
+ * The body-supplied `businessId` tenant contract above is unchanged: the guard
+ * still reads it from the raw body, the DTO still requires `status` from the
+ * IsIn set, and the verbs stay PATCH. What is new is that the handler must take
+ * the status from the validated body and refuse (400) when the URL disagrees,
+ * before any service call — on main the URL silently won.
+ */
+describe('List A: pre-fix failures', () => {
+  it('RA-G1-04: body { businessId, status: SENT } with path void is refused with 400 by the handler before the service is called', async () => {
+    await import('reflect-metadata');
+    const { BadRequestException } = await import('@nestjs/common');
+    const { CommerceController } = await import('./commerce.controller');
+    const updateInvoiceStatus = vi.fn().mockResolvedValue({ id: 'inv_1', status: 'VOID' });
+    const stub = {} as never;
+    const controller = new CommerceController(
+      { updateInvoiceStatus } as never,
+      stub, stub, stub, stub, stub, stub, stub, stub,
+    );
+
+    await expect(
+      controller.updateInvoiceStatus('biz_1', 'inv_1', 'void', { user: { id: 'user_1' } }, { status: 'SENT' } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(updateInvoiceStatus).not.toHaveBeenCalled();
+  }, 60_000); // the controller's import graph is large; the dynamic import counts toward the test clock
 });

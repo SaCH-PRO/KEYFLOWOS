@@ -184,9 +184,48 @@ export interface GovernanceSummary {
   urgentRisks: number;
 }
 
+/**
+ * V1-47-COCKPIT-TRUTH (CF-19, COMMAND-001). Every source the snapshot reads is
+ * reported, so a source that failed is never mistaken for one that answered
+ * with nothing. The legacy panels keep their fallback values; `sources` and
+ * `degraded` say which of them are fallbacks.
+ */
+export type CommandCenterSourceStatus = 'OK' | 'FAILED';
+
+export interface CommandCenterSource {
+  label: string;
+  status: CommandCenterSourceStatus;
+  /** When the source settled (answered or failed), ISO-8601. */
+  fetchedAt: string;
+}
+
+/**
+ * A Release 0 record count. `count` is null whenever it is not known: the
+ * source FAILED, or the caller may not read that list (RESTRICTED). 0 is only
+ * ever a real zero.
+ */
+export type CommandCenterResultStatus = CommandCenterSourceStatus | 'RESTRICTED';
+
+export interface CommandCenterResult {
+  label: string;
+  count: number | null;
+  status: CommandCenterResultStatus;
+  href: string;
+}
+
+export interface CommandCenterResults {
+  contacts: CommandCenterResult;
+  openInvoices: CommandCenterResult;
+  payments: CommandCenterResult;
+}
+
 export interface BusinessCommandCenterSnapshot {
   businessId: string;
   generatedAt: string;
+  /** True when any source FAILED. */
+  degraded: boolean;
+  sources: Record<string, CommandCenterSource>;
+  results: CommandCenterResults;
   health: CommandCenterHealth;
   summary: string;
   pulse: BusinessPulse;

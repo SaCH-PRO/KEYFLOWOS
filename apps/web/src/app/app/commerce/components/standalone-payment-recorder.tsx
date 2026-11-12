@@ -85,7 +85,14 @@ export function StandalonePaymentRecorder({
     paymentId: string;
     invoiceId: string;
     amount: number;
+    currency: string;
     invoiceStatus: string;
+    /**
+     * V1-41b (D-27, V1-41 review CR-V41-3): the server recorded the extracted
+     * payment PENDING; no money is recorded until a member confirms it on the
+     * invoice's Payments tab.
+     */
+    pending: boolean;
   } | null>(null);
 
   const { uploadFile, isUploading, progress } = useUpload();
@@ -188,11 +195,16 @@ export function StandalonePaymentRecorder({
       if (res.error) {
         toast.error(res.error);
       } else if (res.data) {
+        // V1-41 (D-27): an AI-extracted payment is recorded PENDING and moves
+        // no balance until a member confirms it; say so, never "recorded".
+        const pending = res.data.requiresConfirmation === true || res.data.payment.status === "PENDING";
         setRecordedResult({
           paymentId: res.data.payment.id,
           invoiceId: selectedInvoiceId,
           amount: res.data.payment.amount,
+          currency: res.data.payment.currency,
           invoiceStatus: res.data.invoiceStatus,
+          pending,
         });
 
         // Upload evidence to Google Drive if it was a file upload (not from Drive)
@@ -212,7 +224,14 @@ export function StandalonePaymentRecorder({
         }
 
         setStep("recorded");
-        toast.success(`Payment of ${formatCurrency(res.data.payment.amount, res.data.payment.currency)} recorded`);
+        const amountText = formatCurrency(res.data.payment.amount, res.data.payment.currency);
+        if (pending) {
+          toast.info(`Payment of ${amountText} is pending confirmation`, {
+            description: "Confirm it on the invoice's Payments tab to record the money.",
+          });
+        } else {
+          toast.success(`Payment of ${amountText} recorded`);
+        }
         onRecorded?.();
       }
     } catch (err) {
@@ -233,7 +252,15 @@ export function StandalonePaymentRecorder({
       open={open}
       onClose={handleClose}
       title="Record Payment"
-      subtitle={step === "upload" ? "Upload payment evidence and let AI do the rest" : step === "review" ? "Review extracted details and match to an invoice" : "Payment recorded successfully"}
+      subtitle={
+        step === "upload"
+          ? "Upload payment evidence and let AI do the rest"
+          : step === "review"
+            ? "Review extracted details and match to an invoice"
+            : recordedResult?.pending
+              ? "Payment awaiting confirmation"
+              : "Payment recorded successfully"
+      }
       width="lg"
       icon={
         <div
@@ -499,20 +526,35 @@ export function StandalonePaymentRecorder({
             transition={{ duration: 0.3 }}
             className="space-y-5"
           >
-            <div className="text-center py-6">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+            {recordedResult.pending ? (
+              // V1-41 (D-27): the extracted payment is PENDING; nothing is recorded yet.
+              <div className="text-center py-6">
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-8 h-8 text-amber-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-foreground mb-1">Payment Pending Confirmation</h3>
+                <p className="text-xs text-muted-foreground">
+                  {formatCurrency(recordedResult.amount, recordedResult.currency)} was read from the evidence and is pending:
+                  confirm it on the invoice&apos;s Payments tab to record the money. The invoice balance does not change
+                  until a member with revenue write access confirms it.
+                </p>
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-1">Payment Recorded</h3>
-              <p className="text-xs text-muted-foreground">
-                {formatCurrency(recordedResult.amount, "TTD")} was recorded against the invoice.
-              </p>
-            </div>
+            ) : (
+              <div className="text-center py-6">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-foreground mb-1">Payment Recorded</h3>
+                <p className="text-xs text-muted-foreground">
+                  {formatCurrency(recordedResult.amount, recordedResult.currency)} was recorded against the invoice.
+                </p>
+              </div>
+            )}
 
             <div className="p-4 rounded-xl bg-white/[0.02] border border-border/40 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Amount</span>
-                <span className="font-semibold">{formatCurrency(recordedResult.amount, "TTD")}</span>
+                <span className="font-semibold">{formatCurrency(recordedResult.amount, recordedResult.currency)}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Invoice status</span>

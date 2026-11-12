@@ -18,6 +18,20 @@ type FulfillmentRoute = { strategy?: string };
  * react on a single canonical event instead of poking the marketplace tables.
  *
  * Idempotent: `routeOrder` short-circuits when routes already exist.
+ *
+ * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): routing runs only for an
+ * order stored PAID in the event's business. PATCH .../orders/:id/status
+ * 'paid' with no payment emits store_order.paid for a STANDARD order stored
+ * UNPAID, and a queued or forged copy can name an unpaid order or another
+ * business's order: routing reserved stock, moved the order to routed and
+ * told CRM it was fulfilled (or, for another business, that routing failed).
+ * Nothing is routed or emitted otherwise.
+ *
+ * Still open (it.todo in storefront-paid-event.integration.test.ts): the
+ * stored PAID read here is itself written with no payment and no revenue
+ * write by PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+ * on a STANDARD order (V18-T2c, review STL-SEC-1: needs an owner ruling); the
+ * other store_order.paid listeners do not read it (V18-T2b).
  */
 @Injectable()
 export class StoreOrderRoutingListener {
@@ -33,6 +47,7 @@ export class StoreOrderRoutingListener {
   async onStoreOrderPaid(payload: StoreOrderPaidPayload) {
     const orderId = payload?.order?.id;
     if (!orderId) return;
+    if (!(await this.isStoredOrderPaid(payload.businessId, orderId))) return;
     try {
       const routes = (await this.routing.routeOrder(payload.businessId, orderId)) as
         | FulfillmentRoute[]
@@ -90,6 +105,25 @@ export class StoreOrderRoutingListener {
         error: errMsg.slice(0, 500),
       };
       this.events.emit('store_order.routing_failed', failurePayload);
+    }
+  }
+
+  /** W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order, read in the event's business, is stored PAID. */
+  private async isStoredOrderPaid(businessId: string, orderId: string): Promise<boolean> {
+    if (!businessId || typeof orderId !== 'string') return false;
+    try {
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: orderId, businessId },
+        select: { paymentStatus: true },
+      });
+      if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
+      this.logger.warn(
+        `store_order.paid for order ${orderId} not stored PAID in business ${businessId} (${stored ? stored.paymentStatus : 'not found'}); not routed`,
+      );
+      return false;
+    } catch (err) {
+      this.logger.warn(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
+      return false;
     }
   }
 }

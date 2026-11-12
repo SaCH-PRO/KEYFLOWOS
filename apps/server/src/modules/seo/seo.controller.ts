@@ -1,4 +1,8 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Inject, UseGuards } from '@nestjs/common';
+import {
+  Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, Inject, UseGuards,
+  ForbiddenException, UnauthorizedException,
+} from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { SeoService } from './seo.service';
 import { SeoGoogleSearchConsoleService } from './seo-gsc.service';
 import { SeoGoogleAnalyticsService } from './seo-ga4.service';
@@ -6,6 +10,18 @@ import { SeoContentService } from './seo-content.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SeoAdminGuard } from './seo-admin.guard';
+
+/**
+ * W4-D94-SEO-OWNER (owner ruling D-94): only the business owner may connect,
+ * sync or disconnect Google Analytics and Search Console, as for Gmail
+ * (GMAIL_OWNER_ONLY); anyone else gets 403 with this code before anything is
+ * read or written.
+ */
+export const SEO_CONNECTOR_OWNER_ONLY = 'SEO_CONNECTOR_OWNER_ONLY';
+const SEO_CONNECTOR_OWNER_ONLY_MESSAGE =
+  'Only the business owner can connect, sync or disconnect Google Analytics and Search Console';
+
+type SeoConnectorActor = { id?: string; role?: string };
 
 @Controller('seo')
 @UseGuards(AuthGuard, SeoAdminGuard, BusinessGuard)
@@ -15,7 +31,42 @@ export class SeoController {
     @Inject(SeoGoogleSearchConsoleService) private readonly gsc: SeoGoogleSearchConsoleService,
     @Inject(SeoGoogleAnalyticsService) private readonly ga4: SeoGoogleAnalyticsService,
     @Inject(SeoContentService) private readonly content: SeoContentService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * W4-D94-SEO-OWNER (owner ruling D-94; review D12b-ST-2, case MW-27): who
+   * may connect, sync or disconnect the GA4 and Search Console connectors.
+   * These connections hold the business's Google OAuth tokens (metaData.ga4,
+   * metaData.gsc), so, as for the business mailbox, the business owner only:
+   * the OWNER membership or the distinguished owner (Business.ownerId) while
+   * it holds that OWNER membership (owner rulings D-116, D-125: holding ADMIN
+   * or STAFF it is that role), with the SUPER_ADMIN bypass BusinessGuard
+   * already grants. The rule is
+   * GmailService.assertConnectAuthority's (D-11), restated rather than
+   * imported, as WhatsAppService.isConfigOwner also restates it: SeoModule
+   * does not import CommerceModule. Anyone else (an ADMIN or STAFF member) gets 403
+   * SEO_CONNECTOR_OWNER_ONLY before anything is read or written. The status
+   * reads (GET .../connectors/ga4, .../gsc) stay open to members.
+   */
+  private async assertConnectorOwner(businessId: string, actor: SeoConnectorActor | undefined): Promise<void> {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    if (actor.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return;
+    const owned = await this.prisma.client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+      // ADMIN or STAFF, the recorded owner is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    if (owned) return;
+    throw new ForbiddenException({ code: SEO_CONNECTOR_OWNER_ONLY, message: SEO_CONNECTOR_OWNER_ONLY_MESSAGE });
+  }
 
   @Get('businesses/:businessId/dashboard')
   getDashboard(@Param('businessId') businessId: string) {
@@ -161,24 +212,33 @@ export class SeoController {
     return this.gsc.getConnectionStatus(businessId);
   }
 
+  // W4-D94-SEO-OWNER (D-94): connect, sync and disconnect, for Search Console
+  // and GA4, are OWNER only (assertConnectorOwner, first); the GET status
+  // routes stay open to members.
+
   @Post('businesses/:businessId/connectors/gsc')
-  connectGsc(
+  async connectGsc(
     @Param('businessId') businessId: string,
     @Body() body: { siteUrl: string; accessToken?: string; refreshToken?: string },
+    @Req() req: { user?: SeoConnectorActor },
   ) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.gsc.saveConnection(businessId, body);
   }
 
   @Delete('businesses/:businessId/connectors/gsc')
-  disconnectGsc(@Param('businessId') businessId: string) {
+  async disconnectGsc(@Param('businessId') businessId: string, @Req() req: { user?: SeoConnectorActor }) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.gsc.disconnectGsc(businessId);
   }
 
   @Post('businesses/:businessId/connectors/gsc/sync')
-  syncGsc(
+  async syncGsc(
     @Param('businessId') businessId: string,
     @Body() body: { days?: number },
+    @Req() req: { user?: SeoConnectorActor },
   ) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.gsc.syncSearchData(businessId, body.days ?? 28);
   }
 
@@ -188,23 +248,28 @@ export class SeoController {
   }
 
   @Post('businesses/:businessId/connectors/ga4')
-  connectGa4(
+  async connectGa4(
     @Param('businessId') businessId: string,
     @Body() body: { propertyId: string; accessToken?: string; refreshToken?: string },
+    @Req() req: { user?: SeoConnectorActor },
   ) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.ga4.saveConnection(businessId, body);
   }
 
   @Delete('businesses/:businessId/connectors/ga4')
-  disconnectGa4(@Param('businessId') businessId: string) {
+  async disconnectGa4(@Param('businessId') businessId: string, @Req() req: { user?: SeoConnectorActor }) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.ga4.disconnectGa4(businessId);
   }
 
   @Post('businesses/:businessId/connectors/ga4/sync')
-  syncGa4(
+  async syncGa4(
     @Param('businessId') businessId: string,
     @Body() body: { days?: number },
+    @Req() req: { user?: SeoConnectorActor },
   ) {
+    await this.assertConnectorOwner(businessId, req.user);
     return this.ga4.syncAnalyticsData(businessId, body.days ?? 28);
   }
 }

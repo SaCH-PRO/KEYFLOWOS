@@ -46,6 +46,9 @@ import { CalendarConflictService } from './calendar-conflict.service';
 import { CalendarInsightService } from './calendar-insight.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { GoogleCalendarTemporalSyncService } from './connectors/google-calendar-temporal-sync.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
+import { assertCalendarNamesReader } from '../bookings/calendar.service';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -68,6 +71,8 @@ export class CalendarController {
     private readonly aiUsage: AiUsageService,
     @Inject(GoogleCalendarTemporalSyncService)
     private readonly temporalSync: GoogleCalendarTemporalSyncService,
+    @Inject(PrismaService)
+    private readonly prisma: PrismaService,
   ) {}
 
   // ----- Google Calendar sync (platform connection) ---------------------
@@ -84,12 +89,31 @@ export class CalendarController {
     return this.sync.getSettings(businessId);
   }
 
+  /**
+   * W10-GOOGLE-DOORS-REST review repair (owner rulings D-99 and D-111;
+   * SEC-W10GDR-1, [V94D-T08]): every key this door writes changes the sync of
+   * the owner's Google Calendar connection: which of the owner's calendars the
+   * hourly resync reads and writes (calendarId), whether it runs and which way
+   * (syncEnabled, syncDirection), whether the owner's Google events are pulled
+   * in and whom they are shown to (pullExternal, defaultVisibility), and which
+   * KEYFLOW items are pushed into the owner's calendar (the per-type switches).
+   * D-99 gives starting, syncing and stopping a Google connection to the owner
+   * alone and D-111 keeps changing one owner-only, so
+   * assertGoogleConnectOwner (OWNER membership, Business.ownerId or
+   * SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY) runs first, before the
+   * body is read or anything is written, as on its twin PATCH
+   * /bookings/businesses/:b/calendar/settings. The settings and status reads
+   * stay a member's; the calendar-list read is the owner's and ADMINs' (D-120,
+   * W11-CALENDAR-NAMES-SCOPE).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/sync/settings')
   async patchSyncSettings(
     @Param('businessId') businessId: string,
     @Body() body: Partial<CalendarSyncSettings>,
+    @Req() req: AuthedRequest,
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     if (!body || typeof body !== 'object') {
       throw new BadRequestException('Body required');
     }
@@ -117,34 +141,85 @@ export class CalendarController {
     );
   }
 
+  /**
+   * W11-CALENDAR-NAMES-SCOPE (owner ruling D-120, read with D-125; W10-GOOGLE-
+   * DOORS-REST residual, ruling R-2): the names of the owner's Google
+   * calendars are listed to an OWNER-membership holder and an ADMIN only.
+   * assertCalendarNamesReader (OWNER or ADMIN membership, or SUPER_ADMIN, else
+   * 403 CALENDAR_NAMES_OWNER_OR_ADMIN) runs first, before any Google call, as
+   * on the bookings twin GET /bookings/businesses/:b/calendar/list. STAFF
+   * learn that a calendar is connected from GET .../sync/status, which stays a
+   * member's.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/sync/calendars')
-  async listSyncCalendars(@Param('businessId') businessId: string) {
+  async listSyncCalendars(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertCalendarNamesReader(this.prisma, businessId, req.user);
     return this.sync.listAvailableCalendars(businessId);
   }
 
+  /**
+   * W8-GOOGLE-CONSENT-OWNER review repair (owner ruling D-99; SEC-W8GCO-2):
+   * the platform Google Calendar connection is the business owner's to start,
+   * sync and disconnect, as on its bookings twin routes
+   * (GET /bookings/businesses/:b/calendar/auth-url and POST .../calendar/disconnect):
+   * connect builds the same CalendarService consent URL and disconnect clears
+   * the same Business.calendar* tokens, so a member refused there was not to be
+   * admitted here. assertGoogleConnectOwner (OWNER membership,
+   * Business.ownerId or SUPER_ADMIN, else 403 GOOGLE_CONNECT_OWNER_ONLY) runs
+   * first, before a URL is built or anything is read or written. The status
+   * and settings reads stay open to members (the calendar-list read is the
+   * owner's and ADMINs', D-120).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/connect')
-  syncConnect(@Param('businessId') businessId: string) {
+  async syncConnect(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return { url: this.sync.getAuthUrl(businessId) };
   }
 
+  // W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-2): disconnecting is the owner's, as connecting is.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/disconnect')
-  async syncDisconnect(@Param('businessId') businessId: string) {
+  async syncDisconnect(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     await this.sync.disconnect(businessId);
     return { success: true };
   }
 
+  // W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-2): a manual push/pull resync of the Google connection is the owner's too.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/resync')
-  async syncResync(@Param('businessId') businessId: string) {
+  async syncResync(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.sync.manualResync(businessId);
   }
 
+  // W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T07]; review SEC-W9GD-3):
+  // pulling the coming events of the business Google Calendar into the
+  // temporal flow is a sync of the Google connection, so it is the owner's, as
+  // .../sync/google/resync is (assertGoogleConnectOwner, 403
+  // GOOGLE_CONNECT_OWNER_ONLY first). Its review repair (SEC-W10GDR-1) makes
+  // PATCH .../sync/settings the owner's too (D-99, D-111; see that handler).
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/sync/google/temporal-flow')
-  async syncGoogleCalendarToTemporalFlow(@Param('businessId') businessId: string) {
+  async syncGoogleCalendarToTemporalFlow(
+    @Param('businessId') businessId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.temporalSync.syncBusiness(businessId);
   }
 

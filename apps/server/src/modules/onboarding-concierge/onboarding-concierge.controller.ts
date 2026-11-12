@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Body, UseGuards, Inject } from '@nestjs/common';
 import { OnboardingConciergeService, AutoConfigureResult } from './onboarding-concierge.service';
 import { OnboardingStateService } from './onboarding-state.service';
+import { DemoDataSeederService, type OwnerDemoSeedResult } from './demo-data-seeder.service';
 import {
   SaveOnboardingStepDto,
   ChatDto,
@@ -10,6 +11,7 @@ import {
 } from './dto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 
 @Controller('onboarding-concierge/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -19,6 +21,8 @@ export class OnboardingConciergeController {
     private readonly concierge: OnboardingConciergeService,
     @Inject(OnboardingStateService)
     private readonly state: OnboardingStateService,
+    @Inject(DemoDataSeederService)
+    private readonly demoSeeder: DemoDataSeederService,
   ) {}
 
   @Get('status')
@@ -44,9 +48,21 @@ export class OnboardingConciergeController {
     return this.state.saveStep(businessId, body.step);
   }
 
+  /**
+   * PR196-SEED-DEMO-OWNER (owner ruling D-84, review OK-6-1, OK-6-2, OK-6-4):
+   * the demo seed writes a demo contact and a DRAFT demo invoice, so it is
+   * OWNER only (a non-member SUPER_ADMIN is refused, D-46) and audited in its
+   * own transaction, naming the owner; a repeated seed answers the existing
+   * demo data, and a unique violation is a 409, never a 500. It goes through
+   * the seeder's owner door with the authenticated caller. There is no
+   * separate sample-contact seeding route.
+   */
   @Post('seed-demo')
-  async seedDemoData(@Param('businessId') businessId: string) {
-    return this.concierge.seedDemoData(businessId);
+  async seedDemoData(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ): Promise<OwnerDemoSeedResult> {
+    return this.demoSeeder.seedDemoDataAsOwner(businessId, user);
   }
 
   @Get('welcome')
@@ -64,23 +80,37 @@ export class OnboardingConciergeController {
     return this.concierge.getTemplatePreview(templateId);
   }
 
+  /**
+   * Any member chats; only the owner's answers are persisted as intake
+   * (R0-09b, owner ruling D-11, review SEC-2), decided in the service from the
+   * authenticated caller.
+   */
   @Post('chat')
   async chat(
     @Param('businessId') businessId: string,
     @Body() body: ChatDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
     return this.concierge.generateConciergeResponse(
       businessId,
       body.message,
       body.history || [],
+      user,
     );
   }
 
+  /**
+   * R0-09b (owner ruling D-11, review R09-ST-3): auto-configure rewrites the
+   * business profile (name, businessHours, store settings, slug, metaData), so
+   * it is OWNER only; the check runs before the template or the body is used.
+   */
   @Post('auto-configure')
   async autoConfigure(
     @Param('businessId') businessId: string,
     @Body() body: AutoConfigureDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ): Promise<AutoConfigureResult> {
+    await this.concierge.assertProfileOwner(businessId, user);
     return this.concierge.autoConfigureFromTemplate(businessId, body.templateId, body);
   }
 

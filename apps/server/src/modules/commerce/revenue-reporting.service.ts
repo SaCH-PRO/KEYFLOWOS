@@ -1,5 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CASH_NET_PAYMENT_WHERE } from './invoice-workflow.service';
+import { roundMoney } from './money';
 
 export type RevenueReportPreset =
   | 'by-source'
@@ -899,9 +901,11 @@ export class RevenueReportingService {
     const prevEnd = new Date(range.start.getTime() - 1);
     const prevStart = new Date(prevEnd.getTime() - periodMs);
 
+    // V1-36 (CF-17): collected is cash received net of refunds (CASH_NET_PAYMENT_WHERE,
+    // the database form of computeBalance), not the SUCCESSFUL rows alone.
     const [collectedNow, expectedNow, collectedPrev, expectedPrev] = await Promise.all([
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: range.start, lte: range.end } },
+        where: { businessId, createdAt: { gte: range.start, lte: range.end }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
@@ -909,7 +913,7 @@ export class RevenueReportingService {
         _sum: { total: true },
       }),
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: prevStart, lte: prevEnd } },
+        where: { businessId, createdAt: { gte: prevStart, lte: prevEnd }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
@@ -918,9 +922,9 @@ export class RevenueReportingService {
       }),
     ]);
 
-    const cNow = Number(collectedNow._sum.amount ?? 0);
+    const cNow = roundMoney(Number(collectedNow._sum.amount ?? 0));
     const eNow = Number(expectedNow._sum.total ?? 0);
-    const cPrev = Number(collectedPrev._sum.amount ?? 0);
+    const cPrev = roundMoney(Number(collectedPrev._sum.amount ?? 0));
     const ePrev = Number(expectedPrev._sum.total ?? 0);
 
     const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0);

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 
 export interface SalesRep {
   id: string;
@@ -83,23 +84,29 @@ export class SalesTeamService {
     return reps;
   }
 
+  /**
+   * W3-D13b-META-WRITERS (MW-03h): metaData is read and written under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (the owner's PATCH clearing a payment secret, another rate) is
+   * not undone by this one's copy (RED-before MW-16: the cleared secret was
+   * stored again and the PATCH's bank name lost).
+   */
   async setCommissionRate(businessId: string, staffId: string, rate: number) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, any>) ?? {};
-    const salesConfig = (meta.salesConfig as Record<string, any>) ?? {};
-    const commissionRates = { ...(salesConfig.commissionRates as Record<string, number> ?? {}), [staffId]: rate };
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = (business?.metaData as Record<string, any>) ?? {};
+      const salesConfig = (meta.salesConfig as Record<string, any>) ?? {};
+      const commissionRates = { ...(salesConfig.commissionRates as Record<string, number> ?? {}), [staffId]: rate };
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...meta,
-          salesConfig: { ...salesConfig, commissionRates },
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...meta,
+            salesConfig: { ...salesConfig, commissionRates },
+          },
         },
-      },
+      });
     });
   }
 

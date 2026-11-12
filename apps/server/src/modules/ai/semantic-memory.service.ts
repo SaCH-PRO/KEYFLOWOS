@@ -1,8 +1,25 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiUsageService } from './ai-usage.service';
+
+/**
+ * W7-AI-SERVICES-503 (the R0-07a rule; COST-LEDGER-001 section 7 item 7): the
+ * structured 503 AiUsageService.trackEmbedding answers when no OpenAI key is
+ * configured (provider_not_configured, also KEY_DISABLED), or the gateway's
+ * provider_unavailable. search and backfillFromAiMemory rethrow it unchanged,
+ * so GET .../agent/memory/search and POST .../agent/memory/backfill answer the
+ * same 503 and code as the other AI routes instead of an empty 200; every other
+ * failure keeps its old mapping (empty results, the memory skipped). The same
+ * predicate as OpenAiVoiceProvider's (R0-34b).
+ */
+function isAiProviderUnavailable(err: unknown): err is HttpException {
+  if (!(err instanceof HttpException) || err.getStatus() !== HttpStatus.SERVICE_UNAVAILABLE) return false;
+  const body = err.getResponse();
+  const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined;
+  return code === 'provider_not_configured' || code === 'provider_unavailable';
+}
 
 export interface SemanticMemory {
   id: string;
@@ -103,6 +120,12 @@ export class SemanticMemoryService {
         similarity: Number(r.similarity),
       }));
     } catch (err: any) {
+      // W7-AI-SERVICES-503 (R0-07a rule): embeddings not configured fails visibly.
+      // TemporalFlowService, UnifiedMemoryRetrievalService and (since the
+      // W7-AI-SERVICES-503 review repair, SEC503-1 / CR-503-1)
+      // FlowOrchestratorService.buildSemanticMemorySection catch it: optional
+      // enrichment of a turn that goes on without it.
+      if (isAiProviderUnavailable(err)) throw err;
       this.logger.error(`Semantic search failed: ${(err as Error).message}`);
       return [];
     }
@@ -126,6 +149,9 @@ export class SemanticMemoryService {
         });
         stored++;
       } catch (err: any) {
+          // W7-AI-SERVICES-503 (R0-07a rule): the provider refusal is the same for every
+          // memory, so it stops the backfill and answers the 503; any other failure skips one.
+          if (isAiProviderUnavailable(err)) throw err;
           this.logger.warn(`On error: ${err instanceof Error ? err.message : err}`);
         }
     }

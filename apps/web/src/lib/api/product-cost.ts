@@ -1,5 +1,6 @@
 import { apiGet as apiGetSimple, apiPost } from "../api";
-import { DEFAULT_BUSINESS_ID } from "./_defaults";
+import { getStoredBusinessId } from "../workspace";
+import { noBusinessSelected } from "./_defaults";
 
 export interface ProductCostProfile {
   sourceCost: number;
@@ -14,7 +15,11 @@ export interface ProductCostProfile {
 }
 
 export async function fetchProductCostProfile(productId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  // R0-15d: the business named, else the selected one, never the demo tenant.
+  // FOLLOW3-D11: only a business left out resolves the selection; an explicit
+  // "" is refused, as lib/client.ts refuses it (`||` used to swap it silently).
+  const bid = businessId ?? getStoredBusinessId();
+  if (!bid) return noBusinessSelected();
   return apiGetSimple<{
     costProfile: ProductCostProfile | null;
     price: number;
@@ -37,7 +42,10 @@ export async function updateProductCostProfile(
   },
   businessId?: string,
 ) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  // R0-15d: the business named, else the selected one, never the demo tenant.
+  // FOLLOW3-D11: an explicit "" is refused, not swapped for the selection.
+  const bid = businessId ?? getStoredBusinessId();
+  if (!bid) return noBusinessSelected();
   return apiPost<{
     costProfile: ProductCostProfile;
     landedCost: number;

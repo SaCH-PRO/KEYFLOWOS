@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenueBriefingService } from './revenue-briefing.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 60_000;
 const TARGET_HOUR = 8;
@@ -23,7 +24,7 @@ export class WeeklyRevenueReviewScheduler implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[WeeklyRevenueReview] Disabled via env');
       return;
     }

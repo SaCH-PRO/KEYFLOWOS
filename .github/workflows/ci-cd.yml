@@ -12,11 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 # Must match the exact versions in the root package.json `engines` field.
-# Major-only ranges ('20'/'9') resolve to the latest patch, which
-# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
-# failing every job before any code runs.
+# Major-only ranges ('22'/'9') resolve to the latest patch. pnpm rejects an
+# engines.pnpm mismatch with ERR_PNPM_UNSUPPORTED_ENGINE, failing every job
+# before any code runs, but only WARNS on an engines.node mismatch.
+# Node 22.x is owner ruling D-21 (V1-39). 22.23.4 is the newest Node 22
+# security release when pinned (2026-10-20); a later security release moves
+# every pin together. .nvmrc, engines.node, this line, hawkscan.yml and the
+# Dockerfile ARG must agree, which the "Check the Node runtime pin" step
+# proves (scripts/ci/runtime-pin.spec.mjs).
 env:
-  NODE_VERSION: '20.18.1'
+  NODE_VERSION: '22.23.4'
   PNPM_VERSION: '9.15.0'
 
 jobs:
@@ -41,6 +46,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+
+      # V1-39 (PRS-M04, D-21): one declared Node runtime. Runs on the Node
+      # setup-node just installed, before install, and needs no dependencies.
+      # No env here: NODE_TEST_CONTEXT=child alone makes `node --test` skip
+      # every file and exit 0.
+      - name: Check the Node runtime pin
+        run: node --test scripts/ci/runtime-pin.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -90,6 +102,16 @@ jobs:
 
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
+
+      # Launch verifier contract (V1-20, PRS-M01): readiness must reject a
+      # degraded JSON body even when the HTTP status is 200. The shell spec
+      # runs scripts/verify-up.sh itself against a 127.0.0.1 fixture (no
+      # external network). Same command as `pnpm test:verify-up`. Explicit
+      # files, never a bare directory: `node --test scripts/tests/` runs zero
+      # specs on Node 20. No env here: NODE_TEST_CONTEXT=child alone makes
+      # `node --test` skip every file and exit 0.
+      - name: Verify launch health contract
+        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
 
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
@@ -184,12 +206,30 @@ jobs:
       - name: Lint web
         run: pnpm --filter web lint --max-warnings 26
 
+  # Security Scan (V1-01-SEC-CREDENTIAL-SECRET-SCAN, PRS-M07; ports #189's
+  # secret scan and #114's outcome capture). Until this packet the job could
+  # not fail: a shallow checkout, trufflehog@main scanning from a literal
+  # `base: main`, and continue-on-error on both scanners. Owner ruling D-22
+  # (docs/reconstruction/BUILD-MAP-001.md section (g)) makes the secret scan
+  # blocking, so nothing in this job, steps or job header, may skip the job or
+  # swallow a failure. D-22 does not name the dependency audit: its result is
+  # recorded on every run but not enforced (see the audit step). The contract
+  # for this job, with its negative controls, is
+  # scripts/security/tests/secret-scan-contract.spec.mjs, run below.
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    # The scanner image gets the whole checkout mounted: a read-only token,
+    # and checkout does not leave it in .git/config.
+    permissions:
+      contents: read
     steps:
+      # Full history: the scan range below needs both endpoint commits.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
@@ -205,18 +245,127 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Recorded, not enforced. The packet makes enforcement wait on D-22 when
+      # high advisories exist (they do: 131 high and 17 critical at 0796a728),
+      # and D-22 names the secret scan, not the audit. A blocking audit would
+      # also turn the required pipeline red at a fixed head whenever a new
+      # advisory is published or the registry is unreachable. The exit code is
+      # a step output; the enforcement step reports a non-zero one as a
+      # ::warning and in the step summary, and fails the job if the audit step
+      # itself did not run or recorded nothing. Making the audit blocking takes
+      # a ruling and a remediation packet first, then one line in the
+      # enforcement step (and its contract).
       - name: Audit dependencies
-        run: pnpm audit --audit-level high
-        continue-on-error: true
+        id: dependency_audit
+        run: |
+          audit_exit=0
+          pnpm audit --audit-level high || audit_exit=$?
+          echo "exit_code=$audit_exit" >> "$GITHUB_OUTPUT"
 
+      # The steps below run even when an earlier one failed, so one run
+      # reports every scanner. The last step turns any outcome other than
+      # success, a skip included, into a failed job.
+      #
+      # Every spec in scripts/security/tests, this job's contract and R0-31's
+      # no-committed-credential spec among them (also `pnpm test:security`).
+      # The file glob is deliberate: `node --test scripts/security/tests/`
+      # runs zero specs and passes on Node 20, and fails to start on Node 22.
+      # No env, shell or working-directory here: NODE_TEST_CONTEXT=child alone
+      # makes `node --test` skip every file and exit 0.
+      - name: Security script specs
+        id: security_suite
+        if: ${{ !cancelled() }}
+        run: node --test scripts/security/tests/*.spec.mjs
+
+      # Fail closed when either endpoint is missing or absent from the
+      # checkout, when a push created the branch (all-zero before SHA: the
+      # action would silently widen to the whole history), or when no commit
+      # in the range touches a file (the action would scan nothing and pass).
+      # The range is judged by its commits, as TruffleHog scans it, not by the
+      # tree difference: a secret added and then reverted nets to no change.
+      - name: Require usable secret scan range
+        id: secret_scan_range
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          SCAN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SCAN_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SCAN_BASE:-}" ] || [ -z "${SCAN_HEAD:-}" ]; then
+            echo "::error::Secret-scan commit range is missing (base '${SCAN_BASE:-}', head '${SCAN_HEAD:-}')."
+            exit 1
+          fi
+          if [ "$SCAN_BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::Secret-scan base is the all-zero SHA: this push created the branch, so there is no range to scan. Scan it through a pull request."
+            exit 1
+          fi
+          git cat-file -e "$SCAN_BASE^{commit}" || { echo "::error::Secret-scan base $SCAN_BASE is not in the checkout."; exit 1; }
+          git cat-file -e "$SCAN_HEAD^{commit}" || { echo "::error::Secret-scan head $SCAN_HEAD is not in the checkout."; exit 1; }
+          touched_files="$(git log --format= --name-only "$SCAN_BASE..$SCAN_HEAD" | sed '/^$/d' | sort -u)"
+          if [ -z "$touched_files" ]; then
+            echo "::error::Secret scan would examine an empty commit difference: no commit in $SCAN_BASE..$SCAN_HEAD touches a file."
+            exit 1
+          fi
+          echo "Secret-scan range $SCAN_BASE..$SCAN_HEAD: $(git rev-list --count "$SCAN_BASE..$SCAN_HEAD") commits touch $(printf '%s\n' "$touched_files" | wc -l) files."
+
+      # Pinned by commit to the v3.99.7 release tag. The action runs
+      # "${image}:${version}", so the CLI image is pinned by digest as well
+      # (the 3.99.7 multi-arch index on ghcr.io; a tag can be re-pushed) and
+      # no `image` input is given. No base/head inputs: the action derives the
+      # event's own commit SHAs (the ones checked above); a literal 'main' need
+      # not exist in the checkout. The action already passes --fail; passing it
+      # again aborts the scanner before it scans anything.
       - name: Secret scanning (trufflehog)
-        uses: trufflesecurity/trufflehog@main
+        id: secret_scan
+        if: ${{ !cancelled() && steps.secret_scan_range.outcome == 'success' }}
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           path: ./
-          base: main
-          head: HEAD
-          extra_args: --debug --only-verified
-        continue-on-error: true
+          version: '3.99.7@sha256:0d003fc3abc4e1565eca8462b992001314de51451e96e3c44de80d116794d5d1'
+          extra_args: --only-verified --fail-on-scan-errors
+
+      # Re-raise and record every scanner's outcome (#114). A skipped scanner
+      # does not fail a job by itself; this step does. The audit's own verdict
+      # is recorded here as a ::warning, not enforced (see the audit step).
+      - name: Enforce security scan outcomes
+        if: always()
+        shell: bash
+        env:
+          DEPENDENCY_AUDIT_OUTCOME: ${{ steps.dependency_audit.outcome }}
+          DEPENDENCY_AUDIT_EXIT_CODE: ${{ steps.dependency_audit.outputs.exit_code }}
+          SECURITY_SUITE_OUTCOME: ${{ steps.security_suite.outcome }}
+          SECRET_SCAN_RANGE_OUTCOME: ${{ steps.secret_scan_range.outcome }}
+          SECRET_SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
+        run: |
+          status=0
+          check() {
+            echo "$1=$2"
+            if [ "$2" != "success" ]; then
+              echo "::error::Security Scan: $1 outcome is '$2', not success."
+              status=1
+            fi
+          }
+          check dependency_audit "${DEPENDENCY_AUDIT_OUTCOME:-}"
+          check security_suite "${SECURITY_SUITE_OUTCOME:-}"
+          check secret_scan_range "${SECRET_SCAN_RANGE_OUTCOME:-}"
+          check secret_scan "${SECRET_SCAN_OUTCOME:-}"
+          audit_exit="${DEPENDENCY_AUDIT_EXIT_CODE:-}"
+          echo "dependency_audit_exit_code=$audit_exit"
+          if [ "${DEPENDENCY_AUDIT_OUTCOME:-}" = "success" ]; then
+            case "$audit_exit" in
+              0) ;;
+              '' | *[!0-9]*)
+                echo "::error::Security Scan: the dependency audit ran but recorded no usable exit code ('$audit_exit')."
+                status=1
+                ;;
+              *)
+                echo "::warning::Security Scan: dependency_audit (pnpm audit --audit-level high) exited $audit_exit: high or critical advisories, or the audit could not complete. Recorded, not enforced: D-22 does not make the audit blocking."
+                echo "Dependency audit (pnpm audit --audit-level high) exited $audit_exit: recorded, not enforced." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+                ;;
+            esac
+          fi
+          exit "$status"
 
   build-server:
     name: Build Server
@@ -270,16 +419,84 @@ jobs:
       # above was satisfied by that build.
       #
       # This does NOT assert a full boot; CI has no database. It asserts the
-      # process gets PAST module loading, which is the part a missing or
-      # ESM-only dependency breaks. A DB connection failure afterwards is fine
-      # and expected here.
+      # process gets PAST module loading, which is the part a missing, broken
+      # or ESM-only dependency breaks, and it fails closed (PIN-R3, review
+      # RC2-1): the step passes only when the boot exits 0 AND prints the load
+      # marker. Every other outcome fails it and prints the boot output.
+      #
+      # How the boot reaches exit 0 without a database: the probe written
+      # below is preloaded (--require) and replaces NestFactory.create.
+      # main.ts calls NestFactory.create(AppModule) only after it has imported
+      # AppModule. The probe then has Nest scan the graph in preview mode,
+      # which instantiates no provider, so nothing reaches the database; the
+      # scan loads the modules reached only through forwardRef(async () =>
+      # import(...)), as notifications.module.ts reaches CommerceModule (review
+      # CR-PINR3-1). Then it yields one turn of the event loop, so Node reports
+      # a promise rejected while the graph loaded (a tsc-compiled unawaited
+      # import() of a missing or top-level-await dependency, an init promise
+      # started at load) and the boot dies of it as the real one does (review
+      # SEC-PINR3-1). Only then does it print KEYFLOW_MODULE_GRAPH_LOADED and
+      # exit 0 (it writes with fs.writeSync, which process.exit cannot cut
+      # short on a pipe). A load error, thrown or rejected by then, an exit
+      # before that point, a hang (timeout), a root module other than
+      # AppModule, or a non-zero exit after the marker all fail the step, and
+      # the step prints the whole boot output: a tail cut the error line off a
+      # dependency missing deep in a require chain (review CR-PINR3-2). Work
+      # that fails later than that turn (a timer, network I/O) is not module
+      # loading; native-dast.yml's full boot still catches it.
+      #
+      # This replaced a grep for a list of Node error codes, which passed
+      # whatever the list did not name: an ESM-only dependency importing a
+      # named export its dependency lacks (SyntaxError),
+      # ERR_PACKAGE_PATH_NOT_EXPORTED and a SyntaxError in a dependency all
+      # reported "loaded successfully" (RC2-1). scripts/ci/runtime-pin.spec.mjs
+      # case 7 reads this step strictly and RUNS it against server graphs that
+      # fail each of those ways and graphs that load, so flipping exit 1,
+      # dropping stderr from OUT or grepping anything but "$OUT" fails it
+      # (RC2-3).
+      #
+      # No --no-experimental-require-module (V1-39, review CR-V139-2): this job,
+      # native-dast.yml (the required DAST gate) and e2e-live.yml all boot
+      # dist/main.js on the pinned Node 22, where require(esm) is on by default,
+      # so this check loads the graph the way those boots do. runtime-pin.spec.mjs
+      # requires the flag back while any workflow boots the server on a Node
+      # without require(esm) (where an ESM-only dependency dies with
+      # ERR_REQUIRE_ESM), and requires it gone once none does.
+      #
+      # DATABASE_URL: main.ts validates the environment and exits before it
+      # imports AppModule, so with no DATABASE_URL this step only loaded
+      # main.ts's own imports. An unreachable one (port 1, no password) gets
+      # the process through env validation to the AppModule import; the probe
+      # stops it before NestFactory would try the database.
       - name: Verify the server gets past module loading
+        env:
+          DATABASE_URL: postgresql://module-load-check@127.0.0.1:1/module-load-check
         run: |
           set +e
-          OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
-          if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
-            echo "::error::Server dies during module loading — it cannot start"
-            echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|Cannot find module" | head -5
+          PROBE="$(mktemp -d)/module-load-probe.cjs"
+          cat > "$PROBE" <<'PROBE_EOF'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const fromServer = { paths: [path.resolve('apps/server/dist')] };
+          const { NestFactory } = require(require.resolve('@nestjs/core', fromServer));
+          const create = NestFactory.create.bind(NestFactory);
+          NestFactory.create = async (root, options) => {
+            const name = typeof root === 'function' ? root.name : typeof root;
+            if (name !== 'AppModule') {
+              fs.writeSync(2, 'module-load probe: NestFactory.create got ' + name + ', not AppModule\n');
+              process.exit(1);
+            }
+            await create(root, { ...options, preview: true, abortOnError: false, logger: ['error'] });
+            await new Promise((resolve) => setImmediate(resolve));
+            fs.writeSync(1, 'KEYFLOW_MODULE_GRAPH_LOADED\n');
+            process.exit(0);
+          };
+          PROBE_EOF
+          OUT=$(timeout 45 node --require "$PROBE" apps/server/dist/main.js 2>&1)
+          STATUS=$?
+          if [ "$STATUS" -ne 0 ] || ! echo "$OUT" | grep -qxF "KEYFLOW_MODULE_GRAPH_LOADED"; then
+            echo "::error::Server cannot load its module graph (exit $STATUS, or no load marker) — it cannot start"
+            echo "$OUT"
             exit 1
           fi
           echo "Server loaded its module graph successfully"
@@ -319,6 +536,93 @@ jobs:
         env:
           NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
           NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || 'http://localhost:5000' }}
+
+  # R0-25-PLAYWRIGHT-R0. The Playwright specs under apps/web/e2e had never run
+  # in CI. This job runs the non-live ones with the API mocked at the network
+  # edge (page.route on http://api.test.local): E2E_NO_SERVER is unset, so
+  # playwright.config.ts starts the web server itself, here the standalone
+  # server (next.config.ts builds `output: "standalone"`, which `next start`
+  # does not serve; R0-15d) on a build made with
+  # NEXT_PUBLIC_API_BASE_URL=http://api.test.local (a dev server compiles each
+  # route on first visit, past the mocked specs' 15 s navigation timeout). The live specs (release0-live, live-journey) need a
+  # real stack and run in e2e-live.yml, by hand.
+  #
+  # THE SPEC LIST IS EXPLICIT: the files green at this head. The other 15 files
+  # are stale and were reported by R0-25, not fixed (outside its scope). With
+  # this job's setup, all 20 files at the R0-25 base gave 43 failed, 29 passed,
+  # 3 skipped:
+  #   - every /app/* spec seeds kf_token=test-token-e2e (e2e/helpers/
+  #     workspace.ts), which is not a JWT, so src/middleware.ts sends the page
+  #     to /auth/login before it renders (calendar-event-drawer,
+  #     connect-business-profile, connect-contacts, connect-forms,
+  #     inventory-xlsx-import; the post-login steps of auth-callback,
+  #     auth-login, auth-signup);
+  #   - business-genesis-legal, business-genesis-market and key-connect-smoke
+  #     throw "ADMIN_JWT_SECRET not set" before the page opens;
+  #   - event-drawer-allday, event-drawer-timed, upload-presigned-put,
+  #     upload-real-surfaces and two auth-signup / auth-login banner cases do
+  #     not find the elements they wait for.
+  # A spec joins this list when it is green here; nothing is skipped silently.
+  e2e-mocked:
+    name: E2E (Playwright, mocked API)
+    # Pinned: ubuntu-latest moved to 26.04, where Playwright 1.59.1 cannot install its browser
+    # ("Playwright does not support chromium on ubuntu26.04-x64"). Unpin once Playwright supports it.
+    runs-on: ubuntu-24.04
+    needs: [lint-and-typecheck]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Build web against the mocked API host
+        run: cd apps/web && pnpm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://api.test.local
+
+      - name: Install Playwright Chromium
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright specs (mocked API)
+        run: >-
+          cd apps/web && pnpm exec playwright test
+          e2e/onboarding-loop-regression.spec.ts
+          e2e/auth-helpers.spec.ts
+          e2e/public-flows.spec.ts
+        env:
+          # The standalone server (.next/standalone/apps/web/server.js) on 0.0.0.0
+          # and E2E_PORT (5000): playwright.config.ts webServerCommand.
+          E2E_WEB_COMMAND: standalone
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mocked-traces
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   test:
     name: Run Tests
@@ -425,6 +729,20 @@ jobs:
       - name: Apply migrations to the test database
         run: pnpm db:deploy
 
+      # The suites make Postgres refuse statements on purpose (unique, foreign-key
+      # and check violations they assert on), and the service logs each one with its
+      # statement. GitHub prints the whole service log when the job stops, after the
+      # test output, so a failing run's vitest summary sits under tens of thousands of
+      # Postgres lines and cannot be read from the end of the log. Fatal-only logging
+      # keeps the summary at the end; it changes nothing a test sees.
+      - name: Quiet the Postgres service log
+        run: >-
+          docker exec ${{ job.services.postgres.id }}
+          psql -U keyflow -d keyflowos
+          -c "ALTER SYSTEM SET log_min_messages = 'fatal'"
+          -c "ALTER SYSTEM SET log_min_error_statement = 'panic'"
+          -c "SELECT pg_reload_conf()"
+
       # app-module-boots.integration.test.ts spawns apps/server/dist/main.js to
       # prove the application actually starts — the class of failure where tsc is
       # clean, 3300 tests pass, and Nest still cannot resolve a provider. dist/ is
@@ -442,6 +760,50 @@ jobs:
 
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
+
+      # R0-16-PROOF-BINDING. A green `test:ci` cannot show that a required case
+      # ran: a skipped, renamed or deleted case leaves the aggregate green.
+      # This step judges EVERY case manifest under
+      # scripts/proof-admission/manifests/ against one vitest JSON report of the
+      # suites those manifests bind (their `suites` field), at this exact head
+      # (--expect-head = HEAD). Resource manifests (ci-resources.json,
+      # local-worktree-resources.json) are skipped by type. A packet binds its
+      # suites by adding one manifest; nobody edits this workflow to add a
+      # proof. --skip-build: "Build server" above built dist/main.js at this
+      # head, and the runner refuses a dist older than apps/server/src. Same
+      # Postgres and Redis services as the server tests.
+      - name: Evaluate every proof manifest at this head
+        run: node scripts/proof-admission/run-manifests.mjs --skip-build
+
+      # R0-35-EXIT-PROOF. The Release 0 exit gate (BUILD-MAP-001 section (d)),
+      # scripts/proof-admission/release0.mjs: run-manifests over exactly the
+      # Release 0 manifests that scripts/proof-admission/release0-index.json
+      # lists (each SATISFIED at this head), then release0-proof-coverage.spec.ts
+      # (every Release 0 server suite bound, no manifest naming a missing
+      # suite, every skip or todo in the source explained), then the runtime
+      # skip check on that run's report (a case the run skipped, left todo or
+      # pending fails unless the index explains it). Exit 2 (REJECTED) fails
+      # this job. Exit 3 is NOT MET: everything is proven and OPEN Release 0
+      # items remain (listed in this step's log); it is annotated for the
+      # owner, not failed, so a regression stays distinguishable from the
+      # standing R0 exit. The R0 exit gate itself needs exit 0.
+      # --skip-build: "Build server" built dist/.
+      - name: Release 0 exit proof (proof:release0)
+        run: |
+          set +e
+          pnpm --filter server proof:release0 --skip-build
+          code=$?
+          if [ "$code" -eq 3 ]; then
+            echo "::warning title=Release 0 exit gate NOT MET::proof:release0 proved every Release 0 manifest and explained every skip; OPEN Release 0 items remain (see this step's log). The R0 exit gate needs exit 0."
+            exit 0
+          fi
+          exit "$code"
+
+      # The one-command local runner (scripts/test-local.sh) runs in a sandbox
+      # with stand-ins for docker and pnpm: plan order, resource admission
+      # refusals, step selection. It touches no database.
+      - name: Self-test the local test runner
+        run: bash scripts/ci/test-local.selftest.sh
 
       # K12 proof admission is deliberately separate from the main Vitest exit
       # code. It consumes a native JSON report and an accepted case manifest so
@@ -469,6 +831,22 @@ jobs:
       # filter names test:unit explicitly.
       - name: Run web tests
         run: pnpm --filter web test:unit
+
+      # KF-HARNESS-PKG-TESTS-001 (V1-26). packages/api carries specs
+      # (vitest.config.ts: src/**/*.spec.ts) -- the no-raw-records gate and
+      # the crm.contactDetail visibility cases -- and no step ran them: the
+      # server step runs apps/server only and the step above runs apps/web.
+      # No procedure is served: since D-68 the server serves /trpc only when
+      # TRPC_ENABLED=1 (trpcModuleImports in apps/server/src/trpc.module.ts),
+      # and even then the Nest exact-path mount answers 404 for
+      # /trpc/<procedure> (apps/server/src/trpc.module.spec.ts), so these
+      # specs gate the routers for the day tRPC is re-enabled with fixes.
+      # The three crm.contactDetail visibility refusals are `it.fails` (RED,
+      # blocked on a shared visibility helper): they fail this step the day
+      # the rule lands, until they are turned back into `it`. Pure unit
+      # specs: no database, no Redis; "Build workspace packages" is enough.
+      - name: Run packages/api tests
+        run: pnpm --filter @keyflow/api test:unit
 
   # Production deployment (commented out until configured)
   # deploy:

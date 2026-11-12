@@ -1,5 +1,10 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../core/config/env';
+// V1-38b (CR-1): the customer bonus goes to Contact.status CLIENT, the one
+// vocabulary; a row holding the legacy CLIENT spelling scores the same.
+// V1-38c: that spelling and the predicate are crm.constants.ts's.
+import { isClientStatus } from './crm.constants';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const DEFAULT_TARGET_HOUR_UTC = 4; // run at 04:00 UTC
@@ -37,6 +42,10 @@ export class LeadScoringScheduler implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.LEAD_SCORE_SCHEDULER_DISABLED === '1') {
       this.logger.log('Lead-scoring scheduler disabled via env');
       return;
@@ -183,7 +192,7 @@ export class LeadScoringScheduler implements OnModuleInit, OnModuleDestroy {
     else if (input.eventCount >= 2) score += 2;
 
     // Status bonus/penalty
-    if (input.status === 'CUSTOMER') score += 5;
+    if (isClientStatus(input.status)) score += 5;
     if (input.status === 'LOST') score -= 10;
 
     return Math.max(0, Math.min(100, Math.round(score)));

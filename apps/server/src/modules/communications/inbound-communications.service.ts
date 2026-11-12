@@ -134,7 +134,7 @@ export class InboundCommunicationsService {
     // Staff members (full account or contact-only) can talk to KEY directly
     // over SMS — check that before treating this as a customer inquiry.
     if (payload.body?.trim()) {
-      const staffResult = await this.staffChat.routeInboundMessage(businessId, from, payload.body, 'sms');
+      const staffResult = await this.staffChat.routeInboundMessage(businessId, from, payload.body, 'sms', payload.externalId);
       if (staffResult.handled) {
         if (staffResult.reply) {
           // SMS falls back to Twilio-via-WhatsApp for outbound, same as the rest

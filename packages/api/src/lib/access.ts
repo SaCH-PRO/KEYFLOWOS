@@ -13,6 +13,12 @@ import { AppContext } from '../trpc';
  * that builds the workspace.
  *
  * `Business` is the model type and is what callers actually use.
+ *
+ * Owner ruling D-104 (W11-TRPC-MEMBERSHIP): Membership is the single rule for
+ * business access. The caller is admitted when they hold a Membership of this
+ * business, in any role; an owner recorded only as Business.ownerId, with no
+ * Membership row, is refused, as BusinessGuard refuses them on REST. The former
+ * `ownerId` arm admitted exactly that owner. no-owner-arm.spec.ts keeps it out.
  */
 export async function assertBusinessAccess(
   ctx: AppContext,
@@ -22,13 +28,7 @@ export async function assertBusinessAccess(
     throw new Error('Unauthorized');
   }
   const business = await ctx.db.business.findFirst({
-    where: {
-      id: businessId,
-      OR: [
-        { ownerId: ctx.user.id },
-        { members: { some: { userId: ctx.user.id } } },
-      ],
-    },
+    where: { id: businessId, members: { some: { userId: ctx.user.id } } },
   });
   if (!business) {
     throw new Error('Forbidden');
@@ -41,8 +41,15 @@ export async function assertBusinessAccess(
  *
  * The effective role is resolved from the database, never from `ctx.business.role`.
  * That field is populated by guards upstream, and treating it as authoritative would
- * make role enforcement only as trustworthy as whatever set it. The business owner is
- * always treated as OWNER regardless of any Membership row.
+ * make role enforcement only as trustworthy as whatever set it.
+ *
+ * The role is the caller's Membership role and nothing else (owner rulings D-104,
+ * D-116, D-125; W11-TRPC-MEMBERSHIP). The owner is whoever holds an OWNER
+ * Membership of this business, so a co-owner (OWNER Membership, not
+ * Business.ownerId) resolves OWNER; a recorded owner holding only ADMIN or STAFF
+ * resolves that role; a recorded owner with no Membership is Forbidden.
+ * Business.ownerId grants nothing on its own and is neither filtered on nor
+ * selected here.
  *
  * @param allowedRoles Membership roles permitted here, e.g. ['OWNER', 'ADMIN'].
  *                     Membership.role is one of OWNER | ADMIN | STAFF.
@@ -64,13 +71,9 @@ export async function assertBusinessRole(
   }
 
   const business = await ctx.db.business.findFirst({
-    where: {
-      id: businessId,
-      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-    },
+    where: { id: businessId, members: { some: { userId } } },
     select: {
       id: true,
-      ownerId: true,
       members: { where: { userId }, select: { role: true }, take: 1 },
     },
   });
@@ -79,7 +82,8 @@ export async function assertBusinessRole(
     throw new Error('Forbidden');
   }
 
-  const role = business.ownerId === userId ? 'OWNER' : business.members[0]?.role;
+  // D-116/D-125: the membership role, never a role inferred from Business.ownerId.
+  const role = business.members[0]?.role;
   if (!role || !allowedRoles.includes(role)) {
     throw new Error('Forbidden');
   }

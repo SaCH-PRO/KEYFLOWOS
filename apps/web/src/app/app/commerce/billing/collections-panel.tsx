@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import type { Invoice, Contact } from "@/lib/client";
 import {
   markInvoicePaid,
-  updateInvoiceStatus,
+  sendInvoiceReminder,
   commerceAiInvoiceReminder,
   type CommerceInvoiceReminder,
 } from "@/lib/client";
@@ -199,21 +199,33 @@ export default function CollectionsPanel({
     }
   }, [actionLoading, setInvoices]);
 
+  // V1-42c-INVOICE-STATUS-EVENTS (VR-01): the reminder goes through the
+  // reminder door (POST .../invoices/:id/send-reminder), which emails the
+  // customer and logs invoice.payment_reminder_sent. It used to ask the status
+  // route for SENT, which since V1-42 answers a SENT invoice without doing
+  // anything (and refuses an OVERDUE one), while this toasted "Reminder sent".
+  // "Reminder sent" now means the server delivered one; a reminder changes
+  // nothing on the invoice, so the row is left as it is.
   const handleSendReminder = useCallback(async (invoiceId: string) => {
     if (actionLoading[invoiceId]) return;
+    if (!businessId) {
+      toast.error("Select a workspace to send a reminder");
+      return;
+    }
     setActionLoading((prev) => ({ ...prev, [invoiceId]: "send" }));
     try {
-      const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
-      if (!error && data) {
-        setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i)));
+      const { data, error } = await sendInvoiceReminder(businessId, invoiceId, {});
+      if (error || !data) {
+        toast.error(error ?? "Failed to send reminder");
+      } else if (data.delivered) {
         toast.success("Reminder sent");
       } else {
-        toast.error(error ?? "Failed to send reminder");
+        toast.warning("Reminder logged but not emailed: this customer has no email address");
       }
     } finally {
       setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
     }
-  }, [actionLoading, setInvoices]);
+  }, [actionLoading, businessId]);
 
   const recordContactAttempt = useCallback((invoiceId: string) => {
     setContactAttempts((prev) => ({

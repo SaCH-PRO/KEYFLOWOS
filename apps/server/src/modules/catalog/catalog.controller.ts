@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGu
 import { CatalogService } from './catalog.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { CreateProductDto } from '../commerce/dto/create-product.dto';
 import { BulkProductsDto } from '../commerce/dto/bulk-products.dto';
 import { CreateCatalogServiceDto, UpdateCatalogServiceDto, BatchCatalogServicesDto } from './dto/catalog-service.dto';
@@ -16,6 +17,13 @@ export class CatalogController {
 
   // ----- Products -----
 
+  /**
+   * Anonymous storefront listing: projected rows, 404 for a closed store
+   * (CatalogService.listPublicProducts), rate limited like the bookings
+   * public lists beside it (V1-23).
+   */
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/products')
   listPublicProducts(@Param('businessId') businessId: string) {
     return this.catalog.listPublicProducts(businessId);

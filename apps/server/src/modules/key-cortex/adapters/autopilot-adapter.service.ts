@@ -49,20 +49,30 @@ export class AutopilotAdapterService {
     });
   }
 
+  /**
+   * Trial-N integration review NEW-3: the approver (and below, the member who
+   * completes a task) is the member the command acts for (ConnectorCommand.userId,
+   * the authenticated principal over POST cortex/execute and batch), as AP-02
+   * records over HTTP. 'key-cortex' recorded a person's decision as KEY's, and
+   * COMPLETED rows with approvedBy are the delegation loop's human evidence.
+   */
   async approveTask(input: {
     businessId: string;
     taskId: string;
     notes?: string;
+    actorId?: string;
   }) {
-    return this.autopilot.approveTask(input.taskId, input.businessId, 'key-cortex');
+    return this.autopilot.approveTask(input.taskId, input.businessId, input.actorId || 'key-cortex');
   }
 
+  /** Trial-N repair round 2 (DENY-ACTOR): the denier is the member the command acts for, as for approve. */
   async rejectTask(input: {
     businessId: string;
     taskId: string;
     reason?: string;
+    actorId?: string;
   }) {
-    return this.autopilot.denyTask(input.taskId, input.businessId);
+    return this.autopilot.denyTask(input.taskId, input.businessId, input.actorId || 'key-cortex');
   }
 
   async enableLoop(input: { businessId: string; loopId: string }) {
@@ -77,12 +87,13 @@ export class AutopilotAdapterService {
     businessId: string;
     taskId: string;
     outcome?: string;
+    actorId?: string;
   }) {
     return this.autopilot.updateTaskStatus(
       input.taskId,
       input.businessId,
       'COMPLETED',
-      'key-cortex',
+      input.actorId || 'key-cortex',
     );
   }
 
@@ -189,6 +200,7 @@ export class AutopilotAdapterService {
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           notes: command.parameters.notes as string,
+          actorId: command.userId,
         });
         return connectorOk(command, start, approved);
       }
@@ -197,6 +209,7 @@ export class AutopilotAdapterService {
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           reason: command.parameters.reason as string,
+          actorId: command.userId,
         });
         return connectorOk(command, start, rejected);
       }
@@ -219,6 +232,7 @@ export class AutopilotAdapterService {
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           outcome: command.parameters.outcome as string,
+          actorId: command.userId,
         });
         return connectorOk(command, start, completed);
       }

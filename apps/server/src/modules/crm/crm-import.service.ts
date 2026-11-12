@@ -1,13 +1,25 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { isIP } from 'node:net';
+import type { Prisma } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { AiUsageService } from '../ai/ai-usage.service';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  isNonPublicAddress,
+  OutboundAddressRefusedError,
+  PinnedDispatcher,
+  resolvePublicAddress,
+  type CheckedAddress,
+} from '../../core/security/outbound-address';
 import { CrmService } from './crm.service';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
+  canonicalContactStatus,
   type ContactAgeGroup,
 } from './crm.constants';
 
@@ -23,6 +35,9 @@ const AGE_GROUP_LABEL_TO_CODE: Record<string, ContactAgeGroup> = (() => {
   }
   return map;
 })();
+
+/** ST-38c-2: the redirects import/link follows, each target checked first. */
+const MAX_IMPORT_REDIRECTS = 5;
 
 function normalizeAgeGroupValue(raw: string): ContactAgeGroup | null {
   const trimmed = raw.trim();
@@ -235,6 +250,17 @@ export class CrmImportService {
     return normalized;
   }
 
+  /**
+   * Every import entry point takes `actorUserId`, the requesting member. With
+   * it, a member who may not create contacts is refused 403 before an import
+   * job is opened, a link fetched or the vision model called, and each row goes
+   * through findOrCreateContact with that actor (merged only into contacts the
+   * member may edit; a collision answers the visibility-bounded 409).
+   */
+  private async assertImportAllowed(businessId: string, actorUserId?: string) {
+    if (actorUserId) await this.crm.assertCanCreateContacts(businessId, actorUserId);
+  }
+
   async createFileImport(params: {
     businessId: string;
     sourceType: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf';
@@ -242,7 +268,9 @@ export class CrmImportService {
     sourceUrl?: string;
     fileBuffer?: Buffer;
     ocrText?: string;
+    actorUserId?: string;
   }) {
+    await this.assertImportAllowed(params.businessId, params.actorUserId);
     const importJob = await this.prisma.client.contactImport.create({
       data: {
         businessId: params.businessId,
@@ -276,6 +304,7 @@ export class CrmImportService {
             businessId: params.businessId,
             importId: importJob.id,
             recordId: record.id,
+            actorUserId: params.actorUserId,
           });
           processed += 1;
         } catch (error: any) {
@@ -316,7 +345,25 @@ export class CrmImportService {
     }
   }
 
-  private validateImportUrl(url: string): void {
+  /**
+   * V1-38c review ST-38c-2 (pre-existing): import/link fetches only a public
+   * address. WHATWG URL gives an IPv6 host in brackets and keeps a trailing
+   * dot, so the old literal list missed [::ffff:127.0.0.1], the IPv4-mapped
+   * metadata address and [fd00::1]; it also missed 127.0.0.0/8 beyond
+   * 127.0.0.1. A localhost name is refused by name, and an IP literal is
+   * checked against the shared outbound-address guard (core/security; an
+   * IPv4-mapped IPv6 address against the IPv4 ranges).
+   *
+   * W4-IMPORT-SSRF-PIN (ST-38c-2, second half): a DNS name was checked by name
+   * only, so one that resolves to a private address (127.0.0.1.nip.io,
+   * *.localtest.me) was fetched. The host is now resolved once, here, every
+   * address asked for, and refused with 400 when any address is not public or
+   * when it does not resolve. The addresses given back are the only ones the
+   * fetch is pinned to (fetchImportLink), so a second DNS answer is never
+   * used; every checked address is kept, not only the first (review CR-PIN-1),
+   * so a dual-stack link whose first answer is unreachable still imports.
+   */
+  private async checkImportUrl(url: string): Promise<CheckedAddress> {
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -328,34 +375,69 @@ export class CrmImportService {
       throw new BadRequestException('URL must use http or https');
     }
 
-    const hostname = parsed.hostname.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
 
-    // Block private IP ranges and localhost
-    const blocked = [
-      'localhost',
-      '127.0.0.1',
-      '0.0.0.0',
-      '::1',
-      '[::1]',
-    ];
-    if (blocked.includes(hostname)) {
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
       throw new BadRequestException('Private addresses are not allowed');
     }
 
-    // Block IPv4 private ranges
-    const ipv4Private = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.)/;
-    if (ipv4Private.test(hostname)) {
+    if (isIP(hostname) !== 0 && isNonPublicAddress(hostname)) {
       throw new BadRequestException('Private IP ranges are not allowed');
     }
 
-    // Block IPv6 loopback / link-local
-    if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')) {
-      throw new BadRequestException('Private IP ranges are not allowed');
+    try {
+      return await resolvePublicAddress(hostname);
+    } catch (err) {
+      if (err instanceof OutboundAddressRefusedError) {
+        throw new BadRequestException(
+          err.reason === 'non_public' ? 'Private IP ranges are not allowed' : 'The link host could not be resolved',
+        );
+      }
+      throw err;
     }
   }
 
-  async createLinkImport(params: { businessId: string; sourceUrl: string }) {
-    this.validateImportUrl(params.sourceUrl);
+  /**
+   * ST-38c-2: fetch the link without letting fetch follow a redirect on its
+   * own, at most MAX_IMPORT_REDIRECTS of them. W4-IMPORT-SSRF-PIN: each fetch
+   * goes through a dispatcher pinned to the addresses its host was checked
+   * at, so the connection is made only to those addresses, tried in turn (the
+   * URL's name stays the Host and the TLS server name); a redirect target is
+   * checked and resolved the same way (checkImportUrl) before it is fetched
+   * through its own pinned dispatcher.
+   */
+  private async fetchImportLink(sourceUrl: string, checked: CheckedAddress): Promise<Response> {
+    let url = sourceUrl;
+    let target = checked;
+    for (let hops = 0; ; hops++) {
+      const dispatcher = new PinnedDispatcher(target);
+      let response: Response;
+      try {
+        response = await fetch(url, { redirect: 'manual', dispatcher } as RequestInit);
+      } finally {
+        // close() lets the request in flight finish, its body included, then ends the connection.
+        dispatcher.close().catch(() => undefined);
+      }
+      const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+      if (!location) return response;
+      await response.body?.cancel().catch(() => undefined);
+      if (hops >= MAX_IMPORT_REDIRECTS) {
+        throw new BadRequestException('Too many redirects');
+      }
+      let next: string;
+      try {
+        next = new URL(location, url).toString();
+      } catch {
+        throw new BadRequestException('Invalid redirect URL');
+      }
+      target = await this.checkImportUrl(next);
+      url = next;
+    }
+  }
+
+  async createLinkImport(params: { businessId: string; sourceUrl: string; actorUserId?: string }) {
+    await this.assertImportAllowed(params.businessId, params.actorUserId);
+    const target = await this.checkImportUrl(params.sourceUrl);
 
     const importRecord = await this.prisma.client.contactImport.create({
       data: {
@@ -367,7 +449,7 @@ export class CrmImportService {
     });
 
     try {
-      const response = await fetch(params.sourceUrl);
+      const response = await this.fetchImportLink(params.sourceUrl, target);
       if (!response.ok) {
         throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
       }
@@ -402,7 +484,12 @@ export class CrmImportService {
         },
       });
 
+      // Each row is settled on its own, as import/file does: a row that is
+      // refused (a 409 from a contact the member may not edit, a 403) or fails
+      // is marked FAILED with its error and the import goes on with the next
+      // row; a row that resolves to a contact is marked CREATED with its id.
       let created = 0;
+      let failed = 0;
       for (const row of rows) {
         const builtInput = this.buildContactInput(row, mapping);
         const contactInput = {
@@ -415,7 +502,7 @@ export class CrmImportService {
           continue;
         }
 
-        await this.prisma.client.contactImportContact.create({
+        const record = await this.prisma.client.contactImportContact.create({
           data: {
             importId: importRecord.id,
             rawData: row as Record<string, unknown>,
@@ -423,16 +510,28 @@ export class CrmImportService {
           },
         });
 
-        const contact = await this.crm.findOrCreateContact(params.businessId, contactInput);
-        if (contact) {
-          created++;
+        try {
+          const contact = await this.crm.findOrCreateContact(params.businessId, contactInput, params.actorUserId);
+          if (contact) {
+            created++;
+            await this.prisma.client.contactImportContact.update({
+              where: { id: record.id },
+              data: { status: 'CREATED', contactId: contact.id },
+            });
+          }
+        } catch (error: unknown) {
+          failed++;
+          await this.prisma.client.contactImportContact.update({
+            where: { id: record.id },
+            data: { status: 'FAILED', error: (error as Error)?.message },
+          });
         }
       }
 
       await this.prisma.client.contactImport.update({
         where: { id: importRecord.id },
         data: {
-          status: 'COMPLETED',
+          status: failed === 0 ? 'COMPLETED' : 'FAILED',
           processedRows: created,
           completedAt: new Date(),
         },
@@ -455,6 +554,7 @@ export class CrmImportService {
     businessId: string;
     importId: string;
     recordId: string;
+    actorUserId?: string;
   }) {
     const record = await this.prisma.client.contactImportContact.findUnique({
       where: { id: params.recordId },
@@ -481,7 +581,7 @@ export class CrmImportService {
       source: 'import',
       sourceDetail: record.import.sourceType,
     };
-    const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput);
+    const contact = await this.crm.findOrCreateContact(record.import.businessId, contactInput, params.actorUserId);
     if (!contact) {
       throw new BadRequestException('Failed to create contact from import record');
     }
@@ -497,7 +597,8 @@ export class CrmImportService {
       type: 'contact.imported',
       data: { importId: record.importId, recordId: record.id },
       source: 'import',
-      actorType: 'SYSTEM',
+      // The importing member, when there is one (the import routes).
+      ...(params.actorUserId ? { actorType: 'USER', actorId: params.actorUserId } : { actorType: 'SYSTEM' }),
     });
 
     return record;
@@ -563,7 +664,8 @@ Only return the JSON object, no markdown or explanation.`,
     }
   }
 
-  async scanContactImage(businessId: string, buffer: Buffer, mimetype?: string) {
+  async scanContactImage(businessId: string, buffer: Buffer, mimetype?: string, actorUserId?: string) {
+    await this.assertImportAllowed(businessId, actorUserId);
     const base64 = `data:${mimetype || 'image/jpeg'};base64,${buffer.toString('base64')}`;
     const extracted = await this.extractContactFromImage(businessId, base64);
     if (!extracted.firstName && !extracted.lastName && !extracted.email && !extracted.phone) {
@@ -577,7 +679,7 @@ Only return the JSON object, no markdown or explanation.`,
       companyName: extracted.companyName,
       source: 'scan',
       sourceDetail: 'business_card',
-    });
+    }, actorUserId);
     return { contact, extracted };
   }
 
@@ -586,6 +688,7 @@ Only return the JSON object, no markdown or explanation.`,
     ocrText: string;
     mediaUrl?: string;
     type?: string;
+    actorUserId?: string;
   }) {
     const mapped = this.parseOcrText(params.ocrText);
     const contact = await this.crm.findOrCreateContact(params.businessId, {
@@ -595,7 +698,7 @@ Only return the JSON object, no markdown or explanation.`,
       phone: mapped.phone,
       source: 'ocr',
       sourceDetail: params.type ?? 'business_card',
-    });
+    }, params.actorUserId);
     if (!contact) {
       throw new BadRequestException('Failed to create contact from OCR text');
     }
@@ -616,7 +719,8 @@ Only return the JSON object, no markdown or explanation.`,
       type: 'contact.imported_from_media',
       data: { mediaId: media.id },
       source: 'ocr',
-      actorType: 'SYSTEM',
+      // The importing member, when there is one (the import route).
+      ...(params.actorUserId ? { actorType: 'USER', actorId: params.actorUserId } : { actorType: 'SYSTEM' }),
     });
 
     return { contact, media };
@@ -630,15 +734,32 @@ Only return the JSON object, no markdown or explanation.`,
     });
   }
 
-  async listImportRecords(businessId: string, importId: string) {
+  /**
+   * The rows of one import. With `actorUserId` (the route passes the requesting
+   * member), a row linked to a contact is listed only when that member may open
+   * the contact, under the same M7 visibility clause the contact list and
+   * detail apply (a live contact of this tenant): its raw data and contact id
+   * would otherwise disclose a PRIVATE or unshared contact. A row linked to no
+   * contact (FAILED, PENDING) is listed as before. OWNER and SUPER_ADMIN see
+   * every row.
+   */
+  async listImportRecords(businessId: string, importId: string, actorUserId?: string) {
     const importJob = await this.prisma.client.contactImport.findUnique({
       where: { id: importId },
     });
     if (!importJob || importJob.businessId !== businessId) {
       throw new BadRequestException('Import not found');
     }
+    const where: Prisma.ContactImportContactWhereInput = { importId };
+    if (actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const visClause = visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null;
+      if (visClause) {
+        where.OR = [{ contactId: null }, { contact: { is: { ...contactWhereBase(businessId), ...visClause } } }];
+      }
+    }
     return this.prisma.client.contactImportContact.findMany({
-      where: { importId },
+      where,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -668,9 +789,10 @@ Only return the JSON object, no markdown or explanation.`,
 
   private buildContactInput(row: ParsedRow, mapping: FieldMapping) {
     const contact: Record<string, unknown> = {};
-    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact'>)[] = [
+    // 'status' is not copied verbatim: it is normalised below (V1-38c).
+    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact' | 'status'>)[] = [
       'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
-      'phone', 'secondaryPhone', 'whatsappNumber', 'status',
+      'phone', 'secondaryPhone', 'whatsappNumber',
       'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
       'country', 'timezone', 'companyName', 'jobTitle', 'department',
       'industry', 'segment', 'preferredChannel', 'language',
@@ -710,6 +832,18 @@ Only return the JSON object, no markdown or explanation.`,
         const code = normalizeAgeGroupValue(raw);
         if (code) contact.ageGroup = code;
       }
+    }
+    // V1-38c (CF-49), D-92: the status, stage or pipeline_stage column is never
+    // stored verbatim (crm.constants.ts canonicalContactStatus): the
+    // vocabulary in any case, and the legacy CUSTOMER and DORMANT in any case
+    // as CLIENT, the mapping the status readers use. D-92: dormancy is worked
+    // out from inactivity, never stored (before D-92 a DORMANT cell kept the
+    // legacy DORMANT, review CR-V38c-1). Any other cell (INACTIVE, an unknown
+    // stage) is dropped, as an unrecognised age group or flag is, so a new
+    // contact takes createContact's LEAD default.
+    if (mapping.status) {
+      const status = canonicalContactStatus(row[mapping.status]);
+      if (status) contact.status = status;
     }
     if (mapping.custom?.length) {
       const custom: Record<string, string | null> = {};

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BestChannelService } from './best-channel.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 150 * 1000;
@@ -23,6 +24,12 @@ export class BestChannelSchedulerService implements OnModuleInit, OnModuleDestro
   ) {}
 
   onModuleInit() {
+    // V1-24: DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test stops it
+    // before the startup delay is armed.
+    if (schedulersDisabled()) {
+      this.logger.log('[BestChannelScheduler] Disabled via env');
+      return;
+    }
     this.startupTimeout = setTimeout(() => {
       void this.tick();
       this.intervalRef = safeInterval('BestChannelSchedulerService', CHECK_INTERVAL_MS, () => this.tick(), this.logger);

@@ -24,23 +24,33 @@ export class CallScriptService {
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
   ) {}
 
+  /**
+   * Both rows are looked up within `businessId` (V1-21b review 8 DD8-1). KEY's
+   * call_generate_script hands over a call log id and a contact id the model chose; with
+   * findUnique({ id }) they stayed in the tenant only while TenantInterceptor's ambient tenant
+   * was armed, so on the WhatsApp/SMS staff bridge another business's contact went into the
+   * prompt and its call log took the script. Another business's id answers as an unknown one.
+   */
   async generateScript(
     businessId: string,
     callLogId: string,
     contactId: string,
   ): Promise<CallScriptResult> {
-    const contact = await this.prisma.client.contact.findUnique({
-      where: { id: contactId },
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      // Relation includes are not filtered by business: a row another business wrote onto this
+      // contact (a ContactTask planted through its own call log, review 9 TD9-2) would reach the
+      // prompt. Each is read within the business.
       include: {
         deals: {
-          where: { status: 'OPEN' },
+          where: { businessId, status: 'OPEN' },
           take: 5,
           include: { stage: true },
         },
-        invoices: { orderBy: { issueDate: 'desc' }, take: 5 },
-        bookings: { orderBy: { startTime: 'desc' }, take: 5 },
+        invoices: { where: { businessId }, orderBy: { issueDate: 'desc' }, take: 5 },
+        bookings: { where: { businessId }, orderBy: { startTime: 'desc' }, take: 5 },
         tasks: {
-          where: { status: 'OPEN' },
+          where: { businessId, status: 'OPEN' },
           orderBy: { dueDate: 'asc' },
           take: 5,
         },
@@ -51,8 +61,8 @@ export class CallScriptService {
       throw new NotFoundException('Contact not found');
     }
 
-    const callLog = await this.prisma.client.callLog.findUnique({
-      where: { id: callLogId },
+    const callLog = await this.prisma.client.callLog.findFirst({
+      where: { id: callLogId, businessId },
     });
 
     if (!callLog) {

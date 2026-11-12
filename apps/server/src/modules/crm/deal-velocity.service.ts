@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { boundMemberOpensContacts } from './crm-deals.service';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -146,8 +147,13 @@ export class DealVelocityService {
       }
     }
     outliers.sort((a, b) => b.multiple - a.multiple);
+    const listed = outliers.slice(0, 50);
+    // W9-CRM-RESIDUALS (D-37): an outlier whose contact the member bound to the
+    // call cannot open is listed without that contact, as GET deals lists it.
+    const opens = await boundMemberOpensContacts(this.prisma, businessId, listed.map((o) => o.contact?.id));
+    const shown = opens ? listed.map((o) => (o.contact && !opens(o.contact.id) ? { ...o, contact: null } : o)) : listed;
 
-    return { stages: stageVelocity, outliers: outliers.slice(0, 50), generatedAt: new Date().toISOString() };
+    return { stages: stageVelocity, outliers: shown, generatedAt: new Date().toISOString() };
   }
 
   /** Returns avg days in each stage as a Map for use by other services (health, bottleneck). */

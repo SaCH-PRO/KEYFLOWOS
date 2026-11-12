@@ -53,6 +53,9 @@ export class CalendarCommerceListener {
   @OnEvent('invoice.overdue', { async: true })
   @OnEvent('invoice.void', { async: true })
   @OnEvent('invoice.payment_recorded', { async: true })
+  // V1-42c (VR-05): a refund's D-14 reopen to SENT (paidAt cleared). Without
+  // it the due item of a fully refunded invoice stayed COMPLETED.
+  @OnEvent('invoice.reopened', { async: true })
   @OnEvent('invoice.payment_failed', { async: true })
   @OnEvent('invoice.due_date_changed', { async: true })
   @OnEvent('invoice.updated', { async: true })

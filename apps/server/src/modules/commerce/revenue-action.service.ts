@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { CASH_NET_PAYMENT_WHERE } from './invoice-workflow.service';
+import { roundMoney, sumMoney } from './money';
 import type {
   InvoicePaidPayload,
   InvoiceStatusPayload,
@@ -15,6 +17,7 @@ import type {
   RevenueActionCompletedPayload,
   StoreOrderRoutingFailedPayload,
 } from '../../core/event-bus/events.types';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 5 * 60 * 1000;
 
@@ -69,7 +72,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[RevenueActionService] Scheduler disabled via env');
       return;
     }
@@ -122,6 +125,64 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
   @OnEvent('invoice.paid', { async: true })
   async onInvoicePaid(payload: InvoicePaidPayload) {
     await this.generateForPaidInvoiceMissingReceipt(payload.businessId, payload.invoice.id);
+  }
+
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT) takes
+   * back the "Send receipt" action invoice.paid raised: the invoice is not
+   * paid any more. Only an open row (PENDING or SNOOZED) of this business is
+   * removed; a COMPLETED or DISMISSED row is the operator's record and stays.
+   * Paying the invoice again raises the action again (onInvoicePaid). If the
+   * invoice is PAID again by the time this runs, its action is right: kept.
+   *
+   * FOLLOW3-A9 review (SEC-A9-1, reverse window): a re-pay that commits
+   * between the status read and the delete refreshes the row the delete then
+   * removes, and its paid handler has already run; so the status is read
+   * once more after the delete and a PAID invoice gets its action back.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const status = await this.invoiceStatus(businessId, invoiceId);
+      if (status == null || status === 'PAID') return;
+      await this.removeOpenReceiptActions(businessId, [invoiceId]);
+      if ((await this.invoiceStatus(businessId, invoiceId)) === 'PAID') {
+        await this.generateForPaidInvoiceMissingReceipt(businessId, invoiceId);
+      }
+    } catch (e) {
+      this.logger.warn(`invoice.reopened action cleanup failed for ${invoiceId}: ${(e as Error).message}`);
+    }
+  }
+
+  /** The invoice's status in this business, or null when it is not this business's invoice. */
+  private async invoiceStatus(businessId: string, invoiceId: string): Promise<string | null> {
+    const inv = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { status: true },
+    });
+    return inv?.status ?? null;
+  }
+
+  /**
+   * Removes this business's open (PENDING or SNOOZED) "Send receipt" actions
+   * of these invoices. A COMPLETED or DISMISSED row is the operator's record
+   * and stays.
+   */
+  private async removeOpenReceiptActions(businessId: string, invoiceIds: string[]): Promise<number> {
+    if (invoiceIds.length === 0) return 0;
+    const res = await this.prisma.client.revenueAction.deleteMany({
+      where: {
+        businessId,
+        type: 'PAID_INVOICE_NO_RECEIPT',
+        relatedType: 'invoice',
+        relatedId: { in: invoiceIds },
+        status: { in: ['PENDING', 'SNOOZED'] },
+      },
+    });
+    return res.count;
   }
 
   @OnEvent('payment.failed', { async: true })
@@ -223,6 +284,35 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       take: 100,
     });
     for (const inv of paid) created += (await this.generateForPaidInvoiceMissingReceipt(businessId, inv.id)) ? 1 : 0;
+
+    // 4b. FOLLOW3-A9 review (SEC-A9-1): an open "Send receipt" action of an
+    //     invoice a refund reopened (SENT, or OVERDUE since) is removed. The
+    //     reopen's handler removes it, but one raised by a paid handler that
+    //     the reopen raced past would otherwise stay. Only this business's
+    //     invoices are read; PARTIALLY_PAID is left, as the event path leaves
+    //     a partial refund's action.
+    const openReceipts = await this.prisma.client.revenueAction.findMany({
+      where: {
+        businessId,
+        type: 'PAID_INVOICE_NO_RECEIPT',
+        relatedType: 'invoice',
+        relatedId: { not: null },
+        status: { in: ['PENDING', 'SNOOZED'] },
+      },
+      select: { relatedId: true },
+      take: 200,
+    });
+    if (openReceipts.length > 0) {
+      const reopened = await this.prisma.client.invoice.findMany({
+        where: {
+          businessId,
+          id: { in: openReceipts.map((r) => r.relatedId as string) },
+          status: { in: ['SENT', 'OVERDUE'] },
+        },
+        select: { id: true },
+      });
+      await this.removeOpenReceiptActions(businessId, reopened.map((i) => i.id));
+    }
 
     // 5. Recurring failures (recent)
     const failed = await this.prisma.client.recurringInvoice.findMany({
@@ -405,7 +495,13 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       amount: Number(inv.total ?? 0),
       reference: inv.invoiceNumber ?? inv.id.slice(0, 8),
     });
-    return this.upsertAction({
+    // FOLLOW3-A9 review (SEC-A9-1): the draft can take seconds (an AI call).
+    // A refund that reopened the invoice meanwhile ran its handler against no
+    // row, so the PAID read above is checked again before the action is
+    // raised, and once more after it: a reopen whose handler ran between that
+    // check and the write left the row for nobody to remove.
+    if ((await this.invoiceStatus(businessId, inv.id)) !== 'PAID') return false;
+    const raised = await this.upsertAction({
       businessId,
       type: 'PAID_INVOICE_NO_RECEIPT',
       title: `Send receipt for invoice #${inv.invoiceNumber ?? inv.id.slice(0, 8)}`,
@@ -417,6 +513,11 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       amountAtRisk: 0,
       recommendation,
     });
+    if ((await this.invoiceStatus(businessId, inv.id)) !== 'PAID') {
+      await this.removeOpenReceiptActions(businessId, [inv.id]);
+      return false;
+    }
+    return raised;
   }
 
   async generateForRecurringFailure(
@@ -797,8 +898,10 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       collectedRows, outstandingRows, overdueRows, quotePipelineRows,
       recurringRows, paidThisMonthRows, billedThisMonthRows,
     ] = await Promise.all([
+      // V1-36 (CF-17): collected net of refunds (CASH_NET_PAYMENT_WHERE, the
+      // database form of computeBalance), not the SUCCESSFUL rows alone.
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
+        where: { businessId, createdAt: { gte: monthStart }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
@@ -828,7 +931,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
 
-    const collectedThisMonth = Number(collectedRows._sum.amount ?? 0);
+    const collectedThisMonth = roundMoney(Number(collectedRows._sum.amount ?? 0));
     const outstanding = Number(outstandingRows._sum.total ?? 0);
     const overdue = Number(overdueRows._sum.total ?? 0);
     const quotePipeline = Number(quotePipelineRows._sum.total ?? 0);
@@ -873,8 +976,9 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     start.setHours(0, 0, 0, 0);
 
     const [payments, invoices] = await Promise.all([
+      // V1-36 (CF-17): a refund is collected money going back out in its week.
       this.prisma.client.payment.findMany({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: start } },
+        where: { businessId, createdAt: { gte: start }, ...CASH_NET_PAYMENT_WHERE },
         select: { amount: true, createdAt: true },
       }),
       this.prisma.client.invoice.findMany({
@@ -888,9 +992,9 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       weekStart.setDate(weekStart.getDate() + w * 7);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 7);
-      const collected = payments
-        .filter((p) => p.createdAt >= weekStart && p.createdAt < weekEnd)
-        .reduce((s, p) => s + Number(p.amount ?? 0), 0);
+      const collected = sumMoney(
+        payments.filter((p) => p.createdAt >= weekStart && p.createdAt < weekEnd).map((p) => Number(p.amount ?? 0)),
+      );
       const billed = invoices
         .filter((i) => i.issueDate && i.issueDate >= weekStart && i.issueDate < weekEnd)
         .reduce((s, i) => s + Number(i.total ?? 0), 0);

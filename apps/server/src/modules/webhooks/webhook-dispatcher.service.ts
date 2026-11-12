@@ -163,6 +163,26 @@ export class WebhookDispatcherService {
     });
   }
 
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT). Owner
+   * ruling D-58: a webhook subscribed to invoice.paid also receives it (else
+   * that integration keeps a refunded invoice paid), as does one subscribed to
+   * invoice.reopened; each such webhook gets one delivery.
+   */
+  @OnEvent('invoice.reopened')
+  async onInvoiceReopened(payload: InvoiceStatusPayload & { previousStatus?: string }) {
+    await this.dispatch(
+      'invoice.reopened',
+      payload.businessId,
+      {
+        invoice: payload.invoice,
+        status: payload.status,
+        previousStatus: payload.previousStatus ?? null,
+      },
+      ['invoice.reopened', 'invoice.paid'],
+    );
+  }
+
   @OnEvent('invoice.sent')
   async onInvoiceSent(payload: InvoiceStatusPayload) {
     await this.dispatch('invoice.sent', payload.businessId, {
@@ -193,8 +213,23 @@ export class WebhookDispatcherService {
     });
   }
 
+  /**
+   * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): a store_order.paid is
+   * delivered only for an order stored PAID in the event's business. PATCH
+   * .../orders/:id/status 'paid' with no payment emits it for a STANDARD order
+   * stored UNPAID, and a queued or forged copy can name an unpaid order or
+   * another business's order; each went to the business's endpoints as a paid
+   * order. Nothing is sent otherwise.
+   *
+   * Still open (it.todo in storefront-paid-event.integration.test.ts): the
+   * stored PAID read here is itself written with no payment and no revenue
+   * write by PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+   * on a STANDARD order (V18-T2c, review STL-SEC-1: needs an owner ruling); the
+   * other store_order.paid listeners do not read it (V18-T2b).
+   */
   @OnEvent('store_order.paid')
   async onStoreOrderPaid(payload: StoreOrderPaidPayload) {
+    if (!(await this.isStoredOrderPaid(payload))) return;
     await this.dispatch('store_order.paid', payload.businessId, {
       order: payload.order,
     });
@@ -221,13 +256,22 @@ export class WebhookDispatcherService {
     });
   }
 
-  private async dispatch(event: string, businessId: string, data: Record<string, unknown>) {
+  /**
+   * `subscribedVia` lists the subscriptions that receive `event` (default: the
+   * event itself); a webhook subscribed to several of them gets one delivery.
+   */
+  private async dispatch(
+    event: string,
+    businessId: string,
+    data: Record<string, unknown>,
+    subscribedVia: string[] = [event],
+  ) {
     try {
       const webhooks = await this.prisma.client.webhook.findMany({
         where: {
           businessId,
           isActive: true,
-          events: { has: event },
+          events: { hasSome: subscribedVia },
         },
       });
 
@@ -343,6 +387,26 @@ export class WebhookDispatcherService {
     };
     this.addLog(log);
     return log;
+  }
+
+  /** W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order the paid event names, read in its business, is stored PAID. */
+  private async isStoredOrderPaid(payload: StoreOrderPaidPayload): Promise<boolean> {
+    const orderId = (payload?.order as { id?: unknown } | undefined)?.id;
+    if (typeof orderId !== 'string' || !orderId || !payload?.businessId) return false;
+    try {
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: orderId, businessId: payload.businessId },
+        select: { paymentStatus: true },
+      });
+      if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
+      this.logger.warn(
+        `store_order.paid for order ${orderId} not stored PAID in business ${payload.businessId} (${stored ? stored.paymentStatus : 'not found'}); no webhook sent`,
+      );
+      return false;
+    } catch (err) {
+      this.logger.error(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
+      return false;
+    }
   }
 
   private sanitizeContact(contact: any) {

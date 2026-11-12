@@ -42,6 +42,8 @@ class PrismaMock {
 
   client: any = {
     $transaction: vi.fn(async (fn: any) => fn(this.client)),
+    // V1-29c: the provider refund door takes the invoice row lock (SELECT ... FOR NO KEY UPDATE).
+    $queryRaw: vi.fn(async () => []),
     invoice: {
       findUnique: vi.fn(async ({ where }: any) => this.invoices.get(where.id) ?? null),
     },
@@ -72,6 +74,17 @@ class PrismaMock {
           return true;
         }) ?? null;
       }),
+      // V1-29c review (SEC-V29C-2): the refund door reads the refund rows linked to the original (what is left of it).
+      findMany: vi.fn(async ({ where }: any) =>
+        this.payments.filter((p) => {
+          if (where.businessId && p.businessId !== where.businessId) return false;
+          if (where.invoiceId && p.invoiceId !== where.invoiceId) return false;
+          if (where.status && p.status !== where.status) return false;
+          if (where.amount?.lt !== undefined && !(Number(p.amount) < where.amount.lt)) return false;
+          if (where.reference?.in && !(where.reference.in as any[]).includes(p.reference)) return false;
+          return true;
+        }),
+      ),
       create: vi.fn(async ({ data }: any) => {
         const row = { id: `pay_${this.payments.length + 1}`, ...data };
         this.payments.push(row);
@@ -125,7 +138,7 @@ describe('PaymentsService Stripe webhooks', () => {
       id: 'cs_test_1',
       amount_total: 5000,
       currency: 'usd',
-      metadata: { invoiceId: 'inv_1' },
+      metadata: { invoiceId: 'inv_1', businessId: 'biz_1' },
     };
     const payload = JSON.stringify({ type: 'checkout.session.completed', data: { object: obj } });
     const res = await svc.handleStripeWebhook(payload, stripeSig(payload, SECRET));
@@ -142,7 +155,7 @@ describe('PaymentsService Stripe webhooks', () => {
   });
 
   it('is idempotent on duplicate charge.succeeded', async () => {
-    const obj = { id: 'ch_test_1', amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1' } };
+    const obj = { id: 'ch_test_1', amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1', businessId: 'biz_1' } };
     const payload = JSON.stringify({ type: 'charge.succeeded', data: { object: obj } });
     await svc.handleStripeWebhook(payload, stripeSig(payload, SECRET));
     await svc.handleStripeWebhook(payload, stripeSig(payload, SECRET));
@@ -154,7 +167,7 @@ describe('PaymentsService Stripe webhooks', () => {
       id: 'cs_replay_1',
       amount_total: 5000,
       currency: 'usd',
-      metadata: { invoiceId: 'inv_1' },
+      metadata: { invoiceId: 'inv_1', businessId: 'biz_1' },
     };
     const payload = JSON.stringify({
       id: 'evt_replay_1',
@@ -185,7 +198,7 @@ describe('PaymentsService Stripe webhooks', () => {
     const mk = (id: string) => JSON.stringify({
       id: `evt_${id}`,
       type: 'charge.succeeded',
-      data: { object: { id, amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1' } } },
+      data: { object: { id, amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1', businessId: 'biz_1' } } },
     });
     const p1 = mk('ch_partial_1');
     const p2 = mk('ch_partial_2');
@@ -246,7 +259,7 @@ describe('PaymentsService Stripe webhooks', () => {
       amount_total: 5000,
       currency: 'usd',
       payment_intent: 'pi_order_1',
-      metadata: { invoiceId: 'inv_1' },
+      metadata: { invoiceId: 'inv_1', businessId: 'biz_1' },
     };
     const sessionPayload = JSON.stringify({
       type: 'checkout.session.completed',
@@ -284,6 +297,41 @@ describe('PaymentsService Stripe webhooks', () => {
     expect(refund.status).toBe('REFUNDED');
     expect(refund.amount).toBe(-50);
     expect(refund.invoiceId).toBe('inv_1');
+  });
+
+  it('R0-20c review (SEC-R020C-1): refuses a platform-signed session, charge or payment intent naming an invoice but no business', async () => {
+    for (const [type, obj] of [
+      ['checkout.session.completed', { id: 'cs_nobiz', amount_total: 5000, currency: 'usd', client_reference_id: 'inv_1', metadata: {} }],
+      ['charge.succeeded', { id: 'ch_nobiz', amount: 5000, currency: 'usd', metadata: { invoiceId: 'inv_1' } }],
+      ['payment_intent.succeeded', { id: 'pi_nobiz', amount_received: 5000, currency: 'usd', metadata: { invoice_id: 'inv_1' } }],
+    ] as const) {
+      const payload = JSON.stringify({ id: `evt_${obj.id}`, type, data: { object: obj } });
+      await expect(svc.handleStripeWebhook(payload, stripeSig(payload, SECRET)), type).rejects.toThrow(/does not match the invoice/);
+    }
+    expect(prisma.payments).toHaveLength(0);
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(workflowSeen.size).toBe(0);
+  });
+
+  it('R0-20c review (SEC-R020C-2): a session completed unpaid records nothing; its async_payment_succeeded records it once', async () => {
+    const session = (payment_status: string) => ({
+      id: 'cs_delayed_1', amount_total: 5000, currency: 'usd', payment_status, metadata: { invoiceId: 'inv_1', businessId: 'biz_1' },
+    });
+    const unpaid = JSON.stringify({ id: 'evt_delayed_done', type: 'checkout.session.completed', data: { object: session('unpaid') } });
+    await expect(svc.handleStripeWebhook(unpaid, stripeSig(unpaid, SECRET))).resolves.toEqual({ ok: true, received: true });
+    expect(prisma.payments).toHaveLength(0);
+    expect(reconcile).not.toHaveBeenCalled();
+
+    const failed = JSON.stringify({ id: 'evt_delayed_failed', type: 'checkout.session.async_payment_failed', data: { object: session('unpaid') } });
+    await expect(svc.handleStripeWebhook(failed, stripeSig(failed, SECRET))).resolves.toEqual({ ok: true, received: true });
+    expect(prisma.payments).toHaveLength(0);
+
+    const settled = JSON.stringify({ id: 'evt_delayed_paid', type: 'checkout.session.async_payment_succeeded', data: { object: session('paid') } });
+    const res = await svc.handleStripeWebhook(settled, stripeSig(settled, SECRET));
+    expect(res.processed).toBe('checkout.session.async_payment_succeeded');
+    expect(prisma.payments).toHaveLength(1);
+    expect(prisma.payments[0]).toMatchObject({ providerPaymentId: 'cs_delayed_1', status: 'SUCCESSFUL', amount: 50, invoiceId: 'inv_1' });
+    expect(reconcile).toHaveBeenCalledWith('inv_1');
   });
 
   it('acks unknown event types without persisting', async () => {

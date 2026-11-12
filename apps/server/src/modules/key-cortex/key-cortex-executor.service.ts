@@ -24,6 +24,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 // ─── Connector ──────────────────────────────────────────────────────────────────
@@ -49,6 +50,8 @@ const BATCH_STOP_ON_FAILURE = true;
 const MAX_BATCH_SIZE = 50;
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const APPROVAL_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+/** A business that sets no aiSpendingThreshold is held to this one (the fallback policy's). */
+const DEFAULT_SPENDING_THRESHOLD = 1000;
 
 // Safety blocklist: actions that are too dangerous to expose through the AI
 // command surface until they are hardened with allowlists, read-only scopes,
@@ -61,6 +64,28 @@ const BLOCKED_ACTIONS = new Set([
 
 function isBlockedCommand(command: ConnectorCommand): boolean {
   return BLOCKED_ACTIONS.has(command.action);
+}
+
+/** Past this many characters an audit payload is kept as a preview (as AiExecutionLogService does). */
+const AUDIT_JSON_MAX_CHARS = 5000;
+
+/**
+ * A value as the JSON an ai_execution_logs Json column stores: a JSON copy, a
+ * preview when it is large, or a marker when it cannot be serialized, so an
+ * odd payload never costs the execute its audit row.
+ */
+function auditJson(value: unknown): Prisma.InputJsonValue | null {
+  if (value === undefined || value === null) return null;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return null;
+    if (text.length > AUDIT_JSON_MAX_CHARS) {
+      return { _truncated: true, _size: text.length, _preview: text.slice(0, 500) };
+    }
+    return JSON.parse(text) as Prisma.InputJsonValue;
+  } catch {
+    return { _error: 'Could not serialize payload' };
+  }
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -80,6 +105,16 @@ export interface ExecuteOptions {
   /** Request source info */
   sourceInfo?: Record<string, unknown>;
 }
+
+/**
+ * The autonomy authority's answer for one command (FOLLOW3-D14), asked once:
+ * by execute() itself, or by executeBatch() for every command before any runs.
+ * `failedClosed` marks an answer the authority could not give (a throw or an
+ * unusable verdict), which refuses a whole batch (review SEC-D14-1).
+ */
+type AutonomyGateOutcome =
+  | { refused: true; failedClosed: boolean; reason: string }
+  | { refused: false; clearsSkipApproval: boolean; forcesApproval: boolean };
 
 export interface ExecutionRecord {
   id: string;
@@ -194,10 +229,17 @@ export class KeyCortexExecutorService {
   // ════════════════════════════════════════════════════════════════════════════
   /**
    * Execute a single ConnectorCommand with full lifecycle management:
+   *   0. Ask the autonomy authority once (fail closed: a throw, a deny or an
+   *      unusable verdict refuses, audited; FOLLOW3-D14 applies V1-02
+   *      isUsableAutonomyVerdict). A verdict whose tier is manual sends the
+   *      command to approval; one that asks for approval clears the caller's
+   *      skipApproval, so the business policy decides (review D14-CR-1).
    *   1. Resolve the approval policy for this business + user.
    *   2. If approval required → delegate to executeWithApproval().
    *   3. Otherwise → call connector.execute() with timeout & error wrapping.
-   *   4. Log the execution to Prisma (non-blocking).
+   *   4. Log the execution to Prisma (awaited, never thrown): one
+   *      ai_execution_logs row on every path, the refusals that return before
+   *      the connector included (R0-09e repair, review ST-1 / CR-1).
    *   5. Emit real-time event (non-blocking).
    *   6. If failed + rollbackOnFailure → attempt rollback.
    *   7. Return the execution record.
@@ -205,6 +247,20 @@ export class KeyCortexExecutorService {
   async execute(
     command: ConnectorCommand,
     options: ExecuteOptions = {},
+  ): Promise<ExecutionRecord> {
+    return this.executeGated(command, options);
+  }
+
+  /**
+   * execute() itself. `asked` is the autonomy answer executeBatch already
+   * obtained for this command (FOLLOW3-D14 review SEC-D14-1), so the authority
+   * is still asked once per command; without it the authority is asked here.
+   * Private: no caller outside this service can hand in an answer.
+   */
+  private async executeGated(
+    command: ConnectorCommand,
+    options: ExecuteOptions,
+    asked?: AutonomyGateOutcome,
   ): Promise<ExecutionRecord> {
     const traceId = options.traceId ?? this.generateTraceId();
     const startedAt = new Date();
@@ -218,7 +274,7 @@ export class KeyCortexExecutorService {
     if (isBlockedCommand(command)) {
       const reason = `Action "${command.action}" is disabled in this build for safety review.`;
       this.logger.warn(`[execute] Blocked ${command.module}.${command.action}: ${reason}`);
-      return {
+      return this.audited({
         id: randomUUID(),
         command,
         result: {
@@ -232,88 +288,20 @@ export class KeyCortexExecutorService {
         durationMs: 0,
         traceId,
         rolledBack: false,
-      };
+      });
     }
 
-    // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
-    try {
-      if (this.autonomyOrchestrator) {
-        const verdict = await this.autonomyOrchestrator.evaluateAction(
-          command.businessId,
-          `${command.module}.${command.action}`,
-          command.parameters,
-          { proposedBy: command.userId },
-        );
-
-        if (!verdict.allowed) {
-          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
-          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return {
-            id: randomUUID(),
-            command,
-            result: {
-              success: false,
-              error: reason,
-              executionTimeMs: 0,
-              command,
-            },
-            startedAt,
-            finishedAt: new Date(),
-            durationMs: 0,
-            traceId,
-            rolledBack: false,
-          };
-        }
-
-        if (verdict.requiresApproval && options.skipApproval) {
-          options = { ...options, skipApproval: false };
-        }
-      } else {
-        // Legacy fallback: KEY Genome autonomy gate
-        const gate = await this.autonomyGate.checkGate({
-          businessId: command.businessId,
-          actionType: `${command.module}.${command.action}`,
-          affectedDomains: command.module ? [command.module as any] : undefined,
-          payload: command.parameters,
-          proposedBy: command.userId ?? null,
-        });
-
-        if (gate.decision === 'BLOCK') {
-          const reason =
-            gate.blockingReasons?.join('; ') ||
-            'Blocked by KEY Genome autonomy gate.';
-          this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return {
-            id: randomUUID(),
-            command,
-            result: {
-              success: false,
-              error: reason,
-              executionTimeMs: 0,
-              command,
-            },
-            startedAt,
-            finishedAt: new Date(),
-            durationMs: 0,
-            traceId,
-            rolledBack: false,
-          };
-        }
-
-        if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
-          options = { ...options, skipApproval: false };
-        }
-      }
-    } catch (gateErr) {
-      this.logger.error(
-        `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
-      );
-      return {
+    // ── Autonomy authority: one answer per command ───────────────────────────
+    // FOLLOW3-D14: asked here, or already asked by executeBatch before any
+    // command of the batch ran (review SEC-D14-1); never asked twice.
+    const gate = asked ?? (await this.evaluateAutonomyGate(command));
+    if (gate.refused) {
+      return this.audited({
         id: randomUUID(),
         command,
         result: {
           success: false,
-          error: 'Autonomy gate unavailable; execution blocked for safety.',
+          error: gate.reason,
           executionTimeMs: 0,
           command,
         },
@@ -322,7 +310,15 @@ export class KeyCortexExecutorService {
         durationMs: 0,
         traceId,
         rolledBack: false,
-      };
+      });
+    }
+    // A verdict that asks for approval (or a legacy ALLOW_WITH_APPROVAL) clears
+    // the caller's skipApproval, so the business policy decides, as before
+    // FOLLOW3-D14 (review D14-CR-1: the real orchestrator answers
+    // requiresApproval:true at the supervised tier for every action of a
+    // business at the default level 2).
+    if (gate.clearsSkipApproval && options.skipApproval) {
+      options = { ...options, skipApproval: false };
     }
 
     // ── Emit START event ─────────────────────────────────────────────────────
@@ -335,9 +331,10 @@ export class KeyCortexExecutorService {
     }
 
     // ── 1. Approval check ────────────────────────────────────────────────────
-    const needsApproval = options.skipApproval
-      ? false
-      : await this.requiresApproval(command);
+    // A usable verdict whose tier is manual is never skipped (FOLLOW3-D14);
+    // otherwise the business policy decides unless the caller skips it.
+    const needsApproval = gate.forcesApproval
+      || (options.skipApproval ? false : await this.requiresApproval(command));
 
     if (needsApproval) {
       this.logger.log(
@@ -345,7 +342,7 @@ export class KeyCortexExecutorService {
       );
       const approvalRecord = await this.executeWithApproval(command);
 
-      return {
+      return this.audited({
         id: approvalRecord.id,
         command,
         result: {
@@ -360,7 +357,7 @@ export class KeyCortexExecutorService {
         durationMs: Date.now() - startMs,
         traceId,
         rolledBack: false,
-      };
+      });
     }
 
     // ── 2. Execute via connector ─────────────────────────────────────────────
@@ -424,10 +421,11 @@ export class KeyCortexExecutorService {
       rollbackResult,
     };
 
-    // ── 5. Audit log (fire-and-forget) ───────────────────────────────────────
-    this.logExecution(record).catch((err) => {
-      this.logger.error(`[execute] Audit log failed: ${err.message}`);
-    });
+    // ── 5. Audit log (awaited; a failure is logged, never thrown) ────────────
+    // R0-09e (R0-09c review ST-7): this was fire-and-forget over a write that
+    // always failed, so no execute ever left its ai_execution_logs row. It is
+    // awaited now, so the row naming the actor exists when execute() returns.
+    await this.audited(record);
 
     // ── 6. Emit completion event ─────────────────────────────────────────────
     if (options.emitEvents !== false) {
@@ -452,6 +450,87 @@ export class KeyCortexExecutorService {
     return record;
   }
 
+  /**
+   * Ask the autonomy authority once for one command (the canonical
+   * orchestrator, else the legacy KEY Genome gate). Fail closed: a throw or an
+   * unusable verdict refuses with `failedClosed` (FOLLOW3-D14 applies V1-02
+   * isUsableAutonomyVerdict, as the legacy gate, the query pipeline and
+   * flows/:id/execute do); a usable deny or a legacy BLOCK refuses that command.
+   */
+  private async evaluateAutonomyGate(command: ConnectorCommand): Promise<AutonomyGateOutcome> {
+    const actionKey = `${command.module}.${command.action}`;
+    try {
+      if (this.autonomyOrchestrator) {
+        const verdict = await this.autonomyOrchestrator.evaluateAction(
+          command.businessId,
+          actionKey,
+          command.parameters,
+          { proposedBy: command.userId },
+        );
+
+        // A verdict that does not state a boolean allowed, a boolean
+        // requiresApproval and a known tier is not an answer.
+        // (Imported at call time: key-cortex-actions.service reaches this file
+        // again through ai/key-tool-registry -> ... -> flow-orchestrator ->
+        // key-cortex-planner, and a load-time import changes the module order
+        // so the built server fails to boot: ActionDispatcherService's
+        // AiOversightService is undefined when its metadata is emitted.)
+        const { isUsableAutonomyVerdict } = await import('./key-cortex-actions.service');
+        if (!isUsableAutonomyVerdict(verdict)) {
+          const reason = `Unusable autonomy verdict for ${actionKey}; execution blocked for safety.`;
+          this.logger.error(`[execute] ${reason}`);
+          return { refused: true, failedClosed: true, reason };
+        }
+
+        if (!verdict.allowed) {
+          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
+          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${actionKey}: ${reason}`);
+          return { refused: true, failedClosed: false, reason };
+        }
+
+        // Review D14-CR-1: only a manual tier forces approval; requiresApproval
+        // keeps its pre-D14 meaning (it clears skipApproval, the policy decides).
+        return {
+          refused: false,
+          clearsSkipApproval: verdict.requiresApproval,
+          forcesApproval: verdict.tier === 'manual',
+        };
+      }
+
+      // Legacy fallback: KEY Genome autonomy gate
+      const gate = await this.autonomyGate.checkGate({
+        businessId: command.businessId,
+        actionType: actionKey,
+        affectedDomains: command.module ? [command.module as any] : undefined,
+        payload: command.parameters,
+        proposedBy: command.userId ?? null,
+      });
+
+      if (gate.decision === 'BLOCK') {
+        const reason =
+          gate.blockingReasons?.join('; ') ||
+          'Blocked by KEY Genome autonomy gate.';
+        this.logger.warn(`[execute] Autonomy gate BLOCKED ${actionKey}: ${reason}`);
+        return { refused: true, failedClosed: false, reason };
+      }
+
+      return {
+        refused: false,
+        clearsSkipApproval: gate.decision === 'ALLOW_WITH_APPROVAL',
+        forcesApproval: false,
+      };
+    } catch (gateErr) {
+      this.logger.error(
+        `[execute] Autonomy gate error for ${actionKey}: ${(gateErr as Error).message}`,
+      );
+      return {
+        refused: true,
+        failedClosed: true,
+        reason: 'Autonomy gate unavailable; execution blocked for safety.',
+      };
+    }
+  }
+
   // ════════════════════════════════════════════════════════════════════════════
   // SECTION 4 — executeBatch()
   // ════════════════════════════════════════════════════════════════════════════
@@ -459,6 +538,9 @@ export class KeyCortexExecutorService {
    * Execute multiple commands in sequence.
    *
    * Behaviour:
+   *   • Ask the autonomy authority for every command (once each) before any
+   *     runs; a throw or an unusable verdict refuses the whole batch, each
+   *     command on record (FOLLOW3-D14 review SEC-D14-1).
    *   • Process commands in the given order.
    *   • If a command fails and stopOnFailure !== false, halt the batch.
    *   • If stopOnFailure === false, continue executing remaining commands.
@@ -517,7 +599,51 @@ export class KeyCortexExecutorService {
     let rolledBackCount = 0;
     let stoppedEarly = false;
 
+    // FOLLOW3-D14 (review SEC-D14-1): every command is put to the autonomy
+    // authority, once each, before any of them runs, as the legacy gate
+    // (V1-02b executeActions), the query pipeline (V1-02) and
+    // flows/:id/execute do. The batch is atomic on an answer the authority
+    // could not give: one evaluation that throws or returns an unusable
+    // verdict refuses every command of the batch, each on record, so nothing
+    // reaches the connector and no approval is created (the commands after it
+    // are not asked). A usable deny refuses its own command only, and approval
+    // stays per command.
+    const gates: AutonomyGateOutcome[] = [];
+    let failedClosedAt = -1;
     for (let i = 0; i < commands.length; i++) {
+      const gate = await this.evaluateAutonomyGate(commands[i]);
+      gates.push(gate);
+      if (gate.refused && gate.failedClosed) {
+        failedClosedAt = i;
+        break;
+      }
+    }
+    if (failedClosedAt >= 0) {
+      const failing = commands[failedClosedAt];
+      const failingGate = gates[failedClosedAt] as Extract<AutonomyGateOutcome, { refused: true }>;
+      const batchReason =
+        `Batch failed closed; execution blocked for safety: step ${failedClosedAt + 1} ` +
+        `(${failing.module}.${failing.action}): ${failingGate.reason}`;
+      this.logger.error(
+        `[executeBatch] Autonomy check failed closed at step ${failedClosedAt + 1}: 0/${commands.length} commands run trace=${traceId}`,
+      );
+      for (let i = 0; i < commands.length; i++) {
+        const refusal: AutonomyGateOutcome = i === failedClosedAt
+          ? failingGate
+          : { refused: true, failedClosed: true, reason: batchReason };
+        results.push(
+          await this.executeGated(
+            commands[i],
+            { ...options, traceId: `${traceId}_step${i + 1}`, emitEvents: false },
+            refusal,
+          ),
+        );
+        failedCount++;
+      }
+      stoppedEarly = true;
+    }
+
+    for (let i = 0; failedClosedAt < 0 && i < commands.length; i++) {
       const cmd = commands[i];
       const cmdTraceId = `${traceId}_step${i + 1}`;
 
@@ -525,11 +651,12 @@ export class KeyCortexExecutorService {
         `[executeBatch] Step ${i + 1}/${commands.length}: ${cmd.module}.${cmd.action}`,
       );
 
-      const record = await this.execute(cmd, {
+      // The authority's answer for this command was asked above (once).
+      const record = await this.executeGated(cmd, {
         ...options,
         traceId: cmdTraceId,
         emitEvents: false, // we'll emit one aggregated event
-      });
+      }, gates[i]);
 
       results.push(record);
 
@@ -778,35 +905,53 @@ export class KeyCortexExecutorService {
   // SECTION 7 — logExecution()
   // ════════════════════════════════════════════════════════════════════════════
   /**
-   * Persist an execution record to the database for audit trail.
-   * Writes to aiExecutionLog (or equivalent) with full context.
+   * Persist an execution record to the database for audit trail: one
+   * ai_execution_logs row per execute, naming its actor.
+   *
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-7): this wrote fields AiExecutionLog
+   * does not have (traceId, parameters, commandJson, resultData,
+   * executionTimeMs, rolledBack, rollbackResult, startedAt, finishedAt, source)
+   * through an untyped client, so Prisma refused every row ("Unknown argument
+   * `traceId`") and no execute was ever audited. It now writes only the model's
+   * own columns, through the typed client so a column that does not exist no
+   * longer compiles: the actor in `userId` (the command's actor when it names a
+   * User row; null for a system actor such as 'key_cortex', which the foreign
+   * key would refuse) and `actor` ('user', or 'system' for a system actor), the
+   * command in `module`, `action` and `toolName`, the actor id as sent, the
+   * parameters, source and trace in `inputSummary`, the result and rollback in
+   * `outputSummary`, then `success`, `errorMessage`, `durationMs` and
+   * `correlationId`.
    */
   async logExecution(record: ExecutionRecord): Promise<void> {
+    const { command, result } = record;
     try {
-      await (this.prisma.client as any).aiExecutionLog.create({
+      const humanActorId = await this.humanActorId(command.userId);
+      await this.prisma.client.aiExecutionLog.create({
         data: {
           id: record.id,
-          businessId: record.command.businessId,
-          userId: record.command.userId,
-          traceId: record.traceId,
-          correlationId: record.command.correlationId,
-          module: record.command.module,
-          action: record.command.action,
-          parameters: JSON.stringify(record.command.parameters),
-          commandJson: JSON.stringify(record.command),
-          success: record.result.success,
-          resultData: record.result.data
-            ? JSON.stringify(record.result.data)
-            : null,
-          errorMessage: record.result.error ?? null,
-          executionTimeMs: record.durationMs,
-          rolledBack: record.rolledBack,
-          rollbackResult: record.rollbackResult
-            ? JSON.stringify(record.rollbackResult)
-            : null,
-          startedAt: record.startedAt,
-          finishedAt: record.finishedAt,
-          source: 'key_cortex',
+          businessId: command.businessId,
+          userId: humanActorId,
+          actor: humanActorId ? 'user' : 'system',
+          action: command.action,
+          toolName: `${command.module}.${command.action}`,
+          module: command.module,
+          inputSummary: {
+            actorId: typeof command.userId === 'string' ? command.userId : null,
+            parameters: auditJson(command.parameters),
+            source: command.source ?? null,
+            traceId: record.traceId,
+          },
+          outputSummary: {
+            data: auditJson(result.data),
+            rolledBack: record.rolledBack,
+            rollbackError: record.rollbackResult && !record.rollbackResult.success
+              ? record.rollbackResult.error ?? null
+              : null,
+          },
+          success: result.success,
+          errorMessage: result.error ?? null,
+          durationMs: record.durationMs,
+          correlationId: command.correlationId ?? null,
         },
       });
 
@@ -819,6 +964,39 @@ export class KeyCortexExecutorService {
       );
       throw err; // Let caller decide
     }
+  }
+
+  /**
+   * Write `record`'s ai_execution_logs row, awaited, then hand the record back.
+   * A failed write is logged, never thrown: the audit never changes what
+   * execute() answers.
+   *
+   * R0-09e repair (review ST-1 / CR-1): execute() reaches this on EVERY path,
+   * not only after the connector ran. The refusals return before the connector
+   * (a blocked action, an autonomy-orchestrator deny, a legacy-gate BLOCK, a
+   * gate error, approval pending) and used to leave no row, so the executes an
+   * audit most needs, a member's refused command and a plan step stopped for
+   * approval, were the ones with no trail.
+   */
+  private async audited(record: ExecutionRecord): Promise<ExecutionRecord> {
+    try {
+      await this.logExecution(record);
+    } catch (err) {
+      this.logger.error(`[execute] Audit log failed: ${(err as Error).message}`);
+    }
+    return record;
+  }
+
+  /**
+   * The command's actor when it names a User row, else null: a system actor
+   * ('key_cortex', 'system', KEY's own 'key_ai') is recorded as `actor:
+   * 'system'` with no userId, which the AiExecutionLog -> User foreign key
+   * requires.
+   */
+  private async humanActorId(userId: unknown): Promise<string | null> {
+    if (typeof userId !== 'string' || userId.length === 0) return null;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { id: true } });
+    return user ? user.id : null;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1015,13 +1193,23 @@ export class KeyCortexExecutorService {
 
   /**
    * Fetch the approval policy for a business + user from the database.
+   *
+   * R0-09e repair (review ST-3): the rate-limit count filtered on `startedAt`,
+   * which AiExecutionLog does not have (its timestamp is `createdAt`), through
+   * an untyped client, so Prisma refused the query, the catch below answered
+   * the fallback policy, and the business's own BusinessSetting
+   * (aiAutonomyLevel 'manual', aiAlwaysRequireApproval, the spending limits)
+   * was never applied. Both reads now go through the typed client, so a column
+   * that does not exist no longer compiles. A business that sets no spending
+   * threshold keeps DEFAULT_SPENDING_THRESHOLD, the threshold every business
+   * was in fact held to while the fallback answered.
    */
   private async fetchApprovalPolicy(
     businessId: string,
     _userId: string,
   ): Promise<ApprovalPolicy> {
     try {
-      const setting = await (this.prisma.client as any).businessSetting.findUnique({
+      const setting = await this.prisma.client.businessSetting.findUnique({
         where: { businessId },
         select: {
           aiAutonomyLevel: true,
@@ -1035,11 +1223,11 @@ export class KeyCortexExecutorService {
 
       // Count recent auto-executions for rate-limiting
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      const recentCount = await (this.prisma.client as any).aiExecutionLog.count({
+      const recentCount = await this.prisma.client.aiExecutionLog.count({
         where: {
           businessId,
           success: true,
-          startedAt: { gte: oneHourAgo },
+          createdAt: { gte: oneHourAgo },
         },
       });
 
@@ -1053,9 +1241,10 @@ export class KeyCortexExecutorService {
         neverRequireApproval: this.parseStringArray(
           setting?.aiNeverRequireApproval,
         ),
-        spendingThreshold: setting?.aiSpendingThreshold
-          ? Number(setting.aiSpendingThreshold)
-          : undefined,
+        spendingThreshold:
+          setting?.aiSpendingThreshold != null
+            ? Number(setting.aiSpendingThreshold)
+            : DEFAULT_SPENDING_THRESHOLD,
         actionSpendingLimits: this.parseRecord(
           setting?.aiActionSpendingLimits,
         ),
@@ -1063,13 +1252,16 @@ export class KeyCortexExecutorService {
           setting?.aiMaxAutoExecutionsPerHour ?? 100,
         currentHourExecutionCount: recentCount,
       };
-    } catch {
+    } catch (err) {
+      this.logger.warn(
+        `[fetchApprovalPolicy] Falling back to the default policy for ${businessId}: ${(err as Error).message}`,
+      );
       // Fallback policy
       return {
         autonomyLevel: 'supervised',
         alwaysRequireApproval: [],
         neverRequireApproval: [],
-        spendingThreshold: 1000,
+        spendingThreshold: DEFAULT_SPENDING_THRESHOLD,
         actionSpendingLimits: {},
         maxAutoExecutionsPerHour: 100,
         currentHourExecutionCount: 0,

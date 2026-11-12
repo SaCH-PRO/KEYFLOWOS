@@ -1,6 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommandService } from '../command/command.service';
+import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from '../finance/cash-position.service';
 
 export interface HealthScore {
   score: number;
@@ -34,7 +35,20 @@ export interface BusinessCommandCenterDto {
   };
   flows: {
     financial: {
+      /**
+       * The ledger cash position (CashPositionService), never FinancialAccount.currentBalance.
+       * V1-37c: the business currency's cash only, in `cashCurrency`.
+       */
       cashBalance: number;
+      /** V1-34: how cashBalance was derived. */
+      cashBasis: 'ledger';
+      /** V1-37c: the currency of cashBalance (the business currency, normalized). */
+      cashCurrency: string;
+      /**
+       * V1-37c (D-13): cash held in another currency, by currency; never added
+       * to cashBalance nor to the money health. Empty when there is none.
+       */
+      otherCurrencyCash: OtherCurrencyCash[];
       outstandingInvoices: number;
       overdueInvoices: number;
       billsDue: number;
@@ -69,10 +83,18 @@ export interface BusinessCommandCenterDto {
 
 @Injectable()
 export class OsService {
+  private readonly cashPosition: CashPositionService;
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommandService) private readonly commandService: CommandService,
-  ) {}
+    // V1-34: OsModule does not import FinanceModule. The reader needs only
+    // Prisma, so without an injected instance OS builds the same reader over
+    // its own PrismaService: safe-to-spend and OS status read one figure.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   async getCommandCenter(businessId: string): Promise<BusinessCommandCenterDto> {
     const business = await this.prisma.client.business.findUnique({
@@ -87,7 +109,7 @@ export class OsService {
 
     const [
       commandSummary,
-      cashAccounts,
+      cashPosition,
       outstandingAgg,
       overdueAgg,
       billsDueAgg,
@@ -105,10 +127,8 @@ export class OsService {
       pendingApprovals,
     ] = await Promise.all([
       this.commandService.summary(businessId),
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
-      }),
+      // V1-34 (CF-41): cash is the ledger's, not the currentBalance snapshot.
+      this.cashPosition.getCashPosition(businessId),
       this.prisma.client.invoice.aggregate({
         where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
         _sum: { total: true },
@@ -179,7 +199,7 @@ export class OsService {
       taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
     }
 
-    const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    const cashBalance = cashPosition.cashBalance;
     const outstandingInvoices = Number(outstandingAgg._sum.total ?? 0);
     const overdueInvoices = Number(overdueAgg._sum.total ?? 0);
     const billsDue = Number(billsDueAgg._sum.amount ?? 0);
@@ -227,6 +247,9 @@ export class OsService {
       flows: {
         financial: {
           cashBalance,
+          cashBasis: cashPosition.basis,
+          cashCurrency: cashPosition.currency,
+          otherCurrencyCash: otherCurrencyCash(cashPosition),
           outstandingInvoices,
           overdueInvoices,
           billsDue,

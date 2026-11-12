@@ -28,6 +28,7 @@ import {
   CalendarClock,
   Clock,
   Sparkles,
+  Link2,
 } from "lucide-react";
 import nextDynamic from "next/dynamic";
 
@@ -43,6 +44,7 @@ import {
   deleteQuote,
   convertQuoteToInvoice,
   bulkUpdateQuotes,
+  createQuotePublicLink,
   Product,
   Quote,
   Contact,
@@ -75,7 +77,41 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
+import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
+import { newPaymentAttemptKey } from "../../finance/components/payment-record-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
+
+type QuoteBulkAction = "send" | "reject" | "delete";
+/** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
+type QuoteBulkSkip = { id: string; quoteStatus?: string; code?: string };
+type QuoteBulkResult = { updated: number; action: string; skipped?: QuoteBulkSkip[]; skippedCount?: number };
+type BulkSkippedNotice = {
+  action: QuoteBulkAction;
+  total: number;
+  rows: Array<{ id: string; number: string; reason: string }>;
+};
+
+const QUOTE_BULK_DONE: Record<QuoteBulkAction, string> = { send: "sent", reject: "rejected", delete: "deleted" };
+
+/** Why the server skipped a row, in words (V1-53b). */
+function describeQuoteBulkSkip(skip: QuoteBulkSkip, action: QuoteBulkAction): string {
+  const status = (skip.quoteStatus ?? "").toLowerCase();
+  const aStatus = status ? `${/^[aeiou]/.test(status) ? "an" : "a"} ${status} quote` : "a quote in this status";
+  switch (skip.code) {
+    case "quote_converted":
+      return "converted to an invoice";
+    case "quote_bulk_not_eligible":
+      if (action === "send") return "only a draft can be sent in bulk";
+      if (action === "reject") return "only a sent or viewed quote can be rejected in bulk";
+      return `${aStatus} cannot be deleted`;
+    case "quote_transition_not_allowed":
+      return `${aStatus} cannot be ${QUOTE_BULK_DONE[action]}`;
+    case "quote_status_changed":
+      return "changed while the action ran; refresh and try again";
+    default:
+      return skip.code ? `refused (${skip.code})` : "refused by the server";
+  }
+}
 
 interface QuotesPanelProps {
   quotes: Quote[];
@@ -140,6 +176,14 @@ export default function QuotesPanel({
   const { open: openComposer } = useCompose();
   const quoteTaskIdRef = useRef<string | null>(null);
   const quoteSessionIdRef = useRef<string | null>(null);
+  // V1-45b (D-15): the quote create's Idempotency-Key, one per open of the
+  // form: minted by the open's first save and reused by every retry of that
+  // open, so a save whose answer was lost is answered with the quote it
+  // created. Dropped when the form closes; the next open mints a new one.
+  const createKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showQuoteBuilder) createKeyRef.current = null;
+  }, [showQuoteBuilder]);
 
   const originContext = getOriginContext();
   const crossModuleOriginLabel = originContext && originContext.workspace && originContext.workspace !== "Revenue"
@@ -221,9 +265,10 @@ export default function QuotesPanel({
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
-  const [convertForm, setConvertForm] = useState({
-    taxRate: "12.5",
-    discountType: "PERCENT" as "PERCENT" | "FIXED",
+  // V1-51 (M20): every open seeds this from the quote (quoteConvertDefaults); no 12.5 default.
+  const [convertForm, setConvertForm] = useState<QuoteConvertForm>({
+    taxRate: "",
+    discountType: "PERCENT",
     discountValue: "",
     notes: "",
     dueDate: "",
@@ -233,34 +278,52 @@ export default function QuotesPanel({
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const { selectedIds, toggleSelected, selectAll, clearSelection } = useBulkSelection();
 
+  const [bulkSkipped, setBulkSkipped] = useState<BulkSkippedNotice | null>(null);
+
+  // V1-53b-QUOTE-RESIDUALS: the bulk route answers the rows it skipped
+  // (`skipped`: id, quoteStatus, code). The panel said "<n> updated", cleared
+  // the whole selection and patched the rows it guessed from their status on
+  // screen, so a converted quote the server refused was shown SENT or removed
+  // and a VIEWED quote the server rejected stayed VIEWED. Now only the rows the
+  // server changed (sent and not skipped) are patched, the skipped rows stay
+  // selected, and the panel lists each one with the reason.
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
-    const action = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
-    const { data, error } = await bulkUpdateQuotes(businessId, Array.from(selectedIds), action as "send" | "reject" | "delete");
-    if (data) {
-      toast.success(`${data.updated} quote(s) updated`);
-      clearSelection();
-      if (data.updated > 0) {
-        const eligibleStatuses: Record<string, string[]> = {
-          send: ["DRAFT"],
-          reject: ["SENT"],
-          delete: ["DRAFT", "SENT", "REJECTED", "EXPIRED"],
-        };
-        const eligible = new Set(
-          quotes
-            .filter((q) => selectedIds.has(q.id) && (eligibleStatuses[action] ?? []).includes(q.status))
-            .map((q) => q.id)
-        );
-        if (action === "delete") {
-          setQuotes((prev) => prev.filter((q) => !eligible.has(q.id)));
-        } else {
-          setQuotes((prev) => prev.map((q) => eligible.has(q.id) ? { ...q, status: status as Quote["status"] } : q));
-        }
-      }
-    } else {
+    const action: QuoteBulkAction = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
+    const ids = Array.from(selectedIds);
+    setBulkSkipped(null);
+    const { data, error } = await bulkUpdateQuotes(businessId, ids, action);
+    if (!data) {
       toast.error(error ?? "Bulk action failed");
+      return;
     }
-  }, [businessId, selectedIds, quotes, setQuotes]);
+    const result = data as QuoteBulkResult;
+    const skipped = (Array.isArray(result.skipped) ? result.skipped : []).filter((s) => ids.includes(s.id));
+    const skippedIds = new Set(skipped.map((s) => s.id));
+    const changed = new Set(ids.filter((id) => !skippedIds.has(id)));
+    if (result.updated > 0 && changed.size > 0) {
+      if (action === "delete") {
+        setQuotes((prev) => prev.filter((q) => !changed.has(q.id)));
+      } else {
+        setQuotes((prev) =>
+          prev.map((q) => (changed.has(q.id) && q.status !== status ? { ...q, status: status as Quote["status"] } : q)),
+        );
+      }
+    }
+    selectAll(ids.filter((id) => skippedIds.has(id)));
+    if (result.updated > 0 || skipped.length === 0) {
+      toast.success(`${result.updated} quote(s) updated`);
+    }
+    if (skipped.length > 0) {
+      const numberOf = new Map(quotes.map((q) => [q.id, q.quoteNumber]));
+      setBulkSkipped({
+        action,
+        total: ids.length,
+        rows: skipped.map((s) => ({ id: s.id, number: numberOf.get(s.id) ?? s.id, reason: describeQuoteBulkSkip(s, action) })),
+      });
+      toast.warning(`${skipped.length} of ${ids.length} selected quote(s) skipped`);
+    }
+  }, [businessId, selectedIds, quotes, setQuotes, selectAll]);
 
   const handleBulkDelete = useCallback(async () => {
     setConfirmState({
@@ -457,6 +520,7 @@ export default function QuotesPanel({
         toast.error("Failed to update quote");
       }
     } else {
+      createKeyRef.current ??= newPaymentAttemptKey();
       const res = await createQuote({
         businessId,
         contactId: quoteForm.contactId,
@@ -466,10 +530,13 @@ export default function QuotesPanel({
         discountType: quoteForm.discountType,
         discountValue: parseFloat(quoteForm.discountValue) || 0,
         notes: quoteForm.notes || undefined,
+        idempotencyKey: createKeyRef.current,
       });
       if (res.data) {
+        createKeyRef.current = null;
         if (quoteTaskIdRef.current) { markTaskCompleted(quoteTaskIdRef.current); quoteTaskIdRef.current = null; }
-        setQuotes((q) => [res.data!, ...q]);
+        // A replay answers the quote already listed (a double click sends one key).
+        setQuotes((q) => [res.data!, ...q.filter((quote) => quote.id !== res.data!.id)]);
         toast.success("Quote created");
         emitEvent("commerce:quote_created", "commerce", { quoteId: res.data.id });
 
@@ -478,6 +545,9 @@ export default function QuotesPanel({
         setPendingDriveUpload({ quoteId: res.data.id, templateId });
       } else if (res.error) {
         toast.error("Failed to create quote");
+        // V1-45b: the form, and its key, stay open for the retry (it closed
+        // and reset here, so the operator re-entered the quote under no key).
+        return;
       }
     }
     setShowQuoteBuilder(false);
@@ -514,13 +584,7 @@ export default function QuotesPanel({
         setSelectedQuote(res.data);
         emitEvent("commerce:quote_created", "commerce", { quoteId: quote.id, action: "accepted" });
         if (autoConvertToInvoice) {
-          setConvertForm({
-            taxRate: String(res.data.taxRate ?? 12.5),
-            discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-            discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
-            notes: res.data.notes ?? "",
-            dueDate: "",
-          });
+          setConvertForm(quoteConvertDefaults(res.data));
           setShowConvertModal(true);
         } else {
           setShowAcceptPrompt(true);
@@ -598,24 +662,71 @@ export default function QuotesPanel({
     setShowQuoteBuilder(true);
   }
 
-  function shareQuoteViaWhatsApp(quote: Quote) {
+  // V1-52-QUOTE-PUBLIC-LINK (CF-16): the customer link comes from the server
+  // (the quote's one token, on the /quote/<token> page), so it can be copied or
+  // shared with no email provider connected. A refusal (a DRAFT must be sent
+  // first; an expired or converted quote has no link to share) is shown to the
+  // operator, never replaced by a message without a link.
+  //
+  // V1-52 review (CR-V152-2): the link route is revenue:write and the quote
+  // reads no longer carry the token (SEC-V52-1), so a revenue:read member is
+  // refused the link (403). Their WhatsApp share used to open with the quote's
+  // number and amount and no link; it still does (shareMessage without a url),
+  // for a sent, unconverted quote, and says the link needs revenue write access.
+  async function fetchQuoteLink(quote: Quote): Promise<{ url: string | null; forbidden: boolean; error: string | null }> {
+    if (!businessId) return { url: null, forbidden: false, error: null };
+    const { data, error, status } = await createQuotePublicLink(businessId, quote.id);
+    if (data?.url) return { url: data.url, forbidden: false, error: null };
+    return { url: null, forbidden: status === 403, error: error ?? "Could not create a link for this quote" };
+  }
+
+  async function copyQuoteLink(quote: Quote) {
+    const { url, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      if (error) toast.error(error);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Quote link copied");
+    } catch {
+      toast.info("Copy the quote link", { description: url });
+    }
+  }
+
+  function shareMessage(quote: Quote, url: string | null): string {
     const contactName = quote.contact
       ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}. Please review and let us know if you'd like to proceed!`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const intro = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}.`;
+    return url
+      ? `${intro} You can view and accept it here: ${url}`
+      : `${intro} Please review and let us know if you'd like to proceed!`;
+  }
+
+  async function shareQuoteViaWhatsApp(quote: Quote) {
+    const { url, forbidden, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      const shareable = quote.status !== "DRAFT" && !quote.invoiceId;
+      if (!forbidden || !shareable) {
+        if (error) toast.error(error);
+        return;
+      }
+      toast.info("Shared without the quote link", {
+        description: "Sharing the customer link needs revenue write access.",
+      });
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleConvert() {
     if (!businessId || !selectedQuote) return;
+    // V1-51: tax and discount are sent explicitly (a cleared discount as 0);
+    // the server carries the quote's own values only when the body names none.
     const res = await convertQuoteToInvoice({
       businessId,
       quoteId: selectedQuote.id,
-      taxRate: parseFloat(convertForm.taxRate) || 0,
-      discountType: convertForm.discountValue ? convertForm.discountType : undefined,
-      discountValue: parseFloat(convertForm.discountValue) || undefined,
-      notes: convertForm.notes || undefined,
-      dueDate: convertForm.dueDate || undefined,
+      ...quoteConvertRequest(convertForm),
     });
     if (res.data) {
       setInvoices((inv) => [res.data!, ...inv]);
@@ -624,7 +735,7 @@ export default function QuotesPanel({
       );
       setShowConvertModal(false);
       setSelectedQuote(null);
-      setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
+      setConvertForm({ taxRate: "", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
       emitEvent("commerce:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
@@ -791,6 +902,35 @@ export default function QuotesPanel({
         </div>
       </div>
 
+      {bulkSkipped && (
+        <div
+          data-testid="quotes-bulk-skipped"
+          role="status"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium text-amber-300">
+              {bulkSkipped.rows.length} of {bulkSkipped.total} selected quote(s) skipped, not {QUOTE_BULK_DONE[bulkSkipped.action]}; they stay selected.
+            </p>
+            <button
+              type="button"
+              onClick={() => setBulkSkipped(null)}
+              className="min-w-[24px] min-h-[24px] flex items-center justify-center rounded hover:bg-white/[0.06]"
+              aria-label="Dismiss skipped quotes notice"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          <ul className="mt-1 max-h-32 overflow-y-auto space-y-0.5 text-muted-foreground">
+            {bulkSkipped.rows.map((row) => (
+              <li key={row.id}>
+                <span className="font-mono text-foreground">{row.number}</span>: {row.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {loading ? (
         <SkeletonList rows={4} cols={3} />
       ) : quotes.length === 0 ? (
@@ -865,13 +1005,7 @@ export default function QuotesPanel({
                   break;
                 case "convert":
                   setSelectedQuote(quote);
-                  setConvertForm({
-                    taxRate: String(quote.taxRate ?? 12.5),
-                    discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                    discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                    notes: quote.notes ?? "",
-                    dueDate: "",
-                  });
+                  setConvertForm(quoteConvertDefaults(quote));
                   setShowConvertModal(true);
                   break;
                 case "view":
@@ -970,10 +1104,16 @@ export default function QuotesPanel({
                 overflowMenu={
                   <OverflowMenu>
                     <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedQuote(quote)} />
-                    <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    {/* V1-51 review (SEC-V51-2): an accepted or converted quote is final (the server answers 409); Duplicate makes a new offer. */}
+                    {quote.status !== "ACCEPTED" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    )}
                     <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
                     <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
+                    {quote.status !== "DRAFT" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Link2} label="Copy link" onClick={() => copyQuoteLink(quote)} />
+                    )}
                     {(quote.status === "DRAFT" || quote.status === "SENT") && (
                       <OverflowMenuItem
                         icon={Mail}
@@ -1004,13 +1144,7 @@ export default function QuotesPanel({
                     {quote.status === "ACCEPTED" && !quote.invoiceId && (
                       <OverflowMenuItem icon={ArrowRightLeft} label="Convert to invoice" onClick={() => {
                         setSelectedQuote(quote);
-                        setConvertForm({
-                          taxRate: String(quote.taxRate ?? 12.5),
-                          discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                          discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                          notes: quote.notes ?? "",
-                          dueDate: "",
-                        });
+                        setConvertForm(quoteConvertDefaults(quote));
                         setShowConvertModal(true);
                       }} />
                     )}
@@ -1172,13 +1306,7 @@ export default function QuotesPanel({
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowAcceptPrompt(false);
                     setShowConvertModal(true);
                   }}
@@ -1271,6 +1399,11 @@ export default function QuotesPanel({
                     <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
+                    {selectedQuote.status !== "DRAFT" && !selectedQuote.invoiceId && (
+                      <button onClick={() => copyQuoteLink(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Copy link">
+                        <Link2 className="w-4 h-4 text-slate-400" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openComposer({
                         to: selectedQuote.contact?.email || "",
@@ -1300,13 +1433,7 @@ export default function QuotesPanel({
                 )}
                 {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
                   <Button size="sm" className="gap-1.5 w-full" onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowConvertModal(true);
                   }}>
                     Convert to Invoice

@@ -1,7 +1,10 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { BusinessEventService } from '../business-events/business-event.service';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
 interface AutopilotTaskInput {
@@ -63,6 +66,7 @@ export class AutopilotService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService,
   ) {}
 
   async getTodaysTasks(businessId: string, limit: number = 3) {
@@ -186,11 +190,35 @@ export class AutopilotService {
     });
   }
 
-  async denyTask(taskId: string, businessId: string) {
-    return this.prisma.client.autopilotTask.update({
+  /**
+   * Trial-N repair round 2 (DENY-ACTOR, SEC-V131b-3): AutopilotTask has no column for who denied
+   * a task (approvedBy and executedBy would misstate it), so the denier is recorded on the audit
+   * trail (BusinessEvent, D-08) once the task is SKIPPED: the authenticated member over HTTP, the
+   * member the command acts for through the cortex adapter. No schema change.
+   */
+  async denyTask(taskId: string, businessId: string, deniedBy: string) {
+    const before = await this.prisma.client.autopilotTask.findUnique({
+      where: { id: taskId, businessId },
+      select: { status: true },
+    });
+    const task = await this.prisma.client.autopilotTask.update({
       where: { id: taskId, businessId },
       data: { status: 'SKIPPED' },
     });
+    const system = isSystemActor(deniedBy);
+    await this.businessEvents.emit({
+      businessId,
+      eventType: 'autopilot_task.denied',
+      subjectType: 'autopilot_task',
+      subjectId: taskId,
+      actorType: system ? 'system' : 'human',
+      actorId: deniedBy,
+      action: 'deny',
+      before: before ? { status: before.status } : undefined,
+      after: { status: task.status },
+      source: system ? 'ai' : 'web',
+    });
+    return task;
   }
 
   async generateSetupTasks(businessId: string) {
@@ -345,42 +373,47 @@ export class AutopilotService {
     };
   }
 
+  /**
+   * FOLLOW3-D13: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (a lead
+   * magnet, an owner's cleared payment secret) is not undone by this one's
+   * copy (RED-before MW-11: the lead magnet was lost).
+   */
   async updateSettings(businessId: string, settings: Record<string, unknown>) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = (business?.metaData as Record<string, unknown>) || {};
-    const existingAutopilot = (meta.autopilot as Record<string, unknown>) || {};
+      const meta = (business?.metaData as Record<string, unknown>) || {};
+      const existingAutopilot = (meta.autopilot as Record<string, unknown>) || {};
 
-    const triggers = settings.triggers as Record<string, boolean> | undefined;
-    const updatedAutopilot = {
-      ...existingAutopilot,
-      ...(settings.pausedUntil !== undefined ? { pausedUntil: settings.pausedUntil } : {}),
-      ...(triggers ? {
-        trigger_follow_up: triggers.follow_up,
-        trigger_birthday: triggers.birthday,
-        trigger_payment_reminder: triggers.payment_reminder,
-        trigger_check_in: triggers.check_in,
-        trigger_offer: triggers.offer,
-      } : {}),
-      ...(settings.autoApproveTypes !== undefined ? { autoApproveTypes: settings.autoApproveTypes } : {}),
-      ...(settings.quietHoursStart !== undefined ? { quietHoursStart: settings.quietHoursStart } : {}),
-      ...(settings.quietHoursEnd !== undefined ? { quietHoursEnd: settings.quietHoursEnd } : {}),
-    };
+      const triggers = settings.triggers as Record<string, boolean> | undefined;
+      const updatedAutopilot = {
+        ...existingAutopilot,
+        ...(settings.pausedUntil !== undefined ? { pausedUntil: settings.pausedUntil } : {}),
+        ...(triggers ? {
+          trigger_follow_up: triggers.follow_up,
+          trigger_birthday: triggers.birthday,
+          trigger_payment_reminder: triggers.payment_reminder,
+          trigger_check_in: triggers.check_in,
+          trigger_offer: triggers.offer,
+        } : {}),
+        ...(settings.autoApproveTypes !== undefined ? { autoApproveTypes: settings.autoApproveTypes } : {}),
+        ...(settings.quietHoursStart !== undefined ? { quietHoursStart: settings.quietHoursStart } : {}),
+        ...(settings.quietHoursEnd !== undefined ? { quietHoursEnd: settings.quietHoursEnd } : {}),
+      };
 
-    const updateData: Record<string, unknown> = {
-      metaData: { ...meta, autopilot: updatedAutopilot },
-    };
+      const updateData: Record<string, unknown> = {
+        metaData: { ...meta, autopilot: updatedAutopilot },
+      };
 
-    if (settings.enabled !== undefined) {
-      updateData.autopilotEnabled = settings.enabled;
-    }
+      if (settings.enabled !== undefined) {
+        updateData.autopilotEnabled = settings.enabled;
+      }
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: updateData as any,
+      await tx.business.update({
+        where: { id: businessId },
+        data: updateData as any,
+      });
     });
 
     return this.getSettings(businessId);

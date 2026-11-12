@@ -276,3 +276,130 @@ describe('BookingsController — Google Calendar two-way editing', () => {
     });
   });
 });
+
+/**
+ * V1-16 (M43, CF-44): the public picker answers in the BUSINESS's timezone.
+ *
+ * The route builds the requested day as a server-local midnight, and the
+ * service then read the day's opening hours with setHours/getDay in the
+ * server's zone. A Port_of_Spain (UTC-4) business open 09:00-11:00 was offered
+ * 09:00Z-10:00Z on a UTC server and 14:00Z-15:00Z on a New York one: one
+ * request, a different answer per server, none of them the business's hours.
+ *
+ * The real BookingsService runs behind the real route here; only Prisma is a
+ * stand-in, holding one service, one business and no bookings.
+ */
+describe('GET public slots: the business day is read in Business.timezone (V1-16)', () => {
+  let slotsApp: INestApplication;
+  const PREVIOUS_TZ = process.env.TZ;
+
+  const prisma = {
+    client: {
+      service: {
+        findFirst: vi.fn(async ({ where }: any) =>
+          where.id === 'svc_pos' && where.businessId === 'biz_pos'
+            ? { duration: 60, bufferMins: null, leadTimeMins: null }
+            : null,
+        ),
+      },
+      business: {
+        findUnique: vi.fn(async ({ where }: any) =>
+          where.id === 'biz_pos'
+            ? { businessHours: { mon: { open: '09:00', close: '11:00', closed: false } }, timezone: 'America/Port_of_Spain' }
+            : null,
+        ),
+      },
+      availability: { findMany: vi.fn(async () => []) },
+      booking: { findFirst: vi.fn(async () => null) },
+    },
+  };
+
+  // The public rate limiter's pipeline, answering "nothing counted yet".
+  const redis = {
+    pipeline: () => {
+      const p: any = {
+        zremrangebyscore: () => p,
+        zcard: () => p,
+        exec: async () => [[null, 0], [null, 0]],
+      };
+      return p;
+    },
+    zadd: async () => 1,
+    pexpire: async () => 1,
+    get: async () => null,
+    set: async () => 'OK',
+  };
+
+  beforeAll(async () => {
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { CrmService } = await import('../crm/crm.service');
+    const { CommerceService } = await import('../commerce/commerce.service');
+    const { RevenueAttributionService } = await import('../commerce/revenue-attribution.service');
+    const { TransactionalEmailService } = await import('../notifications/transactional-email.service');
+    const { PublicEventsService } = await import('../public-events/public-events.service');
+    const { TimelineService } = await import('../timeline/timeline.service');
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [BookingsController],
+      providers: [
+        AuthGuard,
+        BusinessGuard,
+        PlanLimitGuard,
+        BookingsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: EventEmitter2, useValue: { emit: vi.fn() } },
+        { provide: CrmService, useValue: {} },
+        { provide: CommerceService, useValue: {} },
+        { provide: RevenueAttributionService, useValue: {} },
+        { provide: TransactionalEmailService, useValue: {} },
+        { provide: PublicEventsService, useValue: {} },
+        { provide: TimelineService, useValue: {} },
+        { provide: BookingWaitlistService, useValue: {} },
+        { provide: CalendarService, useValue: {} },
+        { provide: BookingOptimizerService, useValue: {} },
+        { provide: SubscriptionsService, useValue: { checkLimit: vi.fn() } },
+        // V1-23: public slots first check the storefront is open (assertPublicStore); open here.
+        { provide: CatalogService, useValue: { assertPublicStore: async () => undefined } },
+        { provide: REDIS_CLIENT, useValue: redis },
+      ],
+    }).compile();
+
+    slotsApp = moduleRef.createNestApplication();
+    slotsApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await slotsApp.init();
+  });
+
+  afterAll(async () => {
+    if (PREVIOUS_TZ === undefined) delete process.env.TZ;
+    else process.env.TZ = PREVIOUS_TZ;
+    if (slotsApp) await slotsApp.close();
+  });
+
+  // 2030-01-07 is a Monday. Port_of_Spain keeps UTC-4 all year (no DST), so
+  // 09:00-11:00 there is 13:00Z-15:00Z, and a 60-minute service at a 30-minute
+  // interval starts at 13:00Z, 13:30Z and 14:00Z, whatever the server's zone.
+  for (const serverTz of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+    it(`Port_of_Spain 09:00-11:00 starts at 13:00Z..14:00Z with the server at TZ=${serverTz}`, async () => {
+      process.env.TZ = serverTz;
+      const res = await request(slotsApp.getHttpServer())
+        .get('/bookings/public/businesses/biz_pos/slots')
+        .query({ serviceId: 'svc_pos', date: '2030-01-07' });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toEqual({
+        date: '2030-01-07',
+        slots: ['2030-01-07T13:00:00.000Z', '2030-01-07T13:30:00.000Z', '2030-01-07T14:00:00.000Z'],
+      });
+    });
+  }
+
+  it('a day the business has no hours for offers nothing, and reports the day asked for', async () => {
+    // Tuesday has no hours row. On a Tokyo server the route's local midnight
+    // for the 8th is the 7th in UTC, and the reported date was read from that.
+    process.env.TZ = 'Asia/Tokyo';
+    const res = await request(slotsApp.getHttpServer())
+      .get('/bookings/public/businesses/biz_pos/slots')
+      .query({ serviceId: 'svc_pos', date: '2030-01-08' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ date: '2030-01-08', slots: [] });
+  });
+});

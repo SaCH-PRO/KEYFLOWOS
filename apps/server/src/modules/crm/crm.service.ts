@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Contact, Prisma } from '@prisma/client';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { sanitize } from '../../core/utils/sanitize';
-import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
+import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, TASK_PRIORITY, TASK_STATUS, type ContactStatus } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
@@ -20,6 +20,7 @@ import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -36,6 +37,17 @@ export interface AuditContext {
   userAgent?: string | null;
   reason?: string | null;
 }
+
+/**
+ * W3-V1-55c review (SEC-V55C-1, CR-V155c-1; owner ruling D-90, on D-08): the
+ * contact.created bus payload createContact emits. Beside ContactCreatedPayload
+ * it carries the actor the contact's contact.created ContactEvent records
+ * (eventActor of the audit context: USER and the member for POST /contacts,
+ * none for a caller that names no actor). Since that ContactEvent has no
+ * Activity copy (meta.feedCopy=false), ActivityEventListener's 'New contact'
+ * is the create's one feed row, and it names this actor as the copy did.
+ */
+export type ContactCreatedEmit = ContactCreatedPayload & { actorType?: string; actorId?: string };
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 
@@ -124,6 +136,129 @@ type ContactExtraAttributes = {
   archivedAt?: string | null;
 };
 
+/**
+ * What a Prisma P2002 `meta.target` may say when a contact write lands on an
+ * identity unique: the identity column, the SQL-only partial index over live
+ * rows (D-16), or the full index it replaced (a database the migration has not
+ * reached yet).
+ */
+const CONTACT_IDENTITY_UNIQUE: Record<'email' | 'phone', readonly string[]> = {
+  email: ['email_normalized', 'contacts_business_id_email_normalized_live_key', 'contacts_business_id_email_normalized_key'],
+  phone: ['phone_normalized', 'contacts_business_id_phone_normalized_live_key', 'contacts_business_id_phone_normalized_key'],
+};
+
+/**
+ * The identity field a Prisma P2002 landed on ('email' or 'phone'), or null
+ * when `err` is not a P2002 on a contact identity unique. Exported for the
+ * other un-delete of a contact, ContactPrivacyService.cancelForget
+ * (FOLLOW3-D8).
+ */
+export function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
+  const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
+  if (!known || typeof known !== 'object' || known.code !== 'P2002') return null;
+  const target = known.meta?.target;
+  const names = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+  return names.some((n) => CONTACT_IDENTITY_UNIQUE.email.includes(n)) ? 'email'
+    : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
+      : null;
+}
+
+/**
+ * PR196-CRM-LIFECYCLE (owner ruling D-81): the statuses a paid invoice moves
+ * to CLIENT. Forward-only: every other status (CLIENT, LOST, ...) is left as it is.
+ */
+const PAID_INVOICE_MOVES_FROM: readonly ContactStatus[] = ['LEAD', 'PROSPECT'];
+/** The source of the D-81 status event and follow-up task (as PR #196 named it). */
+const LIFECYCLE_SOURCE = 'lifecycle-automation';
+/** The D-81 follow-up task: its title (as PR #196 named it) and when it is due (7 days after the move). */
+const LIFECYCLE_FOLLOW_UP_TITLE = 'Post-payment customer check-in & follow-up';
+const LIFECYCLE_FOLLOW_UP_DUE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): the stored Contact
+ * riskFlags / opportunities entries derived from the contact's invoices and
+ * quotes (revenue rows, D-63), which GET contacts/:contactId already withholds
+ * from a member without revenue read (CrmStatsService.contactDetail,
+ * REVENUE_RISK_FLAGS / REVENUE_OPPORTUNITIES in crm-stats.service.ts,
+ * SEC-W7CMV-3). The list withholds the same entries;
+ * test/money-signals.integration.test.ts pins the two reads to agree.
+ */
+const LIST_REVENUE_RISK_FLAGS: ReadonlySet<string> = new Set(['unpaid_invoices', 'poor_payment_history', 'declining_engagement']);
+const LIST_REVENUE_OPPORTUNITIES: ReadonlySet<string> = new Set(['pending_quotes', 'upsell_ready']);
+
+/** A stored riskFlags / opportunities list without the `revenue` entries; any other stored value as it is. */
+function withoutRevenueEntries(value: Prisma.JsonValue | null, revenue: ReadonlySet<string>): Prisma.JsonValue | null {
+  return Array.isArray(value) ? value.filter((entry) => !(typeof entry === 'string' && revenue.has(entry))) : value;
+}
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100): a stored Contact row as a member
+ * without revenue read is served it. Every stored field worked out from the
+ * contact's invoices or quotes is withheld:
+ * - CR-W7CMV-2 (GET contacts/:contactId's rule, V55-13h / V55-13i): the stored
+ *   amounts (lifetimeValue, averageSpend) and the paid / total invoice score
+ *   (paymentReliability) null, riskFlags / opportunities without their revenue
+ *   entries;
+ * - review repair SEC-W8MS-1: the stored leadScore, which carries the invoice
+ *   terms (CrmStatsService.attachContactStats writes +10 a paid and -5 an
+ *   unpaid invoice; ContactInsightService.computeContactIntelligenceFields
+ *   scores the paid total), is `moneyFreeLeadScore`: the score worked out with
+ *   no invoice read (meta.leadScore of the same response), or null where the
+ *   response has none, so `leadScore - meta.leadScore` gives nothing back;
+ * - review repair SEC-W8MS-4: the other fields computeContactIntelligenceFields
+ *   works out from the invoices (nextBestAction 'Send invoice reminder' and
+ *   followUpPriority 'URGENT' for an unpaid invoice, conversionProbability its
+ *   lead score, referralLikelihood and responsivenessScore with paid-total and
+ *   paid-invoice terms) null.
+ * Every other stored field is served as it is.
+ */
+export function withoutStoredMoney<T extends Contact>(contact: T, moneyFreeLeadScore: number | null): T {
+  return {
+    ...contact,
+    lifetimeValue: null,
+    averageSpend: null,
+    paymentReliability: null,
+    riskFlags: withoutRevenueEntries(contact.riskFlags, LIST_REVENUE_RISK_FLAGS),
+    opportunities: withoutRevenueEntries(contact.opportunities, LIST_REVENUE_OPPORTUNITIES),
+    leadScore: moneyFreeLeadScore,
+    conversionProbability: null,
+    nextBestAction: null,
+    followUpPriority: null,
+    referralLikelihood: null,
+    responsivenessScore: null,
+  };
+}
+
+/**
+ * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): a GET contacts row as a
+ * member without revenue read is served it: the stored fields as
+ * withoutStoredMoney serves them, and, with includeStats, meta's invoice
+ * figures 0 (null for the oldest unpaid due date) and its lead score without
+ * the invoice terms (+10 a paid, -5 an unpaid invoice), as the detail's meta
+ * is worked out with no invoice read; the row's leadScore is that score
+ * (review repair SEC-W8MS-1), null without includeStats. Deal figures (open
+ * deals, top open deal) are CRM pipeline rows the deal routes serve on crm
+ * read and stay. Also the rows of GET .../highlights' segments (SEC-W8MS-3,
+ * crm.controller.ts).
+ */
+export function withoutListMoney(contact: ContactWithStats): ContactWithStats {
+  const meta: ContactMeta | undefined = contact.meta
+    ? {
+        ...contact.meta,
+        leadScore: contact.meta.leadScore - contact.meta.paidInvoices * 10 + contact.meta.unpaidInvoices * 5,
+        outstandingBalance: 0,
+        unpaidInvoices: 0,
+        paidInvoices: 0,
+        oldestUnpaidInvoiceDueAt: null,
+        totalRevenue: 0,
+        invoiceCount: 0,
+      }
+    : undefined;
+  const served = withoutStoredMoney(contact, meta ? meta.leadScore : null);
+  if (meta) served.meta = meta;
+  return served;
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -171,6 +306,31 @@ export class CrmService {
     });
   }
 
+  /**
+   * ContactEvent actor fields for an explicit audit actor (a controller
+   * passing the authenticated member). Callers that pass no context (system
+   * jobs, automations, the KEY adapter) get nothing here and no user is
+   * attributed; updateContact and softDeleteContact then record their events
+   * as actorType 'SYSTEM', matching the SYSTEM ContactAuditEntry.
+   */
+  private eventActor(ctx?: AuditContext | null): { actorType?: string; actorId?: string } {
+    const actor = ctx?.actor;
+    if (!actor) return {};
+    return { actorType: actor.type, actorId: actor.id ?? undefined };
+  }
+
+  /**
+   * The audit context a contact mutation records. A call that names its
+   * member only as actorUserId, with no audit actor (POST /contacts/:id/enrich
+   * through ContactEnrichmentService), is that member's edit and records them
+   * as USER on the ContactEvent and the ContactAuditEntry; only a call that
+   * names no actor at all (the KEY adapter, automations) is SYSTEM.
+   */
+  private memberAuditContext(ctx: AuditContext | undefined, actorUserId?: string): AuditContext | undefined {
+    if (ctx?.actor || !actorUserId) return ctx;
+    return { ...ctx, actor: { type: 'USER', id: actorUserId } };
+  }
+
   async healthPing(): Promise<void> {
     await this.prisma.client.$queryRaw`SELECT 1`;
   }
@@ -211,12 +371,44 @@ export class CrmService {
     return contact;
   }
 
+  /**
+   * W8-MONEY-SIGNALS (owner ruling D-100; CR-W7CMV-2): for a member without
+   * revenue read (`actorUserId` whose module scopes do not read revenue, the
+   * rule resolveTimelineViewer applies to every W7 money view) the revenue
+   * sort (sortBy 'revenue', either sortOrder) and the revenue filters
+   * (minRevenue, hasUnpaidInvoices) are ignored: the list keeps the order,
+   * membership and cursor paging it has without them, so neither tells that
+   * member who pays or who owes. Review repair SEC-W8MS-2 (D-100): so is the
+   * score sort (sortBy 'score', either sortOrder): it orders by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice), so its order ranks the same thing. Its rows carry no revenue
+   * field (withoutListMoney). The owner, a member with revenue read and a
+   * caller that names no actor (KEY, internal jobs) are served as before.
+   */
   async listContacts(input: ContactListOptions) {
     let access: CrmAccess | null = null;
     if (input.actorUserId) {
       access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
     }
+    const visClause = access && input.actorUserId ? visibilityClause(access, input.actorUserId) : null;
+    const readsRevenue = !input.actorUserId
+      || (await resolveTimelineViewer(this.prisma, input.businessId, input.actorUserId)).readable.has('revenue');
+    if (!readsRevenue) {
+      const moneySort = input.sortBy === 'revenue' || input.sortBy === 'score';
+      const { contacts, ...page } = await this.listContactRows({
+        ...input,
+        minRevenue: undefined,
+        hasUnpaidInvoices: undefined,
+        sortBy: moneySort ? undefined : input.sortBy,
+        sortOrder: moneySort ? undefined : input.sortOrder,
+      }, visClause);
+      return { ...page, contacts: (contacts as ContactWithStats[]).map((contact) => withoutListMoney(contact)) };
+    }
+    return this.listContactRows(input, visClause);
+  }
 
+  /** The list as listContacts reads it; `visClause` is the actor's CRM visibility clause (none: tenant only). */
+  private async listContactRows(input: ContactListOptions, visClause: ReturnType<typeof visibilityClause> | null) {
     const ownerFilter = input.ownedByActor && input.actorUserId
       ? input.actorUserId
       : input.ownerId;
@@ -291,11 +483,8 @@ export class CrmService {
       }
     }
 
-    if (access && input.actorUserId) {
-      const visClause = visibilityClause(access, input.actorUserId);
-      if (visClause) {
-        where.AND = [...(where.AND ?? []), visClause];
-      }
+    if (visClause) {
+      where.AND = [...(where.AND ?? []), visClause];
     }
 
     const take = Math.min(input.take ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
@@ -398,6 +587,108 @@ export class CrmService {
     }
   }
 
+  /**
+   * Contact carries two tenant-scoped uniques over live rows,
+   * `(business_id, email_normalized)` and `(business_id, phone_normalized)`,
+   * each `WHERE deleted_at IS NULL` (SQL-only partial indexes, D-16, migration
+   * 20261101000000_contact_partial_identity_uniques). A write that lands on one
+   * of them raises Prisma P2002, which left alone surfaces as an opaque 500.
+   * This turns it into a 409 that names the field and, when the actor may see
+   * it, the tenant's existing live holder, so a client can link to or merge
+   * with that contact. `meta.target` names the violated columns (the driver
+   * adapter reads them from the error detail) or, failing that, the index; both
+   * spellings are recognized. A violation of anything else, or any other error,
+   * is rethrown untouched.
+   *
+   * The holder is looked up after the failed transaction, through the
+   * soft-delete-aware client and, when `actorUserId` is given, under the same
+   * M7 visibility clause the list and detail routes apply. The id is a working
+   * key (it opens the contact's child routes), so a member who is denied GET
+   * detail on the holder (a 'my book' STAFF, or a view-all STAFF against
+   * another member's PRIVATE row) is not handed it here either. Whenever no
+   * visible live holder exists, because the holder is outside the actor's
+   * visibility or because it stopped being live between the failed write and
+   * this read, the answer is still 409 with `existingContactId: null` and the
+   * same message as the visible case: the response never says which of those
+   * it is. A soft-deleted contact no longer holds either value, so it never
+   * causes this 409. Callers with no actor (internal jobs) are tenant-scoped
+   * only, as before.
+   */
+  private async rejectContactIdentityTaken(
+    err: unknown,
+    businessId: string,
+    identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
+    actorUserId?: string | null,
+  ): Promise<never> {
+    const field = contactIdentityViolation(err);
+    if (!field) throw err;
+
+    const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
+    let existing: { id: string } | null = null;
+    if (value) {
+      const where: Prisma.ContactWhereInput = field === 'email'
+        ? { ...contactWhereBase(businessId), emailNormalized: value }
+        : { ...contactWhereBase(businessId), phoneNormalized: value };
+      if (actorUserId) {
+        const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+        const visClause = visibilityClause(access, actorUserId);
+        if (visClause) where.AND = [visClause];
+      }
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    }
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: `A contact with this ${label} already exists in this business`,
+      existingContactId: existing?.id ?? null,
+    });
+  }
+
+  /**
+   * The member's CRM access, refusing a member who may not create contacts.
+   * The same M7 edit scope updateContact enforces: a member whose crm_edit is
+   * 'none' passes the module guard on crm:write but may not write contacts.
+   * Callers run it before anything is written (createContact, and the import
+   * routes before they open an import job, fetch a link or call the vision
+   * model).
+   */
+  async assertCanCreateContacts(businessId: string, actorUserId: string): Promise<CrmAccess> {
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    if (!access.isOwner && !access.isSuperAdmin && access.editScope === 'none') {
+      throw new ForbiddenException('You do not have permission to create contacts');
+    }
+    return access;
+  }
+
+  /**
+   * The contacts `actorUserId` may edit, as a where clause: visible to them
+   * (the list and detail visibility clause) and inside their edit scope ('owned'
+   * means owned by or shared with them). Null when they may edit every contact
+   * of the tenant (OWNER, SUPER_ADMIN).
+   */
+  private editableContactClause(access: CrmAccess, actorUserId: string): Prisma.ContactWhereInput | null {
+    if (access.isOwner || access.isSuperAdmin) return null;
+    const clauses: Prisma.ContactWhereInput[] = [];
+    const visClause = visibilityClause(access, actorUserId);
+    if (visClause) clauses.push(visClause as Prisma.ContactWhereInput);
+    if (access.editScope !== 'any') {
+      clauses.push({ OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }] });
+    }
+    return clauses.length > 0 ? { AND: clauses } : null;
+  }
+
+  /**
+   * True when `access` reaches only contacts the member owns or that are shared
+   * with them (crm_edit 'owned', or crm_view 'owned'). An ownerless contact is
+   * outside editableContactClause for such a member, so a contact they create
+   * through an import is made theirs; otherwise they could not open, merge into
+   * or re-import a contact they had just created.
+   */
+  private reachLimitedToOwned(access: CrmAccess): boolean {
+    if (access.isOwner || access.isSuperAdmin) return false;
+    return access.editScope !== 'any' || !access.viewAll;
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -410,8 +701,33 @@ export class CrmService {
     tags?: string[];
     custom?: any;
     customFieldValues?: Record<string, unknown>;
+    /**
+     * The member creating the contact. When provided, createContact enforces
+     * that member's M7 CRM permissions (edit scope, assigning another owner)
+     * and bounds the holder named in a duplicate-identity 409 to the member's
+     * visibility. POST /crm/businesses/:businessId/contacts passes it, and so
+     * do the import routes (through findOrCreateContact's actor argument).
+     * Callers that omit it (cron, internal jobs, public intake) get none of
+     * these checks and receive the tenant's holder unconditionally.
+     */
+    actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
+    if (input.actorUserId) {
+      const access = await this.assertCanCreateContacts(input.businessId, input.actorUserId);
+      const privileged = access.isOwner || access.isSuperAdmin;
+      // Naming someone other than yourself as the owner assigns the contact
+      // to them. That needs the permission updateContact and reassignContacts
+      // require for an ownership change, and, as in reassignContacts, the
+      // owner must be a member of this business. Both are checked before any
+      // write.
+      if (input.ownerId != null && input.ownerId !== input.actorUserId) {
+        if (!privileged && !access.reassign) {
+          throw new ForbiddenException('You do not have permission to assign contacts to another member');
+        }
+        await this.assertNewOwnerIsMember(input.businessId, input.ownerId, 'ownerId');
+      }
+    }
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
@@ -474,19 +790,29 @@ export class CrmService {
         },
       });
 
+      // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
+      // ActivityEventListener's 'New contact', from the contact.created emit
+      // below, so this ContactEvent gets no Activity copy (V1-55b's
+      // meta.feedCopy). crm-network.service.ts's referral, which emits no
+      // contact.created, keeps its copy as its only row.
       await this.timeline.logEvent(input.businessId, created.id, 'contact.created', {
         firstName,
         lastName,
         email,
         source: input.source ?? 'manual',
-      }, undefined, tx);
+      }, { ...this.eventActor(_audit), feedCopy: false }, tx);
 
       return created;
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
     if (contact) {
-      const payload: ContactCreatedPayload = {
+      // W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90): the emit carries the
+      // actor the contact.created ContactEvent above records, so the feed's
+      // one row for the contact ('New contact') names who created it, as the
+      // dropped Activity copy did.
+      const payload: ContactCreatedEmit = {
         contact,
         businessId: input.businessId,
+        ...this.eventActor(_audit),
       };
       this.events.emit('contact.created', payload);
       this.auditContact({
@@ -510,6 +836,28 @@ export class CrmService {
     return contact;
   }
 
+  /**
+   * Find the tenant's contact matching `input` (EntityResolutionService:
+   * email, then phone) and merge the input's missing fields into it, or create
+   * one.
+   *
+   * `actorUserId` is the member on whose behalf this runs (the import routes
+   * pass the requesting member). With it, the member's M7 permissions apply:
+   * a member who may not create contacts is refused 403 before anything is
+   * read or written; a match is merged into, or returned, only when the member
+   * may edit that contact (editableContactClause); otherwise the input goes to
+   * createContact with the same actor, so a colliding email or phone answers
+   * the bounded 409 POST /contacts gives (the holder named only when the member
+   * can open it) and the existing contact is left untouched. The member is
+   * also the audit actor, as on POST /contacts: a created contact's
+   * contact.created event and audit entry name them, and a merge that changes
+   * a contact writes an 'updated' audit entry naming them. A member whose reach
+   * is limited to owned contacts (reachLimitedToOwned) owns the contact an
+   * import creates, so re-importing the same row merges into it. Without an
+   * actor (bookings, intake, store, KEY and other system-context callers) the
+   * lookup is tenant-scoped only, the owner is left unset and no merge audit is
+   * written, as before.
+   */
   async findOrCreateContact(
     businessId: string,
     input: {
@@ -524,7 +872,19 @@ export class CrmService {
       status?: string;
       custom?: any;
     } & Partial<ContactExtraAttributes>,
+    actorUserId?: string,
   ) {
+    let access: CrmAccess | null = null;
+    let editable: Prisma.ContactWhereInput | null = null;
+    if (actorUserId) {
+      access = await this.assertCanCreateContacts(businessId, actorUserId);
+      editable = this.editableContactClause(access, actorUserId);
+    }
+    // The same actor the controller's userAuditContext records for POST /contacts.
+    const audit: AuditContext | undefined = actorUserId ? { actor: { type: 'USER', id: actorUserId } } : undefined;
+    const ownerId = input.ownerId ?? (actorUserId && access && this.reachLimitedToOwned(access) ? actorUserId : null);
+    const scoped = (where: Prisma.ContactWhereInput): Prisma.ContactWhereInput =>
+      (editable ? { ...where, AND: [editable] } : where);
     const normalizeString = (value?: string | null) => {
       const trimmed = value?.trim();
       return trimmed ? trimmed : null;
@@ -544,7 +904,7 @@ export class CrmService {
     return this.prisma.client.$transaction(async (tx) => {
       if (matched) {
         const existing = await tx.contact.findFirst({
-          where: { ...contactWhereWithId(businessId, matched.contactId) },
+          where: scoped({ ...contactWhereWithId(businessId, matched.contactId) }),
         });
         if (existing) {
           return this.mergeContactDetails(existing, businessId, {
@@ -556,20 +916,20 @@ export class CrmService {
             source: input.source,
             sourceDetail: input.sourceDetail,
             tags,
-          });
+          }, audit);
         }
       }
 
       if (!email && !phoneNormalized && input.firstName && input.lastName && input.sourceDetail) {
         const recentMatch = await tx.contact.findFirst({
-          where: {
+          where: scoped({
             ...contactWhereBase(businessId),
             firstName: input.firstName,
             lastName: input.lastName,
             source: input.source ?? 'manual',
             sourceDetail: input.sourceDetail,
             createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-          },
+          }),
           orderBy: { createdAt: 'desc' },
         });
         if (recentMatch) {
@@ -589,13 +949,21 @@ export class CrmService {
         sourceDetail: input.sourceDetail ?? undefined,
         tags,
         ...extraFields,
-      });
+        ...(ownerId ? { ownerId } : {}),
+        ...(actorUserId ? { actorUserId } : {}),
+      }, audit);
     }, { isolationLevel: 'Serializable' });
   }
 
+  /**
+   * Fill `existing`'s empty fields from `input` (and union the tags). With an
+   * audit context (findOrCreateContact on behalf of a member), a merge that
+   * changes the contact writes an 'updated' audit entry naming that actor, as
+   * updateContact does; system-context merges write none, as before.
+   */
   private async mergeContactDetails(
     existing: Contact,
-    _businessId: string,
+    businessId: string,
     input: {
       firstName?: string | null;
       lastName?: string | null;
@@ -606,6 +974,7 @@ export class CrmService {
       sourceDetail?: string | null;
       tags?: string[];
     },
+    audit?: AuditContext,
   ) {
     const data: Record<string, any> = {};
     if (input.firstName && !existing.firstName) data.firstName = sanitize(input.firstName);
@@ -628,10 +997,74 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
-    return this.prisma.client.contact.update({
+    const updated = await this.prisma.client.contact.update({
       where: { id: existing.id },
       data,
     });
+    if (audit) {
+      this.auditContact({
+        businessId,
+        contactId: existing.id,
+        action: 'updated',
+        before: existing as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: `merged ${input.source ?? 'unknown'} input into existing contact`,
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * The one contact-level edit check: updateContact and the enrichment route
+   * (ContactEnrichmentService) both call it before they read or write the
+   * contact, so the two cannot drift apart (R0-13c review CR-1).
+   *
+   * Returns the row the caller may reach: the tenant predicate and, with an
+   * actor, the same M7 visibility clause GET detail applies (CrmStatsService
+   * assertContact). A contact outside it answers exactly like an unknown id
+   * (404), so a write path neither discloses nor edits a PRIVATE row the
+   * caller cannot open. For a member who is not the owner or a super admin,
+   * edit scope 'none' is refused 403 first, then a contact they cannot see is
+   * 404, then a visible one outside edit scope 'owned' (owned by or shared
+   * with them) is 403. Without an actor (KEY adapter, automation) the tenant
+   * predicate alone applies and nothing is checked.
+   */
+  async assertCanEditContact(
+    businessId: string,
+    contactId: string,
+    actorUserId?: string,
+  ): Promise<{ access: CrmAccess | null; reachableWhere: Prisma.ContactWhereInput }> {
+    const reachableWhere: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    if (!actorUserId) return { access: null, reachableWhere };
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const visClause = visibilityClause(access, actorUserId);
+    if (visClause) reachableWhere.AND = [visClause];
+    if (!access.isOwner && !access.isSuperAdmin) {
+      if (access.editScope === 'none') {
+        throw new ForbiddenException('You do not have permission to edit contacts');
+      }
+      const visible = await this.prisma.client.contact.findFirst({ where: reachableWhere, select: { id: true } });
+      if (!visible) {
+        throw new NotFoundException('Contact not found');
+      }
+      if (access.editScope === 'owned') {
+        const owned = await this.prisma.client.contact.findFirst({
+          where: {
+            ...reachableWhere,
+            OR: [
+              { ownerId: actorUserId },
+              { shares: { some: { userId: actorUserId } } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!owned) {
+          throw new ForbiddenException('You can only edit contacts you own');
+        }
+      }
+    }
+    return { access, reachableWhere };
   }
 
   async updateContact(input: {
@@ -650,29 +1083,9 @@ export class CrmService {
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
-    if (input.actorUserId) {
-      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
-      if (!access.isOwner && !access.isSuperAdmin) {
-        if (access.editScope === 'none') {
-          throw new ForbiddenException('You do not have permission to edit contacts');
-        }
-        if (access.editScope === 'owned') {
-          const owned = await this.prisma.client.contact.findFirst({
-            where: {
-              ...contactWhereWithId(input.businessId, input.contactId),
-              OR: [
-                { ownerId: input.actorUserId },
-                { shares: { some: { userId: input.actorUserId } } },
-              ],
-            },
-            select: { id: true },
-          });
-          if (!owned) {
-            throw new ForbiddenException('You can only edit contacts you own');
-          }
-        }
-      }
-    }
+    const audit = this.memberAuditContext(_audit, input.actorUserId);
+    // The row the caller may reach, also read under the lock below.
+    const { access, reachableWhere } = await this.assertCanEditContact(input.businessId, input.contactId, input.actorUserId);
     const trimOptional = (value?: string | null) => {
       if (value === undefined) return undefined;
       const trimmed = value?.trim();
@@ -697,7 +1110,7 @@ export class CrmService {
       const baseCustom =
         (input.custom as Record<string, unknown>) ??
         ((await this.prisma.client.contact.findFirst({
-          where: contactWhereWithId(input.businessId, input.contactId),
+          where: reachableWhere,
           select: { custom: true },
         }))?.custom as Record<string, unknown>) ??
         {};
@@ -758,11 +1171,30 @@ export class CrmService {
     };
 
     const { existing, updated } = await this.prisma.client.$transaction(async (tx) => {
+      // Lock the row before reading it, so the checks below are decided on the
+      // row this transaction writes: a reassignment committing concurrently is
+      // waited for and seen, not overwritten by a request that resends the
+      // owner it read before (which would skip the reassign permission and the
+      // membership check below).
+      await tx.$queryRaw`SELECT id FROM contacts WHERE id = ${input.contactId} AND business_id = ${input.businessId} FOR UPDATE`;
       const existingContact = await tx.contact.findFirst({
-        where: contactWhereWithId(input.businessId, input.contactId),
+        where: reachableWhere,
       });
       if (!existingContact) {
         throw new NotFoundException('Contact not found');
+      }
+      // Changing the owner through PATCH is a reassignment and needs the same
+      // permission as reassignContacts, and, as there, the new owner must be a
+      // member of this business ('' and unknown ids included), for every
+      // caller. Resending the current owner is not a reassignment. Checked
+      // against the locked row read in this transaction, before any write.
+      // (A null ownerId is written as "unchanged", see `data` above.)
+      const changesOwner = input.ownerId != null && input.ownerId !== existingContact.ownerId;
+      if (changesOwner && access && !access.isOwner && !access.isSuperAdmin && !access.reassign) {
+        throw new ForbiddenException('You do not have permission to reassign contacts');
+      }
+      if (changesOwner) {
+        await this.assertNewOwnerIsMember(input.businessId, input.ownerId as string, 'ownerId', tx);
       }
 
       const updatedContact = await tx.contact.update({
@@ -779,7 +1211,7 @@ export class CrmService {
           input.contactId,
           'contact.updated',
           { updatedFields },
-          { actorType: 'USER', source: 'crm' },
+          { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(audit) },
           tx,
         );
       }
@@ -790,13 +1222,13 @@ export class CrmService {
           input.contactId,
           'status.changed',
           { from: existingContact.status, to: input.status },
-          { actorType: 'USER', source: 'crm' },
+          { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(audit) },
           tx,
         );
       }
 
       return { existing: existingContact, updated: updatedContact };
-    });
+    }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
 
     const payload: ContactUpdatedPayload = {
       contact: updated,
@@ -815,7 +1247,7 @@ export class CrmService {
       action: reassigned ? 'reassigned' : 'updated',
       before: existing as unknown as Record<string, unknown>,
       after: updated as unknown as Record<string, unknown>,
-      ctx: _audit,
+      ctx: audit,
       extraReason: reassigned
         ? `owner ${existing?.ownerId ?? 'none'} → ${updated.ownerId ?? 'none'}`
         : undefined,
@@ -834,38 +1266,218 @@ export class CrmService {
     return updated;
   }
 
+  /**
+   * PR196-CRM-LIFECYCLE (owner ruling D-81): the one status move the system
+   * makes on its own. A paid invoice of the contact moves a LEAD or PROSPECT to
+   * CLIENT; any other status is left as it is, lifecycleStage is never written,
+   * and nothing moves it back (a refund's reopen is not a counter-move).
+   *
+   * The write is a compare-and-set on the status read here (PR #196 MC-14): a
+   * concurrent or replayed delivery, a human edit or a merge that changed the
+   * status first leaves this call with no row, and it writes nothing else. Only
+   * the call that moved the contact writes, in the same transaction as the move:
+   *   - a status.changed ContactEvent naming the invoice, by SYSTEM;
+   *   - one follow-up task (the canonical OPEN status) with its task.created
+   *     ContactEvent by SYSTEM (review SEC-L81-1: CrmTimelineService.addTask
+   *     records every task as a USER's), assigned to the contact's owner only
+   *     while the owner is a member of `businessId` (review SEC-L81-2: a removed
+   *     member keeps Contact.ownerId, so their follow-up is left unassigned). It
+   *     is gated by the compare-and-set, never by the contact's other tasks
+   *     (MC-21, MC-22), and cannot be lost after the move commits.
+   * Neither ContactEvent is mirrored into the Activity feed (as
+   * CrmTimelineService.logEvent would): the move's one feed row is
+   * ActivityEventListener's on contact.updated (D-08, MC-15). After the commit:
+   * a ContactAuditEntry by SYSTEM naming the invoice (D-25, MC-16), the
+   * follow-up's task_added audit (MC-23), contact.updated with
+   * fromStatus/toStatus (automations, webhooks, sync; MC-16) and
+   * contact_task.created (the calendar projection).
+   * Tenant-bound: the contact, its owner's membership and the task are read and
+   * written only in `businessId`. Returns the moved contact, or null when
+   * nothing moved.
+   */
+  async advanceToClientOnInvoicePaid(input: {
+    businessId: string;
+    contactId: string;
+    invoiceId: string;
+    invoiceNumber?: string | null;
+  }): Promise<Contact | null> {
+    const { businessId, contactId, invoiceId } = input;
+    const invoiceNumber = input.invoiceNumber ?? null;
+    const where = contactWhereWithId(businessId, contactId);
+    const current = await this.prisma.client.contact.findFirst({ where, select: { status: true } });
+    if (!current || !(PAID_INVOICE_MOVES_FROM as readonly string[]).includes(current.status)) return null;
+    const from = current.status;
+    const to: ContactStatus = 'CLIENT';
+    const trigger = { trigger: 'invoice.paid', invoiceId, invoiceNumber };
+    const dueDate = new Date(Date.now() + LIFECYCLE_FOLLOW_UP_DUE_MS);
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const rows = await tx.contact.updateManyAndReturn({ where: { ...where, status: from }, data: { status: to } });
+      if (rows.length !== 1) return null;
+      const contact = rows[0];
+      await tx.contactEvent.create({
+        data: {
+          businessId,
+          contactId,
+          type: CONTACT_EVENT.STATUS_CHANGED,
+          data: { from, to, ...trigger },
+          actorType: 'SYSTEM',
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+
+      // SEC-L81-2: the owner gets the follow-up only while they are a member of this business.
+      const ownerMembership = contact.ownerId
+        ? await tx.membership.findUnique({
+            where: { userId_businessId: { userId: contact.ownerId, businessId } },
+            select: { id: true },
+          })
+        : null;
+      const assigneeId = ownerMembership ? contact.ownerId : null;
+      const task = await tx.contactTask.create({
+        data: {
+          businessId,
+          contactId,
+          title: LIFECYCLE_FOLLOW_UP_TITLE,
+          dueDate,
+          priority: TASK_PRIORITY.NORMAL,
+          status: TASK_STATUS.OPEN,
+          assigneeId,
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+      if (assigneeId) {
+        await tx.taskAssignment.create({
+          data: {
+            taskType: 'ContactTask',
+            taskId: task.id,
+            assignableType: 'User',
+            assignableId: assigneeId,
+            assignedBy: 'system',
+            reason: 'task_created',
+          },
+        });
+      }
+      // SEC-L81-1: the task's timeline entry names SYSTEM, as its audit does.
+      const taskEvent = await tx.contactEvent.create({
+        data: {
+          businessId,
+          contactId,
+          type: CONTACT_EVENT.TASK_CREATED,
+          data: { taskId: task.id, title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId, ...trigger },
+          actorType: 'SYSTEM',
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+      return { contact, task, taskEvent, ownerNotMember: Boolean(contact.ownerId) && !ownerMembership };
+    });
+    if (!result) return null;
+    const { contact: moved, task, taskEvent } = result;
+    if (result.ownerNotMember) {
+      this.logger.warn(`[CRM] D-81 follow-up for contact=${contactId} left unassigned: its owner is not a member of business=${businessId}`);
+    }
+
+    const actor: ContactAuditActor = { type: 'SYSTEM', label: LIFECYCLE_SOURCE };
+    await this.contactAudit.write({
+      businessId,
+      contactId,
+      action: 'updated',
+      entityType: 'invoice',
+      entityId: invoiceId,
+      before: { status: from },
+      after: { status: to },
+      actor,
+      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: ${from} -> ${to} (D-81)`,
+    });
+    await this.contactAudit.write({
+      businessId,
+      contactId,
+      action: 'task_added',
+      entityType: 'task',
+      entityId: task.id,
+      after: { title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId: task.assigneeId },
+      actor,
+      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: follow-up (D-81)`,
+    });
+    const payload: ContactUpdatedPayload = { contact: moved, businessId, fromStatus: from, toStatus: to };
+    this.events.emit('contact.updated', payload);
+    this.events.emit('contact_task.created', { task, businessId });
+    // As CrmTimelineService.logEvent announces each contact event it writes (insight, best channel, attribution).
+    this.events.emit('crm.contact_event.logged', {
+      businessId,
+      contactId,
+      type: taskEvent.type,
+      eventId: taskEvent.id,
+      source: LIFECYCLE_SOURCE,
+      actorType: 'SYSTEM',
+      data: taskEvent.data,
+    });
+    this.stats.invalidateCache(businessId);
+    this.flow.invalidateCache(businessId);
+    return moved;
+  }
+
   async softDeleteContact(input: { businessId: string; contactId: string; actorUserId?: string }, _audit?: AuditContext) {
-    const contact = await this.assertContact(input.businessId, input.contactId);
+    const audit = this.memberAuditContext(_audit, input.actorUserId);
+    // As in updateContact: with an actor, the row the caller may reach is the
+    // tenant predicate plus the visibility clause GET detail applies, so a
+    // contact the caller cannot see answers 404 exactly like an unknown id,
+    // before any record-dependent refusal. Without an actor (KEY adapter,
+    // compensation) the tenant predicate alone applies, as before.
+    const reachableWhere: Prisma.ContactWhereInput = { ...contactWhereWithId(input.businessId, input.contactId) };
+    let access: CrmAccess | null = null;
     if (input.actorUserId) {
-      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
-      if (!access.isOwner && !access.isSuperAdmin) {
-        if (access.deleteScope === 'none') {
-          throw new ForbiddenException('You do not have permission to delete contacts');
-        }
-        if (access.deleteScope === 'owned' && contact.ownerId !== input.actorUserId) {
-          throw new ForbiddenException('You can only delete contacts you own');
-        }
-        if (!access.viewAll && contact.ownerId !== input.actorUserId) {
-          // Defensive: cannot delete a contact you can't even see.
-          throw new NotFoundException('Contact not found');
-        }
+      access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) reachableWhere.AND = [visClause];
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where: reachableWhere });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    if (input.actorUserId && access && !access.isOwner && !access.isSuperAdmin) {
+      if (access.deleteScope === 'none') {
+        throw new ForbiddenException('You do not have permission to delete contacts');
+      }
+      if (access.deleteScope === 'owned' && contact.ownerId !== input.actorUserId) {
+        throw new ForbiddenException('You can only delete contacts you own');
+      }
+      if (!access.viewAll && contact.ownerId !== input.actorUserId) {
+        // Defensive: a 'my book' member deletes only contacts they own.
+        throw new NotFoundException('Contact not found');
       }
     }
-    await this.timeline.logEvent(
-      input.businessId,
-      input.contactId,
-      'contact.deleted',
-      { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
-      { actorType: 'USER', source: 'crm' },
-    );
-    const deleted = await this.prisma.client.contact.update({ where: { id: input.contactId }, data: { deletedAt: new Date() } });
+    const deleted = await this.prisma.client.$transaction(async (tx) => {
+      // Claim the live, still reachable row: the UPDATE re-checks
+      // `deletedAt IS NULL` (and the visibility clause) under the row lock, so
+      // of two concurrent deletes only one matches and the other is refused
+      // like any already-deleted contact, writing no event.
+      const claimed = await tx.contact.update({
+        where: reachableWhere as Prisma.ContactWhereUniqueInput,
+        data: { deletedAt: new Date() },
+      }).catch((err: unknown) => {
+        if ((err as { code?: unknown } | null)?.code === 'P2025') {
+          throw new NotFoundException('Contact not found');
+        }
+        throw err;
+      });
+      await this.timeline.logEvent(
+        input.businessId,
+        input.contactId,
+        'contact.deleted',
+        { name: `${contact.firstName ?? ''} ${contact.lastName ?? ''}`.trim() },
+        { actorType: 'SYSTEM', source: 'crm', ...this.eventActor(audit) },
+        tx,
+      );
+      return claimed;
+    });
     this.auditContact({
       businessId: input.businessId,
       contactId: input.contactId,
       action: 'deleted',
       before: { deletedAt: contact.deletedAt },
       after: { deletedAt: deleted.deletedAt },
-      ctx: _audit,
+      ctx: audit,
     });
     const deletedPayload: ContactDeletedPayload = {
       contact: deleted,
@@ -932,31 +1544,40 @@ export class CrmService {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
-    let allowedIds = input.contactIds;
+    // A member named only as actorUserId (CrmController passes no audit
+    // context) is recorded as USER on the audit entries and the events, as
+    // updateContact records them; a call with no actor (the KEY
+    // flow-orchestrator tool) stays a SYSTEM audit entry with no user on the
+    // event, as bulkDeleteContacts records it.
+    const audit = this.memberAuditContext(_audit, input.actorUserId);
+    // Every caller, the owner and a call with no actor included, writes only
+    // live contacts of this tenant: an id from another tenant is skipped, and
+    // counted, exactly like a missing one, and gets no event or audit entry.
+    // A member who is not the owner or a super admin is further limited to the
+    // contacts they can see (the GET visibility clause) and may edit (their
+    // edit scope), so a hidden id is skipped the same way and the answer never
+    // reveals it.
+    const scopedWhere: Prisma.ContactWhereInput = { ...contactWhereBase(input.businessId) };
+    let limitedMember = false;
     if (input.actorUserId) {
       const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
       if (!access.isOwner && !access.isSuperAdmin) {
         if (access.editScope === 'none') {
           throw new ForbiddenException('You do not have permission to edit contacts');
         }
-        const ownershipWhere: any = { ...contactWhereBase(input.businessId), id: { in: input.contactIds } };
-        if (access.editScope === 'owned') {
-          ownershipWhere.OR = [
-            { ownerId: input.actorUserId },
-            { shares: { some: { userId: input.actorUserId } } },
-          ];
-        }
-        const editable = await this.prisma.client.contact.findMany({
-          where: ownershipWhere,
-          select: { id: true },
-        });
-        allowedIds = editable.map((c) => c.id);
-        if (allowedIds.length === 0) {
-          throw new ForbiddenException('You cannot edit any of the selected contacts');
-        }
+        const editableClause = this.editableContactClause(access, input.actorUserId);
+        if (editableClause) scopedWhere.AND = [editableClause];
+        limitedMember = true;
       }
     }
-    input = { ...input, contactIds: allowedIds };
+    const contacts = await this.prisma.client.contact.findMany({
+      where: { ...scopedWhere, id: { in: input.contactIds } },
+      select: { id: true, tags: true },
+    });
+    if (limitedMember && contacts.length === 0) {
+      throw new ForbiddenException('You cannot edit any of the selected contacts');
+    }
+    input = { ...input, contactIds: contacts.map((c) => c.id) };
     const auditAfter = {
       ...(input.status ? { status: input.status } : {}),
       ...(input.addTags ? { addedTags: input.addTags } : {}),
@@ -965,15 +1586,19 @@ export class CrmService {
       ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
       ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
     };
-    for (const cid of allowedIds) {
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: cid,
-        action: 'bulk_updated',
-        after: auditAfter,
-        ctx: _audit,
-      });
-    }
+    // Audited once the write has committed, and only for the rows it wrote.
+    const auditWritten = (writtenIds: string[]) => {
+      for (const cid of writtenIds) {
+        this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'bulk_updated',
+          after: auditAfter,
+          ctx: audit,
+        });
+      }
+    };
+    const eventMeta = this.eventActor(audit);
     const data: Record<string, unknown> = {};
     if (input.status) data.status = input.status;
     if (input.relationshipType !== undefined) {
@@ -989,10 +1614,6 @@ export class CrmService {
       data.archivedAt = input.archived ? new Date() : null;
     }
     if (input.addTags && input.addTags.length > 0) {
-      const contacts = await this.prisma.client.contact.findMany({
-        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
-        select: { id: true, tags: true },
-      });
       const results = await this.prisma.client.$transaction(async (tx) => {
         const updated = [];
         for (const c of contacts) {
@@ -1006,10 +1627,11 @@ export class CrmService {
             ...(input.priority !== undefined ? { priority: input.priority } : {}),
             ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
             ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
-          }, undefined, tx);
+          }, eventMeta, tx);
         }
         return updated;
       });
+      auditWritten(results.map((u) => u.id));
       this.stats.invalidateCache(input.businessId);
       this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
@@ -1017,33 +1639,42 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No update fields provided');
     }
-    const result = await this.prisma.client.$transaction(async (tx) => {
-      const res = await tx.contact.updateMany({
-        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
+    const writtenIds = await this.prisma.client.$transaction(async (tx) => {
+      // The same scope again at the write, which also says exactly which rows
+      // this call wrote: only those get an event (and, after commit, an audit
+      // entry), so a row deleted meanwhile leaves no trace either.
+      const rows = await tx.contact.updateManyAndReturn({
+        where: { ...scopedWhere, id: { in: input.contactIds } },
         data,
+        select: { id: true },
       });
-      for (const cid of input.contactIds) {
+      for (const { id: cid } of rows) {
         await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', {
           ...(input.status ? { status: input.status } : {}),
           ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
           ...(input.priority !== undefined ? { priority: input.priority } : {}),
           ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
           ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
-        }, undefined, tx);
+        }, eventMeta, tx);
       }
-      return res;
+      return rows.map((row) => row.id);
     });
+    auditWritten(writtenIds);
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
-    return { updated: result.count };
+    return { updated: writtenIds.length };
   }
 
   async bulkDeleteContacts(input: { businessId: string; contactIds: string[]; actorUserId?: string }, _audit?: AuditContext) {
     if (!input.contactIds || input.contactIds.length === 0) {
       throw new BadRequestException('contactIds is required');
     }
+    // With an actor, only rows the caller can see (the GET visibility clause)
+    // are deleted: a hidden id is skipped exactly like a missing one.
+    let visClause: Prisma.ContactWhereInput | null = null;
     if (input.actorUserId) {
       const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      visClause = visibilityClause(access, input.actorUserId);
       if (!access.isOwner && !access.isSuperAdmin) {
         if (access.deleteScope === 'none') {
           throw new ForbiddenException('You do not have permission to delete contacts');
@@ -1064,11 +1695,22 @@ export class CrmService {
         }
       }
     }
-    const eventOps = input.contactIds.map((cid) =>
-      this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }),
+    // Delete first, scoped to this tenant's live rows the caller can see, and
+    // learn exactly which rows this call deleted. Only those get an event and
+    // an audit entry: an id from another tenant, a missing or hidden id, or one
+    // already deleted (including by a concurrent request) gets no trace.
+    const deletedRows = await this.prisma.client.contact.updateManyAndReturn({
+      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId), ...(visClause ? { AND: [visClause] } : {}) },
+      data: { deletedAt: new Date() },
+      select: { id: true },
+    });
+    const deletedIds = deletedRows.map((row) => row.id);
+    const eventMeta = this.eventActor(_audit);
+    const eventOps = deletedIds.map((cid) =>
+      this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }, eventMeta),
     );
     await Promise.allSettled(eventOps);
-    for (const cid of input.contactIds) {
+    for (const cid of deletedIds) {
       this.auditContact({
         businessId: input.businessId,
         contactId: cid,
@@ -1076,13 +1718,32 @@ export class CrmService {
         ctx: _audit,
       });
     }
-    const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId) },
-      data: { deletedAt: new Date() },
-    });
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
-    return { deleted: result.count };
+    return { deleted: deletedIds.length };
+  }
+
+  /**
+   * Refuses (400) a new contact owner who is not a member of `businessId`:
+   * the one membership check reassignContacts, updateContact (a PATCH that
+   * changes ownerId) and createContact (naming another owner) apply. An
+   * unknown id or '' has no membership either. The message names `field`,
+   * the body field the caller sent ('newOwnerId' for bulk reassign, 'ownerId'
+   * for PATCH and POST). `client` is the transaction when the caller holds one.
+   */
+  private async assertNewOwnerIsMember(
+    businessId: string,
+    userId: string,
+    field: 'ownerId' | 'newOwnerId',
+    client: Pick<PrismaService['client'], 'membership'> = this.prisma.client,
+  ): Promise<void> {
+    const membership = await client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new BadRequestException(`${field} must belong to a member of this business`);
+    }
   }
 
   /**
@@ -1110,12 +1771,7 @@ export class CrmService {
       }
     }
 
-    const newOwnerMembership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: input.newOwnerId, businessId: input.businessId } },
-    });
-    if (!newOwnerMembership) {
-      throw new BadRequestException('newOwnerId must belong to a member of this business');
-    }
+    await this.assertNewOwnerIsMember(input.businessId, input.newOwnerId, 'newOwnerId');
 
     const eligibleWhere: any = {
       ...contactWhereBase(input.businessId),
@@ -1515,10 +2171,31 @@ export class CrmService {
     try {
       await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
       restored.contact = 1;
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Failing to restore the surviving "duplicate" row is the only true blocker:
       // the rest of the revert depends on this row existing as a contact.
-      throw new BadRequestException(`Failed to restore duplicate contact: ${reasonOf(err)}`);
+      // Since D-16 the merged duplicate releases its email and phone during the
+      // undo window, so another live contact may hold one of them by now; the
+      // un-delete is then a P2002 on an identity unique and answers like every
+      // other identity conflict: 409 contact_email_taken / contact_phone_taken
+      // naming the live holder the actor may see. Nothing has been restored or
+      // stamped yet, so the merge stays revertable once the conflict is
+      // resolved. Any other failure is a 400 that carries no database text
+      // (Prisma's message names server paths, source lines and columns); the
+      // cause goes to the log.
+      if (contactIdentityViolation(err)) {
+        await this.rejectContactIdentityTaken(
+          err,
+          input.businessId,
+          {
+            emailNormalized: typeof restoreData.emailNormalized === 'string' ? restoreData.emailNormalized : null,
+            phoneNormalized: typeof restoreData.phoneNormalized === 'string' ? restoreData.phoneNormalized : null,
+          },
+          input.actorType === 'USER' ? input.actorId : null,
+        );
+      }
+      this.logger.warn(`revertMerge ${op.id}: restoring duplicate contact ${op.duplicateId} failed: ${reasonOf(err)}`);
+      throw new BadRequestException('Failed to restore duplicate contact');
     }
 
     // 2. Move every previously-repointed row back to the duplicate, table by
@@ -1761,6 +2438,8 @@ export class CrmService {
     actorType?: string;
     actorId?: string;
     source?: string;
+    /** W4-FEED-COPY-COMPLETE (D-90): passed through to CrmTimelineService.logContactEvent (false: no Activity copy). */
+    feedCopy?: boolean;
   }) {
     return this.timeline.logContactEvent(input);
   }
@@ -1793,7 +2472,13 @@ export class CrmService {
     return this.timeline.dueTasks(input);
   }
 
-  async listNextActions(input: { businessId: string; windowDays?: number; limit?: number }) {
+  /**
+   * W9-CRM-RESIDUALS review SEC-W9CR-1 (D-37): `visibility` is the caller's CRM
+   * visibility clause (GET contact-next-actions passes the session member's;
+   * null or absent for the OWNER and SUPER_ADMIN): with one, only the contacts
+   * the member may open are listed, by the rule GET contacts/:contactId applies.
+   */
+  async listNextActions(input: { businessId: string; windowDays?: number; limit?: number; visibility?: Prisma.ContactWhereInput | null }) {
     const windowDays = Math.max(0, Math.min(60, input.windowDays ?? 7));
     const limit = Math.max(1, Math.min(100, input.limit ?? 25));
     const cutoff = new Date();
@@ -1805,6 +2490,7 @@ export class CrmService {
         ...contactWhereBase(input.businessId),
         archivedAt: null,
         nextActionAt: { not: null, lte: cutoff },
+        ...(input.visibility ? { AND: [input.visibility] } : {}),
       },
       orderBy: [
         { nextActionAt: 'asc' },

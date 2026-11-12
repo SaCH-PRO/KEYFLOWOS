@@ -153,6 +153,38 @@ describe('KeyCortexLearningService', () => {
     expect(lessons[0]).toContain('price increases');
   });
 
+  // W11-CORTEX-MEMORY-COGNITION, owner ruling D-130 option (A): the chat's learned-lessons block carries only the
+  // reader's own lessons, so its read names the reader; a caller that names no reader reads as before.
+  it('W11-CORTEX-MEMORY-COGNITION (D-130 option A): retrieveLessons with { userId } reads only that member\'s cognition rows (userId in the findMany where)', async () => {
+    const mockPrisma = createMockPrisma([]);
+    const service = createService(mockPrisma, false);
+
+    await service.retrieveLessons('biz_1', 'What pricing should we use?', { roleId: 'ceo', limit: 3, userId: 'user_1' });
+
+    expect(mockPrisma.client.cognitionMemory.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.client.cognitionMemory.findMany.mock.calls[0][0].where).toEqual({
+      businessId: 'biz_1',
+      roleId: 'ceo',
+      userId: 'user_1',
+      lessonsLearned: { isEmpty: false },
+    });
+  });
+
+  it('W11-CORTEX-MEMORY-COGNITION (D-130 option A): retrieveLessons without userId keeps its where unchanged (no userId key)', async () => {
+    const mockPrisma = createMockPrisma([]);
+    const service = createService(mockPrisma, false);
+
+    await service.retrieveLessons('biz_1', 'What pricing should we use?', { roleId: 'ceo', limit: 3 });
+
+    const where = mockPrisma.client.cognitionMemory.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({
+      businessId: 'biz_1',
+      roleId: 'ceo',
+      lessonsLearned: { isEmpty: false },
+    });
+    expect(where).not.toHaveProperty('userId');
+  });
+
   it('getAcceptanceRate aggregates accepted/rejected/modified responses', async () => {
     const mockPrisma = createMockPrisma();
     mockPrisma.client.cognitionMemory.count = vi

@@ -68,6 +68,8 @@ interface ContactDetailInfoProps {
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onContactUpdated?: () => void;
   customFieldValues?: Array<{ id: string; definitionId: string; value?: unknown; definition: { name: string; label: string; type: string; description: string | null; placeholder: string | null } }>;
+  /** The business the contact belongs to; without it, the member's selected business (never biz_demo). */
+  businessId?: string | null;
 }
 
 export function ContactDetailInfo({
@@ -77,6 +79,7 @@ export function ContactDetailInfo({
   onAddTask,
   onContactUpdated,
   customFieldValues,
+  businessId,
 }: ContactDetailInfoProps) {
   const { open: openComposer } = useCompose();
   const router = useRouter();
@@ -107,14 +110,17 @@ export function ContactDetailInfo({
   const localTime = useMemo(() => contact.timezone ? localTimeFor(contact.timezone) : null, [contact.timezone]);
 
   const persistFlag = async (field: "marketingOptIn" | "doNotContact", value: boolean) => {
-    const businessId = getStoredBusinessId() ?? undefined;
+    // SEC-R015d-1: the consent write goes to the business this contact is shown
+    // in (the one its custom fields are read from), not whatever kf_business_id
+    // says now; the selection only when no business was handed.
+    const tenant = businessId || getStoredBusinessId() || undefined;
     setSavingFlag(field === "marketingOptIn" ? "marketing" : "dnc");
     const previousMarketing = marketingOptIn;
     const previousDnc = doNotContact;
     if (field === "marketingOptIn") setMarketingOptIn(value);
     else setDoNotContact(value);
     try {
-      const res = await updateContact({ businessId, contactId: contact.id, [field]: value });
+      const res = await updateContact({ businessId: tenant, contactId: contact.id, [field]: value });
       if (res.error) throw new Error(res.error);
       toast.success(field === "marketingOptIn"
         ? value ? "Marketing opt-in enabled" : "Marketing opt-in disabled"
@@ -498,7 +504,7 @@ export function ContactDetailInfo({
               )}
               {customFieldValues && customFieldValues.length > 0 && (
                 <div className="space-y-2">
-                  <ContactCustomFields values={typedValuesRecord} readOnly />
+                  <ContactCustomFields businessId={businessId} values={typedValuesRecord} readOnly />
                 </div>
               )}
               {arbitraryCustomFields.length > 0 && (

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Inject,
   Param,
@@ -24,6 +25,8 @@ import { FlowEngineService } from './flow-engine.service';
 import { FlowRunnerService } from './flow-runner.service';
 import { FlowTemplateService } from './flow-template.service';
 import { CreateFlowDto, UpdateFlowDto, TestFlowDto } from './dto';
+import { parseTimelineLimit } from '../timeline/dto/query-timeline.dto';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 @Controller('api/flows')
 export class FlowController {
@@ -52,19 +55,26 @@ export class FlowController {
     return this.flowService.getCockpitSummary(businessId);
   }
 
+  /**
+   * The legacy business feed (fetchActivityFeed). V1-84: bounded like
+   * GET /timeline/businesses/:id/events (400 above TIMELINE_MAX_LIMIT) and
+   * filtered by the same rule (timeline-visibility.ts), so it is not a way
+   * around the timeline's row filter.
+   */
   @Get('businesses/:businessId/activity')
   @UseGuards(AuthGuard, BusinessGuard)
   async getActivityFeed(
     @Param('businessId') businessId: string,
+    @Request() req: { user?: { id?: string } },
     @Query('module') module?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
-    return this.activityService.listForBusiness(businessId, {
-      module,
-      limit: limit ? parseInt(limit, 10) : 30,
-      cursor,
-    });
+    const take = parseTimelineLimit(limit, 30);
+    const userId = req.user?.id;
+    if (!userId) throw new ForbiddenException('Authentication required');
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, userId);
+    return this.activityService.listForBusiness(businessId, { module, limit: take, cursor }, viewer);
   }
 
   @Get('businesses/:businessId/cross-module-workflows')
@@ -301,11 +311,11 @@ export class FlowController {
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('automations', 'read')
   async getRunSteps(
-    @Param('businessId') _businessId: string,
-    @Param('flowId') _flowId: string,
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
     @Param('runId') runId: string,
   ) {
-    const items = await this.runner.findRunSteps(runId);
+    const items = await this.runner.findRunSteps(businessId, flowId, runId);
     return { items, total: items.length };
   }
 

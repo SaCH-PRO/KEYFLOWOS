@@ -5,6 +5,29 @@ import type { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
+import { schedulersDisabled } from '../../core/config/env';
+
+/** The 6-hourly all-business compaction registered at boot (a scheduler, V1-24b). */
+const PERIODIC_COMPACT = 'periodic-compact';
+
+/** FOLLOW3-C3: how long onModuleDestroy waits for the worker's own connection to be ready before it closes it. */
+const READY_BEFORE_CLOSE_MS = 2_000;
+
+/** Resolves once `item` is ready or failed to initialize, or after `ms`, whichever comes first. */
+async function readyOrAfter(ms: number, item: { waitUntilReady(): Promise<unknown> } | undefined): Promise<void> {
+  if (!item) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      item.waitUntilReady().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export interface TemporalFlowMemoryJob {
   businessId: string;
@@ -54,14 +77,27 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
 
     // Schedule periodic compaction every 6 hours
     try {
+      // V1-24b review (CR-V124b-1): found by NAME. bullmq 5's getRepeatableJobs()
+      // entries carry key, name, pattern, tz and next but no `id`, so the old
+      // lookup by id never matched and nothing was ever removed.
       const existing = await this.queue.getRepeatableJobs();
-      const match = existing.find((r) => r.id === 'temporal-flow-memory-periodic-compact');
-      if (match) {
-        await this.queue.removeRepeatableByKey(match.key);
+      for (const r of existing.filter((j) => j.name === PERIODIC_COMPACT)) {
+        await this.queue.removeRepeatableByKey(r.key);
+      }
+
+      // V1-24b: a repeatable job registered at boot is a scheduler. With
+      // schedulers off it is not (re)registered, and the removal above clears
+      // one an earlier boot left in Redis, with its next delayed run. The worker
+      // still runs the on-demand jobs (the memory/compact and detect-patterns
+      // routes); a periodic run already queued is dropped in process().
+      if (schedulersDisabled()) {
+        this.logger.log('Periodic compaction not scheduled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+        this.logger.log('TemporalFlowMemory worker initialized');
+        return;
       }
 
       await this.queue.add(
-        'periodic-compact',
+        PERIODIC_COMPACT,
         { businessId: 'ALL', operation: 'compact' },
         {
           jobId: 'temporal-flow-memory-periodic-compact',
@@ -78,6 +114,23 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
   }
 
   async onModuleDestroy() {
+    // FOLLOW3-C3: the worker is closed only once it is ready. new Worker()
+    // duplicates this.redis as its blocking connection and initializes it in
+    // the background: connect, then an INFO for bullmq's version check. A
+    // close() before that INFO is answered (a destroy a few hundred ms after
+    // onModuleInit) disconnects the duplicate under it (bullmq 5.76
+    // redis-connection.js:363-365). The INFO rejects with 'Connection is
+    // closed' and bullmq re-emits it on a connection whose listeners close()
+    // has already removed, which throws inside bullmq's own .catch (:74-75,
+    // :385): an unhandled rejection from RedisConnection.getRedisVersionAndType
+    // <- RedisConnection.init. Once ready, close() quits instead, which waits
+    // for the reply. A worker whose connection failed to initialize (bullmq has
+    // already emitted that as the worker's 'error') is closed all the same.
+    // The wait is bounded (FOLLOW3-C3 repair): if Redis stops answering while
+    // the worker initializes, it never becomes ready (ioredis reconnects
+    // forever), and a shutdown must not wait on that; after the bound close()
+    // runs as before.
+    await readyOrAfter(READY_BEFORE_CLOSE_MS, this.worker);
     await this.worker?.close();
     await this.queue.close();
   }
@@ -98,6 +151,12 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
   }
 
   private async process(job: Job<TemporalFlowMemoryJob>): Promise<void> {
+    // V1-24b review (CR-V124b-1): a periodic run already waiting when this
+    // process booted with schedulers off does no work here.
+    if (job.name === PERIODIC_COMPACT && schedulersDisabled()) {
+      this.logger.log('Periodic compaction skipped (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     const data = job.data;
 
     if (data.operation === 'compact') {

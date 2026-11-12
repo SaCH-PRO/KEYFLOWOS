@@ -19,6 +19,9 @@ export default function AccountingPeriodsPage() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [month, setMonth] = useState((new Date().getMonth() + 1).toString());
 
+  // The api client never throws on an HTTP refusal: it returns { data: null, error }
+  // with the server's message, and every handler below shows that message
+  // (V1-15b repair2, review LC-2: a refused close, reopen or create was silent).
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
@@ -26,6 +29,7 @@ export default function AccountingPeriodsPage() {
     try {
       const res = await fetchAccountingPeriods(businessId);
       if (res.data) setPeriods(res.data.items ?? []);
+      else setError(res.error ?? "Failed to load accounting periods");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load accounting periods");
     } finally {
@@ -49,6 +53,8 @@ export default function AccountingPeriodsPage() {
         setPeriods((prev) => [...prev, res.data!]);
         setShowAdd(false);
         toast.success("Accounting period created");
+      } else {
+        toast.error(res.error ?? "Failed to create period");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create period");
@@ -65,6 +71,9 @@ export default function AccountingPeriodsPage() {
       if (res.data) {
         load();
         toast.success("Period closed");
+      } else {
+        // e.g. 400 "has not ended" (only an ended month closes), 403 for a non-admin.
+        toast.error(res.error ?? "Failed to close period");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to close period");
@@ -79,6 +88,8 @@ export default function AccountingPeriodsPage() {
       if (res.data) {
         load();
         toast.success("Period reopened");
+      } else {
+        toast.error(res.error ?? "Failed to reopen period");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to reopen period");

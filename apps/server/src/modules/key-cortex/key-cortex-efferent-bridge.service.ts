@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit, Inject, Optional } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
-import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
+import { FlowOrchestratorService, type KeyDispatchAction } from '../ai/flow-orchestrator.service';
 import { ActionNotClearedError } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import {
   KeyCortexToolRegistryService,
@@ -54,6 +54,23 @@ import {
  * autonomous action does not. Tools the gate refuses now become approval
  * proposals rather than dead ends; see KeyCortexToolRegistryService.
  */
+/**
+ * W10-CORTEX-CHAT-SCOPE (review CR-W9KCA-3): the dispatch of a bridged call, with the command
+ * thread of the registry call it answers (ctx.sessionId, ctx.correlationId) beside it. A KEY-cortex
+ * turn's bridged call sent only its surface and member, so the organ call it reaches
+ * (FlowOrchestratorService.executeBridgedCortexTool hands the dispatch's session and correlation to
+ * the cortex registry) was audited with sessionId 'unknown' and no correlation: off the turn's
+ * thread. The action boundary also records the two on the action it files. Attribution only: neither
+ * is a principal, and neither grants anything. A call with no thread sends none, as before.
+ */
+function withCommandThread(ctx: KeyCortexToolContext, action: KeyDispatchAction): KeyDispatchAction {
+  return {
+    ...action,
+    ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+    ...(ctx.correlationId ? { correlationId: ctx.correlationId } : {}),
+  };
+}
+
 @Injectable()
 export class KeyCortexEfferentBridgeService implements OnModuleInit {
   private readonly logger = new Logger(KeyCortexEfferentBridgeService.name);
@@ -143,7 +160,19 @@ export class KeyCortexEfferentBridgeService implements OnModuleInit {
         // KF-EXEC-ACTION-001: `ctx.userId` is optional and set by callers
         // that did not authenticate anyone, so it is not presented as a
         // principal. The bridge has a business and nothing else.
-        { surface: 'CORTEX_BRIDGE' },
+        //
+        // W3-D64-COMMERCE-CREATE review (CR-D64C-2; D-64, D-88): it rides
+        // beside the call instead, read only to judge the contact a KEY
+        // commerce write binds by that member's CRM view. That can only
+        // narrow the bind (an id that is no member of the business is
+        // refused), never widen it, so an unauthenticated id grants nothing.
+        //
+        // W10-CORTEX-CHAT-SCOPE (review CR-W9KCA-3): the turn's command
+        // thread rides on the dispatch too (withCommandThread).
+        withCommandThread(
+          ctx,
+          ctx.userId ? { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ctx.userId } : { surface: 'CORTEX_BRIDGE' },
+        ),
       );
       return { success: true, data: result as KeyCortexToolResult['data'] };
     } catch (err: unknown) {

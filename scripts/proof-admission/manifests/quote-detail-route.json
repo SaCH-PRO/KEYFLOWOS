@@ -1,0 +1,40 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-04-QT-DETAIL-ROUTE",
+  "proofScope": "quote-detail-route-real-database-and-public-surface-ledger",
+  "description": "The tenant-bound quote detail route and the retired bare-id route. Run from apps/server: npx vitest run test/commerce-quote-visibility.integration.test.ts src/core/auth/public-surface.spec.ts --reporter=json --outputFile=.proof/r0-04-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/quote-detail-route.json --report .proof/r0-04-vitest.json. JOINED CONTACT (review finding ST-R004-1): the case 'ST-R004-1 (fixed)' replaces the former 'OPEN DEFECT ST-R004-1 reproduced' case, which pinned the defect: a contactId of another tenant on quote create or patch answers 404, byte-identical to an unknown contact, with no Quote row written or changed (R0-27 review ST-27-2, 76e1c59d). SCOPE LIMIT: this manifest is evidence for the DETAIL ROUTE and those two writes only. It binds the quote row to the path tenant, and the detail route serves the joined contact only when it belongs to that tenant, so a legacy row already joined to a foreign contact reads contact null there. The other quote readers are proved separately by scripts/proof-admission/manifests/quote-contact-tenant.json (R0-04 / R0-CMF3-QUOTE-CONTACT-TENANT), which covers the readers in commerce.service.ts and lists the residuals no manifest covers: quote readers in other modules that join the contact with no tenant condition, and the list readers' whole-row projection of a same-tenant contact. So this manifest is not joined-row tenancy evidence for Release 0 journey step 6 beyond the detail route.",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "suites": [
+    "test/commerce-quote-visibility.integration.test.ts",
+    "src/core/auth/public-surface.spec.ts"
+  ],
+  "requiredCases": [
+    "fixture sanity (real rows) seeded the tenants, memberships, quotes and the converted invoice",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path rejects a request with no identity (401) and discloses nothing",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path rejects a user with no membership at BusinessGuard (403 No access to this business)",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path rejects a member of another tenant on this tenant path (403)",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path rejects a member whose revenue scope is explicitly none (403 Insufficient permissions)",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path the owner of B asking for A's quote id on B's own path gets 404, byte-identical to an unknown id",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path positive control: the other tenant opens its own quote on its own path (200)",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path a soft-deleted quote is not found for anyone, owner and SUPER_ADMIN included (404)",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path OWNER, revenue:read (explicit and STAFF default) and SUPER_ADMIN open DRAFT, SENT and ACCEPTED with the full operator detail incl. contact",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path the ACCEPTED quote carries its converted invoice for the operator, and the lifecycle step says so",
+    "GET /commerce/businesses/:businessId/quotes/:quoteId through the real guard path denied and operator reads mutate nothing (no view stamp, no event, no timeline entry)",
+    "GET /commerce/quotes/:quoteId (bare id) — CHOICE: 404 for every quote and caller, no projection, behind @PublicRateLimit(20/min) unauthenticated and non-member GET of a DRAFT quote id -> 404, body byte-identical to an unknown id (volatile fields stripped)",
+    "GET /commerce/quotes/:quoteId (bare id) — CHOICE: 404 for every quote and caller, no projection, behind @PublicRateLimit(20/min) SENT and ACCEPTED quotes answer 404 too (the pinned choice, not a redacted projection): no contact email/phone, notes, business private fields or invoice link leave the server",
+    "GET /commerce/quotes/:quoteId (bare id) — CHOICE: 404 for every quote and caller, no projection, behind @PublicRateLimit(20/min) the owner gets the same 404 on the bare-id route: operators read the tenant route, which serves the same quote",
+    "GET /commerce/quotes/:quoteId (bare id) — CHOICE: 404 for every quote and caller, no projection, behind @PublicRateLimit(20/min) the bare-id route is throttled: the 21st anonymous read inside one minute is 429",
+    "GET /commerce/quotes/:quoteId (bare id) — CHOICE: 404 for every quote and caller, no projection, behind @PublicRateLimit(20/min) bare-id reads mutate nothing (a SENT quote is not stamped viewed)",
+    "regression control: the signed-token public quote route is unchanged GET /commerce/public/quotes/:token still serves the shared quote to an anonymous holder of the token",
+    "regression control: the signed-token public quote route is unchanged an unknown token is still refused (403), as before",
+    "ST-PC01-1: the tenant-bound server-side quote read a KEY caller must use (service level, real DB) getQuoteForBusiness called directly binds the read to the tenant: another tenant's id, an unknown id and a soft-deleted row read as null",
+    "ST-PC01-1: the tenant-bound server-side quote read a KEY caller must use (service level, real DB) KEY CommerceAdapterService.getQuoteStatus({ businessId: bizB, quoteId: <bizA DRAFT> }) throws NotFound and leaks nothing; the owning tenant still reads it (ST-PC01-1)",
+    "ST-R004-1 (fixed) — a quote on B's path cannot join A's contact B's owner naming A's contactId on quote create or patch gets 404, byte-identical to an unknown contact; no Quote row is written or changed, and B's detail route never serves A's customer",
+    "the unauthenticated HTTP surface the parser handles a class-level guard — key-cortex is fully covered",
+    "the unauthenticated HTTP surface the parser handles a per-handler guard — phone-voice has exactly one open route",
+    "the unauthenticated HTTP surface finds the whole surface — this is not vacuous",
+    "the unauthenticated HTTP surface no controller exposes an unauthenticated handler that is not acknowledged",
+    "the unauthenticated HTTP surface the ledger shrinks and does not go stale"
+  ]
+}

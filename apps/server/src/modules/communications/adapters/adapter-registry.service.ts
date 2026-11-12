@@ -3,7 +3,6 @@ import { ChannelAdapter } from './channel-adapter.interface';
 import { MetaAdapter } from './meta-adapter';
 import { EmailAdapter } from './email-adapter';
 import { WhatsAppAdapter } from './whatsapp-adapter';
-import { ResendEmailAdapter } from './resend-email-adapter';
 
 @Injectable()
 export class AdapterRegistryService {
@@ -14,7 +13,8 @@ export class AdapterRegistryService {
     this.register(new MetaAdapter());
     this.register(new EmailAdapter());
     this.register(new WhatsAppAdapter());
-    this.register(new ResendEmailAdapter());
+    // D-82: ResendEmailAdapter (the platform sender) is not registered. Business
+    // email never relays through the platform's own address.
   }
 
   private register(adapter: ChannelAdapter) {
@@ -29,11 +29,9 @@ export class AdapterRegistryService {
   /**
    * The adapter for a destination's platform.
    *
-   * EMAIL maps to GOOGLE, which is Gmail and needs a connected account. A
-   * business without one had nothing to send through at all — see
-   * resend-email-adapter.ts. `resolveEmail` below picks the fallback when the
-   * connection is not actually usable; this stays a pure platform lookup so
-   * existing callers are unchanged.
+   * EMAIL maps to GOOGLE, which is Gmail and needs a connected account.
+   * `resolveEmailFor` below checks that the connection is actually usable; this
+   * stays a pure platform lookup so existing callers are unchanged.
    */
   resolveByPlatform(platform: string): ChannelAdapter | null {
     const providerMap: Record<string, string> = {
@@ -50,20 +48,19 @@ export class AdapterRegistryService {
   }
 
   /**
-   * The adapter that can actually deliver this email.
+   * The adapter that can actually deliver this business email: Gmail when the
+   * connection carries a usable token, otherwise none.
    *
-   * Gmail when the connection carries a usable token, the platform ESP when it
-   * does not. Deciding on the CONNECTION rather than the platform is the point:
-   * a business can have an EMAIL destination whose token has expired, and
-   * failing that delivery with MISSING_CREDENTIALS when a working fallback
-   * exists is the same "correct in isolation" failure the rest of this codebase
-   * keeps producing.
+   * D-82 (2026-11-09): business email leaves only from the business's own
+   * mailbox. It used to fall back to the platform ESP (Resend, sending from the
+   * platform's sign-in address); it no longer does. With no usable Gmail the
+   * caller gets null and fails the delivery visibly
+   * (DeliveryQueueService: EMAIL_ACCOUNT_NOT_CONNECTED).
    */
   resolveEmailFor(connection: { provider?: string | null; token?: string | null } | null | undefined): ChannelAdapter | null {
     const usableGmail =
       (connection?.provider === 'GOOGLE' || connection?.provider === 'EMAIL') && !!connection?.token;
-    if (usableGmail) return this.resolve('GOOGLE');
-    return this.resolve('RESEND');
+    return usableGmail ? this.resolve('GOOGLE') : null;
   }
 
   listProviders(): string[] {

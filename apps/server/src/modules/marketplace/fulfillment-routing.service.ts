@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, Inject, NotFoundException } from '@nestjs/common';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -6,6 +6,72 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order-metadata';
+import type { BusinessMetaTx } from '../../core/prisma/business-meta';
+import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
+import { readPurchaseOrderLine, STOCK_QUANTITY_MAX } from '../../core/inventory/purchase-order-lines';
+
+/**
+ * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
+ * engine reads and writes an order's routes with, the transaction its claim
+ * on the order holds (routeOrder).
+ */
+type RoutingTx = BusinessMetaTx;
+
+/**
+ * The claim routeOrder takes on an order: one transaction-scoped advisory
+ * lock per business and order (transaction scoped because the pooler runs in
+ * transaction mode, as the booking slot claim's). maxWait and timeout leave
+ * room for a router that waits for another to finish routing the same order.
+ */
+const ROUTING_LOCK_NAMESPACE = 'marketplace-order-routing:';
+export const ROUTING_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
+
+/**
+ * W11-PO-RECEIPT-CLAIM: the 409 a purchase order status change answers when
+ * the status it read before its write was changed by another request first
+ * (advancePurchaseOrderStatus compares and sets that status). Not marked
+ * retryable: D-134 rules such a 409 final for a KEY plan step
+ * (inventory_advance_purchase_order); the caller reloads the purchase order.
+ */
+export const PURCHASE_ORDER_CHANGED = 'The purchase order was changed by another request; reload it and try again';
+
+/**
+ * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): how many times routeOrder runs
+ * its claim transaction. Its stock locks are taken in one global order
+ * (core/inventory/stock-lock-order.ts), so routing does not deadlock with a
+ * writer that follows the order; a transaction lost to a deadlock or a
+ * serialization failure anyway (a writer outside that order) is run once more
+ * before routing is reported failed: StoreOrderRoutingListener turns a
+ * failure into store_order.routing_failed (an operator "routing failed" action
+ * and a failed contact event), and nothing else routes a provider-paid
+ * storefront order again.
+ */
+const ROUTING_CLAIM_ATTEMPTS = 2;
+
+/**
+ * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-2, SEAMZ4-CR-3): the statuses
+ * routing moves a paid order on from (to routed, or supplier_ordered), the
+ * marketplace's own statuses before routing. Any other status is kept: one
+ * past routing, and a storefront status (CONFIRMED and the rest of the
+ * storefront's uppercase vocabulary, LEGACY_STATUS_MAP below), which the
+ * storefront's readers (StoreOrderService.getOrderSummary and listOrders, the
+ * store order list and fulfilment panel, the customer's tracking) know and
+ * 'routed' is not.
+ */
+const ROUTING_ADVANCES_FROM: ReadonlySet<string> = new Set(['placed', 'awaiting_payment', 'paid', 'awaiting_fulfillment']);
+
+/**
+ * W10-SOP-FIX review (SOPFIX-SEC-1) / W10-Z4-ROUTE-FIX (SEAMZ4-CR-2): takes the
+ * routing claim on an order on the caller's transaction (held to its commit).
+ * routeOrder takes it before it reads the order's routes; the fulfil cancel
+ * takes it before it releases the order's reservations, so a cancel meets an
+ * order being routed only once its routes have committed.
+ */
+export async function claimOrderRouting(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ROUTING_LOCK_NAMESPACE}${businessId}:${orderId}`}))`;
+}
 
 export interface OrderStatusTimelineEntry {
   status: string;
@@ -203,8 +269,77 @@ export class FulfillmentRoutingService {
     return `${prefix}-${timestamp}-${rand}`;
   }
 
+  /**
+   * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): routing claims the
+   * order before it reads the order's routes. A paid order is routed by two
+   * routers on purpose (mark_paid's or createOrder's un-awaited autoRouteOrder,
+   * and StoreOrderRoutingListener on the paid door's store_order.paid, the
+   * safety net), and the manual POST .../route can run beside them. Each read
+   * the order's routes, found none and created its own: two LOCAL_STOCK
+   * RESERVED routes for one line (the second reservation written over the
+   * first), and a DROPSHIP line raised a supplier PurchaseOrder per router.
+   *
+   * The claim is a transaction-scoped advisory lock on the business and order,
+   * taken first in the transaction that reads the routes and writes the new
+   * ones with the order's status and timeline steps. A router that meets the
+   * order being routed waits for that transaction to commit and then reads its
+   * routes (READ COMMITTED: each statement reads what has committed), so it
+   * takes the existing-routes path and creates nothing. A failure rolls the
+   * routes back with the claim, so the order can be routed again. What follows
+   * routing (stock alerts, notifications to the business) runs once the routes
+   * have committed.
+   *
+   * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): the claim holds every stock row
+   * lock it takes to commit, so they are taken first, all at once and in the
+   * global order (routeClaimedOrder, core/inventory/stock-lock-order.ts):
+   * reserved line by line in line order, two orders naming the same products in
+   * opposite order deadlocked (40P01) and one was left unrouted with
+   * store_order.routing_failed. A claim transaction lost to a deadlock or a
+   * serialization failure anyway is run once more (ROUTING_CLAIM_ATTEMPTS);
+   * the work an aborted attempt queued for after commit is dropped with it.
+   */
   async routeOrder(businessId: string, orderId: string): Promise<any[]> {
-    const order = await this.prisma.client.marketplaceOrder.findFirst({
+    const { routes, afterCommit } = await this.claimAndRouteOrder(businessId, orderId);
+    for (const work of afterCommit) {
+      await work().catch((err) =>
+        this.logger.error(`After routing order ${orderId}: ${(err as Error).message}`),
+      );
+    }
+    return routes;
+  }
+
+  /**
+   * routeOrder's claim transaction, run again once when it is lost to a deadlock or a serialization failure
+   * (ROUTING_CLAIM_ATTEMPTS). Returns the routes and the work to run once they have committed; what an aborted attempt
+   * queued is dropped with it.
+   */
+  private async claimAndRouteOrder(
+    businessId: string,
+    orderId: string,
+  ): Promise<{ routes: FulfillmentRouteShape[]; afterCommit: Array<() => Promise<void>> }> {
+    for (let attempt = 1; ; attempt += 1) {
+      const afterCommit: Array<() => Promise<void>> = [];
+      try {
+        const routes = await this.prisma.client.$transaction(async (tx) => {
+          await claimOrderRouting(tx, businessId, orderId);
+          return this.routeClaimedOrder(tx, businessId, orderId, afterCommit);
+        }, ROUTING_CLAIM_TX_OPTIONS);
+        return { routes, afterCommit };
+      } catch (err) {
+        if (attempt >= ROUTING_CLAIM_ATTEMPTS || !isLostTransactionConflict(err)) throw err;
+        this.logger.warn(`Routing order ${orderId} lost a lock conflict (attempt ${attempt}); routing it again`);
+      }
+    }
+  }
+
+  /** routeOrder's work, under its claim on the order: every read and write on `tx`. */
+  private async routeClaimedOrder(
+    tx: RoutingTx,
+    businessId: string,
+    orderId: string,
+    afterCommit: Array<() => Promise<void>>,
+  ): Promise<FulfillmentRouteShape[]> {
+    const order = await tx.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
       include: {
         items: { include: { product: true } },
@@ -214,8 +349,43 @@ export class FulfillmentRoutingService {
 
     if (!order) throw new BadRequestException('Order not found');
 
-    const validRoutingStatuses = ['placed', 'awaiting_fulfillment', 'paid', 'routed', 'awaiting_payment'];
     const normalizedStatus = normalizeOrderStatus(order.status);
+    // W10-Z4-ROUTE-FIX (SEAMZ4-CR-3; D-112): an order stored PAID is paid. The paid door leaves a storefront order
+    // CONFIRMED / PAID (its fulfilment vocabulary), which reads as awaiting_payment here, so its routing wrote
+    // 'awaiting_payment' on a paid order.
+    const isPaid =
+      normalizedStatus === 'paid' ||
+      normalizedStatus === 'awaiting_fulfillment' ||
+      String(order.paymentStatus ?? '').toUpperCase() === 'PAID';
+    // W10-Z4-ROUTE-FIX (SEAMZ4-CR-2, SEAMZ4-CR-3): the status routing moves a paid order on to is written only from a
+    // marketplace status before routing (ROUTING_ADVANCES_FROM), and only while the order still has the status read
+    // here (appendOrderTimelineAdvancingStatus): the paid door and the cancel do not take the claim, and the status
+    // computed from this read was written over the paid or cancelled they committed meanwhile. An order not paid gets
+    // no status written (it was written its own status back).
+    const advancesFrom = isPaid && ROUTING_ADVANCES_FROM.has(order.status) ? order.status : null;
+
+    // An order routed already is answered with its routes, whatever status routing moved it to: the router that
+    // waited for the claim meets the order routed (a DROPSHIP order supplier_ordered), and refusing that status
+    // reported a routing failure for an order that is routed (store_order.routing_failed: an operator action and a
+    // failed contact event).
+    const existingRoutes = order.fulfillmentRoutes as FulfillmentRouteShape[] | undefined;
+    if (existingRoutes && existingRoutes.length > 0) {
+      if (advancesFrom) {
+        const hasDropship = existingRoutes.some((r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID');
+        const finalStatus = hasDropship ? 'supplier_ordered' : 'routed';
+        const now = new Date().toISOString();
+        // W10-SOP-FIX (SOP-V4): status and step in one statement (order-metadata.ts), not the metadata read above
+        // written back over what the paid marking, autoRouteOrder and the paid listeners wrote meanwhile.
+        await appendOrderTimelineAdvancingStatus(tx, businessId, orderId, [], {
+          from: advancesFrom,
+          to: finalStatus,
+          steps: [{ status: finalStatus, timestamp: now, note: 'Order status advanced after payment — routes already created' }],
+        });
+      }
+      return existingRoutes;
+    }
+
+    const validRoutingStatuses = ['placed', 'awaiting_fulfillment', 'paid', 'routed', 'awaiting_payment'];
     if (!validRoutingStatuses.includes(normalizedStatus)) {
       throw new BadRequestException(
         `Cannot route order in status "${order.status}". ` +
@@ -223,41 +393,25 @@ export class FulfillmentRoutingService {
       );
     }
 
-    const existingRoutes = order.fulfillmentRoutes as FulfillmentRouteShape[] | undefined;
-    if (existingRoutes && existingRoutes.length > 0) {
-      const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
-      if (isPaid) {
-        const hasDropship = existingRoutes.some((r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID');
-        const finalStatus = hasDropship ? 'supplier_ordered' : 'routed';
-        const now = new Date().toISOString();
-        const existingMeta = (order.metadata as OrderMetadata) ?? {};
-        const existingTimeline: OrderStatusTimelineEntry[] = existingMeta.statusTimeline ?? [];
-        await this.prisma.client.marketplaceOrder.update({
-          where: { id: orderId },
-          data: {
-            status: finalStatus,
-            metadata: {
-              ...existingMeta,
-              statusTimeline: [
-                ...existingTimeline,
-                { status: finalStatus, timestamp: now, note: 'Order status advanced after payment — routes already created' },
-              ],
-            },
-          },
-        });
-      }
-      return existingRoutes;
-    }
+    // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): every stock row any line can reserve from (each line's product, in every
+    // warehouse of the business) is locked here, all at once, in the global order, before the first reservation; a
+    // line reserves only from these rows. Locked line by line in line order and held to commit, two orders with the
+    // same products in opposite order each held one row and waited for the other's (40P01).
+    const lockedStockIds = await lockStockRowsInOrder(
+      tx,
+      businessId,
+      (order.items as OrderItemShape[]).map((item) => item.productId),
+    );
 
     const routes: FulfillmentRouteShape[] = [];
 
     for (const item of order.items as OrderItemShape[]) {
       const listing = await (
         item.listingId
-          ? this.prisma.client.marketplaceListing.findFirst({
+          ? tx.marketplaceListing.findFirst({
               where: { id: item.listingId, businessId, isActive: true },
             })
-          : this.prisma.client.marketplaceListing.findFirst({
+          : tx.marketplaceListing.findFirst({
               where: { productId: item.productId, businessId, isActive: true },
             })
       );
@@ -269,25 +423,34 @@ export class FulfillmentRoutingService {
 
       switch (strategy) {
         case 'LOCAL_STOCK':
-          route = await this.routeLocalStock(businessId, orderId, item, listing);
+          route = await this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing, lockedStockIds);
           break;
         case 'DROPSHIP':
-          route = await this.routeDropship(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routeDropship(tx, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
           break;
         case 'PREORDER':
-          route = await this.routePreorder(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routePreorder(tx, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
           break;
         case 'HYBRID':
-          route = await this.routeHybrid(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routeHybrid(
+            tx,
+            afterCommit,
+            businessId,
+            orderId,
+            item,
+            listing,
+            order as unknown as MarketplaceOrderShape,
+            lockedStockIds,
+          );
           break;
         case 'MANUAL':
-          route = await this.routeManual(businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
           break;
         case 'SERVICE':
-          route = await this.routeService(businessId, orderId, item, listing);
+          route = await this.routeService(tx, businessId, orderId, item, listing);
           break;
         default:
-          route = await this.routeManual(businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
       }
 
       routes.push(route);
@@ -297,42 +460,43 @@ export class FulfillmentRoutingService {
       (r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID',
     );
     const now = new Date().toISOString();
-    const existingMeta = (order.metadata as OrderMetadata) ?? {};
-    const existingTimeline: OrderStatusTimelineEntry[] = existingMeta.statusTimeline ?? [];
 
-    const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
-    const finalStatus = isPaid ? (hasDropship ? 'supplier_ordered' : 'routed') : normalizedStatus;
+    const finalStatus = hasDropship ? 'supplier_ordered' : 'routed';
+    const advanceStep: OrderStatusTimelineEntry = hasDropship
+      ? { status: 'supplier_ordered', timestamp: now, note: 'Purchase orders raised for dropship items' }
+      : { status: 'routed', timestamp: now, note: 'Order routed — awaiting processing' };
 
-    const timelineEntries: OrderStatusTimelineEntry[] = [
-      { status: 'routes_created', timestamp: now, note: 'Routes created by fulfillment engine; inventory reserved' },
-    ];
-    if (isPaid && hasDropship) {
-      timelineEntries.push({ status: 'supplier_ordered', timestamp: now, note: 'Purchase orders raised for dropship items' });
-    } else if (isPaid) {
-      timelineEntries.push({ status: 'routed', timestamp: now, note: 'Order routed — awaiting processing' });
-    }
-
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: {
-        status: finalStatus,
-        metadata: {
-          ...existingMeta,
-          statusTimeline: [...existingTimeline, ...timelineEntries],
-        },
-      },
-    });
+    // W10-SOP-FIX (SOP-V4): status and steps in one statement. The metadata read with the order at the top was written
+    // back whole, over the paid marking's step, autoRouteOrder's step and the paid listener's contact link written while
+    // the routes were created (and this order is routed by mark_paid and StoreOrderRoutingListener together).
+    // W10-Z4-ROUTE-FIX (SEAMZ4-CR-2, SEAMZ4-CR-3): the status (and its step) only for a paid order in a status routing
+    // moves on, and only while it still has the status read under the claim (advancesFrom).
+    await appendOrderTimelineAdvancingStatus(
+      tx,
+      businessId,
+      orderId,
+      [{ status: 'routes_created', timestamp: now, note: 'Routes created by fulfillment engine; inventory reserved' }],
+      advancesFrom ? { from: advancesFrom, to: finalStatus, steps: [advanceStep] } : null,
+    );
 
     return routes;
   }
 
+  /**
+   * @param lockedStockIds the stock rows the claim locked (routeClaimedOrder): the line reserves from one of these
+   *   only, so it writes no stock row outside the claim's one locking statement (W10-Z4-ROUTE-FIX, SEAMZ4-CR-1). A row
+   *   created after that statement is not reserved from by this routing.
+   */
   private async routeLocalStock(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
+    lockedStockIds: readonly string[],
   ): Promise<FulfillmentRouteShape> {
-    const product = await this.prisma.client.product.findUnique({
+    const product = await tx.product.findUnique({
       where: { id: item.productId },
       select: { inventoryMode: true, _count: { select: { inventoryStocks: true } } },
     });
@@ -345,7 +509,7 @@ export class FulfillmentRoutingService {
     ).toLowerCase();
 
     if (inventoryMode === 'untracked' || inventoryMode === 'virtual') {
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -361,21 +525,22 @@ export class FulfillmentRoutingService {
       return route as unknown as FulfillmentRouteShape;
     }
 
-    const stock = await this.prisma.client.inventoryStock.findFirst({
-      where: { productId: item.productId, businessId },
+    // Read under the claim's row lock, so the reservation below counts every reservation committed before it.
+    const stock = await tx.inventoryStock.findFirst({
+      where: { id: { in: [...lockedStockIds] }, productId: item.productId, businessId },
       orderBy: { quantity: 'desc' },
     });
 
     const available = stock ? stock.quantity - stock.reserved : 0;
 
     if (available >= item.quantity) {
-      await this.prisma.client.inventoryStock.update({
+      await tx.inventoryStock.update({
         where: { id: stock!.id },
         data: { reserved: stock!.reserved + item.quantity },
       });
 
       const taskNote = `Pick/pack task pending for item ${item.id} x${item.quantity}`;
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -400,11 +565,13 @@ export class FulfillmentRoutingService {
         },
       });
 
-      await this.checkAndAlertReorderThreshold(businessId, stock!.id);
+      // Read once the reservation has committed (routeOrder), as it was read after the reservation's own write.
+      const stockId = stock!.id;
+      afterCommit.push(() => this.checkAndAlertReorderThreshold(businessId, stockId));
 
       return route as unknown as FulfillmentRouteShape;
     } else {
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -423,9 +590,11 @@ export class FulfillmentRoutingService {
           `Available: ${available}, Required: ${item.quantity}`,
       );
 
-      this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
-        this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
-      );
+      afterCommit.push(async () => {
+        this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
+          this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
+        );
+      });
 
       return route as unknown as FulfillmentRouteShape;
     }
@@ -461,7 +630,7 @@ export class FulfillmentRoutingService {
     });
   }
 
-  private async resolveSupplierSourceLink(productId: string): Promise<{
+  private async resolveSupplierSourceLink(tx: RoutingTx, productId: string): Promise<{
     id: string;
     priority: number;
     sourceCost?: number | null;
@@ -472,7 +641,7 @@ export class FulfillmentRoutingService {
       };
     };
   } | null> {
-    return this.prisma.client.productSourceLink.findFirst({
+    return tx.productSourceLink.findFirst({
       where: {
         productId,
         isActive: true,
@@ -488,13 +657,14 @@ export class FulfillmentRoutingService {
   }
 
   private async routeDropship(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
     order: MarketplaceOrderShape,
   ): Promise<FulfillmentRouteShape> {
-    const sourceLink = await this.resolveSupplierSourceLink(item.productId);
+    const sourceLink = await this.resolveSupplierSourceLink(tx, item.productId);
 
     let supplierName: string;
     let supplierEmail: string | null;
@@ -524,7 +694,7 @@ export class FulfillmentRoutingService {
 
     const subtotal = unitCost * item.quantity;
 
-    const po = await this.prisma.client.purchaseOrder.create({
+    const po = await tx.purchaseOrder.create({
       data: {
         businessId,
         poNumber: this.generatePONumber(),
@@ -556,7 +726,7 @@ export class FulfillmentRoutingService {
       },
     });
 
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -582,6 +752,7 @@ export class FulfillmentRoutingService {
   }
 
   private async routePreorder(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
@@ -596,7 +767,7 @@ export class FulfillmentRoutingService {
     const itemTotal = item.total ?? item.unitPrice * item.quantity;
     const depositAmount = depositPercent > 0 ? (itemTotal * depositPercent) / 100 : undefined;
 
-    const preOrder = await this.prisma.client.preOrder.create({
+    const preOrder = await tx.preOrder.create({
       data: {
         businessId,
         productId: item.productId,
@@ -614,7 +785,7 @@ export class FulfillmentRoutingService {
       },
     });
 
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -633,14 +804,17 @@ export class FulfillmentRoutingService {
   }
 
   private async routeHybrid(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
     order: MarketplaceOrderShape,
+    lockedStockIds: readonly string[],
   ): Promise<FulfillmentRouteShape> {
-    const stock = await this.prisma.client.inventoryStock.findFirst({
-      where: { productId: item.productId, businessId },
+    const stock = await tx.inventoryStock.findFirst({
+      where: { id: { in: [...lockedStockIds] }, productId: item.productId, businessId },
       orderBy: { quantity: 'desc' },
     });
 
@@ -650,10 +824,10 @@ export class FulfillmentRoutingService {
       this.logger.log(
         `Hybrid: local stock satisfied for product ${item.productId} (${available}/${item.quantity})`,
       );
-      return this.routeLocalStock(businessId, orderId, item, listing);
+      return this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing, lockedStockIds);
     }
 
-    const sourceLink = await this.resolveSupplierSourceLink(item.productId);
+    const sourceLink = await this.resolveSupplierSourceLink(tx, item.productId);
     const hasSupplier = !!(sourceLink || listing?.supplierName);
 
     if (hasSupplier) {
@@ -662,22 +836,24 @@ export class FulfillmentRoutingService {
           `Local stock insufficient (${available}/${item.quantity}). ` +
           `Using ${sourceLink ? `ProductSourceLink priority=${sourceLink.priority}` : 'listing supplier'}`,
       );
-      return this.routeDropship(businessId, orderId, item, listing, order);
+      return this.routeDropship(tx, businessId, orderId, item, listing, order);
     }
 
     this.logger.log(
       `Hybrid: fallback to preorder for product ${item.productId}. No local stock or supplier available.`,
     );
-    return this.routePreorder(businessId, orderId, item, listing, order);
+    return this.routePreorder(tx, businessId, orderId, item, listing, order);
   }
 
   private async routeManual(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
   ): Promise<FulfillmentRouteShape> {
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -690,9 +866,11 @@ export class FulfillmentRoutingService {
       },
     });
 
-    this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
-      this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
-    );
+    afterCommit.push(async () => {
+      this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
+        this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
+      );
+    });
 
     return route as unknown as FulfillmentRouteShape;
   }
@@ -727,12 +905,13 @@ export class FulfillmentRoutingService {
   }
 
   private async routeService(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
   ): Promise<FulfillmentRouteShape> {
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -849,45 +1028,71 @@ export class FulfillmentRoutingService {
     }
   }
 
-  async releaseInventoryReservation(businessId: string, orderId: string): Promise<void> {
-    const routes = await this.prisma.client.fulfillmentRoute.findMany({
-      where: {
-        businessId,
-        orderId,
-        strategy: 'LOCAL_STOCK',
-        status: { in: ['RESERVED', 'PICKING_PACKING'] },
-      },
-      include: { order: { include: { items: true } } },
+  /**
+   * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-2): the fulfil 'cancel' action's
+   * release of an order's fulfilment, on the cancel's own transaction, which
+   * then writes the order's cancelled status and step (MarketplaceService.
+   * fulfillOrder).
+   *
+   * It takes the order's routing claim first (claimOrderRouting). The cancel
+   * released the reservations of the routes committed when it ran, with no
+   * claim: an order being routed had none yet, and the router then committed
+   * its RESERVED routes, their reserved stock and 'routed' over the cancelled
+   * status. Under the claim the cancel waits for a router to commit, then
+   * re-reads the order's status (400 when it can no longer be cancelled), locks
+   * the stock rows its LOCAL_STOCK routes reserved from (each route's product in
+   * its warehouse, and no other row of the product: review Z4RV-CR-1) in the
+   * global order (core/inventory/stock-lock-order.ts), gives back what each
+   * reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after
+   * it meets the order cancelled and creates nothing.
+   */
+  async cancelOrderFulfilment(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
+    await claimOrderRouting(tx, businessId, orderId);
+    const order = await tx.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { status: true, items: { select: { id: true, productId: true, quantity: true } } },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (!canTransitionOrder(order.status, 'cancelled')) {
+      throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
+    }
+
+    const itemsById = new Map(order.items.map((item) => [item.id, item]));
+    const routes = await tx.fulfillmentRoute.findMany({
+      where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: { in: ['RESERVED', 'PICKING_PACKING'] } },
+    });
+    const releases = routes.flatMap((route) => {
+      const routeMeta = (route.metadata ?? {}) as RouteMetadata;
+      const item = route.orderItemId ? itemsById.get(route.orderItemId) : undefined;
+      const untracked =
+        routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual';
+      return !route.warehouseId || untracked || !item ? [] : [{ warehouseId: route.warehouseId, item }];
     });
 
-    for (const route of routes) {
-      if (!route.warehouseId) continue;
-
-      const routeMeta = (route.metadata ?? {}) as RouteMetadata;
-      if (routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual') {
-        await this.prisma.client.fulfillmentRoute.update({ where: { id: route.id }, data: { status: 'CANCELLED' } });
-        continue;
-      }
-
-      const orderItem = (route.order.items as OrderItemShape[]).find((i) => i.id === route.orderItemId);
-      if (!orderItem) continue;
-
-      const stock = await this.prisma.client.inventoryStock.findFirst({
-        where: { productId: orderItem.productId, warehouseId: route.warehouseId },
-      });
-
+    // Every stock row these routes reserved from, locked at once in the global order before the first is written:
+    // only those rows (W10-Z4-ROUTE-FIX review Z4RV-CR-1). Locking the product's rows in every warehouse, a cancel of
+    // one line held two rows of its product, and a transfer writing them in the other order (from row, then to row)
+    // deadlocked with it: the cancel was rolled back, its route RESERVED and its unit reserved.
+    await lockStockRowPairsInOrder(
+      tx,
+      businessId,
+      releases.map(({ warehouseId, item }) => ({ productId: item.productId, warehouseId })),
+    );
+    for (const { warehouseId, item } of releases) {
+      // Read under the lock: what is reserved now, every reservation committed before it counted.
+      const stock = await tx.inventoryStock.findFirst({ where: { businessId, productId: item.productId, warehouseId } });
       if (stock) {
-        await this.prisma.client.inventoryStock.update({
+        await tx.inventoryStock.update({
           where: { id: stock.id },
-          data: { reserved: Math.max(0, stock.reserved - orderItem.quantity) },
+          data: { reserved: Math.max(0, stock.reserved - item.quantity) },
         });
       }
-
-      await this.prisma.client.fulfillmentRoute.update({
-        where: { id: route.id },
-        data: { status: 'CANCELLED' },
-      });
     }
+
+    await tx.fulfillmentRoute.updateMany({
+      where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+      data: { status: 'CANCELLED' },
+    });
   }
 
   async checkAndAlertReorderThreshold(businessId: string, stockId: string): Promise<void> {
@@ -931,6 +1136,71 @@ export class FulfillmentRoutingService {
         reorderAt: stock.reorderAt,
       } as InventoryLowPayload);
     }
+  }
+
+  /**
+   * W10-Z4-ROUTE-FIX review (Z4RV-SEC-1): the stock a purchase order received
+   * adds, one entry per line that adds any (a product, a warehouse, a quantity
+   * above 0): the line's product, its warehouse or else the business's default
+   * one, and its quantity (received, else ordered).
+   *
+   * Each line's product and warehouse must be the business's (a soft-deleted
+   * product of the business counts), or the receipt is refused (400) before
+   * anything is written. A purchase order's items are stored as its creator
+   * sent them (createPurchaseOrder, body: any), and the receipt wrote the stock
+   * row of whatever (productId, warehouseId) a line named: another business's
+   * row (its quantity, and its weighted-average cost), or a new row of this
+   * business for another business's product, which makes that product read as
+   * stock-tracked (resolveInventoryMode) and its storefront refuse to sell it.
+   *
+   * W11-PO-LINES (owner ruling D-136; F-40): each stored line is read first by
+   * core/inventory/purchase-order-lines.ts, the reader createPurchaseOrder
+   * checks a line with. A line naming a product whose ids are not non-empty
+   * strings, or whose stock quantity is not a whole number of 0 or more, is
+   * refused (400 'Purchase order line N is malformed; nothing was received')
+   * before any stock is read or written; only the strings and numbers read are
+   * passed on (the ownership check, the stock locks and the writes). The ids
+   * were coerced with String() for the check and passed raw after it, so a
+   * one-element array (String(['x']) is 'x') reached Prisma (500), digit text
+   * was added to an integer column (500) and a fraction was stored truncated.
+   * A legacy quantity stored as digit text ('5') is received as that number
+   * (D-136), and the line's cost is Number(unitCost) when finite and above 0,
+   * on an updated and a created stock row alike (a text cost on a new row was
+   * a 500). A line that is not an object, or names no product, adds no stock
+   * and is passed over, as before.
+   */
+  private async receivedStockLines(
+    businessId: string,
+    items: Prisma.JsonValue,
+    defaultWarehouseId: string | undefined,
+  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; unitCost: number | undefined }>> {
+    const lines = (Array.isArray(items) ? items : []).flatMap((item, index) => {
+      const read = readPurchaseOrderLine(item, 'receipt');
+      if (read.problem) {
+        if (read.problem.field === 'line') return [];
+        throw new BadRequestException(`Purchase order line ${index + 1} is malformed; nothing was received`);
+      }
+      const { productId, stockQuantity: quantity = 0, unitCost } = read.line;
+      const warehouseId = read.line.warehouseId ?? defaultWarehouseId;
+      return productId && warehouseId && quantity > 0 ? [{ line: index + 1, productId, warehouseId, quantity, unitCost }] : [];
+    });
+    if (lines.length === 0) return lines;
+
+    // Read with no soft-delete or tenant filter (raw SQL), by the business's own id (core/inventory/stock-ownership.ts,
+    // the check a transfer makes too, W10-Z5-TRANSFER-FIX Z5SEC-2).
+    const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
+      this.prisma.client,
+      businessId,
+      lines.map((l) => l.productId),
+      lines.map((l) => l.warehouseId),
+    );
+    const foreign = lines.find((l) => !ownProducts.has(l.productId) || !ownWarehouses.has(l.warehouseId));
+    if (foreign) {
+      throw new BadRequestException(
+        `Purchase order line ${foreign.line} names a product or a warehouse that is not this business's; nothing was received`,
+      );
+    }
+    return lines;
   }
 
   async advancePurchaseOrderStatus(
@@ -980,45 +1250,85 @@ export class FulfillmentRoutingService {
         orderBy: { createdAt: 'asc' },
       });
       const defaultWarehouseId = warehouses[0]?.id;
+      // W10-Z4-ROUTE-FIX review (Z4RV-SEC-1): the stock each line adds, every line's product and warehouse checked to
+      // be the business's first (400 otherwise, nothing written).
+      const receipts = await this.receivedStockLines(businessId, po.items, defaultWarehouseId);
 
-      updatedPO = await this.prisma.client.$transaction(async (rawTx) => {
+      // W11-STOCK-ROW-RACE (D-137): a line's stock row created meanwhile by another writer of the business (a transfer or
+      // an inventory set into the same new pair) runs the transaction once more, which then adds to that row; a row of
+      // another business_id (a planted row) keeps the 409 (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts).
+      // The run again repeats the status compare-and-set below (W11-PO-RECEIPT-CLAIM): the first run rolled back, so the
+      // purchase order is received once, or the run again answers 409 when another request moved it meanwhile.
+      updatedPO = await retryOnOwnStockRowRace(this.prisma.client, businessId, () => this.prisma.client.$transaction(async (rawTx) => {
         const tx = rawTx as unknown as Prisma.TransactionClient;
-        const updated = await tx.purchaseOrder.update({
-          where: { id: poId },
+        // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): the stock rows the lines add to, locked first, at once, in the global order
+        // (core/inventory/stock-lock-order.ts), then the purchase order, its routes and the stock written. Updated line
+        // by line in line order and held to commit, a receipt with lines [B, A] and a routing reserving [A, B] each
+        // held one row and waited for the other's (40P01), and one was rolled back. Review Z4RV-CR-1: only the
+        // (product, warehouse) rows the lines write; every warehouse's row of a line's product made a receipt hold two
+        // rows of it, which a transfer writing them in the other order deadlocked with, and the receipt was rolled back.
+        await lockStockRowPairsInOrder(rawTx, businessId, receipts);
+        // W11-PO-LINES review (SEC-POL-4): the purchase order moves from the status read above, compared and set here.
+        // The status was read before this transaction and the update did not compare it, so two receipts of one SHIPPED
+        // purchase order at once both committed and added its stock twice (two RECEIPT movements). The second now waits
+        // for the first's row lock (behind the stock locks above, as before), reads RECEIVED and updates nothing.
+        // W11-PO-RECEIPT-CLAIM: this is the transaction's first purchase order write, and a lost claim is a 409 (the
+        // purchase order was changed by another request after it was read), no longer the transition table's 400 (that
+        // stays for a RECEIVED made after the first committed: it reads RECEIVED above). Thrown before any route, stock
+        // row, movement or posting is written, the transaction rolls back and purchaseOrder.received is not emitted. A
+        // line into a pair with no stock row takes no stock lock: this update's row lock serializes the two receipts,
+        // and the loser's update matches nothing once the winner commits.
+        const moved = await tx.purchaseOrder.updateMany({
+          where: { id: poId, businessId, status: po.status },
           data: updateData,
         });
+        if (moved.count !== 1) throw new ConflictException(PURCHASE_ORDER_CHANGED);
+        const updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: poId } });
 
         await tx.fulfillmentRoute.updateMany({
           where: { businessId, purchaseOrderId: poId },
           data: { status: 'PICKING_PACKING' },
         });
 
-        const poItems = (updated.items as any[]) ?? [];
-        for (const item of poItems) {
-          const productId = item.productId;
-          const qty = item.receivedQuantity ?? item.quantity ?? 0;
-          const warehouseId = item.warehouseId || defaultWarehouseId;
-
-          if (!productId || !warehouseId || qty <= 0) continue;
-
-          const existing = await tx.inventoryStock.findUnique({
-            where: { productId_warehouseId: { productId, warehouseId } },
+        // The purchase order's lines as read above (no writer changes a purchase order's items after it is created).
+        for (const { line, productId, warehouseId, quantity: qty, unitCost } of receipts) {
+          // Review Z4RV-SEC-1: the business's own row, read under the lock above. This read the row of the line's
+          // (productId, warehouseId) with no business filter, so a line naming another business's product and
+          // warehouse added to that business's stock and rewrote its weighted-average cost.
+          const existing = await tx.inventoryStock.findFirst({
+            where: { businessId, productId, warehouseId },
           });
 
           if (existing) {
+            // W11-PO-LINES review (POL-CR-1): the row holds at most STOCK_QUANTITY_MAX (int4); a line taking it above
+            // that answered 500 (P2020). Read under the lock, after any earlier line of this receipt into the same row.
+            if (existing.quantity + qty > STOCK_QUANTITY_MAX) {
+              throw new BadRequestException(
+                `Purchase order line ${line} would take its stock row above ${STOCK_QUANTITY_MAX}; nothing was received`,
+              );
+            }
             // FIN3 — Weighted-average cost recompute on receipt:
             //   newAvg = (oldQty*oldCost + recvQty*recvCost) / (oldQty + recvQty)
             // Falls back to the existing cost if the PO line carries no
             // unitCost (treats freight-only or zero-cost receipts as
             // not-priced rather than blowing away an established cost).
+            // W11-PO-LINES: unitCost is the line's Number(unitCost) when finite and above 0, read once
+            // (receivedStockLines), else undefined.
             let nextCostPerUnit = existing.costPerUnit ?? null;
-            if (item.unitCost != null && item.unitCost > 0) {
+            if (unitCost !== undefined) {
               const oldQty = Math.max(existing.quantity, 0);
               const oldCost = existing.costPerUnit ?? 0;
               const denom = oldQty + qty;
               nextCostPerUnit = denom > 0
-                ? (oldQty * oldCost + qty * Number(item.unitCost)) / denom
-                : Number(item.unitCost);
+                ? (oldQty * oldCost + qty * unitCost) / denom
+                : unitCost;
+              // W11-PO-LINES review (found reproducing SEC-POL-2): a cost so large the average overflows to Infinity was
+              // written as NULL (Prisma sends Infinity as null), erasing the row's cost. Refused instead.
+              if (!Number.isFinite(nextCostPerUnit)) {
+                throw new BadRequestException(
+                  `Purchase order line ${line} has a cost too large to average into its stock row; nothing was received`,
+                );
+              }
             }
             await tx.inventoryStock.update({
               where: { id: existing.id },
@@ -1028,17 +1338,24 @@ export class FulfillmentRoutingService {
               },
             });
           } else {
-            await tx.inventoryStock.create({
-              data: {
-                businessId,
-                productId,
-                warehouseId,
-                quantity: qty,
-                reserved: 0,
-                currency: updated.currency ?? 'TTD',
-                ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
-              },
-            });
+            // W10-Z5-TRANSFER-FIX (Z5SEC-2): a row of another business_id holding this (product, warehouse), planted by
+            // the old cross-business receipt, is a 409 naming no ids (the purchase order stays as it was), not an
+            // unhandled P2002 (a 500). The row is left for an operator to repair. W11-STOCK-ROW-RACE: the pair is carried
+            // on the 409 so the run again above can tell such a row from the business's own, created meanwhile.
+            await createStockRowOrConflict({ productId, warehouseId }, () =>
+              tx.inventoryStock.create({
+                data: {
+                  businessId,
+                  productId,
+                  warehouseId,
+                  quantity: qty,
+                  reserved: 0,
+                  currency: updated.currency ?? 'TTD',
+                  // W11-PO-LINES: the same cost as the update path (item.unitCost passed raw: a text cost was a 500).
+                  ...(unitCost !== undefined ? { costPerUnit: unitCost } : {}),
+                },
+              }),
+            );
           }
 
           await tx.stockMovement.create({
@@ -1079,12 +1396,20 @@ export class FulfillmentRoutingService {
         }
 
         return updated;
-      });
+      }));
     } else {
-      updatedPO = await this.prisma.client.purchaseOrder.update({
-        where: { id: poId },
-        data: updateData,
-      });
+      // W11-PO-RECEIPT-CLAIM: compared and set on the status read above, as the receipt is. Written unconditionally, two
+      // changes from SUBMITTED at once (to ACKNOWLEDGED and to DRAFT) both answered and the last write won. One update
+      // (the row and its status checked together, Prisma P2025 when it no longer matches): the loser answers 409.
+      updatedPO = await this.prisma.client.purchaseOrder
+        .update({
+          where: { id: poId, businessId, status: po.status },
+          data: updateData,
+        })
+        .catch((err: unknown) => {
+          if ((err as { code?: unknown } | null)?.code === 'P2025') throw new ConflictException(PURCHASE_ORDER_CHANGED);
+          throw err;
+        });
     }
 
     if (targetStatus === 'RECEIVED') {
@@ -1140,21 +1465,14 @@ export class FulfillmentRoutingService {
 
     if (allReady) {
       const now = new Date().toISOString();
-      const orderMeta = (route.order.metadata as OrderMetadata) ?? {};
-      const existingTimeline: OrderStatusTimelineEntry[] = orderMeta.statusTimeline ?? [];
-      await this.prisma.client.marketplaceOrder.update({
-        where: { id: route.orderId },
-        data: {
-          status: 'picking_packing',
-          metadata: {
-            ...orderMeta,
-            statusTimeline: [
-              ...existingTimeline,
-              { status: 'picking_packing', timestamp: now, note: 'All preorder items ready — advanced to pick/pack' },
-            ],
-          },
-        },
-      });
+      // W10-SOP-FIX (SOP-V4): status and step in one statement, not the metadata read with the route written back.
+      await appendOrderTimeline(
+        this.prisma.client,
+        businessId,
+        route.orderId,
+        [{ status: 'picking_packing', timestamp: now, note: 'All preorder items ready — advanced to pick/pack' }],
+        { status: 'picking_packing' },
+      );
     }
 
     return updatedRoute;

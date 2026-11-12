@@ -294,13 +294,13 @@ export default function ProjectsPage() {
 
           {activeTab === "plans" && (
             <motion.div key="plans" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-              <PlanGenerator businessId={businessId || ""} goals={[]} />
+              <PlanGenerator businessId={businessId || ""} goals={[]} onPlanApproved={loadProjects} />
             </motion.div>
           )}
 
           {activeTab === "intelligence" && (
             <motion.div key="intelligence" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-              <ProjectIntelligencePanel />
+              <ProjectIntelligencePanel projects={projects} businessId={businessId} />
             </motion.div>
           )}
 

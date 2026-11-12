@@ -1,5 +1,6 @@
-import { Injectable, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertGoogleConnectOwner, GOOGLE_CONNECT_OWNER_ONLY } from '../../core/connectors/google-suite.controller';
 import { SafeToSpendService } from '../finance/safe-to-spend.service';
 import { CashflowForecastService } from '../finance/cashflow-forecast.service';
 import { MoneyMovesService } from '../finance/money-moves.service';
@@ -339,6 +340,38 @@ const timelineCreateReminder: KeyToolDefinition<
   },
 };
 
+/**
+ * W10-GOOGLE-DOORS-REST (owner ruling D-99, [V94D-T06]; review CRR-W9GD-1):
+ * scanDrive runs ConnectorIntelligenceService.syncGoogleDrive, the Google Drive
+ * pull POST /drive/businesses/:b/sync runs, so it is the business owner's too.
+ * The member driving the run (ctx.userId) must pass the owner rule
+ * (assertGoogleConnectOwner: OWNER membership of ctx.businessId, its
+ * Business.ownerId, or SUPER_ADMIN); a run that names no member, or anyone
+ * else, gets the refusal envelope the other KEY refusals return (success false,
+ * notExecuted, the reason; no data) and nothing is pulled.
+ */
+async function scanDriveOwnerRefusal(
+  ctx: KeyToolContext,
+  deps: ToolDependencies,
+): Promise<(ToolResult<never> & { notExecuted: true }) | null> {
+  const refuse = (reason: string) => ({
+    success: false as const,
+    notExecuted: true as const,
+    error: `${GOOGLE_CONNECT_OWNER_ONLY}: ${reason}; nothing was run`,
+  });
+  if (!ctx.userId) return refuse('a Google Drive sync is the business owner\'s and no member is named');
+  const user = await deps.prisma.client.user.findUnique({ where: { id: ctx.userId }, select: { role: true } });
+  try {
+    await assertGoogleConnectOwner(deps.prisma, ctx.businessId, { id: ctx.userId, role: user?.role });
+    return null;
+  } catch (err) {
+    if (!(err instanceof HttpException)) throw err;
+    const body = err.getResponse();
+    const message = typeof body === 'object' && body !== null && 'message' in body ? String((body as { message: unknown }).message) : err.message;
+    return refuse(message);
+  }
+}
+
 const connectScanDrive: KeyToolDefinition<
   Record<string, never>,
   { scanned: number; newFiles: number }
@@ -350,6 +383,9 @@ const connectScanDrive: KeyToolDefinition<
   requiresApproval: false,
   validateInput: () => ({ valid: true, parsed: {} as Record<string, never> }),
   execute: async (ctx, _input, deps) => {
+    // W10-GOOGLE-DOORS-REST (D-99): the driving member must be the business owner.
+    const refused = await scanDriveOwnerRefusal(ctx, deps);
+    if (refused) return refused;
     const result = await deps.connectorIntelligence.syncGoogleDrive(ctx.businessId);
     return { success: true, data: result };
   },

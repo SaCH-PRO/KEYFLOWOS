@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { LedgerBalanceService } from '../finance/ledger-balance.service';
+import { LedgerBalanceService, type AccountBalance } from '../finance/ledger-balance.service';
+import { normalizeCurrency } from '../finance/posting.service';
 import { ReceivablesService, AgingReport } from '../finance/receivables.service';
 
 export type ReportBasis = 'cash' | 'accrual';
@@ -63,15 +64,30 @@ export interface CashflowReport {
   upcomingPayables: { total: number; count: number };
 }
 
-export interface BalanceSheetReport {
+/** A balance-sheet line: one account in one currency (V1-37b). */
+export interface BalanceSheetLine extends PnlAccountLine {
+  currency: string;
+}
+
+/** The balance sheet of one currency's ledger rows. */
+export interface BalanceSheetCurrencySheet {
   asOf: string;
   currency: string;
-  assets: { total: number; lines: PnlAccountLine[]; cashAndBank: number; accountsReceivable: number; inventory: number };
-  liabilities: { total: number; lines: PnlAccountLine[]; accountsPayable: number; taxPayable: number; loans: number };
-  equity: { total: number; lines: PnlAccountLine[]; ownerEquity: number; retainedEarnings: number };
+  assets: { total: number; lines: BalanceSheetLine[]; cashAndBank: number; accountsReceivable: number; inventory: number };
+  liabilities: { total: number; lines: BalanceSheetLine[]; accountsPayable: number; taxPayable: number; loans: number };
+  equity: { total: number; lines: BalanceSheetLine[]; ownerEquity: number; retainedEarnings: number };
   netEquityFromIncome: number;
   identityHolds: boolean;
   identityDelta: number;
+}
+
+/**
+ * V1-37b (V1-37 review RV37-02): the top level is the business currency's
+ * sheet; `byCurrency` holds one sheet per currency the books hold (the
+ * business currency always among them). No figure adds two currencies.
+ */
+export interface BalanceSheetReport extends BalanceSheetCurrencySheet {
+  byCurrency: Record<string, BalanceSheetCurrencySheet>;
 }
 
 export interface TaxSummaryReport {
@@ -105,6 +121,35 @@ export interface DimensionRow {
 const D = Prisma.Decimal;
 const ZERO = new D(0);
 const CASH_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR', 'CREDIT_CARD']);
+/**
+ * Transaction statuses that are in the books. PostingService.reverse never
+ * edits an original: it marks it REVERSED and posts a mirrored REVERSAL, and
+ * the two net to zero only when both are read (V1-15 review CR-1).
+ */
+const BOOKED_TRANSACTION_STATUSES = ['POSTED', 'REVERSED'];
+
+/**
+ * packages/db's defaultTakeExtension caps every findMany at 1000 rows, so a
+ * report read that can pass 1000 pages by id instead (V1-15b repair2, review
+ * LC-3: past the 1000th cash transaction of a range, a REVERSAL was silently
+ * dropped and the cash-basis P&L counted its original alone).
+ */
+const READ_PAGE = 1000;
+
+/**
+ * Every row of a paged read. `page(cursor)` reads at most READ_PAGE rows in id
+ * order, after `cursor` when it is set; a short page is the last one.
+ */
+async function readAllPages<T extends { id: string }>(page: (cursor: string | undefined) => Promise<T[]>): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const batch = await page(cursor);
+    rows.push(...batch);
+    if (batch.length < READ_PAGE) return rows;
+    cursor = batch[batch.length - 1].id;
+  }
+}
 
 function toNum(d: Prisma.Decimal | number | string | null | undefined): number {
   if (d == null) return 0;
@@ -120,6 +165,16 @@ function toNum(d: Prisma.Decimal | number | string | null | undefined): number {
  * Cash basis filter: only count entries whose parent FinancialTransaction
  * also touched a Cash/Bank/Processor/Credit-Card account. This produces
  * the classic cash-only revenue/expense view from a single ledger.
+ *
+ * Reversals (V1-15 review CR-1): a reversed original stays in the books
+ * beside its REVERSAL, which mirrors its entries and is dated when it was
+ * made. Every reader here must see both so the pair nets to zero over a
+ * range covering both, while each period keeps its own side. The
+ * LedgerEntry aggregations (accrual P&L, cashflow, balance sheet, tax,
+ * revenue/expense breakdowns, AP aging) carry no status filter, so they
+ * already read both. computeCashBasisPnl is the one transaction-level
+ * reader: it reads BOOKED_TRANSACTION_STATUSES and classifies a REVERSAL
+ * as the mirror of its original.
  */
 @Injectable()
 export class LedgerReportingService {
@@ -131,12 +186,18 @@ export class LedgerReportingService {
 
   // ---- helpers --------------------------------------------------------
 
+  /**
+   * The business currency every report is labelled with. V1-37c (VR-03):
+   * normalized, as the door and the trial balance read it, so a business
+   * stored as 'ttd' labels its reports TTD and its balance sheet's top level
+   * is the sheet the door-posted TTD rows are in.
+   */
   private async getCurrency(businessId: string): Promise<string> {
     const biz = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { currency: true },
     });
-    return biz?.currency ?? 'TTD';
+    return normalizeCurrency(biz?.currency) || 'TTD';
   }
 
   private async cashTouchingTxIds(businessId: string, from: Date, to: Date): Promise<Set<string>> {
@@ -171,6 +232,24 @@ export class LedgerReportingService {
    *    composition.
    *  • Pure asset swaps (e.g. Cash↔Inventory) carry no income/expense
    *    leg under cash basis and are skipped.
+   *  • A REVERSAL (reversalOfId set) mirrors its original's entries, so
+   *    its cash moves the other way: it is classified as its original
+   *    was (a refunded collection is negative income traced to the
+   *    invoice, a reversed bill payment negative expense traced to the
+   *    bill) and its signed amounts offset the original's. The traced
+   *    composition is the document's own postings, never their
+   *    reversals, so a voided bill still allocates its payment.
+   *  • A partial refund (V1-81, FOLLOW3-A7 item 8): the REFUND transaction
+   *    RevenuePostingService.onPaymentRefunded posts for a refund that
+   *    leaves part of a payment (sourceType 'Payment', no reversalOfId;
+   *    Dr AR / Cr cash on ACCRUAL) is a collection given back: its cash
+   *    out is negative income traced to the invoice and an operating
+   *    outflow. Its REVERSAL (the refund completed: the recording is
+   *    reversed, and each partial with it) cancels it: income back, and
+   *    the refund's outflow taken back rather than a new inflow, so the
+   *    completed refund reads in = out = the payment (PRD-12) and each
+   *    period keeps its own side. On CASH basis the REFUND is Dr REVENUE /
+   *    Cr cash and takes the direct branch, as before.
    */
   private async computeCashBasisPnl(
     businessId: string,
@@ -184,17 +263,27 @@ export class LedgerReportingService {
     operatingCashIn: number;
     operatingCashOut: number;
   }> {
-    const txns = await this.prisma.client.financialTransaction.findMany({
+    // Every cash transaction of the range, paged past the 1000-row read cap (review LC-3).
+    const txns = await readAllPages((cursor) => this.prisma.client.financialTransaction.findMany({
       where: {
         businessId,
-        status: 'POSTED',
+        // POSTED and REVERSED: a reversed original and its REVERSAL net to zero (V1-15 review CR-1).
+        // Under AND because the hermetic ledger-reporting.service.spec.ts stub matches `status` by equality.
+        AND: [{ status: { in: BOOKED_TRANSACTION_STATUSES } }],
         date: { gte: from, lte: to },
         entries: { some: { account: { systemKey: { in: Array.from(CASH_KEYS) } } } },
+        ...(cursor ? { id: { gt: cursor } } : {}),
       },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
       select: {
         id: true,
+        type: true,
         sourceType: true,
         sourceId: true,
+        reversalOfId: true,
+        // V1-81: a REVERSAL of a partial REFUND cancels the refund, not the collection.
+        reversalOf: { select: { type: true } },
         entries: {
           select: {
             accountId: true,
@@ -204,7 +293,7 @@ export class LedgerReportingService {
           },
         },
       },
-    });
+    }));
 
     type Bucket = Map<string, { name: string; systemKey: string | null; amount: number }>;
     const income: Bucket = new Map();
@@ -217,9 +306,12 @@ export class LedgerReportingService {
       name: string,
       systemKey: string | null,
       delta: number,
+      takesBackOutflow = false,
     ) => {
       const cur = opCash.get(accountId) ?? { name, systemKey, inflow: 0, outflow: 0 };
-      if (delta > 0) cur.inflow += delta;
+      // V1-81: a reversed refund takes its outflow back (cash in reduces the outflow).
+      if (takesBackOutflow) cur.outflow -= delta;
+      else if (delta > 0) cur.inflow += delta;
       else cur.outflow += -delta;
       opCash.set(accountId, cur);
     };
@@ -235,33 +327,44 @@ export class LedgerReportingService {
       m.set(accountId, cur);
     };
 
-    // Pre-fetch source rows for tracing settlements.
-    const paymentIds = txns
+    // Pre-fetch source rows for tracing settlements. Both reads page past the
+    // 1000-row read cap too (review LC-3): a range with more payments, or more
+    // invoice / bill postings, than one read returns must trace them all.
+    const paymentIds = Array.from(new Set(txns
       .filter((t) => t.sourceType === 'Payment' && !!t.sourceId)
-      .map((t) => t.sourceId as string);
-    const billIds = txns
+      .map((t) => t.sourceId as string)));
+    const billIds = Array.from(new Set(txns
       .filter((t) => t.sourceType === 'Expense' && !!t.sourceId)
-      .map((t) => t.sourceId as string);
+      .map((t) => t.sourceId as string)));
     const payments = paymentIds.length
-      ? await this.prisma.client.payment.findMany({
-          where: { id: { in: paymentIds } },
+      ? await readAllPages((cursor) => this.prisma.client.payment.findMany({
+          where: { id: cursor ? { in: paymentIds, gt: cursor } : { in: paymentIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, invoiceId: true },
-        })
+        }))
       : [];
     const paymentToInvoice = new Map(payments.map((p) => [p.id, p.invoiceId]));
     const invoiceIds = Array.from(new Set(payments.map((p) => p.invoiceId).filter(Boolean) as string[]));
 
     type SourceTxn = { sourceType: string | null; sourceId: string | null; entries: typeof txns[number]['entries'] };
     const sourceTxns: SourceTxn[] = (invoiceIds.length || billIds.length)
-      ? await this.prisma.client.financialTransaction.findMany({
+      ? await readAllPages((cursor) => this.prisma.client.financialTransaction.findMany({
           where: {
             businessId,
+            // The document's own composition: its reversals would net it to
+            // zero and leave a reversed payment nothing to allocate against.
+            reversalOfId: null,
             OR: [
               ...(invoiceIds.length ? [{ sourceType: 'Invoice', sourceId: { in: invoiceIds } }] : []),
               ...(billIds.length ? [{ sourceType: 'Expense', sourceId: { in: billIds } }] : []),
             ],
+            ...(cursor ? { id: { gt: cursor } } : {}),
           },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: {
+            id: true,
             sourceType: true,
             sourceId: true,
             entries: {
@@ -273,7 +376,7 @@ export class LedgerReportingService {
               },
             },
           },
-        })
+        }))
       : [];
     const sourceByKey = new Map<string, SourceTxn[]>();
     for (const st of sourceTxns) {
@@ -305,11 +408,11 @@ export class LedgerReportingService {
         if (sk === 'ACCOUNTS_PAYABLE') touchesAP = true;
       }
 
-      const recordOperatingCash = () => {
+      const recordOperatingCash = (takesBackOutflow = false) => {
         for (const ce of cashEntries) {
           const delta = toNum(ce.debit) - toNum(ce.credit);
           if (Math.abs(delta) < 0.005) continue;
-          addOpCash(ce.accountId, ce.account.name, ce.account.systemKey, delta);
+          addOpCash(ce.accountId, ce.account.name, ce.account.systemKey, delta, takesBackOutflow);
         }
       };
 
@@ -322,8 +425,19 @@ export class LedgerReportingService {
         continue;
       }
 
+      // A REVERSAL mirrors its original, so its cash moves the other way;
+      // the allocations below are signed and offset the original's.
+      const settlementSign = t.reversalOfId ? -1 : 1;
+      // V1-81 (FOLLOW3-A7 item 8): on the AR side a partial REFUND of a
+      // payment gives cash back (sign -1, like a reversed collection), and
+      // the REVERSAL of such a REFUND cancels it (sign +1, the refund's
+      // outflow taken back). The AP branch keeps settlementSign as it was.
+      const refundOfPayment = t.type === 'REFUND' && !t.reversalOfId;
+      const reversesRefund = !!t.reversalOfId && t.reversalOf?.type === 'REFUND';
+      const arSign = reversesRefund ? 1 : refundOfPayment ? -1 : settlementSign;
+
       // Customer payment settling AR — trace to invoice and allocate.
-      if (touchesAR && cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
+      if (touchesAR && arSign * cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
         const invoiceId = paymentToInvoice.get(t.sourceId);
         if (!invoiceId) continue;
         const lines = (sourceByKey.get(`Invoice:${invoiceId}`) ?? [])
@@ -335,12 +449,12 @@ export class LedgerReportingService {
           const lineAmt = toNum(e.credit) - toNum(e.debit);
           add(income, e.accountId, e.account.name, e.account.systemKey, cashEffect * (lineAmt / total));
         }
-        recordOperatingCash();
+        recordOperatingCash(reversesRefund);
         continue;
       }
 
       // Vendor bill payment settling AP — trace to bill and allocate.
-      if (touchesAP && cashEffect < 0 && t.sourceType === 'Expense' && t.sourceId) {
+      if (touchesAP && settlementSign * cashEffect < 0 && t.sourceType === 'Expense' && t.sourceId) {
         const lines = (sourceByKey.get(`Expense:${t.sourceId}`) ?? [])
           .flatMap((s) => s.entries)
           .filter((e) => e.account.type === 'EXPENSE' || e.account.type === 'COGS');
@@ -372,7 +486,8 @@ export class LedgerReportingService {
         outflow: +v.outflow.toFixed(2),
         net: +(v.inflow - v.outflow).toFixed(2),
       }))
-      .filter((r) => r.inflow >= 0.005 || r.outflow >= 0.005);
+      // Absolute: a reversed refund alone in a period reads as a negative outflow (V1-81).
+      .filter((r) => Math.abs(r.inflow) >= 0.005 || Math.abs(r.outflow) >= 0.005);
     const operatingCashIn = +operatingCashByAccount.reduce((s, r) => s + r.inflow, 0).toFixed(2);
     const operatingCashOut = +operatingCashByAccount.reduce((s, r) => s + r.outflow, 0).toFixed(2);
 
@@ -654,11 +769,51 @@ export class LedgerReportingService {
 
   // ---- Balance Sheet --------------------------------------------------
 
+  /**
+   * V1-37b (V1-37 review RV37-02): the trial balance is one row per (account,
+   * currency) since V1-37, and this summed every row into one sheet labelled
+   * with the business currency: a TTD business's USD receivable was added to
+   * its TTD assets and AR read as two unlabelled lines. The sheet is now built
+   * per currency and never sums across currencies. The top level is the
+   * business currency's sheet (every line labelled with it); `byCurrency` holds
+   * one sheet per currency the books hold, each line labelled, each balancing
+   * on its own (every posting balances in its one currency, PostingService).
+   * Other currencies are shown beside the business currency, never converted.
+   *
+   * V1-37c (VR-03): keyed on the NORMALIZED code. Keyed on the raw row
+   * currency, legacy 'ttd' rows made a separate 'ttd' sheet and the TTD sheet
+   * dropped them. Rows of one account that normalize to one code are one line.
+   */
   async getBalanceSheet(businessId: string, asOf: Date): Promise<BalanceSheetReport> {
     const currency = await this.getCurrency(businessId);
     const trial = await this.balances.getTrialBalance(businessId, asOf);
 
-    type Bucket = { total: number; lines: PnlAccountLine[] };
+    // A row that names no currency (a reader older than V1-37) is the business currency's.
+    const rowsByCurrency = new Map<string, AccountBalance[]>([[currency, []]]);
+    for (const row of trial) {
+      const code = normalizeCurrency(row.currency) || currency;
+      const rows = rowsByCurrency.get(code) ?? [];
+      const same = rows.find((r) => r.accountId === row.accountId);
+      if (same) {
+        const debit = new D(String(same.debit ?? 0)).add(new D(String(row.debit ?? 0)));
+        const credit = new D(String(same.credit ?? 0)).add(new D(String(row.credit ?? 0)));
+        rows[rows.indexOf(same)] = { ...same, debit, credit, net: debit.sub(credit) };
+      } else {
+        rows.push({ ...row, currency: code });
+      }
+      rowsByCurrency.set(code, rows);
+    }
+
+    const byCurrency: Record<string, BalanceSheetCurrencySheet> = {};
+    for (const code of [...rowsByCurrency.keys()].sort()) {
+      byCurrency[code] = this.balanceSheetOf(code, asOf, rowsByCurrency.get(code) ?? []);
+    }
+    return { ...byCurrency[currency], byCurrency };
+  }
+
+  /** The balance sheet of one currency's trial-balance rows. */
+  private balanceSheetOf(currency: string, asOf: Date, trial: AccountBalance[]): BalanceSheetCurrencySheet {
+    type Bucket = { total: number; lines: BalanceSheetLine[] };
     const mk = (): Bucket => ({ total: 0, lines: [] });
     const assets = mk();
     const liabilities = mk();
@@ -670,11 +825,12 @@ export class LedgerReportingService {
     for (const a of trial) {
       const debit = toNum(a.debit);
       const credit = toNum(a.credit);
-      const line: PnlAccountLine = {
+      const line: BalanceSheetLine = {
         accountId: a.accountId,
         systemKey: a.systemKey,
         name: a.name,
         amount: 0,
+        currency,
       };
       switch (a.type) {
         case 'ASSET': {
@@ -714,7 +870,7 @@ export class LedgerReportingService {
     const totalEquityWithRetained = +(equity.total + netEquityFromIncome).toFixed(2);
     const identityDelta = +(assets.total - liabilities.total - totalEquityWithRetained).toFixed(2);
 
-    const findBy = (lines: PnlAccountLine[], keys: string[]): number =>
+    const findBy = (lines: BalanceSheetLine[], keys: string[]): number =>
       +lines.filter((l) => l.systemKey && keys.includes(l.systemKey)).reduce((s, l) => s + l.amount, 0).toFixed(2);
 
     return {
@@ -830,19 +986,24 @@ export class LedgerReportingService {
     to: Date,
   ): Promise<DimensionRow[]> {
     if (dimension === 'customer') {
-      const grouped = await this.prisma.client.ledgerEntry.findMany({
+      // Every income entry of the range, paged past the 1000-row read cap (V1-15c, as LC-3).
+      const grouped = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
         where: {
           businessId,
           date: { gte: from, lte: to },
           account: { type: 'INCOME' },
           transaction: { contactId: { not: null } },
+          ...(cursor ? { id: { gt: cursor } } : {}),
         },
+        orderBy: { id: 'asc' },
+        take: READ_PAGE,
         select: {
+          id: true,
           credit: true,
           debit: true,
           transaction: { select: { contactId: true } },
         },
-      });
+      }));
       const map = new Map<string, { total: number; count: number }>();
       for (const e of grouped) {
         const id = e.transaction?.contactId;
@@ -854,10 +1015,12 @@ export class LedgerReportingService {
       }
       const ids = Array.from(map.keys());
       const contacts = ids.length
-        ? await this.prisma.client.contact.findMany({
-            where: { id: { in: ids } },
+        ? await readAllPages((cursor) => this.prisma.client.contact.findMany({
+            where: { id: cursor ? { in: ids, gt: cursor } : { in: ids } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
-          })
+          }))
         : [];
       const labels = new Map(
         contacts.map((c) => [
@@ -879,10 +1042,13 @@ export class LedgerReportingService {
       // remains the source of total amount; source rows are used only
       // for the dimension split (productId / category) which the
       // ledger does not carry.
-      const incomeEntries = await this.prisma.client.ledgerEntry.findMany({
-        where: { businessId, date: { gte: from, lte: to }, account: { type: 'INCOME' } },
-        select: { transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true } } },
-      });
+      // Both reads page past the 1000-row read cap (V1-15c): the income entries, and the invoices they split over.
+      const incomeEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+        where: { businessId, date: { gte: from, lte: to }, account: { type: 'INCOME' }, ...(cursor ? { id: { gt: cursor } } : {}) },
+        orderBy: { id: 'asc' },
+        take: READ_PAGE,
+        select: { id: true, transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true } } },
+      }));
       const perTxn = new Map<string, { net: number; invoiceId?: string }>();
       for (const e of incomeEntries) {
         const cur = perTxn.get(e.transactionId) ?? { net: 0, invoiceId: undefined };
@@ -894,8 +1060,10 @@ export class LedgerReportingService {
       }
       const invoiceIds = Array.from(new Set(Array.from(perTxn.values()).map((v) => v.invoiceId).filter(Boolean) as string[]));
       const invoices = invoiceIds.length
-        ? await this.prisma.client.invoice.findMany({
-            where: { id: { in: invoiceIds } },
+        ? await readAllPages((cursor) => this.prisma.client.invoice.findMany({
+            where: { id: cursor ? { in: invoiceIds, gt: cursor } : { in: invoiceIds } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: {
               id: true, subtotal: true,
               items: {
@@ -905,7 +1073,7 @@ export class LedgerReportingService {
                 select: { total: true, productId: true, description: true, product: { select: { name: true } } },
               },
             },
-          })
+          }))
         : [];
       const invoiceById = new Map(invoices.map((i) => [i.id, i]));
       const map = new Map<string, { label: string; total: number; count: number }>();
@@ -956,10 +1124,24 @@ export class LedgerReportingService {
     // dimension key looked up from the originating Expense source row
     // (ledger has no vendor/project columns, source is used only for
     // labelling, the amount comes straight from the ledger).
-    const expEntries = await this.prisma.client.ledgerEntry.findMany({
-      where: { businessId, date: { gte: from, lte: to }, account: { type: { in: ['EXPENSE', 'COGS'] } } },
-      select: { transactionId: true, debit: true, credit: true, transaction: { select: { sourceType: true, sourceId: true, contactId: true } } },
-    });
+    // Every read here pages past the 1000-row read cap (V1-15c, as LC-3).
+    const expEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+      where: {
+        businessId,
+        date: { gte: from, lte: to },
+        account: { type: { in: ['EXPENSE', 'COGS'] } },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
+      select: {
+        id: true,
+        transactionId: true,
+        debit: true,
+        credit: true,
+        transaction: { select: { sourceType: true, sourceId: true, contactId: true } },
+      },
+    }));
     const perTxn = new Map<string, { net: number; sourceId?: string; contactId?: string }>();
     for (const e of expEntries) {
       const cur = perTxn.get(e.transactionId) ?? { net: 0, sourceId: undefined, contactId: undefined };
@@ -970,10 +1152,12 @@ export class LedgerReportingService {
     }
     const expenseIds = Array.from(new Set(Array.from(perTxn.values()).map((v) => v.sourceId).filter(Boolean) as string[]));
     const expenseMeta = expenseIds.length
-      ? await this.prisma.client.expense.findMany({
-          where: { id: { in: expenseIds } },
+      ? await readAllPages((cursor) => this.prisma.client.expense.findMany({
+          where: { id: cursor ? { in: expenseIds, gt: cursor } : { in: expenseIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, vendor: true, contactId: true, projectId: true },
-        })
+        }))
       : [];
     const expenseById = new Map(expenseMeta.map((e) => [e.id, e]));
 
@@ -983,10 +1167,12 @@ export class LedgerReportingService {
         ...expenseMeta.map((e) => e.contactId).filter(Boolean) as string[],
       ]));
       const contacts = contactIds.length
-        ? await this.prisma.client.contact.findMany({
-            where: { id: { in: contactIds } },
+        ? await readAllPages((cursor) => this.prisma.client.contact.findMany({
+            where: { id: cursor ? { in: contactIds, gt: cursor } : { in: contactIds } },
+            orderBy: { id: 'asc' },
+            take: READ_PAGE,
             select: { id: true, displayName: true, firstName: true, lastName: true },
-          })
+          }))
         : [];
       const contactLabel = new Map(contacts.map((c) => [c.id, c.displayName || `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim()]));
       const map = new Map<string, { label: string; total: number; count: number }>();
@@ -1010,10 +1196,12 @@ export class LedgerReportingService {
     // project
     const projectIds = Array.from(new Set(expenseMeta.map((e) => e.projectId).filter(Boolean) as string[]));
     const projects = projectIds.length
-      ? await this.prisma.client.project.findMany({
-          where: { id: { in: projectIds } },
+      ? await readAllPages((cursor) => this.prisma.client.project.findMany({
+          where: { id: cursor ? { in: projectIds, gt: cursor } : { in: projectIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, name: true },
-        })
+        }))
       : [];
     const labels = new Map(projects.map((p) => [p.id, p.name]));
     const map = new Map<string, { label: string; total: number; count: number }>();
@@ -1071,15 +1259,19 @@ export class LedgerReportingService {
     // Σ debits to AP across all member transactions. Groups with zero
     // remaining are fully settled and dropped. Orphan AP postings
     // without a sourceId are netted by transactionId as a fallback.
-    const apEntries = await this.prisma.client.ledgerEntry.findMany({
-      where: { businessId, accountId: apCoa.id, date: { lte: asOf } },
+    // Every AP entry, and below every open bill, paged past the 1000-row read cap (V1-15c, as LC-3).
+    const apEntries = await readAllPages((cursor) => this.prisma.client.ledgerEntry.findMany({
+      where: { businessId, accountId: apCoa.id, date: { lte: asOf }, ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
       select: {
+        id: true,
         transactionId: true,
         debit: true,
         credit: true,
         transaction: { select: { sourceType: true, sourceId: true, contactId: true } },
       },
-    });
+    }));
     type Group = { key: string; sourceType: string | null; sourceId: string | null; contactId: string | null; remaining: number };
     const groups = new Map<string, Group>();
     for (const e of apEntries) {
@@ -1101,10 +1293,12 @@ export class LedgerReportingService {
       .filter((g) => g.sourceType === 'Expense' && !!g.sourceId)
       .map((g) => g.sourceId as string);
     const expenseMeta = expenseIds.length
-      ? await this.prisma.client.expense.findMany({
-          where: { id: { in: expenseIds } },
+      ? await readAllPages((cursor) => this.prisma.client.expense.findMany({
+          where: { id: cursor ? { in: expenseIds, gt: cursor } : { in: expenseIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, vendor: true, contactId: true, dueDate: true },
-        })
+        }))
       : [];
     const expenseById = new Map(expenseMeta.map((e) => [e.id, e]));
 

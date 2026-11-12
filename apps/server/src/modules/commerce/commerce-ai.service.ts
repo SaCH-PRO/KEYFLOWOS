@@ -1,7 +1,10 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
+import { CommerceService } from './commerce.service';
+import { readStoredPayments } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   buildCommerceCommandPrompt,
@@ -18,6 +21,33 @@ import {
   buildRevenueJourneyPrompt,
 } from './prompts/innovation.prompt';
 
+/**
+ * V1-41c-MONEY-ROW-COUNTERS (V1-41 deviation, V1-41b residual): the Payment
+ * rows the balance contract reads as money, SUCCESSFUL and REFUNDED
+ * (balanceOfStoredRows ignores every other row). A PENDING row (a customer's
+ * offline intent, an extracted amount awaiting a member), a FAILED attempt and
+ * a CONFIRMED extracted row (kept beside the SUCCESSFUL payment the member
+ * recorded from it, V1-41b) are not payments; the counters below counted them.
+ * Spread it beside a businessId filter: Payment sits outside the tenant
+ * extension (M31), so a row carrying another tenant's id is not this tenant's.
+ */
+const MONEY_ROW_WHERE = { status: { in: ['SUCCESSFUL', 'REFUNDED'] } } satisfies Prisma.PaymentWhereInput;
+
+/**
+ * V1-41c: how many payments the rows hold, i.e. the SUCCESSFUL entries
+ * balanceOfStoredRows adds into `paid` (readStoredPayments). A refund row is
+ * not a payment; a pre-V1-29 flipped original (a positive REFUNDED row) is the
+ * payment it stood for plus its refund, so it counts once. A count, not an
+ * amount: money itself is read through balanceOfStoredRows.
+ */
+function paymentsReceived(rows: ReadonlyArray<{ amount: number | string; status: string }>): number {
+  let count = 0;
+  for (const entry of readStoredPayments(rows)) {
+    if (entry.status === 'SUCCESSFUL') count += 1;
+  }
+  return count;
+}
+
 @Injectable()
 export class CommerceAiService {
   private readonly logger = new Logger(CommerceAiService.name);
@@ -27,6 +57,11 @@ export class CommerceAiService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CommerceStatsService) private readonly stats: CommerceStatsService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    // V1-QUOTE-CHAIN-finish (SEC-V50-4): the quote actions go through the
+    // quote transition table (CommerceService.updateQuoteStatus).
+    // V1-42-DM-LIFECYCLE-OWNER-CAS: invoice status commands go through the
+    // operator paths (recordPayment, the workflow), never a raw status write.
+    @Inject(CommerceService) private readonly commerce: CommerceService,
   ) {}
 
   private get db() {
@@ -128,20 +163,102 @@ export class CommerceAiService {
     return parts.join('\n');
   }
 
-  private async findInvoice(businessId: string, params: Record<string, any>) {
+  /**
+   * The invoice a command names, by id or by number, in this tenant.
+   *
+   * V1-42 review (SEC-V42-2): mark_paid records a real payment and its ledger
+   * posting, and void_invoice reverses the receivable, on the invoice found
+   * here. A number was matched with `contains` and findFirst (no order, no
+   * exact match), so `INV-001` could pay `INV-0012`. The invoice whose number
+   * is exactly the one given wins (numbers are unique per business). Failing
+   * that, a partial number (the command prompt allows one) must match exactly
+   * one invoice; one that matches more is refused, naming the ambiguity, and
+   * nothing is touched.
+   */
+  private async findInvoice(
+    businessId: string,
+    params: Record<string, any>,
+  ): Promise<{ invoice: { id: string; invoiceNumber: string } | null; error: string }> {
+    const select = { id: true, invoiceNumber: true } as const;
+    const notFound = { invoice: null, error: 'Invoice not found' };
     if (params.invoiceId) {
-      return this.db.invoice.findFirst({
+      const invoice = await this.db.invoice.findFirst({
         where: { id: String(params.invoiceId), businessId, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+        select,
       });
+      return invoice ? { invoice, error: '' } : notFound;
     }
     if (params.invoiceNumber) {
-      return this.db.invoice.findFirst({
-        where: { businessId, invoiceNumber: { contains: String(params.invoiceNumber) }, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+      const number = String(params.invoiceNumber);
+      const exact = await this.db.invoice.findFirst({
+        where: { businessId, invoiceNumber: number, deletedAt: null },
+        select,
       });
+      if (exact) return { invoice: exact, error: '' };
+      const partial = await this.db.invoice.findMany({
+        where: { businessId, invoiceNumber: { contains: number }, deletedAt: null },
+        select,
+        take: 2,
+      });
+      if (partial.length === 1) return { invoice: partial[0], error: '' };
+      if (partial.length > 1) {
+        return { invoice: null, error: `Invoice number "${number}" matches more than one invoice; give the full number` };
+      }
     }
-    return null;
+    return notFound;
+  }
+
+  /**
+   * V1-53b-QUOTE-RESIDUALS: the quote a KEY quote action names by number, in
+   * this business and not deleted. The lookup was `quoteNumber: { contains }`
+   * with the first match taken, so "Q-1" acted on Q-10 or Q-11 and an absent
+   * "Q-2" on Q-20. The number now matches exactly: the exact spelling first
+   * ((businessId, quoteNumber) is unique), else the one quote equal to it
+   * ignoring case. Prisma sends an insensitive `equals` to Postgres as ILIKE
+   * with the value unescaped, so LIKE wildcards are escaped here and every
+   * candidate is checked again in code. No match answers quote_not_found;
+   * two quotes equal ignoring case, neither spelled as asked, answer
+   * quote_ambiguous; neither acts on any quote.
+   */
+  private async findQuoteByNumber(
+    businessId: string,
+    raw: unknown,
+  ): Promise<
+    | { quote: { id: string; quoteNumber: string } }
+    | { error: { success: false; error: string; code?: 'quote_not_found' | 'quote_ambiguous' } }
+  > {
+    const quoteNumber = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
+    if (!quoteNumber) return { error: { success: false, error: 'Quote number is required' } };
+    const select = { id: true, quoteNumber: true } as const;
+    const exact = await this.db.quote.findFirst({
+      where: { businessId, quoteNumber, deletedAt: null },
+      select,
+    });
+    if (exact) return { quote: exact };
+    const lowered = quoteNumber.toLowerCase();
+    const candidates = (
+      await this.db.quote.findMany({
+        where: {
+          businessId,
+          quoteNumber: { equals: quoteNumber.replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select,
+        take: 5,
+      })
+    ).filter((q) => q.quoteNumber.toLowerCase() === lowered);
+    if (candidates.length === 1) return { quote: candidates[0]! };
+    if (candidates.length > 1) {
+      const numbers = candidates.map((q) => q.quoteNumber).join(', ');
+      return {
+        error: {
+          success: false,
+          code: 'quote_ambiguous',
+          error: `Quote "${quoteNumber}" is ambiguous: it matches more than one quote (${numbers}). Use the exact quote number.`,
+        },
+      };
+    }
+    return { error: { success: false, code: 'quote_not_found', error: `Quote "${quoteNumber}" not found` } };
   }
 
   private async findProduct(businessId: string, params: Record<string, any>) {
@@ -616,9 +733,10 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         select: { id: true, quoteNumber: true, status: true, total: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
+      // V1-41c: the money rows of this tenant only (MONEY_ROW_WHERE, paymentsReceived).
       this.db.payment.findMany({
-        where: { invoice: { contactId, businessId } },
-        select: { amount: true, createdAt: true },
+        where: { businessId, ...MONEY_ROW_WHERE, invoice: { contactId, businessId } },
+        select: { amount: true, status: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -697,7 +815,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         dueDate: i.dueDate,
         paidAt: i.paidAt,
       })),
-      totalPayments: payments.length,
+      totalPayments: paymentsReceived(payments),
     };
   }
 
@@ -805,62 +923,80 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     }
   }
 
-  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}) {
+  /**
+   * Runs an interpreted commerce command. `actorId` is the authenticated
+   * member (the ai-execute route needs revenue:write); the quote actions are
+   * moves of the quote transition table made as that member.
+   *
+   * @param actorId The authenticated caller (the route's `req.user.id`): the
+   *   member the payment and the status change are recorded against.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): mark_paid and void_invoice wrote the
+   * status raw. mark_paid set PAID with no payment row and no posting (and on
+   * any status, VOID included); void_invoice set VOID on any status (PAID
+   * included) and left the accrual receivable open. They now take the
+   * operator paths: mark_paid is CommerceService.markInvoicePaid (the
+   * remaining balance recorded through recordPayment: one payment, its
+   * posting, the reconcile to PAID, invoice.paid), and void_invoice is
+   * CommerceService.updateInvoiceStatus (the workflow's compare-and-set VOID,
+   * the AR reversal, invoice.void). A move the workflow refuses is the 409 it
+   * answers.
+   */
+  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}, actorId: string | null = null) {
     this.logger.log(`Executing commerce command: ${action} for business ${businessId}`);
     const start = Date.now();
 
     try {
       switch (action) {
         case 'mark_paid': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'PAID', paidAt: new Date() },
-          });
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
+          await this.commerce.markInvoicePaid(invoice.id, actorId, businessId);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} marked as paid`, invoiceId: invoice.id };
         }
 
         case 'void_invoice': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'VOID' },
-          });
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
+          await this.commerce.updateInvoiceStatus({ invoiceId: invoice.id, status: 'VOID', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} voided`, invoiceId: invoice.id };
         }
 
         case 'send_reminder': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
           const reminder = await this.generateInvoiceReminder(businessId, invoice.id);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Reminder drafted for Invoice #${invoice.invoiceNumber}`, invoiceId: invoice.id, reminder };
         }
 
         case 'convert_quote': {
-          const quoteNumber = params.quoteNumber;
-          if (!quoteNumber) return { success: false, error: 'Quote number is required' };
-          const quote = await this.db.quote.findFirst({
-            where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
-          });
-          if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
-          await this.db.quote.update({ where: { id: quote.id }, data: { status: 'ACCEPTED' } });
+          const found = await this.findQuoteByNumber(businessId, params.quoteNumber);
+          if ('error' in found) return found.error;
+          const quote = found.quote;
+          // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
+          // status ACCEPTED directly, so it marked a customer-REJECTED quote
+          // (or a converted one) ACCEPTED with no event. It is now the status
+          // route's operator-recorded acceptance: the transition table decides
+          // (409 for a REJECTED, EXPIRED or converted quote), and the move
+          // emits quote.accepted and names the member on the timeline.
+          await this.commerce.updateQuoteStatus({ quoteId: quote.id, status: 'ACCEPTED', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Quote #${quote.quoteNumber} marked as accepted`, quoteId: quote.id };
         }
 
         case 'send_quote': {
-          const quoteNumber = params.quoteNumber;
-          if (!quoteNumber) return { success: false, error: 'Quote number is required' };
-          const quote = await this.db.quote.findFirst({
-            where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
-          });
-          if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
-          await this.db.quote.update({ where: { id: quote.id }, data: { status: 'SENT' } });
+          const found = await this.findQuoteByNumber(businessId, params.quoteNumber);
+          if ('error' in found) return found.error;
+          const quote = found.quote;
+          // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
+          // status SENT directly, with no view token and no event, and re-opened
+          // a REJECTED or converted quote. It is now the status route's move:
+          // DRAFT -> SENT mints the quote's one view token and emits quote.sent;
+          // the table refuses anything else (409).
+          await this.commerce.updateQuoteStatus({ quoteId: quote.id, status: 'SENT', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Quote #${quote.quoteNumber} marked as sent`, quoteId: quote.id };
         }
@@ -1220,9 +1356,10 @@ Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).j
         where: { businessId, deletedAt: null },
         select: { id: true, contactId: true, status: true, total: true, createdAt: true, paidAt: true },
       }),
+      // V1-41c: the money rows of this tenant only (MONEY_ROW_WHERE, paymentsReceived).
       this.db.payment.findMany({
-        where: { invoice: { businessId, deletedAt: null } },
-        select: { id: true, amount: true, invoiceId: true, createdAt: true },
+        where: { businessId, ...MONEY_ROW_WHERE, invoice: { businessId, deletedAt: null } },
+        select: { id: true, amount: true, status: true, invoiceId: true, createdAt: true },
       }),
     ]);
 
@@ -1249,7 +1386,7 @@ Contacts with quotes: ${contactsWithQuotes}
 Total quotes: ${quotes.length} (${quotes.filter(q => q.status === 'ACCEPTED').length} accepted, ${quotes.filter(q => q.status === 'REJECTED').length} rejected)
 Quotes converted to invoices: ${quotesConvertedToInvoice}
 Total invoices: ${invoices.length} (${paidInvoices.length} paid)
-Total payments: ${payments.length}
+Total payments: ${paymentsReceived(payments)}
 Total revenue: $${paidInvoices.reduce((s, i) => s + Number(i.total), 0)}
 Funnel rates: Contact→Quote ${funnel.contactToQuoteRate}%, Quote→Invoice ${funnel.quoteToInvoiceRate}%, Invoice→Payment ${funnel.invoiceToPaymentRate}%`;
 

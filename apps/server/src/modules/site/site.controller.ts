@@ -1,8 +1,8 @@
-import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { SiteService } from './site.service';
-import { StoreOrderService } from './store-order.service';
+import { CHECKOUT_IN_FLIGHT_RETRY_AFTER_S, CheckoutInFlightException, StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
@@ -10,8 +10,14 @@ import { StorefrontConversionService } from './storefront-conversion.service';
 import { CustomerReferralService } from './customer-referral.service';
 import { CaseStudyService } from './case-study.service';
 import { PaymentsService } from '../payments/payments.service';
+import {
+  STOREFRONT_CHECKOUT_METHODS,
+  normalizeStorefrontMethod,
+  storefrontMethodUnsupported,
+} from '../payments/storefront-checkout-methods';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitize, sanitizeObject } from '../../core/utils/sanitize';
@@ -155,9 +161,24 @@ export class SiteController {
       notes?: string;
       visitorId?: string;
       referralCode?: string;
+      /** The checkout's retry key, when the Idempotency-Key header cannot be sent (see checkoutIdempotencyKey). */
+      idempotencyKey?: string;
     },
     @Req() req: Request,
   ) {
+    // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106, D-18): the method, read
+    // once, trimmed and upper-cased. Only no method, CASH, MANUAL, WIPAY,
+    // PAYPAL or STRIPE is taken; anything else is refused here, before an
+    // order is written (it was refused by createStorePayment after the order,
+    // its retry slot and its promo use had committed). Whether this business
+    // offers the provider is StoreOrderService.createOrder's check, also
+    // before the write. The normalised value is what the order stores, the
+    // retry key's request hash reads and the payment step is started with.
+    const paymentMethod = normalizeStorefrontMethod(body.paymentMethod);
+    if (paymentMethod !== null && !STOREFRONT_CHECKOUT_METHODS.includes(paymentMethod)) {
+      throw new BadRequestException(storefrontMethodUnsupported(body.paymentMethod as string));
+    }
+
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
     const cookieVid = readVisitorIdFromRequest(req);
@@ -174,35 +195,91 @@ export class SiteController {
       country: sanitize(body.customer.country ?? null) ?? undefined,
     };
 
-    const order = await this.storeOrderService.createOrder({
+    const orderInput = {
       businessId,
       cartItems: body.items,
       customerInfo: cleanCustomer,
       promoCode: body.promoCode ? sanitize(body.promoCode) ?? undefined : undefined,
       shippingInfo: body.shipping,
-      paymentMethod: body.paymentMethod,
+      paymentMethod: paymentMethod ?? undefined,
       notes: sanitize(body.notes ?? null) ?? undefined,
       storefrontSlug: slug,
       visitorId: resolvedVid,
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
-    });
+    };
 
-    let payment: any = null;
-    if (body.paymentMethod && body.paymentMethod !== 'CASH' && body.paymentMethod !== 'MANUAL') {
-      payment = await this.paymentsService.createStorePayment({
-        orderId: order.id,
-        amount: order.total,
-        currency: order.currency,
-        method: body.paymentMethod,
-        businessId,
-        returnUrl: body.returnUrl,
-      });
+    // CASH, MANUAL and no method start no provider session (D-18).
+    const startPayment = paymentMethod && paymentMethod !== 'CASH' && paymentMethod !== 'MANUAL'
+      ? (order: { id: string; total: number; currency: string }) =>
+          this.paymentsService.createStorePayment({
+            orderId: order.id,
+            amount: order.total,
+            currency: order.currency,
+            method: paymentMethod,
+            businessId,
+            returnUrl: body.returnUrl,
+          })
+      : null;
+
+    // V1-33 (M37, SSP-BP-03): a retried checkout carries the same
+    // Idempotency-Key and is answered with the order (and payment session)
+    // the first call created. Without the header nothing changes. A retry
+    // while the first call is still starting the session, past the wait, is
+    // 409 with Retry-After (V1-33 review, V33-CR-1).
+    const idempotencyKey = SiteController.checkoutIdempotencyKey(req.headers['idempotency-key'] ?? body.idempotencyKey);
+    if (idempotencyKey) {
+      const result = await this.storeOrderService
+        .createOrderOnce(orderInput, idempotencyKey, startPayment)
+        .catch((err: unknown) => {
+          if (err instanceof CheckoutInFlightException) req.res?.setHeader('Retry-After', String(CHECKOUT_IN_FLIGHT_RETRY_AFTER_S));
+          throw err;
+        });
+      if (result.replayed) req.res?.setHeader('Idempotent-Replayed', 'true');
+      return { order: result.order, payment: result.payment };
     }
+
+    const order = await this.storeOrderService.createOrder(orderInput);
+    const payment = startPayment ? await startPayment(order) : null;
 
     return {
       order,
       payment,
     };
+  }
+
+  /**
+   * V1-33: the checkout's Idempotency-Key header, trimmed; absent or blank means none. At most 255 characters.
+   *
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): or, when no header is sent, the body's `idempotencyKey`.
+   * The storefront calls this API cross-origin and the CORS preflight allows no Idempotency-Key header
+   * (app-bootstrap.ts allowedHeaders), so the storefront's one key per checkout travels in the body. The header,
+   * when present, wins. The key is not part of the checkout's request hash (createOrderOnce).
+   */
+  private static checkoutIdempotencyKey(header: unknown): string | null {
+    const raw = Array.isArray(header) ? header[0] : header;
+    const key = typeof raw === 'string' ? raw.trim() : '';
+    if (!key) return null;
+    if (key.length > 255) throw new BadRequestException('Idempotency-Key must be at most 255 characters');
+    return key;
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4, RC1-1; D-69): the
+   * gateways a storefront takes for an amount in `currency` (the cart's;
+   * without one, the business currency), by the same rule as the invoice pay
+   * page (PaymentsService.getAvailableGateways): WiPay only for a business with
+   * a WiPay merchant pair and a TTD amount. The storefront checkout offers WiPay
+   * from this answer only; it listed WiPay, as the default, for every TTD cart.
+   * Ids, names and currencies only: no key, account number or other setting.
+   */
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
+  @Get('storefront/public/:slug/gateways')
+  async getPublicGateways(@Param('slug') slug: string, @Query('currency') currency?: string) {
+    const storefront = await this.siteService.getPublicStorefront(slug);
+    const payable = typeof currency === 'string' && currency.trim() ? sanitize(currency.trim(), 8) : null;
+    const gateways = await this.paymentsService.getAvailableGateways(storefront.business.id, payable);
+    return gateways.map((g) => ({ id: g.id, name: g.name, currencies: g.currencies }));
   }
 
   @UseGuards(PublicRateLimitGuard)
@@ -280,23 +357,55 @@ export class SiteController {
     return this.storeOrderService.getOrder(orderId, businessId);
   }
 
+  /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): the whole body goes to the service, which refuses (400) one that
+   * carries paymentStatus, paymentMethod or paymentRef. Only body.status was passed, so a payment field was answered
+   * 200 and silently dropped. A status-only body is unchanged.
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the authenticated member is the actor, never a body field; a
+   * SHIPPED by a member with revenue write books the order's shipping fee once per order.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/orders/:orderId/status')
   updateOrderStatus(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
-    @Body() body: { status: string },
+    @Body() body: { status: string; paymentStatus?: unknown; paymentMethod?: unknown; paymentRef?: unknown },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId);
+    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId, body, req?.user?.id ?? null);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * V1-33 (M37): the operator records the cash a customer paid for a CASH
+   * (or MANUAL) storefront order. Revenue write, like recording any payment;
+   * the recorder is the authenticated user, never a body field.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/orders/:orderId/complete-offline')
+  completeOfflineOrder(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.storeOrderService.completeOfflineOrder(orderId, businessId, req?.user?.id ?? null);
+  }
+
+  /**
+   * Trial-N recheck (G6PUB-RC1-3): a refund moves money state, so it takes
+   * revenue write, like recording a payment, and the refunder is the
+   * authenticated member (D-46: a SUPER_ADMIN who is not one is refused).
+   * StoreOrderService.refundOrder records it through the D-14 refund door.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/orders/:orderId/refund')
   refundOrder(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.storeOrderService.refundOrder(orderId, businessId);
+    return this.storeOrderService.refundOrder(orderId, businessId, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

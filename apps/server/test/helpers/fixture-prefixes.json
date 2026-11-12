@@ -1,0 +1,913 @@
+{
+  "registryVersion": 1,
+  "about": [
+    "Fixture prefixes of apps/server/test suites (R0-00-WT-ISOLATION). Enforced by apps/server/src/core/config/fixture-prefix-registry.spec.ts.",
+    "A new prefix is a 4-character head plus '_': k<NN><a-z>_ for an R0 packet, v<NN><a-z>_ for a V1 packet, NN = the packet number (R0-12 -> k12a_). The packet that adds the suite adds {prefix, owner, packet} here.",
+    "A new suite cleans up with LIKE ${sqlLikePrefix(P)} from test/helpers/sql-like.js, in its own file and in every helper it imports from apps/server/test, and embeds its prefix in every literal written to User.email, Business.slug, Payment.providerPaymentId, PaymentLink.token or Site.subdomain.",
+    "A prefix is found as `const P = '...'`, as `const <UPPER_NAME> = '<x>_'`, or as a '<x>_' string passed as a call's first argument (buildBoundaryFixture('kab_')). Every *.integration.test.ts must own a registered prefix or be listed in noPrefixSuites with a reason.",
+    "legacy: true marks the prefixes in use before R0-00 landed (c2f6f46d, plus 'ab_' from R0-05). They keep their names; the set may shrink but never grow. A packet branched before R0-00 that adds a suite renames its prefix to k<NN><a-z>_ and switches its cleanup to sqlLikePrefix() when it is integrated."
+  ],
+  "prefixes": [
+    {
+      "prefix": "ab_",
+      "owner": "apps/server/test/identity-boundary.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "ainv_",
+      "owner": "apps/server/test/authority-inventory.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cid_",
+      "owner": "apps/server/test/commerce-invoice-detail.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cie_",
+      "owner": "apps/server/test/commerce-invoice-errors.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cpi_",
+      "owner": "apps/server/test/commerce-payment-idempotency.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "cqv_",
+      "owner": "apps/server/test/commerce-quote-visibility.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "fcs_",
+      "owner": "apps/server/test/finance-coa-seed-concurrency.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "k04b_",
+      "owner": "apps/server/test/quote-contact-tenant.integration.test.ts",
+      "packet": "R0-04 / R0-CMF3-QUOTE-CONTACT-TENANT"
+    },
+    {
+      "prefix": "k07a_",
+      "owner": "apps/server/test/optional-services-fail-visibly.integration.test.ts",
+      "packet": "R0-07-OPTIONAL-SVC-VISIBLE"
+    },
+    {
+      "prefix": "k07c_",
+      "owner": "apps/server/test/ai-direct-provider-503.integration.test.ts",
+      "packet": "R0-07 / R0-07a-AI-DIRECT-503"
+    },
+    {
+      "prefix": "k07d_",
+      "owner": "apps/server/test/gmail-connect-binding.integration.test.ts",
+      "packet": "R0-07 / R0-CMF5-GMAIL-CONNECT-BINDING"
+    },
+    {
+      "prefix": "k07p_",
+      "owner": "apps/server/test/payment-secrets-write-only.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY"
+    },
+    {
+      "prefix": "k07w_",
+      "owner": "apps/server/test/whatsapp-config-authority.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
+    },
+    {
+      "prefix": "k08c_",
+      "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
+      "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"
+    },
+    {
+      "prefix": "k09a_",
+      "owner": "apps/server/test/identity-business-config.integration.test.ts",
+      "packet": "R0-09-ID-HARDEN"
+    },
+    {
+      "prefix": "k09b_",
+      "owner": "apps/server/test/d11-sibling-writes.integration.test.ts",
+      "packet": "R0-09 / R0-09b-D11-SIBLING-WRITES"
+    },
+    {
+      "prefix": "k09d_",
+      "owner": "apps/server/test/d11-genesis-templates.integration.test.ts",
+      "packet": "R0-09 / R0-09d-D11-GENESIS-TEMPLATES"
+    },
+    {
+      "prefix": "k09f_",
+      "owner": "apps/server/test/d11-finance-settings.integration.test.ts",
+      "packet": "R0-09 / R0-09f-D11-FINANCE-TAX-AND-WEB"
+    },
+    {
+      "prefix": "k12a_",
+      "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
+      "packet": "R0-12-CT-TENANT-ROUTES"
+    },
+    {
+      "prefix": "k13a_",
+      "owner": "apps/server/test/contacts-persistence.integration.test.ts",
+      "packet": "R0-13-CT-PERSISTENCE-PROOF"
+    },
+    {
+      "prefix": "k13b_",
+      "owner": "apps/server/test/contacts-import-write-scope.integration.test.ts",
+      "packet": "R0-13 / R0-13b-CT-IMPORT-ACTOR"
+    },
+    {
+      "prefix": "k13c_",
+      "owner": "apps/server/test/contacts-patch-visibility.integration.test.ts",
+      "packet": "R0-13 / R0-13c-CT-PATCH-VISIBILITY"
+    },
+    {
+      "prefix": "k13f_",
+      "owner": "apps/server/test/shadowed-routes-live.integration.test.ts",
+      "packet": "R0-13 / R0-13f-ROUTE-SHADOWING-SIBLINGS"
+    },
+    {
+      "prefix": "k13g_",
+      "owner": "apps/server/test/key-cortex-flows-routes.integration.test.ts",
+      "packet": "R0-13 / R0-13g-KEY-FLOWS-ROUTES"
+    },
+    {
+      "prefix": "k13o_",
+      "owner": "apps/server/test/ops-scope-command-procurement.integration.test.ts",
+      "packet": "R0-13 / R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT"
+    },
+    {
+      "prefix": "k14a_",
+      "owner": "apps/server/test/identity-local-auth.integration.test.ts",
+      "packet": "R0-14-AUTH-LOCAL-SIGNIN"
+    },
+    {
+      "prefix": "k17a_",
+      "owner": "apps/server/test/payments-manual.integration.test.ts",
+      "packet": "R0-17-PAYMENT-TX-INTEGRITY"
+    },
+    {
+      "prefix": "k19a_",
+      "owner": "apps/server/test/evidence-feed.integration.test.ts",
+      "packet": "R0-19-EVIDENCE-BASELINE"
+    },
+    {
+      "prefix": "k20a_",
+      "owner": "apps/server/test/payments-mark-paid.integration.test.ts",
+      "packet": "R0-20-MARKPAID-CONVERGENCE"
+    },
+    {
+      "prefix": "k22a_",
+      "owner": "apps/server/test/public-payment-intent.integration.test.ts",
+      "packet": "R0-22-PUBLIC-INTENT-HARDEN"
+    },
+    {
+      "prefix": "k24a_",
+      "owner": "apps/server/test/tenant-interceptor-alignment.integration.test.ts"
+    },
+    {
+      "prefix": "k27b_",
+      "owner": "apps/server/test/commerce-authorization.e2e.test.ts",
+      "packet": "R0-27-REVENUE-CREATE-CONTRACT"
+    },
+    {
+      "prefix": "k28a_",
+      "owner": "apps/server/test/commerce-quote-status-auth.integration.test.ts",
+      "packet": "R0-28-QUOTE-STATUS-AUTH"
+    },
+    {
+      "prefix": "k32a_",
+      "owner": "apps/server/test/onboarding-manual-complete.integration.test.ts",
+      "packet": "R0-32-ONBOARD-COMPLETE-SERVER"
+    },
+    {
+      "prefix": "k33a_",
+      "owner": "apps/server/test/portal-grant-tenant.integration.test.ts",
+      "packet": "R0-33-PORTAL-GRANT-TENANT"
+    },
+    {
+      "prefix": "k34a_",
+      "owner": "apps/server/test/cortex-audit-tenant.integration.test.ts",
+      "packet": "R0-34-KEY-AUDIT-TENANT"
+    },
+    {
+      "prefix": "k34b_",
+      "owner": "apps/server/test/key-cortex-tenant-binding.integration.test.ts",
+      "packet": "R0-34 / R0-34b-KEY-TENANT-BINDING"
+    },
+    {
+      "prefix": "k34c_",
+      "owner": "apps/server/test/key-cortex-actor-binding.integration.test.ts",
+      "packet": "R0-34 / R0-09c-KEY-ACTOR-BINDING"
+    },
+    {
+      "prefix": "kab_",
+      "owner": "apps/server/test/key-action-boundary.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "kas_",
+      "owner": "apps/server/test/key-action-boundary-surfaces.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "pya_",
+      "owner": "apps/server/test/payments-actor.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "r0_",
+      "owner": "apps/server/test/release0-journey.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "rva_",
+      "owner": "apps/server/test/revenue-authorization.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2b_",
+      "owner": "apps/server/test/bank-connection-secret.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2d_",
+      "owner": "apps/server/test/tenant-membership-boundary.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t2i1_",
+      "owner": "apps/server/test/task-assignment-tenant.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t3_",
+      "owner": "apps/server/test/business-token-disclosure.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t4_",
+      "owner": "apps/server/test/social-disconnect-tenant.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "t6_",
+      "owner": "apps/server/test/webhook-ingress-secret-redaction.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tca_",
+      "owner": "apps/server/test/contacts-audit-actor.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcc_",
+      "owner": "apps/server/test/connector-credentials-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcd_",
+      "owner": "apps/server/test/crm-contact-duplicate.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcr_",
+      "owner": "apps/server/test/connector-routes-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tcv_",
+      "owner": "apps/server/test/contacts-visibility.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tfw_",
+      "owner": "apps/server/test/form-webhook-tenancy-attack.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tgen_",
+      "owner": "apps/server/test/tenant-founding-membership.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "tss_",
+      "owner": "apps/server/test/social-sync-unsupported.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "v02b_",
+      "owner": "apps/server/test/key-cortex-legacy-gate-audit.integration.test.ts",
+      "packet": "V1-02 (V1-02b-KEY-LEGACY-GATE)"
+    },
+    {
+      "prefix": "v03a_",
+      "owner": "apps/server/test/autonomy-profile-authority.integration.test.ts",
+      "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
+    },
+    {
+      "prefix": "v05a_",
+      "owner": "apps/server/test/payments-provider-callbacks.integration.test.ts",
+      "packet": "V1-05-PUB-PROVIDER-CALLBACKS"
+    },
+    {
+      "prefix": "v06a_",
+      "owner": "apps/server/test/bookings-core.integration.test.ts",
+      "packet": "V1-06-BK-BASELINE-PARITY"
+    },
+    {
+      "prefix": "v09a_",
+      "owner": "apps/server/test/key-command-ask-governed.integration.test.ts",
+      "packet": "V1-09-KEY-COMMAND-GOVERNED"
+    },
+    {
+      "prefix": "v09b_",
+      "owner": "apps/server/test/key-commands-read-scope.integration.test.ts",
+      "packet": "V1-09 / V1-09b-KEY-COMMANDS-READ-SCOPE"
+    },
+    {
+      "prefix": "v10a_",
+      "owner": "apps/server/test/key-cortex-plan-execution.integration.test.ts",
+      "packet": "V1-10-KEY-PLANNER-CLAIM"
+    },
+    {
+      "prefix": "v12a_",
+      "owner": "apps/server/test/recurring-invoice-run.integration.test.ts",
+      "packet": "V1-12-DM-RECURRING-GUARD"
+    },
+    {
+      "prefix": "v14a_",
+      "owner": "apps/server/test/portal-boundary.integration.test.ts",
+      "packet": "V1-14-PUB-PORTAL-VOICE-BINDING"
+    },
+    {
+      "prefix": "v15a_",
+      "owner": "apps/server/test/ledger-write-door.integration.test.ts",
+      "packet": "V1-15-DM-LEDGER-WRITE-DOOR"
+    },
+    {
+      "prefix": "v15b_",
+      "owner": "apps/server/test/expense-void-reversal.integration.test.ts",
+      "packet": "V1-15-DM-LEDGER-WRITE-DOOR"
+    },
+    {
+      "prefix": "v15c_",
+      "owner": "apps/server/test/payment-webhook-dedupe.integration.test.ts",
+      "packet": "V1-15 (V1-15c-PAYMENT-INGRESS-AND-READERS)"
+    },
+    {
+      "prefix": "v15d_",
+      "owner": "apps/server/test/stripe-ops-tenancy.integration.test.ts",
+      "packet": "V1-15 (V1-15d-STRIPE-OPS-TENANCY)"
+    },
+    {
+      "prefix": "v16a_",
+      "owner": "apps/server/test/booking-concurrency.integration.test.ts",
+      "packet": "V1-16-BK-SLOT-CONCURRENCY"
+    },
+    {
+      "prefix": "v18a_",
+      "owner": "apps/server/test/storefront-paid-event.integration.test.ts",
+      "packet": "V1-18-PUB-STOREFRONT-PAID-EVENT"
+    },
+    {
+      "prefix": "v18r_",
+      "owner": "apps/server/test/marketplace-routing-concurrency.integration.test.ts",
+      "packet": "V1-18 (W10-Z4-ROUTE-FIX)"
+    },
+    {
+      "prefix": "v19a_",
+      "owner": "apps/server/test/key-idempotency-claim.integration.test.ts",
+      "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
+    },
+    {
+      "prefix": "v19b_",
+      "owner": "apps/server/test/plan-executor-approval-resume.integration.test.ts",
+      "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
+    },
+    {
+      "prefix": "v19c_",
+      "owner": "apps/server/test/key-cortex-action-audit.integration.test.ts",
+      "packet": "V1-19 (V1-19c-CORTEX-ACTION-AUDIT-ROW)"
+    },
+    {
+      "prefix": "v21a_",
+      "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
+      "packet": "V1-21-AUTH-JOBROLE-CEILING"
+    },
+    {
+      "prefix": "v21b_",
+      "owner": "apps/server/test/staff-bridge-boundary.integration.test.ts",
+      "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
+    },
+    {
+      "prefix": "v21d_",
+      "owner": "apps/server/test/key-dispatcher-tenant.integration.test.ts",
+      "packet": "V1-21 (V1-21d-KEY-DISPATCHER-TENANT-INCLUDES)"
+    },
+    {
+      "prefix": "v22a_",
+      "owner": "apps/server/test/commerce-money-rounding.integration.test.ts",
+      "packet": "V1-22-DM-MONEY-CENTS"
+    },
+    {
+      "prefix": "v23a_",
+      "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
+      "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
+    },
+    {
+      "prefix": "v27a_",
+      "owner": "apps/server/test/booking-slot-writers.integration.test.ts",
+      "packet": "V1-27-BK-SLOT-WRITERS"
+    },
+    {
+      "prefix": "v28a_",
+      "owner": "apps/server/test/booking-settlement.integration.test.ts",
+      "packet": "V1-28-BK-SETTLEMENT"
+    },
+    {
+      "prefix": "v29a_",
+      "owner": "apps/server/test/commerce-refund.integration.test.ts",
+      "packet": "V1-29-DM-REFUND-CONVENTION"
+    },
+    {
+      "prefix": "v29c_",
+      "owner": "apps/server/test/provider-refund-door.integration.test.ts",
+      "packet": "V1-29 (V1-29c-REFUND-WRITE-DOOR)"
+    },
+    {
+      "prefix": "v29e_",
+      "owner": "apps/server/test/crm-revenue-net.integration.test.ts",
+      "packet": "V1-29 (V1-29e-CRM-REVENUE-NET)"
+    },
+    {
+      "prefix": "v31b_",
+      "owner": "apps/server/test/key-action-routes-bind.integration.test.ts",
+      "packet": "V1-31 (V1-31b-KEY-ACTION-ROUTES-BIND)"
+    },
+    {
+      "prefix": "v32a_",
+      "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
+      "packet": "V1-32-KEY-PROPOSAL-CLAIM"
+    },
+    {
+      "prefix": "v33a_",
+      "owner": "apps/server/test/storefront-checkout-retry.integration.test.ts",
+      "packet": "V1-33-PUB-CHECKOUT-RETRY-OFFLINE"
+    },
+    {
+      "prefix": "v34a_",
+      "owner": "apps/server/test/cash-position.integration.test.ts",
+      "packet": "V1-34-DM-CASH-POSITION"
+    },
+    {
+      "prefix": "v35a_",
+      "owner": "apps/server/test/cross-module-job-poller.integration.test.ts",
+      "packet": "V1-35-DM-POLLER-CLAIM"
+    },
+    {
+      "prefix": "v36a_",
+      "owner": "apps/server/test/invoice-refund-balance.integration.test.ts",
+      "packet": "V1-36-DM-BALANCE-READ-CONTRACT"
+    },
+    {
+      "prefix": "v37a_",
+      "owner": "apps/server/test/commerce-currency.integration.test.ts",
+      "packet": "V1-37-DM-CURRENCY"
+    },
+    {
+      "prefix": "v37c_",
+      "owner": "apps/server/test/ledger-currency-normalize.integration.test.ts",
+      "packet": "V1-37 / V1-37c-CURRENCY-NORMALIZE-CASH"
+    },
+    {
+      "prefix": "v38a_",
+      "owner": "apps/server/test/contact-privacy-purge.integration.test.ts",
+      "packet": "V1-38-CT-PRIVACY-PURGE-STATUS"
+    },
+    {
+      "prefix": "v40a_",
+      "owner": "apps/server/test/log-redaction.integration.test.ts",
+      "packet": "V1-40-SEC-TRUST-CENSUS-REDACTION"
+    },
+    {
+      "prefix": "v41a_",
+      "owner": "apps/server/test/untrusted-payment-inputs.integration.test.ts",
+      "packet": "V1-41-DM-UNTRUSTED-MONEY-INPUTS"
+    },
+    {
+      "prefix": "v42a_",
+      "owner": "apps/server/test/invoice-transition-concurrency.integration.test.ts",
+      "packet": "V1-42-DM-LIFECYCLE-OWNER-CAS"
+    },
+    {
+      "prefix": "v42b_",
+      "owner": "apps/server/test/undo-tenant-scope.integration.test.ts",
+      "packet": "V1-42 / V1-42b-UNDO-TENANT-SCOPE"
+    },
+    {
+      "prefix": "v42c_",
+      "owner": "apps/server/test/invoice-status-events.integration.test.ts",
+      "packet": "V1-42 / V1-42c-INVOICE-STATUS-EVENTS"
+    },
+    {
+      "prefix": "v43a_",
+      "owner": "apps/server/test/commerce-document-numbering.integration.test.ts",
+      "packet": "V1-43-DM-NUMBERING"
+    },
+    {
+      "prefix": "v44a_",
+      "owner": "apps/server/test/credit-note-reversal.integration.test.ts",
+      "packet": "V1-44-DM-CREDIT-NOTE"
+    },
+    {
+      "prefix": "v45a_",
+      "owner": "apps/server/test/commerce-create-idempotency.integration.test.ts",
+      "packet": "V1-45-DM-CREATE-IDEMPOTENCY"
+    },
+    {
+      "prefix": "v46a_",
+      "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
+      "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
+    },
+    {
+      "prefix": "v48a_",
+      "owner": "apps/server/test/public-invoice-link.integration.test.ts",
+      "packet": "V1-48-PUBLIC-TOKEN-VIEW"
+    },
+    {
+      "prefix": "v49a_",
+      "owner": "apps/server/test/public-receipt.integration.test.ts",
+      "packet": "V1-49-PUBLIC-RECEIPT"
+    },
+    {
+      "prefix": "v50a_",
+      "owner": "apps/server/test/commerce-quote-status.integration.test.ts",
+      "packet": "V1-50-QUOTE-STATE-MACHINE"
+    },
+    {
+      "prefix": "v51a_",
+      "owner": "apps/server/test/release0-quote-journey.integration.test.ts",
+      "packet": "V1-51-QUOTE-CONVERSION-JOURNEY"
+    },
+    {
+      "prefix": "v52a_",
+      "owner": "apps/server/test/quote-public-link.integration.test.ts",
+      "packet": "V1-52-QUOTE-PUBLIC-LINK"
+    },
+    {
+      "prefix": "v53a_",
+      "owner": "apps/server/test/commerce-quote-errors.integration.test.ts",
+      "packet": "V1-53-QUOTE-CREATE-ERRORS"
+    },
+    {
+      "prefix": "v53b_",
+      "owner": "apps/server/test/quote-chain-finish.integration.test.ts",
+      "packet": "V1-53-QUOTE-CHAIN-finish"
+    },
+    {
+      "prefix": "v54a_",
+      "owner": "apps/server/test/call-log-complete-once.integration.test.ts",
+      "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
+    },
+    {
+      "prefix": "v81a_",
+      "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
+    },
+    {
+      "prefix": "v81c_",
+      "owner": "apps/server/test/refund-door-tenancy.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A3-REFUND-DOOR-TENANCY)"
+    },
+    {
+      "prefix": "v81e_",
+      "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
+    },
+    {
+      "prefix": "v81f_",
+      "owner": "apps/server/test/books-read-scope.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A6-BOOKS-READ-SCOPE)"
+    },
+    {
+      "prefix": "v81g_",
+      "owner": "apps/server/test/money-reports.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
+    },
+    {
+      "prefix": "v81j_",
+      "owner": "apps/server/test/booking-deposit-currency.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A10-DEPOSIT-CURRENCY)"
+    },
+    {
+      "prefix": "v82a_",
+      "owner": "apps/server/test/invoice-void-net-received.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B1-VOID-NET-RECEIVED)"
+    },
+    {
+      "prefix": "v82b_",
+      "owner": "apps/server/test/invoice-issued-amounts.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B2-ISSUED-INVOICE-AMOUNTS)"
+    },
+    {
+      "prefix": "v82c_",
+      "owner": "apps/server/test/accrual-revenue-splits.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B3-ACCRUAL-SPLIT-DISCOUNT)"
+    },
+    {
+      "prefix": "v82d_",
+      "owner": "apps/server/test/expense-currency-cents.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B4-EXPENSE-CURRENCY-CENTS)"
+    },
+    {
+      "prefix": "v82e_",
+      "owner": "apps/server/test/document-email-line-totals.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B5-EMAIL-LINE-TOTALS)"
+    },
+    {
+      "prefix": "v82f_",
+      "owner": "apps/server/test/invoice-delete-ledger.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B6-DELETE-ISSUED-INVOICE)"
+    },
+    {
+      "prefix": "v82g_",
+      "owner": "apps/server/test/expense-edit-posted.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B7-EXPENSE-EDIT-POSTED)"
+    },
+    {
+      "prefix": "v84a_",
+      "owner": "apps/server/test/timeline-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D1-TIMELINE-SCOPE)"
+    },
+    {
+      "prefix": "v84b_",
+      "owner": "apps/server/test/crm-contact-routes-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D2-CRM-CONTACT-ROUTES-VIS)"
+    },
+    {
+      "prefix": "v84c_",
+      "owner": "apps/server/test/crm-sibling-controllers-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D3-CRM-SIBLING-CONTROLLERS-VIS)"
+    },
+    {
+      "prefix": "v84d_",
+      "owner": "apps/server/test/call-log-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D4-CALL-LOG-VIS)"
+    },
+    {
+      "prefix": "v84e_",
+      "owner": "apps/server/test/contact-reads-noncrm-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D5-CONTACT-READS-NONCRM)"
+    },
+    {
+      "prefix": "v84f_",
+      "owner": "apps/server/test/commerce-contact-bind-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D6-COMMERCE-CONTACT-BIND-VIS)"
+    },
+    {
+      "prefix": "v84g_",
+      "owner": "apps/server/test/key-contact-reads-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D7-KEY-CONTACT-READS-VIS)"
+    },
+    {
+      "prefix": "v84i_",
+      "owner": "apps/server/test/key-do-it-for-me-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D9-DOITFORME-SCOPE)"
+    },
+    {
+      "prefix": "v84j_",
+      "owner": "apps/server/test/command-item-contact-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
+    },
+    {
+      "prefix": "v84l_",
+      "owner": "apps/server/test/business-meta-writers.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D12-METADATA-LOCKED-WRITES)"
+    },
+    {
+      "prefix": "v84p_",
+      "owner": "apps/server/test/key-chat-ops-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE)"
+    },
+    {
+      "prefix": "v84q_",
+      "owner": "apps/server/test/job-runner-claims.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS)"
+    },
+    {
+      "prefix": "v86e_",
+      "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
+      "packet": "V1-86 (V1-38b-STATUS-READERS)"
+    },
+    {
+      "prefix": "v87a_",
+      "owner": "apps/server/test/key-plan-reads.integration.test.ts",
+      "packet": "V1-87 (KEY-R3a-PLAN-READS)"
+    },
+    {
+      "prefix": "v87b_",
+      "owner": "apps/server/test/key-plan-authority.integration.test.ts",
+      "packet": "V1-87 (KEY-R3b-PLAN-AUTHORITY)"
+    },
+    {
+      "prefix": "v87c_",
+      "owner": "apps/server/test/storefront-order-doors.integration.test.ts",
+      "packet": "V1-87 (G6PUB-R3-STORE-ORDER-DOORS)"
+    },
+    {
+      "prefix": "v87d_",
+      "owner": "apps/server/test/own-row-reads.integration.test.ts",
+      "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
+    },
+    {
+      "prefix": "v88a_",
+      "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
+      "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
+    },
+    {
+      "prefix": "v88b_",
+      "owner": "apps/server/test/booking-waitlist-expiry.integration.test.ts",
+      "packet": "V1-88 (PR196-WAITLIST-EXPIRY)"
+    },
+    {
+      "prefix": "v88c_",
+      "owner": "apps/server/test/projects-tasks-plans.integration.test.ts",
+      "packet": "V1-88 (PR196-PROJECTS-SERVER)"
+    },
+    {
+      "prefix": "v88d_",
+      "owner": "apps/server/test/demo-seed-owner.integration.test.ts",
+      "packet": "V1-88 (PR196-SEED-DEMO-OWNER)"
+    },
+    {
+      "prefix": "v88e_",
+      "owner": "apps/server/test/crm-lifecycle-paid-invoice.integration.test.ts",
+      "packet": "V1-88 (PR196-CRM-LIFECYCLE)"
+    },
+    {
+      "prefix": "v89k_",
+      "owner": "apps/server/test/key-crm-visibility.integration.test.ts",
+      "packet": "V1-89 (W3-KEY-CRM-VISIBILITY)"
+    },
+    {
+      "prefix": "v89q_",
+      "owner": "apps/server/test/review-solicitation-dedupe.integration.test.ts",
+      "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
+    },
+    {
+      "prefix": "v92d_",
+      "owner": "apps/server/test/identity-rekey-creator.integration.test.ts",
+      "packet": "V1-92 (W6-IDENTITY-REKEY-CREATOR)"
+    },
+    {
+      "prefix": "v92f_",
+      "owner": "apps/server/test/connect-sync-actor.integration.test.ts",
+      "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
+    },
+    {
+      "prefix": "v93a_",
+      "owner": "apps/server/test/key-connector-authority.integration.test.ts",
+      "packet": "V1-93 (W7-KEY-CONNECTOR-TENANT)"
+    },
+    {
+      "prefix": "v93e_",
+      "owner": "apps/server/test/connect-recent-visibility.integration.test.ts",
+      "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
+    },
+    {
+      "prefix": "v94a_",
+      "owner": "apps/server/test/risc-signin-cutoff.integration.test.ts",
+      "packet": "V1-94 (W8-RISC-SIGNIN-CUTOFF)"
+    },
+    {
+      "prefix": "v94d_",
+      "owner": "apps/server/test/google-consent-owner.integration.test.ts",
+      "packet": "V1-94 (W8-GOOGLE-CONSENT-OWNER)"
+    },
+    {
+      "prefix": "v94e_",
+      "owner": "apps/server/test/money-signals.integration.test.ts",
+      "packet": "V1-94 (W8-MONEY-SIGNALS)"
+    },
+    {
+      "prefix": "v95b_",
+      "owner": "apps/server/test/google-identity-backfill.integration.test.ts",
+      "packet": "V1-95 (W9-IDENTITY-BACKFILL-SCRIPT)"
+    },
+    {
+      "prefix": "v95p_",
+      "owner": "apps/server/test/contact-custom-field-names-tenant.integration.test.ts",
+      "packet": "V1-95 (W9-CUSTOM-FIELDS-TENANT)"
+    },
+    {
+      "prefix": "v95r_",
+      "owner": "apps/server/test/projects-budget-assignee-scope.integration.test.ts",
+      "packet": "V1-95 (W9-PROJECTS-SERVER)"
+    },
+    {
+      "prefix": "v96c_",
+      "owner": "apps/server/test/owner-membership-backfill.integration.test.ts",
+      "packet": "V1-96 (W10-OWNER-MEMBERSHIP)"
+    },
+    {
+      "prefix": "v96o_",
+      "owner": "apps/server/test/data-cleanup-scripts.integration.test.ts",
+      "packet": "V1-96 (W10-DATA-CLEANUP-SCRIPTS)"
+    },
+    {
+      "prefix": "v97f_",
+      "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
+      "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"
+    },
+    {
+      "prefix": "v97o_",
+      "owner": "apps/server/test/key-cortex-read-scope.integration.test.ts",
+      "packet": "V1-97 (W11-CORTEX-READ-ROUTES-SCOPE)"
+    },
+    {
+      "prefix": "v97u_",
+      "owner": "apps/server/test/key-genome-finance-scope.integration.test.ts",
+      "packet": "V1-97 (W11-GENOME-FINANCE-SCOPE)"
+    },
+    {
+      "prefix": "v97v_",
+      "owner": "apps/server/test/calendar-names-scope.integration.test.ts",
+      "packet": "V1-97 (W11-CALENDAR-NAMES-SCOPE)"
+    },
+    {
+      "prefix": "v97w_",
+      "owner": "apps/server/test/owner-role-profile.integration.test.ts",
+      "packet": "V1-97 (W11-D116-PROFILE-OWNER)"
+    },
+    {
+      "prefix": "v97x_",
+      "owner": "apps/server/test/owner-role-key.integration.test.ts",
+      "packet": "V1-97 (W11-D116-KEY-OWNER)"
+    },
+    {
+      "prefix": "v97z_",
+      "owner": "apps/server/test/owner-role-connections.integration.test.ts",
+      "packet": "V1-97 (W11-D116-CONNECTION-OWNER)"
+    },
+    {
+      "prefix": "zz_credit_",
+      "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_ctxv2_",
+      "owner": "apps/server/test/cortex-context-v2.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_gdpr_",
+      "owner": "apps/server/test/gdpr-purge.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_ingest_",
+      "owner": "apps/server/test/bank-statement-ingest.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_obl_",
+      "owner": "apps/server/test/obligation-clock.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_tse_",
+      "owner": "apps/server/test/tenant-scope-extension.integration.test.ts",
+      "legacy": true
+    },
+    {
+      "prefix": "zz_wl_",
+      "owner": "apps/server/test/booking-waitlist.integration.test.ts",
+      "legacy": true
+    }
+  ],
+  "pendingRenames": [],
+  "noPrefixSuites": [
+    {
+      "file": "apps/server/test/app-module-boots.integration.test.ts",
+      "reason": "Boots the built server in a child process and asserts it listens; seeds and deletes no rows."
+    },
+    {
+      "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",
+      "reason": "Seeds rows with random ids (createId) under an existing business and deletes them by those id lists; no LIKE cleanup."
+    },
+    {
+      "file": "apps/server/test/keyflow-dev-auth.integration.test.ts",
+      "reason": "Spawns main.ts with KEYFLOW_DEV_AUTH_BYPASS set and asserts the boot guard exits; touches no rows."
+    },
+    {
+      "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
+      "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
+    },
+    {
+      "file": "apps/server/test/trpc-mount-flag.integration.test.ts",
+      "reason": "Boots the built server twice in child processes (TRPC_ENABLED unset, then 1) and probes /trpc over HTTP; seeds and deletes no rows."
+    },
+    {
+      "file": "apps/server/test/schema-sync-path.integration.test.ts",
+      "reason": "creates and drops its own throwaway database; writes no rows in the shared database"
+    }
+  ]
+}

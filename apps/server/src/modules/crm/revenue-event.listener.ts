@@ -4,6 +4,7 @@ import type { ContactEventType } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactInsightService } from './contact-insight.service';
+import { CrmService } from './crm.service';
 import type {
   QuoteCreatedPayload,
   QuoteSentPayload,
@@ -37,6 +38,34 @@ type FulfillmentRoutedPayload = {
 };
 
 /**
+ * FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): the invoice status transitions
+ * whose timeline entries are deduped per transition, not per invoice (see
+ * log()): each names the type that takes it back and the data field that
+ * says when it happened.
+ */
+const INVOICE_TRANSITIONS: Partial<Record<ContactEventType, { counter: ContactEventType; mark: string }>> = {
+  'invoice.paid': { counter: 'invoice.reopened', mark: 'paidAt' },
+  'invoice.reopened': { counter: 'invoice.paid', mark: 'reopenedAt' },
+};
+
+/**
+ * V1-55b-FEED-DEDUPE-REST (V55-07; D-08: Activity is the user-visible feed).
+ * The contact events this listener logs from a bus event whose feed row
+ * ActivityEventListener writes on the same emit: the ContactEvent is kept on
+ * the contact's timeline, and its Activity copy (an actorless second feed row
+ * for the event) is not written. invoice.paid: ActivityEventListener.onInvoicePaid
+ * writes the paid row ('Payment received').
+ */
+const FEED_ROW_BY_ACTIVITY_LISTENER: ReadonlySet<ContactEventType> = new Set<ContactEventType>(['invoice.paid']);
+
+/** A transition time (Date or its JSON string) as epoch ms, or null when absent / unreadable. */
+function transitionTime(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const t = new Date(v as string | number | Date).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
  * Central listener that turns revenue/operations events on the bus into
  * canonical ContactEvent rows on the contact timeline (and triggers the
  * insight snapshot to recompute). Every other module emits — only this
@@ -45,7 +74,8 @@ type FulfillmentRoutedPayload = {
  *
  * Idempotency: each event carries (or is given) a stable `dedupeKey`
  * `rev:<type>:<entityId>`; before writing we check the contact's last 25
- * events of the same type for a matching key in `data.dedupeKey`.
+ * events of the same type for a matching key in `data.dedupeKey`
+ * (invoice.paid / invoice.reopened: per transition, INVOICE_TRANSITIONS).
  */
 @Injectable()
 export class RevenueEventListener {
@@ -55,6 +85,7 @@ export class RevenueEventListener {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Inject(ContactInsightService) private readonly insights: ContactInsightService,
+    @Inject(CrmService) private readonly crm: CrmService,
   ) {}
 
   // ---- quote.* ----
@@ -205,6 +236,56 @@ export class RevenueEventListener {
       currency: inv?.currency,
       paidAt: inv?.paidAt,
     });
+    await this.advanceLifecycleOnPaid(p.businessId, inv?.id ?? null);
+  }
+
+  /**
+   * PR196-CRM-LIFECYCLE (owner ruling D-81): a paid invoice moves its own
+   * contact LEAD/PROSPECT -> CLIENT. Only invoice.paid does (not
+   * booking.confirmed, store_order.paid or payment.received). The contact is the
+   * invoice row's, read in the event's business, never the payload's contactId;
+   * the move is CrmService's audited compare-and-set, so replays and concurrent
+   * deliveries move it once, and a later invoice.reopened does not move it back.
+   */
+  private async advanceLifecycleOnPaid(businessId: string, invoiceId: string | null) {
+    if (!businessId || !invoiceId) return;
+    try {
+      const invoice = await this.prisma.client.invoice.findFirst({
+        where: { id: invoiceId, businessId },
+        select: { contactId: true, invoiceNumber: true },
+      });
+      if (!invoice?.contactId) return;
+      await this.crm.advanceToClientOnInvoicePaid({
+        businessId,
+        contactId: invoice.contactId,
+        invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+      });
+    } catch (err) {
+      this.logger.warn(`D-81 lifecycle advance failed for invoice=${invoiceId}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT,
+   * InvoiceWorkflowService.reconcileFromPayments) is logged beside the
+   * invoice.paid entry it takes back, so the timeline does not keep a
+   * refunded invoice as paid. The write also marks the insight stale (log()).
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(p: InvoiceStatusPayload & { previousStatus?: string }) {
+    const inv = p.invoice as { id?: string; contactId?: string | null; invoiceNumber?: string; total?: unknown; currency?: string | null; updatedAt?: unknown } | undefined;
+    await this.log(p.businessId, inv?.contactId ?? null, 'invoice.reopened', {
+      invoiceId: inv?.id,
+      invoiceNumber: inv?.invoiceNumber,
+      total: inv?.total,
+      currency: inv?.currency,
+      previousStatus: p.previousStatus ?? null,
+      status: p.status,
+      // FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): the reopen write's time names
+      // this transition, as paidAt names an invoice.paid one (see log()).
+      reopenedAt: inv?.updatedAt ?? null,
+    });
   }
 
   // ---- payment.* (connector-driven) ----
@@ -284,10 +365,27 @@ export class RevenueEventListener {
   }
 
   // ---- store_order.* ----
+  /**
+   * W9-STORE-PAID-LISTENERS (V18-T2, SEC-V18-3; D-18): this listener's paid
+   * timeline entry is written only for an order stored PAID in the event's
+   * business. PATCH .../orders/:id/status 'paid' with no payment emits
+   * store_order.paid for a STANDARD order stored UNPAID, and a queued or forged
+   * copy can name an unpaid order or another business's order (whose contact
+   * may share the email); each put a paid order on the contact's timeline.
+   * Nothing from this listener otherwise.
+   *
+   * Still open (it.todo in storefront-paid-event.integration.test.ts):
+   * CommerceIntegrationService.handleOrderPaid logs its own store_order.paid
+   * timeline event for a STANDARD order stored UNPAID (V18-T2b), and the stored
+   * PAID read here is itself written with no payment and no revenue write by
+   * PATCH .../status paymentStatus PAID or the fulfil mark_paid action
+   * (V18-T2c, review STL-SEC-1: needs an owner ruling).
+   */
   @OnEvent('store_order.paid', { async: true })
   async onStoreOrderPaid(p: StoreOrderPaidPayload) {
     const order = p.order as { id?: string; customerEmail?: string | null; total?: unknown; currency?: string | null } | undefined;
     if (!order?.id) return;
+    if (!(await this.isStoredOrderPaid(p.businessId, order.id))) return;
     const contactId = await this.contactFromOrderEmail(p.businessId, order.customerEmail ?? null);
     if (!contactId) return;
     await this.log(p.businessId, contactId, 'store_order.paid', {
@@ -330,6 +428,29 @@ export class RevenueEventListener {
     });
   }
 
+  /**
+   * W9-STORE-PAID-LISTENERS (V18-T2; D-18): the order, read in the event's
+   * business, is stored PAID. For a STANDARD order a stored PAID is not proof
+   * of a payment (V18-T2c, open).
+   */
+  private async isStoredOrderPaid(businessId: string, orderId: string): Promise<boolean> {
+    if (!businessId || typeof orderId !== 'string') return false;
+    try {
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: orderId, businessId },
+        select: { paymentStatus: true },
+      });
+      if ((stored?.paymentStatus ?? '').toUpperCase() === 'PAID') return true;
+      this.logger.warn(
+        `store_order.paid for order ${orderId} not stored PAID in business ${businessId} (${stored ? stored.paymentStatus : 'not found'}); no timeline entry`,
+      );
+      return false;
+    } catch (err) {
+      this.logger.warn(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   private async contactFromOrderEmail(businessId: string, email: string | null) {
     if (!email) return null;
     try {
@@ -363,39 +484,77 @@ export class RevenueEventListener {
       `${type}:${Date.now()}`;
     const dedupeKey = `rev:${type}:${entityId}`;
     try {
+      // W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-12): the entry is written
+      // only for a contact of the payload's business, so a payload naming
+      // another tenant's contact writes nothing on it (as D-81's move reads the
+      // contact in the invoice's business). A forgotten contact in its grace
+      // period still counts: aggregate is the Contact read the soft-delete
+      // extension leaves as written.
+      const inBusiness = await this.prisma.client.contact.aggregate({ where: { id: contactId, businessId }, _count: { _all: true } });
+      if (inBusiness._count._all === 0) return;
       // Content-based dedupe: any same-type event for this contact in the
       // last 10 minutes that references the same entity (by dedupeKey, or by
       // matching id field in legacy rows that were written directly by
       // commerce/bookings before the central listener took over) is treated
       // as a duplicate. This keeps us idempotent against both event-bus
       // re-emits AND direct-write callers we have not yet migrated.
+      //
+      // FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): invoice.paid and
+      // invoice.reopened are status transitions, and the reconcile writes
+      // each one compare-and-set, so pay -> full refund -> pay again inside
+      // the window is three real moves. A same-type row of the invoice is a
+      // duplicate only when it is this transition: no counter-transition
+      // (invoice.reopened for a paid, invoice.paid for a reopen) of the
+      // invoice was logged after it, and its transition time (paidAt /
+      // reopenedAt) is this event's when both carry one.
+      const transition = INVOICE_TRANSITIONS[type];
       const recents = await this.prisma.client.contactEvent.findMany({
         where: {
           businessId,
           contactId,
-          type,
+          type: transition ? { in: [type, transition.counter] } : type,
           createdAt: { gte: new Date(Date.now() - 10 * 60_000) },
         },
         orderBy: { createdAt: 'desc' },
-        take: 25,
+        take: transition ? 50 : 25,
       });
       const matchingId = String(entityId);
-      const isDup = recents.some((row) => {
-        const rd = (row.data ?? null) as Record<string, unknown> | null;
-        if (!rd) return false;
+      const sameEntity = (rd: Record<string, unknown>) => {
         if (rd.dedupeKey === dedupeKey) return true;
         for (const k of ['invoiceId', 'quoteId', 'recurringInvoiceId', 'orderId', 'externalId']) {
           if (rd[k] != null && String(rd[k]) === matchingId) return true;
         }
         return false;
-      });
+      };
+      const dataOf = (row: { data?: unknown }) => (row.data ?? null) as Record<string, unknown> | null;
+      let isDup: boolean;
+      if (!transition) {
+        isDup = recents.some((row) => {
+          const rd = dataOf(row);
+          return rd ? sameEntity(rd) : false;
+        });
+      } else {
+        // Newest first: the latest counter-transition of this invoice, if any.
+        const lastCounter = recents.find((row) => {
+          const rd = dataOf(row);
+          return row.type === transition.counter && rd != null && sameEntity(rd);
+        });
+        const at = transitionTime(data[transition.mark]);
+        isDup = recents.some((row) => {
+          const rd = dataOf(row);
+          if (row.type !== type || !rd || !sameEntity(rd)) return false;
+          if (lastCounter && !(new Date(row.createdAt).getTime() > new Date(lastCounter.createdAt).getTime())) return false;
+          const rowAt = transitionTime(rd[transition.mark]);
+          return at == null || rowAt == null || at === rowAt;
+        });
+      }
       if (isDup) return;
       await this.timeline.logEvent(
         businessId,
         contactId,
         type,
         { ...data, dedupeKey },
-        { actorType: 'SYSTEM', source: 'event-bus' },
+        { actorType: 'SYSTEM', source: 'event-bus', ...(FEED_ROW_BY_ACTIVITY_LISTENER.has(type) ? { feedCopy: false } : {}) },
       );
       await this.insights.markStale(businessId, contactId);
     } catch (err: any) {

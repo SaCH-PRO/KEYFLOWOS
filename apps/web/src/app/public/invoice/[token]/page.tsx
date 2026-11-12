@@ -4,8 +4,28 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Badge, Button, Card } from "@keyflow/ui";
 import { motion } from "framer-motion";
-import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle } from "lucide-react";
-import { getPublicInvoiceByToken, type PublicInvoicePayload } from "@/lib/client";
+import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle, Receipt } from "lucide-react";
+import { getPayLinkStatus, getPublicInvoiceByToken, type PayLinkStatus, type PublicInvoicePayload } from "@/lib/client";
+import { API_BASE } from "@/lib/api";
+
+/**
+ * V1-49-PUBLIC-RECEIPT: the server's receipt projection for this link
+ * (GET /commerce/public/invoice-link/:token/receipt). Rendered as given.
+ */
+interface PublicReceipt {
+  invoiceNumber: string;
+  status: string;
+  currency: string;
+  total: number;
+  amountPaid: number;
+  /** W5-CREDIT-AWARE-PAY: the APPLIED credit notes netted; present only for a credited invoice. */
+  credited?: number;
+  amountDue: number;
+  paidAt: string | null;
+  issuedAt?: string | null;
+}
+
+type ReceiptState = { loading: boolean; data: PublicReceipt | null; error: string | null } | null;
 
 function formatCurrency(amount: number, currency: string) {
   try {
@@ -32,6 +52,28 @@ export default function PublicInvoicePage() {
     payload: null,
     error: null,
   });
+  const [receipt, setReceipt] = useState<ReceiptState>(null);
+  // W5-CREDIT-AWARE-PAY (CR-AR-2): the server's credited figure for a part-credited invoice (the token
+  // status poll's `credited`, net of its own APPLIED credit notes). null: not credited, or not read.
+  const [credited, setCredited] = useState<number | null>(null);
+
+  // Loaded on request only: the receipt is a second public read of the same
+  // token, and most visits are to pay, not to fetch a receipt.
+  async function loadReceipt() {
+    setReceipt({ loading: true, data: null, error: null });
+    try {
+      const res = await fetch(`${API_BASE}/commerce/public/invoice-link/${encodeURIComponent(token)}/receipt`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setReceipt({ loading: false, data: null, error: "A receipt is not available for this invoice." });
+        return;
+      }
+      setReceipt({ loading: false, data: (await res.json()) as PublicReceipt, error: null });
+    } catch {
+      setReceipt({ loading: false, data: null, error: "We couldn't load the receipt. Please try again." });
+    }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -43,6 +85,11 @@ export default function PublicInvoicePage() {
         setState({ loading: false, payload: null, error: error ?? "Invoice not found" });
       } else {
         setState({ loading: false, payload: data, error: null });
+        if (data.invoice?.status === "PARTIALLY_CREDITED") {
+          const poll = await getPayLinkStatus(token);
+          const figure = (poll.data as (PayLinkStatus & { credited?: unknown }) | undefined)?.credited;
+          if (!cancelled && typeof figure === "number") setCredited(figure);
+        }
       }
     })();
     return () => {
@@ -76,10 +123,26 @@ export default function PublicInvoicePage() {
   }
 
   const invoice = state.payload.invoice;
+  // V1-48 (CF-18): Paid and Remaining are the server's figures, rendered as
+  // given. Without a balance block (an older server) the page shows the
+  // total as due and no paid figure, rather than inventing one.
+  const balance = state.payload.balance ?? null;
+  const amountDue = balance ? Number(balance.amountDue) : Number(invoice.total);
   const business = invoice.business;
   const accent = business?.primaryColor || "#F97316";
   const isPaid = invoice.status === "PAID";
   const isVoid = invoice.status === "VOID";
+  // W5-CREDIT-AWARE-PAY (CR-AR-2, D-78): paying what a credit note leaves owing keeps the invoice
+  // PARTIALLY_CREDITED, so a part-credited invoice with nothing due (the server's amountDue) is
+  // settled too: no Pay button, and the settled message instead.
+  const isSettledCredit = invoice.status === "PARTIALLY_CREDITED" && balance !== null && Number(balance.amountDue) <= 0;
+  // V1-49: a receipt exists once something has been received, with the
+  // remaining stated. That is read from the server's paid figure, not the
+  // status (review CR-V49-1): a part-paid invoice moved to OVERDUE still has
+  // one. Without a balance block (an older server) the status decides. The
+  // receipt route has the last word.
+  const hasReceipt =
+    !isVoid && (balance ? Number(balance.amountPaid) > 0 : isPaid || invoice.status === "PARTIALLY_PAID");
   const contactName = invoice.contact
     ? [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(" ") || "Customer"
     : "Customer";
@@ -113,7 +176,7 @@ export default function PublicInvoicePage() {
               <p className="text-sm font-semibold truncate">{business?.name ?? "Business"}</p>
             </div>
           </div>
-          <Badge tone={isPaid ? "success" : isVoid ? "danger" : "info"}>{invoice.status}</Badge>
+          <Badge tone={isPaid || isSettledCredit ? "success" : isVoid ? "danger" : "info"}>{invoice.status}</Badge>
         </motion.div>
 
         <Card className="p-6 bg-card/80 border-border/50 space-y-5">
@@ -125,8 +188,8 @@ export default function PublicInvoicePage() {
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wider text-slate-400">Amount due</p>
-              <p className="text-2xl font-semibold" style={{ color: accent }}>
-                {formatCurrency(Number(invoice.total), invoice.currency)}
+              <p className="text-2xl font-semibold" style={{ color: accent }} data-testid="public-invoice-amount-due">
+                {formatCurrency(amountDue, invoice.currency)}
               </p>
               <p className="text-xs text-slate-400 mt-1">Due {formatDate(invoice.dueDate)}</p>
             </div>
@@ -156,6 +219,45 @@ export default function PublicInvoicePage() {
             </div>
           )}
 
+          {balance && (
+            <dl className="rounded-xl border border-border/40 divide-y divide-border/30 text-sm">
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Total</dt>
+                <dd className="font-medium" data-testid="public-invoice-total">
+                  {formatCurrency(Number(invoice.total), invoice.currency)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Paid</dt>
+                <dd className="font-medium text-emerald-300" data-testid="public-invoice-paid">
+                  {formatCurrency(Number(balance.amountPaid), invoice.currency)}
+                </dd>
+              </div>
+              {credited !== null && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">Credited</dt>
+                  <dd className="font-medium" data-testid="public-invoice-credited">
+                    {formatCurrency(credited, invoice.currency)}
+                  </dd>
+                </div>
+              )}
+              <div className="flex items-center justify-between px-4 py-2">
+                <dt className="text-slate-400">Remaining</dt>
+                <dd className="font-semibold" data-testid="public-invoice-remaining">
+                  {formatCurrency(Number(balance.amountDue), invoice.currency)}
+                </dd>
+              </div>
+              {isPaid && balance.paidAt && (
+                <div className="flex items-center justify-between px-4 py-2">
+                  <dt className="text-slate-400">Paid on</dt>
+                  <dd className="font-medium" data-testid="public-invoice-paid-at">
+                    {formatDate(balance.paidAt)}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
+
           {invoice.notes && (
             <div className="rounded-xl bg-white/[0.03] border border-border/30 p-3">
               <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-400 mb-1">
@@ -169,6 +271,13 @@ export default function PublicInvoicePage() {
             <div className="flex items-center justify-center gap-2 rounded-xl py-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm font-medium">
               <CheckCircle className="w-4 h-4" /> This invoice has been paid in full.
             </div>
+          ) : isSettledCredit ? (
+            <div
+              className="flex items-center justify-center gap-2 rounded-xl py-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm font-medium"
+              data-testid="public-invoice-settled"
+            >
+              <CheckCircle className="w-4 h-4" /> This invoice is settled: nothing is owed.
+            </div>
           ) : isVoid ? (
             <div className="flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-500/10 border border-slate-500/30 text-slate-300 text-sm font-medium">
               This invoice has been voided.
@@ -179,10 +288,10 @@ export default function PublicInvoicePage() {
                 className="w-full"
                 style={{ backgroundColor: accent }}
                 onClick={() => {
-                  // Tokenized provider-aware flow: /pay/link/{token} resolves
-                  // the payment link on the API and forwards the customer to
-                  // the appropriate provider checkout (Wipay / manual /
-                  // gateway), avoiding the legacy mark-paid dropout.
+                  // V1-46 (D-07, token links only): /pay/link/{token} is the
+                  // pay page itself, keyed by this same token. It no longer
+                  // downgrades to the retired bare-id /pay/:invoiceId page,
+                  // so deactivating or expiring the link stops payment too.
                   window.location.href = `/pay/link/${encodeURIComponent(token)}`;
                 }}
               >
@@ -191,6 +300,69 @@ export default function PublicInvoicePage() {
               <p className="text-xs text-center text-slate-400">
                 Choose your payment option on the next screen.
               </p>
+            </div>
+          )}
+
+          {hasReceipt && (
+            <div className="space-y-3">
+              {!receipt?.data && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  data-testid="public-invoice-receipt-button"
+                  disabled={receipt?.loading}
+                  onClick={() => void loadReceipt()}
+                >
+                  <Receipt className="w-4 h-4" /> {receipt?.loading ? "Loading receipt…" : "View receipt"}
+                </Button>
+              )}
+              {receipt?.error && (
+                <p className="text-xs text-center text-amber-300" data-testid="public-receipt-error">
+                  {receipt.error}
+                </p>
+              )}
+              {receipt?.data && (
+                <section
+                  className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-2 text-sm"
+                  data-testid="public-receipt"
+                  aria-label="Payment receipt"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">Receipt for invoice #{receipt.data.invoiceNumber}</p>
+                    <Button variant="ghost" size="xs" onClick={() => window.print()}>
+                      Print
+                    </Button>
+                  </div>
+                  <dl className="divide-y divide-border/30">
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-slate-400">Received</dt>
+                      <dd className="font-medium text-emerald-300" data-testid="public-receipt-paid">
+                        {formatCurrency(Number(receipt.data.amountPaid), receipt.data.currency)}
+                      </dd>
+                    </div>
+                    {typeof receipt.data.credited === "number" && (
+                      <div className="flex items-center justify-between py-1.5">
+                        <dt className="text-slate-400">Credited</dt>
+                        <dd className="font-medium" data-testid="public-receipt-credited">
+                          {formatCurrency(Number(receipt.data.credited), receipt.data.currency)}
+                        </dd>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between py-1.5">
+                      <dt className="text-slate-400">Remaining</dt>
+                      <dd className="font-medium" data-testid="public-receipt-remaining">
+                        {formatCurrency(Number(receipt.data.amountDue), receipt.data.currency)}
+                      </dd>
+                    </div>
+                    {receipt.data.paidAt && (
+                      <div className="flex items-center justify-between py-1.5">
+                        <dt className="text-slate-400">Paid on</dt>
+                        <dd className="font-medium">{formatDate(receipt.data.paidAt)}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </section>
+              )}
             </div>
           )}
         </Card>

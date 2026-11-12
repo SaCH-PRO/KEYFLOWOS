@@ -8,6 +8,41 @@ export const ASSIGNABLE_TYPES = ['User', 'StaffMember', 'Contractor', 'KeyflowSt
 export type TaskType = (typeof TASK_TYPES)[number];
 export type AssignableType = (typeof ASSIGNABLE_TYPES)[number];
 
+/** Anything with a non-space run either side of an '@': an email address, or most of one. */
+const EMAIL_LIKE = /[^\s@]+@[^\s@]+/;
+
+/**
+ * W9-PROJECTS-SERVER (review SEC-W196-3): how GET .../task-assignments/options names a member: their
+ * name, else their first and last name, else 'Unnamed member (…<last 4 of id>)' (the label the
+ * web's assignee picker uses). Never the email: a name that looks like one is passed over.
+ *
+ * W9-PROJECTS-SERVER repair (review SEC-W9PS-2, D-87): nor the email's local part.
+ * IdentityService.inviteTeamMember names the placeholder it creates `email.split('@')[0]`, and
+ * adoption at sign-up keeps that name, so most invited members were offered by their address before
+ * the '@'. The email is read here only to recognise that name and is never returned. The match is
+ * exact, as the placeholder writes it (from the same string the row's email holds): a name the
+ * member chose that only differs in case ('Ada' for ada@...) stays their name. Review SEC-W9PS-3:
+ * KEY's people_workload (workloadSummary) names members with this too.
+ */
+function assigneeMemberLabel(u: {
+  id: string;
+  name: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+}): string {
+  const localPart = (u.email ?? '').split('@')[0].trim();
+  const usable = (s: string | null | undefined) => {
+    const t = (s ?? '').trim();
+    return t.length > 0 && !EMAIL_LIKE.test(t) && t !== localPart ? t : null;
+  };
+  return (
+    usable(u.name) ??
+    usable([u.firstName, u.lastName].map((p) => (p ?? '').trim()).filter(Boolean).join(' ')) ??
+    `Unnamed member (…${u.id.slice(-4)})`
+  );
+}
+
 export interface AssignTaskInput {
   taskType: TaskType;
   taskId: string;
@@ -256,6 +291,13 @@ export class TaskAssignmentService {
    * Deliberately returns no pay data. StaffMember.hourlyRate sits one field
    * away from every row assembled here, and chat has no way to know whether the
    * person asking is entitled to see it.
+   *
+   * W9-PROJECTS-SERVER repair (review SEC-W9PS-3; D-87): nor any member's email.
+   * KEY's people_workload is offered to every crew (ROLE_BASELINE_TOOLS), STAFF
+   * refused the team list (team:none) included, and named a member who has no
+   * name by their email. Members are named as GET .../task-assignments/options
+   * names them (assigneeMemberLabel); the email is read only to recognise a
+   * name that is its local part and is not returned.
    */
   async workloadSummary(businessId: string): Promise<{
     people: Array<{
@@ -284,7 +326,7 @@ export class TaskAssignmentService {
         where: { businessId },
         select: {
           dailyCapacityHours: true,
-          user: { select: { id: true, name: true, email: true } },
+          user: { select: { id: true, name: true, firstName: true, lastName: true, email: true } },
         },
         take: 200,
       }),
@@ -324,7 +366,7 @@ export class TaskAssignmentService {
       ...members.map((m) => ({
         assignableType: 'User' as AssignableType,
         assignableId: m.user.id,
-        name: m.user.name ?? m.user.email ?? m.user.id,
+        name: assigneeMemberLabel(m.user), // SEC-W9PS-3: never the email
         openTasks: held.get(`User:${m.user.id}`)?.size ?? 0,
         // Stored per day; reported per week because capacity conversations are
         // weekly and StaffMember's equivalent field already is.
@@ -473,12 +515,21 @@ export class TaskAssignmentService {
 
   /**
    * Get a flat list of assignable options for a business (users + staff).
+   *
+   * W9-PROJECTS-SERVER (review SEC-W196-3; D-87): every member of the business reads this list,
+   * STAFF refused the team list (team:none) included, so it names members and never shows their
+   * email: a member is offered by their name, else their first and last name, else a neutral
+   * label that tells options apart by the end of their id. A stored name that is an email address
+   * (account bootstrap stores the email as the name when none is given) is not a name.
+   * W9-PROJECTS-SERVER repair (review SEC-W9PS-2): nor is a name that is the email's local part (an
+   * invited member's placeholder name, kept at sign-up). The email is read for that check only and is
+   * never in the answer.
    */
   async getAssignableOptions(businessId: string) {
     const [users, staff] = await Promise.all([
       this.prisma.client.user.findMany({
         where: { businesses: { some: { businessId } } },
-        select: { id: true, name: true, email: true },
+        select: { id: true, name: true, firstName: true, lastName: true, email: true },
         take: 200,
       }),
       this.prisma.client.staffMember.findMany({
@@ -489,7 +540,7 @@ export class TaskAssignmentService {
     ]);
 
     return [
-      ...users.map((u) => ({ type: 'User' as AssignableType, id: u.id, name: u.name ?? u.email ?? u.id })),
+      ...users.map((u) => ({ type: 'User' as AssignableType, id: u.id, name: assigneeMemberLabel(u) })),
       ...staff.map((s) => ({ type: 'StaffMember' as AssignableType, id: s.id, name: s.name })),
       { type: 'KEY' as AssignableType, id: 'key_ai', name: 'KEY AI Assistant' },
     ];

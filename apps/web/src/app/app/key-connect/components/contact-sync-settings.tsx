@@ -18,6 +18,7 @@ import { Button, Badge } from "@keyflow/ui";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { apiGet, apiPostSimple, apiPut } from "@/lib/api";
+import { CONTACT_STATUSES } from "@/lib/crm-constants";
 
 interface SyncProgress {
   phase: string;
@@ -80,7 +81,14 @@ interface TeamMember {
   role?: string | null;
 }
 
-const STATUS_OPTIONS = ["LEAD", "PROSPECT", "ACTIVE", "INACTIVE", "ARCHIVED"];
+/**
+ * D-92 (W6-WEB-STATUS-OPTIONS, CR-D92R-1): every stored Contact.status is one
+ * of LEAD, PROSPECT, CLIENT, LOST, and the mapping-rules setting answers 400 for
+ * any other defaultStatus, so the select offers exactly those four. It offered
+ * ACTIVE, INACTIVE and ARCHIVED (each refused) and no CLIENT or LOST. A refused
+ * save shows the server's message (handleSaveRules: toast.error(res.error)).
+ */
+const STATUS_OPTIONS = CONTACT_STATUSES;
 const LIFECYCLE_OPTIONS = [
   "subscriber",
   "lead",

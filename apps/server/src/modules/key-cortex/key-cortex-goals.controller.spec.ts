@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { KeyCortexGoalsController } from './key-cortex-goals.controller';
 import { KeyCortexPlannerService } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
@@ -64,7 +64,8 @@ describe('KeyCortexGoalsController', () => {
   describe('goals', () => {
     it('creates a goal', async () => {
       const dto = { businessId: 'biz_1', title: 'Increase revenue', description: 'Test' };
-      const result = await controller.createGoal(dto);
+      // The second argument is the tenant @GuardedBusinessId() resolves (the body's, here).
+      const result = await controller.createGoal(dto, 'biz_1');
       expect(planner.createGoal).toHaveBeenCalledWith('biz_1', expect.objectContaining({ title: 'Increase revenue' }));
       expect(result).toEqual(mockGoal);
     });
@@ -108,9 +109,14 @@ describe('KeyCortexGoalsController', () => {
   });
 
   describe('plans', () => {
+    // R0-09e: the plan's actor is the authenticated principal (the fourth
+    // argument, @CurrentUser()); these three used to expect `undefined` or no
+    // actor at all, which is the defect R0-09e closes.
+    const member = { id: 'user_1', email: 'user_1@test.local', role: 'USER' };
+
     it('creates a plan from a goal', async () => {
-      const result = await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1' });
-      expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', undefined);
+      const result = await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1' }, 'biz_1', member);
+      expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', 'user_1');
       expect(result).toEqual(mockPlan);
     });
 
@@ -125,15 +131,92 @@ describe('KeyCortexGoalsController', () => {
 
     it('creates a plan from a command', async () => {
       const dto = { businessId: 'biz_1', objective: 'Invoice all clients', modules: ['commerce'] };
-      const result = await controller.createPlanFromCommand(dto as any);
-      expect(planner.createPlanFromCommand).toHaveBeenCalledWith('biz_1', expect.objectContaining(dto), undefined);
+      const result = await controller.createPlanFromCommand(dto as any, 'biz_1', member);
+      expect(planner.createPlanFromCommand).toHaveBeenCalledWith('biz_1', expect.objectContaining(dto), 'user_1');
       expect(result).toEqual(mockPlan);
     });
 
     it('executes a plan', async () => {
-      const result = await controller.executePlan('plan_1', { traceId: 'trace_1' });
-      expect(planner.executePlan).toHaveBeenCalledWith('plan_1', { traceId: 'trace_1' });
+      const result = await controller.executePlan('plan_1', { traceId: 'trace_1' }, 'biz_1', member);
+      expect(planner.executePlan).toHaveBeenCalledWith('plan_1', { traceId: 'trace_1' }, { userId: 'user_1', role: 'USER', businessId: 'biz_1' });
       expect(result.status).toBe('completed');
+    });
+  });
+
+  /**
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2). POST plans and POST
+   * goals/:goalId/plans handed the planner the body `userId`, and POST
+   * plans/:planId/execute took no actor, so a STAFF member wrote and ran a plan
+   * as the OWNER. The actor is the principal AuthGuard admitted
+   * (@CurrentUser()); a body userId is ignored, as KeyCortexController does
+   * (R0-09c); with no authenticated user the handler answers 401. The
+   * real-database half is test/key-cortex-actor-binding.integration.test.ts.
+   */
+  describe('R0-09e-KEY-PLAN-ACTOR — plan creation and execution act for the authenticated principal (review ST-5 / CR-2)', () => {
+    const ME = { id: 'user_staff', email: 'staff@test.local', role: 'USER' };
+    const OWNER = 'user_owner';
+
+    it('RED-BEFORE: POST plans and POST goals/:goalId/plans ignore a body userId naming someone else: the planner is handed req.user', async () => {
+      await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1', userId: OWNER }, 'biz_1', ME);
+      expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', ME.id);
+      await controller.createPlanFromCommand({ businessId: 'biz_1', objective: 'Rename the business', userId: OWNER } as any, 'biz_1', ME);
+      expect((planner.createPlanFromCommand as any).mock.calls[0][2]).toBe(ME.id);
+    });
+
+    it('RED-BEFORE: POST plans/:planId/execute hands the planner the executing member (req.user, its role and the guarded tenant)', async () => {
+      const admin = { id: 'user_super', role: 'SUPER_ADMIN' };
+      await controller.executePlan('plan_1', { skipApproval: false }, 'biz_1', admin);
+      expect(planner.executePlan).toHaveBeenCalledWith('plan_1', { traceId: undefined, skipApproval: false }, { userId: 'user_super', role: 'SUPER_ADMIN', businessId: 'biz_1' });
+    });
+
+    it('RED-BEFORE: with no authenticated user the three plan routes answer 401 and the planner is not called', async () => {
+      await expect(controller.createPlanFromGoal('goal_1', { userId: OWNER }, 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.createPlanFromCommand({ objective: 'x', userId: OWNER } as any, 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.executePlan('plan_1', {}, 'biz_1', undefined)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.executePlan('plan_1', {}, 'biz_1', { id: '' } as any)).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(planner.createPlanFromGoal).not.toHaveBeenCalled();
+      expect(planner.createPlanFromCommand).not.toHaveBeenCalled();
+      expect(planner.executePlan).not.toHaveBeenCalled();
+    });
+
+    it('RED-BEFORE: POST plans/:planId/execute with no guarded tenant is refused 400 before the planner runs', async () => {
+      await expect(controller.executePlan('plan_1', {}, undefined as unknown as string, ME)).rejects.toThrow(/businessId is required/);
+      expect(planner.executePlan).not.toHaveBeenCalled();
+    });
+
+    it("RED-BEFORE: source — no handler reads a request userId, and none falls back to 'key_cortex' or 'system'", async () => {
+      const { readFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const code = readFileSync(join(__dirname, 'key-cortex-goals.controller.ts'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/.*$/gm, '');
+      expect(code.match(/\b(dto|_dto|options|body|query)\.userId\b/g) ?? []).toEqual([]);
+      expect(code.match(/@(Body|Query)\(\s*['"]userId['"]\s*\)/g) ?? []).toEqual([]);
+      expect(code.match(/['"](key_cortex|system|key_user)['"]/g) ?? []).toEqual([]);
+    });
+
+    it('RED-BEFORE: tsc emits for the three plan handlers exactly the parameter types the real-database suite writes (the body, the guarded tenant, the principal)', async () => {
+      const ts = await import('typescript');
+      const { readFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const out = ts.transpileModule(readFileSync(join(__dirname, 'key-cortex-goals.controller.ts'), 'utf8'), {
+        compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS },
+      }).outputText;
+      const paramTypes = (method: string) => {
+        const end = out.indexOf(`], KeyCortexGoalsController.prototype, "${method}"`);
+        if (end < 0) return undefined;
+        return out.slice(out.lastIndexOf('__decorate([', end), end).match(/__metadata\("design:paramtypes", \[([^\]]*)\]/)?.[1].split(/,\s*/);
+      };
+      // test/key-cortex-actor-binding.integration.test.ts writes these (vitest emits none).
+      expect({
+        createPlanFromGoal: paramTypes('createPlanFromGoal'),
+        createPlanFromCommand: paramTypes('createPlanFromCommand'),
+        executePlan: paramTypes('executePlan'),
+      }).toEqual({
+        createPlanFromGoal: ['String', 'CreatePlanFromGoalDto', 'String', 'Object'],
+        createPlanFromCommand: ['CreatePlanFromCommandDto', 'String', 'Object'],
+        executePlan: ['String', 'Object', 'String', 'Object'],
+      });
     });
   });
 
@@ -144,18 +227,27 @@ describe('KeyCortexGoalsController', () => {
       expect(result).toEqual([]);
     });
 
-    it('creates a trigger rule', async () => {
+    // KEY-R3b-PLAN-AUTHORITY (D-73): a rule records the authenticated member who creates or changes
+    // it (the member its plans run as), so both handlers take the principal and pass it on.
+    it('creates a trigger rule, recording the authenticated member', async () => {
       const dto = { businessId: 'biz_1', eventType: 'invoice_overdue' };
-      const result = await controller.createTriggerRule(dto as any);
-      expect(triggerService.createRule).toHaveBeenCalledWith(dto);
+      const result = await controller.createTriggerRule(dto as any, { id: 'user_1' } as any);
+      expect(triggerService.createRule).toHaveBeenCalledWith(dto, 'user_1');
       expect(result).toEqual({ id: 'rule_1' });
     });
 
-    it('updates a trigger rule', async () => {
+    it('updates a trigger rule, recording the authenticated member', async () => {
       const dto = { businessId: 'biz_1', enabled: false };
-      const result = await controller.updateTriggerRule('rule_1', dto as any);
-      expect(triggerService.updateRule).toHaveBeenCalledWith('biz_1', 'rule_1', dto);
+      const result = await controller.updateTriggerRule('rule_1', dto as any, 'biz_1', { id: 'user_1' } as any);
+      expect(triggerService.updateRule).toHaveBeenCalledWith('biz_1', 'rule_1', dto, 'user_1');
       expect(result).toEqual(expect.objectContaining({ enabled: false }));
+    });
+
+    it('creating or changing a trigger rule with no authenticated user is 401 and writes nothing', async () => {
+      await expect(controller.createTriggerRule({ businessId: 'biz_1', eventType: 'x' } as any)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.updateTriggerRule('rule_1', {} as any, 'biz_1')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(triggerService.createRule).not.toHaveBeenCalled();
+      expect(triggerService.updateRule).not.toHaveBeenCalled();
     });
   });
 });

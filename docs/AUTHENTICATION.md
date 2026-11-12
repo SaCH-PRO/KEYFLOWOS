@@ -50,6 +50,15 @@ forgetting `@UseGuards` produces no error and a working endpoint. That is why
 exists: it is a shrink-only ledger of every unauthenticated handler, and it fails
 the build when an unacknowledged one appears.
 
+**`/trpc` is not in that ledger, and is off by default (D-68).** TrpcModule mounts
+the `@keyflow/api` router as Express middleware, not as controller handlers, so
+the ledger cannot count it, and its procedures authenticate inside tRPC rather
+than through `AuthGuard`. AppModule imports TrpcModule only when
+`TRPC_ENABLED=1`; unset or any other value leaves every `/trpc` request answering
+the same 404 as an unknown route, with no TrpcModule providers in the app. Pinned
+by `apps/server/src/trpc.module.spec.ts` and
+`apps/server/test/trpc-mount-flag.integration.test.ts`.
+
 ---
 
 ## 3. The flows

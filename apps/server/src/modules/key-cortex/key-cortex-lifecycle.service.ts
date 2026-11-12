@@ -8,10 +8,13 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
+import { auditErrorText, auditResultText } from './key-cortex-tool-registry.service';
+import { getToolByName } from '../ai/flow-tool-registry';
 import {
   CortexSession,
   CortexSessionStatus,
@@ -38,6 +41,39 @@ export interface StartTurnInput {
   persona?: CortexPersona;
   provider?: CortexProvider;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * W9-KEY-CORTEX-AUDIT: a tool call's input or answer as the lifecycle's ai_execution_logs row stores it.
+ *
+ * Review SEC-W9KCA-1: the treatment the call's CortexActionLog row gets (auditResultText, V1-19c
+ * SEC-V19c-1): every value of the call's input taken out (the record ids it names kept), bounded as
+ * AiExecutionLogService.sanitizePayload bounds its copy ({ _truncated, _size, _preview } past 5000
+ * characters, the first 500 kept). These rows are read into prompts, business-wide where the caller
+ * names no member (UnifiedMemoryRetrievalService), so the row holds nothing of a member's typed input,
+ * and nothing its CortexActionLog row does not. Undefined (the column is left NULL) when the value is
+ * empty or has no JSON form, so an odd payload never costs the call its row.
+ */
+function executionLogJson(value: unknown, input: unknown): Prisma.InputJsonValue | undefined {
+  const text = auditResultText(value, input);
+  return text === null ? undefined : (JSON.parse(text) as Prisma.InputJsonValue);
+}
+
+/**
+ * W9-KEY-CORTEX-AUDIT review (CR-W9KCA-1): whether a tool call's AiExecutionLog row is
+ * FlowOrchestratorService.executeTool's to write. A flow tool reaches the cortex registry through the
+ * efferent bridge (KeyCortexEfferentBridgeService mirrors FLOW_TOOLS under their own names), which runs
+ * it through executeTool, and executeTool writes that call's row (actor 'flow') for an answer and for a
+ * failure. A second row here counted one call twice in every reader of the table: the hourly
+ * auto-execution cap (KeyCortexExecutorService.fetchApprovalPolicy counts every success row), the
+ * execution-log stats, the morning briefing's failed count and GET ai/execution-logs. A flow-named
+ * call the registry answered without running it (refused, sent for approval), or one an organ
+ * registered under a flow name (the bridge then leaves it to the organ), has no AiExecutionLog row,
+ * as before this packet, when every recordExecution row was refused; its CortexActionLog row is
+ * still written.
+ */
+function executionLoggedByFlow(toolName: string): boolean {
+  return getToolByName(toolName) !== undefined;
 }
 
 export interface RecordExecutionInput {
@@ -334,50 +370,44 @@ export class KeyCortexLifecycleService {
     const { identity } = input;
     const now = new Date();
 
-    const executionLogPromise = (this.prisma.client as any).aiExecutionLog.create({
-      data: {
-        businessId: identity.businessId,
-        userId: identity.userId ?? null,
-        sessionId: identity.sessionId,
-        commandId: identity.commandId,
-        correlationId: identity.correlationId,
-        action: input.toolName,
-        toolName: input.toolName,
-        module: input.module,
-        riskTier: input.riskTier,
-        success: input.success,
-        errorMessage: input.error,
-        inputSummary: input.input as any,
-        outputSummary: input.output as any,
-        durationMs: input.durationMs,
-        startedAt: input.startedAt,
-        planId: input.planId ?? null,
-        planStepId: input.planStepId ?? null,
-        actor: 'key_cortex',
-      },
-    });
+    // W9-KEY-CORTEX-AUDIT: only columns AiExecutionLog has. The write named startedAt, which the model
+    // does not have, so Prisma refused every row, recordExecution rejected and cortex.action_executed
+    // was never emitted. The call's timing is durationMs here (and startedAt/completedAt on its
+    // CortexActionLog row). Review SEC-W9KCA-1: the input, answer and error are stored as the call's
+    // CortexActionLog row stores them (the input's values taken out, bounded). Review CR-W9KCA-1: a
+    // bridged flow tool's row is FlowOrchestratorService.executeTool's, so none is written here.
+    const executionLogPromise = executionLoggedByFlow(input.toolName)
+      ? Promise.resolve()
+      : (this.prisma.client as any).aiExecutionLog.create({
+          data: {
+            businessId: identity.businessId,
+            userId: identity.userId ?? null,
+            sessionId: identity.sessionId,
+            commandId: identity.commandId,
+            correlationId: identity.correlationId,
+            action: input.toolName,
+            toolName: input.toolName,
+            module: input.module,
+            riskTier: input.riskTier,
+            success: input.success,
+            errorMessage: auditErrorText(input.error, input.input) ?? undefined,
+            inputSummary: executionLogJson(input.input, input.input),
+            outputSummary: executionLogJson(input.output, input.input),
+            durationMs: input.durationMs,
+            planId: input.planId ?? null,
+            planStepId: input.planStepId ?? null,
+            actor: 'key_cortex',
+          },
+        });
 
-    const actionLogPromise = (this.prisma.client as any).cortexActionLog.create({
-      data: {
-        sessionId: identity.sessionId,
-        businessId: identity.businessId,
-        userId: identity.userId ?? null,
-        commandId: identity.commandId,
-        correlationId: identity.correlationId,
-        actionType: input.toolName,
-        status: input.success ? 'success' : 'error',
-        description: `${input.module}.${input.toolName}`,
-        result: input.success ? JSON.stringify(input.output) : undefined,
-        error: input.error,
-        requiresApproval: input.requiresApproval,
-        startedAt: input.startedAt,
-        completedAt: input.completedAt,
-        durationMs: input.durationMs,
-        createdAt: now,
-      },
-    });
+    const actionLogPromise = this.recordActionLog(input, now);
 
-    await Promise.all([executionLogPromise, actionLogPromise]);
+    // Both writes settle before this answers (V1-19c): Promise.all rejected on
+    // the first failure while the other write was still in flight, so a caller
+    // could not know whether the CortexActionLog row had been written yet.
+    const settled = await Promise.allSettled([executionLogPromise, actionLogPromise]);
+    const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+    if (failed) throw failed.reason;
 
     this.eventBus.emit({
       source: input.module,
@@ -393,13 +423,91 @@ export class KeyCortexLifecycleService {
         riskTier: input.riskTier,
         durationMs: input.durationMs,
         success: input.success,
-        error: input.error,
+        // Review SEC-W9KCA-1: the bus persists this payload to business_events and cognitive_events, both
+        // read into prompts business-wide: the error as the rows store it, the input's values taken out.
+        error: auditErrorText(input.error, input.input) ?? undefined,
       },
       metadata: {
         correlationId: identity.correlationId,
         sessionId: identity.sessionId,
         entityType: 'AiExecutionLog',
         importance: input.success ? 'normal' : 'high',
+      },
+    });
+  }
+
+  /**
+   * The CortexActionLog row of a tool call the tool loop records, unless the
+   * registry already wrote it (V1-19c).
+   *
+   * KeyCortexToolLoopService calls this right after
+   * KeyCortexToolRegistryService.execute for the same call, and the registry
+   * writes the CortexActionLog row of every execution it runs, awaited before
+   * execute() answers. Writing here too would make every tool-loop execution
+   * two rows. So the row is written only when no registry row of this call
+   * exists: same business, tool and outcome, started inside this call's
+   * window, and the same command thread (correlationId). That keeps the
+   * record of a call the registry answered without running the tool (not
+   * found, refused, invalid input), which only this row records. A failed
+   * lookup writes the row: a duplicate is better than a lost record.
+   *
+   * A tool loop with no turn identity (lifecycle.startTurn threw) runs the
+   * tool with no command thread, so the registry's row has correlationId null
+   * and sessionId 'unknown', and then gives this record a correlationId it
+   * made up afterwards (V1-19c review, CR-V19c-1: the lookup missed and the
+   * call got two rows). A thread-less registry row of the same session (and
+   * the same user, when this record names one) is that call's row too.
+   *
+   * The stored answer and error get the registry row's treatment: the call's
+   * input taken out, bounded (auditResultText, auditErrorText; SEC-V19c-1).
+   */
+  private async recordActionLog(input: RecordExecutionInput, now: Date): Promise<void> {
+    const { identity } = input;
+    const status = input.success ? 'success' : 'error';
+    let auditedByRegistry = false;
+    try {
+      const existing = await this.prisma.client.cortexActionLog.findFirst({
+        where: {
+          businessId: identity.businessId,
+          actionType: input.toolName,
+          status,
+          startedAt: { gte: input.startedAt, lte: input.completedAt },
+          OR: [
+            { correlationId: identity.correlationId },
+            {
+              correlationId: null,
+              sessionId: identity.sessionId,
+              ...(identity.userId ? { userId: identity.userId } : {}),
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      auditedByRegistry = Boolean(existing);
+    } catch (err) {
+      this.logger.warn(
+        `[recordExecution][${identity.businessId}] could not check for the registry's CortexActionLog row: ${(err as Error).message}`,
+      );
+    }
+    if (auditedByRegistry) return;
+
+    await this.prisma.client.cortexActionLog.create({
+      data: {
+        sessionId: identity.sessionId,
+        businessId: identity.businessId,
+        userId: identity.userId ?? null,
+        commandId: identity.commandId,
+        correlationId: identity.correlationId,
+        actionType: input.toolName,
+        status,
+        description: `${input.module}.${input.toolName}`,
+        result: input.success ? auditResultText(input.output, input.input) : null,
+        error: auditErrorText(input.error, input.input),
+        requiresApproval: input.requiresApproval,
+        startedAt: input.startedAt,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        createdAt: now,
       },
     });
   }

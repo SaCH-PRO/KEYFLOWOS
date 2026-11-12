@@ -13,8 +13,19 @@ import { KeyActionBoundaryService } from './action-boundary/key-action-boundary.
 
 function createMockClient() {
   const rows: any[] = [];
-  return {
+  // V1-32: the approver's authority is read at approval and re-read in the
+  // execution claim's transaction (the claim itself is proved against the real
+  // database in test/key-action-proposal-claim.integration.test.ts). Here the
+  // approver is a member whose authority never changes.
+  const client: any = {
     rows,
+    user: { findUnique: vi.fn(async () => ({ role: 'USER', deletedAt: null, bannedAt: null })) },
+    business: { findFirst: vi.fn(async () => ({ ownerId: 'user_1' })) },
+    membership: {
+      findUnique: vi.fn(async () => ({ id: 'm_1', role: 'OWNER', maxApprovalTier: 0, permissionScopes: null })),
+    },
+    $queryRaw: vi.fn(async () => []),
+    $transaction: vi.fn(async (fn: (tx: any) => Promise<unknown>) => fn(client)),
     keyActionProposal: {
       create: vi.fn(async ({ data }: any) => {
         const row = { ...data, id: 'prop_1', createdAt: new Date(), updatedAt: new Date() };
@@ -29,8 +40,20 @@ function createMockClient() {
         Object.assign(row, data, { updatedAt: new Date() });
         return row;
       }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const matches = rows.filter(
+          (r) =>
+            r.id === where.id &&
+            (where.businessId === undefined || r.businessId === where.businessId) &&
+            (where.status === undefined || r.status === where.status) &&
+            (!('approvedBy' in where) || (r.approvedBy ?? null) === where.approvedBy),
+        );
+        for (const row of matches) Object.assign(row, data, { updatedAt: new Date() });
+        return { count: matches.length };
+      }),
     },
   };
+  return client;
 }
 
 describe('KeyActionProposalService', () => {

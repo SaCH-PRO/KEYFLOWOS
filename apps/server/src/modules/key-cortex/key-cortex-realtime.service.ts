@@ -17,6 +17,7 @@ import { Interval } from '@nestjs/schedule';
 import { KeyCortexGateway } from './key-cortex.gateway';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
+import { keyCronsDisabled } from '../../core/config/env';
 
 // ------------------------------------------------------------------
 // Event payload types
@@ -228,6 +229,7 @@ export class KeyCortexRealtimeService implements OnModuleInit {
   // empirically, not assumed.) The work stays in handlePeriodicHealthPush() so callers and
   // tests are unchanged; only the scheduled entry point is guarded.
   handlePeriodicHealthPushTick(): void {
+    if (keyCronsDisabled()) return;
     runGuarded('KeyCortexRealtimeService', () => this.handlePeriodicHealthPush(), this.logger);
   }
 

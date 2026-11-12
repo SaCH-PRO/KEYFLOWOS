@@ -1,14 +1,17 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { CrmService } from '../crm/crm.service';
 import { CrmCommunicationService } from '../crm/crm-communication.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { CommerceService } from './commerce.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
-import { CreditNoteService } from '../finance/credit-note.service';
+import { CreditNoteService, RESERVED_CREDIT_NOTE_NUMBER_PREFIX } from '../finance/credit-note.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 import type { DocumentExtractionResult } from '../ai/document-intelligence.service';
+import { PaymentEvidenceService } from './payment-evidence.service';
 
 export type DriveIntakeActionType =
   | 'create_invoice'
@@ -54,7 +57,58 @@ export class DriveIntakeOrchestrator {
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(CreditNoteService) private readonly creditNotes: CreditNoteService,
     @Inject(TaskAssignmentService) private readonly taskAssignment: TaskAssignmentService,
+    @Inject(PaymentEvidenceService) private readonly paymentEvidence: PaymentEvidenceService,
   ) {}
+
+  /**
+   * R0-CMF2-PAYMENT-ACTOR-GAPS: the placeholders callers pass when no person
+   * approved the plan: the ingestion auto-execute ('system') and the data-inbox
+   * fallback when the request carries no user ('user'). Neither is a User id,
+   * so neither is recorded as a payment's recorder: none is invented (the
+   * payments-actor PA-08 rule).
+   */
+  private static readonly NO_HUMAN_APPROVER_IDS: ReadonlySet<string> = new Set(['system', 'user']);
+
+  private static approverActorId(userId: string | null | undefined): string | null {
+    return userId && !DriveIntakeOrchestrator.NO_HUMAN_APPROVER_IDS.has(userId) ? userId : null;
+  }
+
+  /**
+   * W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (R0-CMF2 review SEC-CMF2-3;
+   * the R0-02 rule; owner ruling D-46): a person approving a plan needs a
+   * Membership in the business whose scope map (or, without one, the role
+   * defaults) holds revenue:write, because the plan's steps create and
+   * finalize invoices, record payments and apply credit notes. The drive
+   * approve route's guards were the only check, so the second door to the same
+   * plan, POST data-inbox/.../items/:id/approve (operations:write only, which
+   * hands the IngestionItem's plan to executePlan), let a member with
+   * revenue:read, and a SUPER_ADMIN who is not a member (ModuleScopeGuard waves
+   * that role through), run it. The check lives here, so every caller is held
+   * to it, as assertMemberMayApply holds every caller of a credit step.
+   * No Membership answers 403 'Not authorized to update this invoice' (D-46, as
+   * the commerce invoice writes answer); below revenue:write, the guard's
+   * message. The placeholders that name no person ('system' from the ingestion
+   * auto-execute the owner switched on, 'user' from the data-inbox fallback)
+   * are not looked up: PA-18b's auto-execute is unchanged, and a credit step
+   * still refuses them (assertMemberMayApply).
+   */
+  async assertApproverMayRunPlan(businessId: string, userId: string | null | undefined): Promise<void> {
+    const approver = DriveIntakeOrchestrator.approverActorId(userId);
+    if (!approver) return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: approver, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not authorized to update this invoice');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
+  }
 
   /**
    * Build an action plan from an extracted Drive file. This resolves/creates the
@@ -249,6 +303,12 @@ export class DriveIntakeOrchestrator {
 
   /**
    * Execute an approved plan. This is the only path that writes financial records.
+   *
+   * V1-41-DM-UNTRUSTED-MONEY-INPUTS (M32, D-27): a record_payment step writes
+   * the payment PENDING (PaymentEvidenceService.recordPendingPayment): the
+   * amount is read from a document, so approving the plan moves no balance and
+   * posts nothing. A member with revenue:write confirms it through the
+   * operator door (PaymentEvidenceService.confirmPendingPayment).
    */
   async executePlan(
     businessId: string,
@@ -256,6 +316,11 @@ export class DriveIntakeOrchestrator {
     userId: string,
     planOverride?: DriveIntakePlan,
   ): Promise<{ success: boolean; results: ActionResult[] }> {
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-1 (D-46): the approver is
+    // checked first, before the intake is read or claimed, so a refused
+    // approval writes nothing and the plan stays approvable by a member who may.
+    await this.assertApproverMayRunPlan(businessId, userId);
+
     const intake = await this.prisma.client.driveIntakeFile.findFirst({
       where: { id: intakeFileId, businessId },
     });
@@ -270,11 +335,41 @@ export class DriveIntakeOrchestrator {
     const plan = planOverride ?? (intake.proposedActions as unknown as DriveIntakePlan | null);
     if (!plan) throw new BadRequestException('No action plan found for this intake file');
 
+    // V1-44b review (SEC-V44b-R2): a plan that credits an invoice is approved
+    // only by a member who may apply a credit note (revenue:write, the rule
+    // CreditNoteService.apply enforces), and that is checked BEFORE the claim.
+    // Checked only at apply, a member with revenue:read (refused POST
+    // credit-notes) still created the step's note through the plan, and their
+    // run used up the one-shot claim: the intake ended 'error' and the member
+    // who may approve it never could. The placeholders ('system', 'user') name
+    // no member and are refused here too. A refused approval writes nothing
+    // and leaves the intake 'reviewing'.
+    if (plan.actions.some((a) => a.type === 'apply_credit_note')) {
+      await this.creditNotes.assertMemberMayApply(businessId, DriveIntakeOrchestrator.approverActorId(userId));
+    }
+
+    // V1-44b (V1-44 review SEC-V44-3): the approval is a compare-and-set
+    // claim. The status checks above are reads and 'approved' was written only
+    // after every step, so two concurrent approvals (two members, a double
+    // click, the ingestion auto-execute beside a member) both ran the plan:
+    // once V1-44 made apply_credit_note reach the ledger, the invoice was
+    // credited twice. Exactly one caller moves the intake reviewing ->
+    // approved; the other is refused here, before any step, and writes
+    // nothing. A failed run still ends 'error' (below); a successful one
+    // stamps processedAt.
+    const claimed = await this.prisma.client.driveIntakeFile.updateMany({
+      where: { id: intakeFileId, businessId, status: 'reviewing' },
+      data: { status: 'approved' },
+    });
+    if (claimed.count !== 1) {
+      throw new BadRequestException('This intake plan is already being executed or has been executed');
+    }
+
     const results: ActionResult[] = [];
     let createdInvoiceId: string | undefined;
 
     try {
-      for (const action of plan.actions) {
+      for (const [actionIndex, action] of plan.actions.entries()) {
         switch (action.type) {
           case 'create_invoice': {
             const payload = action.payload as {
@@ -293,7 +388,10 @@ export class DriveIntakeOrchestrator {
             });
             createdInvoiceId = invoice.id;
             // Finalize immediately so the ledger posts (Dr AR / Cr Revenue).
-            await this.invoiceWorkflow.transition(invoice.id, 'SENT');
+            // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): the approver issues it and is
+            // named on the ACCRUAL invoice_finalized posting, as record_payment names them
+            // (R0-CMF2); the ingestion auto-execute, with no human, records null (PA-08).
+            await this.invoiceWorkflow.transition(invoice.id, 'SENT', { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
             results.push({ action: 'create_invoice', success: true, entityId: invoice.id });
             break;
           }
@@ -306,12 +404,29 @@ export class DriveIntakeOrchestrator {
             };
             const invoiceId = payload.invoiceId ?? createdInvoiceId;
             if (!invoiceId) throw new BadRequestException('No invoice available for payment');
-            const res = await this.commerce.recordPayment(invoiceId, businessId, {
+            // R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-3): the approver records the
+            // payment (Payment.recordedBy, the posting's createdById, the
+            // contact event). The recorder comes from the caller, never from
+            // the extracted plan payload.
+            //
+            // R0-CMF2 review (SEC-CMF2-2): the status check above is a read,
+            // and the intake flips to 'approved' only after every write, so
+            // two concurrent approvals (or a re-run after a crash before that
+            // flip) both reach this step. The key, derived from this intake
+            // file and this step, makes the second answer with the first's
+            // payment instead of proposing it twice.
+            //
+            // V1-41 (D-27): the payment is recorded PENDING, never posted
+            // here; it moves no balance until a member confirms it. The key
+            // keeps answering the same row after that confirmation, so a
+            // re-run never proposes the payment again.
+            const pending = await this.paymentEvidence.recordPendingPayment(invoiceId, businessId, {
               amount: payload.amount,
               method: payload.method,
               reference: payload.reference,
-            });
-            results.push({ action: 'record_payment', success: true, entityId: res.payment.id });
+              idempotencyKey: `drive:${intakeFileId}:${actionIndex}`,
+            }, { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
+            results.push({ action: 'record_payment', success: true, entityId: pending.id });
             break;
           }
           case 'apply_credit_note': {
@@ -322,13 +437,38 @@ export class DriveIntakeOrchestrator {
             };
             const invoiceId = payload.invoiceId ?? createdInvoiceId;
             if (!invoiceId) throw new BadRequestException('No invoice available for credit note');
-            const cn = await this.creditNotes.create(businessId, {
-              invoiceId,
-              creditNoteNumber: `CN-${Date.now()}`,
-              amount: payload.amount,
-              reason: payload.reason,
-            });
-            await this.creditNotes.apply(businessId, cn.id, { userId });
+            // V1-44b (SEC-V44-3): the step is keyed on this intake file and
+            // this step's position, as record_payment is (SEC-CMF2-2): the
+            // note's number is that key (unique per business), so a second
+            // execution of the same step (a concurrent run that got past the
+            // claim's reads, or a re-run of the plan) finds the step's own note
+            // instead of crediting the invoice again: one note, one apply, one
+            // REVERSAL. CN-<Date.now()> was a new note on every run.
+            const creditNoteNumber = DriveIntakeOrchestrator.creditNoteNumberFor(intakeFileId, actionIndex);
+            const step = { invoiceId, amount: payload.amount, reason: payload.reason };
+            const cn = await this.keyedCreditNote(businessId, creditNoteNumber, step);
+            if (cn.status === 'DRAFT') {
+              // V1-44b (SEC-V44-4): applied as the approving member, never as a
+              // placeholder ('system', 'user'), as the payment step records
+              // its payment; with no member CreditNoteService.apply refuses 403
+              // (and executePlan refused such an approver before the claim,
+              // SEC-V44b-R2).
+              // V1-44b review (SEC-V44b-R1): at the amount this step approves;
+              // a note PATCHed since it was read is refused 409, not posted.
+              try {
+                await this.creditNotes.apply(businessId, cn.id, {
+                  userId: DriveIntakeOrchestrator.approverActorId(userId),
+                  expectedAmount: payload.amount,
+                });
+              } catch (applyErr) {
+                // A concurrent run of this same step applied it first: that is this step done.
+                const now = await this.findKeyedCreditNote(businessId, creditNoteNumber);
+                if (now?.status !== 'APPLIED') throw applyErr;
+                DriveIntakeOrchestrator.assertSameStep(creditNoteNumber, now, step);
+              }
+            } else if (cn.status !== 'APPLIED') {
+              throw new ConflictException(`Credit note ${creditNoteNumber} is ${cn.status}; this plan step does not apply it again`);
+            }
             results.push({ action: 'apply_credit_note', success: true, entityId: cn.id });
             break;
           }
@@ -401,15 +541,97 @@ export class DriveIntakeOrchestrator {
     }
   }
 
+  /** V1-44b (SEC-V44-3): the credit note number of one apply_credit_note step: the step's identity, never the approver's. */
+  private static creditNoteNumberFor(intakeFileId: string, actionIndex: number): string {
+    return `${RESERVED_CREDIT_NOTE_NUMBER_PREFIX}${intakeFileId}-${actionIndex}`;
+  }
+
+  private findKeyedCreditNote(businessId: string, creditNoteNumber: string) {
+    return this.prisma.client.creditNote.findFirst({
+      where: { businessId, creditNoteNumber },
+      select: { id: true, status: true, invoiceId: true, amount: true },
+    });
+  }
+
+  /**
+   * V1-44b review (SEC-V44b-R1, CRR-V44b-1): a note carrying the step's
+   * number is this step's only when it credits what the step approves: the
+   * same invoice and the same amount. The number outlives the document
+   * version (a re-synced Drive file keeps its DriveIntakeFile id and returns to
+   * 'reviewing' with a new plan), so a note left by an earlier plan of another
+   * amount (a DRAFT whose apply failed, or an APPLIED one) is refused 409, as
+   * record_payment refuses a key replayed with another amount
+   * (PaymentEvidenceService): never applied in this approver's name, never
+   * reported as this step's credit.
+   */
+  private static assertSameStep(
+    creditNoteNumber: string,
+    note: { status: string; invoiceId: string; amount: unknown },
+    input: { invoiceId: string; amount: number },
+  ): void {
+    if (note.invoiceId !== input.invoiceId) {
+      throw new ConflictException(`Credit note ${creditNoteNumber} belongs to another invoice`);
+    }
+    const noted = note.amount == null ? null : new Prisma.Decimal(String(note.amount));
+    if (!noted || !noted.equals(new Prisma.Decimal(String(input.amount)))) {
+      throw new ConflictException(
+        `Credit note ${creditNoteNumber} (${note.status}) credits ${String(noted)}, not the ${String(input.amount)} this plan step approves; it is not applied for this plan`,
+      );
+    }
+  }
+
+  /**
+   * V1-44b (SEC-V44-3): the step's note, created on its first execution. A
+   * note already carrying the step's number is that step's (a re-run, or a
+   * concurrent run that created it first; the number is unique per business,
+   * so of two creates one is refused and reads the other's) when it credits
+   * the same invoice and amount (assertSameStep); any other is refused 409.
+   * No member can mint the number: POST credit-notes refuses the
+   * RESERVED_CREDIT_NOTE_NUMBER_PREFIX.
+   */
+  private async keyedCreditNote(
+    businessId: string,
+    creditNoteNumber: string,
+    input: { invoiceId: string; amount: number; reason?: string },
+  ): Promise<{ id: string; status: string; invoiceId: string }> {
+    const sameStep = (note: { id: string; status: string; invoiceId: string; amount: unknown }) => {
+      DriveIntakeOrchestrator.assertSameStep(creditNoteNumber, note, input);
+      return note;
+    };
+    const existing = await this.findKeyedCreditNote(businessId, creditNoteNumber);
+    if (existing) return sameStep(existing);
+    try {
+      const created = await this.creditNotes.create(businessId, {
+        invoiceId: input.invoiceId,
+        creditNoteNumber,
+        amount: input.amount,
+        reason: input.reason,
+      });
+      return { id: created.id, status: created.status, invoiceId: created.invoiceId };
+    } catch (createErr) {
+      const raced = await this.findKeyedCreditNote(businessId, creditNoteNumber);
+      if (!raced) throw createErr;
+      return sameStep(raced);
+    }
+  }
+
   async rejectIntakeFile(businessId: string, intakeFileId: string, userId?: string): Promise<void> {
     const intake = await this.prisma.client.driveIntakeFile.findFirst({
       where: { id: intakeFileId, businessId },
     });
     if (!intake) throw new NotFoundException('Drive intake file not found');
-    await this.prisma.client.driveIntakeFile.update({
-      where: { id: intakeFileId },
+    // W7-DRIVE-INTAKE-SCOPE review repair SEC-W7DI-2: an approved intake (its
+    // plan claimed, so being run or already run: its payment, invoice or credit
+    // note exists) is never relabelled 'rejected', or the intake record would
+    // no longer match the money written. Compare-and-set, as the approval's
+    // claim is: a reject that loses the race to a claim is refused too.
+    const rejected = await this.prisma.client.driveIntakeFile.updateMany({
+      where: { id: intakeFileId, businessId, status: { not: 'approved' } },
       data: { status: 'rejected', processedAt: new Date() },
     });
+    if (rejected.count !== 1) {
+      throw new BadRequestException('This intake plan has already been executed; it cannot be rejected');
+    }
     if (userId) {
       await this.resolvePendingApproval(businessId, intakeFileId, 'rejected', userId).catch((err) => {
         this.logger.warn(`Failed to resolve approval on reject: ${err instanceof Error ? err.message : String(err)}`);

@@ -1,0 +1,148 @@
+/**
+ * PR196-PROJECTS-WEB: the project routes the Projects screens call that
+ * lib/client.ts does not type: the budget read, the board reorder, the
+ * assignee options and the task writes that name an assignee.
+ *
+ * Every call goes through lib/api.ts (the API base, the member's token, the
+ * unsendable-request guard); none builds a web-relative URL. The project-budget
+ * view used to fetch `/api/projects/...`, a path the web app has no route for,
+ * so every project read "No budget set" (WPD-03).
+ */
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import type { ProjectTask } from "@/lib/client";
+
+const enc = encodeURIComponent;
+
+/**
+ * GET /projects/businesses/:bid/projects/:pid/budget (ProjectsService.getProjectBudget). Amounts are in the business currency.
+ *
+ * W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): for a member who does not
+ * read expenses the route answers 200 with the costs withheld: totalCost, timeCost, expenseCost,
+ * remainingBudget, percentUsed and status are null. The budget and the hours burn are always numbers.
+ */
+export interface ProjectBudget {
+  projectId: string;
+  budgetAmount: number;
+  budgetHours: number;
+  totalCost: number | null;
+  timeCost: number | null;
+  expenseCost: number | null;
+  trackedHours: number;
+  remainingBudget: number | null;
+  percentUsed: number | null;
+  percentHoursUsed: number;
+  status: "HEALTHY" | "WARNING" | "AT_RISK" | "OVER_BUDGET" | string | null;
+}
+
+/** The budget with its costs, as the route serves it to a member who reads expenses. */
+export type ProjectBudgetWithCosts = ProjectBudget & {
+  totalCost: number;
+  timeCost: number;
+  expenseCost: number;
+  remainingBudget: number;
+  percentUsed: number;
+  status: string;
+};
+
+/** Whether the route served the costs (CR-W9PS-1): any withheld (null) cost field means it did not. */
+export function budgetHasCosts(b: ProjectBudget): b is ProjectBudgetWithCosts {
+  return (
+    b.totalCost !== null &&
+    b.timeCost !== null &&
+    b.expenseCost !== null &&
+    b.remainingBudget !== null &&
+    b.percentUsed !== null &&
+    b.status !== null
+  );
+}
+
+export function getProjectBudget(businessId: string, projectId: string) {
+  return apiGet<ProjectBudget>(`/projects/businesses/${enc(businessId)}/projects/${enc(projectId)}/budget`);
+}
+
+/** A project task with the board fields the server returns (ProjectTask.status, .position). */
+export type ProjectBoardTask = ProjectTask & { status?: string; position?: number };
+
+export interface TaskMove {
+  taskId: string;
+  status: string;
+  position: number;
+}
+
+/**
+ * POST /projects/businesses/:bid/projects/:pid/tasks/reorder. The server checks
+ * the whole batch first and sends any status change through updateTask's door
+ * (PR196-PROJECTS-SERVER), so a refused batch writes none of its moves.
+ */
+export function reorderProjectTasks(businessId: string, projectId: string, updates: TaskMove[]) {
+  return apiPost<ProjectBoardTask[]>({
+    path: `/projects/businesses/${enc(businessId)}/projects/${enc(projectId)}/tasks/reorder`,
+    body: { updates },
+  });
+}
+
+/**
+ * PATCH /projects/businesses/:bid/tasks/:taskId {position}: a task's position alone. updateTask
+ * writes it with no status or completion change, no evidence gate and no feed row (review
+ * SEC-W196-1: the reorder route reads any status it is sent for a task whose status and completion
+ * disagree as a status change, so such a task's position is saved here instead).
+ */
+export function setProjectTaskPosition(businessId: string, taskId: string, position: number) {
+  return apiPatch<ProjectBoardTask>(`/projects/businesses/${enc(businessId)}/tasks/${enc(taskId)}`, { position });
+}
+
+/** Who a project task may be given to (D-87): a member of the business or one of its booking staff. */
+export interface TaskAssigneeOption {
+  type: "User" | "StaffMember";
+  id: string;
+  name: string;
+}
+
+const EMAIL_SHAPED = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * GET /businesses/:bid/task-assignments/options (TaskAssignmentService.getAssignableOptions):
+ * the business's members and booking staff. KEY is left out: a person may not
+ * assign a task to KEY (PR196-PROJECTS-SERVER answers 404 for it).
+ *
+ * Review SEC-W196-3: the server names a member who has no name by their email, and any member may
+ * read the list (STAFF with team:none included). Screens show names only: an email-shaped name is
+ * replaced by a neutral label that tells options apart by the end of their id.
+ */
+export async function fetchTaskAssigneeOptions(businessId: string) {
+  const res = await apiGet<unknown>(`/businesses/${enc(businessId)}/task-assignments/options`);
+  if (!Array.isArray(res.data)) return { ...res, data: null as TaskAssigneeOption[] | null };
+  const options = res.data
+    .filter(
+      (o): o is TaskAssigneeOption =>
+        typeof o === "object" && o !== null &&
+        ((o as TaskAssigneeOption).type === "User" || (o as TaskAssigneeOption).type === "StaffMember") &&
+        typeof (o as TaskAssigneeOption).id === "string" && (o as TaskAssigneeOption).id !== "" &&
+        typeof (o as TaskAssigneeOption).name === "string",
+    )
+    .map((o) => ({
+      type: o.type,
+      id: o.id,
+      name: EMAIL_SHAPED.test(o.name.trim())
+        ? `Unnamed ${o.type === "User" ? "member" : "staff member"} (…${o.id.slice(-4)})`
+        : o.name,
+    }));
+  return { ...res, data: options };
+}
+
+/** POST /projects/businesses/:bid/projects/:pid/tasks, naming an assignee when one is chosen. */
+export function createProjectTaskFor(
+  businessId: string,
+  projectId: string,
+  data: { title: string; dueDate?: string; assigneeId?: string },
+) {
+  return apiPost<ProjectBoardTask>({
+    path: `/projects/businesses/${enc(businessId)}/projects/${enc(projectId)}/tasks`,
+    body: data,
+  });
+}
+
+/** PATCH /projects/businesses/:bid/tasks/:taskId {assigneeId}; null unassigns. */
+export function setProjectTaskAssignee(businessId: string, taskId: string, assigneeId: string | null) {
+  return apiPatch<ProjectBoardTask>(`/projects/businesses/${enc(businessId)}/tasks/${enc(taskId)}`, { assigneeId });
+}

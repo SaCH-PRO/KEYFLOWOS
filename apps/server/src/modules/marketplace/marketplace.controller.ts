@@ -7,6 +7,8 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 
 @Controller('marketplace')
 @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
@@ -14,6 +16,7 @@ export class MarketplaceController {
   constructor(
     @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
     @Inject(CommerceIntegrationService) private readonly commerceIntegration: CommerceIntegrationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('businesses/:businessId/dashboard')
@@ -143,19 +146,31 @@ export class MarketplaceController {
     return this.marketplaceService.getOrder(businessId, orderId);
   }
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (D-77): an order created paid records its
+   * payment through the paid door, with the authenticated member as the
+   * recorder (revenue write, D-46); never a body field.
+   */
   @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/orders')
-  createOrder(@Param('businessId') businessId: string, @Body() body: any) {
-    return this.marketplaceService.createOrder(businessId, body);
+  createOrder(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user?: { id?: string } }) {
+    return this.marketplaceService.createOrder(businessId, body, req?.user?.id ?? null);
   }
 
+  /**
+   * W10-STORE-ORDER-PAID (D-112): marking an order PAID (paymentStatus PAID)
+   * records its payment through the paid door, which takes a member with
+   * revenue write (403 otherwise); the recorder is the authenticated member,
+   * never a body field. A status change alone stays open to every member.
+   */
   @Patch('businesses/:businessId/orders/:orderId/status')
   updateOrderStatus(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.marketplaceService.updateOrderStatus(businessId, orderId, body.status, body);
+    return this.marketplaceService.updateOrderStatus(businessId, orderId, body.status, body, req?.user?.id ?? null);
   }
 
   @Get('businesses/:businessId/shipments')
@@ -260,15 +275,26 @@ export class MarketplaceController {
     return this.marketplaceService.updatePurchaseOrder(businessId, poId, body);
   }
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-1): the 'refund' of a
+   * STOREFRONT order is the D-14 refund door (StoreOrderService.refundOrder),
+   * which takes a member with revenue write; the refunder is the authenticated
+   * member, never a body field. Review (SEC-R3-1): so is the refund of an
+   * order created paid (D-77), and any other order's refund (an Expense) takes
+   * revenue write too (MarketplaceService.fulfillOrder). W10-STORE-ORDER-PAID
+   * (D-112): so does 'mark_paid', which records the payment through the paid
+   * door with this member as the recorder; the other actions stay open.
+   */
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/fulfill')
   fulfillOrder(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: { action: string; [key: string]: any },
+    @Req() req: { user?: { id?: string } },
   ) {
     const { action, ...data } = body;
-    return this.marketplaceService.fulfillOrder(businessId, orderId, action, data);
+    return this.marketplaceService.fulfillOrder(businessId, orderId, action, data, req?.user?.id ?? null);
   }
 
   @CrmRateLimit(10, 60_000)
@@ -340,19 +366,36 @@ export class MarketplaceController {
     return this.marketplaceService.updateDeliveryConfig(businessId, body);
   }
 
+  // V1-84 review (FOLLOW3-D5 ST-4): the order's linked contact (id, name,
+  // email, phone) is shown only to a member who may open it (V1-08 rule,
+  // contactVisibilityFilter); otherwise `contact` is null, exactly as for an
+  // order with no linked or a deleted contact. The order, revenue, expenses,
+  // project and margin are the order's and stay. OWNER and SUPER_ADMIN get
+  // exactly today's answer.
   @Get('businesses/:businessId/orders/:orderId/cross-links')
-  getOrderCrossLinks(
+  async getOrderCrossLinks(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
+    @Req() req: { user: { id: string } },
   ) {
-    return this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
+    const access = await resolveCrmAccess(this.prisma, businessId, req.user.id);
+    const links = await this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
+    if (!links.contact) return links;
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, req.user.id, [links.contact.id]);
+    return !canOpen || canOpen(links.contact.id) ? links : { ...links, contact: null };
   }
 
+  // V1-84 (FOLLOW3-D5): a contact-keyed route answers only for a contact the
+  // caller may open by the GET crm contacts/:contactId rule (V1-08
+  // assertContactVisible): a hidden contact gets the same 404 'Contact not
+  // found' as an unknown id, before the service runs.
   @Get('businesses/:businessId/contacts/:contactId/order-history')
-  getContactOrderHistory(
+  async getContactOrderHistory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.commerceIntegration.getContactOrderHistory(businessId, contactId);
   }
 

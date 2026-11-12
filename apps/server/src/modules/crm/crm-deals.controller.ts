@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { PickType } from '@nestjs/mapped-types';
+import { IsArray, IsString, ValidateBy, buildMessage, type ValidationOptions } from 'class-validator';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -18,6 +20,73 @@ import {
 import { DealForecastService } from './deal-forecast.service';
 import { DealVelocityService } from './deal-velocity.service';
 import { WonLostReasonService } from './won-lost-reason.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible } from './crm-permissions.helper';
+
+/**
+ * True when `value` is a string the database can compare: no NUL code unit
+ * (Postgres refuses it in text, 22021) and no unpaired UTF-16 surrogate (Prisma
+ * refuses it before the query is sent). Every other string, a paired surrogate
+ * and any other control character included, is left to the lookup.
+ */
+function isComparableText(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  for (let i = 0; i < value.length; i += 1) {
+    const unit = value.charCodeAt(i);
+    if (unit === 0) return false;
+    if (unit >= 0xdc00 && unit <= 0xdfff) return false;
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i += 1;
+    }
+  }
+  return true;
+}
+
+const IsComparableText = (validationOptions?: ValidationOptions) =>
+  ValidateBy(
+    {
+      name: 'isComparableText',
+      validator: {
+        validate: (value) => isComparableText(value),
+        defaultMessage: buildMessage(
+          (eachPrefix) => `${eachPrefix}$property must not contain a NUL character or an unpaired surrogate`,
+          validationOptions,
+        ),
+      },
+    },
+    validationOptions,
+  );
+
+/**
+ * The POST deals/bulk/move-stage body (R0-13f): BulkMoveStageDto's stageId rule
+ * (PickType copies its validation metadata) and dealIds an array of strings.
+ * BulkMoveStageDto checks only that dealIds is an array, so an element such as
+ * `{ not: '' }` passed the global ValidationPipe and reached moveStage's
+ * findFirst({ where: { id, businessId } }) as a Prisma filter, matching a deal
+ * of the tenant the caller never named. The empty-list and 100-id checks stay
+ * in CrmDealsService.bulkMoveStage with their own messages. Declared before
+ * CrmDealsController, whose decorator metadata names it when the class is
+ * defined.
+ *
+ * Each deal id and the stageId must also be text the database can compare
+ * (R0-13f review): bulkMoveStage catches each id's error and returns its
+ * message in the 201 body, so a NUL byte or an unpaired surrogate made
+ * moveStage's findFirst throw Prisma's raw error (the server source path, a
+ * code frame, the PostgresError) to the caller, where the single move answers
+ * the same input with GlobalHttpExceptionFilter's sanitised 500. Refused here
+ * with 400 before any deal moves.
+ */
+export class BulkMoveDealsStageDto extends PickType(BulkMoveStageDto, ['stageId'] as const) {
+  @IsArray()
+  @IsString({ each: true })
+  @IsComparableText({ each: true })
+  dealIds!: string[];
+
+  @IsComparableText()
+  stageId!: string;
+}
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -27,6 +96,7 @@ export class CrmDealsController {
     @Inject(DealForecastService) private readonly forecast: DealForecastService,
     @Inject(DealVelocityService) private readonly velocity: DealVelocityService,
     @Inject(WonLostReasonService) private readonly reasons: WonLostReasonService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // ---- intelligence ----
@@ -144,7 +214,8 @@ export class CrmDealsController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/deals')
-  listDeals(
+  async listDeals(
+    @Req() req: { user: { id: string } },
     @Param('businessId') businessId: string,
     @Query('stageIds') stageIds?: string | string[],
     @Query('ownerId') ownerId?: string,
@@ -160,6 +231,13 @@ export class CrmDealsController {
     @Query('skip') skip?: string,
     @Query('take') take?: string,
   ) {
+    // Filtered to one contact, this is GET contacts/:contactId/deals under
+    // another path: it answers only for a contact the caller may open, and a
+    // hidden contact gets the same 404 'Contact not found' as an unknown id,
+    // before the service runs (FOLLOW3-D3 review ST-1).
+    if (contactId !== undefined && contactId !== '') {
+      await assertContactVisible(this.prisma, businessId, String(contactId), req.user.id);
+    }
     const toArr = (v?: string | string[]) => (Array.isArray(v) ? v : v ? v.split(',').filter(Boolean) : undefined);
     const validStatus = ['OPEN', 'WON', 'LOST', 'ALL'];
     return this.deals.listDeals({
@@ -225,6 +303,29 @@ export class CrmDealsController {
     return this.deals.deleteDeal({ businessId, dealId, actorId: req?.user?.id });
   }
 
+  /**
+   * Move several deals of the path business to one of its stages.
+   *
+   * Declared BEFORE `deals/:dealId/move-stage` (R0-13f): below it this route
+   * was answered by moveStage as deal 'bulk' (404), so the deals board's and
+   * list's bulk move never worked. It needs the single move's guards and crm
+   * 'write', and CrmDealsService.bulkMoveStage hands each id to moveStage, the
+   * single move's own tenant check: another tenant's deal or an unknown id is
+   * skipped with the same per-id result, and another tenant's stage moves
+   * nothing. route-shadowing.spec.ts keeps the order.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('crm', 'write')
+  @CrmRateLimit(10, 60_000)
+  @Post('businesses/:businessId/deals/bulk/move-stage')
+  bulkMoveStage(
+    @Param('businessId') businessId: string,
+    @Body() body: BulkMoveDealsStageDto,
+    @Req() req: any,
+  ) {
+    return this.deals.bulkMoveStage({ businessId, dealIds: body.dealIds, stageId: body.stageId, actorId: req?.user?.id });
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
@@ -236,18 +337,6 @@ export class CrmDealsController {
     @Req() req: any,
   ) {
     return this.deals.moveStage({ businessId, dealId, stageId: body.stageId, actorId: req?.user?.id });
-  }
-
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('crm', 'write')
-  @CrmRateLimit(10, 60_000)
-  @Post('businesses/:businessId/deals/bulk/move-stage')
-  bulkMoveStage(
-    @Param('businessId') businessId: string,
-    @Body() body: BulkMoveStageDto,
-    @Req() req: any,
-  ) {
-    return this.deals.bulkMoveStage({ businessId, dealIds: body.dealIds, stageId: body.stageId, actorId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -280,11 +369,16 @@ export class CrmDealsController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/deals')
-  listContactDeals(
+  async listContactDeals(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
     @Query('status') status?: string,
   ) {
+    // FOLLOW3-D3: only for a contact the caller may open by the GET crm
+    // contacts/:contactId rule (V1-08); a hidden contact gets the same 404
+    // 'Contact not found' as an unknown id, before the service runs.
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     const validStatus = ['OPEN', 'WON', 'LOST', 'ALL'];
     return this.deals.listContactDeals({
       businessId,

@@ -10,6 +10,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { UndoService } from './undo.service';
 import { AgentStateMachineService } from './agent-state-machine.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface PlanStepJob {
   planId: string;
@@ -36,6 +37,27 @@ export interface CronTriggerJob {
   businessId: string;
   eventName: string;
   payload: Record<string, any>;
+}
+
+/** The job name a trigger's repeatable is registered under: stable across schedule changes, unique per AgentTrigger id. */
+const cronTriggerJobName = (triggerId: string) => `cron-trigger:${triggerId}`;
+
+/** FOLLOW3-C3: how long onModuleDestroy waits for the workers' and events' own connections to be ready before it closes them. */
+const READY_BEFORE_CLOSE_MS = 2_000;
+
+/** Resolves once every one of these is ready or failed to initialize, or after `ms`, whichever comes first. */
+async function readyOrAfter(ms: number, items: Array<{ waitUntilReady(): Promise<unknown> } | undefined>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.all(items.map((item) => item?.waitUntilReady().catch(() => undefined))),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 @Injectable()
@@ -76,14 +98,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.cronWorker = new Worker<CronTriggerJob>(
-      'ai-cron-triggers',
-      async (job) => this.processCronTrigger(job),
-      {
-        connection: this.redis,
-        concurrency: 3,
-      },
-    );
+    // V1-24b review (SEC-V124b-1): the ai-cron-triggers queue holds only the
+    // tenants' repeatable AgentTrigger schedules (CronSchedulerService), which
+    // stay in Redis across restarts. With schedulers off this process runs none
+    // of them, so the cron worker is not started. Plan steps are enqueued on
+    // demand and keep their worker.
+    if (schedulersDisabled()) {
+      this.logger.log('Cron trigger worker not started (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+    } else {
+      this.cronWorker = new Worker<CronTriggerJob>(
+        'ai-cron-triggers',
+        async (job) => this.processCronTrigger(job),
+        {
+          connection: this.redis,
+          concurrency: 3,
+        },
+      );
+    }
 
     this.planEvents = new QueueEvents('ai-plan-steps', { connection: this.redis });
     this.planEvents.on('failed', ({ jobId, failedReason }) => {
@@ -94,6 +125,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    // FOLLOW3-C3 (CR-C3-1): each worker's blocking connection is a duplicate
+    // of this.redis that bullmq initializes in the background (connect, then
+    // an INFO for its version check). A close() before that INFO is answered
+    // disconnects the duplicate under it, and bullmq re-emits the rejected INFO
+    // on an emitter close() has already stripped: an unhandled 'Connection is
+    // closed' rejection from RedisConnection.getRedisVersionAndType <-
+    // RedisConnection.init (see TemporalFlowMemoryQueueService.onModuleDestroy).
+    // So they are closed once ready, or once they failed to initialize (the
+    // events connection too, although QueueEvents.close() already awaits its
+    // own). The wait is bounded: with Redis unreachable they never become ready
+    // (ioredis reconnects forever), and a shutdown must not wait on that; after
+    // the bound close() runs as before.
+    await readyOrAfter(READY_BEFORE_CLOSE_MS, [this.planWorker, this.cronWorker, this.planEvents]);
     await this.planWorker?.close();
     await this.cronWorker?.close();
     await this.planEvents?.close();
@@ -118,19 +162,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async enqueueCronTrigger(job: CronTriggerJob, cronExpression: string): Promise<void> {
-    const jobId = `cron:${job.triggerId}`;
-    // Upsert repeatable job
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === jobId);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
-    }
+    // Upsert: a changed schedule hashes to a new repeatable key, so every
+    // repeatable the trigger already has is removed first (V1-24c).
+    await this.removeCronTrigger(job.triggerId);
 
     await this.cronQueue.add(
-      `cron-trigger:${job.triggerId}`,
+      cronTriggerJobName(job.triggerId),
       job,
       {
-        jobId,
+        jobId: `cron:${job.triggerId}`,
         repeat: { pattern: cronExpression, tz: 'UTC' },
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
@@ -138,11 +178,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * V1-24c: a trigger's repeatables are found by the job NAME they are
+   * registered under. bullmq 5's getRepeatableJobs() entries carry key (an md5
+   * of name:jobId:endDate:tz:pattern), name, tz, pattern and next, but no `id`,
+   * so the old lookup by id never matched: a removed trigger kept firing and a
+   * changed schedule added a second repeatable beside the old one. Every match
+   * is removed (duplicates that lookup left behind included), each with its
+   * next delayed run. An unknown trigger matches nothing.
+   */
   async removeCronTrigger(triggerId: string): Promise<void> {
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === `cron:${triggerId}`);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
+    const name = cronTriggerJobName(triggerId);
+    for (const r of await this.cronQueue.getRepeatableJobs()) {
+      if (r.name === name) await this.cronQueue.removeRepeatableByKey(r.key);
     }
   }
 
@@ -180,6 +228,30 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       if (!allCompleted) {
         throw new Error(`Dependencies not satisfied for step ${data.stepId}`);
       }
+    }
+
+    // KEY-R3b-PLAN-AUTHORITY (D-71, D-73; NOPRINCIPAL-SURFACES): the step runs as the plan's member,
+    // checked now, at run time, against the plan as stored (never the job's data): that member's
+    // module scopes and the no-principal rules (the dispatcher below is handed no principal), and for
+    // a plan with no member (a journey, an agent trigger, the daily briefing) no contact read and no
+    // money write. A refused step is recorded failed with the reason and nothing is dispatched; the
+    // job completes (asking again gets the same answer).
+    const { planStepRunRefusal } = await import('./plan-step-authority');
+    const refusal = await planStepRunRefusal(this.prisma, data.businessId, data.planId, data.toolName);
+    if (refusal) {
+      this.logger.warn(`Plan step ${data.stepId} (${data.toolName}) refused: ${refusal}`);
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: data.stepId },
+        data: { status: 'failed', errorMessage: `Refused: ${refusal}`, completedAt: new Date() },
+      });
+      this.events.emit('action.failed', {
+        businessId: data.businessId,
+        toolName: data.toolName,
+        planId: data.planId,
+        planStepId: data.stepId,
+        error: `Refused: ${refusal}`,
+      });
+      return { refused: refusal };
     }
 
     // Governance check
@@ -279,16 +351,53 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * V1-24c review (ST-V124c-1, CR-V124c-2): no production path removes a
+   * trigger's repeatable when its AgentTrigger row is deleted (directly or with
+   * its business), disabled, unscheduled or rescheduled: the API writes the row
+   * only and the boot sync only adds. So each run re-reads the row by its id
+   * AND the business it was registered for, and fires only an enabled row still
+   * on the schedule this run came from, with the row's current event and
+   * payload (not the copy stored in Redis at registration). A missing, disabled
+   * or unscheduled row (or one now under another business) has its repeatables
+   * removed and fires nothing; a rescheduled row is re-registered on its current
+   * schedule and nothing fires on the old one. A failed lookup throws: the run
+   * fails and fires nothing, and the repeatable is kept.
+   */
   private async processCronTrigger(job: Job<CronTriggerJob>): Promise<void> {
-    const data = job.data;
-    this.logger.log(`Cron trigger fired: ${data.triggerId} for ${data.businessId}`);
+    const { triggerId, businessId } = job.data;
+    const row = await this.prisma.client.agentTrigger.findFirst({
+      where: { id: triggerId, businessId },
+      select: { id: true, businessId: true, name: true, eventPattern: true, objective: true, condition: true, enabled: true, schedule: true },
+    });
 
-    this.events.emit(data.eventName, {
-      name: data.eventName,
-      businessId: data.businessId,
-      payload: data.payload,
+    if (!row || !row.enabled || !row.schedule) {
+      await this.removeCronTrigger(triggerId);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} is no longer scheduled: repeatable removed, not fired`);
+      return;
+    }
+
+    const current: CronTriggerJob = {
+      triggerId: row.id,
+      businessId: row.businessId,
+      eventName: row.eventPattern,
+      payload: { triggerId: row.id, name: row.name, objective: row.objective, condition: row.condition },
+    };
+
+    if (row.schedule !== job.opts.repeat?.pattern) {
+      await this.enqueueCronTrigger(current, row.schedule);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} was rescheduled (${row.schedule}): re-registered, not fired on the old schedule`);
+      return;
+    }
+
+    this.logger.log(`Cron trigger fired: ${triggerId} for ${businessId}`);
+
+    this.events.emit(current.eventName, {
+      name: current.eventName,
+      businessId: current.businessId,
+      payload: current.payload,
       source: 'cron',
-      triggerId: data.triggerId,
+      triggerId: current.triggerId,
     });
   }
 

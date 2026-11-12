@@ -1,9 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { IdentityService } from '../../identity/identity.service';
 import { IntegrationHubService } from '../../integration-hub/integration-hub.service';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../../core/authority/module-vocabulary';
+
+/**
+ * R0-09c review CR-1: the member a remove_team_member or update_role command
+ * changes. It must be named: Prisma drops a `where` key whose value is
+ * undefined, so the membership lookup below with no `parameters.userId` matched
+ * whichever membership of the business Postgres read first, and the command
+ * removed or re-roled a member nobody chose. Two ways reached that: the
+ * executor's rollbackOnFailure compensates a failed add_team_member with
+ * remove_team_member carrying the add's {email, role} (no userId), and a
+ * command that leaves the userId out. Once the actor became the authenticated
+ * OWNER (R0-09c), both passed IdentityService's team check. Now they are
+ * refused before any lookup.
+ */
+function teamTarget(command: ConnectorCommand): string {
+  const target = command.parameters?.userId;
+  if (typeof target !== 'string' || target.length === 0) {
+    throw new BadRequestException(`settings.${command.action} needs parameters.userId, the member to change`);
+  }
+  return target;
+}
 
 @Injectable()
 export class SettingsAdapterService {
@@ -18,6 +39,7 @@ export class SettingsAdapterService {
     try {
       switch (command.action) {
         case 'update_business_profile': {
+          await this.assertProfileOwner(command);
           const updated = await this.updateBusinessProfile({
             businessId: command.businessId,
             name: command.parameters.name as string | undefined,
@@ -28,6 +50,7 @@ export class SettingsAdapterService {
           return connectorOk(command, start, updated);
         }
         case 'update_branding': {
+          await this.assertProfileOwner(command);
           const updated = await this.updateBranding({
             businessId: command.businessId,
             primaryColor: command.parameters.primaryColor as string | undefined,
@@ -48,7 +71,7 @@ export class SettingsAdapterService {
         case 'remove_team_member': {
           const removed = await this.removeTeamMember({
             businessId: command.businessId,
-            userId: command.parameters.userId as string,
+            userId: teamTarget(command),
             requesterId: command.userId,
           });
           return connectorOk(command, start, removed);
@@ -56,13 +79,14 @@ export class SettingsAdapterService {
         case 'update_role': {
           const updated = await this.updateTeamMemberRole({
             businessId: command.businessId,
-            userId: command.parameters.userId as string,
+            userId: teamTarget(command),
             role: command.parameters.role as string,
             requesterId: command.userId,
           });
           return connectorOk(command, start, updated);
         }
         case 'configure_integration': {
+          await this.assertConnectWrite(command);
           const configured = await this.configureIntegration({
             businessId: command.businessId,
             providerKey: command.parameters.integration as string,
@@ -82,6 +106,68 @@ export class SettingsAdapterService {
 
   async getBusinessProfile(businessId: string) {
     return this.identity.getBusiness(businessId);
+  }
+
+  /**
+   * R0-09c-KEY-ACTOR-BINDING (R0-09-ID-HARDEN review CR-3), owner ruling D-11:
+   * editing the business profile is OWNER only, regardless of granted scopes —
+   * the rule PATCH /identity/businesses/:businessId applies. These two actions
+   * reached IdentityService.updateBusiness with no owner check, so a STAFF
+   * command changed the name, timezone, currency and branding that route
+   * refuses it.
+   *
+   * The rule is IdentityService.assertBusinessOwner, applied on the command's
+   * actor: `command.userId` (KeyCortexController takes it from the principal
+   * AuthGuard admitted, never from the request) with the role its User row
+   * holds, which is the role AuthMiddleware attaches. So the OWNER membership,
+   * the distinguished owner (Business.ownerId) and SUPER_ADMIN pass, as on the
+   * PATCH route; a STAFF or ADMIN member, a non-member and a command with no
+   * human actor ('system', KEY's own 'key_ai') do not. A refusal throws, and
+   * execute() answers it as the connector failure shape.
+   */
+  private async assertProfileOwner(command: ConnectorCommand): Promise<void> {
+    const actorId = command.userId;
+    if (typeof actorId !== 'string' || actorId.length === 0) {
+      throw new ForbiddenException('Only the business owner can edit the business profile');
+    }
+    const actor = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    await this.identity.assertBusinessOwner(command.businessId, { id: actorId, role: actor?.role });
+  }
+
+  /**
+   * R0-09c review ST-6: settings.configure_integration connects or disconnects
+   * an integration, which the HTTP routes (POST and DELETE
+   * integration-hub/businesses/:businessId/connections/:providerKey) admit only
+   * with connect:write through ModuleScopeGuard. The action checked no
+   * authority, so a STAFF command (connect is 'none' for every role by
+   * default) connected and disconnected the business's integrations.
+   *
+   * The rule here is ModuleScopeGuard's, read from the same vocabulary, on the
+   * command's actor: SUPER_ADMIN (its User role, as AuthMiddleware attaches it)
+   * passes; otherwise the actor's membership of the business, its explicit
+   * scope map or else its role defaults, must hold connect at write or above.
+   * A command with no human actor, a non-member and a member below write are
+   * refused, and execute() answers the connector failure shape.
+   */
+  private async assertConnectWrite(command: ConnectorCommand): Promise<void> {
+    const actorId = command.userId;
+    if (typeof actorId !== 'string' || actorId.length === 0) {
+      throw new ForbiddenException('Authentication required');
+    }
+    const actor = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    if (actor?.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actorId, businessId: command.businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const scopes = membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+    const level = scopes.connect || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: connect requires write access (you have ${level})`);
+    }
   }
 
   private async updateBusinessProfile(input: {

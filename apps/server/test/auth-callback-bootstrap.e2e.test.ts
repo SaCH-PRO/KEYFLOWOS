@@ -24,15 +24,50 @@ import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 
 const FAKE_TOKEN = 'fake-supabase-jwt-for-e2e';
 const FAKE_USER = { id: 'supabase-user-id', email: 'owner@example.com' };
+/**
+ * D-97 / SEC-W7RR-1: the same user's access token after a Google sign-in, as
+ * the stub verifier accepts it: JWT-shaped, GoTrue's server-set app_metadata
+ * naming the google provider (unsigned here; verification is the stub's).
+ */
+const b64url = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+const GOOGLE_TOKEN = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub: FAKE_USER.id, role: 'authenticated', app_metadata: { provider: 'google', providers: ['email', 'google'] } })}.c2ln`;
 
 const supabaseAuthMock = {
   getUserFromToken: vi.fn(async (token?: string) =>
-    token === FAKE_TOKEN ? FAKE_USER : null,
+    token === FAKE_TOKEN || token === GOOGLE_TOKEN ? FAKE_USER : null,
   ),
 };
 
 const identityServiceMock = {
   bootstrapUser: vi.fn(),
+};
+
+/**
+ * D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: GoTrue's
+ * admin user record for the token's user, as the service-role client reads it
+ * (GET /admin/users/:id). Its google identity carries the Google sub a RISC
+ * event names. Nothing leaves the process.
+ */
+const VERIFIED_GOOGLE_SUB = 'google-sub-verified-callback';
+const FORGED_GOOGLE_SUB = 'google-sub-of-another-person';
+const verifiedRecord = (id: string) => ({
+  id,
+  email: FAKE_USER.email,
+  identities: [
+    {
+      identity_id: '6a0e3f52-1b9c-4d7e-8f21-3c4d5e6f7a8b',
+      id: VERIFIED_GOOGLE_SUB,
+      user_id: id,
+      provider: 'google',
+      identity_data: { sub: VERIFIED_GOOGLE_SUB, email: FAKE_USER.email },
+    },
+  ],
+});
+const getUserById = vi.fn(async (id: string) => ({ data: { user: verifiedRecord(id) }, error: null as { message: string } | null }));
+const supabaseAdminMock = {
+  signOut: vi.fn(async () => undefined),
+  isConfigured: vi.fn(() => true),
+  getClient: vi.fn(() => ({ auth: { admin: { getUserById } } })),
 };
 
 function makePrismaMock() {
@@ -69,8 +104,10 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         // auth.middleware.spec.ts:126.
         { provide: REDIS_CLIENT, useValue: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK'), setex: vi.fn(async () => 'OK') } },
         // Logout dependency. Functional, not `{}` — the controller swallows its
-        // failures. See identity.e2e.test.ts.
-        { provide: SupabaseAdminService, useValue: { signOut: vi.fn(async () => undefined) } },
+        // failures. See identity.e2e.test.ts. D-97 / SEC-W7RR-1: bootstrap
+        // also reads the token user's VERIFIED record here (GoTrue's admin
+        // user record), whose identities it hands to bootstrapUser.
+        { provide: SupabaseAdminService, useValue: supabaseAdminMock },
       ],
     }).compile();
 
@@ -114,6 +151,8 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         firstName: 'Ada',
         lastName: 'Lovelace',
       }),
+      // R0-SEC-01 review repair: the proof a pending team invitation needs.
+      expect.objectContaining({ proveEmailOwnership: expect.any(Function) }),
     );
     expect(res.body).toMatchObject({
       user: { id: FAKE_USER.id, email: FAKE_USER.email },
@@ -142,5 +181,71 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
     expect(code).toBe('account_email_conflict');
     expect(message).toBe(friendly);
     expect(JSON.stringify(res.body)).not.toMatch(/internal server error/i);
+  });
+
+  describe('D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1 — the identities bootstrap persists come from the verified provider record, never the body', () => {
+    const forgedBody = {
+      firstName: 'Ada',
+      identities: [{ provider: 'google', id: FORGED_GOOGLE_SUB, identity_data: { sub: FORGED_GOOGLE_SUB } }],
+    };
+    const lastInput = () => identityServiceMock.bootstrapUser.mock.calls.at(-1)?.[0] as { identities?: Array<Record<string, unknown>> } | undefined;
+
+    it("D-97 / SEC-W7RR-1: forwards the identities of GoTrue's record for the token's own user (read with the service-role client), so the Google sub a RISC event names maps to this user; body.identities is ignored", async () => {
+      identityServiceMock.bootstrapUser.mockClear();
+      getUserById.mockClear();
+      identityServiceMock.bootstrapUser.mockResolvedValueOnce({ user: { id: FAKE_USER.id }, business: { id: 'biz-callback-1' } });
+
+      await request(app.getHttpServer())
+        .post('/identity/bootstrap')
+        .set('Authorization', `Bearer ${GOOGLE_TOKEN}`)
+        .send(forgedBody)
+        .expect(201);
+
+      expect(getUserById).toHaveBeenCalledWith(FAKE_USER.id);
+      expect(lastInput()?.identities).toEqual([
+        expect.objectContaining({ provider: 'google', id: VERIFIED_GOOGLE_SUB, identity_data: expect.objectContaining({ sub: VERIFIED_GOOGLE_SUB }) }),
+      ]);
+      expect(JSON.stringify(identityServiceMock.bootstrapUser.mock.calls)).not.toContain(FORGED_GOOGLE_SUB);
+    });
+
+    it.each([
+      ['a record of another user', () => getUserById.mockResolvedValueOnce({ data: { user: verifiedRecord('someone-else') }, error: null })],
+      ['an error result', () => getUserById.mockResolvedValueOnce({ data: { user: null as never }, error: { message: 'gotrue 500' } })],
+      ['a throw', () => getUserById.mockRejectedValueOnce(new TypeError('fetch failed'))],
+      ['an unconfigured admin client', () => supabaseAdminMock.isConfigured.mockReturnValueOnce(false)],
+    ] as Array<[string, () => void]>)(
+      'SEC-W7RR-1 negative control: with %s no identity is forwarded (never the body one) and bootstrap still answers 201',
+      async (_name, arrange) => {
+        identityServiceMock.bootstrapUser.mockClear();
+        identityServiceMock.bootstrapUser.mockResolvedValueOnce({ user: { id: FAKE_USER.id }, business: { id: 'biz-callback-1' } });
+        arrange();
+
+        await request(app.getHttpServer())
+          .post('/identity/bootstrap')
+          .set('Authorization', `Bearer ${GOOGLE_TOKEN}`)
+          .send(forgedBody)
+          .expect(201);
+
+        expect(identityServiceMock.bootstrapUser).toHaveBeenCalledTimes(1);
+        expect(lastInput()?.identities ?? []).toEqual([]);
+        expect(JSON.stringify(identityServiceMock.bootstrapUser.mock.calls)).not.toContain(FORGED_GOOGLE_SUB);
+      },
+    );
+
+    it('SEC-W7RR-1 negative control: a bearer that names no external sign-in provider (an email/password session) asks GoTrue nothing and forwards no identity, whatever body.identities says', async () => {
+      identityServiceMock.bootstrapUser.mockClear();
+      getUserById.mockClear();
+      identityServiceMock.bootstrapUser.mockResolvedValueOnce({ user: { id: FAKE_USER.id }, business: { id: 'biz-callback-1' } });
+
+      await request(app.getHttpServer())
+        .post('/identity/bootstrap')
+        .set('Authorization', `Bearer ${FAKE_TOKEN}`)
+        .send(forgedBody)
+        .expect(201);
+
+      expect(getUserById).not.toHaveBeenCalled();
+      expect(lastInput()?.identities ?? []).toEqual([]);
+      expect(JSON.stringify(identityServiceMock.bootstrapUser.mock.calls)).not.toContain(FORGED_GOOGLE_SUB);
+    });
   });
 });

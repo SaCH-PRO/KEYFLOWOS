@@ -1,9 +1,22 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { fromCents, toCents } from '../commerce/money';
+import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
 export interface SafeToSpendDto {
+  /**
+   * The ledger cash position (CashPositionService), never FinancialAccount.currentBalance.
+   * V1-37c: the business currency's cash only (labelled by `currency`).
+   */
   cashBalance: number;
+  /** V1-34: how cashBalance was derived. */
+  cashBasis: 'ledger';
+  /**
+   * V1-37c (D-13): cash held in another currency, by currency. It is never
+   * added to cashBalance nor counted in safeToSpend; empty when there is none.
+   */
+  otherCurrencyCash: OtherCurrencyCash[];
   taxReserved: number;
   billsDueNext30Days: number;
   payrollReserved: number;
@@ -20,23 +33,17 @@ export class SafeToSpendService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ChartOfAccountsSeederService) private readonly coaSeeder: ChartOfAccountsSeederService,
+    @Inject(CashPositionService) private readonly cashPosition: CashPositionService,
   ) {}
 
   async calculate(businessId: string): Promise<SafeToSpendDto> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { currency: true },
-    });
-    const currency = business?.currency ?? 'TTD';
-
     const now = new Date();
     const next30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const [cashAccounts, taxPayableAccount, billsDue, reserveBuckets] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
-      }),
+    // V1-34 (CF-41): cash is the ledger's. FinancialAccount.currentBalance is
+    // an opening snapshot that no payment, refund or expense ever moves.
+    const [cashPosition, taxPayableAccount, billsDue, reserveBuckets] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId),
       this.coaSeeder.getBySystemKey(businessId, 'TAX_PAYABLE'),
       this.prisma.client.expense.findMany({
         where: {
@@ -52,7 +59,12 @@ export class SafeToSpendService {
       }),
     ]);
 
-    const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    // V1-37c (D-13): every figure below is in the business currency, the one
+    // the cash position labels its cashBalance with (normalized); cash in any
+    // other currency is reported apart and never added.
+    const currency = cashPosition.currency;
+    const cashBalance = cashPosition.cashBalance;
+    const otherCash = otherCurrencyCash(cashPosition);
 
     let taxReserved = 0;
     if (taxPayableAccount) {
@@ -70,18 +82,37 @@ export class SafeToSpendService {
     const payrollReserved = 0;
     const debtPaymentsDue = 0;
 
-    // Operating buffer: minimum 10% of cash or 500 currency units
-    const operatingBuffer = Math.max(cashBalance * 0.1, 500);
+    // Operating buffer: minimum 10% of cash or 500 currency units (in cents, D-13).
+    const operatingBuffer = fromCents(Math.max(Math.round(toCents(cashBalance) / 10), toCents(500)));
 
     const otherReserves = reserveBuckets.reduce((sum, r) => sum + Number(r.currentAmount ?? 0), 0);
 
-    const safeToSpend = Math.max(
+    // Integer cents (D-13), so the figure never carries float residue.
+    const safeToSpend = fromCents(Math.max(
       0,
-      cashBalance - taxReserved - billsDueNext30Days - payrollReserved - debtPaymentsDue - operatingBuffer - otherReserves,
-    );
+      toCents(cashBalance)
+        - toCents(taxReserved)
+        - toCents(billsDueNext30Days)
+        - toCents(payrollReserved)
+        - toCents(debtPaymentsDue)
+        - toCents(operatingBuffer)
+        - toCents(otherReserves),
+    ));
 
+    // V1-34 review CR-34-01: say so when an account opening balance that has
+    // not been posted yet is part of a cash figure; V1-37c: under the figure
+    // of its own currency.
+    const unpostedIn = (code: string) => cashPosition.unpostedOpeningBalances
+      .filter((o) => o.currency === code)
+      .map((o) => `  - includes ${o.name} opening balance not yet posted: ${o.currency} ${o.amount.toFixed(2)}`);
     const explanation: string[] = [
-      `Cash balance: ${currency} ${cashBalance.toFixed(2)}`,
+      `Cash balance: ${currency} ${cashBalance.toFixed(2)} (ledger)`,
+      ...unpostedIn(currency),
+      // V1-37c (D-13): cash in another currency is said, never added or converted.
+      ...otherCash.flatMap((o) => [
+        `Cash in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (ledger)`,
+        ...unpostedIn(o.currency),
+      ]),
       `Tax reserved: ${currency} ${taxReserved.toFixed(2)}`,
       `Bills due next 30 days: ${currency} ${billsDueNext30Days.toFixed(2)}`,
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,
@@ -100,6 +131,8 @@ export class SafeToSpendService {
 
     return {
       cashBalance,
+      cashBasis: cashPosition.basis,
+      otherCurrencyCash: otherCash,
       taxReserved,
       billsDueNext30Days,
       payrollReserved,

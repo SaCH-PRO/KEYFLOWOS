@@ -16,9 +16,11 @@
  * same "correct in isolation" failure this codebase keeps producing.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { AdapterRegistryService } from './adapter-registry.service';
 import { ResendEmailAdapter } from './resend-email-adapter';
-import { SystemEmailSendError } from '../../notifications/system-email.service';
+import { SystemEmailSendError, SystemEmailService } from '../../notifications/system-email.service';
+import { AiMessageSenderService } from '../../ai/ai-message-sender.service';
 
 const registry = () => new AdapterRegistryService();
 
@@ -32,14 +34,18 @@ describe('which adapter sends an email', () => {
     expect(a?.provider).toBe('GOOGLE');
   });
 
-  it('no connected account falls back to the platform ESP', () => {
+  // D-82 (2026-11-09) reverses the two cases below. They read "falls back to
+  // the platform ESP": business email now never relays through the platform
+  // sender, so a business with no usable Gmail gets no adapter and its delivery
+  // fails visibly (delivery-queue.business-mail.spec.ts).
+  it('[D-82] RED-BEFORE: no connected account does not fall back to the platform sender: no adapter', () => {
     const a = registry().resolveEmailFor(null);
-    expect(a?.provider).toBe('RESEND');
+    expect(a).toBeNull();
   });
 
-  it('a connection with no token falls back too — an expired account is not a usable one', () => {
+  it('[D-82] RED-BEFORE: a connection with no token (expired or disconnected) does not fall back either: no adapter', () => {
     const a = registry().resolveEmailFor({ provider: 'GOOGLE', token: null });
-    expect(a?.provider).toBe('RESEND');
+    expect(a).toBeNull();
   });
 
   it('non-email platforms are untouched', () => {
@@ -199,5 +205,69 @@ describe('the fallback adapter sends', () => {
     expect(result.success).toBe(false);
     expect(result.outcomeCertainty).toBe('OUTCOME_UNKNOWN');
     expect(result.isTransient).toBe(true);
+  });
+});
+
+describe('D-82: business email never relays through the platform sender', () => {
+  it('[D-82] RED-BEFORE: the registry never hands out the platform sender for business email, whatever the connection', () => {
+    const r = registry();
+    const connections = [
+      null,
+      undefined,
+      {},
+      { provider: 'GOOGLE', token: null },
+      { provider: 'GOOGLE', token: '' },
+      { provider: 'EMAIL', token: null },
+      { provider: 'RESEND', token: 're_live_looking_token' },
+      { provider: 'SMTP', token: 'smtp-token' },
+      { provider: 'WHATSAPP', token: 'wa-token' },
+    ];
+    for (const c of connections) {
+      expect(r.resolveEmailFor(c as never)?.provider, JSON.stringify(c)).not.toBe('RESEND');
+    }
+    expect(r.resolve('RESEND')).toBeNull();
+    expect(r.listProviders()).not.toContain('RESEND');
+    for (const platform of ['EMAIL', 'GOOGLE', 'RESEND', 'FACEBOOK', 'INSTAGRAM_BUSINESS', 'WHATSAPP']) {
+      expect(r.resolveByPlatform(platform)?.provider, platform).not.toBe('RESEND');
+    }
+  });
+
+  it('[D-82] a usable Gmail connection (GOOGLE or EMAIL provider with a token) still resolves to Gmail', () => {
+    const r = registry();
+    expect(r.resolveEmailFor({ provider: 'GOOGLE', token: 'ya29.token' })?.provider).toBe('GOOGLE');
+    expect(r.resolveEmailFor({ provider: 'EMAIL', token: 'ya29.token' })?.provider).toBe('GOOGLE');
+  });
+
+  // Review repair SE-1: the AI message sender (the 1:1 email path behind
+  // communications drafts/:id/send, the intake send_reply action and
+  // CommunicationsService.sendMessage) fell back to
+  // SystemEmailService.sendTransactional, the platform sender, when Gmail
+  // failed. It no longer does; the full cases are in
+  // apps/server/src/modules/ai/ai-message-sender.service.spec.ts.
+  it('[D-82] RED-BEFORE: AiMessageSenderService email to a contact fails visibly without Gmail instead of relaying through SystemEmailService', async () => {
+    const platformSend = vi.spyOn(SystemEmailService.prototype, 'sendTransactional').mockResolvedValue({ id: 'platform_relay_1' });
+    const gmail = {
+      sendEmail: vi.fn(async () => {
+        throw new ServiceUnavailableException({ code: 'provider_not_configured', service: 'gmail', message: 'Gmail not connected' });
+      }),
+    };
+    const client = {
+      contact: { findFirst: vi.fn(async () => ({ id: 'c1', email: 'customer@example.test', firstName: null, lastName: null, phone: null, whatsappNumber: null, preferredChannel: null })) },
+    };
+    const sender = new AiMessageSenderService(
+      { client } as never,
+      { emit: vi.fn() } as never,
+      gmail as never,
+      undefined,
+      { recordContactEvent: vi.fn(async () => undefined) } as never,
+    );
+    try {
+      const result = await sender.sendMessage({ businessId: 'biz_a', contactId: 'c1', channel: 'email', body: 'Hello' });
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('EMAIL_ACCOUNT_NOT_CONNECTED');
+      expect(platformSend).not.toHaveBeenCalled();
+    } finally {
+      platformSend.mockRestore();
+    }
   });
 });

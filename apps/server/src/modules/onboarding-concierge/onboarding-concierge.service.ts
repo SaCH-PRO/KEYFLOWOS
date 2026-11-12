@@ -1,10 +1,12 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
-import { DemoDataSeederService } from './demo-data-seeder.service';
+import { DemoDataSeederService, type DemoSeedResult } from './demo-data-seeder.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import type {
   BlueprintData,
   BlueprintRegistrationProfile,
@@ -32,6 +34,39 @@ function isRegistrationStepCompleteForReadiness(status: unknown): boolean {
   const value = status.trim().toUpperCase();
   const incomplete = ['NOT_STARTED', 'UNKNOWN', 'IDEA_ONLY', 'PENDING', 'IN_PROGRESS', ''];
   return !incomplete.includes(value);
+}
+
+/** R0-09b (owner ruling D-11): the refusal a non-owner gets on POST .../auto-configure. */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
+
+/** Owner ruling D-03: the manual minimal profile that completes onboarding. */
+type MinimalProfileField = 'name' | 'currency' | 'timezone';
+
+function isIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The minimal-profile fields that are absent or unusable: a blank name, a
+ * currency that is not a three-letter ISO 4217 code, or a timezone that is
+ * not an IANA zone (an invalid zone throws wherever a date is formatted).
+ */
+function missingMinimalProfileFields(
+  business: { name?: string | null; currency?: string | null; timezone?: string | null } | null | undefined,
+): MinimalProfileField[] {
+  const name = business?.name?.trim() ?? '';
+  const currency = business?.currency?.trim() ?? '';
+  const timezone = business?.timezone?.trim() ?? '';
+  const missing: MinimalProfileField[] = [];
+  if (!name) missing.push('name');
+  if (!/^[A-Za-z]{3}$/.test(currency)) missing.push('currency');
+  if (!timezone || !isIanaTimezone(timezone)) missing.push('timezone');
+  return missing;
 }
 
 export interface SetupStatus {
@@ -389,6 +424,65 @@ export class OnboardingConciergeService {
     };
   }
 
+  /**
+   * Who may auto-configure: the business owner only — R0-09b-D11-SIBLING-WRITES,
+   * owner ruling D-11 (2026-10-31: editing the business profile is OWNER only,
+   * regardless of granted scopes; review R09-ST-3). autoConfigureFromTemplate
+   * writes Business.name (customBusinessName), overwrites businessHours, turns
+   * the store on and mints a slug when there is none, and every call writes the
+   * business's setup configuration into Business.metaData (conciergeTemplateId,
+   * conciergeSetupAt, the setup milestone; paymentMethodsConfigured and
+   * paymentRecommendations unless setPaymentMethods is false). Those are
+   * fields of the owner-only profile PATCH (PATCH /identity/businesses/
+   * :businessId, R0-09), so no auto-configure call writes no owner-only field
+   * and the route is refused as a whole: 403 BUSINESS_PROFILE_OWNER_ONLY,
+   * before anything is read or written.
+   *
+   * Business.metaData is not owner-only as a bag: the concierge's own
+   * display-state keys (conciergeDismissed and conciergeDismissedAt from
+   * dismiss/resume, snoozedNudges from snooze, nudgeHistory from GET nudges)
+   * are fixed keys with server-chosen values that carry no profile content, so
+   * those routes keep the BusinessGuard rule (any member; review CR-2).
+   *
+   * The owner test is isProfileOwner.
+   */
+  async assertProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
+    if (await this.isProfileOwner(businessId, actor)) return;
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can auto-configure the business profile.',
+    });
+  }
+
+  /**
+   * Whether the actor is the business owner for owner ruling D-11
+   * (R0-09b-D11-SIBLING-WRITES): the OWNER membership or the distinguished
+   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
+   * and BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform
+   * bypass BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
+   * The rule is restated rather than imported, as R0-08c did: injecting
+   * IdentityService would need OnboardingConciergeModule to import
+   * IdentityModule.
+   */
+  async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
   async autoConfigureFromTemplate(
     businessId: string,
     templateId: string,
@@ -458,11 +552,15 @@ export class OnboardingConciergeService {
         results.businessHoursSet = true;
       }
 
+      // FOLLOW3-D13: metaData is read under the business row lock
+      // (lockBusinessMeta) and written in this transaction, so a metaData
+      // write that commits meanwhile is not undone by this one's copy.
+      const locked = await lockBusinessMeta(tx, businessId);
       const business = await tx.business.findUnique({
         where: { id: businessId },
-        select: { name: true, metaData: true, slug: true, storeEnabled: true },
+        select: { name: true, slug: true, storeEnabled: true },
       });
-      const meta = parseMetaData(business?.metaData);
+      const meta = parseMetaData(locked?.metaData as Prisma.JsonValue | undefined);
 
       const metaUpdates: BusinessMetaData = { ...meta };
 
@@ -559,10 +657,20 @@ export class OnboardingConciergeService {
       }));
   }
 
+  /**
+   * Any member may chat with the concierge (BusinessGuard), but only the
+   * owner's answers are persisted as onboarding intake — R0-09b, owner ruling
+   * D-11, review SEC-2. persistIntakeAnswers writes Business.businessIntent
+   * (the raw message), industry, archetype and country (from the reply's
+   * EXTRACTED lines, which the message can steer) and infers the blueprint
+   * identity; those are owner-only profile fields, so for a non-owner, or with
+   * no actor, the reply is returned and nothing is persisted.
+   */
   async generateConciergeResponse(
     businessId: string,
     userMessage: string,
     conversationHistory: Array<{ role: string; content: string }>,
+    actor?: { id?: string; role?: string },
   ): Promise<ConciergeMessage> {
     if (!userMessage || typeof userMessage !== 'string' || userMessage.trim().length === 0) {
       throw new BadRequestException('Message is required');
@@ -612,9 +720,12 @@ export class OnboardingConciergeService {
       });
 
       const parsed = this.parseAiResponse(result.content, setupStatus);
-      // Persist extracted intake answers synchronously so nothing is lost.
+      // Persist extracted intake answers synchronously so nothing is lost —
+      // the owner's only (D-11, see the docstring).
       try {
-        await this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection);
+        if (await this.isProfileOwner(businessId, actor)) {
+          await this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection);
+        }
       } catch (err) {
         this.logger.warn(`Intake persistence failed: ${(err as Error).message}`);
       }
@@ -1010,80 +1121,94 @@ EXTRACTED: archetype=service_provider`;
     }
 
     if (nudges.length > 0) {
-      const updatedHistory: Record<string, string> = { ...nudgeHistory };
-      for (const nudge of nudges) {
-        updatedHistory[nudge.id] = now.toISOString();
-      }
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          metaData: { ...meta, nudgeHistory: updatedHistory } as Prisma.InputJsonValue,
-        },
+      // FOLLOW3-D13: the nudges were chosen from the read above; their
+      // timestamps are merged into the metaData read under the business row
+      // lock (lockBusinessMeta), so a metaData write that committed meanwhile
+      // is not undone by this one's copy.
+      await this.prisma.client.$transaction(async (tx) => {
+        const locked = await lockBusinessMeta(tx, businessId);
+        const current = parseMetaData(locked?.metaData as Prisma.JsonValue | undefined);
+        const updatedHistory: Record<string, string> = {
+          ...((current.nudgeHistory as Record<string, string> | undefined) || {}),
+        };
+        for (const nudge of nudges) {
+          updatedHistory[nudge.id] = now.toISOString();
+        }
+        await tx.business.update({
+          where: { id: businessId },
+          data: {
+            metaData: { ...current, nudgeHistory: updatedHistory } as Prisma.InputJsonValue,
+          },
+        });
       });
     }
 
     return nudges;
   }
 
+  /**
+   * FOLLOW3-D13: snooze, dismiss and resume read and write metaData under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (an owner's cleared payment secret) is not undone by this one's
+   * copy (RED-before MW-14: the cleared secret was stored again).
+   */
   async snoozeNudge(businessId: string, nudgeId: string, days: number = 3) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-
-    const meta = parseMetaData(business?.metaData);
-    const snoozedNudges = (meta.snoozedNudges as Record<string, string> | undefined) || {};
     const snoozeUntil = new Date();
     snoozeUntil.setDate(snoozeUntil.getDate() + days);
 
-    snoozedNudges[nudgeId] = snoozeUntil.toISOString();
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, snoozedNudges } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      const snoozedNudges = (meta.snoozedNudges as Record<string, string> | undefined) || {};
+
+      snoozedNudges[nudgeId] = snoozeUntil.toISOString();
+
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: { ...meta, snoozedNudges } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { snoozed: true, until: snoozeUntil.toISOString() };
   }
 
   async dismissConcierge(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = parseMetaData(business?.metaData);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...meta,
-          conciergeDismissed: true,
-          conciergeDismissedAt: new Date().toISOString(),
-        } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...meta,
+            conciergeDismissed: true,
+            conciergeDismissedAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { dismissed: true };
   }
 
   async resumeConcierge(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = parseMetaData(business?.metaData);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...meta,
-          conciergeDismissed: false,
-        } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...meta,
+            conciergeDismissed: false,
+          } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { resumed: true };
@@ -1112,86 +1237,232 @@ EXTRACTED: archetype=service_provider`;
     return this.demoSeeder.seedDemoData(businessId);
   }
 
+  /**
+   * Owner ruling D-03 (2026-10-31): onboarding completes on a manual minimal
+   * profile — business name, currency and timezone — without AI. The
+   * three-pillar DNA minimum is no longer a gate; it is returned as a
+   * recommendation so the client can still nudge towards the genome.
+   *
+   * Review ST-R032-1, then R0-SEC-03 on owner ruling D-11: only the business
+   * owner (or a SUPER_ADMIN, on the platform bypass) may complete (see
+   * resolveCompletionActor), checked before anything else, and the completion
+   * and the disclaimer acceptance it records are written to team_activity_logs
+   * against that actor, in the completion transaction.
+   *
+   * R0-SEC-04 (review SEC03-2): completion happens once. The read below is
+   * only a fast path; two calls can both read "not complete". The decision is
+   * the claim, a conditional update made first in the completion transaction:
+   * it matches only a business not yet completed here (no flag, or a flag
+   * without onboardingCompletedAt, which only this method writes). A
+   * concurrent claim waits on the row lock and then matches nothing, so that
+   * call answers alreadyComplete and writes no demo data, disclaimer or
+   * activity row.
+   */
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { onboardingComplete: true, onboardingCompletedAt: true },
+      select: { onboardingComplete: true, onboardingCompletedAt: true, name: true, currency: true, timezone: true },
     });
+
+    const actorId = await this.resolveCompletionActor(businessId);
 
     if (business?.onboardingComplete && business?.onboardingCompletedAt) {
       return { complete: true, alreadyComplete: true };
     }
 
-    const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
-    if (!integrity.threePillarMinimumMet) {
-      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
-      const missingPillars = pillarKeys.filter((key) => integrity.genomeDnaScores[key] < 50);
+    const missingFields = missingMinimalProfileFields(business);
+    if (missingFields.length > 0) {
       throw new ForbiddenException({
-        code: 'GENOME_GATE_BLOCKED',
-        message: 'Three-Pillar Minimum not met. Complete Founder, Business, and Market DNA before finishing onboarding.',
-        genomeIntegrity: integrity.genomeIntegrity,
-        missingPillars,
+        code: 'ONBOARDING_PROFILE_INCOMPLETE',
+        message: 'Add your business name, currency and timezone before finishing onboarding.',
+        missingFields,
       });
     }
 
-    const demoData = await this.prisma.client.$transaction(async (tx) => {
-      await tx.business.update({
-        where: { id: businessId },
+    const genomeRecommendation = await this.threePillarRecommendation(businessId);
+
+    const completion = await this.prisma.client.$transaction(async (tx) => {
+      const claim = await tx.business.updateMany({
+        where: { id: businessId, OR: [{ onboardingComplete: false }, { onboardingCompletedAt: null }] },
         data: {
           onboardingComplete: true,
           onboardingCompletedAt: new Date(),
           onboardingStep: 'complete',
         },
       });
+      if (claim.count === 0) return null;
 
       const seeded = await this.demoSeeder.seedDemoData(businessId, tx);
       await this.awardSetupMilestone(businessId, 'onboardingComplete', tx);
-      await this.ensureLegalDisclaimerAccepted(businessId, tx);
+      const disclaimerAcceptedAt = await this.ensureLegalDisclaimerAccepted(businessId, tx);
+      await this.recordCompletionActivity(tx, businessId, actorId, seeded, disclaimerAcceptedAt);
 
-      return seeded;
+      return { demoData: seeded };
     });
 
-    return { complete: true, demoData };
+    if (!completion) return { complete: true, alreadyComplete: true };
+    return { complete: true, demoData: completion.demoData, genomeRecommendation };
   }
 
-  private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx) {
+  /**
+   * Who may finish onboarding: the business owner only — R0-SEC-03, on owner
+   * ruling D-11 (2026-10-31: editing the business profile is OWNER only,
+   * regardless of granted scopes). Completion marks the business complete,
+   * records the legal disclaimer acceptance for it and writes a demo contact
+   * (crm) and a DRAFT demo invoice (revenue), so BusinessGuard's "any member"
+   * is not enough, and neither is a granted scope: settings:write or
+   * settings:admin admits no ADMIN or STAFF member (this replaces review
+   * ST-R032-1's owner-or-settings:write rule).
+   *
+   * The owner is the profile owner isProfileOwner decides (owner rulings
+   * D-116 / D-125, W11-D116-PROFILE-OWNER): an OWNER membership of this
+   * business, the recorded owner (Business.ownerId) only when they hold one
+   * (holding only ADMIN or STAFF they are that role, review F-17), and a
+   * SUPER_ADMIN on the platform bypass BusinessGuard already grants it;
+   * nothing here widens that.
+   *
+   * This guards POST /complete. The profile PATCH
+   * (PATCH /identity/businesses/:businessId) used to let any member write
+   * onboardingComplete, without an actor row, a disclaimer acceptance or demo
+   * data; R0-09-ID-HARDEN closed that (owner-only PATCH, onboardingComplete
+   * dropped from UpdateBusinessDto), so D-11 holds end to end (proven on a
+   * real database by onboarding-manual-complete.integration.test.ts,
+   * R0-SEC-04). markOnboardingComplete still does not trust a flag written
+   * elsewhere (a row from before R0-09, say): a business counts as already
+   * complete only with onboardingCompletedAt, which only this method writes,
+   * so such a flag is still completed in full by the owner.
+   *
+   * The actor is the authenticated user TenantInterceptor bound to this
+   * request; with no request context, or one for another business, completion
+   * fails closed.
+   */
+  private async resolveCompletionActor(businessId: string): Promise<string> {
+    const context = getTenantContext();
+    const actorId = context?.businessId === businessId ? context.userId : undefined;
+    if (!actorId) throw this.completionForbidden();
+    // Owner ruling D-116 (W11-D116-PROFILE-OWNER, review F-17): the recorded-owner arm that admitted
+    // Business.ownerId with any membership or none is gone; the owner rule is isProfileOwner's, on the
+    // actor with the role its User row holds (the SUPER_ADMIN bypass).
+    const user = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    if (await this.isProfileOwner(businessId, { id: actorId, role: user?.role })) return actorId;
+    throw this.completionForbidden();
+  }
+
+  private completionForbidden() {
+    return new ForbiddenException({
+      code: 'ONBOARDING_COMPLETE_FORBIDDEN',
+      message: 'Only the business owner can finish onboarding.',
+    });
+  }
+
+  /**
+   * Who completed onboarding, and who the recorded legal disclaimer acceptance
+   * belongs to. Written in the completion transaction: no completion commits
+   * without its actor row.
+   */
+  private async recordCompletionActivity(
+    tx: PrismaTx,
+    businessId: string,
+    actorId: string,
+    demoData: DemoSeedResult | null | undefined,
+    disclaimerAcceptedAt: string | null,
+  ) {
+    await tx.teamActivityLog.create({
+      data: {
+        businessId,
+        userId: actorId,
+        module: 'settings',
+        action: 'onboarding_completed',
+        entityType: 'business',
+        entityId: businessId,
+        title: 'Completed onboarding',
+        meta: {
+          demoContactId: demoData?.contactId ?? null,
+          demoInvoiceId: demoData?.invoiceId ?? null,
+          demoInvoiceNumber: demoData?.invoiceNumber ?? null,
+        },
+      },
+    });
+    if (disclaimerAcceptedAt) {
+      await tx.teamActivityLog.create({
+        data: {
+          businessId,
+          userId: actorId,
+          module: 'settings',
+          action: 'legal_disclaimer_accepted',
+          entityType: 'business',
+          entityId: businessId,
+          title: 'Accepted the legal disclaimer on completing onboarding',
+          meta: { disclaimerAcceptedAt },
+        },
+      });
+    }
+  }
+
+  /**
+   * The three-pillar minimum as advice, never as a gate (D-03). A genome that
+   * cannot be scored must not block completion, so a failure reads as null.
+   */
+  private async threePillarRecommendation(businessId: string) {
+    try {
+      const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
+      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
+      return {
+        threePillarMinimumMet: integrity.threePillarMinimumMet,
+        genomeIntegrity: integrity.genomeIntegrity,
+        missingPillars: pillarKeys.filter((key) => (integrity.genomeDnaScores[key] ?? 0) < 50),
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Genome recommendation unavailable for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /** Records the disclaimer acceptance; returns its timestamp when this call recorded it, else null. */
+  private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx): Promise<string | null> {
     try {
       const blueprint = await this.blueprint.getBlueprint(businessId, tx).catch(() => null);
-      if (!blueprint) return;
-      if (blueprint.legalProfile?.disclaimerAcceptedAt) return;
+      if (!blueprint) return null;
+      if (blueprint.legalProfile?.disclaimerAcceptedAt) return null;
 
+      const disclaimerAcceptedAt = new Date().toISOString();
       await this.blueprint.updateBlueprint(
         businessId,
         {
           legalProfile: {
             ...(blueprint.legalProfile || {}),
-            disclaimerAcceptedAt: new Date().toISOString(),
+            disclaimerAcceptedAt,
           },
         },
         tx,
       );
+      return disclaimerAcceptedAt;
     } catch (err: any) {
       this.logger.warn(`Failed to record legal disclaimer acceptance: ${(err as Error).message}`);
+      return null;
     }
   }
 
+  /**
+   * FOLLOW3-D13: runs in its caller's transaction (auto-configure, the
+   * completion claim) and reads metaData under the business row lock
+   * (lockBusinessMeta) before it writes the milestone back.
+   */
   private async awardSetupMilestone(
     businessId: string,
     milestone: string,
-    tx?: PrismaTx,
+    tx: PrismaTx,
   ) {
     try {
-      const client = tx ?? this.prisma.client;
-      const business = await client.business.findUnique({
-        where: { id: businessId },
-        select: { metaData: true },
-      });
-      const meta = parseMetaData(business?.metaData);
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
       const milestones = (Array.isArray(meta.setupMilestones) ? meta.setupMilestones : []) as string[];
 
       if (!milestones.includes(milestone)) {
         milestones.push(milestone);
-        await client.business.update({
+        await tx.business.update({
           where: { id: businessId },
           data: {
             metaData: {

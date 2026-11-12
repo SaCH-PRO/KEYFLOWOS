@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Inject, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { StructureService } from './structure.service';
@@ -11,6 +12,17 @@ import { CreateAssignmentDto } from './dto/create-assignment.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
 import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
+
+/**
+ * The authenticated caller a JobRole or assignment write is bounded by
+ * (V1-21-AUTH-JOBROLE-CEILING): the service refuses to grant more than this caller
+ * holds. AuthGuard already requires a user; this keeps the bound from ever being skipped.
+ * Every JobRole and assignment write passes it, deleting a JobRole included (review F4).
+ */
+function requesterOf(user: AuthenticatedUser | undefined): string {
+  if (!user?.id) throw new ForbiddenException('Authentication required');
+  return user.id;
+}
 
 @Controller('structure')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -63,8 +75,8 @@ export class StructureController {
 
   @Post('businesses/:businessId/job-roles')
   @RequireModuleScope('team', 'write')
-  async createJobRole(@Param('businessId') businessId: string, @Body() dto: CreateJobRoleDto) {
-    return this.service.createJobRole(businessId, dto);
+  async createJobRole(@Param('businessId') businessId: string, @Body() dto: CreateJobRoleDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.createJobRole(businessId, dto, requesterOf(user));
   }
 
   @Get('businesses/:businessId/job-roles/:id')
@@ -75,14 +87,19 @@ export class StructureController {
 
   @Patch('businesses/:businessId/job-roles/:id')
   @RequireModuleScope('team', 'write')
-  async updateJobRole(@Param('businessId') businessId: string, @Param('id') id: string, @Body() dto: UpdateJobRoleDto) {
-    return this.service.updateJobRole(businessId, id, dto);
+  async updateJobRole(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateJobRoleDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.updateJobRole(businessId, id, dto, requesterOf(user));
   }
 
   @Delete('businesses/:businessId/job-roles/:id')
   @RequireModuleScope('team', 'write')
-  async deleteJobRole(@Param('businessId') businessId: string, @Param('id') id: string) {
-    return this.service.deleteJobRole(businessId, id);
+  async deleteJobRole(@Param('businessId') businessId: string, @Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.deleteJobRole(businessId, id, requesterOf(user));
   }
 
   // ─── Assignments ───
@@ -94,8 +111,8 @@ export class StructureController {
 
   @Post('businesses/:businessId/assignments')
   @RequireModuleScope('team', 'write')
-  async createAssignment(@Param('businessId') businessId: string, @Body() dto: CreateAssignmentDto) {
-    return this.service.createAssignment(businessId, dto);
+  async createAssignment(@Param('businessId') businessId: string, @Body() dto: CreateAssignmentDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.createAssignment(businessId, dto, requesterOf(user));
   }
 
   @Get('businesses/:businessId/assignments/:id')
@@ -106,14 +123,19 @@ export class StructureController {
 
   @Patch('businesses/:businessId/assignments/:id')
   @RequireModuleScope('team', 'write')
-  async updateAssignment(@Param('businessId') businessId: string, @Param('id') id: string, @Body() dto: UpdateAssignmentDto) {
-    return this.service.updateAssignment(businessId, id, dto);
+  async updateAssignment(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateAssignmentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.updateAssignment(businessId, id, dto, requesterOf(user));
   }
 
   @Delete('businesses/:businessId/assignments/:id')
   @RequireModuleScope('team', 'write')
-  async deleteAssignment(@Param('businessId') businessId: string, @Param('id') id: string) {
-    return this.service.deleteAssignment(businessId, id);
+  async deleteAssignment(@Param('businessId') businessId: string, @Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.deleteAssignment(businessId, id, requesterOf(user));
   }
 
   // ─── Delegation Rules ───

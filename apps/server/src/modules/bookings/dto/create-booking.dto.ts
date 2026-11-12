@@ -27,9 +27,13 @@ export class CreateBookingDto {
   @IsNotEmpty()
   serviceId!: string;
 
+  // Optional, as on the public DTO (V1-06). Without a staff member the
+  // service itself is the booked resource: BookingsService.assertSlotFree
+  // checks overlap on the service, and business hours apply. The service
+  // checks a given staffId belongs to the business.
   @IsString()
-  @IsNotEmpty()
-  staffId!: string;
+  @IsOptional()
+  staffId?: string;
 
   // NOT @Type(() => Date). class-transformer runs before class-validator, so
   // @Type would hand isISO8601 a Date object — and isISO8601 is

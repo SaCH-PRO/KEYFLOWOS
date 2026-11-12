@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, Logger, Optional } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type {
@@ -29,6 +29,27 @@ import { GenomeFactService } from '../business-genome/key-genome/genome-fact.ser
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import type { BlueprintSectionKey } from '../blueprint/blueprint.types';
 import { normalizeRecommendedEntityType } from '../blueprint/entity-type.helpers';
+
+/**
+ * R0-09d (owner ruling D-11): the refusal a non-owner gets on POST .../answers
+ * for an answer that writes the Business row; the code the concierge
+ * auto-configure refusal answers (OnboardingConciergeService, R0-09b).
+ */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
+
+/**
+ * The genesis answers submitAnswers copies onto the Business row, and the
+ * column each one writes (a string answer, trimmed). Every one is a field of
+ * the owner-only profile PATCH (PATCH /identity/businesses/:businessId, R0-09,
+ * owner ruling D-11), so assertProfileAnswersOwner refuses them to a
+ * non-owner; both read this one list.
+ */
+export const GENESIS_BUSINESS_ANSWER_COLUMNS = {
+  businessName: 'name',
+  businessIntent: 'businessIntent',
+  country: 'country',
+  currency: 'currency',
+} as const;
 
 function isPopulated(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -362,6 +383,73 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     return merged as unknown as BlueprintData;
   }
 
+  /**
+   * R0-09d-D11-GENESIS-TEMPLATES, owner ruling D-11 (2026-10-31: editing the
+   * business profile is OWNER only, regardless of granted scopes; R0-09b review
+   * SEC-1). submitAnswers copies answers.businessName, businessIntent, country
+   * and currency onto Business.name, businessIntent, country and currency
+   * (GENESIS_BUSINESS_ANSWER_COLUMNS), fields of the owner-only profile PATCH
+   * (PATCH /identity/businesses/:businessId, R0-09). A submission carrying any
+   * of them as a string (the values submitAnswers writes) is refused to a
+   * non-owner as a whole: 403 BUSINESS_PROFILE_OWNER_ONLY, before anything is
+   * read or written (no Business write, no blueprint inference, no genome
+   * fact), so a STAFF or an ADMIN — settings:write included — cannot rename
+   * the business, or change its currency, country or intent, through Genesis.
+   *
+   * Answers that carry none of them keep the BusinessGuard rule (any member):
+   * they live in business_blueprints, not on the Business row — the legal
+   * disclaimer acceptance ({"legalProfile.disclaimerAcceptedAt": ...}, sent by
+   * the legal page and the onboarding document pack) and the other blueprint
+   * answers.
+   *
+   * The owner test is isProfileOwner.
+   */
+  async assertProfileAnswersOwner(
+    businessId: string,
+    answers: Record<string, unknown>,
+    actor: { id?: string; role?: string } | undefined,
+  ): Promise<void> {
+    const fields = Object.keys(GENESIS_BUSINESS_ANSWER_COLUMNS).filter((key) => typeof answers[key] === 'string');
+    if (fields.length === 0) return;
+    if (await this.isProfileOwner(businessId, actor)) return;
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can change the business name, currency, country or intent.',
+      fields,
+    });
+  }
+
+  /**
+   * Whether the actor is the business owner for owner ruling D-11
+   * (R0-09d-D11-GENESIS-TEMPLATES): the OWNER membership or the distinguished
+   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
+   * and BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform
+   * bypass BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
+   * The rule is restated rather than imported, as R0-08c and R0-09b did
+   * (PresenceService.isSlugOwner, OnboardingConciergeService.isProfileOwner):
+   * injecting IdentityService would need BusinessGenesisModule to import
+   * IdentityModule, and business-genesis.module.ts is outside the R0-09d
+   * write set.
+   */
+  async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
   async submitAnswers(
     businessId: string,
     answers: Record<string, unknown>,
@@ -369,11 +457,12 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     const afterOnboarding = await this.blueprint.inferFromOnboarding(businessId, answers);
 
     // Sync top-level business fields so setup status and storefront work immediately.
+    // Owner-only (D-11): the controller runs assertProfileAnswersOwner first.
     const businessUpdate: Record<string, unknown> = {};
-    if (typeof answers.businessName === 'string') businessUpdate.name = answers.businessName.trim();
-    if (typeof answers.businessIntent === 'string') businessUpdate.businessIntent = answers.businessIntent.trim();
-    if (typeof answers.country === 'string') businessUpdate.country = answers.country.trim();
-    if (typeof answers.currency === 'string') businessUpdate.currency = answers.currency.trim();
+    for (const [answerKey, column] of Object.entries(GENESIS_BUSINESS_ANSWER_COLUMNS)) {
+      const value = answers[answerKey];
+      if (typeof value === 'string') businessUpdate[column] = value.trim();
+    }
     if (Object.keys(businessUpdate).length) {
       await this.prisma.client.business.update({
         where: { id: businessId },

@@ -1,9 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { PostingService, buildExternalRef } from './posting.service';
+import { PostingService, buildExternalRef, type PostingResult } from './posting.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
-import { TimelineService } from '../timeline/timeline.service';
+import { TimelineService, type RecordEventInput } from '../timeline/timeline.service';
+import { isSystemActor } from '../../core/auth/system-actor';
+import { fromCents, toCents } from '../commerce/money';
 
 export type AccountingBasis = 'CASH' | 'ACCRUAL';
 
@@ -12,6 +14,83 @@ interface PostingOpts {
   /** Override the basis (used by backfill to replay accrual flows). */
   basis?: AccountingBasis;
   createdById?: string | null;
+}
+
+interface PaymentPostingOpts extends PostingOpts {
+  /**
+   * W3-V1-55c review (SEC-V55C-4, PL07-ST-3; D-90): the person on whose
+   * behalf a SYSTEM recorder (KEY) recorded the payment, kept as
+   * data.initiatedBy on the payment's FINANCE payment_recorded row, as the CRM
+   * invoice.payment_recorded copy keeps it. Ignored unless `createdById` is the
+   * system actor, and never the system actor itself. Audit data, never authority.
+   */
+  initiatedBy?: string | null;
+}
+
+interface RefundPostingOpts extends PostingOpts {
+  /**
+   * R0-CMF2-PAYMENT-ACTOR-GAPS: write the refund's audit row, posted or not,
+   * with `tx` (the caller's refund transaction), so it commits with the
+   * refund and rolls back with it. A failed insert is not swallowed: it fails
+   * the refund (R0-CMF2 review SEC-CMF2-1 / CR-CMF2-1).
+   */
+  auditInTransaction?: boolean;
+  /**
+   * V1-29c-REFUND-WRITE-DOOR: the refund row this call records and the amount
+   * it refunds (currency units, > 0). The provider refund door passes it.
+   * Omitted with `auditInTransaction` (the manual refund), it is the newest
+   * refund row linked to the payment, the one that refund wrote in this
+   * transaction. Omitted otherwise, the call refunds all that is left.
+   */
+  refund?: { paymentId: string; amount: number };
+  /**
+   * W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member on whose
+   * behalf a SYSTEM refunder (KEY's payments_refund_charge) made the refund,
+   * kept as data.initiatedBy on the FINANCE payment_refunded row, as a
+   * payment KEY records keeps it (PaymentPostingOpts.initiatedBy). Ignored
+   * unless `createdById` is a system actor, and never a system actor itself.
+   * Audit data, never authority: KEY stays the refunder (SEC-RCD-1).
+   */
+  initiatedBy?: string | null;
+}
+
+/**
+ * V1-29c: a partial refund of a payment is posted as its own REFUND
+ * transaction, numbered per payment (Payment:<id>:payment_refunded:<n>, n = 1,
+ * 2, ...), so a later refund finds the earlier ones by their unique key. The
+ * refund doors serialize the refunds of one invoice (its row lock), so n is
+ * never taken twice; a racing duplicate would fail on the unique key.
+ */
+const PARTIAL_REFUND_KIND = 'payment_refunded';
+
+/** A ledger amount (Decimal, number or string) in integer cents. */
+function centsOf(value: unknown): number {
+  return toCents(Number(value ?? 0));
+}
+
+/**
+ * V1-82 (FOLLOW3-B3): `total` cents apportioned pro rata to `weights` (cents,
+ * none negative, summing above zero) by the largest-remainder method. Each
+ * share is the floor of total x weight / sum; the cents left over go one each
+ * to the largest remainders, a tie to the earlier weight, so the result is
+ * deterministic and the shares sum to `total` exactly. Spreading the discount
+ * (sum - total) pro rata gives the same shares. BigInt, so the products are
+ * exact at any ledger amount.
+ */
+function apportionCents(total: number, weights: readonly number[]): number[] {
+  const t = BigInt(total);
+  const sum = weights.reduce((s, w) => s + BigInt(w), BigInt(0));
+  const shares = weights.map((w) => (t * BigInt(w)) / sum);
+  let left = t - shares.reduce((s, x) => s + x, BigInt(0));
+  const byRemainder = weights
+    .map((w, i) => ({ i, r: (t * BigInt(w)) % sum }))
+    .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r > b.r ? -1 : 1));
+  for (const { i } of byRemainder) {
+    if (left <= BigInt(0)) break;
+    shares[i] = shares[i]! + BigInt(1);
+    left -= BigInt(1);
+  }
+  return shares.map((s) => Number(s));
 }
 
 /**
@@ -184,8 +263,10 @@ export class RevenuePostingService {
   /**
    * Map invoice line items to per-category revenue COA splits. Falls back
    * to a single REVENUE credit when no items carry a recognised
-   * Product.category. Rounding drift is absorbed by the largest split so
-   * the credits sum exactly to `total`.
+   * Product.category. A positive drift (tax, rounding) is absorbed by the
+   * largest split so the credits sum exactly to `total`. A negative drift (a
+   * net document discount) across two or more splits is apportioned pro rata
+   * instead (V1-82), so no credit goes negative.
    */
   private async resolveRevenueSplits(
     businessId: string,
@@ -228,6 +309,17 @@ export class RevenuePostingService {
 
     const sum = splits.reduce((s, x) => s + x.amount, 0);
     const drift = +(total - sum).toFixed(2);
+    if (drift <= -0.01 && splits.length > 1) {
+      // V1-82 (FOLLOW3-B3): a net discount. On the largest split alone it
+      // made that credit negative once the discount exceeded the split, and
+      // validatePosting refused the recognition (the send rolled back). The
+      // credits are the total apportioned pro rata to the splits instead, in
+      // integer cents; a split whose share is no cent posts no leg.
+      const shares = apportionCents(toCents(total), splits.map((s) => toCents(s.amount)));
+      return splits
+        .map((s, i) => ({ accountId: s.accountId, amount: fromCents(shares[i]!), label: s.label }))
+        .filter((s) => s.amount > 0);
+    }
     if (Math.abs(drift) >= 0.01 && splits.length > 0) {
       let max = splits[0]!;
       for (const s of splits) if (s.amount > max.amount) max = s;
@@ -269,7 +361,7 @@ export class RevenuePostingService {
    * the credit goes to Revenue directly. Processor fees (when present)
    * are debited to EXPENSE_BANK_FEES so the deposit account math nets.
    */
-  async onPaymentRecorded(paymentId: string, opts: PostingOpts = {}) {
+  async onPaymentRecorded(paymentId: string, opts: PaymentPostingOpts = {}) {
     const payment = await this.db(opts).payment.findUnique({
       where: { id: paymentId },
       select: {
@@ -298,10 +390,13 @@ export class RevenuePostingService {
     const depositKey = RevenuePostingService.depositSystemKey(payment.provider, payment.method);
     const creditKey = basis === 'ACCRUAL' ? 'ACCOUNTS_RECEIVABLE' : 'REVENUE';
 
-    const [depositId, creditId] = await Promise.all([
-      this.resolveCoa(payment.businessId, depositKey),
-      this.resolveCoa(payment.businessId, creditKey),
-    ]);
+    // Resolve in sequence, not with Promise.all: on a never-seeded tenant the
+    // first lookup seeds the whole chart of accounts, and two lookups racing
+    // each other into that seed is what failed the first payment a tenant
+    // ever recorded (journey harness D1). The seeder also serializes seeding
+    // per business; resolving in order keeps this path to one run regardless.
+    const depositId = await this.resolveCoa(payment.businessId, depositKey);
+    const creditId = await this.resolveCoa(payment.businessId, creditKey);
     const feeId = fee > 0 ? await this.resolveCoa(payment.businessId, 'EXPENSE_BANK_FEES') : null;
 
     const entries: Array<{ accountId: string; debit?: number; credit?: number; memo: string }> = [
@@ -334,7 +429,24 @@ export class RevenuePostingService {
       },
       opts.tx,
     );
-    this.timeline.recordEvent({
+    // W3-V1-55c review (SEC-V55C-3, D-90): a payment already posted already
+    // has its one feed row; a re-run (scripts/finance-backfill-revenue.ts)
+    // writes no second one.
+    if (result.alreadyPosted) return result;
+    // W3-V1-55c (owner ruling D-90, on D-08): this is the payment's one feed
+    // row, and it names who recorded the payment, as the CRM
+    // invoice.payment_recorded copy did: KEY is a SYSTEM actor, a person is
+    // USER; with no actor (a provider callback, a service caller) none is named.
+    // Review SEC-V55C-4 (PL07-ST-3): beside KEY only, the person its command
+    // ran for is kept as data.initiatedBy, as the copy keeps it (audit data,
+    // never authority; never a system actor itself).
+    // W5-FEED-CATEGORIES (CR-FCC-1, D-90): the row is written with category
+    // PAYMENT, so ?category= finds a payment's one feed row as it found the
+    // CRM invoice.payment_recorded copy D-90 removed (category CONTACT).
+    const recordedBy = opts.createdById ?? null;
+    const initiatedBy =
+      isSystemActor(recordedBy) && opts.initiatedBy && !isSystemActor(opts.initiatedBy) ? opts.initiatedBy : null;
+    const entry: RecordEventInput = {
       businessId: payment.businessId,
       module: 'FINANCE',
       action: 'payment_recorded',
@@ -343,49 +455,332 @@ export class RevenuePostingService {
       title: `Payment recorded: ${payment.currency} ${gross}`,
       detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
       contactId: payment.invoice?.contactId ?? undefined,
-      data: { amount: gross, currency: payment.currency, provider: payment.provider },
+      category: 'PAYMENT',
+      data: { amount: gross, currency: payment.currency, provider: payment.provider, ...(initiatedBy ? { initiatedBy } : {}) },
+      ...(recordedBy ? { actorType: isSystemActor(recordedBy) ? 'SYSTEM' as const : 'USER' as const, actorId: recordedBy } : {}),
       occurredAt: new Date(),
-    }).catch(() => {});
+    };
+    if (opts.tx) {
+      // Review SEC-V55C-2: inside the caller's payment transaction the row is
+      // written with it, as the manual refund's row is (SEC-CMF2-1 /
+      // CR-CMF2-1, onPaymentRefunded): it commits with the payment, a payment
+      // that rolls back leaves none, and a failed insert fails the payment
+      // instead of leaving one no feed row names (not caught; the best-effort
+      // TimelineService swallows every error, so it is not used here).
+      await opts.tx.activity.create({
+        data: {
+          businessId: entry.businessId,
+          module: entry.module,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          title: entry.title,
+          detail: entry.detail,
+          contactId: entry.contactId,
+          category: entry.category,
+          data: entry.data as Prisma.InputJsonValue,
+          actorType: entry.actorType,
+          actorId: entry.actorId,
+          occurredAt: entry.occurredAt,
+        },
+      });
+    } else {
+      // No transaction to join (a direct call): the posting has committed on
+      // its own, so the row is recorded best-effort after it, as before.
+      Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
+    }
     return result;
   }
 
   /**
    * Reverse the payment recording when the payment is refunded. Idempotent
    * — re-running on an already-reversed transaction is a no-op.
+   *
+   * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): the FINANCE payment_refunded
+   * activity entry names the refunder (`createdById`, the actor the reversal
+   * already carries). With `auditInTransaction` (the manual refund,
+   * CommerceService.markPaymentRefunded) the entry is written for every
+   * refund, posted or not, as an `activities` row through `tx`, inside the
+   * refund transaction: it commits with the refund, a refund that rolls back
+   * leaves none, and a failed insert fails the refund instead of leaving a
+   * REFUNDED payment that names nobody (R0-CMF2 review SEC-CMF2-1 /
+   * CR-CMF2-1: the best-effort TimelineService swallows every error, so it
+   * is not used for this row). Without it (provider refunds) nothing changes:
+   * a reversal records its entry best-effort at once, and a payment with no
+   * posting records nothing.
+   *
+   * V1-29c-REFUND-WRITE-DOOR (BR-07): a refund posts the amount it refunds.
+   * One that leaves part of the payment posts a REFUND transaction for that
+   * amount, the recording's credit account debited and its deposit account
+   * credited, and the recording stays POSTED. One that refunds what is left
+   * (or a call that names no refund) reverses the recording once, as before,
+   * and reverses each earlier partial REFUND posting (PostingService.reverse),
+   * so the payment's transactions net to zero exactly once and every reader
+   * that nets an original against its REVERSAL (the cash-basis P&L and
+   * operating cash flow, ledger-reporting computeCashBasisPnl) reads a fully
+   * refunded payment as nothing received (review CRR-V29C-2: the V1-29c
+   * ADJUSTMENT that folded the partials back read as a new collection on an
+   * ACCRUAL business). Whether a refund leaves part of the payment is read
+   * from the payment's linked refund rows, this one included, not from the
+   * partial postings alone (review CRR-V29C-1): a linked refund row that was
+   * never posted (payments-ops refundCharge) still refunds its part, and the
+   * refund of what is left after it reverses the recording.
+   * SEC-V29-2: the audit entry names the amount refunded (`amount`), the
+   * refund row (`refundPaymentId`) and the payment's own amount
+   * (`paymentAmount`).
    */
-  async onPaymentRefunded(paymentId: string, opts: PostingOpts = {}) {
+  async onPaymentRefunded(paymentId: string, opts: RefundPostingOpts = {}) {
     const db = this.db(opts);
     const payment = await db.payment.findUnique({
       where: { id: paymentId },
-      select: { id: true, businessId: true },
+      select: {
+        id: true,
+        businessId: true,
+        invoiceId: true,
+        amount: true,
+        currency: true,
+        provider: true,
+        method: true,
+        providerPaymentId: true,
+        invoice: { select: { contactId: true, invoiceNumber: true } },
+      },
     });
     if (!payment) return null;
     const externalRef = buildExternalRef('Payment', payment.id, 'payment_recorded');
     if (!externalRef) return null;
+    const refund = opts.refund ?? (opts.auditInTransaction ? await this.newestLinkedRefund(db, payment) : null);
     const original = await db.financialTransaction.findUnique({
       where: { businessId_externalRef: { businessId: payment.businessId, externalRef } },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        entries: { select: { accountId: true, debit: true, credit: true, account: { select: { systemKey: true } } } },
+      },
     });
-    if (!original) return null;
-    if (original.status === 'REVERSED') {
-      return { transactionId: original.id, externalRef, alreadyPosted: true };
+    let result: PostingResult | null = null;
+    let reversed = false;
+    let partlyPosted = false;
+    let partialsReversed = 0;
+    if (original?.status === 'REVERSED') {
+      result = { transactionId: original.id, externalRef, alreadyPosted: true };
+    } else if (original) {
+      const earlier = await this.partialRefundsOf(db, payment.businessId, payment.id);
+      const replayed = refund ? earlier.find((p) => p.refundPaymentId === refund.paymentId) : undefined;
+      const postedCents = earlier.reduce((s, p) => s + p.cents, 0);
+      // Review CRR-V29C-1: what the payment's refunds add up to is read from
+      // its linked refund rows (the row of this refund included, written in
+      // the caller's transaction), and never less than what is posted.
+      const refundedCents = refund
+        ? Math.max(await this.linkedRefundCents(db, payment), postedCents + toCents(refund.amount))
+        : 0;
+      if (replayed) {
+        result = { transactionId: replayed.id, externalRef: replayed.externalRef, alreadyPosted: true };
+      } else if (refund && refundedCents < toCents(Number(payment.amount ?? 0))) {
+        const accounts = await this.refundAccounts(payment, original.entries, opts);
+        result = await this.posting.post(
+          {
+            businessId: payment.businessId,
+            type: 'REFUND',
+            date: new Date(),
+            amount: refund.amount,
+            currency: payment.currency,
+            description: `Partial refund of a payment for invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
+            contactId: payment.invoice?.contactId ?? null,
+            sourceType: 'Payment',
+            sourceId: payment.id,
+            kind: `${PARTIAL_REFUND_KIND}:${earlier.length + 1}`,
+            reference: payment.invoice?.invoiceNumber ?? payment.invoiceId,
+            metadata: { refundPaymentId: refund.paymentId },
+            createdById: opts.createdById ?? null,
+            entries: [
+              { accountId: accounts.creditId, debit: refund.amount, memo: 'Payment refunded (partial)' },
+              { accountId: accounts.depositId, credit: refund.amount, memo: 'Refund paid out' },
+            ],
+          },
+          opts.tx,
+        );
+        partlyPosted = true;
+      } else {
+        result = await this.posting.reverse(
+          payment.businessId,
+          original.id,
+          { reason: 'Payment refunded', createdById: opts.createdById ?? null },
+          opts.tx,
+        );
+        reversed = true;
+        // Review CRR-V29C-2: the partial refunds are taken back by their own
+        // REVERSALs (each original then REVERSED), so the recording, the
+        // partials and their reversals net to zero in every reader.
+        for (const partial of earlier) {
+          if (partial.status === 'REVERSED') continue;
+          await this.posting.reverse(
+            payment.businessId,
+            partial.id,
+            { reason: 'Payment refunded in full', createdById: opts.createdById ?? null },
+            opts.tx,
+          );
+          partialsReversed += 1;
+        }
+      }
     }
-    const result = await this.posting.reverse(
-      payment.businessId,
-      original.id,
-      { reason: 'Payment refunded', createdById: opts.createdById ?? null },
-      opts.tx,
-    );
-    Promise.resolve(this.timeline.recordEvent({
+    const refundedBy = opts.createdById ?? null;
+    // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): beside KEY only, the member its refund ran for
+    // is kept as data.initiatedBy (the same guard as the payment_recorded row): never beside a person,
+    // never a system actor itself.
+    const initiatedBy =
+      isSystemActor(refundedBy) && opts.initiatedBy && !isSystemActor(opts.initiatedBy) ? opts.initiatedBy : null;
+    const entry: RecordEventInput = {
       businessId: payment.businessId,
       module: 'FINANCE',
       action: 'payment_refunded',
       entityType: 'payment',
       entityId: payment.id,
-      title: 'Payment refunded — ledger reversed',
+      title: reversed
+        ? 'Payment refunded — ledger reversed'
+        : partlyPosted
+          ? 'Payment partly refunded — refund posted'
+          : 'Payment refunded',
+      detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
+      contactId: payment.invoice?.contactId ?? undefined,
+      data: {
+        invoiceId: payment.invoiceId,
+        amount: refund ? refund.amount : payment.amount,
+        paymentAmount: payment.amount,
+        refundPaymentId: refund?.paymentId ?? null,
+        currency: payment.currency,
+        ledgerReversed: reversed,
+        ledgerRefundPosted: partlyPosted,
+        ledgerPartialRefundsReversed: partialsReversed,
+        refundedBy,
+        ...(initiatedBy ? { initiatedBy } : {}),
+      },
+      // KEY is a SYSTEM actor, a person is USER; with no actor none is named.
+      actorType: refundedBy ? (isSystemActor(refundedBy) ? 'SYSTEM' : 'USER') : undefined,
+      actorId: refundedBy ?? undefined,
       occurredAt: new Date(),
-    })).catch(() => {});
+    };
+    if (opts.auditInTransaction) {
+      // Not caught: an audit row that cannot be written rolls the refund back.
+      await db.activity.create({
+        data: {
+          businessId: entry.businessId,
+          module: entry.module,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          title: entry.title,
+          detail: entry.detail,
+          contactId: entry.contactId,
+          data: entry.data as Prisma.InputJsonValue,
+          actorType: entry.actorType,
+          actorId: entry.actorId,
+          occurredAt: entry.occurredAt,
+        },
+      });
+    } else if (reversed || partlyPosted) {
+      Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
+    }
     return result;
+  }
+
+  /**
+   * V1-29c: the partial refund postings of a payment, in order, found by
+   * their numbered keys (see PARTIAL_REFUND_KIND).
+   */
+  private async partialRefundsOf(
+    db: Prisma.TransactionClient,
+    businessId: string,
+    paymentId: string,
+  ): Promise<Array<{ id: string; externalRef: string; status: string | null; cents: number; refundPaymentId: string | null }>> {
+    const found: Array<{ id: string; externalRef: string; status: string | null; cents: number; refundPaymentId: string | null }> = [];
+    for (let n = 1; ; n += 1) {
+      const externalRef = `${buildExternalRef('Payment', paymentId, PARTIAL_REFUND_KIND)}:${n}`;
+      const row = await db.financialTransaction.findUnique({
+        where: { businessId_externalRef: { businessId, externalRef } },
+        select: { id: true, status: true, amount: true, metadata: true },
+      });
+      if (!row) return found;
+      const meta = row.metadata as { refundPaymentId?: unknown } | null;
+      found.push({
+        id: row.id,
+        externalRef,
+        status: row.status ?? null,
+        cents: centsOf(row.amount),
+        refundPaymentId: typeof meta?.refundPaymentId === 'string' ? meta.refundPaymentId : null,
+      });
+    }
+  }
+
+  /**
+   * V1-29c review (CRR-V29C-1): what a payment's linked refund rows refund,
+   * in cents: its negative REFUNDED rows of its invoice and tenant whose
+   * reference is its providerPaymentId (the manual refund, the provider
+   * refund door and payments-ops refundCharge all link so), posted or not.
+   */
+  private async linkedRefundCents(
+    db: Prisma.TransactionClient,
+    payment: { businessId: string; invoiceId: string; providerPaymentId: string },
+  ): Promise<number> {
+    const rows = await db.payment.findMany({
+      where: {
+        businessId: payment.businessId,
+        invoiceId: payment.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: payment.providerPaymentId,
+      },
+      select: { amount: true },
+    });
+    return rows.reduce((s, r) => s + Math.abs(centsOf(r.amount)), 0);
+  }
+
+  /**
+   * V1-29c (SEC-V29-2): the newest refund row linked to a payment (a negative
+   * REFUNDED row of its invoice and tenant whose reference is its
+   * providerPaymentId). The manual refund writes it in the transaction that
+   * calls onPaymentRefunded, under the invoice lock.
+   */
+  private async newestLinkedRefund(
+    db: Prisma.TransactionClient,
+    payment: { businessId: string; invoiceId: string; providerPaymentId: string },
+  ): Promise<{ paymentId: string; amount: number } | null> {
+    const row = await db.payment.findFirst({
+      where: {
+        businessId: payment.businessId,
+        invoiceId: payment.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: payment.providerPaymentId,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, amount: true },
+    });
+    return row ? { paymentId: row.id, amount: fromCents(Math.abs(centsOf(row.amount))) } : null;
+  }
+
+  /**
+   * V1-29c: the accounts a refund of `payment` moves: the deposit account its
+   * recording debited and the account it credited (Revenue on cash basis, AR
+   * on accrual), read from the recording itself so a later basis change does
+   * not split one payment across accounts. A recording that does not name
+   * them falls back to the accounts onPaymentRecorded would use now.
+   */
+  private async refundAccounts(
+    payment: { businessId: string; provider: string | null; method: string | null },
+    entries: ReadonlyArray<{ accountId: string; debit: unknown; credit: unknown; account?: { systemKey: string | null } | null }> | undefined,
+    opts: PostingOpts,
+  ): Promise<{ depositId: string; creditId: string }> {
+    const lines = entries ?? [];
+    const credit = lines.find((e) => centsOf(e.credit) > 0);
+    const deposit = lines
+      .filter((e) => centsOf(e.debit) > 0 && e.account?.systemKey !== 'EXPENSE_BANK_FEES')
+      .sort((a, b) => centsOf(b.debit) - centsOf(a.debit))[0];
+    if (credit && deposit) return { depositId: deposit.accountId, creditId: credit.accountId };
+    const basis = await this.getBasis(payment.businessId, opts.basis, opts);
+    return {
+      depositId: await this.resolveCoa(payment.businessId, RevenuePostingService.depositSystemKey(payment.provider, payment.method)),
+      creditId: await this.resolveCoa(payment.businessId, basis === 'ACCRUAL' ? 'ACCOUNTS_RECEIVABLE' : 'REVENUE'),
+    };
   }
 
   /**

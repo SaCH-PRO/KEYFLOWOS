@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AutopilotService } from '../autopilot/autopilot.service';
 import { DealHealthService } from './deal-health.service';
 import { DealVelocityService } from './deal-velocity.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_TARGET_HOUR_UTC = 4;
@@ -42,6 +43,10 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
   }
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.DEAL_INTEL_SCHEDULER_DISABLED === '1') {
       this.logger.log('Deal-intelligence scheduler disabled via env');
       return;

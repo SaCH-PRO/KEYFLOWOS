@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AdapterRegistryService } from '../communications/adapters/adapter-registry.service';
 import { FlowRunnerService } from './flow-runner.service';
@@ -246,11 +247,21 @@ export class AutomationExecutorService {
       case 'update_status':
       case 'UPDATE_STATUS': {
         if (context.contactId) {
+          // D-92 (V1-38c review ST-38c-1): store only a ContactStatus, through
+          // the helper the CSV/link import uses: DORMANT and CUSTOMER in any
+          // case are CLIENT. ACTIVE (the old default, when the action named
+          // none), INACTIVE or any other word has no ContactStatus, so the
+          // action writes nothing and the contact keeps its status.
+          const status = canonicalContactStatus(action.status || action.value);
+          if (!status) {
+            this.logger.warn(`Playbook "${playbookName}" update_status names no contact status, skipping`);
+            break;
+          }
           try {
             await this.crm.updateContact({
               businessId,
               contactId: context.contactId,
-              status: action.status || action.value || 'ACTIVE',
+              status,
             });
           } catch (e) {
             this.logger.warn(`Failed to update status: ${(e as Error).message}`);
@@ -283,7 +294,8 @@ export class AutomationExecutorService {
                   ...(action.templateData ?? {}),
                 },
               });
-              this.logger.log(`Email sent to ${c.email} for playbook "${playbookName}"`);
+              // The contact by id: its email is personal data (IA-044, CF-029).
+              this.logger.log(`Email sent to contact ${context.contactId} for playbook "${playbookName}"`);
             }
           } catch (e) {
             this.logger.warn(`Failed to send email for playbook "${playbookName}": ${(e as Error).message}`);
@@ -355,7 +367,8 @@ export class AutomationExecutorService {
               },
             });
 
-            this.logger.log(`WhatsApp delivery queued for ${phone} in playbook "${playbookName}"`);
+            // The contact by id: its phone is personal data (IA-044, CF-029).
+            this.logger.log(`WhatsApp delivery queued for contact ${context.contactId} in playbook "${playbookName}"`);
           } catch (e) {
             this.logger.warn(`Failed to send WhatsApp for playbook "${playbookName}": ${(e as Error).message}`);
           }
@@ -491,20 +504,20 @@ export class AutomationExecutorService {
     }
   }
 
+  /*
+   * V1-55-EVT-ACTIVITY-DEDUPE (M50, D-08: Activity is the user-visible feed).
+   * flow.module.ts registers ActivityEventListener next to this service, and
+   * it writes the feed row for contact.created, contact.updated (a status
+   * change), booking.created, booking.confirmed, invoice.paid, invoice.sent
+   * and invoice.overdue. The handlers below run the playbooks, flows and
+   * built-in rules on those events and write no second feed row for them.
+   * V1-55b-FEED-DEDUPE-REST: contact.created and booking.created joined the
+   * list (their 'New contact added' and 'New booking from <contact>' rows are
+   * gone): the listener's booking row now carries the start time (CR-V155-1),
+   * and log-redaction.integration.test.ts observes this listener's run itself.
+   */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'crm',
-      action: 'created',
-      entityType: 'contact',
-      entityId: payload.contact.id,
-      title: 'New contact added',
-      detail: [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || payload.contact.email || 'Unknown',
-      icon: 'UserPlus',
-      tone: 'info',
-      contactId: payload.contact.id,
-    });
     await this.executePlaybooks(payload.businessId, 'contact.created', {
       contactId: payload.contact.id,
       trigger: 'contact.created',
@@ -517,17 +530,22 @@ export class AutomationExecutorService {
 
   @OnEvent('contact.updated')
   async onContactUpdated(payload: ContactUpdatedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'crm',
-      action: 'updated',
-      entityType: 'contact',
-      entityId: payload.contact.id,
-      title: 'Contact updated',
-      detail: payload.toStatus ? `Status changed to ${payload.toStatus}` : undefined,
-      icon: 'UserCog',
-      contactId: payload.contact.id,
-    });
+    // V1-55: ActivityEventListener writes the feed row for a status change
+    // (both statuses set and different); this row is written only for an
+    // update that listener leaves out (the negation of its guard).
+    if (!payload.fromStatus || !payload.toStatus || payload.fromStatus === payload.toStatus) {
+      await this.activity.log({
+        businessId: payload.businessId,
+        module: 'crm',
+        action: 'updated',
+        entityType: 'contact',
+        entityId: payload.contact.id,
+        title: 'Contact updated',
+        detail: payload.toStatus ? `Status changed to ${payload.toStatus}` : undefined,
+        icon: 'UserCog',
+        contactId: payload.contact.id,
+      });
+    }
     await this.executePlaybooks(payload.businessId, 'contact.updated', {
       contactId: payload.contact.id,
       fromStatus: payload.fromStatus,
@@ -542,7 +560,13 @@ export class AutomationExecutorService {
     });
 
     if (payload.fromStatus && payload.toStatus && payload.fromStatus !== payload.toStatus) {
-      await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
+      // W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-13, owner ruling D-81): a
+      // paid invoice's move already wrote its one follow-up, for the owner, in
+      // the move's transaction; the built-in rule adds no second task and no
+      // tags update for it. Playbooks and flows still run on the move.
+      if (!(await this.isPaidInvoiceMove(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus))) {
+        await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
+      }
       await this.executePlaybooks(payload.businessId, 'contact.stage_changed', {
         contactId: payload.contact.id,
         fromStatus: payload.fromStatus,
@@ -555,6 +579,29 @@ export class AutomationExecutorService {
         toStatus: payload.toStatus,
         trigger: 'contact.stage_changed',
       });
+    }
+  }
+
+  /**
+   * W9-CRM-RESIDUALS (L-13, D-81): whether this status change is the D-81 move
+   * of a paid invoice: the contact's latest status.changed entry is the one
+   * CrmService.advanceToClientOnInvoicePaid writes (source
+   * 'lifecycle-automation') from `from` to `to`. A member's change writes its
+   * own entry (source 'crm'), so it is never taken for one. A failed lookup
+   * answers false: the built-in rule runs as before.
+   */
+  private async isPaidInvoiceMove(businessId: string, contactId: string, from: string, to: string): Promise<boolean> {
+    try {
+      const latest = await this.prisma.client.contactEvent.findFirst({
+        where: { businessId, contactId, type: 'status.changed' },
+        orderBy: { createdAt: 'desc' },
+        select: { source: true, data: true },
+      });
+      const data = (latest?.data ?? null) as { from?: unknown; to?: unknown } | null;
+      return latest?.source === 'lifecycle-automation' && data?.from === from && data?.to === to;
+    } catch (e) {
+      this.logger.warn(`D-81 move lookup failed for contact=${contactId}: ${(e as Error).message}`);
+      return false;
     }
   }
 
@@ -580,21 +627,6 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
-    const contactName = payload.contact
-      ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || 'Customer'
-      : 'Customer';
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'bookings',
-      action: 'created',
-      entityType: 'booking',
-      entityId: payload.booking.id,
-      title: `New booking from ${contactName}`,
-      detail: new Date(payload.booking.startTime).toLocaleString(),
-      icon: 'Calendar',
-      tone: 'info',
-      contactId: payload.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'booking.created', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
@@ -609,17 +641,6 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.confirmed')
   async onBookingConfirmed(payload: BookingConfirmedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'bookings',
-      action: 'confirmed',
-      entityType: 'booking',
-      entityId: payload.booking.id,
-      title: 'Booking confirmed',
-      icon: 'CheckCircle',
-      tone: 'success',
-      contactId: payload.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'booking.confirmed', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
@@ -650,19 +671,6 @@ export class AutomationExecutorService {
   @OnEvent('invoice.paid')
   async onInvoicePaid(payload: InvoicePaidPayload) {
     const inv = payload.invoice;
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'paid',
-      entityType: 'invoice',
-      entityId: inv.id,
-      title: `Invoice paid`,
-      detail: `${inv.currency} ${inv.total.toFixed(2)}`,
-      icon: 'DollarSign',
-      tone: 'success',
-      contactId: inv.contact?.id,
-      data: { total: inv.total, currency: inv.currency },
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.paid', {
       contactId: inv.contact?.id,
       invoiceId: inv.id,
@@ -731,18 +739,6 @@ export class AutomationExecutorService {
 
   @OnEvent('invoice.sent')
   async onInvoiceSent(payload: InvoiceStatusPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'sent',
-      entityType: 'invoice',
-      entityId: payload.invoice.id,
-      title: 'Invoice sent',
-      detail: `${payload.invoice.currency} ${payload.invoice.total.toFixed(2)}`,
-      icon: 'Send',
-      tone: 'info',
-      contactId: payload.invoice.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.sent', {
       contactId: payload.invoice.contact?.id,
       invoiceId: payload.invoice.id,
@@ -757,18 +753,6 @@ export class AutomationExecutorService {
 
   @OnEvent('invoice.overdue')
   async onInvoiceOverdue(payload: InvoiceStatusPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'overdue',
-      entityType: 'invoice',
-      entityId: payload.invoice.id,
-      title: 'Invoice overdue',
-      detail: `${payload.invoice.currency} ${payload.invoice.total.toFixed(2)}`,
-      icon: 'AlertTriangle',
-      tone: 'warning',
-      contactId: payload.invoice.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.overdue', {
       contactId: payload.invoice.contact?.id,
       invoiceId: payload.invoice.id,

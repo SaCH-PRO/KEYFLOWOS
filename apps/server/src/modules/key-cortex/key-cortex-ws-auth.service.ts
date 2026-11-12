@@ -1,20 +1,45 @@
 /**
  * KEY Cortex WebSocket authentication & authorization.
  *
- * Transport-specific glue that reuses the SAME auth primitives the HTTP
- * `AuthMiddleware` relies on — it does not re-implement token verification:
- *   - Supabase JWT verification via {@link SupabaseAuthService.getUserFromToken}
- *   - Admin HMAC-JWT fallback via {@link verifyAdminToken}
- *   - Business membership shape mirrors {@link BusinessGuard}
+ * Transport-specific glue. Authentication is the HTTP gate itself: the
+ * socket's bearer token is put through {@link AuthMiddleware.use}, so a socket
+ * gets exactly the decision an HTTP request with the same token gets —
+ * Supabase verification then the admin HMAC-JWT fallback, the local-user
+ * checks (User.deletedAt, User.bannedAt, a missing row for an admin token),
+ * the role from the User row, the logout cutoff and the admin revocation
+ * cutoff, and the same fail-closed / Redis-outage rules. Business membership
+ * mirrors {@link BusinessGuard}, tenant-id resolution included.
  *
- * Identity (userId/role) is ALWAYS derived from the validated token, never
- * from client-controlled handshake query parameters.
+ * Both decisions are taken at connect AND again for the open socket: the
+ * gateway re-asks authenticateSocket (same socket, so the same handshake token;
+ * or authenticateToken for a token the socket sent with key:auth_refresh) and
+ * verifyBusinessMembership (the socket's own businessId, the fresh role) before
+ * every client action and on a schedule, refuses the action when either
+ * refuses, and disconnects the socket when a later check confirms the refusal
+ * — see LIVE REVOCATION in key-cortex.gateway.ts (ST-WS-R1,
+ * R0-ID-F6b-WS-LIVE-REVOCATION). Until then a socket kept its connect-time
+ * identity for its lifetime, so a demoted, banned, deleted, removed or
+ * logged-out user kept acting in the tenant. No method here keeps any
+ * per-socket state; the reuse window, the timeout and the confirmation live in
+ * the gateway. Both report a refusal and a failure to decide (a Postgres or
+ * provider error) the same way, as null / false, which is why the gateway
+ * never disconnects on one refused check.
+ *
+ * Until R0-ID-F6-WS-ADMIN-TOKEN (ST-2-WS) this service verified the token
+ * itself and attached an admin token's own claims with none of those checks,
+ * so a demoted, deleted or banned SUPER_ADMIN still opened any tenant's socket
+ * through verifyBusinessMembership's SUPER_ADMIN bypass.
+ *
+ * Identity (userId/role) is ALWAYS derived from the validated token and the
+ * User row, never from client-controlled handshake query parameters.
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import type { Socket } from 'socket.io';
 import type { Redis } from 'ioredis';
 import { SupabaseAuthService } from '../../core/auth/supabase-auth.service';
-import { verifyAdminToken } from '../../core/auth/admin-token.util';
+import { AuthMiddleware } from '../../core/auth/auth.middleware';
+import { resolveRequestBusinessId } from '../../core/auth/request-business-id';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
@@ -43,12 +68,16 @@ export function isAllowedWsOrigin(origin?: string | null): boolean {
 @Injectable()
 export class KeyCortexWsAuthService {
   private readonly logger = new Logger(KeyCortexWsAuthService.name);
+  /** The HTTP authentication gate, over the same collaborators (see the file comment). */
+  private readonly httpAuth: AuthMiddleware;
 
   constructor(
-    @Inject(SupabaseAuthService) private readonly supabaseAuth: SupabaseAuthService,
+    @Inject(SupabaseAuthService) supabaseAuth: SupabaseAuthService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-  ) {}
+    @Inject(REDIS_CLIENT) redis: Redis,
+  ) {
+    this.httpAuth = new AuthMiddleware(supabaseAuth, prisma, redis);
+  }
 
   /**
    * Extract the bearer token from the handshake.
@@ -70,43 +99,42 @@ export class KeyCortexWsAuthService {
 
   /**
    * Authenticate a socket. Returns the verified identity or null.
-   * Handles missing, malformed, expired, revoked and invalid tokens (all → null).
+   *
+   * The decision is AuthMiddleware's for an HTTP request carrying the same
+   * `Authorization: Bearer <token>`: it attaches `req.user` ({ id, email, role
+   * from the User row }) or leaves it unset, and so every refusal it makes —
+   * missing, malformed, expired or revoked token; deleted, banned or (for an
+   * admin token) missing User row; a Postgres failure — is null here too.
+   * The synthetic request carries nothing but that header, which is all the
+   * middleware reads.
    */
   async authenticateSocket(client: Socket): Promise<WsIdentity | null> {
-    const token = this.extractToken(client);
-    if (!token) return null;
-
-    // Primary: Supabase JWT (local HMAC verification or getUser fallback).
-    const user = await this.supabaseAuth.getUserFromToken(token);
-    if (user?.id) {
-      const role = await this.resolveRole(user.id);
-      return { userId: user.id, email: user.email ?? null, role };
-    }
-
-    // Fallback: admin HMAC-JWT (with Redis JTI/global revocation checks).
-    const admin = await verifyAdminToken(token, this.redis);
-    if (admin) {
-      return { userId: admin.id, email: admin.email ?? null, role: admin.role };
-    }
-
-    return null;
+    return this.decide(this.extractToken(client));
   }
 
   /**
-   * Resolve the user's role from the database (not the JWT), so role changes
-   * take effect immediately. Mirrors AuthMiddleware.attachRole().
+   * authenticateSocket's decision for a bearer token the socket presented
+   * in-band rather than in its handshake (the gateway's key:auth_refresh, see
+   * LIVE REVOCATION in key-cortex.gateway.ts): the same AuthMiddleware decision,
+   * the same null for every refusal. Read as `handshake.auth.token` is: a
+   * `Bearer ` prefix is stripped; anything but a non-empty string is null.
    */
-  private async resolveRole(userId: string): Promise<string> {
-    try {
-      const dbUser = await this.prisma.client.user.findUnique({
-        where: { id: userId },
-        select: { role: true },
-      });
-      return dbUser?.role ?? 'USER';
-    } catch (err) {
-      this.logger.debug(`Role lookup failed: ${(err as Error).message}`);
-      return 'USER';
-    }
+  async authenticateToken(raw: unknown): Promise<WsIdentity | null> {
+    if (typeof raw !== 'string') return null;
+    return this.decide(raw.startsWith('Bearer ') ? raw.slice(7).trim() : raw.trim());
+  }
+
+  /** AuthMiddleware's decision for `Authorization: Bearer <token>` (see authenticateSocket). */
+  private async decide(token: string | undefined): Promise<WsIdentity | null> {
+    if (!token) return null;
+
+    const req = { headers: { authorization: `Bearer ${token}` } } as unknown as Request & {
+      user?: { id: string; email?: string | null; role: string };
+    };
+    await this.httpAuth.use(req, {} as Response, () => undefined);
+    const user = req.user;
+    if (!user?.id) return null;
+    return { userId: user.id, email: user.email ?? null, role: user.role };
   }
 
   /**
@@ -114,17 +142,25 @@ export class KeyCortexWsAuthService {
    * SUPER_ADMIN bypasses the check. Otherwise membership is required (owner or
    * member). The `business.findFirst` lookup is soft-delete filtered, so a
    * disabled (soft-deleted) business yields no match and is rejected.
+   *
+   * `businessId` is whatever JSON the client put in the handshake, so it is
+   * read through {@link resolveRequestBusinessId}, the resolver BusinessGuard
+   * uses: only a non-empty string names a tenant. Before the R0-ID-F6 review
+   * repair (ST-WS-R2) any truthy value reached `findFirst` as `id`, where an
+   * object is a Prisma filter — `{ in: [ownBiz, foreignBiz] }` was authorized
+   * for any member of ownBiz, and the gateway then stored that object as the
+   * socket's tenant. Unlike BusinessGuard the socket always needs a tenant, so
+   * this holds for SUPER_ADMIN too (as the empty-id refusal always has).
    */
-  async verifyBusinessMembership(userId: string, role: string, businessId: string): Promise<boolean> {
-    if (!businessId) return false;
+  async verifyBusinessMembership(userId: string, role: string, businessId: unknown): Promise<boolean> {
+    const id = resolveRequestBusinessId({ query: { businessId } });
+    if (!id) return false;
     if (role === 'SUPER_ADMIN') return true;
 
     try {
       const business = await this.prisma.client.business.findFirst({
-        where: {
-          id: businessId,
-          OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-        },
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): a Membership is the one access rule.
+        where: { id, members: { some: { userId } } },
         select: { id: true },
       });
       return !!business;

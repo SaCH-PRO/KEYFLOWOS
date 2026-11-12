@@ -105,6 +105,34 @@ describe('the refund is treated as what it is', () => {
     expect(body).toMatch(/const refund = await this\.getPaymentsOps\(\)\.refundCharge/);
     expect(body).toMatch(/return \{ refund \}/);
   });
+
+  it('records the refund as KEY, its SYSTEM actor, never a person or a tool argument (W10-REFUND-CHARGE-DOOR review SEC-RCD-1, R0-PL-07)', () => {
+    // The refund door names the refunder on the refund row, its posting and its feed row; KEY is
+    // KEY_SYSTEM_ACTOR_ID there (SYSTEM), as the manual refund door records KEY.
+    const at = orchestrator.indexOf("case 'payments_refund_charge':");
+    const body = orchestrator.slice(at, orchestrator.indexOf('      case ', at + 10));
+    const call = body.slice(body.indexOf('.refundCharge('), body.indexOf('return { refund }'));
+    // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the actor argument is still KEY_SYSTEM_ACTOR_ID; the member
+    // who asked rides beside it as the options' initiatedBy (audit data, never the refunder).
+    expect(call).toMatch(/,\s*KEY_SYSTEM_ACTOR_ID,\s*\{\s*initiatedBy\s*\},?\s*\);/);
+    expect(call).not.toMatch(/args\.(actorId|userId|recordedBy|initiatedBy)/);
+  });
+
+  it('W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): names the member who asked beside KEY as initiatedBy, taken from contactBindMember(businessId, action), never from args', () => {
+    // As commerce_mark_invoice_paid keeps that member beside KEY (SEC-W7KMP-1, D-88): the chat principal, the
+    // PLAN_HTTP caller, the plan's member, the approved proposal's executor or the KEY-cortex turn's member.
+    const at = orchestrator.indexOf("case 'payments_refund_charge':");
+    const body = orchestrator.slice(at, orchestrator.indexOf('      case ', at + 10));
+    const decl = 'const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;';
+    expect(body).toContain(decl);
+    expect(body.indexOf(decl)).toBeLessThan(body.indexOf('.refundCharge('));
+    // the one assignment of initiatedBy in the case, and nothing of the tool's arguments in it
+    expect(body.match(/\binitiatedBy\s*=/g)).toHaveLength(1);
+    expect(body).not.toMatch(/initiatedBy\s*[:=][^;\n]*args\b/);
+    // KEY stays the refunder: the person is never passed as the actor
+    const call = body.slice(body.indexOf('.refundCharge('), body.indexOf('return { refund }'));
+    expect(call).not.toMatch(/,\s*(initiatedBy|bindMember|action\?\.principalUserId)\s*,\s*\{/);
+  });
 });
 
 describe('gateways are checked before they are used', () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { openKey, KeyAwarenessPanel, KeyNoticedStream } from "@/components/key";
@@ -27,11 +28,22 @@ import {
   Store,
   Calendar,
   Settings,
+  Receipt,
+  CreditCard,
+  History,
+  type LucideIcon,
 } from "lucide-react";
+import { BusinessActivityFeed } from "@/components/timeline/business-timeline";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
-import { getBusinessCommandCenterSnapshot, type BusinessCommandCenterSnapshot } from "@/lib/api/business-command-center";
+import {
+  getBusinessCommandCenterSnapshot,
+  type BusinessCommandCenterSnapshot,
+  type CommandCenterResult,
+  type CommandCenterResults,
+  type CommandCenterSource,
+} from "@/lib/api/business-command-center";
 import {
   fetchCommandItems,
   completeCommandItem,
@@ -45,7 +57,9 @@ import {
   type CommandItem,
 } from "@/lib/api/command";
 import { DueObligationsPanel } from "./components/due-obligations-panel";
+import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { commandActionsDisabledReason, operationsLevelFromAnswer, type OperationsLevel } from "@/lib/module-access";
 import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
 import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
 import { BusinessPulseCardV2 } from "./components-v2/business-pulse-card-v2";
@@ -126,6 +140,77 @@ function CommandQuickLauncher() {
   );
 }
 
+/* ── V1-47-COCKPIT-TRUTH ─────────────────────────────────────────────────
+   The Release 0 records, each linked to its list, and a banner whenever a
+   source the server read did not answer. A count that is not known reads
+   "Unavailable" (the source failed) or "No access" (this member may not read
+   that list), never 0: a 0 here is always a real zero. */
+
+const RESULT_TILES: Array<{ key: keyof CommandCenterResults; icon: LucideIcon }> = [
+  { key: "contacts", icon: Users },
+  { key: "openInvoices", icon: Receipt },
+  { key: "payments", icon: CreditCard },
+];
+
+function resultValue(result: CommandCenterResult): string {
+  if (result.status === "OK" && result.count !== null) return String(result.count);
+  return result.status === "RESTRICTED" ? "No access" : "Unavailable";
+}
+
+function ReleaseResultTiles({ results }: { results: CommandCenterResults }) {
+  return (
+    <div data-testid="cockpit-results" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {RESULT_TILES.map(({ key, icon: Icon }) => {
+        const result = results[key];
+        const known = result.status === "OK" && result.count !== null;
+        return (
+          <Link
+            key={key}
+            href={result.href}
+            data-testid={`cockpit-result-${key}`}
+            className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-4 py-3 hover:bg-card hover:border-primary/20 transition-colors focus-ring"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Icon className="h-4 w-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">{result.label}</p>
+              <p
+                data-testid="cockpit-result-count"
+                className={known ? "text-xl font-semibold text-foreground" : "text-sm font-medium text-muted-foreground"}
+              >
+                {resultValue(result)}
+              </p>
+            </div>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function DegradedBanner({ sources }: { sources: Record<string, CommandCenterSource> }) {
+  const failed = Object.values(sources)
+    .filter((source) => source.status === "FAILED")
+    .map((source) => source.label);
+  return (
+    <div
+      role="alert"
+      data-testid="cockpit-degraded-banner"
+      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3"
+    >
+      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-foreground">Part of this cockpit could not be loaded</p>
+        <p className="text-xs text-muted-foreground">
+          {failed.length > 0 ? `Sources that did not answer: ${failed.join(", ")}. ` : "A source did not answer. "}
+          Figures that depend on them may be incomplete; a count that could not be read shows as Unavailable, not 0.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function CommandCenterPage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -136,6 +221,16 @@ export default function CommandCenterPage() {
   const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
   const [queueTotal, setQueueTotal] = useState(0);
   const [queueLoading, setQueueLoading] = useState(false);
+  /**
+   * W7-WEB-OPS-SCOPE (D-40): the member's operations level as the server's refusals name it; the
+   * queue disables the item actions below write. The cockpit itself is every member's (D-96).
+   */
+  const [operationsLevel, setOperationsLevel] = useState<OperationsLevel>("unknown");
+  /** An item action's answer: a refusal names the level, and every item action needs write. */
+  const noteActionAnswer = (res: { error?: string | null; status?: number }) => {
+    const refused = operationsLevelFromAnswer(res);
+    if (refused) setOperationsLevel(refused);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -175,9 +270,14 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     setQueueLoading(true);
     try {
-      const { data } = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      const res = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      const { data } = res;
       setCommandItems(data?.items ?? []);
       setQueueTotal(data?.total ?? 0);
+      // A refused read names the level (none); a read that succeeds means at least read.
+      const refused = operationsLevelFromAnswer(res);
+      if (refused) setOperationsLevel(refused);
+      else if (data) setOperationsLevel((prev) => (prev === "none" ? "unknown" : prev));
     } finally {
       setQueueLoading(false);
     }
@@ -191,50 +291,52 @@ export default function CommandCenterPage() {
 
   const handleComplete = async (id: string) => {
     if (!businessId) return;
-    await completeCommandItem(businessId, id);
+    noteActionAnswer(await completeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleApprove = async (id: string) => {
     if (!businessId) return;
-    await approveCommandItem(businessId, id);
+    noteActionAnswer(await approveCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleExecute = async (id: string) => {
     if (!businessId) return;
-    await executeCommandItem(businessId, id);
+    noteActionAnswer(await executeCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleAssign = async (id: string) => {
     if (!businessId) return;
-    await assignCommandItem(businessId, id, "USER", "me");
+    noteActionAnswer(await assignCommandItem(businessId, id, "USER", "me"));
     await loadQueue();
   };
 
   const handleDismiss = async (id: string) => {
     if (!businessId) return;
-    await dismissCommandItem(businessId, id);
+    noteActionAnswer(await dismissCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleSnooze = async (id: string) => {
     if (!businessId) return;
     const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await snoozeCommandItem(businessId, id, until);
+    noteActionAnswer(await snoozeCommandItem(businessId, id, until));
     await loadQueue();
   };
 
   const handleReopen = async (id: string) => {
     if (!businessId) return;
-    await reopenCommandItem(businessId, id);
+    noteActionAnswer(await reopenCommandItem(businessId, id));
     await loadQueue();
   };
 
   const handleDischarge = async (id: string) => {
     if (!businessId) return;
-    await dischargeObligation(businessId, id, "manual");
+    // W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): discharge is an item action too (operations write);
+    // its refusal names the level like the queue's actions do.
+    noteActionAnswer(await dischargeObligation(businessId, id, "manual"));
     // The queue reads the same table, so a discharged obligation has to leave
     // both lists — refreshing only the panel would show it gone in one place
     // and present in the other.
@@ -289,7 +391,12 @@ export default function CommandCenterPage() {
       headerRight={<CommandQuickLauncher />}
     >
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+        {snapshot.degraded && <DegradedBanner sources={snapshot.sources ?? {}} />}
+
         <MissionControlHero businessId={businessId} hullScore={snapshot.keyGenome.overall} />
+
+        {/* A server that predates V1-47 sends no results: show nothing rather than zeros. */}
+        {snapshot.results && <ReleaseResultTiles results={snapshot.results} />}
 
         <CommandHealthStripV2 health={snapshot.health} />
 
@@ -308,8 +415,19 @@ export default function CommandCenterPage() {
             priority and answers "what should I look at"; this sorts by date and
             answers "what do I owe". Different questions, same table. */}
         <CommandSection icon={CalendarClock} title="Due this week">
-          <DueObligationsPanel businessId={businessId} onDischarge={handleDischarge} />
+          <DueObligationsPanel
+            businessId={businessId}
+            onDischarge={handleDischarge}
+            dischargeDisabledReason={commandActionsDisabledReason(operationsLevel)}
+          />
         </CommandSection>
+
+        {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps
+            this member may run, each with its D-70 Run action (exactly the
+            stored step, through the bound execute route, no re-planning).
+            /app/control-tower redirects here, so this is where an approval
+            leads to the approved step running. */}
+        <ApprovedActionsPanel key={`approved-actions:${businessId}`} businessId={businessId} />
 
         <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
           <CommandQueueV2
@@ -324,7 +442,19 @@ export default function CommandCenterPage() {
             onDismiss={handleDismiss}
             onSnooze={handleSnooze}
             onReopen={handleReopen}
+            operationsLevel={operationsLevel}
           />
+        </CommandSection>
+
+        {/* V1-25-EVT-BUSINESS-FEED (M49): what happened in the business, newest
+            first: payments recorded, invoices paid, contacts, bookings. Read from
+            the tenant-guarded /timeline/businesses/:id/events (Activity rows,
+            D-08); a feed that could not be read says so, never "no activity".
+            That read is not scope-filtered, so it is shown only to a caller the
+            V1-47 tiles report able to read revenue and CRM (SEC-V125-1/2):
+            otherwise "No access", and nothing is read. */}
+        <CommandSection icon={History} title="Business activity">
+          <BusinessActivityFeed businessId={businessId} results={snapshot.results} compact />
         </CommandSection>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -440,7 +570,7 @@ export default function CommandCenterPage() {
           </div>
         </div>
 
-        <CommandGenomeOutcomesCardV2 key={businessId} businessId={businessId} />
+        <CommandGenomeOutcomesCardV2 key={`genome-outcomes:${businessId}`} businessId={businessId} />
 
         <CrossDomainPanelV2 businessId={businessId} />
 

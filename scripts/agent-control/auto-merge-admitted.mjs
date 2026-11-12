@@ -30,6 +30,11 @@
  *     evaluator waits for that gate's own successful run. EXPECTED_HEAD_SHA
  *     and EXPECTED_BASE_SHA, when set, must equal the live PR.
  *
+ * FOLLOW3-C5 (owner ruling D-61) keeps each run's workflow file (`path`) in
+ * the snapshot (lib/admission.mjs toWorkflowRunSnapshot), so admission counts
+ * a run for a required gate only when it came from that gate's own file
+ * (lib/admission.mjs runOfRequiredGate).
+ *
  * Without --merge this is the pre-merge check every merge must pass, manual
  * merges included (docs/development/AGENT_CONTROL_PLANE.md).
  *
@@ -37,7 +42,7 @@
  */
 
 import { parseYaml } from './lib/yaml.mjs';
-import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge } from './lib/admission.mjs';
+import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, toWorkflowRunSnapshot } from './lib/admission.mjs';
 import { CONTROL_ISSUE } from './lib/events.mjs';
 import { copilotReviewEvidence, chatgptReviewEvidence } from './lib/semantic-review.mjs';
 
@@ -47,6 +52,10 @@ const prNumber = Number(process.env.PR_NUMBER || 0);
 const wantMerge = process.argv.includes('--merge');
 const grantOnly = process.argv.includes('--grant-only');
 
+// Every load of this module is a run, whatever name it is started or imported
+// by (a symlink, a bin shim, a wrapper): without credentials it exits 2, never
+// 0, because callers read exit 0 as a verdict (agent-control-gate.yml reads it
+// as the #80 grant). Nothing is exported; tests import the lib modules.
 if (wantMerge && grantOnly) {
   process.stderr.write('--merge and --grant-only are exclusive\n');
   process.exit(2);
@@ -207,14 +216,7 @@ async function evaluateNow() {
   }
 
   const runs = await api(`/repos/${repo}/actions/runs?head_sha=${pr.head.sha}&per_page=100`);
-  const workflow_runs = (runs.workflow_runs || []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    head_sha: r.head_sha,
-    status: r.status,
-    conclusion: r.conclusion,
-    created_at: r.created_at,
-  }));
+  const workflow_runs = (runs.workflow_runs || []).map(toWorkflowRunSnapshot);
 
   const [reviews, events, chatgpt, lineage, control_comments] = await Promise.all([
     apiAll(`/repos/${repo}/pulls/${prNumber}/reviews`),

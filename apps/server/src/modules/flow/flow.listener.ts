@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { appUrl } from '../../core/config/runtime-urls';
 import {
@@ -25,7 +25,9 @@ import {
 import { BookingsService } from '../bookings/bookings.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from '../commerce/financial-copilot.service';
+import { CommerceService } from '../commerce/commerce.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class FlowListener implements OnModuleInit, OnModuleDestroy {
@@ -37,11 +39,39 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FinancialCopilotService) private readonly financialCopilot: FinancialCopilotService,
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
+    @Inject(forwardRef(() => CommerceService)) private readonly commerce: CommerceService,
   ) {
     this.logger.log(`FlowListener created, prisma=${!!this.prisma}`);
   }
 
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the customer's
+   * invoice URL for a reminder, /public/invoice/<token>. The overdue reminder
+   * sent /pay/<invoiceId>, the retired bare-id page; the due-soon reminder
+   * sent /invoices/<invoiceId>, which no web route serves. A link that cannot
+   * be issued leaves the reminder without a button (the templates render
+   * none) rather than failing it.
+   *
+   * V1-46b review (SEC-V46B-1/2, CR-V46B-01): through
+   * CommerceService.automatedInvoiceUrl, so a reminder reuses the live link
+   * and never mints one for an invoice whose links were all revoked or
+   * expired (an anonymous WiPay failure callback reaches the payment-failed
+   * email). Callers build it only once the contact has an email.
+   */
+  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+    try {
+      return (await this.commerce.automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      this.logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`);
+      return undefined;
+    }
+  }
+
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.reminderInterval = setInterval(() => {
       this.handleBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`),
@@ -81,9 +111,16 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
   async handleInvoicePaid(payload: InvoicePaidPayload) {
     this.logger.debug(`Flow observed invoice.paid for business=${payload.businessId}`);
 
-    if (payload.invoice.bookingId) {
-      await this.bookingsService.confirmBooking(payload.invoice.bookingId);
-      this.logger.debug(`Booking ${payload.invoice.bookingId} confirmed via invoice.paid`);
+    // V1-28 (M42): this tested payload.invoice.bookingId, a field no
+    // invoice.paid payload carries, so paying never confirmed a booking. The
+    // booking is found through the relation (its final invoice, or its
+    // deposit invoice) under the event's business, and only one still waiting
+    // for confirmation moves; a completed or cancelled booking is left alone.
+    try {
+      const confirmed = await this.bookingsService.confirmBookingForPaidInvoice(payload.businessId, payload.invoice.id);
+      if (confirmed) this.logger.debug(`Booking ${confirmed.id} confirmed via invoice.paid`);
+    } catch (e) {
+      this.logger.error(`invoice.paid booking confirmation failed for invoice ${payload.invoice.id}: ${(e as Error).message}`);
     }
 
     this.logger.log(
@@ -159,6 +196,8 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
     // Send customer overdue reminder
     const inv = payload.invoice;
+    // V1-46b review (CR-V46B-01): no email, no reminder, so no pay link is touched.
+    if (!inv.contact?.email) return;
     const daysOverdue = inv.dueDate
       ? Math.max(1, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / (1000 * 60 * 60 * 24)))
       : 1;
@@ -167,7 +206,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       total: inv.total,
       currency: inv.currency,
       dueDate: inv.dueDate,
-      invoiceUrl: `${appUrl()}/pay/${inv.id}`,
+      invoiceUrl: await this.customerInvoiceUrl(inv.id, payload.businessId),
       daysOverdue,
     });
   }
@@ -576,9 +615,10 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
           },
         });
         if (alreadySent) continue;
+        // V1-46b review (CR-V46B-01): no email, no reminder, so no pay link is touched.
+        if (!inv.contact?.email) continue;
 
-        const base = appUrl();
-        const invoiceUrl = base ? `${base}/invoices/${inv.id}` : undefined;
+        const invoiceUrl = await this.customerInvoiceUrl(inv.id, inv.businessId);
 
         await this.sendCustomerNotification(inv.businessId, 'invoice_due_soon', inv.contact, {
           invoiceNumber: inv.invoiceNumber ?? inv.id.slice(-6).toUpperCase(),
@@ -660,8 +700,8 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
       })
       .catch(() => null);
     if (!inv?.contact?.email) return;
-    const base = appUrl();
-    const retryUrl = base ? `${base}/invoices/${inv.id}/pay` : undefined;
+    // V1-46b (CR-01): the retry link is the token link; /invoices/<id>/pay is served by no web route.
+    const retryUrl = await this.customerInvoiceUrl(inv.id, payload.businessId);
     await this.sendCustomerNotification(
       payload.businessId,
       'payment_failed',

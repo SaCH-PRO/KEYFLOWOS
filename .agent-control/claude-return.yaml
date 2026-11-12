@@ -429,7 +429,7 @@ exact_head_proof:   # the head that carries this file; PENDING until the RETURN 
     status: PENDING
   - gate: Branch divergence
     status: PENDING
-  - gate: DAST (HawkScan)
+  - gate: DAST (Native)
     status: PENDING
   - gate: Agent Control Worker Proof
     status: PENDING

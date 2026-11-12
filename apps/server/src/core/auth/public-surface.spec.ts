@@ -32,6 +32,15 @@
  * looked plausible enough to write down. The 1,153 came from a regex that had
  * acquired a literal backspace character, so it matched nothing and every
  * controller looked unguarded.
+ *
+ * NOT COUNTED HERE: /trpc. TrpcModule (apps/server/src/trpc.module.ts) mounts
+ * @keyflow/api's router as Express middleware, not as controller handlers, so
+ * this parser cannot see it, and its procedures authenticate inside tRPC
+ * (protectedProcedure), outside AuthGuard. D-68 (2026-11-03): it is unmounted
+ * by default; AppModule imports TrpcModule only when TRPC_ENABLED=1, and
+ * otherwise every /trpc request answers the 404 an unknown route answers.
+ * Pinned by src/trpc.module.spec.ts (the wiring) and
+ * test/trpc-mount-flag.integration.test.ts (the built server, both ways).
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -124,7 +133,14 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   // guards as every other write on this controller. It was the primary
   // invoice-creation route with no auth, no tenant check and no plan limit,
   // which also made it a way around RequirePlanLimit('invoices').
-  'modules/commerce/commerce.controller.ts': 10,
+  // 10 -> 11 (V1-49-PUBLIC-RECEIPT, M24, D-07): GET
+  // public/invoice-link/:token/receipt, the customer's receipt. Necessarily
+  // unauthenticated (the customer has no session). What stands in: the
+  // pay-link token IS the credential (24 crypto-random bytes, V1-48; unknown,
+  // expired, inactive and foreign-tenant links answer one 404) plus
+  // @PublicRateLimit(30, 60_000). Read-only; a projection with no payment
+  // rows, references or customer email.
+  'modules/commerce/commerce.controller.ts': 11,
   'modules/commerce/leverage.controller.ts': 9,
   'modules/communications/communications.controller.ts': 3,
   'modules/communications/inbound-communications.controller.ts': 2,
@@ -175,7 +191,10 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/push-notifications/push-notification.controller.ts': 4,
   'modules/risc/risc.controller.ts': 1,
   'modules/site/presence/presence.controller.ts': 3,
-  'modules/site/site.controller.ts': 16,
+  // 16 -> 17: GET storefront/public/:slug/gateways (G6PUB-R3-STORE-ORDER-DOORS). The storefront's
+  // gateway ids, names and currencies only (the invoice pay page's public list, PaymentsService.
+  // getAvailableGateways), for a store that is on (getPublicStorefront 404s otherwise); rate limited.
+  'modules/site/site.controller.ts': 17,
   'modules/social/social.controller.ts': 5,
   'modules/subscriptions/subscriptions.controller.ts': 2,
   'modules/templates/templates.controller.ts': 2,

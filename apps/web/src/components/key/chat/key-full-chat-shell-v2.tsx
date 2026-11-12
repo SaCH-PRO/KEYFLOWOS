@@ -21,8 +21,10 @@ import { Badge } from "@/components/ui-v2/badge";
 import { KeyActionGrid } from "./key-action-grid";
 import { KeyGenomePreview } from "./key-genome-preview";
 import { KeyGenomeChip } from "./key-genome-chip";
+import { KeyLiveVoice } from "./key-live-voice";
 import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
+import { listVoiceRooms } from "@/lib/api/livekit";
 import { getStoredBusinessId } from "@/lib/workspace";
 import type { KeyChatMode } from "./types";
 
@@ -76,6 +78,37 @@ function ApprovalsRail() {
   );
 }
 
+/**
+ * PR196-VOICE (pr196-review OK-9A-1): whether the server reports live KEY voice
+ * available for the selected business. It asks the business's voice rooms
+ * listing once on mount; the server answers it only when LiveKit is set up,
+ * and otherwise with the structured 503 provider_not_configured (service
+ * 'voice'), which fetchWithRetry hands back without retrying. Until the answer
+ * arrives, and on any refusal or failure, voice is treated as unavailable, so
+ * the header never shows a control whose click can only fail.
+ */
+function useLiveVoiceAvailable(): boolean {
+  const [available, setAvailable] = useState(false);
+
+  useEffect(() => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    let cancelled = false;
+    listVoiceRooms(businessId)
+      .then((res) => {
+        if (!cancelled) setAvailable(res.error == null && Array.isArray(res.data));
+      })
+      .catch(() => {
+        if (!cancelled) setAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return available;
+}
+
 export function KeyFullChatShellV2() {
   const chat = useKeyChat();
   const { status, showHistory, setShowHistory, chatMode, setChatMode, activeSessionId, messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen } = chat;
@@ -83,6 +116,7 @@ export function KeyFullChatShellV2() {
   const mode = (chatMode as ChatMode) ?? "general";
   const inGenomeThread = activeSessionId === GENOME_SESSION_ID;
   const [showRightRail, setShowRightRail] = useState(true);
+  const liveVoiceAvailable = useLiveVoiceAvailable();
 
   // Mobile: the right rail is an overlay — start collapsed so the conversation
   // is visible first (audit: rail covered the chat canvas on phones).
@@ -199,6 +233,7 @@ export function KeyFullChatShellV2() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
+              {liveVoiceAvailable && <KeyLiveVoice />}
               <KeyGenomeChip surface="page" />
               <Badge color={inGenomeThread ? "violet" : "muted"} className="hidden sm:inline-flex">
                 {inGenomeThread ? "Genome" : mode === "general" ? "General" : mode}

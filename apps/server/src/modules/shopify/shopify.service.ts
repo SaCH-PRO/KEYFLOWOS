@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CatalogService } from '../catalog/catalog.service';
+import { contactStatusForExternalCustomer, isContactStatus } from '../crm/crm.constants';
 
 export interface ShopifyCredentials {
   shopDomain: string;
@@ -224,10 +225,19 @@ export class ShopifyService {
               lastName: order.customer.last_name || 'Customer',
               email: order.customer.email,
               phone: order.customer.phone || null,
-              status: 'CUSTOMER',
+              // A Shopify order makes its customer a client (CF-49: canonical vocabulary only).
+              status: contactStatusForExternalCustomer(1),
               source: 'shopify',
               custom: { shopifyCustomerId: order.customer.id },
             },
+          });
+        } else if (!isContactStatus(contact.status)) {
+          // CR-1: a status outside the vocabulary (the 'CUSTOMER' this adapter
+          // used to write) reaches no canonical reader; an order makes it CLIENT.
+          // A status in the vocabulary is the business's and is never touched.
+          await this.prisma.client.contact.update({
+            where: { id: contact.id },
+            data: { status: contactStatusForExternalCustomer(1) },
           });
         }
       }
@@ -293,7 +303,6 @@ export class ShopifyService {
         lastName: customer.last_name || 'Customer',
         email: customer.email,
         phone: customer.phone || null,
-        status: customer.orders_count > 0 ? 'CUSTOMER' : 'LEAD',
         source: 'shopify',
         addressLine1: customer.default_address?.address1 || null,
         city: customer.default_address?.city || null,
@@ -305,14 +314,24 @@ export class ShopifyService {
         },
       };
 
+      // CF-49: Shopify maps a NEW contact into the canonical vocabulary and
+      // never overwrites an existing contact's canonical status (it used to
+      // write 'CUSTOMER', or downgrade a PROSPECT/CLIENT to 'LEAD' on every
+      // sync). CR-1: an existing status OUTSIDE the vocabulary (the 'CUSTOMER'
+      // this adapter used to write) is mapped into it, so the contact reaches
+      // the readers of CLIENT again.
       if (existing) {
         await this.prisma.client.contact.update({
           where: { id: existing.id },
-          data: contactData,
+          data: isContactStatus(existing.status)
+            ? contactData
+            : { ...contactData, status: contactStatusForExternalCustomer(customer.orders_count) },
         });
         updated++;
       } else {
-        await this.prisma.client.contact.create({ data: contactData });
+        await this.prisma.client.contact.create({
+          data: { ...contactData, status: contactStatusForExternalCustomer(customer.orders_count) },
+        });
         imported++;
       }
     }

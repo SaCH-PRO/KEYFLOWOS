@@ -154,9 +154,10 @@ export class UpdateBusinessDto {
   @IsOptional()
   businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
 
-  @IsBoolean()
-  @IsOptional()
-  onboardingComplete?: boolean;
+  // onboardingComplete is deliberately absent (R0-09-ID-HARDEN, CF-22): the
+  // global ValidationPipe runs with whitelist: true, so a client that still
+  // sends it has it stripped, and completion goes through the onboarding
+  // concierge's gated path instead of this generic PATCH.
 
   @IsBoolean()
   @IsOptional()

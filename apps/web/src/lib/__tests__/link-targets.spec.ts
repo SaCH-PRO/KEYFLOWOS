@@ -28,9 +28,11 @@
  * naming a route that does not exist is wrong no matter what the other 93% do.
  * Skipping computed targets costs coverage; it cannot cost correctness.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { operateSections } from '../nav-config';
+import { MODE_OPERATE_ITEMS } from '../disclosure-mode';
 
 const WEB_SRC = path.join(__dirname, '..', '..');
 const APP_DIR = path.join(WEB_SRC, 'app');
@@ -174,5 +176,481 @@ describe('hardcoded links point at routes that exist', () => {
           `${!stillUsed ? 'no longer linked anywhere' : 'a real destination'} — remove the entry.`,
       ).toBe(true);
     }
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * R0-08-WEB-NAV-LINKS (CF-20, CF-21, M08)
+ *
+ * The literal-only gate above cannot see these: each is a link to a route that
+ * EXISTS, carrying a query the destination ignores. /app/commerce rewrites
+ * ?tab=invoices to the pipeline tab and never reads ?invoice=, so an owner who
+ * clicks "Invoice" on a payment row lands on a list, not the invoice.
+ * /app/settings/business renders the payments tab whatever ?tab says, so
+ * "Upgrade" lands on gateways, not the plan. The checks below read the source
+ * for the specific shape of each defect.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), 'utf8');
+const relOf = (file: string) => path.relative(WEB_SRC, file).split(path.sep).join('/');
+
+/**
+ * A link into the commerce workspace that carries an invoice id. Three shapes,
+ * whatever the interpolated variable is called:
+ *   - the template interpolates something named invoiceId;
+ *   - it sets an invoice= or invoiceId= query key;
+ *   - it pairs tab=invoices with an id= key, in either order. The contact
+ *     timeline's "View Invoice" passes data.invoiceId as `entityId`, so a
+ *     name-based check alone never sees it.
+ * Only /app/commerce is in scope — quotes-panel deliberately opens
+ * /app/payments filtered by an invoice id, which is a search, not a deep link.
+ */
+const INVOICE_LINK =
+  /`(\/app\/commerce[^`]*(?:\$\{[^}]*invoiceId[^}]*\}|[?&](?:invoice|invoiceId)=|[?&]tab=invoices&(?:[^`]*&)?id=|[?&]id=[^`]*[?&]tab=invoices\b)[^`]*)`/g;
+/**
+ * The one shape that opens the invoice: the detail route with the id passed
+ * through encodeURIComponent, any query after it. A raw `${t.invoiceId}` is
+ * rejected (review ST-R008-2): an id with a slash or a `?` in it, or an
+ * undefined one, otherwise builds a different URL from the one the row names.
+ */
+const INVOICE_DETAIL = /^\/app\/commerce\/invoices\/\$\{encodeURIComponent\([^`]+?\)\}(?:\?[^`]*)?$/;
+
+/**
+ * Every template link to the invoice detail route, whatever the id is called.
+ * INVOICE_LINK only sees a detail link whose interpolation names invoiceId, so
+ * a fixed `${encodeURIComponent(inv.id)}` would be invisible to it; this is how
+ * the per-file counts below see the links they are counting.
+ */
+const DETAIL_LINK = /`(\/app\/commerce\/invoices\/\$\{[^`]*)`/g;
+
+function invoiceLinks(): Array<{ file: string; target: string }> {
+  const out: Array<{ file: string; target: string }> = [];
+  for (const file of sourceFiles()) {
+    for (const m of fs.readFileSync(file, 'utf8').matchAll(INVOICE_LINK)) {
+      out.push({ file: relOf(file), target: m[1] });
+    }
+  }
+  return out;
+}
+
+const detailLinksIn = (rel: string) => [...read(rel).matchAll(DETAIL_LINK)].map((m) => m[1]);
+const invoiceLinksIn = (rel: string) => [...read(rel).matchAll(INVOICE_LINK)].map((m) => m[1]);
+
+/** Broken links per file: an invoice id carried somewhere other than INVOICE_DETAIL. */
+function brokenByFile(): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const l of invoiceLinks()) {
+    if (INVOICE_DETAIL.test(l.target)) continue;
+    out.set(l.file, [...(out.get(l.file) ?? []), l.target]);
+  }
+  return out;
+}
+
+interface LedgerEntry {
+  /** How many broken links the file holds. Exact: a second one fails (F3). */
+  count: number;
+  reason: string;
+}
+
+/**
+ * Files that still carry an invoice id to a commerce TAB instead of the detail
+ * route. Empty since R0-08b: the eight files R0-08 ledgered are fixed. Keyed by
+ * file AND count (review F3), so a ledgered file that grows a second broken
+ * link fails instead of hiding behind the first. Shrink-only, self-cleaning.
+ */
+const INVOICE_LINK_OUTSIDE_WRITE_SET: Record<string, LedgerEntry> = {};
+
+/**
+ * Files outside the R0-08b write set whose link already opens the detail route
+ * but splices the id in raw, which INVOICE_DETAIL now rejects (ST-R008-2). They
+ * reach the right screen for an ordinary cuid; they are recorded here rather
+ * than fixed because the files belong to other packets. Same count rule.
+ */
+const UNENCODED_INVOICE_DETAIL_OUTSIDE_WRITE_SET: Record<string, LedgerEntry> = {
+  'app/app/financial-flow/page.tsx': {
+    count: 1,
+    reason: '`${signal.payload?.invoiceId}` raw; a signal without an invoice id opens /invoices/undefined',
+  },
+  'app/app/commerce/invoices/[id]/edit/page.tsx': {
+    count: 2,
+    reason: '`${invoiceId}` from the route params, raw (back arrow and post-save push)',
+  },
+};
+
+/**
+ * Every link that carries an invoice id in the files R0-08 ledgered, plus the
+ * payments console R0-08 fixed, and how many each holds. Each must be
+ * INVOICE_DETAIL. Exact counts (F3): a file cannot pass by fixing one link of
+ * three, and a link that disappears is noticed rather than silently uncounted.
+ */
+const INVOICE_DETAIL_LINKS: Record<string, number> = {
+  'app/app/payments/page.tsx': 2,
+  'components/ai/cross-module-links.tsx': 1,
+  'app/app/money/components/money-activity-feed.tsx': 3,
+  'app/app/projects/components/project-detail-tabs/revenue-tab.tsx': 2,
+  'app/app/projects/components/project-detail-tabs/overview-tab.tsx': 1,
+  'app/app/commerce/recurring/recurring-panel.tsx': 1,
+  'app/app/bookings/components/booking-detail-drawer.tsx': 1,
+  'app/app/bookings/page.tsx': 1,
+  // The CTA map the cross-module journey uses, and both "View Invoice" buttons.
+  'components/contacts/timeline-tab-panel.tsx': 3,
+};
+
+describe('a link that names an invoice opens that invoice (CF-21)', () => {
+  it('the invoice detail route exists, so the target below is a real screen', () => {
+    expect(resolvesToRoute('/app/commerce/invoices/inv_123')).toBe(true);
+  });
+
+  it('commerce still drops ?tab=invoices onto the pipeline — the defect these links fell into', () => {
+    // Characterises the destination: if commerce ever honours ?tab=invoices
+    // with an id, this fails and the ledger below can be revisited.
+    const commerce = read('app/app/commerce/page.tsx');
+    expect(commerce).toMatch(/\["quotes", "invoices", "payments"\]\.includes\(paramTab\)/);
+    expect(commerce, 'commerce now reads ?invoice= — revisit this gate').not.toMatch(
+      /get\("invoice(Id)?"\)/,
+    );
+    expect(commerce, 'commerce now reads ?id= — revisit this gate').not.toMatch(/get\("id"\)/);
+  });
+
+  it('the extractor sees every shape that carries an invoice id, whatever the variable is called', () => {
+    // The completeness claim below is only as good as this regex. The samples
+    // are shapes found in the product, plus the id= key before tab=invoices;
+    // the last two must NOT be read as an invoice deep link (a contact filter,
+    // and commerce's own record drawer, which honours recordType/recordId).
+    const tpl = (s: string) => '`' + s + '`';
+    const seen = (s: string) => [...tpl(s).matchAll(INVOICE_LINK)].map((m) => m[1]);
+    const carries = [
+      '/app/commerce?tab=invoices&id=${encodeURIComponent(entityId)}',
+      '/app/commerce?tab=invoices&id=${encodeURIComponent(inv.id)}',
+      '/app/commerce?id=${x}&tab=invoices',
+      '/app/commerce?tab=invoices&invoice=${entry.id}',
+      '/app/commerce?tab=pipeline&invoice=${inv.id}',
+      '/app/commerce?tab=invoices&invoiceId=${inv.id}',
+      '/app/commerce?tab=invoices&id=${project.invoiceId}',
+      '/app/commerce/invoices/${encodeURIComponent(t.invoiceId)}',
+    ];
+    for (const s of carries) expect(seen(s), s).toEqual([s]);
+    for (const s of [
+      '/app/commerce?tab=invoices&contactId=${contactId}',
+      '/app/commerce?recordType=invoice&recordId=${id}',
+    ]) {
+      expect(seen(s), s).toEqual([]);
+    }
+  });
+
+  it('the detail shape requires the id to be encoded (ST-R008-2)', () => {
+    // Accepts the encoded detail route, with or without a query after it.
+    for (const s of [
+      '/app/commerce/invoices/${encodeURIComponent(t.invoiceId)}',
+      '/app/commerce/invoices/${encodeURIComponent(inv.id)}',
+      '/app/commerce/invoices/${encodeURIComponent(inv.id)}?action=record-payment',
+    ]) {
+      expect(INVOICE_DETAIL.test(s), s).toBe(true);
+    }
+    // Rejects a raw id, and every commerce tab that ignores the id.
+    for (const s of [
+      '/app/commerce/invoices/${t.invoiceId}',
+      '/app/commerce/invoices/${signal.payload?.invoiceId}',
+      '/app/commerce/invoices/${t.invoiceId}?x=${encodeURIComponent(y)}',
+      '/app/commerce?tab=invoices&invoiceId=${encodeURIComponent(inv.id)}',
+      '/app/commerce?tab=pipeline&invoice=${inv.id}',
+    ]) {
+      expect(INVOICE_DETAIL.test(s), s).toBe(false);
+    }
+  });
+
+  it('finds the contact timeline\'s "View Invoice" links, which name the id entityId', () => {
+    // Regression for the review finding: these escaped the name-based regex.
+    // Once fixed they are detail links that INVOICE_LINK may no longer see by
+    // name, so both extractors are consulted.
+    const rel = 'components/contacts/timeline-tab-panel.tsx';
+    const timeline = new Set([...invoiceLinksIn(rel), ...detailLinksIn(rel)]);
+    expect(timeline.size, 'timeline invoice links not found — extractor is broken').toBeGreaterThanOrEqual(3);
+  });
+
+  it('the payments console links each transaction to its invoice detail page', () => {
+    const payments = invoiceLinks().filter((l) => l.file === 'app/app/payments/page.tsx');
+
+    // The table row and the detail drawer: two links. Zero would be vacuous.
+    expect(payments.length, 'payments invoice links not found — extractor is broken').toBeGreaterThanOrEqual(2);
+    expect(
+      payments.filter((l) => !INVOICE_DETAIL.test(l.target)).map((l) => l.target),
+      'these payments links carry an invoice id to a commerce tab that ignores it',
+    ).toEqual([]);
+  });
+
+  it('each formerly ledgered file opens the invoice detail page from every invoice link, by count', () => {
+    const off: string[] = [];
+    for (const [rel, expected] of Object.entries(INVOICE_DETAIL_LINKS)) {
+      const wrongShape = invoiceLinksIn(rel).filter((t) => !INVOICE_DETAIL.test(t));
+      const detail = detailLinksIn(rel);
+      const unencoded = detail.filter((t) => !INVOICE_DETAIL.test(t));
+      if (wrongShape.length) off.push(`${rel}: still links a commerce tab: ${wrongShape.join(' | ')}`);
+      if (unencoded.length) off.push(`${rel}: id not encoded: ${unencoded.join(' | ')}`);
+      if (detail.length !== expected) off.push(`${rel}: ${detail.length} detail links, expected ${expected}`);
+    }
+    expect(off, 'point these at /app/commerce/invoices/${encodeURIComponent(id)}').toEqual([]);
+  });
+
+  it('every other commerce link carrying an invoice id opens the detail route, or is ledgered by count', () => {
+    const off: string[] = [];
+    for (const [file, targets] of brokenByFile()) {
+      const allowed =
+        (INVOICE_LINK_OUTSIDE_WRITE_SET[file]?.count ?? 0) +
+        (UNENCODED_INVOICE_DETAIL_OUTSIDE_WRITE_SET[file]?.count ?? 0);
+      if (targets.length > allowed) off.push(`${file}: ${targets.length} broken, ${allowed} ledgered: ${targets.join(' | ')}`);
+    }
+    expect(off, 'point these at /app/commerce/invoices/${encodeURIComponent(id)}').toEqual([]);
+  });
+
+  it('both invoice-link ledgers hold exactly what is still broken', () => {
+    const broken = brokenByFile();
+    for (const [file, { count, reason }] of Object.entries(INVOICE_LINK_OUTSIDE_WRITE_SET)) {
+      const wrongShape = (broken.get(file) ?? []).filter((t) => !t.startsWith('/app/commerce/invoices/'));
+      expect(wrongShape.length, `${file} ("${reason}"): ledger count is stale — update or remove it`).toBe(count);
+    }
+    for (const [file, { count, reason }] of Object.entries(UNENCODED_INVOICE_DETAIL_OUTSIDE_WRITE_SET)) {
+      const unencoded = (broken.get(file) ?? []).filter((t) => t.startsWith('/app/commerce/invoices/'));
+      expect(unencoded.length, `${file} ("${reason}"): ledger count is stale — update or remove it`).toBe(count);
+      expect(file in INVOICE_DETAIL_LINKS, `${file} is in the R0-08b write set — fix it, do not ledger it`).toBe(false);
+    }
+  });
+
+  it('the invoice-tab ledger is empty: every R0-08 entry was fixed, none may return', () => {
+    expect(Object.keys(INVOICE_LINK_OUTSIDE_WRITE_SET)).toEqual([]);
+  });
+});
+
+describe('billing links land on the billing screen', () => {
+  it('/app/settings/business ignores ?tab, so ?tab=billing there is a dead deep link', () => {
+    // Characterises the destination. If the page starts honouring ?tab, this
+    // fails and the assertion below can be reconsidered.
+    const business = read('app/app/settings/business/page.tsx');
+    expect(business).not.toMatch(/useSearchParams|get\("tab"\)/);
+    expect(resolvesToRoute('/app/settings/billing'), 'the billing screen moved').toBe(true);
+    expect(read('app/app/settings/billing/page.tsx')).toMatch(/<BillingTab\s*\/>/);
+  });
+
+  it('no file links /app/settings/business?tab=billing', () => {
+    const offenders = sourceFiles()
+      .filter((f) => fs.readFileSync(f, 'utf8').includes('/app/settings/business?tab=billing'))
+      .map(relOf);
+
+    expect(offenders, 'link /app/settings/billing instead').toEqual([]);
+  });
+});
+
+describe('the cockpit is linked directly, not through its redirect stub', () => {
+  it('the /app/keyflow-command stub still exists and still forwards (no route is deleted)', () => {
+    // D-2 consolidation (CWS-BP4/5) is V1+ backlog. This packet re-points
+    // links; it does not remove the stub that bookmarks rely on.
+    expect(read('app/app/keyflow-command/page.tsx')).toMatch(/redirect\("\/app\/command-center"\)/);
+    expect(resolvesToRoute('/app/command-center')).toBe(true);
+  });
+
+  it('the sidebar logo goes straight to /app/command-center', () => {
+    const sidebar = read('components/layout/desktop-sidebar.tsx');
+    expect(sidebar, 'the logo still targets the redirect stub').not.toContain('/app/keyflow-command');
+    expect(sidebar).toMatch(/href="\/app\/command-center"/);
+  });
+
+  it('no file in the R0-08 write set links the redirect stub', () => {
+    const writeSet = [
+      'lib/nav-config.ts',
+      'lib/semantic-routes.ts',
+      'components/layout/desktop-sidebar.tsx',
+      'components/addon-pack-gate.tsx',
+      'components/ui/upgrade-prompt.tsx',
+      'components/ui/upgrade-modal.tsx',
+      'app/app/payments/page.tsx',
+      'app/app/commerce/components/revenue-setup-drawer.tsx',
+    ];
+    expect(writeSet.filter((f) => /["'`]\/app\/keyflow-command["'`#]/.test(read(f)))).toEqual([]);
+  });
+
+  it('no file in the R0-08b write set links the redirect stub', () => {
+    // The mobile drawer's cockpit link and the ⌘H shortcut both went through
+    // the stub. A pathname comparison against the stub counts too: once the
+    // link goes straight to the cockpit, the drawer must light up on the
+    // cockpit's own path, which is where the user now is.
+    const writeSet = [
+      'lib/disclosure-mode.ts',
+      'hooks/use-keyboard-shortcuts.ts',
+      'components/functional/keyboard-shortcuts-help.tsx',
+      'components/layout/mobile-drawer.tsx',
+      'components/layout/new-entity-menu.tsx',
+      'app/app/commerce/page.tsx',
+      ...Object.keys(INVOICE_DETAIL_LINKS),
+    ];
+    expect(writeSet.filter((f) => /["'`]\/app\/keyflow-command["'`#]/.test(read(f)))).toEqual([]);
+  });
+
+  it('the mobile drawer\'s cockpit link goes straight to /app/command-center', () => {
+    const drawer = read('components/layout/mobile-drawer.tsx');
+    expect(drawer).toMatch(/<Link\s+href="\/app\/command-center"/);
+    expect(drawer, 'the drawer link is not lit on the cockpit itself').toMatch(
+      /pathname\.startsWith\("\/app\/command-center"\)/,
+    );
+  });
+
+  it('the go-home shortcut (kf:go-home) targets /app/command-center', () => {
+    expect(read('hooks/use-keyboard-shortcuts.ts')).toMatch(
+      /goHome = \(\) => router\.push\("\/app\/command-center"\)/,
+    );
+  });
+});
+
+describe('the nav has a door to invoices and quotes (CF-20)', () => {
+  // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
+  // which follows ?view, quotes included (finance-pipeline.tsx).
+  const operate = (() => {
+    const src = read('lib/nav-config.ts');
+    return src.slice(src.indexOf('export const operateSections'), src.indexOf('export const buildSections'));
+  })();
+  const money = () => operateSections.find((s) => s.id === 'money')?.items ?? [];
+  const MODES = ['startup', 'growth', 'enterprise'] as const;
+  /** What use-app-layout shows: an exact-label allowlist, enterprise unfiltered. */
+  const shownIn = (mode: (typeof MODES)[number]) =>
+    money().filter((i) => mode === 'enterprise' || MODE_OPERATE_ITEMS[mode].includes(i.label));
+
+  it('the destinations the entries would use exist today', () => {
+    expect(resolvesToRoute('/app/commerce/invoices')).toBe(true);
+    expect(read('app/app/finance/components/finance-pipeline.tsx')).toMatch(/searchParams\.get\("view"\)/);
+  });
+
+  it('Invoices opens the existing invoices hub', () => {
+    expect(operate).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
+    expect(money().find((i) => i.label === 'Invoices')?.href, 'not in the Money section').toBe(
+      '/app/commerce/invoices',
+    );
+  });
+
+  it('Quotes opens the existing quotes view of the pipeline', () => {
+    expect(operate).toMatch(/label: "Quotes", href: "\/app\/commerce\?tab=pipeline&view=quotes"/);
+    const quotes = money().find((i) => i.label === 'Quotes');
+    expect(quotes?.href, 'not in the Money section').toBe('/app/commerce?tab=pipeline&view=quotes');
+    expect(quotes?.matchTab).toBe('pipeline');
+  });
+
+  it('every disclosure mode shows both doors, so a new owner (startup, the default) sees them', () => {
+    for (const mode of MODES) {
+      expect(MODE_OPERATE_ITEMS[mode], mode).toEqual(expect.arrayContaining(['Invoices', 'Quotes']));
+      const hrefs = shownIn(mode).map((i) => i.href);
+      expect(hrefs, mode).toContain('/app/commerce/invoices');
+      expect(hrefs, mode).toContain('/app/commerce?tab=pipeline&view=quotes');
+    }
+  });
+
+  // The href is only half the door: Next keeps /app/commerce mounted when a nav
+  // click changes only its search params, so the page must follow ?tab after
+  // mount. That is rendered, not string-matched, in
+  // app/app/commerce/__tests__/commerce-tab-follows-url.test.tsx (review F2).
+  it('the commerce page follows ?tab while mounted, so the Quotes door works from another commerce tab', () => {
+    const commerce = read('app/app/commerce/page.tsx');
+    expect(commerce).toMatch(/const paramTab = searchParams\.get\("tab"\);/);
+    expect(commerce).toMatch(/\}, \[paramTab\]\);/);
+  });
+
+  // W9-WEB-COMMERCE-NAV (was it.todo, BLOCKED outside the R0-08b write set,
+  // review F2): the rail's active state. use-app-layout.ts refreshed its tab
+  // only when the pathname changed, so a search-param-only click (Sales ->
+  // Quotes on /app/commerce) left the rail lit as it was; and matchTab
+  // "pipeline" lit Quotes for every pipeline view, Invoices included. The real
+  // hook is rendered here (its network and storage edges stubbed), the URL
+  // moves by pushState with the pathname unchanged, as Next does, and the
+  // rail is read through the isSecondaryActive the sidebar and drawer call.
+  // Sales lighting beside Quotes is the existing parent-entry rule (Sales also
+  // lights on /app/commerce/invoices and /app/commerce/gateway), not a defect
+  // of this entry.
+  it('Quotes lights only on the quotes view, and the rail follows a search-param-only click (W9-WEB-COMMERCE-NAV, was it.todo)', async () => {
+    const { renderHook, act } = await import('@testing-library/react');
+    vi.doMock('next/navigation', () => ({
+      usePathname: () => window.location.pathname,
+      useRouter: () => ({ push: () => {}, replace: () => {}, back: () => {}, prefetch: () => {}, refresh: () => {} }),
+      useSearchParams: () => new URLSearchParams(window.location.search),
+    }));
+    vi.doMock('@/lib/navigation-context', () => ({ useNavigationContext: () => ({}) }));
+    vi.doMock('@/lib/theme-context', () => ({ useThemeColors: () => ({ setAccent1: () => {}, setAccent2: () => {} }) }));
+    vi.doMock('@/hooks/use-plan', () => ({ usePlanLimitHandler: () => ({ planLimitHit: null, clearPlanLimit: () => {} }) }));
+    vi.doMock('@/lib/api', () => ({
+      apiGet: async () => ({ data: null, error: 'not stubbed' }),
+      apiPatch: async () => ({ data: null, error: 'not stubbed' }),
+      apiPost: async () => ({ data: null, error: 'not stubbed' }),
+    }));
+    vi.doMock('@/lib/workspace', () => ({
+      clearStoredBusinessId: () => {},
+      getStoredBusinessId: () => null,
+      getCachedUser: () => null,
+      getUserDisplayName: () => '',
+      getUserInitials: () => 'KF',
+      refreshWorkspace: async () => null,
+      getCachedBusiness: () => null,
+      isSuperAdmin: () => false,
+      BUSINESS_CHANGED_EVENT: 'kf:business-changed',
+    }));
+    try {
+      const { useAppLayout } = await import('@/hooks/use-app-layout');
+      const item = (label: string) => {
+        const found = money().find((i) => i.label === label);
+        if (!found) throw new Error(`${label} is not in the Money section`);
+        return found;
+      };
+      const quotes = item('Quotes');
+      const invoices = item('Invoices');
+
+      window.history.replaceState({}, '', '/app/commerce');
+      const { result, rerender, unmount } = renderHook(() => useAppLayout());
+      const lit = () => ({ quotes: result.current.isSecondaryActive(quotes), invoices: result.current.isSecondaryActive(invoices) });
+      /** A nav click that changes only the search params: the page and the shell stay mounted. */
+      const click = (url: string) => act(() => {
+        window.history.pushState({}, '', url);
+        rerender();
+      });
+
+      // Money > Sales (the Snapshot): Quotes is dark.
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      // Money > Quotes clicked from there: the rail follows without a pathname change.
+      click('/app/commerce?tab=pipeline&view=quotes');
+      expect(lit()).toEqual({ quotes: true, invoices: false });
+      // The pipeline's other views are not the quotes view.
+      click('/app/commerce?tab=pipeline&view=invoices');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      click('/app/commerce?tab=pipeline');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      click('/app/commerce?tab=pipeline&view=quotes');
+      expect(lit()).toEqual({ quotes: true, invoices: false });
+      // Back to the Snapshot by a search-param-only click: Quotes goes dark again.
+      click('/app/commerce');
+      expect(lit()).toEqual({ quotes: false, invoices: false });
+      unmount();
+
+      // Mounted on a pipeline view other than quotes, Quotes is dark from the start.
+      window.history.replaceState({}, '', '/app/commerce?tab=pipeline&view=invoices');
+      const second = renderHook(() => useAppLayout());
+      expect(second.result.current.isSecondaryActive(quotes)).toBe(false);
+      second.unmount();
+
+      // Invoices keeps its own page: lit there, by pathname.
+      window.history.replaceState({}, '', '/app/commerce/invoices');
+      const third = renderHook(() => useAppLayout());
+      expect(third.result.current.isSecondaryActive(invoices)).toBe(true);
+      expect(third.result.current.isSecondaryActive(quotes)).toBe(false);
+      third.unmount();
+    } finally {
+      for (const m of ['next/navigation', '@/lib/navigation-context', '@/lib/theme-context', '@/hooks/use-plan', '@/lib/api', '@/lib/workspace']) vi.doUnmock(m);
+      window.history.replaceState({}, '', '/');
+    }
+  });
+});
+
+describe('the "+ Contact" entry opens the add-contact form', () => {
+  it('the contacts page opens quick-add only for ?action=new', () => {
+    expect(read('app/app/crm/contacts/page.tsx')).toMatch(/action === "new"/);
+  });
+
+  it('new-entity-menu links /app/crm/contacts?action=new', () => {
+    expect(read('components/layout/new-entity-menu.tsx')).toMatch(
+      /label: "Contact", icon: Users, href: "\/app\/crm\/contacts\?action=new"/,
+    );
   });
 });

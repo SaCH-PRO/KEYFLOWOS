@@ -117,6 +117,7 @@ export function ExpenseFormSideSheet({
 
   const handleSubmit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(),
       amount: parseFloat(formData.amount),
@@ -125,7 +126,6 @@ export function ExpenseFormSideSheet({
       categoryId: formData.categoryId || undefined,
       notes: formData.notes.trim() || undefined,
       receiptUrl: formData.receiptUrl.trim() || undefined,
-      currency: "TTD",
       paymentMethod: formData.paymentMethod || undefined,
       tags: formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       isRecurring: formData.isRecurring,
@@ -136,12 +136,15 @@ export function ExpenseFormSideSheet({
     };
     try {
       let expenseId = editingExpense?.id;
-      if (editingExpense) {
-        await updateExpense(businessId, editingExpense.id, payload);
-      } else {
-        const res = await createExpense(businessId, payload);
-        if (res.data) expenseId = res.data.id;
+      const res = editingExpense
+        ? await updateExpense(businessId, editingExpense.id, payload)
+        : await createExpense(businessId, payload);
+      // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
+      if (res?.error) {
+        toast.error(res.error);
+        return;
       }
+      if (!editingExpense && res.data) expenseId = res.data.id;
 
       // Upload receipt to Google Drive if a file was selected
       if (expenseId && selectedFileRef.current && formData.receiptUrl) {

@@ -4,17 +4,59 @@ import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { updateContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { Mail, Phone, MapPin, Star, ChevronDown, Check } from "lucide-react";
+import { Mail, Phone, MapPin, Star, ChevronDown, Check, ShieldOff, SearchX, AlertTriangle } from "lucide-react";
 import { CONTACT_STATUSES } from "@/lib/crm-constants";
 import { toast } from "sonner";
 import { useContactDetailContext } from "./contact-detail-context";
 import { ContactAvatar } from "@/components/contacts/contact-avatar";
+import { classifyContactsLoadError } from "@/app/app/crm/pipeline/hooks/use-contacts-data";
 
 const STATUS_OPTIONS = CONTACT_STATUSES;
 
+/**
+ * CONTACTS-v1 section 5: when the record cannot be shown, say why. A refusal
+ * (403, or a 401 the token refresh could not rescue) is a denial, a 404 is
+ * "not found", anything else is a failed load; none of them is an empty
+ * record. Rendered by the header because the layout mounts it on every tab.
+ */
+function ContactUnavailableState({ error }: { error: string | null }) {
+  // No error but no contact means the server answered with no record.
+  const failure = classifyContactsLoadError(error) ?? "not_found";
+
+  if (failure === "denied") {
+    return (
+      <div role="alert" data-testid="contact-unavailable" data-state="denied" className="rounded-xl border border-border/50 bg-card/50 p-6 mb-4 text-center">
+        <ShieldOff className="mx-auto mb-2 h-5 w-5 text-amber-500" />
+        <h1 className="text-base font-semibold">You do not have access to this contact</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Your account is not permitted to view this record in this workspace. Ask the workspace owner for access.
+        </p>
+      </div>
+    );
+  }
+
+  if (failure === "not_found") {
+    return (
+      <div role="status" data-testid="contact-unavailable" data-state="not_found" className="rounded-xl border border-border/50 bg-card/50 p-6 mb-4 text-center">
+        <SearchX className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+        <h1 className="text-base font-semibold">Contact not found</h1>
+        <p className="mt-1 text-sm text-muted-foreground">It may have been deleted, or the link may be wrong.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div role="alert" data-testid="contact-unavailable" data-state="failed" className="rounded-xl border border-border/50 bg-card/50 p-6 mb-4 text-center">
+      <AlertTriangle className="mx-auto mb-2 h-5 w-5 text-red-400" />
+      <h1 className="text-base font-semibold">Could not load this contact</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+    </div>
+  );
+}
+
 export default function ContactHeader() {
   const { contactId } = useParams();
-  const { contact, detail, loading } = useContactDetailContext();
+  const { contact, detail, loading, error } = useContactDetailContext();
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -49,7 +91,8 @@ export default function ContactHeader() {
     }
   };
 
-  if (loading || !contact) return <div className="h-16 border-b animate-pulse bg-muted/30" />;
+  if (loading) return <div className="h-16 border-b animate-pulse bg-muted/30" />;
+  if (!contact) return <ContactUnavailableState error={error} />;
 
   const name = [contact.firstName, contact.lastName].filter(Boolean).join(" ") || "Unnamed Contact";
   const score = detail?.meta?.leadScore ?? 0;

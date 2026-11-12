@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useThemeColors } from "@/lib/theme-context";
 import { usePlanLimitHandler } from "./use-plan";
@@ -14,6 +14,7 @@ import {
   refreshWorkspace,
   getCachedBusiness,
   isSuperAdmin,
+  BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
@@ -31,6 +32,7 @@ import {
   buildSections,
   moreNav,
   meNav,
+  isNavItemActive,
   type NavItem,
   type NavSection,
   type PrimaryNavItem,
@@ -119,12 +121,11 @@ export function useAppLayout(): AppLayoutState {
     return "cockpit";
   }, [pathname]);
 
-  const [queryTab, setQueryTab] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setQueryTab(new URLSearchParams(window.location.search).get("tab"));
-  }, [pathname]);
+  // The rail follows the search params as they change, not only on a pathname
+  // change (W9-WEB-COMMERCE-NAV): a nav door that changes only ?tab or ?view
+  // (Money > Quotes clicked from Money > Sales on /app/commerce) left the rail
+  // lit for the tab read on the last pathname change.
+  const searchParams = useSearchParams();
 
   const [drawerSurface, setDrawerSurface] = useState<DrawerSurface>(null);
 
@@ -132,16 +133,10 @@ export function useAppLayout(): AppLayoutState {
     setDrawerSurface(null);
   }, [pathname]);
 
-  const isSecondaryActive = useCallback((item: NavItem) => {
-    const basePath = item.href.split("?")[0];
-    if (item.matchTab) {
-      return pathname === basePath && queryTab === item.matchTab;
-    }
-    if (item.exactMatch) {
-      return pathname === basePath && !queryTab;
-    }
-    return pathname === basePath || pathname.startsWith(basePath + "/");
-  }, [pathname, queryTab]);
+  const isSecondaryActive = useCallback(
+    (item: NavItem) => isNavItemActive(item, pathname, searchParams),
+    [pathname, searchParams],
+  );
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -263,22 +258,32 @@ export function useAppLayout(): AppLayoutState {
     }
   }, [pathname]);
 
+  // Header identity from the cached user. Network-free, so it still follows
+  // every navigation as it did when the whole init ran per pathname: a profile
+  // edit (setCachedUser) reaches the header on the next click, not only after
+  // a reload.
+  const applyCachedUser = useCallback(() => {
+    const user = getCachedUser();
+    if (!user) return;
+    setDisplayName(getUserDisplayName());
+    setInitials(getUserInitials());
+    setAvatarUrl(user.avatarUrl ?? null);
+    setIsAdminUser(isSuperAdmin());
+    setUserEmail(user.email ?? null);
+  }, []);
+
+  useEffect(() => {
+    applyCachedUser();
+  }, [pathname, applyCachedUser]);
+
   useEffect(() => {
     let canceled = false;
     const init = async () => {
       try {
         await refreshWorkspace();
         if (canceled) return;
-        const user = getCachedUser();
         void getCachedBusiness();
-
-        if (user) {
-          setDisplayName(getUserDisplayName());
-          setInitials(getUserInitials());
-          if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
-          setIsAdminUser(isSuperAdmin());
-          setUserEmail(user.email ?? null);
-        }
+        applyCachedUser();
 
         const businessId = getStoredBusinessId();
         if (businessId) {
@@ -303,11 +308,23 @@ export function useAppLayout(): AppLayoutState {
       }
     };
     init();
+    // Once per mount, not per pathname: re-resolving on every navigation is
+    // what used to put a chosen business back to the bootstrap default (M03).
+    // A deliberate switch (selectBusiness) announces itself instead.
+    const onBusinessChanged = () => {
+      void init();
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     return () => {
       canceled = true;
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, router]);
+  }, []);
+
+  // The business the notifications on screen belong to. markAllRead acts on
+  // this one, never on whatever is stored by the time the click lands.
+  const notificationsBusinessRef = useRef<string | null>(null);
 
   const fetchNotifications = useCallback(async () => {
     const businessId = getStoredBusinessId();
@@ -316,20 +333,25 @@ export function useAppLayout(): AppLayoutState {
       apiGet(`/notifications/businesses/${businessId}?unreadOnly=false`),
       apiGet(`/notifications/businesses/${businessId}/unread-count`),
     ]);
+    // Switched while this was in flight: these rows belong to the previous business.
+    if (getStoredBusinessId() !== businessId) return;
     if (listRes.data) setNotifications(listRes.data as AppNotification[]);
     if (countRes.data) setUnreadCount((countRes.data as { count?: number }).count ?? 0);
+    notificationsBusinessRef.current = businessId;
   }, []);
 
   const fetchConnectorAlerts = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
     const res = await apiGet(`/connectors/businesses/${businessId}/needs-attention`);
+    if (getStoredBusinessId() !== businessId) return;
     if (res.data) {
       setConnectorAlertCount((res.data as { count?: number }).count ?? 0);
     }
   }, []);
 
   useEffect(() => {
+    let canceled = false;
     fetchNotifications();
     fetchConnectorAlerts();
     const interval = setInterval(() => {
@@ -337,7 +359,27 @@ export function useAppLayout(): AppLayoutState {
       fetchNotifications();
       fetchConnectorAlerts();
     }, 30000);
-    return () => clearInterval(interval);
+    // A switch: what is on screen describes the previous business, so drop it
+    // at once, then load the new business's once its resolution has landed.
+    const onBusinessChanged = () => {
+      notificationsBusinessRef.current = null;
+      setNotifications([]);
+      setUnreadCount(0);
+      setConnectorAlertCount(0);
+      void refreshWorkspace()
+        .catch(() => null)
+        .then(() => {
+          if (canceled) return;
+          fetchNotifications();
+          fetchConnectorAlerts();
+        });
+    };
+    window.addEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
+    return () => {
+      canceled = true;
+      clearInterval(interval);
+      window.removeEventListener(BUSINESS_CHANGED_EVENT, onBusinessChanged);
+    };
   }, [fetchNotifications, fetchConnectorAlerts]);
 
   useEffect(() => {
@@ -363,9 +405,12 @@ export function useAppLayout(): AppLayoutState {
   }, [mobileDrawerOpen]);
 
   const markAllRead = useCallback(async () => {
-    const businessId = getStoredBusinessId();
-    if (!businessId) return;
+    // The business whose notifications are displayed, and only while it is
+    // still the selected one: one tenant's list is never marked read on another.
+    const businessId = notificationsBusinessRef.current;
+    if (!businessId || businessId !== getStoredBusinessId()) return;
     await apiPatch(`/notifications/businesses/${businessId}/read-all`, {});
+    if (notificationsBusinessRef.current !== businessId) return;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadCount(0);
   }, []);

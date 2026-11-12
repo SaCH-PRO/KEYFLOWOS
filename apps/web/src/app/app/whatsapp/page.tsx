@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { MessageCircle, Send, Plus, Loader2, Calendar, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { MessageCircle, Send, Plus, Loader2, Calendar, AlertCircle, CheckCircle2, Clock, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Badge } from "@keyflow/ui";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -55,9 +55,14 @@ interface CrmContact {
   whatsappNumber?: string | null;
 }
 
+/**
+ * GET /whatsapp/businesses/:businessId/status, masked since R0-SEC2: platformId
+ * is the phoneNumberId only for the config owner; any other reader gets the
+ * sending number there, or an empty string. Nothing here reads it.
+ */
 interface ConnectionStatus {
   connected: boolean;
-  destination?: { id: string; platformId: string; displayName: string | null };
+  destination?: { id: string; platformId?: string; displayName: string | null };
 }
 
 function formatTime(iso: string | null): string {
@@ -73,6 +78,9 @@ function formatTime(iso: string | null): string {
 export default function WhatsAppInboxPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
+  // R0-SEC2b (review CR-SEC2-2): GET status answers 403 to a member without
+  // operations: read. That is no access, not "not connected".
+  const [denied, setDenied] = useState(false);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
@@ -101,6 +109,7 @@ export default function WhatsAppInboxPage() {
       apiGet<ConversationItem[]>(`/whatsapp/businesses/${businessId}/conversations`),
       apiGet<{ templates: WhatsAppTemplate[]; error?: string }>(`/whatsapp/businesses/${businessId}/templates`),
     ]);
+    setDenied(s.status === 403);
     setStatus(s.data ?? { connected: false });
     setConversations(c.data ?? []);
     setTemplates(t.data?.templates ?? []);
@@ -220,6 +229,20 @@ export default function WhatsAppInboxPage() {
       <div className="flex items-center justify-center h-96">
         <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
       </div>
+    );
+  }
+
+  if (denied) {
+    return (
+      <WorkspaceShell icon={MessageCircle} title="WhatsApp" subtitle="Two-way WhatsApp Business inbox">
+        <div role="status" className="max-w-lg mx-auto mt-12 p-8 border border-neutral-200 rounded-xl text-center bg-white">
+          <Lock className="w-12 h-12 mx-auto text-neutral-400 mb-4" />
+          <h2 className="text-lg font-semibold mb-2">You don&rsquo;t have access to the WhatsApp inbox</h2>
+          <p className="text-sm text-neutral-600">
+            Your role in this business does not include the WhatsApp inbox. Ask the business owner for access.
+          </p>
+        </div>
+      </WorkspaceShell>
     );
   }
 

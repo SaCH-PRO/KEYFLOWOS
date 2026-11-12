@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -8,6 +9,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ObjectStorageService } from '../../../core/object-storage';
 import {
@@ -22,12 +24,101 @@ import {
   ContactAuditActor,
 } from './contact-audit.service';
 import { buildZip, sha256Hex } from './contact-zip.util';
+import { contactIdentityViolation } from '../crm.service';
+import { contactWhereBase } from '../crm.helpers';
+import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../../core/config/env';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
 const DOWNLOAD_TTL_SECONDS = 24 * 60 * 60; // signed-URL validity (1 day)
 const EXPORT_TTL_DAYS = 7;
+
+/**
+ * What a GDPR purge sets on the Contact row (D-25, CF-48). Every field that
+ * identifies or describes the person is cleared; the row keeps only its id,
+ * business, status, ownership/visibility, timestamps and derived scores, so the
+ * invoices, quotes and bookings retained below still have the row they
+ * reference. Json columns are set to SQL NULL, `custom` and `tags` to empty.
+ */
+const ERASED_CONTACT_FIELDS = {
+  firstName: null,
+  lastName: null,
+  displayName: null,
+  email: null,
+  emailNormalized: null,
+  secondaryEmail: null,
+  phone: null,
+  phoneNormalized: null,
+  secondaryPhone: null,
+  whatsappNumber: null,
+  addressLine1: null,
+  addressLine2: null,
+  city: null,
+  state: null,
+  postalCode: null,
+  country: null,
+  timezone: null,
+  language: null,
+  companyName: null,
+  jobTitle: null,
+  department: null,
+  industry: null,
+  ageGroup: null,
+  notesInternal: null,
+  source: null,
+  sourceDetail: null,
+  segment: null,
+  preferredChannel: null,
+  bestChannel: null,
+  bestChannelConfidence: null,
+  bestTimeWindowJson: Prisma.DbNull,
+  preferredServices: Prisma.DbNull,
+  riskFlags: Prisma.DbNull,
+  opportunities: Prisma.DbNull,
+  nextBestAction: null,
+  accountId: null,
+  tags: [] as string[],
+  custom: {},
+};
+
+/**
+ * The basis on which a purge keeps the records that reference the contact:
+ * invoices, quotes and bookings are financial and transaction records the
+ * business must retain (GDPR Art. 17(3)(b), legal obligation).
+ */
+const PURGE_RETAINED_BASIS = 'legal_obligation:financial_records';
+const PURGE_RETAINED_BASIS_DETAIL =
+  'Invoices, quotes and bookings are retained as financial and transaction records ' +
+  '(GDPR Art. 17(3)(b)); they keep referencing the anonymised, deleted contact row.';
+
+/**
+ * What the forget_purged entry says the purge did NOT sweep (CR-2): it erases
+ * exactly the contact rows and the tables it counts, nothing more is claimed.
+ */
+const PURGE_NOT_SWEPT =
+  'Records of other modules that reference the contact id and are not counted under erased or retained ' +
+  '(for example messaging, campaigns, deals and journeys) are not swept by this purge.';
+
+/** Audit action recording export bundle objects the purge could not delete from storage. */
+const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
+
+/**
+ * A merge operation's repointedCounts reduced to its counts. The stored value
+ * also carries `_deletedSnapshots` (whole rows of the duplicate, kept for the
+ * undo), which a purge must not leave behind.
+ */
+function countsOnly(value: Prisma.JsonValue | null): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return Prisma.DbNull;
+  const out: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key.startsWith('_') || !entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const count = (entry as Record<string, unknown>).count;
+    if (typeof count === 'number') out[key] = count;
+  }
+  return out;
+}
 
 /**
  * GDPR export & forget service (M7).
@@ -44,10 +135,15 @@ const EXPORT_TTL_DAYS = 7;
  *   2. **Forget** — soft-deletes the contact, opens a
  *      `ContactForgetRequest` with `purgeAt = now + graceDays` (per
  *      business setting; default 7), and lets the operator cancel
- *      during the window. After `purgeAt` a scheduled purge job hard-
- *      deletes the contact + child rows in a single transaction and
- *      replaces identifiers in the audit log with hashed placeholders
- *      so the compliance trail survives without PII.
+ *      during the window. After `purgeAt` a scheduled purge erases the
+ *      contact's personal fields in place (and those of every duplicate
+ *      merged into it), deletes its personal child rows, scrubs merge
+ *      snapshots and the audit log, and records one `forget_purged`
+ *      audit entry naming what was erased and what was retained and on
+ *      which basis, all in a single transaction (D-25). The contact row
+ *      itself stays, anonymised and soft-deleted: invoices, quotes and
+ *      bookings reference it (ON DELETE NO ACTION) and are retained as
+ *      financial records.
  */
 @Injectable()
 export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
@@ -62,6 +158,10 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.DISABLE_FORGET_SCHEDULER === 'true') {
       this.logger.log('[ContactPrivacy] forget purge scheduler disabled via env');
       return;
@@ -385,16 +485,39 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException(`Forget request already ${req.status}`);
     }
 
-    await this.prisma.client.$transaction(async (tx) => {
-      await tx.contact.update({
-        where: { id: input.contactId },
-        data: { deletedAt: null },
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        // Bound to the same claim the purge takes (SEC-V138-2): only a request
+        // that is still 'requested' and still names this contact can be
+        // cancelled. If the purge committed after the read above, nothing
+        // matches and the cancel aborts, so it can neither overwrite 'purged'
+        // nor un-delete the anonymised row.
+        const cancelled = await tx.contactForgetRequest.updateMany({
+          where: { id: req.id, businessId: input.businessId, contactId: input.contactId, status: 'requested' },
+          data: { status: 'cancelled', cancelledAt: new Date() },
+        });
+        if (cancelled.count === 0) {
+          throw new BadRequestException('Forget request is no longer open (already purged or cancelled)');
+        }
+        await tx.contact.updateMany({
+          where: { id: input.contactId, businessId: input.businessId },
+          data: { deletedAt: null },
+        });
       });
-      await tx.contactForgetRequest.update({
-        where: { id: req.id },
-        data: { status: 'cancelled', cancelledAt: new Date() },
-      });
-    });
+    } catch (err: unknown) {
+      // Since D-16 a forgotten contact releases its email and phone for the
+      // grace period, so another live contact may hold one of them by now; the
+      // un-delete is then a P2002 on an identity unique and the transaction has
+      // rolled back (the request is still 'requested', the contact still
+      // deleted, nothing is audited). It answers like every other identity
+      // conflict, revertMerge's included: 409 contact_email_taken /
+      // contact_phone_taken naming the live holder the actor may see
+      // (FOLLOW3-D8). Anything else is rethrown untouched.
+      if (contactIdentityViolation(err)) {
+        await this.rejectIdentityTaken(err, input.businessId, input.contactId, input.actor);
+      }
+      throw err;
+    }
 
     await this.audit.write({
       businessId: input.businessId,
@@ -408,9 +531,57 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
+  /**
+   * The 409 of a cancel whose un-delete met a contact identity unique: the
+   * body CrmService.rejectContactIdentityTaken gives every other identity
+   * conflict (same code, message and existingContactId field). The value is
+   * the forgotten contact's own normalized email or phone, read past the
+   * soft-delete extension (it hides the deleted row from every find). The
+   * live holder is looked up after the rolled-back transaction, tenant-scoped
+   * and, for a USER actor, under the M7 visibility clause GET detail applies:
+   * the id is a working key, so a member who may not open the holder gets
+   * existingContactId null with the same message. A SYSTEM or API actor is
+   * tenant-scoped only, as rejectContactIdentityTaken treats a call without
+   * an actor.
+   */
+  private async rejectIdentityTaken(
+    err: unknown,
+    businessId: string,
+    contactId: string,
+    actor: ContactAuditActor | undefined,
+  ): Promise<never> {
+    const field = contactIdentityViolation(err);
+    if (!field) throw err;
+
+    const rows = await this.prisma.client.$queryRaw<Array<{ email: string | null; phone: string | null }>>`
+      SELECT email_normalized AS "email", phone_normalized AS "phone"
+        FROM contacts
+       WHERE id = ${contactId} AND business_id = ${businessId}`;
+    const value = field === 'email' ? rows[0]?.email : rows[0]?.phone;
+    let existing: { id: string } | null = null;
+    if (value) {
+      const where: Prisma.ContactWhereInput = field === 'email'
+        ? { ...contactWhereBase(businessId), emailNormalized: value }
+        : { ...contactWhereBase(businessId), phoneNormalized: value };
+      const actorUserId = actor?.type === 'USER' ? actor.id : null;
+      if (actorUserId) {
+        const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+        const visClause = visibilityClause(access, actorUserId);
+        if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+      }
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    }
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: `A contact with this ${label} already exists in this business`,
+      existingContactId: existing?.id ?? null,
+    });
+  }
+
   /** Run-once helper exposed for ops + tests. */
-  async runPurgeCycle(): Promise<{ purged: number }> {
-    if (this.purgeRunning) return { purged: 0 };
+  async runPurgeCycle(): Promise<{ purged: number; repaired: number }> {
+    if (this.purgeRunning) return { purged: 0, repaired: 0 };
     this.purgeRunning = true;
     try {
       const due = await this.prisma.client.contactForgetRequest.findMany({
@@ -421,114 +592,410 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       for (const req of due) {
         if (!req.contactId) continue; // already detached from a purged contact
         try {
-          await this.purgeOne(req.businessId, req.contactId);
-          purged += 1;
+          if (await this.purgeOne(req.id, req.businessId, req.contactId)) purged += 1;
         } catch (err: any) {
           this.logger.warn(
-            `[ContactPrivacy] purge failed contact=${req.contactId}: ${err instanceof Error ? err.message : err}`,
+            `[ContactPrivacy] purge failed request=${req.id} contact=${req.contactId}: ${err instanceof Error ? err.message : err}`,
           );
         }
       }
       if (purged > 0) {
         this.logger.log(`[ContactPrivacy] purged ${purged} forgotten contacts`);
       }
-      return { purged };
+      const repaired = await this.repairLegacyPurges();
+      return { purged, repaired };
     } finally {
       this.purgeRunning = false;
     }
   }
 
   /**
-   * Hard-delete a contact and all its child rows; scrub identifiers
-   * in the audit log (replace contactId + actor PII with hashed
-   * placeholders) so the compliance trail survives without leaking
-   * PII. Performed in a single transaction.
+   * Erase one forgotten contact (D-25, CF-48). In a single transaction:
+   *
+   *   1. claim the request (requested -> purged, detached, hashed, reason
+   *      cleared); a request that is no longer 'requested', or whose grace
+   *      period was renewed after the due list was read, is a no-op;
+   *   2. erase the person: see eraseForgottenContact;
+   *   3. write the forget_purged entry naming what was erased, what was
+   *      retained and on which basis. It is mandatory: if it cannot be
+   *      written, nothing above commits.
+   *
+   * The row is not deleted. `contact.delete` is a soft delete under the
+   * soft-delete extension (the old purge recorded 'GDPR purge completed' over
+   * a row that kept every personal field), and invoices and bookings reference
+   * the row with ON DELETE NO ACTION because they are retained records.
+   *
+   * Returns true when this call purged the contact, false when the request
+   * had already left 'requested'.
    */
-  private async purgeOne(businessId: string, contactId: string): Promise<void> {
+  private async purgeOne(requestId: string, businessId: string, contactId: string): Promise<boolean> {
     const contactHash = this.audit.hashContact(businessId, contactId);
     const purgeStart = Date.now();
-    const expiredJobs = await this.prisma.client.contactExportJob.findMany({
-      where: { contactId },
-      select: { id: true, jsonKey: true, zipKey: true },
+
+    const exportKeys = await this.prisma.client.$transaction(async (tx) => {
+      const now = new Date();
+      const claimed = await tx.contactForgetRequest.updateMany({
+        where: { id: requestId, businessId, contactId, status: 'requested', purgeAt: { lte: now } },
+        // The reason is free text an operator typed (often the subject's name
+        // or email) and is readable from privacy-settings (SEC-V138-3).
+        data: { status: 'purged', purgedAt: now, contactId: null, contactHash, reason: null },
+      });
+      if (claimed.count === 0) return null;
+      return this.eraseForgottenContact(tx as unknown as Prisma.TransactionClient, { requestId, businessId, contactId, contactHash, now, purgeStart });
     });
 
-    await this.prisma.client.$transaction(async (tx) => {
-      // Snapshot child counts before deletion (for audit metadata).
-      const counts = {
-        events: await tx.contactEvent.count({ where: { contactId } }),
-        notes: await tx.contactNote.count({ where: { contactId } }),
-        tasks: await tx.contactTask.count({ where: { contactId } }),
-        media: await tx.contactMedia.count({ where: { contactId } }),
-        invoices: await tx.invoice.count({ where: { contactId } }),
-        quotes: await tx.quote.count({ where: { contactId } }),
-        bookings: await tx.booking.count({ where: { contactId } }),
-      };
+    if (exportKeys === null) return false;
+    await this.deleteExportBundles(requestId, businessId, contactHash, exportKeys);
+    return true;
+  }
 
-      // Scrub identifiers in the audit log: keep the entries (they are
-      // tamper-evident compliance evidence) but null out direct PII so
-      // the contact is unrecoverable from this table.
-      await tx.contactAuditEntry.updateMany({
-        where: { contactId },
-        data: {
-          contactId: null,
-          before: {} as never,
-          after: {} as never,
-          actor: { type: 'SYSTEM', label: 'purged' } as never,
-          reason: 'PII scrubbed on GDPR purge',
-        },
-      });
+  /**
+   * CR-3: a request the pre-D-25 purge closed is 'purged' and detached
+   * (contactId null), but that purge only soft-deleted the contact, so the row
+   * and its child records kept every personal field. Such a request has no
+   * forget_purged entry naming it (the old entry carried no entityId; the
+   * current one always names its request). The hash is the only pointer back
+   * to the row: hashContact is sha256("<businessId>:<contactId>"), recomputed
+   * here in SQL and checked again in code before anything is erased.
+   */
+  private async repairLegacyPurges(): Promise<number> {
+    let legacy: Array<{ requestId: string; businessId: string; contactId: string; contactHash: string; purgedAt: Date | null }>;
+    try {
+      legacy = await this.prisma.client.$queryRaw`
+        SELECT r.id AS "requestId", r.business_id AS "businessId", c.id AS "contactId",
+               r.contact_hash AS "contactHash", r.purged_at AS "purgedAt"
+          FROM contact_forget_requests r
+          JOIN contacts c
+            ON c.business_id = r.business_id
+           AND c.deleted_at IS NOT NULL
+           AND r.contact_hash = 'sha256:' || encode(sha256(convert_to(c.business_id || ':' || c.id, 'UTF8')), 'hex')
+         WHERE r.status = 'purged'
+           AND r.contact_id IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM contact_audit_entries a
+              WHERE a.business_id = r.business_id AND a.action = 'forget_purged' AND a.entity_id = r.id)
+         LIMIT 50`;
+    } catch (err: unknown) {
+      this.logger.warn(`[ContactPrivacy] legacy purge lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
 
-      // Hard-delete child rows. Order matters where foreign keys
-      // restrict (most use ON DELETE CASCADE so contact.delete would
-      // suffice, but explicit deletes give us confidence under strict
-      // FK constraints we don't fully control here).
-      await tx.contactImportContact.updateMany({
-        where: { contactId },
-        data: { contactId: null, status: 'PURGED' },
-      });
-      await tx.contactExportJob.deleteMany({ where: { contactId } });
-      // Decouple the forget request from the contact BEFORE we delete
-      // the contact so the request survives the hard-purge for
-      // compliance review (status=purged, contactId=null, hash kept).
-      await tx.contactForgetRequest.update({
-        where: { contactId },
-        data: {
+    let repaired = 0;
+    for (const row of legacy) {
+      if (this.audit.hashContact(row.businessId, row.contactId) !== row.contactHash) continue;
+      try {
+        if (await this.repairLegacyPurge(row)) repaired += 1;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `[ContactPrivacy] legacy purge repair failed request=${row.requestId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (repaired > 0) {
+      this.logger.log(`[ContactPrivacy] erased ${repaired} contacts an earlier purge had left intact`);
+    }
+    return repaired;
+  }
+
+  private async repairLegacyPurge(row: {
+    requestId: string;
+    businessId: string;
+    contactId: string;
+    contactHash: string;
+    purgedAt: Date | null;
+  }): Promise<boolean> {
+    const purgeStart = Date.now();
+    const exportKeys = await this.prisma.client.$transaction(async (tx) => {
+      const now = new Date();
+      // Claim on the purgedAt we read: a concurrent repair of the same request
+      // re-evaluates this after the first commits and matches nothing.
+      const claimed = await tx.contactForgetRequest.updateMany({
+        where: {
+          id: row.requestId,
+          businessId: row.businessId,
           status: 'purged',
-          purgedAt: new Date(),
           contactId: null,
-          contactHash,
+          contactHash: row.contactHash,
+          purgedAt: row.purgedAt,
+        },
+        data: { purgedAt: now, reason: null },
+      });
+      if (claimed.count === 0) return null;
+      return this.eraseForgottenContact(tx as unknown as Prisma.TransactionClient, {
+        requestId: row.requestId,
+        businessId: row.businessId,
+        contactId: row.contactId,
+        contactHash: row.contactHash,
+        now,
+        purgeStart,
+        legacyPurgedAt: row.purgedAt,
+      });
+    });
+    if (exportKeys === null) return false;
+    await this.deleteExportBundles(row.requestId, row.businessId, row.contactHash, exportKeys);
+    return true;
+  }
+
+  /**
+   * The erasure itself, inside the caller's transaction, after it has claimed
+   * the request:
+   *
+   *   1. erase the Contact row's personal fields IN THE REQUEST'S BUSINESS; a
+   *      request naming another business's contact erases nothing and the
+   *      claim rolls back;
+   *   2. erase every contact merged into it, recursively, in the same business
+   *      (SEC-V138-1): a merged duplicate is the same person, soft-deleted
+   *      with every personal field intact;
+   *   3. scrub the merge operations naming any of them (the duplicate snapshot
+   *      and resolved fields hold both people's values) and close their undo
+   *      window, so a revert cannot bring the person back;
+   *   4. delete the personal child rows of all of them and blank import raw
+   *      data;
+   *   5. scrub their audit trails down to the hash;
+   *   6. write the forget_purged entry.
+   *
+   * Returns the export bundle object keys to delete once the transaction has
+   * committed.
+   */
+  private async eraseForgottenContact(
+    tx: Prisma.TransactionClient,
+    p: {
+      requestId: string;
+      businessId: string;
+      contactId: string;
+      contactHash: string;
+      now: Date;
+      purgeStart: number;
+      legacyPurgedAt?: Date | null;
+    },
+  ): Promise<string[]> {
+    const { requestId, businessId, contactId, contactHash, now } = p;
+
+    // 1. Tenant-bound: the contact must belong to the request's business.
+    const erased = await tx.contact.updateMany({
+      where: { id: contactId, businessId },
+      data: ERASED_CONTACT_FIELDS,
+    });
+    if (erased.count !== 1) {
+      throw new NotFoundException(
+        `Forget request ${requestId} names no contact of business ${businessId}; nothing was purged`,
+      );
+    }
+
+    // 2. Merged duplicates. Raw SQL because the soft-delete extension hides
+    //    deleted rows from findMany, and every merged duplicate is deleted.
+    //    UNION (not UNION ALL) ends the walk on a cycle.
+    const duplicateRows = await tx.$queryRaw<Array<{ id: string }>>`
+      WITH RECURSIVE merged(id) AS (
+        SELECT id FROM contacts WHERE business_id = ${businessId} AND merged_into_id = ${contactId}
+        UNION
+        SELECT c.id FROM contacts c JOIN merged m ON c.merged_into_id = m.id WHERE c.business_id = ${businessId}
+      )
+      SELECT id FROM merged`;
+    const duplicateIds = duplicateRows.map((r) => r.id).filter((id) => id !== contactId);
+    if (duplicateIds.length > 0) {
+      await tx.contact.updateMany({
+        where: { id: { in: duplicateIds }, businessId },
+        data: ERASED_CONTACT_FIELDS,
+      });
+    }
+    const ids = [contactId, ...duplicateIds];
+    // The request soft-deleted the subject; keep that deletedAt, or set one
+    // where a row was restored outside the forget flow.
+    await tx.contact.updateMany({
+      where: { id: { in: ids }, businessId, deletedAt: null },
+      data: { deletedAt: now },
+    });
+
+    // 3. Merge operations naming any of them: no personal values, no undo.
+    const mergeOps = await tx.mergeOperation.findMany({
+      where: { businessId, OR: [{ primaryId: { in: ids } }, { duplicateId: { in: ids } }] },
+      select: { id: true, expiresAt: true, repointedCounts: true },
+    });
+    for (const op of mergeOps) {
+      await tx.mergeOperation.update({
+        where: { id: op.id },
+        data: {
+          // duplicate_snapshot is NOT NULL; an empty snapshot is also what
+          // revertMerge refuses ('Merge snapshot is missing').
+          duplicateSnapshot: {},
+          resolvedFields: Prisma.DbNull,
+          fieldOverrides: Prisma.DbNull,
+          repointedCounts: countsOnly(op.repointedCounts),
+          expiresAt: op.expiresAt.getTime() > now.getTime() ? now : op.expiresAt,
         },
       });
+    }
 
-      // The Contact row owns CASCADEs for events / notes / tasks /
-      // media / quotes / invoices / bookings — deleting it cleans
-      // those up automatically.
-      await tx.contact.delete({ where: { id: contactId } });
+    // 4. Personal child rows of the subject and its duplicates. None of these
+    //    is a retained record.
+    const byContact = { contactId: { in: ids }, businessId };
+    const events = await tx.contactEvent.deleteMany({ where: byContact });
+    const notes = await tx.contactNote.deleteMany({ where: byContact });
+    const tasks = await tx.contactTask.deleteMany({ where: byContact });
+    const media = await tx.contactMedia.deleteMany({ where: byContact });
+    const customFieldValues = await tx.contactCustomFieldValue.deleteMany({ where: { contactId: { in: ids } } });
+    const contactTags = await tx.contactTag.deleteMany({ where: { contactId: { in: ids } } });
+    const exportJobs = await tx.contactExportJob.findMany({
+      where: byContact,
+      select: { jsonKey: true, zipKey: true },
+    });
+    const exportJobRows = await tx.contactExportJob.deleteMany({ where: byContact });
+    const importRecords = await tx.contactImportContact.updateMany({
+      where: { contactId: { in: ids } },
+      data: { contactId: null, status: 'PURGED', rawData: {} },
+    });
+    // CR-2 / SEC-V138-3: corrected email/phone values, store customer ids,
+    // free-text activity and task descriptions, relationship notes.
+    const dataIssues = await tx.contactDataIssue.deleteMany({ where: byContact });
+    const externalMappings = await tx.contactExternalMapping.deleteMany({ where: byContact });
+    const crmActivities = await tx.crmActivity.deleteMany({ where: byContact });
+    const crmTasks = await tx.crmTask.deleteMany({ where: byContact });
+    const relationships = await tx.contactRelationship.deleteMany({
+      where: { businessId, OR: [{ fromContactId: { in: ids } }, { toContactId: { in: ids } }] },
+    });
 
-      // Final audit entry, anchored only by the hash.
-      await tx.contactAuditEntry.create({
+    // 5. Scrub the audit trails: keep the entries (tamper-evident compliance
+    //    evidence), anchored by each contact's hash only and carrying no
+    //    personal data. A forget_purged entry carries none and is kept as is.
+    const SCRUBBED = {
+      contactId: null,
+      before: {} as never,
+      after: {} as never,
+      actor: { type: 'SYSTEM', label: 'purged' } as never,
+      reason: 'PII scrubbed on GDPR purge',
+      ip: null,
+      userAgent: null,
+    };
+    let auditEntriesScrubbed = 0;
+    for (const id of ids) {
+      const hash = id === contactId ? contactHash : this.audit.hashContact(businessId, id);
+      const r = await tx.contactAuditEntry.updateMany({
+        where: {
+          businessId,
+          OR: [{ contactId: id }, { contactHash: hash }],
+          NOT: { action: { in: ['forget_purged', STORAGE_CLEANUP_FAILED_ACTION] } },
+        },
+        data: { ...SCRUBBED, contactHash: hash },
+      });
+      auditEntriesScrubbed += r.count;
+    }
+
+    // What stays, and why. aggregate() also counts soft-deleted rows (the
+    // soft-delete extension filters count()), so these are every retained row.
+    const invoices = await tx.invoice.aggregate({ where: byContact, _count: { _all: true } });
+    const quotes = await tx.quote.aggregate({ where: byContact, _count: { _all: true } });
+    const bookings = await tx.booking.aggregate({ where: byContact, _count: { _all: true } });
+
+    const exportKeys = exportJobs.flatMap((job) => [job.jsonKey, job.zipKey]);
+    const legacy = p.legacyPurgedAt !== undefined;
+    await tx.contactAuditEntry.create({
+      data: {
+        businessId,
+        contactId: null,
+        contactHash,
+        action: 'forget_purged',
+        entityType: 'contact',
+        entityId: requestId,
+        actor: { type: 'SYSTEM', label: 'forget-purge' } as never,
+        after: {
+          retainedBasis: PURGE_RETAINED_BASIS,
+          retainedBasisDetail: PURGE_RETAINED_BASIS_DETAIL,
+          retained: {
+            contactRow: 'anonymised',
+            invoices: invoices._count._all,
+            quotes: quotes._count._all,
+            bookings: bookings._count._all,
+          },
+          erased: {
+            contactFields: Object.keys(ERASED_CONTACT_FIELDS).length,
+            mergedDuplicates: duplicateIds.length,
+            mergeOperationsScrubbed: mergeOps.length,
+            events: events.count,
+            notes: notes.count,
+            tasks: tasks.count,
+            media: media.count,
+            customFieldValues: customFieldValues.count,
+            contactTags: contactTags.count,
+            exportJobs: exportJobRows.count,
+            importRecords: importRecords.count,
+            dataIssues: dataIssues.count,
+            externalMappings: externalMappings.count,
+            crmActivities: crmActivities.count,
+            crmTasks: crmTasks.count,
+            relationships: relationships.count,
+            auditEntriesScrubbed,
+          },
+          // Deleted from object storage after this transaction commits; a key
+          // that cannot be deleted is recorded in a forget_storage_cleanup_failed entry.
+          exportBundleObjects: exportKeys.length,
+          // Honest scope: only what is counted above was swept.
+          notSwept: PURGE_NOT_SWEPT,
+          ...(legacy
+            ? { legacyRepairOf: { previousPurgedAt: p.legacyPurgedAt?.toISOString() ?? null } }
+            : {}),
+          durationMs: Date.now() - p.purgeStart,
+        } as never,
+        reason: legacy
+          ? 'GDPR purge repair: an earlier purge recorded erasure that had not happened; the contact, its merged duplicates and the records counted in erased are now erased; financial records retained (legal obligation)'
+          : 'GDPR purge: the contact, its merged duplicates and the records counted in erased were erased; financial records retained (legal obligation)',
+        changedFields: Object.keys(ERASED_CONTACT_FIELDS),
+      },
+    });
+    return exportKeys;
+  }
+
+  /**
+   * Delete export bundle objects once the purge has committed. A failure does
+   * not fail the purge (the database erasure stands), but it is never silent
+   * (SEC-V138-4): the job rows that held the keys are gone, so every key that
+   * could not be deleted is logged and recorded in a
+   * forget_storage_cleanup_failed audit entry, anchored by the hash and naming
+   * the request, from which the cleanup can be retried.
+   */
+  private async deleteExportBundles(
+    requestId: string,
+    businessId: string,
+    contactHash: string,
+    keys: string[],
+  ): Promise<void> {
+    if (keys.length === 0) return;
+    const message = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 200);
+    const failed: Array<{ key: string; error: string }> = [];
+    try {
+      const { client, bucket } = this.s3();
+      const results = await Promise.allSettled(
+        keys.map((Key) => client.send(new DeleteObjectCommand({ Bucket: bucket, Key }))),
+      );
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') failed.push({ key: keys[i], error: message(r.reason) });
+      });
+    } catch (err: unknown) {
+      for (const key of keys) failed.push({ key, error: message(err) });
+    }
+    if (failed.length === 0) return;
+
+    this.logger.warn(
+      `[ContactPrivacy] export bundle cleanup failed request=${requestId}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}`,
+    );
+    try {
+      await this.prisma.client.contactAuditEntry.create({
         data: {
           businessId,
           contactId: null,
           contactHash,
-          action: 'forget_purged',
+          action: STORAGE_CLEANUP_FAILED_ACTION,
           entityType: 'contact',
+          entityId: requestId,
           actor: { type: 'SYSTEM', label: 'forget-purge' } as never,
-          after: { ...counts, durationMs: Date.now() - purgeStart } as never,
-          reason: 'GDPR purge completed',
+          after: { failedKeys: failed.map((f) => f.key), errors: failed.map((f) => f.error) } as never,
+          reason: 'GDPR purge committed, but these export bundle objects could not be deleted from storage; delete them by key',
           changedFields: [],
         },
       });
-    });
-
-    // Best-effort cleanup of export bundles in object storage.
-    if (expiredJobs.length > 0) {
-      const { client, bucket } = this.s3();
-      await Promise.allSettled(
-        expiredJobs.flatMap((job) => [
-          client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.jsonKey })),
-          client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.zipKey })),
-        ]),
+    } catch (err: unknown) {
+      this.logger.error(
+        `[ContactPrivacy] could not record failed export bundle cleanup request=${requestId}: ${message(err)}`,
       );
     }
   }

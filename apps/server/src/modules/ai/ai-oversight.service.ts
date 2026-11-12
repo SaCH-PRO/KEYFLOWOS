@@ -4,8 +4,11 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
-import { ApprovalRoutingService } from './approval-routing.service';
-import { JobRolePolicyService, JobRoleEnvelope } from '../structure/job-role-policy.service';
+// W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): redactContactDetails
+// redacts addresses (the shared redactAddresses) and phone-shaped numbers.
+import { ApprovalRoutingService, redactContactDetails } from './approval-routing.service';
+import { JobRolePolicyService, JobRoleEnvelope, approvalTierForPosition } from '../structure/job-role-policy.service';
+import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from '../structure/position-holders';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 export type RiskTier = 1 | 2 | 3 | 4;
@@ -241,6 +244,15 @@ export class AiOversightService {
       return { ...blocked, reason: `Module "${module}" is blocked by business settings` };
     }
 
+    // A policy that could not be read refuses here, BEFORE a caller-supplied
+    // mode can replace the degraded 'restricted'. The degraded object carries
+    // empty blocklists, so the mode is the only thing denying; letting
+    // `mode || settings.mode` override it (autoExecuteToolForMonitoring passes
+    // 'pro_auto') turned an unknown policy into an auto-approval.
+    if (businessSettings.degraded) {
+      return { ...blocked, reason: 'AI governance settings could not be read — no actions allowed until they can be' };
+    }
+
     const effectiveMode = (mode as AutonomySettings['mode']) || settings.mode;
 
     if (effectiveMode === 'restricted') {
@@ -363,12 +375,19 @@ export class AiOversightService {
       );
     }
 
-    // Fallback to AiMemory
+    // Legacy policy is authoritative only after a confirmed absence of the
+    // typed row. A successful legacy read cannot resolve a failed typed read.
+    //
+    // Known gap, NOT settled here: updateAutonomySettings writes only this
+    // AiMemory row, so for a business that has a typed row (seedForBusiness
+    // creates one) a governance update, the web pause included, does not
+    // change the policy read above. Which store is authoritative is an
+    // architecture decision routed to V1-24-KEY-KILL-SWITCHES.
     try {
       const memory = await client.aiMemory.findUnique({
         where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
       });
-      if (memory?.value) {
+      if (!readFailed && memory?.value) {
         const parsed = JSON.parse(memory.value);
         return { ...DEFAULT_AUTONOMY, ...parsed };
       }
@@ -382,11 +401,13 @@ export class AiOversightService {
     if (readFailed) {
       // FAIL CLOSED. Not knowing the policy is not the same as there being no
       // policy, and acting outside a business's stated limits is worse than not
-      // acting. 'restricted' makes evaluate() refuse every tool with a stated
-      // reason (:151), which surfaces as a blocked action rather than as an
-      // unpoliced one.
+      // acting. evaluate() refuses every tool on `degraded` before any
+      // caller-supplied mode is applied, and 'restricted' keeps any other
+      // reader of the mode from treating it as actionable. Either surfaces as a
+      // blocked action rather than as an unpoliced one.
       //
-      // Reaching here means both stores threw — not that neither had a row.
+      // At least one required read failed; a legacy row cannot clear that
+      // uncertainty about a potentially more restrictive typed policy.
       // A business that has genuinely never configured governance still falls
       // through to DEFAULT_AUTONOMY below, exactly as before.
       return { ...DEFAULT_AUTONOMY, mode: 'restricted', maxAutoTier: 1, degraded: true };
@@ -536,7 +557,13 @@ export class AiOversightService {
     if (notifyResult.sent) {
       await this.prisma.client.aiApprovalItem.update({ where: { id: item.id }, data: { notifiedAt: new Date() } });
     } else if (notifyResult.error) {
-      this.logger.warn(`Failed to notify approver for item ${item.id}: ${notifyResult.error}`);
+      // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, review SEC-W5SEC-1): the error can be
+      // the system email sender's provider text, which may quote the approver's
+      // address. The line names the item id and logs that text redacted.
+      // Repair (review SEC-W6LOG-1): on the WhatsApp leg it was the provider's
+      // response body, which may quote the approver's number; notifyApprover now
+      // returns only the provider code, and the line redacts numbers as well.
+      this.logger.warn(`Failed to notify approver for item ${item.id}: ${redactContactDetails(notifyResult.error)}`);
     }
 
     // Tier-4 (admin-level) actions always additionally notify the business
@@ -547,7 +574,10 @@ export class AiOversightService {
       if (ownerRoute) {
         const ownerNotify = await this.approvalRouting.notifyApprover(businessId, ownerRoute, { id: item.id, title: item.title, description: item.description, riskTier: tier });
         if (!ownerNotify.sent && ownerNotify.error) {
-          this.logger.warn(`Failed to CC owner for tier-4 item ${item.id}: ${ownerNotify.error}`);
+          // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, SEC-W5SEC-1, repair SEC-W6LOG-1): as
+          // above, for the owner's address, and the owner's number (resolveOwner
+          // takes the WhatsApp leg whenever the owner has a phone).
+          this.logger.warn(`Failed to CC owner for tier-4 item ${item.id}: ${redactContactDetails(ownerNotify.error)}`);
         }
       }
     }
@@ -594,10 +624,17 @@ export class AiOversightService {
 
   /**
    * Reply-based approval for a staff position resolved as the item's approver
-   * (see ApprovalRoutingService). Unlike resolveApproval, this does NOT
-   * require a Membership — contact-only positions (no login) authorize
-   * purely off their JobRole.defaultApprovalTier, gated on autoApprovalViaReply
-   * being explicitly on for that position.
+   * (see ApprovalRoutingService), gated on autoApprovalViaReply being explicitly
+   * on for that position. A contact-only position (no login) with no member on
+   * its phone authorizes off its JobRole.defaultApprovalTier.
+   *
+   * K2 (V1-21b review 9 WB-1 / FB-3): a reply may not approve what the holder
+   * could not approve over HTTP. The tier is the JobRole's capped by the
+   * membership HTTP reads for the holder in this business and by each member
+   * whose account phone is the position's (approvalTierForPosition, read from
+   * the same rows as the position's KEY envelope); a holder who is banned,
+   * deleted, or not a member here approves nothing. This method reads those
+   * rows itself, so no caller can hand it a position that skips the cap.
    */
   async resolveApprovalByAssignment(
     approvalId: string,
@@ -618,14 +655,20 @@ export class AiOversightService {
 
     const assignment = await this.prisma.client.orgAssignment.findFirst({
       where: { id: assignmentId, businessId, endedAt: null },
-      include: { jobRole: true },
+      include: { jobRole: true, membership: { include: { user: { select: HOLDER_ACCOUNT } } } },
     });
     if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
     if (!assignment.autoApprovalViaReply) {
       throw new ForbiddenException('This position is not authorized for reply-based approval');
     }
 
-    const effectiveTier = assignment.jobRole?.defaultApprovalTier ?? 0;
+    const [membership, phoneMembers] = await Promise.all([
+      holderMembershipHere(this.prisma, businessId, assignment),
+      membersByPhone(this.prisma, businessId, assignment.contactPhone),
+    ]);
+    const cap = approvalTierForPosition({ ...assignment, businessId, membership, phoneMembers });
+    if (cap.refusal) throw new ForbiddenException(cap.refusal);
+    const effectiveTier = cap.tier;
     if (item.riskTier > effectiveTier) {
       throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (position has tier ${effectiveTier})`);
     }

@@ -10,6 +10,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { SiteService } from '../../site/site.service';
 import { PortalService } from '../../portal/portal.service';
 import { PortalContentService } from '../../portal/portal-content.service';
+import { portalAccessView } from '../../portal/portal-access-view';
 import { PromoCodeService } from '../../site/promo-code.service';
 import { IntakeService } from '../../site/intake.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
@@ -158,7 +159,7 @@ export class StorelinkAdapterService extends KeyOrganAdapter {
       ),
       this.makeTool(
         'storelink.create_portal_access',
-        'Create a customer portal access token',
+        'Grant a contact customer portal access; never returns the access token (staff copy the link from the portal screen)',
         2,
         true,
         ['contactId'],
@@ -171,7 +172,13 @@ export class StorelinkAdapterService extends KeyOrganAdapter {
             input.contactId as string,
             (input.settings as Record<string, boolean>) ?? {},
           );
-          return { success: true, data: { accessId: access.id, token: access.token } };
+          // W11-KEY-ORGAN-OUTPUT-REDACT: the grant's token is a bearer
+          // credential for the contact's portal, and this answer goes to the
+          // LLM provider and into CortexActionLog.result. Answer the allowlist
+          // (portalAccessView, the fields of the flow twin's
+          // redactPortalAccess) with whether a live link exists; accessId is
+          // kept for callers that read it. Staff copy the link from /app/portal.
+          return { success: true, data: { accessId: access.id, ...portalAccessView(access) } };
         },
       ),
     ];

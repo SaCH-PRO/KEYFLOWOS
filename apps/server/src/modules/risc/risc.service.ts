@@ -1,9 +1,20 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap, ServiceUnavailableException } from '@nestjs/common';
 import { createPublicKey, KeyObject } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { jwtVerify } from 'jose';
+import { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+  PASSWORD_RESET_AFTER_CUTOFF_META_KEY,
+  SIGN_IN_CUTOFF_META_KEY,
+  signInCutoffOf,
+} from '../../core/auth/auth.middleware';
+import { SIGN_IN_CUTOFF_CLEARED_META_KEY, updateUserMetaLocked } from '../../core/auth/sign-in-cutoff';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { AuthSecurityService } from '../identity/auth-security.service';
 import {
   RiscDiscoveryDocument,
@@ -14,6 +25,92 @@ import {
 } from './risc.types';
 
 const RISC_CONFIG_URL = 'https://accounts.google.com/.well-known/risc-configuration';
+
+/**
+ * How long an account-disabled/hijacking RISC event bans the user at Supabase,
+ * in seconds. No other event bans (R0-ID-F7 review F7-CR-1): Google also sends
+ * sessions-revoked, tokens-revoked and token-revoked for ordinary account
+ * actions, and a ban refuses the user's own sign-in by every method (password,
+ * OAuth, refresh) while it lasts.
+ *
+ * A RISC event carries no user JWT, and the installed auth-js (2.94.0) admin
+ * API has no call that ends sessions by user id: admin.signOut(jwt, scope)
+ * takes the user's ACCESS JWT as the bearer of POST /logout (handing it the
+ * user id is the CR-2 defect), and there is no admin sessions API. The call it
+ * has that takes a user id is admin.updateUserById, whose
+ * AdminUserAttributes.ban_duration bans the user for a Go duration.
+ *
+ * The ban PAUSES the provider sessions; it does not revoke them (F7-SEC-2).
+ * GoTrue refuses a refresh while the user is banned but keeps the refresh
+ * token, and a ban does not log the user out. So once the ban lapsed a
+ * pre-event refresh token (the hijacker's) worked at Supabase again, and, once
+ * the 24h local cutoff lapsed too, at this API. D-97 (W8-RISC-SIGNIN-CUTOFF;
+ * owner ruling, resolves D-39) closes that at this API: every session-ending
+ * event records a DURABLE sign-in cutoff on the User row
+ * (recordSignInCutoff), and AuthMiddleware refuses every token of a session
+ * that signed in at or before it, a refreshed one included, for good; the real
+ * user signs in again. The provider global logout W7-RISC-REVOKE added (a
+ * POST /logout under a user JWT minted with SUPABASE_JWT_SECRET) is not used:
+ * R0-SEC-02 keeps that secret empty.
+ *
+ * Long enough that every live client meets it: a default Supabase access token
+ * lives 1h, so a client holding one issued just before the event must refresh
+ * within the ban, is refused, and auth-js drops that session. Not longer than
+ * that plus a margin: the legitimate user is locked out of sign-in too, and the
+ * local cutoff already lets a session authenticated after the event through. A
+ * longer lock is the operator's (the Supabase dashboard ban), and this handler
+ * never shortens one (F7-SEC-1, see banAtProvider).
+ */
+const RISC_PROVIDER_BAN_SECONDS = 60 * 60 + 5 * 60;
+
+/**
+ * A revocation leg of a session-ending event that can fail, named as
+ * POST /identity/logout names its legs in the audit reason.
+ */
+type RevocationLeg = 'revocation_marker' | 'admin_cutoff' | 'signin_cutoff' | 'local_sessions' | 'provider_ban';
+
+/**
+ * Whether handleEvent ends the user's sessions (terminateUserSessions) for this
+ * event: sessions-revoked, tokens-revoked, token-revoked, and account-disabled
+ * with reason hijacking. Exported (W10-RISC-RESET) as the one classification:
+ * the UserIdentity backfill (apps/server/scripts/backfill-google-identities.ts)
+ * imports it to count the stored `no_matching_user` events that were never
+ * applied, instead of keeping a copy that could drift.
+ */
+export function endsSessions(eventType: string, reason: string | undefined): boolean {
+  return (
+    eventType === RISC_EVENT_TYPES.SESSIONS_REVOKED ||
+    eventType === RISC_EVENT_TYPES.TOKENS_REVOKED ||
+    eventType === RISC_EVENT_TYPES.TOKEN_REVOKED ||
+    (eventType === RISC_EVENT_TYPES.ACCOUNT_DISABLED && reason === RISC_DISABLED_REASON.HIJACKING)
+  );
+}
+
+/**
+ * D-97 review SEC-W8RSC-2: whether a stored RiscEvent.actionTaken names the
+ * durable sign-in cutoff among the legs that did not hold. Such a delivery was
+ * answered 503, so its redelivery is processed again, not deduplicated.
+ */
+function signInCutoffIncomplete(actionTaken: string | null | undefined): boolean {
+  const legs = typeof actionTaken === 'string' ? actionTaken.split(':revocation_incomplete:')[1] : undefined;
+  return legs !== undefined && legs.split(',').includes('signin_cutoff');
+}
+
+interface HandledEvent {
+  /** What the event did; persisted on RiscEvent.actionTaken. */
+  action: string;
+  /** Every revocation leg that did not hold, in the order they ran. */
+  failed: RevocationLeg[];
+  /**
+   * D-97 review SEC-W8RSC-2: the durable sign-in cutoff was not recorded
+   * because the write failed (not because the user row is gone), so a
+   * redelivery of the event can still record it: answer 503.
+   */
+  redeliver: boolean;
+}
+
+/** What terminateUserSessions reports: the legs that did not hold, and whether a redelivery can repair them. */
+type RevocationOutcome = Pick<HandledEvent, 'failed' | 'redeliver'>;
 
 type VerificationKey = KeyObject | CryptoKey;
 
@@ -39,6 +136,7 @@ export class RiscService {
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(AuthSecurityService) private readonly authSecurity: AuthSecurityService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   onApplicationBootstrap() {
@@ -60,7 +158,9 @@ export class RiscService {
    * Receive, validate, deduplicate, and act on a Google RISC security event token.
    *
    * Returns HTTP status guidance: 202 for accepted (valid, possibly duplicate),
-   * 400 for malformed or unverifiable tokens.
+   * 400 for malformed or unverifiable tokens. Throws ServiceUnavailableException
+   * (503) when a session-ending event's durable sign-in cutoff was not recorded
+   * (D-97 review SEC-W8RSC-2), so that Google delivers it again.
    */
   async receiveEvent(token: string): Promise<{ status: 202 | 400; processed: boolean }> {
     let payload: RiscEventPayload;
@@ -80,53 +180,90 @@ export class RiscService {
       return { status: 400, processed: false };
     }
 
-    // Idempotency: RISC may redeliver events. Accept duplicates with 202.
+    // Idempotency: RISC may redeliver events. Accept duplicates with 202 —
+    // except a delivery whose durable sign-in cutoff did not hold (D-97 review
+    // SEC-W8RSC-2): that one was answered 503 so that Google delivers it again,
+    // and the redelivery is processed again rather than dropped as a duplicate.
     const existing = await this.prisma.client.riscEvent.findUnique({
       where: { jti: payload.jti },
     });
-    if (existing) {
+    if (existing && !signInCutoffIncomplete(existing.actionTaken)) {
       this.logger.debug(`RISC event ${payload.jti} already processed; accepting duplicate`);
       return { status: 202, processed: false };
     }
 
     const userId = await this.resolveUser(subject);
-    const actionTaken = await this.handleEvent(eventType, eventDetails, userId);
+    if (!userId && endsSessions(eventType, eventDetails?.reason)) {
+      // D-97 review SEC-W8RSC-3 (a documented residual, docs/auth-pathway.md):
+      // a Google sub with no UserIdentity row ends nobody's session. Since
+      // W8-RISC-SIGNIN-CUTOFF bootstrap writes that row at every Google
+      // sign-in, but an account last signed in before then has none until its
+      // owner signs in again; named here so the operator can find the account
+      // in GoTrue and act on it by hand.
+      this.logger.warn(
+        `SECURITY: RISC ${eventType} for Google sub ${subject.sub} matched no user (no UserIdentity row); no session was ended`,
+      );
+    }
+    const { action, failed, redeliver } = await this.handleEvent(eventType, eventDetails, userId);
+    // A revocation that did not fully happen is not recorded as one that did
+    // (R0-ID-F7 review F7-SEC-3): every failed leg is named on the row and in
+    // the audit, as POST /identity/logout names its failed legs.
+    const actionTaken = failed.length > 0 ? `${action}:revocation_incomplete:${failed.join(',')}` : action;
+    // D-97 review SEC-W8RSC-2: the durable sign-in cutoff is the one leg that
+    // nothing else makes up for (the Redis cutoffs lapse after 24h, the ban
+    // after 65 minutes), so when its write failed (`redeliver`) the event is
+    // not answered as handled: the row and the audit name the failed leg, and
+    // the 503 below asks Google to deliver the event again, which then runs
+    // every leg again (each is idempotent; the cutoff is never lowered). A
+    // user row that is gone is named too but answered 202: no redelivery can
+    // write a cutoff on it.
 
-    await this.prisma.client.riscEvent
-      .create({
-        data: {
-          jti: payload.jti,
-          eventType,
-          providerSubject: subject.sub,
-          userId,
-          actionTaken,
-          payload: {
-            reason: eventDetails?.reason ?? null,
-            state: eventDetails?.state ?? null,
-          },
-          processedAt: new Date(),
-        },
-      })
-      .catch((err: unknown) => {
-        // Logging failure must not return 500 to Google; the event was handled.
-        this.logger.warn(`Failed to persist RISC event ${payload.jti}: ${err instanceof Error ? err.message : String(err)}`);
-      });
+    const record = {
+      eventType,
+      providerSubject: subject.sub,
+      userId,
+      actionTaken,
+      payload: {
+        reason: eventDetails?.reason ?? null,
+        state: eventDetails?.state ?? null,
+      },
+      processedAt: new Date(),
+    };
+    await (existing
+      ? this.prisma.client.riscEvent.update({ where: { jti: payload.jti }, data: record })
+      : this.prisma.client.riscEvent.create({ data: { jti: payload.jti, ...record } })
+    ).catch((err: unknown) => {
+      // Logging failure must not return 500 to Google; the event was handled.
+      this.logger.warn(`Failed to persist RISC event ${payload.jti}: ${err instanceof Error ? err.message : String(err)}`);
+    });
 
     await this.authSecurity
       .audit({
         event: 'login_failure',
-        outcome: 'success',
+        // As for POST /identity/logout: 'success' means the server-side
+        // revocation (the logout cutoff and, D-97, the durable sign-in cutoff)
+        // holds, when the event writes one; the reason names every leg that
+        // did not.
+        outcome: failed.includes('revocation_marker') || failed.includes('signin_cutoff') ? 'error' : 'success',
         userId: userId ?? undefined,
-        reason: `risc:${eventType}`,
+        reason: failed.length > 0 ? `risc:${eventType}; revocation_incomplete: ${failed.join(', ')}` : `risc:${eventType}`,
         metadata: {
           jti: payload.jti,
           providerSubject: subject.sub,
           actionTaken,
           eventReason: eventDetails?.reason ?? null,
+          ...(failed.length > 0 ? { revocationIncomplete: failed } : {}),
+          ...(redeliver ? { redeliveryRequested: true } : {}),
+          ...(existing ? { redelivery: true } : {}),
         },
       })
       .catch(() => undefined);
 
+    if (redeliver) {
+      // Not a 2xx: a push transmitter delivers again what was not accepted
+      // (RFC 8935). RiscController lets the exception through as 503.
+      throw new ServiceUnavailableException('RISC event not fully applied; deliver it again');
+    }
     return { status: 202, processed: true };
   }
 
@@ -248,6 +385,22 @@ export class RiscService {
 
   /**
    * Map a RISC subject to a KeyFlowOS user via the `UserIdentity` table.
+   *
+   * Its writer is POST /identity/bootstrap (IdentityService.persistUserIdentities),
+   * which since W8-RISC-SIGNIN-CUTOFF (D-97, W7-RISC-REVOKE review SEC-W7RR-1)
+   * persists the identities of the VERIFIED provider record (GoTrue's admin
+   * user record for the token's own subject), never the request body's.
+   *
+   * Residual (D-97 review SEC-W8RSC-3, docs/auth-pathway.md): nothing wrote
+   * UserIdentity before that packet, so an account last signed in with Google
+   * before it resolves no user here until its owner signs in again or the
+   * operator runs the backfill (W9-IDENTITY-BACKFILL-SCRIPT:
+   * apps/server/scripts/backfill-google-identities.ts, `pnpm
+   * backfill:google-identities`, dry run by default), which writes bootstrap's
+   * row from GoTrue's verified records; an event that arrived before the
+   * backfill is not replayed (review SEC-W9IBS-1). receiveEvent logs such a
+   * session-ending event for the operator. user_metadata (user-editable at
+   * GoTrue) is never used to match.
    */
   private async resolveUser(subject: RiscSubject): Promise<string | null> {
     if (!subject.sub) return null;
@@ -259,97 +412,300 @@ export class RiscService {
 
   /**
    * Execute the security action requested by the event type.
-   * Returns a short `actionTaken` string persisted for observability.
+   * Returns a short action string persisted for observability, and every
+   * revocation leg that did not hold.
    */
   private async handleEvent(
     eventType: string,
     eventDetails: { subject: RiscSubject; reason?: string; state?: string },
     userId: string | null,
-  ): Promise<string> {
+  ): Promise<HandledEvent> {
+    const done = (action: string, outcome: RevocationOutcome = { failed: [], redeliver: false }): HandledEvent => ({
+      action,
+      ...outcome,
+    });
     if (!userId) {
-      return 'no_matching_user';
+      return done('no_matching_user');
     }
 
     switch (eventType) {
+      // Google also sends these for ordinary account actions (a password
+      // change, revoking the app's access), so they end the sessions here but
+      // do not ban at the provider (R0-ID-F7 review F7-CR-1).
       case RISC_EVENT_TYPES.SESSIONS_REVOKED:
       case RISC_EVENT_TYPES.TOKENS_REVOKED:
-        await this.terminateUserSessions(userId);
-        return 'sessions_terminated';
+        return done('sessions_terminated', await this.terminateUserSessions(userId, { providerBan: false }));
 
       case RISC_EVENT_TYPES.TOKEN_REVOKED:
         // We don't store OAuth refresh tokens for Google Sign-in itself;
         // Supabase manages those. Treat as a session revocation.
-        await this.terminateUserSessions(userId);
-        return 'token_revoked_sessions_terminated';
+        return done('token_revoked_sessions_terminated', await this.terminateUserSessions(userId, { providerBan: false }));
 
       case RISC_EVENT_TYPES.ACCOUNT_DISABLED:
         if (eventDetails.reason === RISC_DISABLED_REASON.HIJACKING) {
-          await this.terminateUserSessions(userId);
+          const outcome = await this.terminateUserSessions(userId, { providerBan: true });
           await this.flagGoogleSignInDisabled(userId, true);
           await this.notifyAdmins(userId, eventType, eventDetails.reason);
-          return 'account_disabled_hijacking';
+          return done('account_disabled_hijacking', outcome);
         }
         // bulk-account or unknown reason: flag for review but don't lock the user out.
         await this.flagGoogleSignInDisabled(userId, true);
         await this.notifyAdmins(userId, eventType, eventDetails.reason ?? 'unspecified');
-        return 'account_disabled_flagged';
+        return done('account_disabled_flagged');
 
       case RISC_EVENT_TYPES.ACCOUNT_ENABLED:
         await this.flagGoogleSignInDisabled(userId, false);
-        return 'account_enabled';
+        return done('account_enabled');
 
       case RISC_EVENT_TYPES.ACCOUNT_CREDENTIAL_CHANGE_REQUIRED:
         await this.notifyAdmins(userId, eventType, 'credential_change');
-        return 'credential_change_logged';
+        return done('credential_change_logged');
 
       case RISC_EVENT_TYPES.VERIFICATION:
-        return 'verification_logged';
+        return done('verification_logged');
 
       default:
-        return 'unhandled_event';
+        return done('unhandled_event');
     }
   }
 
   /**
-   * End all local sessions and revoke Supabase sessions for the user.
+   * Revoke the user's sessions at this API and in the local Session rows, and,
+   * for account-disabled/hijacking (`providerBan`), pause them at Supabase.
+   * Returns every leg that did not hold, and whether a redelivery of the event
+   * can repair the durable cutoff (its write failed: SEC-W8RSC-2).
+   *
+   * A RISC event carries no user JWT, so the handler cannot hand the provider
+   * one (admin.signOut takes the user's ACCESS JWT as the bearer of
+   * POST /logout; until R0-ID-F7 this passed the user id and GoTrue refused it:
+   * R0-ID-F4 review F4-C, the CR-2 shape). In this order:
+   *
+   *   1. The logout cutoff POST /identity/logout writes
+   *      (auth:revoked:user:<id>, the revocation time in epoch seconds, for
+   *      LOGOUT_REVOCATION_TTL_SECONDS): AuthMiddleware refuses every token of
+   *      a session authenticated up to now, including one a refresh mints
+   *      later, and attaches a session authenticated after it. Written FIRST,
+   *      so nothing the provider does (fail, throw, hang) stands in its way.
+   *   2. The admin-token cutoff the same logout writes
+   *      (admin:user:<id>:revokedAt, ms, same TTL), so the user's admin
+   *      local-auth tokens issued up to now are refused too: a hijacking event
+   *      revokes no less than a voluntary logout (review F7-SEC-4).
+   *   3. D-97 (W8-RISC-SIGNIN-CUTOFF): the DURABLE sign-in cutoff on the User
+   *      row (recordSignInCutoff), the same time as 1 but with no TTL:
+   *      AuthMiddleware refuses every token of a session that signed in at or
+   *      before it for good, so the pre-event refresh tokens GoTrue keeps mint
+   *      nothing this API accepts once 1 lapses (F7-SEC-2, SEC-W7RR-2).
+   *      Written under the User row lock (updateUserMeta: SEC-W8RSC-1); when
+   *      it does not hold, receiveEvent answers 503 so that Google delivers
+   *      the event again (SEC-W8RSC-2). D-101 (W9-RISC-PASSWORD-CUTOFF): the
+   *      same write removes signInCutoffClearedAt, so after every such event
+   *      only a Google or emailed-link sign-in is admitted until one clears
+   *      the restriction again.
+   *   4. The local Session rows.
+   *   5. With `providerBan` only: the ban at Supabase (banAtProvider), which
+   *      refuses to renew the user's sessions while it lasts (see
+   *      RISC_PROVIDER_BAN_SECONDS). No provider global logout (D-97,
+   *      R0-SEC-02).
+   *
+   * The other session-ending events (sessions-revoked, tokens-revoked,
+   * token-revoked) send nothing to the provider (F7-CR-1): only the local legs,
+   * the durable cutoff included.
+   *
+   * Each leg's failure is logged, named in the result, and does not skip the
+   * next.
    */
-  private async terminateUserSessions(userId: string): Promise<void> {
+  private async terminateUserSessions(userId: string, opts: { providerBan: boolean }): Promise<RevocationOutcome> {
+    const failed: RevocationLeg[] = [];
+    const now = Date.now();
+    const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+    try {
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(now));
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to write the logout cutoff for ${userId}: ${reason(err)}`);
+      failed.push('revocation_marker');
+    }
+
+    try {
+      await this.redis.set(`admin:user:${userId}:revokedAt`, String(now), 'EX', LOGOUT_REVOCATION_TTL_SECONDS);
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to write the admin-token cutoff for ${userId}: ${reason(err)}`);
+      failed.push('admin_cutoff');
+    }
+
+    const cutoff = await this.recordSignInCutoff(userId, Math.floor(now / 1000));
+    if (cutoff !== 'held') failed.push('signin_cutoff');
+
     try {
       await this.prisma.client.session.deleteMany({ where: { userId } });
     } catch (err: unknown) {
-      this.logger.warn(`Failed to delete local sessions for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`Failed to delete local sessions for ${userId}: ${reason(err)}`);
+      failed.push('local_sessions');
     }
 
-    if (this.supabaseAdmin.isConfigured()) {
-      try {
-        const client = this.supabaseAdmin.getClient();
-        const { error } = await client.auth.admin.signOut(userId, 'global');
-        if (error) {
-          this.logger.warn(`Supabase global sign-out failed for ${userId}: ${error.message}`);
-        }
-      } catch (err: unknown) {
-        this.logger.warn(`Supabase sign-out threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    if (opts.providerBan) {
+      if (!(await this.banAtProvider(userId))) failed.push('provider_ban');
+    }
+    return { failed, redeliver: cutoff === 'failed' };
+  }
+
+  /**
+   * D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39): record the
+   * user's DURABLE sign-in cutoff, User.metaData.signInCutoffAt (epoch
+   * seconds), merged into the metaData already there and never lowered (a
+   * later cutoff already recorded stays). AuthMiddleware refuses every
+   * Supabase token whose session signed in at or before it. No schema change
+   * and no new secret: the same User.metaData bag flagGoogleSignInDisabled
+   * writes. Returns whether the cutoff holds when it returns ('held'), the
+   * user row is gone ('no_user'), or the write failed ('failed', which a
+   * redelivery of the event can repair: SEC-W8RSC-2); every failure is
+   * logged with the user id. Nothing lowers it: account-enabled restores a
+   * recovered user, whose sign-in after the event passes it.
+   *
+   * D-101 (W9-RISC-PASSWORD-CUTOFF): after the cutoff only a Google or
+   * emailed-link sign-in is admitted until one such session clears the
+   * restriction (AuthMiddleware records User.metaData.signInCutoffClearedAt).
+   * Every session-ending event sets the restriction again: this write removes
+   * the cleared marker, in the same locked read-modify-write, even when a
+   * later cutoff already recorded stays.
+   *
+   * D-113 (W10-RISC-RESET review SEC-W10RR-2 / CR-W10RR-2): the same write
+   * removes the password reset recorded after the earlier cutoff
+   * (passwordResetAfterCutoffAt), so a password sign-in needs a new reset
+   * after this event. Reading a record as none while it is not after the new
+   * cutoff was not enough: completeReset dates a reset at its recovery
+   * session's authentication when the provider dates that ahead of this
+   * server (up to 60s), and a reset can commit while this event is in flight,
+   * so a record dated after the new cutoff survived the event and admitted
+   * every later password session with no reset after it. The write also runs
+   * when only that record is present, under a later cutoff already recorded.
+   *
+   * Through updateUserMeta (D-97 review SEC-W8RSC-1 / CR-W8RSC-1): two events
+   * for the same user handled together no longer write back each other's
+   * stale copy, so a concurrent flag write cannot erase the cutoff.
+   */
+  private async recordSignInCutoff(userId: string, cutoff: number): Promise<'held' | 'no_user' | 'failed'> {
+    try {
+      const found = await this.updateUserMeta(userId, (meta) => {
+        const recorded = signInCutoffOf(meta);
+        const cleared = SIGN_IN_CUTOFF_CLEARED_META_KEY in meta;
+        const reset = PASSWORD_RESET_AFTER_CUTOFF_META_KEY in meta;
+        if (recorded !== null && recorded >= cutoff && !cleared && !reset) return null;
+        // D-101: the cleared marker goes (the restriction holds again); the cutoff is never lowered.
+        // D-113 (SEC-W10RR-2 / CR-W10RR-2): the password reset recorded for the earlier cutoff goes too.
+        const kept: Record<string, unknown> = { ...meta };
+        delete kept[SIGN_IN_CUTOFF_CLEARED_META_KEY];
+        delete kept[PASSWORD_RESET_AFTER_CUTOFF_META_KEY];
+        return { ...kept, [SIGN_IN_CUTOFF_META_KEY]: recorded !== null && recorded > cutoff ? recorded : cutoff };
+      });
+      if (!found) {
+        this.logger.warn(`Sign-in cutoff not recorded for ${userId}: no User row`);
+        return 'no_user';
       }
+      return 'held';
+    } catch (err: unknown) {
+      this.logger.warn(`Failed to record the sign-in cutoff for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      return 'failed';
+    }
+  }
+
+  /**
+   * D-97 review SEC-W8RSC-1 / CR-W8RSC-1: how RiscService changes
+   * User.metaData (the durable sign-in cutoff and the googleSignInDisabled
+   * flag). Through updateUserMetaLocked (core/auth/sign-in-cutoff.ts), the one
+   * door the server changes that column through after the row is created; since
+   * D-101 (W9-RISC-PASSWORD-CUTOFF) AuthMiddleware writes the cleared marker
+   * through it too, under the same User row lock.
+   *
+   * Every writer reads the bag, changes its own key and writes the whole bag
+   * back. Unlocked, two RISC events for the same user handled together (say
+   * account-disabled/bulk-account and sessions-revoked) both read the same
+   * bag, and whichever wrote last erased the other's key: the flag write
+   * dropped signInCutoffAt while the event row still said
+   * sessions_terminated, and once the 24h Redis cutoff lapsed the pre-event
+   * sessions were admitted again (F7-SEC-2 reopened). The read and the write
+   * now run in one transaction that first takes the row lock (SELECT ... FOR
+   * NO KEY UPDATE): a concurrent writer waits for this one to commit and then
+   * reads its result. The lock is held for three statements; this route is
+   * public but reaches here only with a SET that Google signed, so no
+   * anonymous burst can queue on it.
+   *
+   * `change` gets the stored bag (a plain object; anything else reads as {})
+   * and returns the bag to write, or null to write nothing. Returns false when
+   * there is no such user (nothing is written then); a database error throws.
+   */
+  private async updateUserMeta(
+    userId: string,
+    change: (meta: Record<string, unknown>) => Record<string, unknown> | null,
+  ): Promise<boolean> {
+    return updateUserMetaLocked(this.prisma.client, userId, change);
+  }
+
+  /**
+   * Ban the user at Supabase for RISC_PROVIDER_BAN_SECONDS, unless a ban that
+   * lasts at least that long is already on the account. Returns whether such a
+   * ban holds when it returns; every failure is logged.
+   *
+   * GoTrue's ban overwrites: ban_duration sets banned_until = now + duration,
+   * whatever was there. Written blind, it would cut a longer ban, such as an
+   * operator's indefinite one from the Supabase dashboard (the only
+   * provider-level lock this repository has), down to
+   * RISC_PROVIDER_BAN_SECONDS, after which the attacker could sign in again
+   * (review F7-SEC-1, F7-CR-2). So the current ban is read first, and when it
+   * cannot be read, or its end cannot be parsed, nothing is written: a ban
+   * written over one we could not read may shorten it. auth-js has no
+   * conditional update, so a ban set between the read and the write is still
+   * overwritten.
+   */
+  private async banAtProvider(userId: string): Promise<boolean> {
+    if (!this.supabaseAdmin.isConfigured()) {
+      this.logger.warn(`Supabase session ban not attempted for ${userId}: Supabase admin client not configured`);
+      return false;
+    }
+    try {
+      const admin = this.supabaseAdmin.getClient().auth.admin;
+      const { data, error: readError } = await admin.getUserById(userId);
+      if (readError || !data?.user) {
+        this.logger.warn(
+          `Supabase session ban not written for ${userId}: its current ban could not be read (${readError?.message ?? 'no user returned'})`,
+        );
+        return false;
+      }
+
+      const bannedUntil = data.user.banned_until;
+      if (bannedUntil) {
+        const endsAt = Date.parse(bannedUntil);
+        if (Number.isNaN(endsAt)) {
+          this.logger.warn(`Supabase session ban not written for ${userId}: its current ban end is unreadable (${bannedUntil})`);
+          return false;
+        }
+        if (endsAt >= Date.now() + RISC_PROVIDER_BAN_SECONDS * 1000) {
+          this.logger.log(`Supabase ban for ${userId} already lasts until ${bannedUntil}; left as it is`);
+          return true;
+        }
+      }
+
+      const { error } = await admin.updateUserById(userId, { ban_duration: `${RISC_PROVIDER_BAN_SECONDS}s` });
+      if (error) {
+        this.logger.warn(`Supabase session ban failed for ${userId}: ${error.message}`);
+        return false;
+      }
+      return true;
+    } catch (err: unknown) {
+      this.logger.warn(`Supabase session ban threw for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 
   /**
    * Soft-disable Google Sign-In for the affected user. The flag is stored on
    * the User row as metadata until a permanent schema field is justified.
+   * Through updateUserMeta (D-97 review SEC-W8RSC-1 / CR-W8RSC-1), so this
+   * write never carries a stale copy of the durable sign-in cutoff back.
    */
   private async flagGoogleSignInDisabled(userId: string, disabled: boolean): Promise<void> {
     try {
-      const user = await this.prisma.client.user.findUnique({
-        where: { id: userId },
-        select: { metaData: true },
-      });
-      if (!user) return;
-
-      const meta = (user.metaData ?? {}) as Record<string, unknown>;
-      await this.prisma.client.user.update({
-        where: { id: userId },
-        data: { metaData: { ...meta, googleSignInDisabled: disabled } },
-      });
+      await this.updateUserMeta(userId, (meta) => ({ ...meta, googleSignInDisabled: disabled }));
     } catch (err: unknown) {
       this.logger.warn(`Failed to update googleSignInDisabled for ${userId}: ${err instanceof Error ? err.message : String(err)}`);
     }

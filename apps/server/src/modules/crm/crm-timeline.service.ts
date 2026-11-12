@@ -1,8 +1,16 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
+import { CONTACT_EVENT_TYPES_BY_CATEGORY, normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
+import type { ContactEvent, Invoice, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereBase } from './crm.helpers';
 import { TimelineService } from '../timeline/timeline.service';
+import {
+  TIMELINE_SCAN_LIMIT,
+  crmRowCarriesMoney,
+  readVisibleActivityPage,
+  resolveTimelineViewer,
+} from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
@@ -17,6 +25,57 @@ type TimelineEntry = {
   timestamp: Date;
   meta?: Record<string, unknown>;
 };
+
+/**
+ * The top-level ContactEvent data fields that carry an amount, as the copy
+ * writers put them (an invoice or order total, a payment, a refund, a
+ * storefront booking's deposit, a referral's invoice total).
+ */
+const MONEY_DATA_KEYS = ['amount', 'total', 'subtotal', 'invoiceTotal', 'totalPaid', 'paymentAmount', 'refundAmount', 'depositAmount'] as const;
+
+/**
+ * W4-FEED-COPY-COMPLETE review SEC-FCC-1 (owner rulings D-90 and D-63, the
+ * V1-84 timeline rule): the Activity category of a ContactEvent's CRM copy.
+ *
+ * A copy that carries money is COMMERCE, which canReadActivityRow
+ * (timeline-visibility.ts) reads as a revenue row, so a member without revenue
+ * read is not served its amount: every sales_revenue type (@keyflow/shared
+ * getContactEventCategory), and any other type whose data carries an amount
+ * (MONEY_DATA_KEYS: store_order.paid / refunded, checkout.*, payment.completed,
+ * a storefront booking.created's deposit, a referral note.created's invoice
+ * total). The map this replaces was keyed by category names @keyflow/shared no
+ * longer uses ('revenue', 'booking', 'payment', ...), so every copy was CONTACT
+ * and a member with crm read and revenue 'none' read those amounts.
+ *
+ * Every other copy stays CONTACT, as it has been written since those names
+ * changed, so ?category=CONTACT keeps returning it (V55-12a parity).
+ */
+function contactEventCopyCategory(type: string, data: unknown): 'COMMERCE' | 'CONTACT' {
+  if (getContactEventCategory(type) === 'sales_revenue') return 'COMMERCE';
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const fields = data as Record<string, unknown>;
+    if (MONEY_DATA_KEYS.some((key) => fields[key] !== null && fields[key] !== undefined)) return 'COMMERCE';
+  }
+  return 'CONTACT';
+}
+
+/**
+ * A ContactEvent as the feed rule (canReadActivityRow, timeline-visibility.ts)
+ * judges it: the row of its CRM copy (module crm, naming the contact; logEvent),
+ * its type as action and type, its data. GET contacts/:contactId/events
+ * (listContactEvents) and the highlights timeline (buildTimeline withoutMoney;
+ * W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1, owner rulings D-100, D-90
+ * and D-63) judge the same row.
+ */
+function contactEventActivityRow(event: Pick<ContactEvent, 'type' | 'contactId' | 'data'>) {
+  return { module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data };
+}
+
+/** The ContactEvents buildTimeline reads: the 10 newest. */
+const TIMELINE_EVENTS = 10;
+
+/** The batch buildTimeline reads money-free events in (eventsWithoutMoney). */
+const EVENT_SCAN_BATCH = 100;
 
 @Injectable()
 export class CrmTimelineService {
@@ -66,7 +125,13 @@ export class CrmTimelineService {
     contactId: string,
     type: string,
     data: any,
-    meta?: { actorType?: string; actorId?: string; source?: string },
+    /**
+     * feedCopy false (V1-55b-FEED-DEDUPE-REST; D-08: Activity is the feed):
+     * the caller knows another writer puts this event's feed row in Activity,
+     * so the ContactEvent (and its crm.contact_event.logged emit) is written
+     * and the Activity copy is not. Default: copied, as before.
+     */
+    meta?: { actorType?: string; actorId?: string; source?: string; feedCopy?: boolean },
     tx?: {
       contactEvent: { create: (args: any) => Promise<{ id: string }> };
       contact?: { update: (args: any) => Promise<unknown> };
@@ -91,36 +156,28 @@ export class CrmTimelineService {
       },
     });
 
-    // Also write to unified Activity ledger (Wave 1)
-    const categoryMap: Record<string, 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK'> = {
-      communication: 'CONTACT',
-      revenue: 'COMMERCE',
-      booking: 'BOOKING',
-      payment: 'PAYMENT',
-      ai: 'AI',
-      system: 'SYSTEM',
-      store: 'STORE',
-      task: 'TASK',
-    };
-    const contactEventCat = getContactEventCategory(normalized.canonical);
-    this.timeline.recordEvent({
-      businessId,
-      module: 'crm',
-      action: normalized.canonical,
-      entityType: 'contact',
-      entityId: contactId,
-      title: normalized.canonical,
-      detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
-      contactId,
-      category: (contactEventCat ? categoryMap[contactEventCat] : undefined) ?? 'CONTACT',
-      type: normalized.canonical,
-      actorType: (meta?.actorType as any) ?? 'SYSTEM',
-      actorId: meta?.actorId,
-      data: data ?? {},
-      occurredAt: new Date(),
-    }).catch((err) => {
-      this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
-    });
+    // Also write to unified Activity ledger (Wave 1), unless the caller says
+    // another writer puts this event's feed row there (V1-55b, meta.feedCopy).
+    if (meta?.feedCopy !== false) {
+      this.timeline.recordEvent({
+        businessId,
+        module: 'crm',
+        action: normalized.canonical,
+        entityType: 'contact',
+        entityId: contactId,
+        title: normalized.canonical,
+        detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
+        contactId,
+        category: contactEventCopyCategory(normalized.canonical, data),
+        type: normalized.canonical,
+        actorType: (meta?.actorType as any) ?? 'SYSTEM',
+        actorId: meta?.actorId,
+        data: data ?? {},
+        occurredAt: new Date(),
+      }).catch((err) => {
+        this.logger.warn(`[UnifiedLedger] failed to record activity for contactEvent: ${(err as Error).message}`);
+      });
+    }
 
     if (getContactEventCategory(normalized.canonical) === 'communication') {
       const contactClient = tx?.contact ?? this.prisma.client.contact;
@@ -148,13 +205,47 @@ export class CrmTimelineService {
     return created;
   }
 
-  async listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
+  /**
+   * The contact's ContactEvents, newest first, that the reading member
+   * (`viewerUserId`) may see.
+   *
+   * W6-CONTACT-EVENTS-MONEY (W5-FEED-CATEGORIES review SEC-W5FC-1; owner
+   * rulings D-90 and D-63, the V1-84 timeline rule): each event is judged as
+   * the feed judges its CRM copy (module crm, naming the contact; logEvent),
+   * by canReadActivityRow through readVisibleActivityPage
+   * (timeline-visibility.ts). So an event of a sales_revenue type, or whose
+   * data carries a MONEY_DATA_FIELDS field (crmRowCarriesMoney: e.g.
+   * invoice.payment_recorded, which D-90 still writes without a copy,
+   * invoice.paid, store_order.paid, a storefront booking.created's deposit),
+   * is withheld from a member without revenue read, and the page is filled
+   * from older events. Before it the route served every event, amounts
+   * included, on crm read alone. A read that names no member is refused: there
+   * is no one to judge the events for.
+   *
+   * W6-CONTACT-EVENTS-MONEY covered this route only. The contact's sibling
+   * reads (CrmStatsService.contactDetail, CrmJourneyService
+   * .getContactCrossJourney / getContactJourney and CrmRevenueService
+   * .getContactRevenueSummary; review SEC-W6CEM-1, SEC-W6CEM-2, CR-W6CEM-1)
+   * withhold the same money events and figures from a member without revenue
+   * read since W7-CONTACT-MONEY-VIEWS (D-90, D-63): the live cases V55-13f..h
+   * in test/evidence-feed.integration.test.ts (W8-HOUSEKEEPING: this comment
+   * called them an it.todo and said those reads still served them).
+   */
+  async listContactEvents(params: { businessId: string; contactId: string; limit?: number; viewerUserId?: string | null }) {
     await this.assertContact(params.businessId, params.contactId);
-    return this.prisma.client.contactEvent.findMany({
-      where: { businessId: params.businessId, contactId: params.contactId },
-      orderBy: { createdAt: 'desc' },
-      take: params.limit ?? 20,
+    if (!params.viewerUserId) throw new ForbiddenException('Contact events are read for a member');
+    const viewer = await resolveTimelineViewer(this.prisma, params.businessId, params.viewerUserId);
+    const where = { businessId: params.businessId, contactId: params.contactId };
+    const page = await readVisibleActivityPage(this.prisma, viewer, params.limit ?? 20, async (skip, take) => {
+      const events = await this.prisma.client.contactEvent.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      return events.map((event) => ({ ...contactEventActivityRow(event), event }));
     });
+    return page.map((row) => row.event);
   }
 
   async listContactNotes(params: { businessId: string; contactId: string }) {
@@ -437,12 +528,21 @@ export class CrmTimelineService {
     actorType?: string;
     actorId?: string;
     source?: string;
+    /**
+     * W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08): logEvent's
+     * meta.feedCopy (V1-55b), carried for callers that reach the timeline
+     * through CrmService.logContactEvent. false: another writer puts this
+     * event's feed row in Activity, so the ContactEvent (and its emit) is
+     * written and its Activity copy is not. Absent: copied, as before.
+     */
+    feedCopy?: boolean;
   }) {
     await this.assertContact(input.businessId, input.contactId);
     return this.logEvent(input.businessId, input.contactId, input.type, input.data, {
       actorType: input.actorType,
       actorId: input.actorId,
       source: input.source,
+      ...(input.feedCopy === false ? { feedCopy: false } : {}),
     });
   }
 
@@ -500,7 +600,14 @@ export class CrmTimelineService {
     return { processed, aliased, flagged };
   }
 
-  async dueTasks(input: { businessId: string; windowDays?: number }) {
+  /**
+   * W9-CRM-RESIDUALS (review SEC-L81-3, D-37): `visibility` is the caller's CRM
+   * visibility clause (GET tasks/due passes the member's; null or absent for the
+   * OWNER, SUPER_ADMIN and internal callers): with one, only tasks of live
+   * contacts of the business the member may open are listed. Every task carries
+   * a contact summary, never the full row (notesInternal, custom fields).
+   */
+  async dueTasks(input: { businessId: string; windowDays?: number; visibility?: Prisma.ContactWhereInput | null }) {
     const windowDays = input.windowDays ?? 7;
     const now = new Date();
     const soon = new Date();
@@ -514,9 +621,12 @@ export class CrmTimelineService {
             { dueDate: { lte: soon } },
             { remindAt: { lte: soon } },
           ],
+          ...(input.visibility ? { contact: { ...contactWhereBase(input.businessId), AND: [input.visibility] } } : {}),
         },
       orderBy: { dueDate: 'asc' },
-      include: { contact: true },
+      include: {
+        contact: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true, status: true } },
+      },
       take: 50,
     });
   }
@@ -729,30 +839,64 @@ export class CrmTimelineService {
     return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
   }
 
-  async buildTimeline(businessId: string, limit = 20): Promise<TimelineEntry[]> {
+  /**
+   * The business's recent CRM rows (the 10 newest ContactEvents, 8 notes, 8
+   * tasks, 6 invoices, 6 bookings), newest first, cut to `limit`. With no
+   * options every row of the business is read, as before (the owner's
+   * highlights).
+   *
+   * W10-MONEY-SIGNALS-REST (owner rulings D-63 and D-100; review residuals
+   * SEC-W9MR-1 and SEC-W9MR-2 remainder), for CrmStatsService.flowHighlights:
+   * - `contacts`: each read keeps only the rows of the contacts matching it
+   *   (the viewer's visibility clause, the rule GET contacts/:contactId
+   *   applies), so another member's PRIVATE contact takes no place and is
+   *   never named;
+   * - `withoutMoney`: no invoice is read and every ContactEvent the feed rule
+   *   withholds from a member without revenue read is left out before the 10
+   *   are taken, so none takes any of the 10 places (eventsWithoutMoney). The
+   *   rule is GET contacts/:contactId/events' (canReadActivityRow ->
+   *   crmRowCarriesMoney): a sales_revenue type (@keyflow/shared), and since
+   *   the W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1 (D-100, D-90,
+   *   D-63) also any other type whose data carries an amount (e.g.
+   *   payment.completed, store_order.paid / refunded,
+   *   autopilot.payment_recovery), which the entry's type alone (the rule
+   *   timelineEntryCarriesMoney applies) does not show.
+   */
+  async buildTimeline(
+    businessId: string,
+    limit = 20,
+    options: { contacts?: Prisma.ContactWhereInput | null; withoutMoney?: boolean } = {},
+  ): Promise<TimelineEntry[]> {
+    const ofContacts = options.contacts ? { contact: options.contacts } : {};
+    const eventWhere: Prisma.ContactEventWhereInput = {
+      businessId,
+      ...ofContacts,
+      // The sales_revenue types are left out in the query (rows the rule withholds anyway, fewer reads).
+      ...(options.withoutMoney ? { type: { notIn: [...CONTACT_EVENT_TYPES_BY_CATEGORY.sales_revenue] } } : {}),
+    };
     const [events, notes, tasks, invoices, bookings] = await Promise.all([
-      this.prisma.client.contactEvent.findMany({
-        where: { businessId },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      }),
+      options.withoutMoney
+        ? this.eventsWithoutMoney(eventWhere)
+        : this.prisma.client.contactEvent.findMany({ where: eventWhere, orderBy: { createdAt: 'desc' }, take: TIMELINE_EVENTS }),
       this.prisma.client.contactNote.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
       this.prisma.client.contactTask.findMany({
-        where: { businessId },
+        where: { businessId, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 6,
-      }),
+      options.withoutMoney
+        ? Promise.resolve([] as Invoice[])
+        : this.prisma.client.invoice.findMany({
+            where: { businessId, deletedAt: null, ...ofContacts },
+            orderBy: { createdAt: 'desc' },
+            take: 6,
+          }),
       this.prisma.client.booking.findMany({
-        where: { businessId, deletedAt: null },
+        where: { businessId, deletedAt: null, ...ofContacts },
         orderBy: { createdAt: 'desc' },
         take: 6,
       }),
@@ -837,5 +981,39 @@ export class CrmTimelineService {
     ];
 
     return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
+  }
+
+  /**
+   * W10-MONEY-SIGNALS-REST review repair SEC-W10MSR-1 (owner rulings D-100,
+   * D-90 and D-63): the TIMELINE_EVENTS newest of the ContactEvents `where`
+   * matches that carry no money by the feed rule. Each event is judged as
+   * listContactEvents (GET contacts/:contactId/events) judges it, the row of
+   * its CRM copy (contactEventActivityRow), by crmRowCarriesMoney: a
+   * sales_revenue type, or data carrying a MONEY_DATA_FIELDS field (e.g.
+   * payment.completed, store_order.paid / refunded, autopilot.payment_recovery
+   * with an amount). For the highlights' viewer that is canReadActivityRow's
+   * whole verdict on such a row: the route requires crm read and `where` keeps
+   * the contacts they may open, so a member without revenue read is withheld
+   * exactly the money rows. The events are read newest first in batches, in a
+   * total order (createdAt, then id), so a withheld row takes none of the
+   * places, until TIMELINE_EVENTS are kept, the events run out or
+   * TIMELINE_SCAN_LIMIT have been examined (readVisibleActivityPage's bound).
+   */
+  private async eventsWithoutMoney(where: Prisma.ContactEventWhereInput): Promise<ContactEvent[]> {
+    const kept: ContactEvent[] = [];
+    let skip = 0;
+    while (kept.length < TIMELINE_EVENTS && skip < TIMELINE_SCAN_LIMIT) {
+      const take = Math.min(EVENT_SCAN_BATCH, TIMELINE_SCAN_LIMIT - skip);
+      const batch = await this.prisma.client.contactEvent.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      kept.push(...batch.filter((event) => !crmRowCarriesMoney(contactEventActivityRow(event))));
+      if (batch.length < take) break;
+      skip += batch.length;
+    }
+    return kept.slice(0, TIMELINE_EVENTS);
   }
 }

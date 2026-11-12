@@ -16,7 +16,13 @@ import {
 } from './resend-effect';
 
 /**
- * Send campaign and sequence email without a connected Gmail account.
+ * Sent campaign and sequence email through the platform sender when no Gmail
+ * account was connected.
+ *
+ * D-82 (2026-11-09): business email never relays through the platform sender,
+ * so AdapterRegistryService no longer registers or resolves this adapter. It is
+ * kept, unreachable, until its pre-D-82 deliveries are reconciled; do not
+ * register it again for business email.
  */
 export class ResendEmailAdapter implements ChannelAdapter {
   readonly provider = 'RESEND';

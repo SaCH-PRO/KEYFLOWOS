@@ -8,10 +8,28 @@ import { MessageIntakeQueue } from "./components/message-intake-queue";
 import { Switch } from "@/components/ui/switch";
 import { useEffect, useState } from "react";
 
+/**
+ * R0-ID-WEB-AUTHORITY-UX (R0-09 review CR-1): messageIntakeEnabled is written
+ * through PATCH /identity/businesses/:id, which owner ruling D-11 makes OWNER only.
+ * A refused write comes back as `{ error, status }` rather than a throw, so the
+ * toggle reads the result: on a refusal it returns the switch to the value the
+ * server kept and shows the server's refusal (a 403 without a usable message names
+ * the owner-only rule).
+ */
+const OWNER_ONLY_FALLBACK_TEXT = "Only the business owner can change this.";
+const GENERIC_FORBIDDEN = new Set(["forbidden", "forbidden resource", "request failed"]);
+
+function saveRefusalText(res: { error: string | null; status?: number }, fallback: string): string {
+  const message = res.error?.trim() ?? "";
+  if (res.status === 403 && (!message || GENERIC_FORBIDDEN.has(message.toLowerCase()))) return OWNER_ONLY_FALLBACK_TEXT;
+  return message || fallback;
+}
+
 export default function MessageIntakePage() {
   const businessId = getStoredBusinessId();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
@@ -24,11 +42,17 @@ export default function MessageIntakePage() {
 
   const toggle = async (checked: boolean) => {
     if (!businessId) return;
+    const previous = enabled;
     setSaving(true);
+    setRefusal(null);
     setEnabled(checked);
-    await apiPatch(`/identity/businesses/${encodeURIComponent(businessId)}`, {
+    const res = await apiPatch(`/identity/businesses/${encodeURIComponent(businessId)}`, {
       messageIntakeEnabled: checked,
     });
+    if (res.error) {
+      setEnabled(previous);
+      setRefusal(saveRefusalText(res, "Could not save the message intake setting."));
+    }
     setSaving(false);
   };
 
@@ -78,6 +102,11 @@ export default function MessageIntakePage() {
             />
           </div>
         </div>
+        {refusal && (
+          <p role="alert" className="mt-3 text-xs text-[hsl(var(--kf-error))]">
+            {refusal}
+          </p>
+        )}
       </div>
 
       {businessId ? (

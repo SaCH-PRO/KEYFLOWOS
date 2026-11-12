@@ -27,33 +27,56 @@ export class NotificationsService {
     });
   }
 
-  async listForBusiness(businessId: string, opts?: { unreadOnly?: boolean; limit?: number }) {
+  /**
+   * `excludeTypes` (W8-REVENUE-ACTIONS-SCOPE, D-63): notification types the caller may not be served,
+   * left out in the query so the page stays full (the weekly financial briefing for a member without
+   * revenue read).
+   */
+  async listForBusiness(businessId: string, opts?: { unreadOnly?: boolean; limit?: number; excludeTypes?: string[] }) {
     return this.notifModel.findMany({
       where: {
         businessId,
         ...(opts?.unreadOnly ? { read: false } : {}),
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: opts?.limit ?? 50,
     });
   }
 
-  async unreadCount(businessId: string) {
+  async unreadCount(businessId: string, opts?: { excludeTypes?: string[] }) {
     return this.notifModel.count({
-      where: { businessId, read: false },
+      where: {
+        businessId,
+        read: false,
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
+      },
     });
   }
 
-  async markRead(id: string, businessId: string) {
+  /**
+   * `excludeTypes` (W8-REVENUE-ACTIONS-SCOPE review SEC-W8RA-3, D-63): types the caller may not be
+   * served are not marked either (the read flag is the business's), and a notification of one is
+   * answered as a missing id is ({ count: 0 }).
+   */
+  async markRead(id: string, businessId: string, opts?: { excludeTypes?: string[] }) {
     return this.notifModel.updateMany({
-      where: { id, businessId },
+      where: {
+        id,
+        businessId,
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
+      },
       data: { read: true },
     });
   }
 
-  async markAllRead(businessId: string) {
+  async markAllRead(businessId: string, opts?: { excludeTypes?: string[] }) {
     return this.notifModel.updateMany({
-      where: { businessId, read: false },
+      where: {
+        businessId,
+        read: false,
+        ...(opts?.excludeTypes?.length ? { type: { notIn: opts.excludeTypes } } : {}),
+      },
       data: { read: true },
     });
   }

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { CommerceService } from '../../commerce/commerce.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../../core/auth/system-actor';
 
 /**
  * Typed adapter that exposes the commerce methods expected by
@@ -21,6 +22,12 @@ export class CommerceAdapterService {
     notes?: string;
     sendImmediately?: boolean;
     source?: string;
+    /**
+     * W3-D64-COMMERCE-CREATE (D-88): the member the KEY command runs for
+     * (ConnectorCommand.userId); the contact must be one they may open (D-64).
+     * KEY's system actors (a plan no member created) keep the OWNER's view.
+     */
+    actorUserId?: string;
   }) {
     const invoice = await this.commerce.createInvoice({
       businessId: input.businessId,
@@ -33,6 +40,7 @@ export class CommerceAdapterService {
       })),
       dueDate: input.dueDate,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
 
     if (input.sendImmediately) {
@@ -50,7 +58,9 @@ export class CommerceAdapterService {
     invoiceId: string;
     message?: string;
   }) {
-    return this.commerce.bulkUpdateInvoices(input.businessId, [input.invoiceId], 'send');
+    // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88): KEY sends, and is named on the
+    // ACCRUAL invoice_finalized posting (it named no one).
+    return this.commerce.bulkUpdateInvoices(input.businessId, [input.invoiceId], 'send', KEY_SYSTEM_ACTOR_ID);
   }
 
   async getInvoice(input: { businessId: string; invoiceId: string }) {
@@ -126,6 +136,8 @@ export class CommerceAdapterService {
     contactId: string;
     items: Array<Record<string, unknown>>;
     notes?: string;
+    /** W3-D64-COMMERCE-CREATE (D-88): as createInvoice. */
+    actorUserId?: string;
   }) {
     // Commerce module does not yet expose a dedicated order service, so we
     // create an invoice as the canonical order record.
@@ -134,6 +146,7 @@ export class CommerceAdapterService {
       contactId: input.contactId,
       items: input.items,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
   }
 
@@ -143,12 +156,16 @@ export class CommerceAdapterService {
     amount: number;
     method: string;
     reference?: string;
+    /** The user the KEY command runs for (ConnectorCommand.userId). */
+    initiatedBy?: string;
   }) {
+    // R0-PL-07: KEY records as its system actor, distinct from any human.
+    // Review PL07-ST-3: the human KEY acted for is kept as the initiator.
     return this.commerce.recordPayment(input.invoiceId, input.businessId, {
       amount: input.amount,
       method: input.method,
       reference: input.reference,
-    });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID, initiatedBy: input.initiatedBy ?? null });
   }
 
   async createQuote(input: {
@@ -157,6 +174,8 @@ export class CommerceAdapterService {
     items: Array<Record<string, unknown>>;
     validUntil?: string;
     notes?: string;
+    /** W3-D64-COMMERCE-CREATE (D-88): as createInvoice. */
+    actorUserId?: string;
   }) {
     return this.commerce.createQuote({
       businessId: input.businessId,
@@ -169,6 +188,7 @@ export class CommerceAdapterService {
       })),
       expiryDate: input.validUntil,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
   }
 
@@ -288,7 +308,9 @@ export class CommerceAdapterService {
   }
 
   async getQuoteStatus(input: { businessId: string; quoteId: string }) {
-    const quote = await this.commerce.getQuote(input.quoteId);
+    // Bound to the command's tenant: the bare-id getQuote read any tenant's quote
+    // (ST-PC01-1). A foreign or unknown id answers like a missing one.
+    const quote = await this.commerce.getQuoteForBusiness(input.quoteId, input.businessId);
     if (!quote) {
       throw new NotFoundException('Quote not found');
     }
@@ -307,6 +329,8 @@ export class CommerceAdapterService {
           notes: command.parameters.notes as string,
           sendImmediately: (command.parameters.sendImmediately as boolean) || false,
           source: 'key_cortex',
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, invoice);
       }
@@ -359,6 +383,8 @@ export class CommerceAdapterService {
           contactId: command.parameters.contactId as string,
           items: command.parameters.items as Array<Record<string, unknown>>,
           notes: command.parameters.notes as string,
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, order);
       }
@@ -369,6 +395,8 @@ export class CommerceAdapterService {
           amount: command.parameters.amount as number,
           method: command.parameters.method as string,
           reference: command.parameters.reference as string,
+          // From the command envelope, never from the tool parameters.
+          initiatedBy: command.userId,
         });
         return connectorOk(command, start, payment);
       }
@@ -379,6 +407,8 @@ export class CommerceAdapterService {
           items: command.parameters.items as Array<Record<string, unknown>>,
           validUntil: command.parameters.validUntil as string,
           notes: command.parameters.notes as string,
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, quote);
       }

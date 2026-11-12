@@ -1,6 +1,6 @@
-import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingStatus, Prisma } from '@prisma/client';
+import { Booking, BookingStatus, Invoice, Prisma } from '@prisma/client';
 import {
   BookingCompletedPayload,
   BookingConfirmedPayload,
@@ -17,12 +17,27 @@ import {
 } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
+import { contactWhereWithId } from '../crm/crm.helpers';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CommerceService } from '../commerce/commerce.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
+import { normalizeCurrency } from '../finance/posting.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { BookingWaitlistService } from './booking-waitlist.service';
+import { schedulersDisabled } from '../../core/config/env';
+import { getTenantContext } from '../../core/tenant/tenant-context';
+import {
+  DERIVATION_TX_TIMEOUT_MS,
+  depositPosition,
+  derivePaymentStatus,
+  readSettlementInvoices,
+  settlementInvoiceSelect,
+  toCents,
+} from './booking-payment-status.listener';
+import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
 
 interface DayHours {
   open: string;
@@ -64,11 +79,236 @@ type BookingWithRelations = Prisma.BookingGetPayload<{
   include: { contact: true; service: true };
 }>;
 
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+
+/** A booking's claim on a calendar: what assertSlotFree compares and claimSlot locks. */
+type SlotParams = {
+  businessId: string;
+  serviceId: string;
+  staffId?: string | null;
+  start: Date;
+  end: Date;
+  bufferMins?: number | null;
+  excludeBookingId?: string;
+};
+
+/** Minutes in a day on the business's clock: the picker's candidate starts stay below it. */
+const MINUTES_PER_DAY = 1440;
+
+/**
+ * V1-16 (M41): the slot claim's advisory lock. One transaction-scoped lock per
+ * business and resource (the staff member, else the service: exactly what
+ * assertSlotFree compares), so claims on one calendar commit one after another
+ * and claims on different calendars do not wait for each other. Transaction
+ * scoped because the pooler runs in transaction mode: Postgres releases it at
+ * commit or rollback, on whichever connection the transaction had.
+ */
+const SLOT_LOCK_NAMESPACE = 'booking-slot:';
+const SLOT_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
+
+/** Statuses that give the slot back: the ones assertSlotFree's `notIn` does not count. */
+const SLOT_RELEASING_STATUSES: BookingStatus[] = ['CANCELLED', 'NO_SHOW'];
+const holdsSlot = (status: BookingStatus) => !SLOT_RELEASING_STATUSES.includes(status);
+
+/** What a status write needs to know about the booking to decide whether it claims a slot. */
+type StatusWriteTarget = Pick<Booking, 'id' | 'businessId' | 'serviceId' | 'staffId' | 'startTime' | 'endTime' | 'status'>;
+
+/**
+ * V1-28 (M42): the statuses a paid invoice confirms. Both hold the slot, as
+ * CONFIRMED does, so the move is a conditional update and never a claim.
+ */
+const AWAITING_CONFIRMATION: BookingStatus[] = ['PENDING', 'UNCONFIRMED'];
+
+/**
+ * V1-28 (CF-43): one booking's final invoice is drawn up under this lock, so
+ * two completions (or a completion and the Create-invoice button) racing for
+ * it draw up one; the second waits and finds it.
+ */
+const FINAL_INVOICE_LOCK_NAMESPACE = 'booking-final-invoice:';
+
+/** D-26: Booking.paymentStatus once a customer cancel has forfeited a paid deposit. */
+const DEPOSIT_FORFEITED = 'DEPOSIT_FORFEITED';
+
+/** The completion answer's code for an invoice that was not drawn up (V1-28 review, SEC-V28-1). */
+export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
+
+/**
+ * D-59 (FOLLOW3-A10): the code of a final invoice refused because the
+ * booking's live deposit is in another currency than the final invoice (the
+ * business currency). D-13 is one currency per business: a deposit is never
+ * netted across currencies, nothing is written, the operator settles by hand.
+ *
+ * Shipped envelope (review CR-A10-1): POST create-invoice answers 409 with this
+ * code. The status route keeps V1-28's contract (completion never fails on
+ * its invoicing): the booking is COMPLETED and the answer carries invoicing
+ * FAILED with this code, no final invoice. D-59's text ("completion refuses
+ * with 409") is to be reconciled with this envelope in BUILD-MAP-001.
+ */
+export const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/**
+ * D-59: the refusal of a final invoice that nets (or would net) the live
+ * deposit in another currency. `final` is the final invoice already drawn up
+ * when the pairing is re-checked after the fact (review SEC-A10-1).
+ */
+function depositCurrencyMismatch(
+  deposit: { id: string; invoiceNumber: string | null },
+  depositCurrency: string,
+  invoiceCurrency: string,
+  final?: { id: string; invoiceNumber: string | null },
+): ConflictException {
+  const finalPart = final
+    ? `the final invoice ${final.invoiceNumber} that nets it is in ${invoiceCurrency}`
+    : `the final invoice would be in ${invoiceCurrency}`;
+  return new ConflictException({
+    code: DEPOSIT_CURRENCY_MISMATCH,
+    message: `The deposit invoice ${deposit.invoiceNumber} is in ${depositCurrency} but ${finalPart}; a deposit is never netted across currencies. Settle the balance by hand.`,
+    depositInvoiceId: deposit.id,
+    depositCurrency,
+    invoiceCurrency,
+    ...(final ? { finalInvoiceId: final.id } : {}),
+  });
+}
+
+/** The completion answer's code for a final invoice that was not drawn up: D-59's refusal keeps its own code. */
+function completionInvoiceCode(err: unknown): typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH {
+  const response = err instanceof ConflictException ? err.getResponse() : null;
+  return response && typeof response === 'object' && (response as { code?: unknown }).code === DEPOSIT_CURRENCY_MISMATCH
+    ? DEPOSIT_CURRENCY_MISMATCH
+    : INVOICE_NOT_CREATED;
+}
+
+/**
+ * V1-28 review (SEC-V28-1): the invoiceError an operator reads, at the level
+ * GlobalHttpExceptionFilter would answer the same failure: a 4xx
+ * HttpException's own message (a refusal meant for the caller); anything else
+ * (a database or programming error, whose text carries server paths, source
+ * excerpts and column names) a fixed sentence. The detail is logged.
+ */
+function completionInvoiceError(err: unknown): string {
+  // D-59: a refused pairing may concern a final invoice already drawn up
+  // (review SEC-A10-1), so its lead does not say "could not be created".
+  const lead = completionInvoiceCode(err) === DEPOSIT_CURRENCY_MISMATCH
+    ? 'The booking is completed, but its final invoice is refused'
+    : 'The booking is completed, but its invoice could not be created';
+  if (err instanceof HttpException && err.getStatus() < 500 && err.message) return `${lead}: ${err.message}`;
+  return `${lead}. Use Create invoice on the booking to try again.`;
+}
+
+/**
+ * V1-28 (CF-43): what drawing up a booking's final invoice did. The final
+ * invoice bills the price LESS what the booking's live deposit invoice (not
+ * VOID, not deleted) covers of it (depositPosition): an unpaid deposit is
+ * still owed on its own invoice and covers what it bills, a PAID one covers
+ * the money it holds (less refunds), and a credited one only what it still
+ * bills; so deposit + final == price. NOT_REQUIRED: nothing is owed beyond
+ * the deposit, or there is nothing to bill (free service, no contact).
+ */
+export type FinalInvoiceOutcome =
+  | {
+      status: 'CREATED' | 'EXISTING';
+      invoiceId: string;
+      invoiceNumber: string | null;
+      amount: number;
+      depositInvoiceId: string | null;
+      depositAmount: number;
+    }
+  | { status: 'NOT_REQUIRED'; invoiceId: null; reason: string; depositInvoiceId: string | null; depositAmount: number };
+
+/** The completion response's invoicing outcome: FAILED is explicit, never swallowed (V1-28), and never the raw error text. */
+export type CompletionInvoicing =
+  | FinalInvoiceOutcome
+  | { status: 'FAILED'; invoiceId: null; code: typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH; error: string };
+
+/** D-26: the forfeit recorded on a booking cancelled after its deposit was paid. */
+export interface DepositForfeit {
+  depositInvoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+}
+
+/** An instant as a wall clock reads it: calendar day, weekday (0 = Sunday), minutes past midnight. */
+interface WallClock {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+  minutes: number;
+}
+
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const wallClockFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** Throws RangeError for a zone this runtime does not know. */
+function wallClockFormat(timeZone: string): Intl.DateTimeFormat {
+  let format = wallClockFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      weekday: 'short',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    });
+    wallClockFormats.set(timeZone, format);
+  }
+  return format;
+}
+
+/**
+ * V1-16 (CF-44): `instant` on the business's clock. Opening hours and staff
+ * hours are wall-clock times in Business.timezone; they were read with
+ * getHours/getDay, the SERVER's clock, which in production (TZ unset) is UTC,
+ * so a UTC-4 business's 13:00-17:00 was refused. No zone means the server's,
+ * as before, through the same Date getters.
+ */
+function wallClock(instant: Date, timeZone: string | undefined): WallClock {
+  if (!timeZone) {
+    return {
+      year: instant.getFullYear(),
+      month: instant.getMonth() + 1,
+      day: instant.getDate(),
+      weekday: instant.getDay(),
+      minutes: instant.getHours() * 60 + instant.getMinutes(),
+    };
+  }
+  const parts: Record<string, string> = {};
+  for (const part of wallClockFormat(timeZone).formatToParts(instant)) parts[part.type] = part.value;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: WEEKDAY_NAMES.indexOf(parts.weekday),
+    minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
+  };
+}
+
+/**
+ * The instant at which the business's clock reads `minutes` past midnight on
+ * year-month-day: the UTC reading shifted by the zone's offset, taken twice so
+ * a day that changes offset (DST) lands on the offset in force at that time.
+ */
+function zonedInstant(year: number, month: number, day: number, minutes: number, timeZone: string | undefined): Date {
+  if (!timeZone) return new Date(year, month - 1, day, 0, minutes);
+  const asUtc = Date.UTC(year, month - 1, day, 0, minutes);
+  const offsetAt = (ms: number) => {
+    const clock = wallClock(new Date(ms), timeZone);
+    return Date.UTC(clock.year, clock.month - 1, clock.day, 0, clock.minutes) - (ms - (ms % 60_000));
+  };
+  const first = asUtc - offsetAt(asUtc);
+  return new Date(asUtc - offsetAt(first));
+}
+
 @Injectable()
 export class BookingsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BookingsService.name);
   private reminderInterval: ReturnType<typeof setInterval> | null = null;
   private emailWarnedBusinesses = new Set<string>();
+  private warnedZones = new Set<string>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -80,15 +320,29 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    // PR196-WAITLIST-EXPIRY: the waitlist expiry this scheduler runs. Optional
+    // only so suites that build BookingsService without it keep working;
+    // BookingsModule provides it.
+    @Optional() @Inject(BookingWaitlistService) private readonly waitlist?: BookingWaitlistService,
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.reminderInterval = setInterval(() => {
       this.processBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder check failed: ${(e as Error).message}`),
       );
+      // PR196-WAITLIST-EXPIRY (D-86, F1-D3): offers past their 120-minute hold
+      // expire on the same gated tick. Every replica may run it: each expiry
+      // is a compare-and-set under the slot lock, so an offer expires once.
+      Promise.resolve()
+        .then(() => this.waitlist?.expireStaleOffers())
+        .catch((e) => this.logger.error(`Waitlist offer expiry failed: ${(e as Error).message}`));
     }, REMINDER_CHECK_INTERVAL_MS);
-    this.logger.log('Booking reminder scheduler started (5min interval)');
+    this.logger.log('Booking reminder and waitlist expiry scheduler started (5min interval)');
   }
 
   onModuleDestroy() {
@@ -282,7 +536,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     this.events.emit(WORK_OBLIGATION_SETTLED, payload);
   }
 
-  async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
+  /**
+   * V1-84 (CR-V28-4, D-65): `cancelledBy` says who cancelled, and only a
+   * CUSTOMER cancel forfeits a paid deposit (D-26). It defaults to BUSINESS, so
+   * KEY bookings_cancel_booking, undo, saga compensation and the cortex
+   * adapter, which call with three arguments, never forfeit. The operator
+   * status route passes CUSTOMER when its body names no initiator (D-65).
+   * FOLLOW3-D18 review: the cancel that moves the booking into CANCELLED
+   * decides; a re-cancel forfeits nothing and records nothing new.
+   */
+  async updateBookingStatus(
+    businessId: string,
+    bookingId: string,
+    status: BookingStatus,
+    cancelledBy: CancelInitiator = 'BUSINESS',
+  ) {
+    if (!CANCEL_INITIATORS.includes(cancelledBy)) {
+      throw new BadRequestException(`Invalid cancelledBy. Must be one of: ${CANCEL_INITIATORS.join(', ')}`);
+    }
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
     });
@@ -297,15 +568,77 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         'Invalid status. Must be one of: PENDING, CONFIRMED, CANCELLED, COMPLETED, NO_SHOW',
       );
     }
-    const updated = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { status },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true, duration: true, price: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+    // V1-16: back from CANCELLED or NO_SHOW, the booking takes its slot again,
+    // through the claim (writeBookingStatus).
+    // FOLLOW3-D18 review (SEC-D18-1, CR-D18-1): the cancel that moves the
+    // booking into CANCELLED decides it. The write is conditional on the row
+    // not being CANCELLED yet, so of two cancels (a KEY, undo or compensation
+    // cancel and an operator's from a stale drawer) exactly one enters; the
+    // other, and any cancel of a booking already CANCELLED, is a re-cancel: it
+    // forfeits nothing and records nothing new (no booking.cancelled row or
+    // event), whoever it names. A re-cancel turned a business cancel, which
+    // keeps the deposit, into a customer forfeit.
+    let entersCancelled = status === 'CANCELLED';
+    const write = (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) =>
+      db.booking.update({
+        where: entersCancelled ? { ...where, status: { not: 'CANCELLED' } } : where,
+        data: { status },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          service: { select: { id: true, name: true, duration: true, price: true } },
+          staff: { select: { id: true, name: true } },
+        },
+      });
+    let updated: Awaited<ReturnType<typeof write>>;
+    try {
+      updated = await this.writeBookingStatus(booking, status, write);
+    } catch (err) {
+      // P2025: the booking is CANCELLED already (read so, or cancelled meanwhile).
+      if (!entersCancelled || (err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      entersCancelled = false;
+      updated = await this.writeBookingStatus(booking, status, write);
+    }
+
+    // D-26: a cancel after the deposit was paid forfeits it, recorded on the
+    // booking. A booking brought back from CANCELLED takes the status its
+    // invoices state again (V1-28 review, SEC-V28-3): DEPOSIT_PAID only while
+    // the deposit still holds money; one refunded meanwhile leaves UNPAID.
+    // Trial-N (N2-SEC): the reinstatement is read from the row as written, not
+    // from the status read before the write: a cancel that committed between
+    // that read and this write (its forfeit included) left a live booking
+    // DEPOSIT_FORFEITED, which no invoice.paid could advance. It is written
+    // only while the booking is still not CANCELLED.
+    // Trial-N round 2 (recheck F4): the reinstatement reads the invoices and
+    // writes the status in one transaction under the booking row lock (FOR NO
+    // KEY UPDATE, the lock BookingPaymentStatusListener's derivations take,
+    // RC-DEP-3). Read without it, a refund and its re-derivation could land
+    // between the read and the write: the re-derivation found the booking still
+    // DEPOSIT_FORFEITED (never overwritten) and wrote nothing, then this wrote
+    // DEPOSIT_PAID with nothing held. Under the lock, that re-derivation waits
+    // for this write and re-derives the booking from the refunded deposit.
+    // V1-84 (D-65): only a customer cancel forfeits; a business cancel keeps
+    // what the deposit holds (DEPOSIT_PAID stays) and writes no forfeit row.
+    // FOLLOW3-D18 review: and only the cancel that moved the booking into
+    // CANCELLED; a re-cancel leaves what the first cancel decided.
+    let depositForfeit: DepositForfeit | null = null;
+    if (status === 'CANCELLED') {
+      if (entersCancelled && cancelledBy === 'CUSTOMER') depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
+      if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
+    } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
+      const reinstated = await this.prisma.client.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${booking.id} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+          const derived = derivePaymentStatus(await readSettlementInvoices(tx, businessId, updated));
+          const restored = await tx.booking.updateMany({
+            where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED, status: { not: 'CANCELLED' } },
+            data: { paymentStatus: derived },
+          });
+          return restored.count > 0 ? derived : null;
+        },
+        { timeout: DERIVATION_TX_TIMEOUT_MS },
+      );
+      if (reinstated) updated.paymentStatus = reinstated;
+    }
 
     if (status === 'CONFIRMED' && booking.contactId) {
       this.events.emit('booking.confirmed', {
@@ -324,6 +657,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
+    // V1-28 (CF-43): the invoicing outcome is part of the completion answer.
+    // A failure leaves the booking COMPLETED and says so (invoiceError); it
+    // was logged and swallowed, so the operator could not tell an invoiced
+    // booking from one that was not.
+    let invoicing: CompletionInvoicing | null = null;
     if (status === 'COMPLETED' && booking.contactId) {
       this.events.emit('booking.completed', {
         booking: updated,
@@ -339,10 +677,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         source: 'bookings',
       });
       this.raiseRebookObligation(businessId, updated);
-      await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
+      invoicing = await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
     }
 
-    if (status === 'CANCELLED' && booking.contactId) {
+    // FOLLOW3-D18 review: a re-cancel emits and records nothing (the customer
+    // heard of the cancel once). The row names the member whose request
+    // cancelled, or SYSTEM (SEC-D18-2): a BUSINESS cancel waives the forfeit,
+    // and the row claimed a USER with no actor.
+    if (status === 'CANCELLED' && entersCancelled && booking.contactId) {
       this.events.emit('booking.cancelled', {
         booking: updated,
         contact: updated.contact ?? undefined,
@@ -352,8 +694,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         businessId,
         contactId: booking.contactId,
         type: 'booking.cancelled',
-        data: { bookingId, status },
-        actorType: 'USER',
+        data: { bookingId, status, cancelledBy },
+        ...this.requestActor(businessId),
         source: 'bookings',
       });
     }
@@ -371,7 +713,120 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('booking.no_show', payload);
     }
 
+    if (invoicing) {
+      return {
+        ...updated,
+        invoiceId: invoicing.invoiceId ?? updated.invoiceId,
+        invoicing,
+        invoiceError: invoicing.status === 'FAILED' ? invoicing.error : null,
+        invoiceErrorCode: invoicing.status === 'FAILED' ? invoicing.code : null,
+      };
+    }
+    if (status === 'CANCELLED') return { ...updated, depositForfeit };
     return updated;
+  }
+
+  /**
+   * D-26: a deposit is forfeit when the customer cancels after paying it. The
+   * forfeit is recorded on the booking (paymentStatus DEPOSIT_FORFEITED) and
+   * on the contact's timeline; nothing moves automatically: the deposit
+   * invoice keeps its status, and no refund, credit note or posting is
+   * written. The owner may refund it by hand through the refund path (a
+   * negative refund row, D-14). What was paid is read from the live deposit
+   * invoice in the table, not from Booking.paymentStatus, so a booking whose
+   * paymentStatus was never written (before V1-28) is covered too.
+   * Cancelling again records nothing new (updateBookingStatus calls this only
+   * for the cancel that moved the booking into CANCELLED).
+   *
+   * V1-28 review: what is forfeit is the money the live deposit (not VOID,
+   * not deleted) holds, by the rule the booking's status is derived from
+   * (depositPosition): all of a PAID deposit nothing was refunded on, the net
+   * received on one that was refunded, whether D-14 left it PAID or reopened
+   * it to PARTIALLY_PAID or SENT, and nothing on a deposit still owed. So a
+   * deposit refunded in full forfeits nothing, and one refunded in part
+   * forfeits what it still holds. The timeline row names who cancelled (SEC-V28-2): the authenticated member
+   * whose request this is (TenantInterceptor's context for this business), or
+   * SYSTEM for a caller with none; it claimed USER with no actor. V1-84: only
+   * a customer cancel reaches this (updateBookingStatus's cancelledBy), so a
+   * KEY tool, undo or compensation, which cancel for the business, never do.
+   *
+   * Trial-N (N2-SEC): the forfeit is written only while the booking is still
+   * CANCELLED. A reinstatement that committed between the cancel's status
+   * write and this one left a live booking DEPOSIT_FORFEITED; now nothing is
+   * forfeit on it. The deposit's payment rows are its own tenant's (N1-SEC).
+   *
+   * Trial-N round 2 (recheck F3): what the deposit holds is read and the
+   * forfeit written in one transaction under the deposit's invoice row lock
+   * (FOR NO KEY UPDATE, the lock every payment and refund of the invoice takes
+   * first: CommerceService.lockInvoiceForPayment, PaymentsService.lockInvoice,
+   * the reconcile). The compare-and-set on paymentStatus did not cover the
+   * deposit read: a full refund that committed between the read and the write
+   * (its re-derivation having moved the booking to UNPAID) was forfeit, and a
+   * forfeit is never re-derived (D-26). Under the lock a payment or refund of
+   * the deposit is before the read (and seen) or after the forfeit commits (the
+   * owner's refund of a forfeit deposit, which leaves it forfeit). The invoice
+   * is locked before the booking row the write locks, the order a contact
+   * merge takes them in (invoices, then bookings).
+   */
+  private async forfeitPaidDeposit(
+    businessId: string,
+    booking: Pick<Booking, 'id' | 'contactId' | 'depositInvoiceId'>,
+  ): Promise<DepositForfeit | null> {
+    const depositInvoiceId = booking.depositInvoiceId;
+    if (!depositInvoiceId) return null;
+    const decided = await this.prisma.client.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${depositInvoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+        const deposit = await tx.invoice.findFirst({
+          where: { id: depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
+          select: settlementInvoiceSelect(businessId),
+        });
+        if (!deposit) return null;
+        const { heldCents } = depositPosition(deposit);
+        if (heldCents <= 0) return null;
+        const forfeit: DepositForfeit = {
+          depositInvoiceId: deposit.id,
+          invoiceNumber: deposit.invoiceNumber,
+          amount: heldCents / 100,
+          currency: deposit.currency,
+        };
+        const recorded = await tx.booking.updateMany({
+          where: { id: booking.id, businessId, status: 'CANCELLED', paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
+          data: { paymentStatus: DEPOSIT_FORFEITED },
+        });
+        if (recorded.count === 0) {
+          const current = await tx.booking.findUnique({ where: { id: booking.id }, select: { status: true, paymentStatus: true } });
+          return current?.status === 'CANCELLED' && current.paymentStatus === DEPOSIT_FORFEITED ? { forfeit, recorded: false } : null;
+        }
+        return { forfeit, recorded: true };
+      },
+      { timeout: DERIVATION_TX_TIMEOUT_MS },
+    );
+    if (!decided) return null;
+    const { forfeit } = decided;
+    if (!decided.recorded) return forfeit;
+    if (booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.deposit_forfeited',
+        data: { bookingId: booking.id, ...forfeit },
+        ...this.requestActor(businessId),
+        source: 'bookings',
+      });
+    }
+    return forfeit;
+  }
+
+  /**
+   * The actor of a write made on a member's request: the authenticated user
+   * TenantInterceptor bound for this business; with no request context, or
+   * one for another business, SYSTEM (the crm-import convention).
+   */
+  private requestActor(businessId: string): { actorType: 'USER'; actorId: string } | { actorType: 'SYSTEM' } {
+    const context = getTenantContext();
+    const actorId = context?.businessId === businessId ? context.userId : undefined;
+    return actorId ? { actorType: 'USER', actorId } : { actorType: 'SYSTEM' };
   }
 
   /**
@@ -383,64 +838,197 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   async createInvoiceFromBooking(businessId: string, bookingId: string) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
-      include: {
-        service: true,
-        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
-      },
+      select: { id: true },
     });
     if (!booking) {
       throw new BadRequestException('Booking not found');
     }
-    if (booking.invoiceId) {
-      const existing = await this.prisma.client.invoice.findUnique({
-        where: { id: booking.invoiceId },
-        select: { id: true, invoiceNumber: true },
-      });
-      if (existing) {
-        return {
-          invoiceId: existing.id,
-          invoiceNumber: existing.invoiceNumber,
-          alreadyExisted: true,
-        };
-      }
+    // V1-28 (CF-43): the same final invoice completion draws up, net of the
+    // deposit; it billed the full price again.
+    const outcome = await this.issueFinalInvoice(businessId, bookingId);
+    if (outcome.status === 'NOT_REQUIRED') {
+      throw new BadRequestException(outcome.reason);
     }
-    if (!booking.contactId || !booking.serviceId || !booking.service) {
-      throw new BadRequestException('Booking is missing a contact or service');
-    }
-    if ((booking.service.price ?? 0) <= 0) {
-      throw new BadRequestException('Service has no price configured');
-    }
-
-    const invoice = await this.commerce.createInvoiceForService(
-      businessId,
-      booking.contactId,
-      booking.service,
-    );
-    if (!invoice) {
-      throw new BadRequestException('Failed to create invoice');
-    }
-    await this.prisma.client.booking.update({
-      where: { id: booking.id },
-      data: { invoiceId: invoice.id },
-    });
-
-    const invoiceWithNumber = invoice as typeof invoice & { invoiceNumber: string };
-    const payload: BookingInvoiceCreatedPayload = {
-      booking: { ...booking, invoiceId: invoice.id },
-      invoice,
-      businessId,
-    };
-    // Single source of truth: RevenueEventListener subscribes to
-    // `booking.invoice_created` and writes the canonical
-    // `invoice.from_booking` row on the contact timeline. Do NOT also
-    // call this.crm.logContactEvent here — that would bypass the bus
-    // and risk duplicate timeline rows.
-    this.events.emit('booking.invoice_created', payload);
     return {
-      invoiceId: invoice.id,
-      invoiceNumber: invoiceWithNumber.invoiceNumber,
-      alreadyExisted: false,
+      invoiceId: outcome.invoiceId,
+      invoiceNumber: outcome.invoiceNumber,
+      alreadyExisted: outcome.status === 'EXISTING',
+      amount: outcome.amount,
+      depositInvoiceId: outcome.depositInvoiceId,
     };
+  }
+
+  /**
+   * V1-28 (CF-43): the booking's final invoice, drawn up once. It bills the
+   * service price less the booking's live deposit invoice (integer cents,
+   * D-13), and its line names the deposit invoice, so deposit + final ==
+   * price; it billed the full price again, so a 100 service with a 25 deposit
+   * was billed 125. A deposit that covers the price leaves nothing to bill.
+   *
+   * Under the booking's advisory lock: the booking is re-read inside it, so of
+   * two callers racing (two completions, or a completion and the Create-invoice
+   * button) one draws the invoice up and the other finds it. The invoice is
+   * created through CommerceService (its own connection, committed); if the
+   * link to the booking then fails, that DRAFT is withdrawn. A number
+   * collision is retried by CommerceService's allocator (V1-43, SEC-V28-1).
+   * W4-A10c-FINAL-LINK-WINDOW (SEC-A10b-3, D-59/D-91): with a deposit, the
+   * final's currency is re-read under its row lock before the link, and a
+   * final switched before the link is refused (assertLinkedFinalKeepsDepositCurrency);
+   * review CR-A10c-1: that lock is taken before the booking row the link
+   * writes, the order a contact merge takes them in (invoices, then bookings).
+   */
+  private async issueFinalInvoice(businessId: string, bookingId: string): Promise<FinalInvoiceOutcome> {
+    const key = `${FINAL_INVOICE_LOCK_NAMESPACE}${bookingId}`;
+    // Assigned inside the transaction callback; declared through a cast so
+    // the compiler does not narrow them to their initial undefined.
+    let drawn = undefined as string | undefined;
+    let created = undefined as { invoice: Invoice; booking: Booking } | undefined;
+    let outcome: FinalInvoiceOutcome;
+    try {
+      outcome = await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+        const booking = await tx.booking.findFirst({ where: { id: bookingId, businessId, deletedAt: null } });
+        if (!booking) throw new NotFoundException('Booking not found');
+        const live = booking.depositInvoiceId
+          ? await tx.invoice.findFirst({
+              where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
+              select: settlementInvoiceSelect(businessId),
+            })
+          : null;
+        // V1-28 review (SEC-V28-3, CR-V28-2): the deposit nets out what it
+        // covers of the price, not its face total: a refunded deposit holds
+        // nothing and a credited one bills less (depositPosition).
+        const depositCents = live ? depositPosition(live).coversCents : 0;
+        const deposit = depositCents > 0 ? live : null;
+        const depositPart = { depositInvoiceId: deposit?.id ?? null, depositAmount: depositCents / 100 };
+
+        if (booking.invoiceId) {
+          const existing = await tx.invoice.findFirst({
+            where: { id: booking.invoiceId, businessId },
+            select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, deletedAt: true },
+          });
+          if (existing) {
+            // D-59 after the fact (review SEC-A10-1): a DRAFT deposit or a
+            // DRAFT final may still have its currency PATCHed once the final
+            // has netted the deposit, so the pairing is re-checked here and a
+            // cross-currency netting is refused, never reported as drawn up.
+            // Nothing is written; a VOID or withdrawn final nets nothing.
+            if (deposit && existing.status !== 'VOID' && !existing.deletedAt) {
+              const depositCurrency = normalizeCurrency(deposit.currency);
+              const finalCurrency = normalizeCurrency(existing.currency);
+              if (depositCurrency !== finalCurrency) {
+                throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, existing);
+              }
+            }
+            return {
+              status: 'EXISTING' as const,
+              invoiceId: existing.id,
+              invoiceNumber: existing.invoiceNumber,
+              amount: toCents(existing.total) / 100,
+              ...depositPart,
+            };
+          }
+        }
+        const notRequired = (reason: string): FinalInvoiceOutcome => ({ status: 'NOT_REQUIRED', invoiceId: null, reason, ...depositPart });
+        if (!booking.contactId || !booking.serviceId) return notRequired('Booking is missing a contact or service');
+        const service = await tx.service.findFirst({ where: { id: booking.serviceId, businessId, deletedAt: null } });
+        if (!service) return notRequired('Booking is missing a contact or service');
+        if ((service.price ?? 0) <= 0) return notRequired('Service has no price configured');
+        // D-59 (FOLLOW3-A10): the final invoice is drawn up in the business
+        // currency (createInvoiceForService, D-13); a deposit it would net in
+        // another currency (a DRAFT deposit PATCHed to USD, or the business
+        // currency changed since booking) is refused, nothing written.
+        if (deposit) {
+          const business = await tx.business.findUnique({ where: { id: businessId }, select: { currency: true } });
+          const invoiceCurrency = normalizeCurrency(business?.currency) || 'TTD';
+          const depositCurrency = normalizeCurrency(deposit.currency);
+          if (depositCurrency !== invoiceCurrency) {
+            throw depositCurrencyMismatch(deposit, depositCurrency, invoiceCurrency);
+          }
+        }
+        const finalCents = toCents(service.price) - depositCents;
+        if (finalCents <= 0) return notRequired('The deposit covers the price; there is no balance to invoice');
+
+        const amount = finalCents / 100;
+        const contactId = booking.contactId;
+        const options = deposit
+          ? { kind: 'FULL' as const, amountOverride: amount, descriptionSuffix: ` (balance after deposit ${deposit.invoiceNumber})` }
+          : undefined;
+        // V1-43 (D-15): numbered by CommerceService's allocator, which retries a
+        // number collision itself (the SEC-V28-1 retry that lived here).
+        const invoice = await this.commerce.createInvoiceForService(businessId, contactId, service, options);
+        if (!invoice) throw new BadRequestException('Failed to create invoice');
+        drawn = invoice.id;
+        // W4-A10c-FINAL-LINK-WINDOW review (CR-A10c-1): the final's row lock is
+        // taken before the booking row the link writes (invoices, then bookings).
+        if (deposit) await this.assertLinkedFinalKeepsDepositCurrency(tx, businessId, deposit, invoice);
+        await tx.booking.update({ where: { id: booking.id }, data: { invoiceId: invoice.id } });
+        created = { invoice, booking: { ...booking, invoiceId: invoice.id } };
+        return {
+          status: 'CREATED' as const,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          amount,
+          ...depositPart,
+        };
+      }, SLOT_CLAIM_TX_OPTIONS);
+    } catch (err) {
+      await this.withdrawDraftInvoices(businessId, [drawn]);
+      throw err;
+    }
+    if (created) {
+      // Single source of truth: RevenueEventListener subscribes to
+      // `booking.invoice_created` and writes the canonical
+      // `invoice.from_booking` row on the contact timeline. Do NOT also
+      // call this.crm.logContactEvent here — that would bypass the bus
+      // and risk duplicate timeline rows.
+      const payload: BookingInvoiceCreatedPayload = { ...created, businessId };
+      this.events.emit('booking.invoice_created', payload);
+    }
+    return outcome;
+  }
+
+  /**
+   * W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3, D-59 as built per D-91,
+   * D-13): the final invoice is created through CommerceService on its own
+   * connection and committed before this transaction links it to the booking
+   * (Booking.invoiceId). A currency PATCH of the final in that window finds no
+   * booking to pair it with (assertDepositPairKeepsCurrency reads committed
+   * links), so it is not refused, and completion linked a USD final netting a
+   * TTD deposit. Before the link, the final's row is taken with the lock every
+   * invoice edit takes first (FOR NO KEY UPDATE, lockInvoiceForPayment) and its
+   * currency re-read under it; the lock is held until this transaction commits:
+   *  - an edit that committed before reads here as switched, and one that
+   *    holds the row (it read no pair) is waited for and read the same way:
+   *    the pairing is refused (DEPOSIT_CURRENCY_MISMATCH), this transaction
+   *    rolls back with nothing linked and the caller withdraws the drawn DRAFT;
+   *  - an edit that comes after waits for this transaction to commit, then
+   *    reads the link, takes the booking's final-invoice lock and is refused.
+   * So no committed state pairs the deposit with a final in another currency.
+   * Lock order (review CR-A10c-1): this runs before the booking update that
+   * writes the link, so the final's row is locked before the booking's, the
+   * order a contact merge takes them in (CrmService.mergeContacts repoints
+   * invoices, then bookings) and forfeitPaidDeposit's. Linking first took the
+   * booking row, then waited on the final's row a merge held, and the merge's
+   * booking repoint then waited on the link: a deadlock. An edit of this new
+   * final takes the final-invoice advisory lock only for a link it reads
+   * committed, which this one is not until the commit, so it never waits on
+   * the advisory lock this transaction holds while holding the final's row.
+   */
+  private async assertLinkedFinalKeepsDepositCurrency(
+    tx: PrismaTx,
+    businessId: string,
+    deposit: { id: string; invoiceNumber: string | null; currency: string | null },
+    final: { id: string; invoiceNumber: string | null },
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ currency: string | null }>>`
+      SELECT currency FROM invoices WHERE id = ${final.id} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+    if (!rows[0]) throw new BadRequestException('Failed to create invoice');
+    const depositCurrency = normalizeCurrency(deposit.currency);
+    const finalCurrency = normalizeCurrency(rows[0].currency);
+    if (depositCurrency !== finalCurrency) {
+      throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, final);
+    }
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
@@ -551,7 +1139,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * agree until they do not.
    *
    * Lead time, business hours and staff working hours are applied the same way
-   * the validator applies them.
+   * the validator applies them, on the same clock: Business.timezone (V1-16).
    */
   async getAvailableSlots(params: {
     businessId: string;
@@ -569,44 +1157,62 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
     if (!service) throw new NotFoundException('Service not found');
 
-    const dayStart = new Date(params.date);
-    dayStart.setHours(0, 0, 0, 0);
+    // V1-16: the route hands over the day asked for as a server-local midnight,
+    // so its calendar date is read back on the server's clock; from there on,
+    // the weekday, the hours and every slot are the business's own clock
+    // (Business.timezone). The day was a server-local midnight moved with
+    // setHours, which shifted the hours by the server's offset and, east of
+    // UTC, reported the previous day.
+    const year = params.date.getFullYear();
+    const month = params.date.getMonth() + 1;
+    const dayOfMonth = params.date.getDate();
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+    const weekday = new Date(Date.UTC(year, month - 1, dayOfMonth)).getUTCDay();
     const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayKey = dayKeys[dayStart.getDay()];
+    const dayKey = dayKeys[weekday];
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { businessHours: true, timezone: true },
+    });
+    const zone = this.businessZone(business?.timezone);
 
     // Staff working hours win over business hours when the staff member has
     // any configured, exactly as the booking validator decides it.
-    let windows: Array<{ openMin: number; closeMin: number }> = [];
+    //
+    // W10-BOOKING-BUFFER (CR-W9KAT-1): `bufferMins` is how much of the
+    // service's buffer must also end by the window's close, as
+    // assertWithinSchedule reads it for both create paths and rescheduleBooking
+    // now does too: the whole buffer on the business's hours, none on a staff
+    // member's own. The picker fitted the appointment alone, so it offered a
+    // start whose buffer ran past closing that every write path then refused.
+    let windows: Array<{ openMin: number; closeMin: number; bufferMins: number }> = [];
     if (staffId) {
       const availability = await this.prisma.client.availability.findMany({
         where: { staffId, staff: { businessId, deletedAt: null } },
       });
       if (availability.length > 0) {
         windows = availability
-          .filter((a) => a.dayOfWeek === dayStart.getDay())
+          .filter((a) => a.dayOfWeek === weekday)
           .map((a) => {
             const [sh, sm] = a.startTime.split(':').map(Number);
             const [eh, em] = a.endTime.split(':').map(Number);
-            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em };
+            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em, bufferMins: 0 };
           });
         // Configured, but not for this day: the staff member does not work today.
-        if (windows.length === 0) return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+        if (windows.length === 0) return { date, slots: [] };
       }
     }
 
     if (windows.length === 0) {
-      const business = await this.prisma.client.business.findUnique({
-        where: { id: businessId },
-        select: { businessHours: true },
-      });
       const hours = business?.businessHours as BusinessHoursMap | null;
       const dayHours = hours?.[dayKey];
       if (!dayHours || dayHours.closed || !dayHours.open || !dayHours.close) {
-        return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+        return { date, slots: [] };
       }
       const [oh, om] = dayHours.open.split(':').map(Number);
       const [ch, cm] = dayHours.close.split(':').map(Number);
-      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm }];
+      // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
+      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm, bufferMins: Math.max(0, service.bufferMins ?? 0) }];
     }
 
     const earliest = service.leadTimeMins && service.leadTimeMins > 0
@@ -615,9 +1221,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     const slots: string[] = [];
     for (const w of windows) {
-      for (let m = w.openMin; m + service.duration <= w.closeMin; m += interval) {
-        const start = new Date(dayStart);
-        start.setMinutes(m);
+      // W10-BOOKING-BUFFER review repair (SEC-W10BB-1): the candidate starts are
+      // this day's, 00:00 to 23:59, whatever the service row holds. With no
+      // await before the DST check below, a negative duration (or, before the
+      // buffer was floored at zero, a negative buffer) walked starts far past
+      // midnight and blocked the event loop of the public slots route and KEY
+      // get_availability; none of them is a time on this day, so none was offered.
+      for (
+        let m = Math.max(0, w.openMin);
+        m < MINUTES_PER_DAY && m + service.duration + w.bufferMins <= w.closeMin;
+        m += interval
+      ) {
+        const start = zonedInstant(year, month, dayOfMonth, m, zone);
+        // A time the clocks skip that day (DST) is not a time anyone can book.
+        if (wallClock(start, zone).minutes !== m) continue;
         const end = new Date(start.getTime() + service.duration * 60000);
         if (start < earliest) continue;
 
@@ -639,22 +1256,26 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return { date: dayStart.toISOString().slice(0, 10), slots };
+    return { date, slots };
   }
 
-  private async assertSlotFree(params: {
-    businessId: string;
-    serviceId: string;
-    staffId?: string | null;
-    start: Date;
-    end: Date;
-    bufferMins?: number | null;
-    excludeBookingId?: string;
-  }): Promise<void> {
-    const bufferMins = params.bufferMins ?? 0;
+  /**
+   * `db` is the claim's transaction when called from claimSlot (V1-16), so the
+   * re-read sees every booking committed before the lock was granted.
+   */
+  private async assertSlotFree(params: SlotParams, db: Pick<PrismaTx, 'booking'> = this.prisma.client): Promise<void> {
+    // W10-BOOKING-BUFFER review repair (SEC-W10BB-1): a buffer only widens the
+    // window, so a negative one counts as none, here and on every path that
+    // reads it (the picker, assertWithinSchedule, rescheduleBooking).
+    // Service.bufferMins is unchecked on the deprecated PATCH
+    // bookings/businesses/:id/services/:sid, KEY add_service and in the
+    // database; read as stored, a negative buffer narrowed this check (an
+    // overlapping booking was accepted), moved closing time later and ran the
+    // picker's loop far past the end of the day.
+    const bufferMins = Math.max(0, params.bufferMins ?? 0);
     const bufferMs = bufferMins * 60000;
 
-    const clash = await this.prisma.client.booking.findFirst({
+    const clash = await db.booking.findFirst({
       where: {
         businessId: params.businessId,
         status: { notIn: ['CANCELLED', 'NO_SHOW'] },
@@ -675,6 +1296,232 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           ? `This time slot is unavailable due to a ${bufferMins}-minute buffer between appointments.`
           : 'That time slot has already been booked. Please choose another.',
       );
+    }
+  }
+
+  /**
+   * V1-16 (M41): the write half of assertSlotFree, and the race it left open.
+   *
+   * Every path read the slot with assertSlotFree and wrote it several awaits
+   * later, so concurrent requests all passed the read before any of them
+   * wrote: ten simultaneous public requests for one slot wrote seven bookings
+   * (booking-concurrency.integration.test.ts, at the V1-06 head). The callers
+   * keep their early read, which refuses a taken slot before contacts,
+   * invoices or events are touched; the write goes through here, which takes
+   * the calendar's advisory lock, reads again with the same guard inside the
+   * transaction and writes, so the second of two claims sees the first. No
+   * migration and no constraint: the table already holds overlapping rows.
+   */
+  private claimSlot<T>(slot: SlotParams, write: (tx: PrismaTx) => Promise<T>): Promise<T> {
+    const key = `${SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      await this.assertSlotFree(slot, tx);
+      return write(tx);
+    }, SLOT_CLAIM_TX_OPTIONS);
+  }
+
+  /**
+   * V1-16 (SEC-V16-1): a booking's status write, which can take a slot too. A
+   * CANCELLED or NO_SHOW booking gave its slot back, and assertSlotFree stops
+   * counting it, so moving it to any other status holds the slot again. That is
+   * a claim like a create: it goes through claimSlot and is refused with the
+   * overlap message when the slot was booked after the cancellation. It was a
+   * bare update, which put a second live booking on that slot.
+   *
+   * A move between two slot-holding statuses keeps the slot the booking already
+   * holds: a plain update, no lock, and no overlap re-read, which legacy rows
+   * that already overlap would fail. The update is conditional on the booking
+   * still holding the slot, so a cancel that lands between the read and this
+   * write turns it into a reinstatement, and that goes through the claim. A move
+   * to CANCELLED or NO_SHOW gives the slot back and stays a plain update.
+   */
+  private async writeBookingStatus<T>(
+    booking: StatusWriteTarget,
+    status: BookingStatus,
+    write: (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) => Promise<T>,
+  ): Promise<T> {
+    if (!holdsSlot(status)) return write(this.prisma.client, { id: booking.id });
+    if (holdsSlot(booking.status)) {
+      try {
+        return await write(this.prisma.client, { id: booking.id, status: { notIn: SLOT_RELEASING_STATUSES } });
+      } catch (err) {
+        // P2025: the booking no longer holds its slot (cancelled meanwhile).
+        if ((err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      }
+    }
+    const service = await this.prisma.client.service.findUnique({
+      where: { id: booking.serviceId },
+      select: { bufferMins: true },
+    });
+    const slot: SlotParams = {
+      businessId: booking.businessId,
+      serviceId: booking.serviceId,
+      staffId: booking.staffId,
+      start: booking.startTime,
+      end: booking.endTime,
+      bufferMins: service?.bufferMins,
+      excludeBookingId: booking.id,
+    };
+    return this.claimSlot(slot, (tx) => write(tx, { id: booking.id }));
+  }
+
+  /**
+   * The zone a business keeps its hours in (V1-16). Business.timezone is an
+   * IANA name with a default; a value this runtime cannot read is reported
+   * once and the server's zone is used, as it was for every business before.
+   */
+  private businessZone(timezone: string | null | undefined): string | undefined {
+    if (!timezone) return undefined;
+    try {
+      wallClockFormat(timezone);
+      return timezone;
+    } catch {
+      if (!this.warnedZones.has(timezone)) {
+        this.warnedZones.add(timezone);
+        this.logger.warn(`Unknown business timezone "${timezone}"; reading business hours in the server's zone.`);
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * Invoices drawn up for a public booking whose write then failed, most often
+   * because a concurrent claim took the slot (V1-16): DRAFTs nobody was sent,
+   * for a booking that does not exist. Soft-deleted so they do not stand as
+   * debts in the business's list. Best effort: the caller is already failing
+   * with the reason that matters.
+   */
+  private async withdrawDraftInvoices(businessId: string, ids: Array<string | undefined>): Promise<void> {
+    const drawn = ids.filter((id): id is string => !!id);
+    if (drawn.length === 0) return;
+    try {
+      await this.prisma.client.invoice.updateMany({
+        where: { id: { in: drawn }, businessId, status: 'DRAFT', deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`Could not withdraw invoices ${drawn.join(', ')} of an unwritten booking: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * The service's advance-notice rule, as the public widget has always applied
+   * it. publicCreateBooking and createBooking both call this (V1-06), so the
+   * in-app path refuses with the same message rather than not at all.
+   */
+  private assertLeadTime(leadTimeMins: number | null | undefined, start: Date): void {
+    if (!leadTimeMins || leadTimeMins <= 0) return;
+    const minStart = new Date(Date.now() + leadTimeMins * 60000);
+    if (start < minStart) {
+      throw new BadRequestException(
+        `This service requires at least ${leadTimeMins} minutes advance notice.`,
+      );
+    }
+  }
+
+  /**
+   * The optional ids a create writes onto the booking must be live rows of the
+   * booking's business; anything else answers like an unknown id (404). Both
+   * create paths call this (V1-06 review): the public widget wrote any staffId
+   * or orgUnitId it was handed, so an anonymous caller could put another
+   * business's staff member or org unit on this business's booking, and its
+   * name then showed in this business's booking list and notifications.
+   */
+  private async assertOwnedRefs(params: {
+    businessId: string;
+    staffId?: string | null;
+    orgUnitId?: string | null;
+  }): Promise<void> {
+    if (params.staffId) {
+      const staff = await this.prisma.client.staffMember.findFirst({
+        where: { id: params.staffId, businessId: params.businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!staff) throw new NotFoundException('Staff member not found');
+    }
+    if (params.orgUnitId) {
+      const orgUnit = await this.prisma.client.orgUnit.findFirst({
+        where: { id: params.orgUnitId, businessId: params.businessId },
+        select: { id: true },
+      });
+      if (!orgUnit) throw new NotFoundException('Org unit not found');
+    }
+  }
+
+  /**
+   * Staff working hours, else business hours: the public path's rules and
+   * messages, moved out of publicCreateBooking (V1-06) so createBooking applies
+   * the same ones and the two cannot drift apart.
+   *
+   * A staff member with any availability rows is held to them and business
+   * hours are not consulted. Otherwise the day must not be closed, and start
+   * through end plus the buffer must fit inside the day's opening hours.
+   *
+   * Both checks measure the end as start-of-day minutes plus the booking's
+   * length, so a booking that runs past midnight (in-app, the client chooses
+   * the end) is outside every day's hours rather than judged by the end's time
+   * of day alone. A day row without open/close times sets no hours, as in
+   * rescheduleBooking. Read on the business's clock, `timeZone` (V1-16): it
+   * was the server's, which put a UTC-4 business's afternoon outside its hours.
+   */
+  private async assertWithinSchedule(params: {
+    businessId: string;
+    staffId?: string | null;
+    hours: BusinessHoursMap | null;
+    start: Date;
+    end: Date;
+    bufferMins?: number | null;
+    timeZone?: string;
+  }): Promise<void> {
+    const { start, end } = params;
+    const startClock = wallClock(start, params.timeZone);
+    const startMinsOfDay = startClock.minutes;
+    const durationMins = Math.round((end.getTime() - start.getTime()) / 60000);
+    if (params.staffId) {
+      const staffAvailabilities = await this.prisma.client.availability.findMany({
+        where: {
+          staffId: params.staffId,
+          staff: { businessId: params.businessId, deletedAt: null },
+        },
+      });
+      if (staffAvailabilities.length > 0) {
+        const dayOfWeek = startClock.weekday;
+        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
+        if (slotAvail.length === 0) {
+          throw new BadRequestException('The selected staff member is not available on this day.');
+        }
+        // An end at midnight is 1440, as the end's time of day `|| 1440` was.
+        const endMinsOfDay = startMinsOfDay + durationMins;
+        const withinAny = slotAvail.some((a) => {
+          const [sh, sm] = a.startTime.split(':').map(Number);
+          const [eh, em] = a.endTime.split(':').map(Number);
+          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
+        });
+        if (!withinAny) {
+          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
+        }
+        return;
+      }
+    }
+
+    const hours = params.hours;
+    if (!hours) return;
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayHours = hours[dayKeys[startClock.weekday]];
+    if (dayHours?.closed) {
+      throw new BadRequestException('This business is closed on the selected day.');
+    }
+    if (dayHours && dayHours.open && dayHours.close) {
+      const [oh, om] = dayHours.open.split(':').map(Number);
+      const [ch, cm] = dayHours.close.split(':').map(Number);
+      const openMins = oh * 60 + om;
+      const closeMins = ch * 60 + cm;
+      // A negative buffer counts as none, as assertSlotFree reads it (SEC-W10BB-1).
+      const endMins = startMinsOfDay + durationMins + Math.max(0, params.bufferMins ?? 0);
+      if (startMinsOfDay < openMins || endMins > closeMins) {
+        throw new BadRequestException('The selected time is outside business hours.');
+      }
     }
   }
 
@@ -712,7 +1559,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    await this.assertSlotFree({
+    const slot: SlotParams = {
       businessId,
       serviceId: booking.serviceId,
       staffId: booking.staffId,
@@ -720,7 +1567,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service?.bufferMins,
       excludeBookingId: booking.id,
+    };
+    await this.assertSlotFree(slot);
+
+    // Hours and weekdays on the business's clock, as the create paths read them (V1-16).
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { businessHours: true, timezone: true },
     });
+    const zone = this.businessZone(business?.timezone);
+    const startClock = wallClock(start, zone);
+    // W10-BOOKING-BUFFER review repair (CR-W10BB-1): the appointment ends
+    // `duration` elapsed minutes after its start on the start's day, as the
+    // picker and both create paths (assertWithinSchedule) read it. The end's
+    // own time of day read an appointment across a spring-forward 60 minutes
+    // later, refusing a move onto a start the picker offers and both create
+    // paths accept, and read one past midnight as early the same day.
+    const startMinsOfDay = startClock.minutes;
+    const endMinsOfDay = startMinsOfDay + duration;
 
     let hasStaffSchedule = false;
     if (booking.staffId) {
@@ -732,13 +1596,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
       if (staffAvailabilities.length > 0) {
         hasStaffSchedule = true;
-        const dayOfWeek = start.getDay();
+        const dayOfWeek = startClock.weekday;
         const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
         if (slotAvail.length === 0) {
           throw new BadRequestException('The selected staff member is not available on this day.');
         }
-        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
-        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
         const withinAny = slotAvail.some((a) => {
           const [sh, sm] = a.startTime.split(':').map(Number);
           const [eh, em] = a.endTime.split(':').map(Number);
@@ -750,15 +1612,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { businessHours: true },
-    });
     if (!hasStaffSchedule) {
       const hours = business?.businessHours as BusinessHoursMap | null;
       if (hours) {
         const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        const dayKey = dayKeys[start.getDay()];
+        const dayKey = dayKeys[startClock.weekday];
         const dayHours = hours[dayKey];
         if (dayHours?.closed) {
           throw new BadRequestException('The business is closed on this day.');
@@ -768,9 +1626,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           const [ch, cm] = dayHours.close.split(':').map(Number);
           const openMin = oh * 60 + om;
           const closeMin = ch * 60 + cm;
-          const bookingStartMin = start.getHours() * 60 + start.getMinutes();
-          const bookingEndMin = (end.getHours() * 60 + end.getMinutes()) || 1440;
-          if (bookingStartMin < openMin || bookingEndMin > closeMin) {
+          // W10-BOOKING-BUFFER (CR-W9KAT-1): the buffer ends by closing too, as
+          // both create paths (assertWithinSchedule) and the picker read it; a
+          // staff member's own hours above are read without it, as there. A
+          // negative buffer counts as none (SEC-W10BB-1).
+          const bookingEndMin = endMinsOfDay + Math.max(0, service?.bufferMins ?? 0);
+          if (startMinsOfDay < openMin || bookingEndMin > closeMin) {
             throw new BadRequestException(
               `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
             );
@@ -779,15 +1640,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const updated = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { startTime: start, endTime: end },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true, duration: true, price: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+    const updated = await this.claimSlot(slot, (tx) =>
+      tx.booking.update({
+        where: { id: bookingId },
+        data: { startTime: start, endTime: end },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          service: { select: { id: true, name: true, duration: true, price: true } },
+          staff: { select: { id: true, name: true } },
+        },
+      }),
+    );
 
     if (booking.contactId) {
       const payload: BookingRescheduledPayload = {
@@ -858,23 +1721,65 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     locationPlaceId?: string;
     locationLatLng?: { lat: number; lng: number };
     orgUnitId?: string;
+    /** The member making the booking: their CRM view bounds which contact they may book. */
+    actorUserId?: string;
   }) {
     // Staff booking from inside the app had NO check of any kind — not
     // overlap, not lead time, nothing. It went straight to booking.create, so
     // anyone with app access could double-book a slot the public widget would
     // have refused. The buffer is read from the service for the same reason
     // the other two paths read it: a configured buffer widens the window.
+    //
+    // V1-06: it also wrote whatever ids it was handed, so another business's
+    // service, contact, staff member or org unit was booked into this one.
+    // Each must be a live row of this business, and the contact one the actor's
+    // CRM view shows (as GET contacts/:id decides it); anything else answers
+    // like an unknown id. Without staffId the service is the resource
+    // (assertSlotFree). The client chooses endTime, so it must follow startTime.
+    const startMs = input.startTime.getTime();
+    const endMs = input.endTime.getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+      throw new BadRequestException('startTime and endTime must be valid dates.');
+    }
+    if (endMs <= startMs) throw new BadRequestException('The end time must be after the start time.');
     const bookedService = await this.prisma.client.service.findFirst({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
-      select: { bufferMins: true },
+      select: { bufferMins: true, leadTimeMins: true },
     });
-    await this.assertSlotFree({
+    if (!bookedService) throw new NotFoundException('Service not found');
+    const contactWhere: Prisma.ContactWhereInput = { ...contactWhereWithId(input.businessId, input.contactId) };
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) contactWhere.AND = [visClause as Prisma.ContactWhereInput];
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where: contactWhere, select: { id: true } });
+    if (!contact) throw new NotFoundException('Contact not found');
+    await this.assertOwnedRefs(input);
+
+    // The public path's rules, in its order and with its messages.
+    this.assertLeadTime(bookedService.leadTimeMins, input.startTime);
+    const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: input.serviceId,
       staffId: input.staffId,
       start: input.startTime,
       end: input.endTime,
-      bufferMins: bookedService?.bufferMins,
+      bufferMins: bookedService.bufferMins,
+    };
+    await this.assertSlotFree(slot);
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: input.businessId },
+      select: { businessHours: true, timezone: true },
+    });
+    await this.assertWithinSchedule({
+      businessId: input.businessId,
+      staffId: input.staffId,
+      hours: (business?.businessHours ?? null) as BusinessHoursMap | null,
+      start: input.startTime,
+      end: input.endTime,
+      bufferMins: bookedService.bufferMins,
+      timeZone: this.businessZone(business?.timezone),
     });
 
     const createData: Prisma.BookingUncheckedCreateInput = {
@@ -893,10 +1798,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     if (input.orgUnitId) createData.orgUnitId = input.orgUnitId;
 
-    const booking = await this.prisma.client.booking.create({
-      data: createData,
-      include: { contact: true },
-    });
+    const booking = await this.claimSlot(slot, (tx) =>
+      tx.booking.create({
+        data: createData,
+        include: { contact: true },
+      }),
+    );
 
     const bookingWithContact = booking as typeof booking & { contact?: { id: string; firstName: string; lastName: string; email: string | null } };
 
@@ -927,17 +1834,66 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         },
         actorType: 'SYSTEM',
         source: 'bookings',
+        // W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08; CR-V155b-1,
+        // V55-12b): the booking's one feed row is ActivityEventListener's
+        // 'New booking', from the booking.created emit above; this
+        // ContactEvent stays on the contact's timeline with no Activity copy.
+        feedCopy: false,
       });
     }
     return booking;
   }
 
   async confirmBooking(bookingId: string) {
-    const booking = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CONFIRMED' },
-      include: { contact: true },
+    const write = (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) =>
+      db.booking.update({ where, data: { status: 'CONFIRMED' }, include: { contact: true } });
+    // V1-16: confirming a cancelled or no-show booking takes its slot again,
+    // through the claim. A booking that is not there fails in the update, as before.
+    const current = await this.prisma.client.booking.findUnique({ where: { id: bookingId } });
+    const booking = current
+      ? await this.writeBookingStatus(current, 'CONFIRMED', write)
+      : await write(this.prisma.client, { id: bookingId });
+    await this.announceConfirmed(booking);
+    return booking;
+  }
+
+  /**
+   * V1-28 (M42): invoice.paid confirms the booking the invoice pays for: the
+   * booking whose final invoice (Booking.invoiceId) or deposit invoice
+   * (Booking.depositInvoiceId) it is, under the event's business, with that
+   * invoice PAID in the table. Only a booking still waiting for confirmation
+   * (PENDING, UNCONFIRMED) moves, by a conditional update, so a completed,
+   * cancelled or no-show booking is never brought back by a payment and a
+   * replay confirms nothing twice. Returns the confirmed booking, or null.
+   */
+  async confirmBookingForPaidInvoice(businessId: string, invoiceId: string) {
+    if (!businessId || !invoiceId) return null;
+    const target = await this.prisma.client.booking.findFirst({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: { in: AWAITING_CONFIRMATION },
+        OR: [
+          { invoiceId, invoice: { is: { businessId, status: 'PAID' } } },
+          { depositInvoiceId: invoiceId, depositInvoice: { is: { businessId, status: 'PAID' } } },
+        ],
+      },
+      select: { id: true },
     });
+    if (!target) return null;
+    const moved = await this.prisma.client.booking.updateMany({
+      where: { id: target.id, businessId, status: { in: AWAITING_CONFIRMATION } },
+      data: { status: 'CONFIRMED' },
+    });
+    if (moved.count === 0) return null;
+    const booking = await this.prisma.client.booking.findUnique({ where: { id: target.id }, include: { contact: true } });
+    if (!booking) return null;
+    await this.announceConfirmed(booking);
+    return booking;
+  }
+
+  /** booking.confirmed on the bus and on the contact's timeline, for a booking just confirmed by the system. */
+  private async announceConfirmed(booking: Booking & { contact?: BookingConfirmedPayload['contact'] | null }) {
     const payload: BookingConfirmedPayload = {
       booking,
       contact: booking.contact ?? undefined,
@@ -962,8 +1918,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         source: 'bookings',
       });
     }
-    
-    return booking;
   }
 
   async publicCreateBooking(input: {
@@ -993,76 +1947,32 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const service = await this.prisma.client.service.findFirstOrThrow({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
     });
+    await this.assertOwnedRefs(input);
 
     const start = new Date(input.startTime);
     const end = new Date(start.getTime() + service.duration * 60000);
 
-    if (service.leadTimeMins && service.leadTimeMins > 0) {
-      const minStart = new Date(Date.now() + service.leadTimeMins * 60000);
-      if (start < minStart) {
-        throw new BadRequestException(
-          `This service requires at least ${service.leadTimeMins} minutes advance notice.`,
-        );
-      }
-    }
+    this.assertLeadTime(service.leadTimeMins, start);
 
-    await this.assertSlotFree({
+    const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: service.id,
       staffId: input.staffId,
       start,
       end,
       bufferMins: service.bufferMins,
+    };
+    await this.assertSlotFree(slot);
+
+    await this.assertWithinSchedule({
+      businessId: input.businessId,
+      staffId: input.staffId,
+      hours: business.businessHours as BusinessHoursMap | null,
+      start,
+      end,
+      bufferMins: service.bufferMins,
+      timeZone: this.businessZone(business.timezone),
     });
-
-    let hasStaffScheduleOverride = false;
-    if (input.staffId) {
-      const staffAvailabilities = await this.prisma.client.availability.findMany({
-        where: {
-          staffId: input.staffId,
-          staff: { businessId: input.businessId, deletedAt: null },
-        },
-      });
-      if (staffAvailabilities.length > 0) {
-        hasStaffScheduleOverride = true;
-        const dayOfWeek = start.getDay();
-        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
-        if (slotAvail.length === 0) {
-          throw new BadRequestException('The selected staff member is not available on this day.');
-        }
-        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
-        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
-        const withinAny = slotAvail.some((a) => {
-          const [sh, sm] = a.startTime.split(':').map(Number);
-          const [eh, em] = a.endTime.split(':').map(Number);
-          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
-        });
-        if (!withinAny) {
-          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
-        }
-      }
-    }
-
-    const hours = business.businessHours as BusinessHoursMap | null;
-    if (hours && !hasStaffScheduleOverride) {
-      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-      const dayKey = dayKeys[start.getDay()];
-      const dayHours = hours[dayKey];
-      if (dayHours?.closed) {
-        throw new BadRequestException('This business is closed on the selected day.');
-      }
-      if (dayHours) {
-        const [oh, om] = dayHours.open.split(':').map(Number);
-        const [ch, cm] = dayHours.close.split(':').map(Number);
-        const startMins = start.getHours() * 60 + start.getMinutes();
-        const openMins = oh * 60 + om;
-        const closeMins = ch * 60 + cm;
-        const endMins = startMins + (service.duration || 0) + (service.bufferMins || 0);
-        if (startMins < openMins || endMins > closeMins) {
-          throw new BadRequestException('The selected time is outside business hours.');
-        }
-      }
-    }
 
     const sourceDetail = input.storefrontSlug
       ? `storefront:${input.storefrontSlug}`
@@ -1147,9 +2057,15 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     if (input.orgUnitId) bookingData.orgUnitId = input.orgUnitId;
 
-    const booking = await this.prisma.client.booking.create({
-      data: bookingData,
-    });
+    // The early read above refused a taken slot before the contact and invoices
+    // were touched; the claim settles the race with requests in flight. Losing
+    // it leaves the invoices drawn up above for a booking that was not written.
+    const booking = await this.claimSlot(slot, (tx) => tx.booking.create({ data: bookingData })).catch(
+      async (err: unknown) => {
+        await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
+        throw err;
+      },
+    );
 
     const payload: BookingCreatedPayload = {
       booking,
@@ -1188,6 +2104,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // service price even if invoice/payment lands later — gives growth
     // dashboards an immediate view of pipeline value). Hard requirement
     // for storefront-originated revenue: failures propagate to the caller.
+    // V1-88 (PR #196 F2c; D-13): in the business currency, as the booking's
+    // invoices are (CommerceService.documentCurrency). It was the literal
+    // 'TTD', so a USD business's storefront bookings were attributed in TTD.
     await this.revenueAttribution.record({
       businessId: input.businessId,
       source: 'storefront',
@@ -1195,12 +2114,19 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       revenueType: 'BOOKING',
       revenueId: booking.id,
       amount: service.price ?? 0,
-      currency: 'TTD',
+      currency: normalizeCurrency(business.currency) || 'TTD',
       contactId: contact.id,
       referralCode: input.referralCode ?? null,
       visitorId: input.visitorId ?? null,
       occurredAt: booking.createdAt,
     });
+
+    // V1-28 (D-07: token links only): the customer's own link to the invoice
+    // this booking drew up, /public/invoice/<token>, where its payment state
+    // and receipt are (V1-48, V1-49). The confirmation pages opened the
+    // operator's authenticated receipt, which answers a customer 401.
+    const invoiceUrl = invoice ? await this.customerInvoiceUrl(input.businessId, invoice.id) : undefined;
+    const depositInvoiceUrl = depositInvoice ? await this.customerInvoiceUrl(input.businessId, depositInvoice.id) : undefined;
 
     return {
       success: true,
@@ -1208,40 +2134,62 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       invoiceId: invoice?.id,
       depositInvoiceId: depositInvoice?.id,
       depositAmount: depositInvoice?.total ?? 0,
+      invoiceUrl,
+      depositInvoiceUrl,
     };
   }
 
-  private async autoGenerateInvoiceForCompletedBooking(booking: any, businessId: string) {
+  /**
+   * The customer's pay-link URL for an invoice the public create just drew
+   * up, through CommerceService.publicInvoiceUrl (the one place such a URL is
+   * built). Best effort: the booking is written, so a link that cannot be
+   * issued leaves the answer without one rather than failing it.
+   */
+  private async customerInvoiceUrl(businessId: string, invoiceId: string): Promise<string | undefined> {
     try {
-      if (booking.invoiceId) {
-        this.logger.log(`Booking ${booking.id} already has invoice ${booking.invoiceId}, skipping auto-invoice`);
-        return;
-      }
-      if (!booking.contactId || !booking.serviceId) return;
+      return (await this.commerce.publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      this.logger.warn(`No customer link for invoice ${invoiceId}: ${(e as Error).message}`);
+      return undefined;
+    }
+  }
 
-      const service = await this.prisma.client.service.findFirst({
-        where: { id: booking.serviceId, businessId, deletedAt: null },
-      });
-      if (!service || service.price <= 0) return;
-
-      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service);
-      if (invoice) {
-        await this.prisma.client.booking.update({
-          where: { id: booking.id },
-          data: { invoiceId: invoice.id },
-        });
-        // Emit on the bus so RevenueEventListener writes the canonical
-        // `invoice.from_booking` timeline row exactly once.
-        const payload: BookingInvoiceCreatedPayload = {
-          booking: { ...booking, invoiceId: invoice.id },
-          invoice,
-          businessId,
-        };
-        this.events.emit('booking.invoice_created', payload);
-        this.logger.log(`Auto-generated invoice ${invoice.id} for completed booking ${booking.id}`);
+  /**
+   * The final invoice of a booking just completed (issueFinalInvoice, net of
+   * the deposit), as an outcome: a failure is FAILED with a code and a
+   * sentence, which the status route returns as invoiceErrorCode and
+   * invoiceError (V1-28). It was swallowed; the raw error text is only logged
+   * (SEC-V28-1).
+   */
+  private async autoGenerateInvoiceForCompletedBooking(
+    booking: { id: string },
+    businessId: string,
+  ): Promise<CompletionInvoicing> {
+    try {
+      const outcome = await this.issueFinalInvoice(businessId, booking.id);
+      if (outcome.status === 'CREATED') {
+        this.logger.log(`Auto-generated invoice ${outcome.invoiceId} for completed booking ${booking.id}`);
       }
-    } catch (err: any) {
-      this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error).message}`);
+      return outcome;
+    } catch (err) {
+      // V1-28 review (SEC-V28-1): the detail is logged; the answer carries a
+      // code and a sentence fit for any member (completionInvoiceError).
+      // D-59's refusal is policy, not a fault: a warning, with no stack.
+      const code = completionInvoiceCode(err);
+      if (code === DEPOSIT_CURRENCY_MISMATCH) {
+        this.logger.warn(`No final invoice for booking ${booking.id}: ${(err as Error).message}`);
+      } else {
+        this.logger.error(
+          `Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error)?.message || 'Unknown error'}`,
+          (err as Error)?.stack,
+        );
+      }
+      return {
+        status: 'FAILED',
+        invoiceId: null,
+        code,
+        error: completionInvoiceError(err),
+      };
     }
   }
 

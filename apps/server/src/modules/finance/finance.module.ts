@@ -42,6 +42,7 @@ import { SafeToSpendService } from './safe-to-spend.service';
 import { CashflowForecastService } from './cashflow-forecast.service';
 import { MoneyMovesService } from './money-moves.service';
 import { CashReserveService } from './cash-reserve.service';
+import { CashPositionService } from './cash-position.service';
 
 /**
  * FIN1/FIN2 — Finance OS foundation + revenue/receivables read APIs.
@@ -92,6 +93,7 @@ import { CashReserveService } from './cash-reserve.service';
     CashflowForecastService,
     MoneyMovesService,
     CashReserveService,
+    CashPositionService,
   ],
   exports: [
     PostingService,
@@ -123,6 +125,7 @@ import { CashReserveService } from './cash-reserve.service';
     CashflowForecastService,
     MoneyMovesService,
     CashReserveService,
+    CashPositionService,
   ],
 })
 export class FinanceModule {}

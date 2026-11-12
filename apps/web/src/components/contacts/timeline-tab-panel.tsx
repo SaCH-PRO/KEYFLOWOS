@@ -183,11 +183,14 @@ function getModuleLabel(m: ModuleFilter): string {
 }
 
 const CTA_HREF_MAP: Record<string, (id?: string) => string> = {
-  commerce: (id) => id ? `/app/commerce?tab=invoices&id=${encodeURIComponent(id)}` : "/app/commerce?tab=invoices",
+  commerce: (id) => id ? `/app/commerce/invoices/${encodeURIComponent(id)}` : "/app/commerce?tab=invoices",
   bookings: (id) => id ? `/app/bookings?id=${encodeURIComponent(id)}` : "/app/bookings",
   marketing: (id) => id ? `/app/marketing?tab=calendar&id=${encodeURIComponent(id)}` : "/app/marketing?tab=calendar",
   projects: (id) => id ? `/app/projects?projectId=${encodeURIComponent(id)}` : "/app/projects",
 };
+
+const quoteCtaHref = (id?: string) =>
+  id ? `/app/commerce?recordType=quote&recordId=${encodeURIComponent(id)}` : "/app/commerce?tab=pipeline&view=quotes";
 
 function computeMomentumScore(eventsCount: number, bookingsCount: number, paidRevenue: number, daysSinceLastInteraction: number): number {
   const a = Math.min(40, eventsCount * 4);
@@ -258,7 +261,18 @@ export function TimelineTabPanel({
         const mod = (item.module === "crm" || item.module === "bookings" || item.module === "commerce" || item.module === "marketing")
           ? item.module as ModuleFilter
           : classifyEvent(item.type);
-        const hrefFn = item.ctaModule ? CTA_HREF_MAP[item.ctaModule] : undefined;
+        // The journey tags quotes with ctaModule "commerce" as well as invoices
+        // (crm-journey.service.ts), so a quote id must not reach the invoice
+        // detail route. Commerce opens its own record drawer for a quote.
+        // Decide by the entity the row names, never by the event type: a
+        // "quote.converted" event carries the INVOICE it produced
+        // (data.invoiceId, labelled "View Invoice"), so only the journey's quote
+        // rows (id "quote_<id>", labelled "View Quote") are quotes.
+        const namesQuote = item.ctaModule === "commerce" && item.ctaLabel !== "View Invoice"
+          && (item.ctaLabel === "View Quote" || item.id.startsWith("quote_"));
+        const hrefFn = namesQuote
+          ? quoteCtaHref
+          : item.ctaModule ? CTA_HREF_MAP[item.ctaModule] : undefined;
         return {
           id: item.id,
           module: mod,
@@ -299,7 +313,7 @@ export function TimelineTabPanel({
       let entityId: string | undefined;
       if (ev.type.startsWith("invoice.") && typeof data?.invoiceId === "string") {
         ctaLabel = "View Invoice"; entityId = data.invoiceId;
-        ctaHref = `/app/commerce?tab=invoices&id=${encodeURIComponent(entityId)}`;
+        ctaHref = `/app/commerce/invoices/${encodeURIComponent(entityId)}`;
       } else if (ev.type.startsWith("booking.") && typeof data?.bookingId === "string") {
         ctaLabel = "View Booking"; entityId = data.bookingId;
         ctaHref = `/app/bookings?id=${encodeURIComponent(entityId)}`;
@@ -392,7 +406,7 @@ export function TimelineTabPanel({
         value: total,
         currency: inv.currency || "TTD",
         ctaLabel: "View Invoice",
-        ctaHref: `/app/commerce?tab=invoices&id=${encodeURIComponent(inv.id)}`,
+        ctaHref: `/app/commerce/invoices/${encodeURIComponent(inv.id)}`,
       });
     }
 
@@ -510,7 +524,16 @@ export function TimelineTabPanel({
   const engagementColor = summary.engagementLevel === "high" ? "text-[hsl(var(--kf-success))]" : summary.engagementLevel === "medium" ? "text-[hsl(var(--kf-warning))]" : "text-[hsl(var(--kf-error))]";
   const engagementLabel = summary.engagementLevel === "high" ? "High" : summary.engagementLevel === "medium" ? "Medium" : "Low";
 
-  const healthAvg = healthMetrics ? Math.round(Object.values(healthMetrics).reduce((s, v) => s + v, 0) / 4) : null;
+  // W8-MONEY-SIGNALS (owner ruling D-100; review CR-W8MS-1): the metrics the
+  // server served. A member without revenue read is served no payment entry,
+  // so the average and the tiles use the metrics present.
+  const servedHealthMetrics = healthMetrics
+    ? HEALTH_METRICS_CONFIG.filter(({ key }) => typeof healthMetrics[key] === "number")
+    : [];
+  const healthAvg = healthMetrics && servedHealthMetrics.length > 0
+    ? Math.round(servedHealthMetrics.reduce((s, { key }) => s + (healthMetrics[key] ?? 0), 0) / servedHealthMetrics.length)
+    : null;
+  const healthGridCols = servedHealthMetrics.length === 3 ? "grid-cols-3" : "grid-cols-4";
 
   if (entries.length === 0 && !healthMetrics && !aiInsight && !conversationContext) {
     return (
@@ -749,9 +772,9 @@ export function TimelineTabPanel({
 
         {healthMetrics && (
           <div className="rounded-xl bg-muted/30 border border-border/50 p-2.5">
-            <div className="grid grid-cols-4 gap-2">
-              {HEALTH_METRICS_CONFIG.map(({ key, label, icon: Icon }) => {
-                const value = healthMetrics[key];
+            <div className={`grid ${healthGridCols} gap-2`}>
+              {servedHealthMetrics.map(({ key, label, icon: Icon }) => {
+                const value = healthMetrics[key] ?? 0;
                 const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
                 return (
                   <div key={key} className="space-y-0.5">
@@ -836,9 +859,9 @@ export function TimelineTabPanel({
 
       {healthMetrics && (
         <div className="rounded-xl bg-muted/30 border border-border/50 p-2.5">
-          <div className="grid grid-cols-4 gap-2">
-            {HEALTH_METRICS_CONFIG.map(({ key, label, icon: Icon }) => {
-              const value = healthMetrics[key];
+          <div className={`grid ${healthGridCols} gap-2`}>
+            {servedHealthMetrics.map(({ key, label, icon: Icon }) => {
+              const value = healthMetrics[key] ?? 0;
               const barColor = value >= 70 ? "hsl(142 76% 36%)" : value >= 40 ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-accent1))";
               return (
                 <div key={key} className="space-y-0.5">

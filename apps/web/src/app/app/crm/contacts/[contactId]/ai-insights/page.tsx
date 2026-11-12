@@ -19,7 +19,8 @@ interface MomentumScore {
 
 interface HealthMetrics {
   engagement: number;
-  payment: number;
+  /** Left out for a member without revenue read (W8-MONEY-SIGNALS, D-100; review CR-W8MS-1). */
+  payment?: number;
   responsiveness: number;
   relationship: number;
 }
@@ -160,12 +161,13 @@ export default function ContactAiInsightsPage() {
               Health Metrics
             </div>
             <div className="space-y-3">
+              {/* W8-MONEY-SIGNALS (D-100; review CR-W8MS-1): a metric the server left out is not drawn. */}
               {[
                 { label: "Engagement", value: health.engagement, color: "bg-blue-500" },
                 { label: "Payment", value: health.payment, color: "bg-green-500" },
                 { label: "Responsiveness", value: health.responsiveness, color: "bg-amber-500" },
                 { label: "Relationship", value: health.relationship, color: "bg-purple-500" },
-              ].map((h) => (
+              ].flatMap((h) => (typeof h.value === "number" ? [{ ...h, value: h.value }] : [])).map((h) => (
                 <div key={h.label}>
                   <div className="mb-1 flex items-center justify-between text-sm">
                     <span>{h.label}</span>

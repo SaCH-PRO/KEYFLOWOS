@@ -241,7 +241,8 @@ export interface JourneyMilestoneData {
 
 export interface HealthMetricsData {
   engagement: number;
-  payment: number;
+  /** Left out for a member without revenue read (W8-MONEY-SIGNALS, D-100). */
+  payment?: number;
   responsiveness: number;
   relationship: number;
 }

@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, ConflictException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { ParsedIntent } from '../ai/intent-parser.service';
@@ -11,6 +12,17 @@ import {
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
+import {
+  CRM_DELETE_ACTIONS,
+  adminPlanStepScopeRefusal,
+  memberPlanStepScopeRefusal,
+  noMemberPlanStepRefusal,
+  planStepContactIds,
+  planStepIsRead,
+  planStepTaskIds,
+} from './key-cortex-plan-authority';
 
 export interface CreateGoalInput {
   title: string;
@@ -20,13 +32,74 @@ export interface CreateGoalInput {
   parentGoalId?: string;
 }
 
+/**
+ * No `userId`: who a plan is for is createPlanFromCommand's `userId` argument
+ * (KeyCortexGoalsController passes the authenticated principal, R0-09e), never
+ * a field of the request body.
+ */
 export interface CreatePlanFromCommandInput {
   objective: string;
   rawInput?: string;
   urgency?: ParsedIntent['urgency'];
   modules?: string[];
   scope?: string[];
-  userId?: string;
+}
+
+/**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2): the member who asked, over
+ * HTTP, for a plan to run. KeyCortexGoalsController builds it from the
+ * principal AuthGuard admitted (@CurrentUser()) and the tenant BusinessGuard
+ * checked; nothing in it comes from the request body.
+ */
+export interface PlanExecutionActor {
+  /** The executing member's user id. */
+  userId: string;
+  /** Its User role, as AuthMiddleware attaches it (SUPER_ADMIN keeps the platform bypass). */
+  role?: string | null;
+  /** The tenant BusinessGuard checked: the plan must belong to it. */
+  businessId: string;
+}
+
+/**
+ * The actor a plan step runs as when no member is behind it: executePlan
+ * called with no PlanExecutionActor (a system trigger, the query pipeline) on a
+ * plan no member created. It names no User row, so the settings adapter's owner
+ * rule and every other actor check refuse it, and the executor's audit row
+ * records it as `actor: 'system'` with no userId.
+ */
+export const SYSTEM_PLAN_ACTOR = 'key_cortex';
+
+/**
+ * The AiPlan statuses executePlan may claim (R0-09e repair, review ST-2): a plan
+ * not yet run ('draft', 'pending', 'approved') and one a member may run again
+ * ('failed', 'waiting_approval'; the goals page offers Run on both). Never
+ * 'running' (another execute holds it), 'completed', or the other executor's
+ * 'executing'. A plan that stopped at an approval pause is claimed but never
+ * re-run (V1-10 review ST-2): see runClaimedPlan.
+ */
+export const RUNNABLE_PLAN_STATUSES: readonly string[] = ['draft', 'pending', 'approved', 'failed', 'waiting_approval'];
+
+/**
+ * The status a plan's saga is closed with when its run stops at a step parked
+ * for approval (V1-10 review ST-1). Terminal, with completedAt set: an approval
+ * runs the parked step outside the saga, and nothing resumes it, so leaving it
+ * 'running' recorded work in flight that would never finish or be compensated.
+ * It is neither 'failed' nor compensated: a pause undoes none of the steps that
+ * ran.
+ */
+export const SAGA_STOPPED_FOR_APPROVAL = 'stopped_for_approval';
+
+/**
+ * Trial-N repair round 2 (KEY-PLANS-D46): the connector modules whose actions
+ * write the business's invoices and payments, the ones POST cortex/execute
+ * holds to the revenue scope (CORTEX_MODULE_RULES: commerce -> revenue). A
+ * plan step of one runs only for a member who holds revenue write.
+ */
+export const INVOICE_WRITE_MODULES: ReadonlySet<string> = new Set(['commerce']);
+
+/** Whether a plan has a step of an INVOICE_WRITE_MODULES module. */
+function planWritesInvoices(plan: { steps?: Array<{ module: string | null }> }): boolean {
+  return (plan.steps ?? []).some((s) => !!s.module && INVOICE_WRITE_MODULES.has(s.module));
 }
 
 export interface PlanGoal {
@@ -374,27 +447,141 @@ export class KeyCortexPlannerService {
     };
   }
 
-  async executePlan(planId: string, options: ExecuteOptions = {}) {
-    const plan = await this.prisma.client.aiPlan.findUnique({
+  /**
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2). Every step used to run as
+   * `plan.userId ?? 'key_cortex'`, and POST plans/:planId/execute handed this
+   * method no actor at all, while plan.userId came from the request body. So a
+   * STAFF member who named the OWNER's id ran KEY commands as the OWNER (the
+   * settings adapter's owner rule then passed), and any member ran any plan.
+   *
+   * With a `member` (the HTTP route): the plan is read in the member's checked
+   * tenant only (another tenant's plan is not found), the member must be the
+   * plan's creator, the business OWNER (OWNER membership or Business.ownerId)
+   * or SUPER_ADMIN (else 403, before the plan starts), and every step runs as
+   * that EXECUTING member, never as the creator named in the row and never as
+   * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
+   * which call this directly): a member's plan runs as that member (held, for a
+   * plan that writes invoices or payments, to what the HTTP route requires:
+   * assertCreatorMayWriteInvoices, D-46), and only a plan no member created
+   * runs as SYSTEM_PLAN_ACTOR. On either path a plan
+   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 'not
+   * claimable' otherwise: running, completed, or a concurrent execute claimed
+   * it first; V1-10, PRS-M24). `options.skipApproval` is honoured only for the
+   * business OWNER or SUPER_ADMIN (V1-10 review ST-3). A plan stopped at an
+   * approval pause runs none of its completed or parked steps again (review
+   * ST-2), and its saga is closed SAGA_STOPPED_FOR_APPROVAL (review ST-1).
+   *
+   * KEY-R3b-PLAN-AUTHORITY (D-71, D-73): every step is then checked, before
+   * the claim, against the member it runs as (the executing member, else the
+   * creator): its module scope (assertStepsWithinAuthority). A plan with no
+   * member principal may not write money or invoices or read contacts; such a
+   * plan is refused and the refusal recorded on it (refuseNoMemberSteps).
+   */
+  async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
+    const plan = member
+      ? await this.prisma.client.aiPlan.findFirst({
+          where: { id: planId, businessId: member.businessId },
+          include: { steps: true },
+        })
+      : await this.prisma.client.aiPlan.findUnique({
+          where: { id: planId },
+          include: { steps: true },
+        });
+    if (!plan) throw new NotFoundException('Plan not found');
+    if (member) await this.assertMayExecutePlan(plan, member);
+    else await this.assertCreatorMayWriteInvoices(plan);
+    // With no member the creator's platform role is read only if a step would be refused.
+    const principal = member
+      ? { userId: member.userId, role: member.role ?? null }
+      : plan.userId
+        ? { userId: plan.userId }
+        : null;
+    if (principal) await this.assertStepsWithinAuthority(plan, principal);
+    else await this.refuseNoMemberSteps(plan);
+    const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
+
+    // V1-10 review ST-3: skipApproval skips the executor's whole approval
+    // policy (the business's aiAlwaysRequireApproval, a capability's
+    // requiresApproval flag, the spending threshold and the hourly cap), and
+    // POST plans/:planId/execute passed it from the request body. So a STAFF
+    // member who created a plan ran the steps the OWNER's policy parks. It is
+    // honoured only for the business OWNER or SUPER_ADMIN; for anyone else (and
+    // for a system caller, none of which sends it) the steps follow the policy.
+    let runOptions = options;
+    if (options.skipApproval && !(await this.mayOverrideApproval(plan.businessId, member))) {
+      this.logger.warn(`[plans] execute ${planId}: skipApproval ignored for ${member ? member.userId : 'a system caller'} (only the business OWNER or SUPER_ADMIN may skip approval)`);
+      runOptions = { ...options, skipApproval: false };
+    }
+
+    // R0-09e repair (review ST-2): claim the plan atomically. This set the
+    // status to 'running' unconditionally, so a 'completed' plan re-ran every
+    // side-effecting step under a new saga, and two concurrent executes of one
+    // pending plan both ran it. Only a plan in RUNNABLE_PLAN_STATUSES is
+    // claimed, in one conditional write; a plan that is running, completed or
+    // in any other state is refused 409 and nothing runs.
+    const claimed = await this.prisma.client.aiPlan.updateMany({
+      where: { id: planId, businessId: plan.businessId, status: { in: [...RUNNABLE_PLAN_STATUSES] } },
+      data: { status: 'running', startedAt: new Date() },
+    });
+    if (claimed.count !== 1) {
+      throw new ConflictException('Plan is not claimable: it is already running, completed or otherwise not runnable');
+    }
+
+    try {
+      return await this.runClaimedPlan(planId, plan, actorId, runOptions);
+    } catch (err) {
+      // An unexpected error while the plan is still 'running' must not leave it
+      // so for ever (no execute could claim it again): it is released as
+      // 'failed', which a member may run again, and the error is rethrown. Only
+      // a plan still 'running' is released, so an error after the final status
+      // was written never turns a 'completed' plan runnable again.
+      await this.prisma.client.aiPlan
+        .updateMany({ where: { id: planId, status: 'running' }, data: { status: 'failed', completedAt: null } })
+        .catch((releaseErr: unknown) => this.logger.error(`Plan ${planId} release failed: ${(releaseErr as Error).message}`));
+      throw err;
+    }
+  }
+
+  /** Runs the steps of a plan executePlan has claimed ('running'), as `actorId`. */
+  private async runClaimedPlan(
+    planId: string,
+    plan: Prisma.AiPlanGetPayload<{ include: { steps: true } }>,
+    actorId: string,
+    options: ExecuteOptions,
+  ) {
+    // V1-10 review ST-2: the steps as they are now that this run holds the
+    // claim. The rows executePlan loaded before claiming can be stale: another
+    // execute may have run the plan to an approval pause in between.
+    const current = await this.prisma.client.aiPlan.findUnique({
       where: { id: planId },
       include: { steps: true },
     });
-    if (!plan) throw new NotFoundException('Plan not found');
+    const sorted = this.topologicalSort(current?.steps ?? plan.steps);
 
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
-      data: { status: 'running', startedAt: new Date() },
-    });
+    // V1-10 review ST-2: a plan whose last run stopped at an approval pause (a
+    // step still 'waiting_approval'; recorded 'waiting_approval', or 'failed'
+    // by the V1 base) is never re-run from the top. That repeated every step
+    // that had completed (its external effect happened twice) and parked the
+    // paused step again (a second approval request, so two approvals ran it
+    // twice). A step that completed in that run is not run again, and a parked
+    // step is not parked again: the run stops there, still waiting. Only an
+    // approval runs it, outside the plan.
+    const resuming = sorted.some((s) => s.status === 'waiting_approval');
 
-    const saga = await this.saga.start({
-      businessId: plan.businessId,
-      sagaType: 'ai_plan',
-      correlationId: options.traceId,
-    });
+    // A resumed run starts a saga only if it runs a step, so Run on a plan
+    // still waiting for approval leaves no saga behind.
+    let saga: Awaited<ReturnType<KeyCortexSagaService['start']>> | undefined = resuming
+      ? undefined
+      : await this.startPlanSaga(plan.businessId, options);
 
-    const sorted = this.topologicalSort(plan.steps);
     const executed: ExecutionRecord[] = [];
     let stopped = false;
+    // V1-10 (PRS-M25): whether the run stopped at a step the executor parked
+    // for approval. The final status was read from `plan.steps`, the rows as
+    // loaded BEFORE the run (never 'waiting_approval'), so every pause was
+    // recorded as a failure: the plan 'failed', a failed plan result written
+    // and the saga failed.
+    let pausedForApproval = false;
 
     for (let i = 0; i < sorted.length; i++) {
       const step = sorted[i];
@@ -405,13 +592,20 @@ export class KeyCortexPlannerService {
         });
         continue;
       }
+      if (resuming && step.status === 'completed') continue;
+      if (resuming && step.status === 'waiting_approval') {
+        pausedForApproval = true;
+        stopped = true;
+        continue;
+      }
+      if (!saga) saga = await this.startPlanSaga(plan.businessId, options);
 
       await this.prisma.client.aiPlanStep.update({
         where: { id: step.id },
         data: { status: 'running', startedAt: new Date() },
       });
 
-      const command = this.buildCommand(plan, step, options);
+      const command = this.buildCommand(plan, step, actorId);
       const actionRef = `${step.module}.${step.action}`;
 
       // Record how this step would be undone, BEFORE running it.
@@ -461,6 +655,21 @@ export class KeyCortexPlannerService {
           where: { id: step.id },
           data: { status: 'waiting_approval' },
         });
+        // V1-10 review ST-1: the saga step names the approval request that now
+        // holds it (the executor's record id is that request's id).
+        // KeyCortexSagaService has no write for a parked step, so it is made
+        // here, on this saga's own row.
+        await this.prisma.client.sagaStep.updateMany({
+          where: { sagaId: saga.id, stepIndex: i },
+          data: {
+            status: 'waiting_approval',
+            output: {
+              approvalStatus: (record.result.data as Record<string, unknown>).approvalStatus,
+              approvalId: record.id,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        pausedForApproval = true;
         stopped = true;
       } else {
         await this.prisma.client.aiPlanStep.update({
@@ -482,11 +691,7 @@ export class KeyCortexPlannerService {
       }
     }
 
-    const finalStatus = stopped
-      ? plan.steps.some((s: any) => s.status === 'waiting_approval')
-        ? 'waiting_approval'
-        : 'failed'
-      : 'completed';
+    const finalStatus = pausedForApproval ? 'waiting_approval' : stopped ? 'failed' : 'completed';
 
     await this.prisma.client.aiPlan.update({
       where: { id: planId },
@@ -500,16 +705,42 @@ export class KeyCortexPlannerService {
       await this.recordPlanResult(planId, executed, finalStatus);
     }
 
-    await (finalStatus === 'completed'
-      ? this.saga.completeSaga(saga.id)
-      : this.saga.failSaga(saga.id));
+    // A plan waiting for approval has not failed: its saga is neither failed
+    // nor compensated (a pause undoes none of the steps that ran). V1-10 review
+    // ST-1: nor is it left 'running', since nothing resumes it; it is closed as
+    // SAGA_STOPPED_FOR_APPROVAL. KeyCortexSagaService has no write for that,
+    // so it is made here, on this run's own saga row and only while it is
+    // still running.
+    if (saga) {
+      if (finalStatus === 'completed') await this.saga.completeSaga(saga.id);
+      else if (finalStatus === 'failed') await this.saga.failSaga(saga.id);
+      else {
+        await this.prisma.client.sagaExecution.updateMany({
+          where: { id: saga.id, businessId: plan.businessId, status: 'running' },
+          data: { status: SAGA_STOPPED_FOR_APPROVAL, completedAt: new Date() },
+        });
+      }
+    }
 
-    return { planId, status: finalStatus, executed: executed.length, sagaId: saga.id };
+    return { planId, status: finalStatus, executed: executed.length, sagaId: saga?.id ?? null };
   }
 
-  async getPlan(planId: string) {
-    return this.prisma.client.aiPlan.findUnique({
-      where: { id: planId },
+  private startPlanSaga(businessId: string, options: ExecuteOptions) {
+    return this.saga.start({
+      businessId,
+      sagaType: 'ai_plan',
+      correlationId: options.traceId,
+    });
+  }
+
+  /**
+   * KEY-R3a-PLAN-READS (KEY-CORTEX-PLAN-READ): the plan `planId` of `businessId` only. It was read
+   * by id alone, so GET cortex/plans/:planId answered another business's plan to a member naming
+   * their own. businessId is required, so a caller cannot read a plan by id alone.
+   */
+  async getPlan(planId: string, businessId: string) {
+    return this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
       include: { steps: true, result: true, goal: true },
     });
   }
@@ -535,24 +766,328 @@ export class KeyCortexPlannerService {
     };
   }
 
+  /**
+   * Who may execute a plan over HTTP (R0-09e, pinned): its creator, the
+   * business OWNER (an OWNER membership: owner rulings D-104, D-116, D-125; a
+   * recorded owner holding ADMIN or STAFF is that role) or SUPER_ADMIN. A plan
+   * no member created (plan.userId null) is the OWNER's or SUPER_ADMIN's to run.
+   *
+   * Trial-N repair round 2 (KEY-PLANS-D46): a plan with a step that writes the
+   * business's invoices or payments (INVOICE_WRITE_MODULES) runs only for a
+   * member who holds revenue write: the commerce adapter writes as
+   * KEY_SYSTEM_ACTOR_ID, so the service membership and scope checks that apply
+   * over HTTP never run on this path. A SUPER_ADMIN who is not a member of the
+   * business is refused such a plan (D-46); one who is a member keeps the
+   * platform bypass, as on POST cortex/execute (cortexCommandRefusal). The
+   * check runs before the claim, so a refused plan is left as it was.
+   */
+  private async assertMayExecutePlan(
+    plan: { businessId: string; userId?: string | null; steps?: Array<{ module: string | null }> },
+    member: PlanExecutionActor,
+  ): Promise<void> {
+    const writesInvoices = planWritesInvoices(plan);
+    if (member.role === 'SUPER_ADMIN') {
+      if (writesInvoices) await this.assertMayWriteInvoices(plan.businessId, member);
+      return;
+    }
+    const mayRun =
+      (!!plan.userId && plan.userId === member.userId) || (await this.isBusinessOwner(plan.businessId, member.userId));
+    if (!mayRun) throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+    if (writesInvoices) await this.assertRevenueWrite(plan.businessId, member.userId);
+  }
+
+  /**
+   * Trial-N repair round 2 recheck (KEY-D46-NOMEMBER, D-46 on every path): executePlan with no
+   * member (the query pipeline behind POST cortex/chat, the cortex triggers) runs a member's plan
+   * as its creator (plan.userId), and ran it with no check, so a plan a non-member SUPER_ADMIN or a
+   * member without revenue write created had its invoice and payment steps run. The creator is
+   * now held to what the HTTP route holds the executing member to for such a plan
+   * (assertMayWriteInvoices), its role read from its User row. A plan no member created runs as
+   * SYSTEM_PLAN_ACTOR, as before. Checked before the claim, so a refused plan is left as it was.
+   */
+  private async assertCreatorMayWriteInvoices(plan: {
+    businessId: string;
+    userId?: string | null;
+    steps?: Array<{ module: string | null }>;
+  }): Promise<void> {
+    if (!plan.userId || !planWritesInvoices(plan)) return;
+    const creator = await this.prisma.client.user.findUnique({ where: { id: plan.userId }, select: { role: true } });
+    await this.assertMayWriteInvoices(plan.businessId, { userId: plan.userId, role: creator?.role ?? null });
+  }
+
+  /** A user's platform role (SUPER_ADMIN keeps the platform bypass), or null for no such user. */
+  private async userRole(userId: string): Promise<string | null> {
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return user?.role ?? null;
+  }
+
+  /**
+   * KEY-R3b-PLAN-AUTHORITY, D-71 (PLAN-MODULE-RULE): every step of the plan needs the scope of its
+   * module held by the member it runs as (`principal`: the executing member over HTTP, else the
+   * plan's creator), write for a write and read for a read, as ModuleScopeGuard computes scopes
+   * (memberPlanStepScopeRefusal). This used to hold a plan only to revenue write, and only for
+   * commerce steps. The business OWNER (either arm) and SUPER_ADMIN (the platform bypass; D-46 is
+   * checked above) pass every step; an ADMIN keeps every module (D-71). A crm step also keeps to the
+   * member's own-contact rules (assertCrmStepWithinView), an ADMIN's included: D-71 keeps an ADMIN
+   * every module scope, not another member's PRIVATE contact, which an ADMIN's visibility excludes
+   * (D-37; KEY-R3b review CR-R3b-1, kept deliberately). Checked before the claim: a refused plan
+   * is left as it was, 403. `principal.role` undefined: the creator on the no-member path, whose
+   * platform role is read only when a step would be refused.
+   */
+  private async assertStepsWithinAuthority(
+    plan: { businessId: string; steps?: Array<{ module: string | null; action: string; inputPayload?: unknown }> },
+    principal: { userId: string; role?: string | null },
+  ): Promise<void> {
+    if (principal.role === 'SUPER_ADMIN') return;
+    if (await this.isBusinessOwner(plan.businessId, principal.userId)) return;
+    try {
+      await this.assertMemberSteps(plan, principal.userId);
+    } catch (err) {
+      if (principal.role === undefined && err instanceof ForbiddenException && (await this.userRole(principal.userId)) === 'SUPER_ADMIN') return;
+      throw err;
+    }
+  }
+
+  /**
+   * D-71 for a member who is neither the business OWNER nor SUPER_ADMIN (assertStepsWithinAuthority).
+   * W10-KEY-PLAN-SCOPE (owner ruling D-114, amending D-71 for an explicit revenue 'none' only;
+   * SEC-W9MRK-1): an ADMIN keeps every module, except that an ADMIN whose explicit scope map sets
+   * revenue to none is refused money steps (adminPlanStepScopeRefusal: the money reports and the
+   * invoice actions); an ADMIN with role-default scopes is unaffected. Anyone else is held to its
+   * scopes, a money report step to revenue:read too (memberPlanStepScopeRefusal, D-57).
+   */
+  private async assertMemberSteps(
+    plan: { businessId: string; steps?: Array<{ module: string | null; action: string; inputPayload?: unknown }> },
+    userId: string,
+  ): Promise<void> {
+    const membership = await this.membershipOf(plan.businessId, userId);
+    if (!membership) {
+      throw new ForbiddenException('Not a member of this business: a KEY plan runs only as a member of its business (D-73)');
+    }
+    const explicit = membership.permissionScopes;
+    const explicitScopes: Record<string, string> | null =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? (explicit as Record<string, string>) : null;
+    const scopes: Record<string, string> = explicitScopes ?? defaultScopesForRole(membership.role);
+    let crm: { access: CrmAccess; clause: unknown } | undefined;
+    for (const step of plan.steps ?? []) {
+      const refusal =
+        membership.role === 'ADMIN'
+          ? adminPlanStepScopeRefusal(step.module, step.action, explicitScopes)
+          : memberPlanStepScopeRefusal(step.module, step.action, scopes);
+      if (refusal) throw new ForbiddenException(refusal);
+      if (step.module === 'crm') {
+        if (!crm) {
+          const access = await resolveCrmAccess(this.prisma, plan.businessId, userId);
+          crm = { access, clause: visibilityClause(access, userId) };
+        }
+        await this.assertCrmStepWithinView(plan.businessId, userId, step, crm);
+      }
+    }
+  }
+
+  /**
+   * D-71: a member's own-contact (owned-view) rules apply to a crm step. The crm adapter reads and
+   * writes contacts with no actor, so the rows a step reaches are checked here, as GET contacts and
+   * PATCH contacts/:id check them: a contact the step names must be one the member can open
+   * (visibilityClause: another member's PRIVATE contact, or any contact outside the book of a member
+   * kept to its own), and a write on it needs crm_edit (crm_delete to delete or merge) for that
+   * contact ('owned': the member owns it). A read that names no contact reads the whole book, which
+   * no visibility clause can bound, so it runs only for a member who sees every contact (the OWNER
+   * returned earlier; an ADMIN, whose visibility excludes another member's PRIVATE contact, does
+   * not). Nothing here applies to the OWNER or SUPER_ADMIN, whose clause is empty.
+   *
+   * KEY-R3b review SEC-R3b-3 / CR-R3b-2: a step that names a task (crm.complete_task, which the
+   * adapter reaches by taskId alone) reaches that task's contact, whatever contact it names beside
+   * it, so the task is looked up in the business (as POST tasks/:taskId/complete does with
+   * assertVisibleChildRow) and its contact checked with the ones the step names. A task id not in
+   * the business is refused: there is no contact to check it against.
+   */
+  private async assertCrmStepWithinView(
+    businessId: string,
+    userId: string,
+    step: { action: string; inputPayload?: unknown },
+    crm: { access: CrmAccess; clause: unknown },
+  ): Promise<void> {
+    if (!crm.clause) return;
+    const label = `crm.${step.action}`;
+    const ids = planStepContactIds(step.inputPayload);
+    const taskIds = planStepTaskIds(step.inputPayload);
+    if (taskIds.length > 0) {
+      const tasks = await this.prisma.client.contactTask.findMany({
+        where: { businessId, id: { in: taskIds } },
+        select: { id: true, contactId: true },
+      });
+      if (tasks.length !== new Set(taskIds).size) {
+        throw new ForbiddenException(`Plan step "${label}" names a task this member cannot open, so it is not run (D-71)`);
+      }
+      ids.push(...tasks.map((task: { contactId: string }) => task.contactId));
+    }
+    const read = planStepIsRead('crm', step.action);
+    if (ids.length === 0) {
+      if (read) {
+        throw new ForbiddenException(
+          `Plan step "${label}" reads the contact book through the crm adapter, which applies no member's contact visibility, so it runs only for the business owner (D-71, D-37)`,
+        );
+      }
+      return;
+    }
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, crm.access, userId, ids);
+    if (canOpen && ids.some((id) => !canOpen(id))) {
+      throw new ForbiddenException(`Plan step "${label}" names a contact this member cannot open, so it is not run (D-71)`);
+    }
+    if (read) return;
+    const deletes = CRM_DELETE_ACTIONS.has(step.action);
+    const scope = deletes ? crm.access.deleteScope : crm.access.editScope;
+    if (scope === 'any') return;
+    if (scope === 'owned') {
+      const owned = await this.prisma.client.contact.count({ where: { businessId, id: { in: ids }, ownerId: userId } });
+      if (owned === new Set(ids).size) return;
+    }
+    throw new ForbiddenException(
+      `Insufficient permissions: plan step "${label}" needs ${deletes ? 'crm_delete' : 'crm_edit'} on this contact (you have ${scope}), so it is not run (D-71)`,
+    );
+  }
+
+  /**
+   * KEY-R3b-PLAN-AUTHORITY, D-73 (KEY-SYSACTOR-COMMERCE): a plan no member created, run with no
+   * member (a trigger rule that recorded no creator, a system caller), may not write the business's
+   * money or invoices and may not read its contacts (noMemberPlanStepRefusal). It ran every step as
+   * SYSTEM_PLAN_ACTOR with no check. Such a plan is refused, and the refusal is recorded on it before
+   * anything runs: the plan, claimed out of RUNNABLE_PLAN_STATUSES, is 'failed', each refused step
+   * 'failed' with the reason, the others 'skipped'. Nothing is routed and no saga starts. 403.
+   */
+  private async refuseNoMemberSteps(plan: {
+    id: string;
+    businessId: string;
+    steps?: Array<{ id: string; module: string | null; action: string; status?: string | null }>;
+  }): Promise<void> {
+    const refusals = new Map<string, string>();
+    for (const step of plan.steps ?? []) {
+      const why = noMemberPlanStepRefusal(step.module, step.action);
+      if (why) refusals.set(step.id, why);
+    }
+    if (refusals.size === 0) return;
+    const claimed = await this.prisma.client.aiPlan.updateMany({
+      where: { id: plan.id, businessId: plan.businessId, status: { in: [...RUNNABLE_PLAN_STATUSES] } },
+      data: { status: 'failed', completedAt: null },
+    });
+    if (claimed.count === 1) {
+      for (const step of plan.steps ?? []) {
+        const why = refusals.get(step.id);
+        if (why) {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: step.id },
+            data: { status: 'failed', errorMessage: `Refused: ${why}`, completedAt: new Date() },
+          });
+        } else if (step.status !== 'completed') {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: step.id },
+            data: { status: 'skipped', errorMessage: 'Not run: another step of this plan was refused (D-73)' },
+          });
+        }
+      }
+    }
+    const first = refusals.values().next().value as string;
+    this.logger.warn(`[plans] ${plan.id} refused (no member principal): ${first}`);
+    throw new ForbiddenException(`This KEY plan has no member principal, so it is not run: ${first}`);
+  }
+
+  /**
+   * Whether `actor` may have a plan's invoice or payment steps run: a SUPER_ADMIN only when a
+   * member of the business (D-46; a member keeps the platform bypass, as on POST cortex/execute),
+   * anyone else only with revenue write (assertRevenueWrite).
+   */
+  private async assertMayWriteInvoices(businessId: string, actor: { userId: string; role?: string | null }): Promise<void> {
+    if (actor.role === 'SUPER_ADMIN') {
+      if (!(await this.membershipOf(businessId, actor.userId))) {
+        throw new ForbiddenException(
+          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices or payments (D-46), so this plan is not run',
+        );
+      }
+      return;
+    }
+    await this.assertRevenueWrite(businessId, actor.userId);
+  }
+
+  /**
+   * Revenue write as ModuleScopeGuard computes it (the membership's explicit scope
+   * map, else its role's defaults); the business OWNER (either arm) holds it.
+   */
+  private async assertRevenueWrite(businessId: string, userId: string): Promise<void> {
+    if (await this.isBusinessOwner(businessId, userId)) return;
+    const membership = await this.membershipOf(businessId, userId);
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(
+        `Insufficient permissions: revenue requires write access (you have ${level}); this plan writes the business's invoices or payments`,
+      );
+    }
+  }
+
+  private membershipOf(businessId: string, userId: string) {
+    return this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+  }
+
+  /**
+   * Whether a run may skip the executor's approval policy (V1-10 review ST-3):
+   * only for the business OWNER (an OWNER membership: D-116, D-125) or
+   * SUPER_ADMIN, who hold authority over that policy. Never for a STAFF
+   * creator or a system caller.
+   */
+  private async mayOverrideApproval(businessId: string, member?: PlanExecutionActor): Promise<boolean> {
+    if (!member) return false;
+    if (member.role === 'SUPER_ADMIN') return true;
+    return this.isBusinessOwner(businessId, member.userId);
+  }
+
+  /**
+   * The business owner: an OWNER membership of this business (owner rulings D-116, D-125,
+   * W11-D116-KEY-OWNER, as IdentityService.assertBusinessOwner admits it): a co-owner is the owner,
+   * Business.ownerId grants nothing on its own, a recorded owner holding ADMIN or STAFF is that role.
+   */
+  private async isBusinessOwner(businessId: string, userId: string): Promise<boolean> {
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // D-116 (W11-D116-KEY-OWNER): only with an OWNER one.
+      where: { id: businessId, ownerId: userId, members: { some: { userId: userId, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
+  /** Every step's command names `actorId`, which executePlan resolves (R0-09e). */
   private buildCommand(
-    plan: { businessId: string; userId?: string | null },
+    plan: { businessId: string },
     step: { module: string | null; action: string; inputPayload: unknown; toolName: string | null },
-    _options: ExecuteOptions,
+    actorId: string,
   ): ConnectorCommand {
     return {
       module: (step.module ?? 'general') as any,
       action: step.action,
       parameters: (step.inputPayload as Record<string, unknown>) ?? {},
       businessId: plan.businessId,
-      userId: plan.userId ?? 'key_cortex',
+      userId: actorId,
       source: 'key_cortex',
       timestamp: new Date(),
       correlationId: `plan_${plan.businessId}_${Date.now()}`,
     };
   }
 
-  private topologicalSort(steps: Array<{ id: string; order: number; dependsOn: string[]; module: string | null; action: string; inputPayload: unknown; toolName: string | null }>) {
+  private topologicalSort(steps: Array<{ id: string; order: number; dependsOn: string[]; module: string | null; action: string; inputPayload: unknown; toolName: string | null; status?: string | null }>) {
     const map = new Map(steps.map((s) => [s.id, s]));
     const visited = new Set<string>();
     const result: typeof steps = [];

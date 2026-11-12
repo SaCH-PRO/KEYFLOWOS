@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { BusinessMatchingService } from './business-matching.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const STALENESS_MS = 24 * 60 * 60 * 1000;
@@ -16,6 +17,10 @@ export class MatchRefreshSchedulerService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.logger.log('Starting match refresh scheduler — checking every hour');
     this.intervalRef = safeInterval('MatchRefreshSchedulerService', CHECK_INTERVAL_MS, () => this.checkAndRefresh(), this.logger);
   }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CrmAdapterService } from './crm-adapter.service';
 import { CrmService } from '../../crm/crm.service';
 import { ConnectorCommand } from '../key-cortex-connector.types';
+import { isContactStatus, type ContactStatus } from '../../crm/crm.constants';
 
 const mkCmd = (action: string, parameters: Record<string, unknown> = {}): ConnectorCommand => ({
   module: 'crm',
@@ -73,10 +74,12 @@ describe('CrmAdapterService', () => {
   });
 
   it('update_status delegates to updateContact', async () => {
-    (crm.updateContact as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'c1', status: 'customer' });
+    (crm.updateContact as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'c1', status: 'CLIENT' });
     const result = await service.execute(mkCmd('update_status', { contactId: 'c1', status: 'customer' }));
     expect(result.success).toBe(true);
-    expect(crm.updateContact).toHaveBeenCalledWith(expect.objectContaining({ status: 'customer' }));
+    // D-92 (review CR-D92-1): before D-92 this case pinned 'customer' handed
+    // to updateContact verbatim; the legacy CUSTOMER in any case is CLIENT.
+    expect(crm.updateContact).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'c1', status: 'CLIENT' }));
   });
 
   it('log_event delegates to logContactEvent', async () => {
@@ -137,5 +140,88 @@ describe('CrmAdapterService', () => {
     const result = await service.execute(mkCmd('nonexistent'));
     expect(result.success).toBe(false);
     expect(result.error).toContain('Unknown CRM action');
+  });
+
+  // ── D-92 (owner ruling; W4-D92-DORMANT-AS-CLIENT review CR-D92-1) ─────────
+  // KEY Cortex writes Contact.status outside the CRM DTOs (create_contact,
+  // update_contact, update_status). Before D-92 it handed CrmService the status
+  // verbatim ('DORMANT', 'dormant', 'customer', 'ACTIVE', the 'lead' default),
+  // so a stored status could fall outside CONTACT_STATUSES, and the lowercase
+  // spellings were read as CLIENT by no status reader (isClientStatus is exact).
+
+  describe('D-92 (review CR-D92-1): KEY Cortex stores a contact status only through canonicalContactStatus', () => {
+    const CANONICAL: Array<[string, ContactStatus]> = [
+      ['DORMANT', 'CLIENT'],
+      ['dormant', 'CLIENT'],
+      [' Dormant ', 'CLIENT'],
+      ['CUSTOMER', 'CLIENT'],
+      ['customer', 'CLIENT'],
+      ['lead', 'LEAD'],
+      ['Prospect', 'PROSPECT'],
+      ['CLIENT', 'CLIENT'],
+      ['lost', 'LOST'],
+    ];
+    const REFUSED = ['ACTIVE', 'active', 'INACTIVE', 'churned', 'partner', 'VIP', '   '];
+
+    it('D-92: update_status hands updateContact DORMANT and CUSTOMER in any case as CLIENT and a canonical status in any case as itself', async () => {
+      (crm.updateContact as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'c1' });
+      for (const [status, stored] of CANONICAL) {
+        (crm.updateContact as ReturnType<typeof vi.fn>).mockClear();
+        const result = await service.execute(mkCmd('update_status', { contactId: 'c1', status }));
+        expect(result.success, status).toBe(true);
+        expect(crm.updateContact, status).toHaveBeenCalledTimes(1);
+        const written = (crm.updateContact as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        expect(written.status, status).toBe(stored);
+        expect(isContactStatus(written.status), status).toBe(true);
+      }
+    });
+
+    it('D-92: update_status refuses ACTIVE, INACTIVE, a word with no ContactStatus, a blank or a missing status, and writes nothing', async () => {
+      for (const status of [...REFUSED, '', undefined]) {
+        await expect(service.execute(mkCmd('update_status', { contactId: 'c1', status })), String(status)).rejects.toThrow(/not a contact status/);
+      }
+      expect(crm.updateContact).not.toHaveBeenCalled();
+    });
+
+    it('D-92: update_contact stores a named status through canonicalContactStatus, leaves the status alone when it names none, and refuses a status with no ContactStatus without writing any field', async () => {
+      (crm.updateContact as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'c1' });
+      await service.execute(mkCmd('update_contact', { contactId: 'c1', status: 'dormant', firstName: 'Ada' }));
+      expect(crm.updateContact).toHaveBeenLastCalledWith(expect.objectContaining({ contactId: 'c1', status: 'CLIENT', firstName: 'Ada' }));
+      await service.execute(mkCmd('update_contact', { contactId: 'c1', firstName: 'Ada' }));
+      expect((crm.updateContact as ReturnType<typeof vi.fn>).mock.lastCall![0].status).toBeUndefined();
+      (crm.updateContact as ReturnType<typeof vi.fn>).mockClear();
+      for (const status of REFUSED) {
+        await expect(service.execute(mkCmd('update_contact', { contactId: 'c1', status, firstName: 'Ada' })), status).rejects.toThrow(/not a contact status/);
+      }
+      expect(crm.updateContact).not.toHaveBeenCalled();
+    });
+
+    it("D-92: create_contact stores LEAD (not 'lead') when it names no status, a named status through canonicalContactStatus, and refuses a status with no ContactStatus without creating the contact", async () => {
+      (crm.createContact as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'c1' });
+      await service.execute(mkCmd('create_contact', { firstName: 'Ada' }));
+      expect(crm.createContact).toHaveBeenLastCalledWith(expect.objectContaining({ firstName: 'Ada', status: 'LEAD' }));
+      for (const [status, stored] of CANONICAL) {
+        await service.execute(mkCmd('create_contact', { firstName: 'Ada', status }));
+        expect((crm.createContact as ReturnType<typeof vi.fn>).mock.lastCall![0].status, status).toBe(stored);
+      }
+      (crm.createContact as ReturnType<typeof vi.fn>).mockClear();
+      for (const status of REFUSED) {
+        await expect(service.execute(mkCmd('create_contact', { firstName: 'Ada', status })), status).rejects.toThrow(/not a contact status/);
+      }
+      expect(crm.createContact).not.toHaveBeenCalled();
+    });
+
+    it('D-92: through KeyCortexConnectorService a refused status is the connector failure shape, not a thrown error', { timeout: 60_000 }, async () => {
+      const { KeyCortexConnectorService } = await import('../key-cortex-connector.service');
+      const connector = Object.create(KeyCortexConnectorService.prototype) as InstanceType<typeof KeyCortexConnectorService>;
+      Object.assign(connector, {
+        adapterMap: { crm: service },
+        logger: { error: () => undefined, warn: () => undefined, log: () => undefined },
+      });
+      const result = await connector.execute(mkCmd('update_status', { contactId: 'c1', status: 'ACTIVE' }));
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not a contact status/);
+      expect(crm.updateContact).not.toHaveBeenCalled();
+    });
   });
 });

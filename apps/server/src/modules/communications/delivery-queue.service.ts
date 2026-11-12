@@ -13,6 +13,7 @@ import {
   ResendEffectSnapshot,
 } from './adapters/resend-effect';
 import { resolveSystemEmailFrom } from '../notifications/system-email.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BATCH_SIZE = 20;
@@ -20,6 +21,10 @@ const BACKOFF_BASE_MS = 60_000;
 const DEFAULT_TIMEZONE = 'America/Port_of_Spain';
 const RESEND_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RESEND_ATTEMPT_LEASE_MS = 10 * 60 * 1000;
+const EMAIL_ACCOUNT_NOT_CONNECTED_MESSAGE =
+  "Not sent: business email goes out only from the business's own Gmail account, and none is connected (or its access has expired). Connect Gmail in Settings > Connections, then retry.";
+const PLATFORM_SEND_UNRESOLVED_MESSAGE =
+  'An earlier send of this email through the platform sender has an unknown outcome. Business email is no longer sent that way (D-82), and sending it again through Gmail could deliver it twice: reconcile it first.';
 
 type DeliveryVariantRuntime = {
   id?: string;
@@ -131,6 +136,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.pollInterval = safeInterval('DeliveryQueueService', POLL_INTERVAL_MS, () => this.tick(), this.logger);
     this.logger.log('Delivery queue scheduler started (30s interval)');
   }
@@ -216,15 +225,32 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Email picks its adapter from the CONNECTION, not just the platform: Gmail
-    // when there is a usable token, the platform ESP when there is not. A
-    // business that never connected an account, or whose token expired, used to
-    // fail every email delivery with MISSING_CREDENTIALS while a working
-    // fallback sat unreachable. See adapters/resend-email-adapter.ts.
+    // when there is a usable token. D-82: business email never relays through
+    // the platform sender, so with no usable Gmail there is no adapter and the
+    // delivery fails visibly (EMAIL_ACCOUNT_NOT_CONNECTED).
     const isEmailPlatform = destination.platform === 'EMAIL' || destination.platform === 'GOOGLE';
     const adapter = isEmailPlatform
       ? this.adapters.resolveEmailFor(destination.connection)
       : this.adapters.resolveByPlatform(destination.platform);
+
+    // A delivery bound to a platform send before D-82 is not sent through
+    // anything else while that send's outcome is unproven: it may have landed.
+    if (isEmailPlatform && adapter?.provider !== 'RESEND' && this.isBoundToPlatformSend(delivery)) {
+      if (delivery.providerOutcome === 'SUCCEEDED_CONFIRMED') {
+        await this.tryRepairResendConsequences(delivery);
+        return;
+      }
+      if (delivery.providerOutcome === 'OUTCOME_UNKNOWN' || delivery.providerOutcome === 'ATTEMPT_IN_FLIGHT') {
+        await this.blockUnresolvedPlatformSend(delivery);
+        return;
+      }
+    }
+
     if (!adapter) {
+      if (isEmailPlatform) {
+        await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'EMAIL_ACCOUNT_NOT_CONNECTED', EMAIL_ACCOUNT_NOT_CONNECTED_MESSAGE, 'Sending');
+        return;
+      }
       await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_ADAPTER', `No adapter for platform: ${destination.platform}`, 'Sending');
       return;
     }
@@ -809,6 +835,53 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * True when this delivery has platform (Resend) send history: EXTFX-001 bound
+   * it (snapshot, fingerprint or idempotency key), or the Resend path recorded
+   * a provider outcome on it. Only the Resend path writes providerOutcome, and
+   * markResendBindingAmbiguous (LEGACY_RESEND_OUTCOME_AMBIGUOUS,
+   * PARTIAL_EFFECT_BINDING) leaves OUTCOME_UNKNOWN on rows it never bound: an
+   * earlier platform send of those may have landed too.
+   */
+  private isBoundToPlatformSend(delivery: {
+    effectSnapshot?: unknown;
+    effectFingerprint?: string | null;
+    providerIdempotencyKey?: string | null;
+    providerOutcome?: string | null;
+  }): boolean {
+    return Boolean(
+      delivery.effectSnapshot ||
+        delivery.effectFingerprint ||
+        delivery.providerIdempotencyKey ||
+        delivery.providerOutcome,
+    );
+  }
+
+  private async blockUnresolvedPlatformSend(delivery: ResendDeliveryRuntime): Promise<void> {
+    await this.prisma.client.outboundDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: 'Failed',
+        nextRetryAt: null,
+        errorCode: 'PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED',
+        errorMessage: PLATFORM_SEND_UNRESOLVED_MESSAGE,
+        providerOutcome: 'OUTCOME_UNKNOWN',
+        attemptLeaseExpiresAt: null,
+      },
+    });
+    await this.recordEvent(
+      delivery.id,
+      'retry_blocked_unknown',
+      delivery.status ?? 'Sending',
+      'Failed',
+      delivery.attemptSequence,
+      'PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED',
+      PLATFORM_SEND_UNRESOLVED_MESSAGE,
+      { providerOutcome: 'OUTCOME_UNKNOWN', platformSenderClosed: true },
+      delivery.currentAttemptId ?? undefined,
+    );
+  }
+
   private async tryRepairResendConsequences(delivery: { id: string }): Promise<void> {
     try {
       await this.repairResendConsequences(delivery);
@@ -990,7 +1063,9 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     const isEmailPlatform = destination.platform === 'EMAIL' || destination.platform === 'GOOGLE';
     if (!isEmailPlatform) return true;
     const adapter = this.adapters.resolveEmailFor(destination.connection);
-    if (adapter?.provider !== 'RESEND') return true;
+    // A delivery bound to a pre-D-82 platform send is judged by that send's
+    // outcome even though the platform sender is no longer resolved.
+    if (adapter?.provider !== 'RESEND' && !this.isBoundToPlatformSend(delivery)) return true;
     return delivery.providerOutcome === 'FAILED_CONFIRMED';
   }
 

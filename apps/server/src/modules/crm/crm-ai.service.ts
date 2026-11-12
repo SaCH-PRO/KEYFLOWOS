@@ -1,11 +1,16 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CrmSequenceService } from './crm-sequence.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmTimelineService } from './crm-timeline.service';
+import { CrmService } from './crm.service';
+import { isContactStatus } from './crm.constants';
 import { normalizeContactEventType } from '@keyflow/shared';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { buildContactSummaryPrompt } from './prompts/contact-summary.prompt';
 import { buildLeadScoringPrompt } from './prompts/lead-scoring.prompt';
 import { buildChurnDetectionPrompt } from './prompts/churn-detection.prompt';
@@ -36,6 +41,18 @@ type AiAnalysisResult = {
   automatedTasks: AutomatedTask[];
 };
 
+/**
+ * The caller's CRM record-visibility clause (crm-permissions.helper
+ * visibilityClause, the rule GET crm contacts applies), AND'd onto every
+ * Contact read a prompt or a scan is built from; null or absent when nothing
+ * is hidden from the caller (OWNER, SUPER_ADMIN), whose reads are unchanged
+ * (V1-89, FOLLOW3-D3 residual ST-2).
+ */
+export type ContactScope = Prisma.ContactWhereInput | null | undefined;
+
+/** bulk_status_change writes in the batches PATCH crm contacts/bulk accepts (at most 100 contactIds). */
+const BULK_STATUS_BATCH = 100;
+
 @Injectable()
 export class CrmAiService {
   private readonly logger = new Logger(CrmAiService.name);
@@ -46,10 +63,16 @@ export class CrmAiService {
     @Inject(CrmSequenceService) private readonly sequences: CrmSequenceService,
     @Inject(CrmListsService) private readonly lists: CrmListsService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(CrmService) private readonly crm: CrmService,
   ) {}
 
   private get db() {
     return this.prisma.client;
+  }
+
+  /** The tenant's live contacts, narrowed to `scope` when the caller's visibility restricts them (V1-89). */
+  private contactWhere(businessId: string, scope: ContactScope): Prisma.ContactWhereInput {
+    return scope ? { ...contactWhereBase(businessId), AND: [scope] } : { ...contactWhereBase(businessId) };
   }
 
   sanitizeAiInput(input: string, maxLen = 500): string {
@@ -79,10 +102,11 @@ export class CrmAiService {
     businessId: string,
     prompt: string,
     contactIds?: string[],
+    scope?: ContactScope,
   ): Promise<AiAnalysisResult> {
     const start = Date.now();
     const sanitizedPrompt = this.sanitizeAiInput(prompt, 2000);
-    const context = await this.buildCrmContext(businessId, contactIds);
+    const context = await this.buildCrmContext(businessId, contactIds, scope);
 
     const systemPrompt = `You are an expert CRM analyst and business advisor for a Caribbean service business (Trinidad & Tobago, TTD currency).
 You analyze customer relationship data and provide actionable business intelligence.
@@ -211,37 +235,48 @@ Respond in valid JSON with this exact structure:
     };
   }
 
+  /**
+   * W3-D13b-META-WRITERS (MW-03h): metaData is read and written under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (the owner's PATCH clearing a payment secret) is not undone by
+   * this one's copy (RED-before MW-17: the cleared secret was stored again).
+   */
   async saveGuidelines(businessId: string, guidelines: string[]): Promise<void> {
-    const business = await this.db.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.db.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const existing = (business?.metaData as Record<string, unknown>) ?? {};
+      const existing = (business?.metaData as Record<string, unknown>) ?? {};
 
-    await this.db.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...existing,
-          aiGuidelines: {
-            guidelines,
-            generatedAt: new Date().toISOString(),
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...existing,
+            aiGuidelines: {
+              guidelines,
+              generatedAt: new Date().toISOString(),
+            },
           },
         },
-      },
+      });
     });
   }
 
-  private async buildCrmContext(businessId: string, contactIds?: string[]): Promise<string> {
-    const where: Record<string, unknown> = { ...contactWhereBase(businessId) };
+  /**
+   * The CRM context of an ai-analyze prompt. With a `scope` (V1-89, FOLLOW3-D3
+   * ST-2) every part of it reads only the contacts the caller may open: the
+   * contact list, the status breakdown, the recent events and open tasks (by
+   * their contact), and the invoice totals (invoices of those contacts).
+   */
+  private async buildCrmContext(businessId: string, contactIds?: string[], scope?: ContactScope): Promise<string> {
+    const where: Prisma.ContactWhereInput = this.contactWhere(businessId, scope);
     if (contactIds?.length) {
       where.id = { in: contactIds };
     }
 
     const [contacts, statusCounts, recentEvents, tasks, invoiceSummary] = await Promise.all([
       this.db.contact.findMany({
-        where: where as any,
+        where,
         take: 200,
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -263,11 +298,11 @@ Respond in valid JSON with this exact structure:
       }),
       this.db.contact.groupBy({
         by: ['status'],
-        where: contactWhereBase(businessId),
+        where: this.contactWhere(businessId, scope),
         _count: true,
       }),
       this.db.contactEvent.findMany({
-        where: { contact: contactWhereBase(businessId) },
+        where: { contact: this.contactWhere(businessId, scope) },
         take: 50,
         orderBy: { createdAt: 'desc' },
         select: {
@@ -277,7 +312,7 @@ Respond in valid JSON with this exact structure:
         },
       }),
       this.db.contactTask.findMany({
-        where: { ...contactWhereBase(businessId), status: 'OPEN' },
+        where: { ...contactWhereBase(businessId), status: 'OPEN', ...(scope ? { contact: this.contactWhere(businessId, scope) } : {}) },
         take: 50,
         orderBy: { dueDate: 'asc' },
         select: {
@@ -288,7 +323,7 @@ Respond in valid JSON with this exact structure:
         },
       }),
       this.db.invoice.aggregate({
-        where: { businessId },
+        where: { businessId, ...(scope ? { contact: this.contactWhere(businessId, scope) } : {}) },
         _sum: { total: true },
         _count: true,
       }),
@@ -638,10 +673,10 @@ Respond in valid JSON:
     }
   }
 
-  async detectChurnRisk(businessId: string) {
+  async detectChurnRisk(businessId: string, scope?: ContactScope) {
     const now = new Date();
     const contacts = await this.db.contact.findMany({
-      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
+      where: { ...this.contactWhere(businessId, scope), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
       orderBy: { lastInteractionAt: 'asc' },
       select: {
@@ -724,10 +759,23 @@ Respond in valid JSON:
     }
   }
 
-  async naturalLanguageSearch(businessId: string, query: string) {
+  /**
+   * W9-MONEY-RANKING (owner ruling D-100; review residual SEC-W8MS-2): for a
+   * `viewerUserId` without revenue read (resolveTimelineViewer, the rule GET
+   * contacts applies) a 'score' or 'revenue' search is ordered by the
+   * money-free key GET contacts uses for that member when it ignores those
+   * sorts (createdAt desc, whatever the sortOrder): both ordered by the stored
+   * leadScore, which carries the invoice terms (+10 a paid, -5 an unpaid
+   * invoice). Every row's leadScore is withheld (null), as GET contacts
+   * serves it without includeStats (withoutStoredMoney). The owner, a member
+   * with revenue read and a call that names no viewer are served as before.
+   */
+  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = !viewerUserId
+      || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
     const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       take: 5,
       select: {
         status: true, tags: true, source: true, city: true,
@@ -782,6 +830,7 @@ Respond in valid JSON:
         where: {
           businessId,
           deletedAt: null,
+          ...(scope ? { AND: [scope] } : {}),
           ...(cleanFilters.status ? { status: cleanFilters.status as string } : {}),
           ...(cleanFilters.search ? {
             OR: [
@@ -803,7 +852,9 @@ Respond in valid JSON:
           } : {}),
         },
         take: 50,
-        orderBy: cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
+        // D-100 (W9-MONEY-RANKING): no stored-score order for a member without revenue read.
+        orderBy: !readsRevenue && (cleanFilters.sortBy === 'score' || cleanFilters.sortBy === 'revenue') ? { createdAt: 'desc' }
+          : cleanFilters.sortBy === 'score' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'revenue' ? { leadScore: (cleanFilters.sortOrder as 'asc' | 'desc') ?? 'desc' }
           : cleanFilters.sortBy === 'newest' ? { createdAt: 'desc' }
           : cleanFilters.sortBy === 'oldest' ? { createdAt: 'asc' }
@@ -817,7 +868,8 @@ Respond in valid JSON:
       });
 
       return {
-        contacts,
+        // D-100 (W9-MONEY-RANKING): the stored lead score is withheld from a member without revenue read.
+        contacts: readsRevenue ? contacts : contacts.map((contact) => ({ ...contact, leadScore: null })),
         filters: cleanFilters,
         interpretation: parsed.interpretation ?? '',
         confidence: Number(parsed.confidence) || 0.5,
@@ -1119,11 +1171,35 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
-  async interpretCommand(businessId: string, command: string) {
+  /**
+   * W9-CRM-RESIDUALS (D-37): each sequence's enrollments and each contact
+   * list's members among the contacts `scope` lets the member open (the tenant
+   * predicate, deletedAt null and the visibility scope), for ai-command's
+   * prompt, which otherwise names counts that include contacts the member
+   * cannot open.
+   */
+  private async visibleEnrollmentAndMemberCounts(
+    businessId: string,
+    scope: Prisma.ContactWhereInput,
+    sequenceIds: string[],
+    listIds: string[],
+  ): Promise<{ enrolled: Map<string, number>; members: Map<string, number> }> {
+    const contact = this.contactWhere(businessId, scope);
+    const [enrolled, members] = await Promise.all([
+      this.db.crmSequenceEnrollment.groupBy({ by: ['sequenceId'], where: { sequenceId: { in: sequenceIds }, contact }, _count: { _all: true } }),
+      this.db.contactListMember.groupBy({ by: ['listId'], where: { listId: { in: listIds }, contact }, _count: { _all: true } }),
+    ]);
+    return {
+      enrolled: new Map(enrolled.map((r) => [r.sequenceId, r._count._all])),
+      members: new Map(members.map((r) => [r.listId, r._count._all])),
+    };
+  }
+
+  async interpretCommand(businessId: string, command: string, scope?: ContactScope) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const [contacts, sequencesList, contactLists] = await Promise.all([
       this.db.contact.findMany({
-        where: contactWhereBase(businessId),
+        where: this.contactWhere(businessId, scope),
         take: 200,
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -1140,12 +1216,19 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
       return `${name} (${c.id}) [${c.status}]${c.companyName ? ` @ ${c.companyName}` : ''}`;
     }).join('\n');
 
+    // W9-CRM-RESIDUALS (D-37): for a member whose view is scoped, the counts are
+    // over the contacts the member may open; the OWNER's are listSequences' and
+    // listContactLists' own.
+    const visible = scope
+      ? await this.visibleEnrollmentAndMemberCounts(businessId, scope, sequencesList.map((s: { id: string }) => s.id), contactLists.map((l) => l.id))
+      : null;
+
     const sequenceSummary = sequencesList.length > 0
-      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${s.enrollmentCount} enrolled`).join('\n')
+      ? sequencesList.map((s: any) => `${s.name} (${s.id}) [${s.status}] - ${visible ? visible.enrolled.get(s.id) ?? 0 : s.enrollmentCount} enrolled`).join('\n')
       : undefined;
 
     const listSummary = contactLists.length > 0
-      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${l.memberCount ?? 0} members`).join('\n')
+      ? contactLists.map((l: any) => `${l.name} (${l.id}) [${l.type ?? 'MANUAL'}] - ${visible ? visible.members.get(l.id) ?? 0 : l.memberCount ?? 0} members`).join('\n')
       : undefined;
 
     const systemPrompt = buildCommandInterpreterPrompt(contactSummary, sequenceSummary, listSummary);
@@ -1176,7 +1259,20 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async executeAiCommand(businessId: string, userId: string, command: { action: string; contactId?: string | null; params?: Record<string, unknown> }) {
+  /**
+   * `editableScope` narrows bulk_status_change to the contacts the caller may
+   * open and edit (V1-89 (d)); null or absent for the OWNER and SUPER_ADMIN.
+   * bulk_status_change writes as `userId` through CrmService.bulkUpdateContacts
+   * (V1-89 review SEC-V89-2). The single-contact actions are gated on their
+   * contactId by the controller (record visibility, and PATCH contacts/:contactId's
+   * edit scope for change_status and toggle_favorite; review SEC-V89-1).
+   */
+  async executeAiCommand(
+    businessId: string,
+    userId: string,
+    command: { action: string; contactId?: string | null; params?: Record<string, unknown> },
+    editableScope?: ContactScope,
+  ) {
     const { action, contactId, params } = command;
     this.logger.log(`[CRM AI] executeAiCommand action=${action} businessId=${businessId}`);
 
@@ -1235,14 +1331,36 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         }
 
         case 'bulk_status_change': {
-          const fromStatus = (params?.fromStatus as string);
-          const toStatus = (params?.toStatus as string);
+          const fromStatus = params?.fromStatus;
+          const toStatus = params?.toStatus;
+          const filterTag = params?.filter;
           if (!fromStatus || !toStatus) return { success: false, message: 'fromStatus and toStatus are required', data: null };
-          const where: any = { ...contactWhereBase(businessId), status: fromStatus };
-          const filterTag = params?.filter as string;
+          // V1-89 review SEC-V89-3: the body's params reach Prisma only as
+          // plain values. toStatus is written, so it must be a status of the
+          // vocabulary PATCH contacts/bulk admits; fromStatus and the filter
+          // are equality terms (one status, one tag), never an operator object.
+          if (!isContactStatus(toStatus)) {
+            return { success: false, message: 'toStatus must be one of LEAD, PROSPECT, CLIENT, LOST', data: null };
+          }
+          if (typeof fromStatus !== 'string') return { success: false, message: 'fromStatus must be one status', data: null };
+          if (filterTag !== undefined && filterTag !== null && typeof filterTag !== 'string') {
+            return { success: false, message: 'filter must be one tag', data: null };
+          }
+          const where: Prisma.ContactWhereInput = { ...this.contactWhere(businessId, editableScope), status: fromStatus };
           if (filterTag) where.tags = { has: filterTag };
-          const result = await this.db.contact.updateMany({ where, data: { status: toStatus } });
-          return { success: true, message: `Changed ${result.count} contacts from ${fromStatus} to ${toStatus}`, data: { count: result.count } };
+          const matched = await this.db.contact.findMany({ where, select: { id: true }, orderBy: { id: 'asc' } });
+          // V1-89 review SEC-V89-2: written by CrmService.bulkUpdateContacts,
+          // the writer PATCH contacts/bulk uses, in that route's batches of
+          // 100: each changed contact gets a 'bulk_updated' audit entry and a
+          // bulk.updated event naming the member, and the CRM caches are
+          // invalidated. It applies the member's edit scope again at the write.
+          let count = 0;
+          for (let i = 0; i < matched.length; i += BULK_STATUS_BATCH) {
+            const contactIds = matched.slice(i, i + BULK_STATUS_BATCH).map((c: { id: string }) => c.id);
+            const result = await this.crm.bulkUpdateContacts({ businessId, contactIds, status: toStatus, actorUserId: userId });
+            count += result.updated;
+          }
+          return { success: true, message: `Changed ${count} contacts from ${fromStatus} to ${toStatus}`, data: { count } };
         }
 
         case 'add_note': {
@@ -1315,9 +1433,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
-  async dataQualityScan(businessId: string) {
+  async dataQualityScan(businessId: string, scope?: ContactScope) {
     const contacts = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         companyName: true, tags: true, status: true, source: true,
@@ -1370,9 +1488,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async findDuplicatesAi(businessId: string) {
+  async findDuplicatesAi(businessId: string, scope?: ContactScope) {
     const contacts = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         companyName: true, status: true,
@@ -1441,13 +1559,33 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async bulkReengagementSuggestions(businessId: string) {
+  /**
+   * W10-MONEY-SIGNALS-REST (owner ruling D-100; review residuals SEC-W9MR-3 /
+   * SEC-W9MR-4): whether `viewerUserId` reads revenue (resolveTimelineViewer,
+   * the rule GET contacts applies). A call that names no viewer is served as
+   * before (naturalLanguageSearch's rule).
+   */
+  private async viewerReadsRevenue(businessId: string, viewerUserId?: string): Promise<boolean> {
+    return !viewerUserId || (await resolveTimelineViewer(this.prisma, businessId, viewerUserId)).readable.has('revenue');
+  }
+
+  /**
+   * The stale contacts (no interaction for 30 days) the caller may open, the
+   * most urgent first. W10-MONEY-SIGNALS-REST (owner ruling D-100; review
+   * residual SEC-W9MR-4): for a `viewerUserId` without revenue read every
+   * suggestion's leadScore is withheld (null), as GET contacts serves it
+   * without includeStats: the stored score carries the invoice terms (+10 a
+   * paid, -5 an unpaid invoice). The order is the owner's and money-free
+   * (staleness, then the status urgency; the lead score places none).
+   */
+  async bulkReengagementSuggestions(businessId: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = await this.viewerReadsRevenue(businessId, viewerUserId);
     const now = new Date();
     const staleThreshold = new Date(now.getTime() - 30 * 86400000);
 
     const staleContacts = await this.db.contact.findMany({
       where: {
-        ...contactWhereBase(businessId),
+        ...this.contactWhere(businessId, scope),
         status: { in: ['CLIENT', 'PROSPECT', 'LEAD'] },
         OR: [
           { lastInteractionAt: { lt: staleThreshold } },
@@ -1495,7 +1633,8 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         email: c.email,
         status: c.status,
         daysSinceLastInteraction: daysSince,
-        leadScore: c.leadScore,
+        // D-100 (W10-MONEY-SIGNALS-REST): the stored lead score is withheld from a member without revenue read.
+        leadScore: readsRevenue ? c.leadScore : null,
         recommendedAction,
         urgency,
         suggestedSequence,
@@ -1514,9 +1653,22 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async revenueOpportunityScan(businessId: string) {
+  /**
+   * The revenue opportunities among the CLIENT and PROSPECT contacts the
+   * caller may open. W10-MONEY-SIGNALS-REST (owner rulings D-100, D-63 and
+   * D-90; review residual SEC-W9MR-3): a `viewerUserId` without revenue read
+   * is served the scan's shape with no money signal, as GET .../predictive-revenue
+   * serves it (SEC-W7CMV-1): no opportunity, since each one is picked by a
+   * money signal ('Hot prospect' by the stored lead score, which carries the
+   * invoice terms, 'Repeat business' by the last invoice's age, 'Upsell' by
+   * the paid total) and carries the paid total and an estimate from it;
+   * totalEstimatedRevenue 0; contactsAnalyzed (a contact count) as for the
+   * owner. No invoice is read for that member.
+   */
+  async revenueOpportunityScan(businessId: string, scope?: ContactScope, viewerUserId?: string) {
+    const readsRevenue = await this.viewerReadsRevenue(businessId, viewerUserId);
     const contacts = await this.db.contact.findMany({
-      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
+      where: { ...this.contactWhere(businessId, scope), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
       select: {
         id: true, firstName: true, lastName: true, status: true,
@@ -1524,6 +1676,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         lastInteractionAt: true,
       },
     });
+    if (!readsRevenue) {
+      return { opportunities: [], totalEstimatedRevenue: 0, contactsAnalyzed: contacts.length };
+    }
 
     const contactIds = contacts.map(c => c.id);
     const invoices = await this.db.invoice.findMany({

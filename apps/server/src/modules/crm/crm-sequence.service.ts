@@ -1,4 +1,5 @@
 import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
@@ -292,11 +293,15 @@ export class CrmSequenceService {
    * Collections dunning: enroll every contact with an overdue invoice into a
    * sequence (usually the business's dunning cadence). Contacts already
    * enrolled in the sequence are skipped by the enrollment upsert.
+   *
+   * `contactWhere` (W3-KEY-CRM-VISIBILITY, D-37): the caller's contact visibility clause; only
+   * invoices whose live contact it admits are considered, so no other contact is enrolled. Absent:
+   * every overdue contact of the business, as before.
    */
   async enrollOverdueContacts(
     businessId: string,
     sequenceId: string,
-    opts?: { minDaysOverdue?: number; limit?: number },
+    opts?: { minDaysOverdue?: number; limit?: number; contactWhere?: Prisma.ContactWhereInput },
   ) {
     const minDays = Math.max(0, opts?.minDaysOverdue ?? 1);
     const cutoff = new Date(Date.now() - minDays * 86400000);
@@ -307,6 +312,7 @@ export class CrmSequenceService {
         deletedAt: null,
         status: { in: ['SENT', 'OVERDUE'] },
         dueDate: { lt: cutoff },
+        ...(opts?.contactWhere ? { contact: { is: { businessId, deletedAt: null, AND: [opts.contactWhere] } } } : {}),
       },
       select: { contactId: true },
       take: opts?.limit ?? 50,

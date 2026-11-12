@@ -8,6 +8,7 @@ import { SkeletonList } from "@/components/ui/skeleton";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@keyflow/ui";
+import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import {
   Search,
   FileText,
@@ -70,6 +71,8 @@ import {
 } from "../components/commerce-types";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
+import { attemptIdempotencyKey, newPaymentAttempt, newPaymentAttemptKey, type PaymentAttempt } from "../../finance/components/payment-record-modal";
+import { reportInvoiceBulkDelete } from "../../finance/hooks/use-pipeline-actions";
 import { InvoiceDriveUploader, buildTemplateData } from "../components/invoice-drive-uploader";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
 import { getInvoiceSmartCTA } from "../utils/smart-cta";
@@ -86,6 +89,19 @@ import { DunningRulesPanel } from "../components/dunning-rules";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import type { ReactNode } from "react";
+
+/**
+ * R0-21 (M29): the row's own figures (PENDING and FAILED rows are not cash).
+ * V1-36 (CF-17): read through the shared balance contract, computeBalance's
+ * mirror, so a refund counts: paidAmount is what was received net of refunds
+ * and remaining what is still owed, the figures GET .../payments serves.
+ * Summing SUCCESSFUL rows alone read SUCCESSFUL 100 with 40 refunded as paid
+ * 100, remaining 0, and the form asked to confirm an over-payment for the 40.
+ */
+function rowPaymentFigures(inv: Invoice): { paidAmount: number; remaining: number; paidPercent: number } {
+  const balance = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+  return { paidAmount: balance.net, remaining: balance.remaining, paidPercent: invoicePaidPercent(balance) };
+}
 
 interface InvoicesPanelProps {
   invoices: Invoice[];
@@ -228,9 +244,34 @@ export default function InvoicesPanel({
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<{ invoice: Invoice } | null>(null);
+  // R0-21 (M26, CF-08): each open of the payment form is one payment attempt
+  // with one idempotency key, reused by every retry of that open. A submit
+  // with a reference is keyed by the server's reference slot instead
+  // (attemptIdempotencyKey, review R021-ST-1).
+  const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
+  // R0-21 (M29): the server's status-aware figures for the open invoice
+  // (GET .../payments: paidAmount = received net of refunds, remaining; V1-36).
+  const [paymentBalance, setPaymentBalance] = useState<{ invoiceId: string; paidAmount: number; remaining: number } | null>(null);
+  // Review R021-ST-2: the invoice whose payments read failed (or answered no
+  // figures); only then does the form fall back to the row's own figures.
+  const [paymentBalanceFailedFor, setPaymentBalanceFailedFor] = useState<string | null>(null);
+  const paymentOpenRef = useRef<string | null>(null);
   const [paymentPlanFor, setPaymentPlanFor] = useState<Invoice | null>(null);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
+  // R0-21: the in-flight guards. State disables the buttons only after React
+  // re-renders; two clicks landing before that would both POST.
+  const recordingPaymentRef = useRef(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const savingInvoiceRef = useRef(false);
+  // V1-45b (D-15): the invoice create's Idempotency-Key, one per open of the
+  // form: minted by the open's first save and reused by every retry of that
+  // open, so a save whose answer was lost is answered with the invoice it
+  // created. Dropped when the form closes; the next open mints a new one.
+  const createKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showInvoiceBuilder) createKeyRef.current = null;
+  }, [showInvoiceBuilder]);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
   const [mobileSheetFor, setMobileSheetFor] = useState<Invoice | null>(null);
   const [timelineRefreshTick, setTimelineRefreshTick] = useState(0);
@@ -244,26 +285,29 @@ export default function InvoicesPanel({
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
     const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
-    const { data, error } = await bulkUpdateInvoices(businessId, Array.from(selectedIds), action as "send" | "void" | "delete");
-    if (data) {
+    const requestedIds = Array.from(selectedIds);
+    const { data, error } = await bulkUpdateInvoices(businessId, requestedIds, action as "send" | "void" | "delete");
+    if (data && action === "delete") {
+      // W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): the server deletes only DRAFT and
+      // VOID invoices and lists each one it kept in `skipped` with its reason;
+      // only the invoices deleted leave the list (a VOID one included).
+      clearSelection();
+      const deleted = reportInvoiceBulkDelete(data, requestedIds, invoices);
+      setInvoices((prev) => prev.filter((i) => !deleted.has(i.id)));
+    } else if (data) {
       toast.success(`${data.updated} invoice(s) updated`);
       clearSelection();
       if (data.updated > 0) {
         const eligibleStatuses: Record<string, string[]> = {
           send: ["DRAFT"],
           void: ["DRAFT", "SENT", "OVERDUE"],
-          delete: ["DRAFT", "SENT", "OVERDUE"],
         };
         const eligible = new Set(
           invoices
             .filter((i) => selectedIds.has(i.id) && (eligibleStatuses[action] ?? []).includes(i.status))
             .map((i) => i.id)
         );
-        if (action === "delete") {
-          setInvoices((prev) => prev.filter((i) => !eligible.has(i.id)));
-        } else {
-          setInvoices((prev) => prev.map((i) => eligible.has(i.id) ? { ...i, status: status as Invoice["status"] } : i));
-        }
+        setInvoices((prev) => prev.map((i) => eligible.has(i.id) ? { ...i, status: status as Invoice["status"] } : i));
       }
     } else {
       toast.error(error ?? "Bulk action failed");
@@ -348,19 +392,25 @@ export default function InvoicesPanel({
   );
 
   // Builds the canonical public invoice URL via the server payment-link
-  // endpoint so the same token works across email/WhatsApp/copy. Falls back
-  // to the local /pay/:id route only if the API is unreachable.
-  async function buildPublicInvoiceUrl(invoiceId: string): Promise<string> {
+  // endpoint so the same token works across email/WhatsApp/copy.
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): there is no
+  // fallback any more. It was the bare-id /pay/:id page, which is retired, so
+  // a link that cannot be issued (a paid or void invoice, the API down) is an
+  // error the operator sees, never a dead URL handed to the customer.
+  async function buildPublicInvoiceUrl(invoiceId: string): Promise<string | null> {
+    if (!businessId) return null;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (!businessId) return `${origin}/pay/${invoiceId}`;
     const { data } = await createInvoicePaymentLink(businessId, invoiceId);
-    if (data?.token) return `${origin}/public/invoice/${data.token}`;
-    return `${origin}/pay/${invoiceId}`;
+    return data?.token ? `${origin}/public/invoice/${data.token}` : null;
   }
 
   async function copyPaymentLink(invoiceId: string) {
     try {
       const link = await buildPublicInvoiceUrl(invoiceId);
+      if (!link) {
+        setInvoiceError("Could not create a payment link for this invoice");
+        return;
+      }
       await navigator.clipboard.writeText(link);
       setCopiedLink(invoiceId);
       setTimeout(() => setCopiedLink(null), 2000);
@@ -372,6 +422,10 @@ export default function InvoicesPanel({
 
   async function shareViaWhatsApp(inv: Invoice) {
     const link = await buildPublicInvoiceUrl(inv.id);
+    if (!link) {
+      setInvoiceError("Could not create a payment link for this invoice");
+      return;
+    }
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
@@ -416,7 +470,22 @@ export default function InvoicesPanel({
     setInvoiceForm((f) => ({ ...f, dueDate }));
   }
 
+  // R0-21: one save at a time. A double click on Create/Update issued two
+  // POSTs (two invoices) because nothing was in flight and `saving` was never
+  // passed to BillingFormModal.
   async function handleCreateOrUpdateInvoice() {
+    if (savingInvoiceRef.current) return;
+    savingInvoiceRef.current = true;
+    setSavingInvoice(true);
+    try {
+      await saveInvoiceForm();
+    } finally {
+      savingInvoiceRef.current = false;
+      setSavingInvoice(false);
+    }
+  }
+
+  async function saveInvoiceForm() {
     setFormError(null);
     if (!businessId) return;
     const validItems = invoiceForm.items.filter(
@@ -482,9 +551,11 @@ export default function InvoicesPanel({
         toast.success("Invoice updated");
       }
     } else {
-      const { data, error } = await createInvoice(invoicePayload);
+      createKeyRef.current ??= newPaymentAttemptKey();
+      const { data, error } = await createInvoice({ ...invoicePayload, idempotencyKey: createKeyRef.current });
       if (error) { setFormError(error); toast.error("Failed to create invoice"); }
       if (data) {
+        createKeyRef.current = null;
         if (invoiceTaskIdRef.current) { markTaskCompleted(invoiceTaskIdRef.current); invoiceTaskIdRef.current = null; }
         setInvoices((prev) => [data, ...prev]);
         resetInvoiceForm();
@@ -540,24 +611,49 @@ export default function InvoicesPanel({
     }
   }
 
+  /**
+   * R0-21 (M29): paid and remaining for the open payment form: the server's
+   * figures once its payments read answers. Only if that read fails (or there
+   * is no workspace to read from) the row's own figures through the shared
+   * balance contract (rowPaymentFigures: net of refunds, never PENDING or
+   * FAILED rows). Null while the read is in flight (review R021-ST-2): the
+   * list row may be stale, so it never decides the overpayment confirm, and
+   * Record Payment waits for the figures, as the finance modal does.
+   */
+  function paymentFiguresFor(inv: Invoice): { paidAmount: number; remaining: number } | null {
+    if (paymentBalance && paymentBalance.invoiceId === inv.id) return paymentBalance;
+    if (paymentBalanceFailedFor === inv.id || !businessId) return rowPaymentFigures(inv);
+    return null;
+  }
+
   function openPaymentModal(inv: Invoice) {
-    const paidAmount = (inv.payments ?? [])
-      .filter((p) => p.status === "SUCCESSFUL")
-      .reduce((sum, p) => sum + p.amount, 0);
-    const remaining = Math.max(0, Number(inv.total) - paidAmount);
-    setPaymentForm({ amount: remaining.toFixed(2), method: "Cash", reference: "", notes: "" });
+    const localRemaining = rowPaymentFigures(inv).remaining.toFixed(2);
+    setPaymentForm({ amount: localRemaining, method: "Cash", reference: "", notes: "" });
     setPaymentModal({ invoice: inv });
-    if (businessId && !paymentHistory[inv.id]) {
+    paymentAttemptRef.current = newPaymentAttempt();
+    setPaymentBalance(null);
+    setPaymentBalanceFailedFor(null);
+    paymentOpenRef.current = inv.id;
+    if (businessId) {
+      // Read on every open: the figures must be current, not cached.
       listInvoicePayments(businessId, inv.id).then((res) => {
-        if (res.data) {
-          setPaymentHistory((prev) => ({ ...prev, [inv.id]: res.data!.payments }));
-        }
+        const failed = () => {
+          if (paymentOpenRef.current === inv.id) setPaymentBalanceFailedFor(inv.id);
+        };
+        if (!res.data) { failed(); return; }
+        const { payments, paidAmount, remaining } = res.data;
+        setPaymentHistory((prev) => ({ ...prev, [inv.id]: payments }));
+        if (paymentOpenRef.current !== inv.id) return;
+        if (typeof paidAmount !== "number" || typeof remaining !== "number") { failed(); return; }
+        setPaymentBalance({ invoiceId: inv.id, paidAmount, remaining });
+        // The prefilled amount follows the server unless the operator edited it.
+        setPaymentForm((f) => (f.amount === localRemaining ? { ...f, amount: remaining.toFixed(2) } : f));
       });
     }
   }
 
   async function handleRecordPayment() {
-    if (!businessId || !paymentModal || recordingPayment) return;
+    if (!businessId || !paymentModal || recordingPayment || recordingPaymentRef.current) return;
     const amount = parseFloat(paymentForm.amount);
     if (isNaN(amount) || amount <= 0) {
       toast.error("Enter a valid payment amount");
@@ -566,10 +662,9 @@ export default function InvoicesPanel({
     // Over-payment nudge: warn before recording so the operator can either
     // adjust the amount or knowingly create an over-payment that will need
     // to be refunded. Refund flow lives under /app/payments.
-    const paidAlready = (paymentHistory[paymentModal.invoice.id] ?? [])
-      .filter((p) => p.status === "SUCCESSFUL")
-      .reduce((s, p) => s + p.amount, 0);
-    const remaining = Math.max(0, Number(paymentModal.invoice.total) - paidAlready);
+    const figures = paymentFiguresFor(paymentModal.invoice);
+    if (!figures) return; // the server's figures are still loading (R021-ST-2)
+    const { remaining } = figures;
     if (amount > remaining + 0.005) {
       const over = amount - remaining;
       const proceed = typeof window !== "undefined"
@@ -581,6 +676,8 @@ export default function InvoicesPanel({
         : true;
       if (!proceed) return;
     }
+    const attempt = paymentAttemptRef.current ?? (paymentAttemptRef.current = newPaymentAttempt());
+    recordingPaymentRef.current = true;
     setRecordingPayment(true);
     try {
       const { data, error } = await recordInvoicePayment(businessId, paymentModal.invoice.id, {
@@ -588,10 +685,15 @@ export default function InvoicesPanel({
         method: paymentForm.method,
         reference: paymentForm.reference || undefined,
         notes: paymentForm.notes || undefined,
+        idempotencyKey: attemptIdempotencyKey(attempt, paymentForm.reference),
       });
       if (!error && data) {
         setInvoices((prev) => prev.map((i) => (i.id === paymentModal.invoice.id ? { ...data.invoice, payments: data.invoice.payments } : i)));
-        setPaymentHistory((prev) => ({ ...prev, [paymentModal.invoice.id]: [data.payment, ...(prev[paymentModal.invoice.id] ?? [])] }));
+        // A keyed retry answers the payment already recorded: list it once.
+        setPaymentHistory((prev) => ({
+          ...prev,
+          [paymentModal.invoice.id]: [data.payment, ...(prev[paymentModal.invoice.id] ?? []).filter((p) => p.id !== data.payment.id)],
+        }));
         const overPaid = data.paidAmount - Number(data.invoice.total);
         if (overPaid > 0.005) {
           toast.warning(
@@ -614,6 +716,7 @@ export default function InvoicesPanel({
         toast.error(error ?? "Failed to record payment");
       }
     } finally {
+      recordingPaymentRef.current = false;
       setRecordingPayment(false);
     }
   }
@@ -677,6 +780,7 @@ export default function InvoicesPanel({
         open={showInvoiceBuilder}
         onClose={() => { setShowInvoiceBuilder(false); resetInvoiceForm(); setFormError(null); }}
         onSubmit={handleCreateOrUpdateInvoice}
+        saving={savingInvoice}
         docType="invoice"
         isEditing={!!editingInvoiceId}
         formError={formError}
@@ -923,8 +1027,8 @@ export default function InvoicesPanel({
               </>
             );
 
-            const paidAmount = (inv.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((sum, p) => sum + p.amount, 0);
-            const paymentPercent = Number(inv.total) > 0 ? Math.round((paidAmount / Number(inv.total)) * 100) : 0;
+            // V1-36 (CF-17): net of refunds, the server's reading (rowPaymentFigures).
+            const { paidAmount, paidPercent: paymentPercent } = rowPaymentFigures(inv);
 
             return (
               <div key={inv.id} className="flex items-start gap-1">
@@ -1267,18 +1371,18 @@ export default function InvoicesPanel({
                 <span className="text-sm font-semibold">{formatAmount(paymentModal.invoice.total, paymentModal.invoice.currency)}</span>
               </div>
               {(() => {
-                const paid = (paymentModal.invoice.payments ?? []).filter((p) => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-                const rem = Math.max(0, Number(paymentModal.invoice.total) - paid);
-                const pct = Number(paymentModal.invoice.total) > 0 ? Math.round((paid / Number(paymentModal.invoice.total)) * 100) : 0;
+                const figures = paymentFiguresFor(paymentModal.invoice);
+                const paid = figures?.paidAmount ?? 0;
+                const pct = figures && Number(paymentModal.invoice.total) > 0 ? Math.round((paid / Number(paymentModal.invoice.total)) * 100) : 0;
                 return (
                   <>
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">Already Paid</span>
-                      <span className="text-sm font-medium text-emerald-400">{formatAmount(paid, paymentModal.invoice.currency)}</span>
+                      <span className="text-sm font-medium text-emerald-400">{figures ? formatAmount(paid, paymentModal.invoice.currency) : "…"}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-muted-foreground">Remaining</span>
-                      <span className="text-sm font-bold text-amber-400">{formatAmount(rem, paymentModal.invoice.currency)}</span>
+                      <span className="text-sm font-bold text-amber-400">{figures ? formatAmount(figures.remaining, paymentModal.invoice.currency) : "…"}</span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-border/30 overflow-hidden">
                       <div className="h-full rounded-full bg-emerald-400 transition-all duration-300" style={{ width: `${pct}%` }} />
@@ -1377,7 +1481,7 @@ export default function InvoicesPanel({
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setPaymentModal(null)}>Cancel</Button>
-              <Button onClick={handleRecordPayment} disabled={recordingPayment} className="gap-2 bg-amber-600 hover:bg-amber-700">
+              <Button onClick={handleRecordPayment} disabled={recordingPayment || !paymentFiguresFor(paymentModal.invoice)} className="gap-2 bg-amber-600 hover:bg-amber-700">
                 {recordingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
                 {recordingPayment ? "Recording..." : "Record Payment"}
               </Button>

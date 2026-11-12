@@ -36,6 +36,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 // randomUUID returns a v4 UUID string, and every call site here is a bare
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -524,6 +525,8 @@ export class KeyCortexIntuitionService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledIntuitionScan(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     // WHY THIS LOGS ON SUCCESS AND NOT ONLY ON FAILURE
     //
     // It used to log only in the catch. A scan that ran and found nothing was
@@ -715,6 +718,8 @@ export class KeyCortexIntuitionService {
   /** Daily deep churn analysis — 6:00 AM */
   @Cron('0 6 * * *')
   async scheduledChurnAnalysis(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       await this.detectChurnPrecursors(businessId)

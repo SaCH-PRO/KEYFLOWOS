@@ -1,10 +1,13 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ProjectsService } from './projects.service';
 import { ProjectPlannerService } from './project-planner.service';
 import { ProjectPlanExecutorService } from './project-plan-executor.service';
 import { GeneratePlanDto, UpdatePlanEventDto, ReorderEventsDto, AnalyzeImpactDto } from './dto/generate-plan.dto';
+
+/** The authenticated member a write acts for (AuthMiddleware attaches it; AuthGuard requires it). */
+type ActorRequest = { user?: { id?: string } };
 
 @Controller('projects')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -92,8 +95,10 @@ export class ProjectsController {
       estimatedHours?: number;
       trackedHours?: number;
     },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.addTask(businessId, projectId, body);
+    // PR196-PROJECTS-SERVER: the assignment names the member (WPD-09).
+    return this.projects.addTask(businessId, projectId, body, req?.user?.id ?? null);
   }
 
   @Patch('businesses/:businessId/tasks/:taskId')
@@ -111,9 +116,12 @@ export class ProjectsController {
       estimatedHours?: number | null;
       trackedHours?: number;
       evidenceIds?: string[];
+      status?: string;
+      position?: number;
     },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.updateTask(businessId, taskId, body);
+    return this.projects.updateTask(businessId, taskId, body, req?.user?.id ?? null);
   }
 
   @Delete('businesses/:businessId/tasks/:taskId')
@@ -129,8 +137,10 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
     @Body() body: { status: string; position?: number },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.updateTaskStatus(businessId, taskId, body.status, body.position);
+    // PR196-PROJECTS-SERVER (WPD-08): updateTask's door, as the member.
+    return this.projects.updateTaskStatus(businessId, taskId, body?.status, body?.position, req?.user?.id ?? null);
   }
 
   @Post('businesses/:businessId/projects/:projectId/tasks/reorder')
@@ -138,16 +148,20 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
     @Body() body: { updates: { taskId: string; status: string; position: number }[] },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.reorderTasks(businessId, projectId, body.updates);
+    return this.projects.reorderTasks(businessId, projectId, body?.updates, req?.user?.id ?? null);
   }
 
   @Get('businesses/:businessId/projects/:projectId/budget')
   getProjectBudget(
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.getProjectBudget(projectId, businessId);
+    // W9-PROJECTS-SERVER (review SEC-W196-2; D-100's withholding rule): the costs are served to a
+    // member who reads expenses, as the project's expense list is (GET .../expenses/by-project).
+    return this.projects.getProjectBudget(projectId, businessId, { viewerUserId: req?.user?.id ?? null });
   }
 
   @Get('businesses/:businessId/projects/:projectId/timeline')
@@ -280,7 +294,7 @@ export class ProjectsController {
   }
 
   @Patch('businesses/:businessId/plans/:planId')
-  updatePlan(
+  async updatePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
     @Body() body: {
@@ -294,16 +308,26 @@ export class ProjectsController {
       swotAnalysis?: Record<string, unknown>;
     },
   ) {
-    return this.planner.updatePlan(businessId, planId, body);
+    // 'approved' and 'materialized' are written only by the approve door (WPD-12, D-85).
+    const { status, ...fields } = body ?? {};
+    this.projects.assertPlanPatchStatus(status);
+    // Review SEC-V88C-1: the status is written only while no approve holds the plan (else 409,
+    // and nothing in the body is written); the other fields as before.
+    if (status !== undefined) await this.projects.changePlanStatus(businessId, planId, status);
+    return this.planner.updatePlan(businessId, planId, fields);
   }
 
+  // PR196-PROJECTS-SERVER (WPD-12, D-85, D-46): OWNER/ADMIN or projects:write, a compare-and-set
+  // so a plan is approved and materialized once (409 after), and the approver on the feed.
   @Post('businesses/:businessId/plans/:planId/approve')
-  async approvePlan(
+  approvePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: ActorRequest,
   ) {
-    await this.planner.updatePlan(businessId, planId, { status: 'approved' });
-    return this.executor.materializePlan(businessId, planId);
+    return this.projects.approvePlan(businessId, planId, req?.user?.id ?? null, () =>
+      this.executor.materializePlan(businessId, planId),
+    );
   }
 
   @Post('businesses/:businessId/plans/:planId/reject')
@@ -311,15 +335,19 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
   ) {
-    return this.planner.updatePlan(businessId, planId, { status: 'rejected' });
+    // Review SEC-V88C-1: not while an approve holds the plan (409).
+    return this.projects.changePlanStatus(businessId, planId, 'rejected');
   }
 
+  // PR196-PROJECTS-SERVER (WPD-14, D-85, D-46): only a draft plan, by OWNER/ADMIN or
+  // projects:write, with the actor on the feed.
   @Delete('businesses/:businessId/plans/:planId')
   deletePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: ActorRequest,
   ) {
-    return this.planner.deletePlan(businessId, planId);
+    return this.projects.deleteDraftPlan(businessId, planId, req?.user?.id ?? null);
   }
 
   @Patch('businesses/:businessId/plans/:planId/events/:eventId')
@@ -363,9 +391,15 @@ export class ProjectsController {
   @Post('businesses/:businessId/plans/:planId/events/:eventId/complete')
   completeOutAppEvent(
     @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
     @Param('eventId') eventId: string,
     @Body() body: { evidence?: string },
+    @Req() req: ActorRequest,
   ) {
-    return this.executor.completeOutAppEvent(businessId, eventId, body.evidence);
+    // Review SEC-V88C-3: the event's task completes through updateTask's door (the evidence gate,
+    // project_task.completed, the member on the feed) before the event is marked completed.
+    return this.projects.completePlanEvent(businessId, planId, eventId, req?.user?.id ?? null, () =>
+      this.executor.completeOutAppEvent(businessId, eventId, body?.evidence),
+    );
   }
 }

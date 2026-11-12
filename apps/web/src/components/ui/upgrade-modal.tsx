@@ -163,7 +163,7 @@ export function UpgradeModal({
               </div>
 
               <Link
-                href="/app/settings/business?tab=billing"
+                href="/app/settings/billing"
                 onClick={onClose}
                 className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-medium transition-all hover:opacity-90 min-h-[44px]"
                 style={{ background: `hsl(var(${plan.color}))`, color: "hsl(var(--kf-foreground))" }}

@@ -22,7 +22,7 @@ import {
   Network,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { getCachedUser, getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple as apiPost, apiDelete, apiPatch } from "@/lib/api";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -89,15 +89,113 @@ const PERMISSION_MODULES = [
   { key: "settings", label: "Settings" },
   { key: "ai", label: "AI / Copilot" },
   { key: "team", label: "Team" },
+  { key: "analytics", label: "Analytics" },
+  { key: "operations", label: "Operations" },
+  { key: "connect", label: "Integrations" },
 ];
 
+/**
+ * R0-ID-WEB-AUTHORITY-UX (V1-07 review CR-REG-1): the invite form's defaults are
+ * the server's role defaults (apps/server/src/core/authority/module-vocabulary.ts
+ * ROLE_DEFAULT_SCOPES) over the same 14 canonical modules, key for key. The server
+ * reads a key missing from an explicit map as 'none', so an 11-key map left an
+ * invited ADMIN without analytics and operations, and that ADMIN was then refused
+ * (correctly, under the grantor ceiling) when inviting a STAFF with server
+ * defaults. `connect` is none for every role, as on the server; it is reachable
+ * only through an explicit grant. Pinned by
+ * __tests__/invite-default-scopes.test.tsx against the server constant.
+ */
+const NONE_FOR_EVERY_ROLE = ["connect"];
+const STAFF_DENIED = ["settings", "team", "ai"];
+
+function roleDefaults(level: (key: string) => string): Record<string, string> {
+  return Object.fromEntries(
+    PERMISSION_MODULES.map((m) => [m.key, NONE_FOR_EVERY_ROLE.includes(m.key) ? "none" : level(m.key)]),
+  );
+}
+
 const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
-  OWNER: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, "admin"])),
-  ADMIN: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, m.key === "team" ? "write" : "admin"])),
-  STAFF: Object.fromEntries(PERMISSION_MODULES.map((m) => [m.key, ["settings", "team", "ai"].includes(m.key) ? "none" : "read"])),
+  OWNER: roleDefaults(() => "admin"),
+  ADMIN: roleDefaults((key) => (key === "team" ? "write" : "admin")),
+  STAFF: roleDefaults((key) => (STAFF_DENIED.includes(key) ? "none" : "read")),
 };
 
 const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
+
+/**
+ * R0-ID-WEB-AUTHORITY-UX review repairs (SEC-UX-1, CR-1): the server refuses an
+ * invite above the inviter's own authority (K2, IdentityService.authorityExcess)
+ * with 403 "You cannot grant more authority than your own". An ADMIN invited
+ * through the earlier 11-key form holds analytics and operations at none, so the
+ * 14-module defaults above are over its ceiling. The form therefore starts a
+ * bounded inviter at the role defaults capped at its own level in each module
+ * and its own approval tier, says which ones it lowered, and on a ceiling
+ * refusal names each module above the inviter's own access. The server's rule
+ * is not changed: an inviter can still raise any row and is then refused.
+ *
+ * Levels and roles rank as the server ranks them (module-vocabulary LEVEL_RANK,
+ * IdentityService ROLE_RANK); a module missing from an explicit map is none.
+ */
+const LEVEL_RANK: Record<string, number> = { none: 0, read: 1, write: 2, admin: 3 };
+const ROLE_RANK: Record<string, number> = { STAFF: 0, ADMIN: 1, OWNER: 2 };
+const isLevel = (level: unknown): level is string => typeof level === "string" && Object.hasOwn(LEVEL_RANK, level);
+const levelRank = (level: unknown) => (isLevel(level) ? LEVEL_RANK[level] : 0);
+const roleRank = (role: string) => (Object.hasOwn(ROLE_RANK, role) ? ROLE_RANK[role] : 0);
+const ownLevel = (scopes: Record<string, string>, key: string) => (isLevel(scopes[key]) ? scopes[key] : "none");
+const moduleLabel = (key: string) => PERMISSION_MODULES.find((m) => m.key === key)?.label ?? key;
+const roleLabel = (role: string) => roleConfig[role]?.label ?? role;
+
+/** The signed-in inviter's own authority, when the server bounds it; null for the OWNER, a SUPER_ADMIN, or an inviter the page cannot find. */
+type InviterEnvelope = { role: string; scopes: Record<string, string>; tier: number };
+
+function inviterEnvelope(members: TeamMember[]): InviterEnvelope | null {
+  const me = getCachedUser();
+  if (!me?.id || me.role === "SUPER_ADMIN") return null;
+  const own = members.find((m) => m.userId === me.id);
+  if (!own || own.role === "OWNER") return null;
+  return { role: own.role, scopes: own.permissionScopes ?? {}, tier: own.maxApprovalTier ?? 0 };
+}
+
+function sameEnvelope(a: InviterEnvelope | null, b: InviterEnvelope | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function joinNames(names: string[]): string {
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** The role's defaults capped at the inviter's own authority, and the rows that were lowered. */
+function inviteDefaults(role: string, inviter: InviterEnvelope | null) {
+  const scopes = DEFAULT_SCOPES[role] || DEFAULT_SCOPES.STAFF;
+  const tier = DEFAULT_TIERS[role] ?? 0;
+  if (!inviter) return { scopes, tier, lowered: [] as string[] };
+  const lowered: string[] = [];
+  const capped = Object.fromEntries(
+    Object.entries(scopes).map(([key, level]) => {
+      const own = ownLevel(inviter.scopes, key);
+      if (levelRank(level) <= levelRank(own)) return [key, level];
+      lowered.push(moduleLabel(key));
+      return [key, own];
+    }),
+  );
+  if (tier > inviter.tier) lowered.push("Approval tier");
+  return { scopes: capped, tier: Math.min(tier, inviter.tier), lowered };
+}
+
+/** Each part of an invite above the inviter's own authority, worded for the refusal toast. */
+function authorityExcess(role: string, scopes: Record<string, string>, tier: number, inviter: InviterEnvelope | null): string[] {
+  if (!inviter) return [];
+  const excess: string[] = [];
+  if (roleRank(role) > roleRank(inviter.role)) excess.push(`the ${roleLabel(role)} role (yours: ${roleLabel(inviter.role)})`);
+  for (const mod of PERMISSION_MODULES) {
+    const own = ownLevel(inviter.scopes, mod.key);
+    if (levelRank(scopes[mod.key]) > levelRank(own)) excess.push(`${mod.label} ${scopes[mod.key]} (yours: ${own})`);
+  }
+  if (tier > inviter.tier) excess.push(`Approval tier ${tier} (yours: ${inviter.tier})`);
+  return excess;
+}
+
+const CEILING_REFUSAL = /more authority than your own/i;
 
 const roleConfig: Record<string, { label: string; color: string; icon: typeof Shield }> = {
   OWNER: { label: "Owner", color: "bg-amber-500/20 text-amber-300 border-amber-500/30", icon: Crown },
@@ -131,6 +229,9 @@ const moduleColor: Record<string, string> = {
   ai: "text-purple-400",
   settings: "text-zinc-400",
   storefront: "text-teal-400",
+  analytics: "text-indigo-400",
+  operations: "text-lime-400",
+  connect: "text-sky-400",
 };
 
 function SkeletonTeam() {
@@ -571,6 +672,8 @@ export default function TeamSettingsPage() {
   const [inviteRole, setInviteRole] = useState("STAFF");
   const [inviteScopes, setInviteScopes] = useState<Record<string, string>>({});
   const [inviteTier, setInviteTier] = useState(0);
+  const [inviter, setInviter] = useState<InviterEnvelope | null>(null);
+  const [inviteLowered, setInviteLowered] = useState<string[]>([]);
   const [showInvite, setShowInvite] = useState(false);
   const [showAdvancedInvite, setShowAdvancedInvite] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<{ membershipId: string; name: string } | null>(null);
@@ -585,6 +688,9 @@ export default function TeamSettingsPage() {
     if (res.data) {
       setDashboard(res.data);
       setActivityItems(res.data.recentActivity);
+      // Kept by value, so a reload with the same envelope does not reset the inviter's edits.
+      const next = inviterEnvelope(res.data.members ?? []);
+      setInviter((prev) => (sameEnvelope(prev, next) ? prev : next));
     }
     setLoading(false);
   }, []);
@@ -609,10 +715,12 @@ export default function TeamSettingsPage() {
   }, [activeTab, moduleFilter, loadActivity]);
 
   useEffect(() => {
+    const start = inviteDefaults(inviteRole, inviter);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
-    setInviteScopes(DEFAULT_SCOPES[inviteRole] || DEFAULT_SCOPES.STAFF);
-    setInviteTier(DEFAULT_TIERS[inviteRole] ?? 0);
-  }, [inviteRole]);
+    setInviteScopes(start.scopes);
+    setInviteTier(start.tier);
+    setInviteLowered(start.lowered);
+  }, [inviteRole, inviter]);
 
   const handleInvite = async () => {
     const businessId = getStoredBusinessId();
@@ -632,7 +740,15 @@ export default function TeamSettingsPage() {
     const res = await apiPost(`/identity/businesses/${businessId}/team`, payload);
     setInviting(false);
     if (res.error) {
-      toast.error(res.error || "Failed to invite team member");
+      // A ceiling refusal names no module; name each one above the inviter's own access.
+      const excess = res.status === 403 && CEILING_REFUSAL.test(res.error)
+        ? authorityExcess(inviteRole, inviteScopes, inviteTier, inviter)
+        : [];
+      toast.error(
+        excess.length > 0
+          ? `${res.error.replace(/\.$/, "")}: ${excess.join(", ")}. Lower ${excess.length === 1 ? "it" : "them"} under Set permissions, or ask the business owner to raise your own access.`
+          : res.error || "Failed to invite team member",
+      );
     } else {
       toast.success("Team member invited");
       setInviteEmail("");
@@ -762,6 +878,13 @@ export default function TeamSettingsPage() {
                   {inviting ? "Inviting..." : "Send Invite"}
                 </Button>
               </div>
+              {inviteLowered.length > 0 && (
+                <p role="status" className="text-[11px] text-amber-300/90 leading-snug">
+                  {joinNames(inviteLowered)} {inviteLowered.length === 1 ? "starts" : "start"} at your own access,
+                  below the {roleLabel(inviteRole)} defaults: an invite cannot grant more authority than your own.
+                  The business owner can raise your access with Edit permissions on your member card.
+                </p>
+              )}
               <div className="pt-1">
                 <button
                   onClick={() => setShowAdvancedInvite(!showAdvancedInvite)}

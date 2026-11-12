@@ -62,7 +62,7 @@ export function CrossModuleEntityLinks({ businessId, entityType, entityId, class
               primary: `#${inv.number}`,
               secondary: `TTD ${inv.amount.toLocaleString()}`,
               status: inv.status,
-              onClick: () => router.push(`/app/commerce?tab=invoices&invoiceId=${inv.id}`),
+              onClick: () => router.push(`/app/commerce/invoices/${encodeURIComponent(inv.id)}`),
             }))}
           />
         )}

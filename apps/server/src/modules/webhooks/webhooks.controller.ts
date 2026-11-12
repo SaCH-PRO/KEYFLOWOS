@@ -4,10 +4,28 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { CommerceService } from '../commerce/commerce.service';
-import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
+import { PaymentsService, STRIPE_LEGACY_REFUSED_PROVIDER } from '../payments/payments.service';
+import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { randomBytes } from 'crypto';
+
+/** Every answer of the deprecated Stripe route names its replacement. */
+const LEGACY_STRIPE_HINT = { deprecated: true, use: '/payments/stripe/webhook' } as const;
+
+/**
+ * The payment event types for which this route emits the Stripe connector's
+ * 'payment.received' once the door has recorded them for an invoice (R0-20b
+ * review CR-R020B-2). They are not a binding: the door binds every payment
+ * event it is handed (R0-20d).
+ */
+const STRIPE_INVOICE_PAYMENT_EVENTS = new Set(['checkout.session.completed', 'charge.succeeded', 'payment_intent.succeeded']);
+
+/** The fields of a Stripe session, charge or payment intent the connector event reads. */
+type StripePaymentObject = {
+  id?: string | null;
+  metadata?: Record<string, string> | null;
+  client_reference_id?: string | null;
+};
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -16,8 +34,9 @@ export class WebhooksController {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(PaymentsService) private readonly payments: PaymentsService,
     @Inject(WebhookDispatcherService) private readonly dispatcher: WebhookDispatcherService,
+    // R0-20b review (CR-R020B-2): the connector event 'payment.received' the route emitted before R0-20b.
     @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
   ) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
@@ -38,14 +57,26 @@ export class WebhooksController {
   ) {
     // ─── DEPRECATED — consolidated into /payments/stripe/webhook ────────────
     // The legacy /webhooks/stripe endpoint has been superseded by
-    // /payments/stripe/webhook, which performs full ledger reconciliation
-    // (payment recording, journal posting, connector events) rather than
-    // only marking the invoice paid.
+    // /payments/stripe/webhook. It stays live for Stripe Dashboard
+    // configurations that still point here.
     //
-    // For backward compatibility during transition we forward the raw
-    // payload to the payments module. This preserves any in-flight
-    // Stripe Dashboard webhook configurations while ensuring consistent
-    // processing.
+    // R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (D-05, ruled 2026-11-02; RA-G16-01):
+    // after the signature check below, the verified bytes go to the same
+    // Stripe ledger door POST /payments/stripe/webhook runs
+    // (PaymentsService.handleStripeWebhook: the binding of a payment event to
+    // the invoice or storefront order it names, provider-event dedupe, one
+    // SUCCESSFUL provider 'stripe' payment posted with it, the reconcile). An
+    // event the binding accepts is recorded once, whether it reaches this
+    // endpoint, the door's own endpoint or both; one it refuses is recorded by
+    // neither. R0-20d (W3-STRIPE-LEGACY-BINDING): the door's binding
+    // (bindStripePaymentEvent, R0-20c) is this route's only one; the copy this
+    // controller kept (bindLegacyStripeEvent) is gone. A refusal is still kept
+    // under this route's label, stripe-legacy-refused (R0-20b review
+    // SEC-R020B-3), which the route hands the door. The route used to call
+    // CommerceService.markInvoicePaid(invoiceId) with no actor and no tenant,
+    // which recorded a 'manual' receipt for the remaining balance (posted Dr
+    // CASH), checked nothing the session carried, and deduped only by the
+    // invoice already being PAID.
     this.logger.warn(
       'Legacy /webhooks/stripe called — migrate Stripe Dashboard webhook URL to /payments/stripe/webhook',
     );
@@ -77,34 +108,61 @@ export class WebhooksController {
 
     this.logger.debug(`Stripe webhook received: ${event.type}`);
 
-    // Handle supported event types
-    if (event.type === 'invoice.payment_succeeded' || event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const invoiceId = session.metadata?.invoiceId || session.client_reference_id;
+    // Events the door ignores are acknowledged, as before; one its binding
+    // refuses is a 400 (BadRequestException), with nothing recorded.
+    const ack = await this.payments.handleStripeWebhook(rawBody.toString('utf8'), signature, {
+      refusedProvider: STRIPE_LEGACY_REFUSED_PROVIDER,
+    });
+    // The door answers `processed` only for the first delivery of an event id
+    // (its provider-event claim, shared with POST /payments/stripe/webhook).
+    if (ack.processed && STRIPE_INVOICE_PAYMENT_EVENTS.has(event.type)) await this.emitStripePaymentReceived(event);
+    return { ...ack, type: event.type, ...LEGACY_STRIPE_HINT };
+  }
 
-      if (invoiceId) {
-        const result = await this.commerce.markInvoicePaid(invoiceId);
-
-        const invoice = await this.prisma.client.invoice.findUnique({
-          where: { id: invoiceId },
-          select: { businessId: true, total: true, currency: true },
-        });
-
-        if (invoice) {
-          this.stripeConnector?.emitPaymentReceived(invoice.businessId, {
-            amount: Number(invoice.total),
-            currency: invoice.currency,
-            invoiceId,
-            externalId: session.id,
-          }).catch((e) => this.logger.warn(`Stripe connector event emission failed: ${e.message}`));
-        }
-
-        return result;
+  /**
+   * R0-20b review (CR-R020B-2): the Stripe connector's 'payment.received'
+   * (the owner's in-app notification, the connector's activity), once, for
+   * the payment the door just recorded for the invoice, with the amount and
+   * currency it recorded. Never fails the delivery: the payment is committed.
+   *
+   * R0-20d: the invoice is the one the event names, read exactly as the door
+   * reads it, and the recorded row must be that invoice's, in the business the
+   * event names: the door's binding accepted the event only if that is the
+   * invoice's business (a delivery of this route is platform-signed). A
+   * storefront order's payment records no invoice row, so it emits nothing.
+   */
+  private async emitStripePaymentReceived(event: Stripe.Event): Promise<void> {
+    if (!this.stripeConnector) return;
+    const obj = (event.data?.object ?? {}) as StripePaymentObject;
+    const invoiceId = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
+    // The door's provider payment id for this event (PaymentsService.processStripeChargeOrSession).
+    const providerPaymentId = obj.id || event.id;
+    if (!invoiceId || !providerPaymentId) return;
+    try {
+      const row = await this.prisma.client.payment.findUnique({
+        where: { providerPaymentId },
+        select: { invoiceId: true, businessId: true, provider: true, status: true, amount: true, currency: true },
+      });
+      if (
+        !row ||
+        row.provider !== 'stripe' ||
+        row.status !== 'SUCCESSFUL' ||
+        row.invoiceId !== invoiceId ||
+        row.businessId !== obj.metadata?.businessId
+      ) {
+        return;
       }
+      this.stripeConnector
+        .emitPaymentReceived(row.businessId, {
+          amount: Number(row.amount),
+          currency: row.currency,
+          invoiceId,
+          externalId: providerPaymentId,
+        })
+        .catch((e: unknown) => this.logger.warn(`Stripe connector event emission failed: ${e instanceof Error ? e.message : String(e)}`));
+    } catch (e: unknown) {
+      this.logger.warn(`Stripe connector event for ${event.id} not emitted: ${e instanceof Error ? e.message : String(e)}`);
     }
-
-    // Acknowledge all other events
-    return { received: true, type: event.type, deprecated: true, use: '/payments/stripe/webhook' };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -109,8 +109,18 @@ export class CrmCustomFieldsController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/custom-field-values')
   getContactValues(
+    @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.values.getValuesForContact(contactId);
+    // The caller's identity bounds the lookup exactly as on the contact detail
+    // route: the contact must satisfy the actor's CRM visibility. The guards
+    // above already refuse a request without a user; this keeps the route
+    // closed if they ever do not.
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    return this.values.getValuesForContact(businessId, contactId, actorUserId);
   }
 }

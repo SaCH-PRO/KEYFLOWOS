@@ -10,8 +10,9 @@ const API_BASE = (() => {
 })();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
-import { fetchWithRetry } from "./fetch-with-retry";
+import { fetchWithRetry, providerUnavailableCode, type ProviderUnavailableCode } from "./fetch-with-retry";
 import { refreshAccessToken } from "./workspace";
+import { unsendableRequest } from "./api/_defaults";
 
 // One-shot reachability check: the first time a network error is observed
 // against API_BASE, log a single loud warning so the developer knows the
@@ -38,7 +39,12 @@ type FetchOptions = {
   init?: RequestInit;
 };
 
-type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
+/**
+ * `status` is the HTTP status of an error response; it is absent on success
+ * and on a network failure, which never got one. `rawError` is the parsed
+ * error body.
+ */
+type ApiResponse<T> = { data: T | null; error: string | null; status?: number; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
 
 export interface PlanLimitError {
   resource: string;
@@ -168,10 +174,29 @@ function handleErrorResponse<T>(data: unknown, statusText: string, status?: numb
   } else {
     message = statusText || "Request failed";
   }
-  return { data: null, error: message, planLimitReached: planLimit, rawError: parsed };
+  return { data: null, error: message, status, planLimitReached: planLimit, rawError: parsed };
 }
 
+/*
+ * FOLLOW3-D11-WEB-API-EMPTY-SEGMENT: every transport below (apiPostSimple
+ * through apiPost) refuses, before anything is sent, a request that names no
+ * business ({ data: null, error: "No business selected" }: an empty,
+ * "undefined", "null" or unselected /businesses/ segment or businessId, or an
+ * unbound businessId in the body of a route without one) or a missing id
+ * ({ data: null, error: "Missing id" }: any other empty, "undefined" or "null"
+ * path segment, or a trailing "/" before the query). The path is judged as
+ * written AND as fetch will send it (the WHATWG-normalised URL: ".", "..",
+ * "%2e" segments resolved, "\" read as "/", tab/CR/LF dropped, trailing spaces
+ * stripped), so `contacts/.` or `businesses/\t/` is refused like the shape it
+ * becomes, and a path whose business segment the wire would change (a ".."
+ * climbing over it) answers "No business selected" (review SEC-D11-1). Every
+ * lib/api/* module and screen sends through these, so none can send
+ * /businesses//... or reach a list route with an empty detail id. See
+ * lib/api/_defaults.ts unsendableRequest.
+ */
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
+  const refused = unsendableRequest(path, body);
+  if (refused) return refused;
   const { headers: initHeaders, ...restInit } = init ?? {};
   const headers = buildHeaders(initHeaders);
 
@@ -239,6 +264,8 @@ async function readSnapshot(url: string, signal?: AbortSignal): Promise<GetSnaps
 }
 
 export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<T>> {
+  const refused = unsendableRequest(path);
+  if (refused) return refused;
   const url = `${API_BASE}${path}`;
   try {
     let snapshot: GetSnapshot;
@@ -280,6 +307,8 @@ export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): 
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
+  const refused = unsendableRequest(path, body);
+  if (refused) return refused;
   try {
     const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "PATCH",
@@ -297,6 +326,8 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<ApiRespo
 }
 
 export async function apiDelete<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+  const refused = unsendableRequest(path, body);
+  if (refused) return refused;
   try {
     const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "DELETE",
@@ -322,6 +353,8 @@ export async function apiPostSimple<T>(path: string, body: unknown): Promise<Api
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<ApiResponse<T>> {
+  const refused = unsendableRequest(path, body);
+  if (refused) return refused;
   try {
     const res = await fetchWithRefresh(`${API_BASE}${path}`, {
       method: "PUT",
@@ -340,6 +373,28 @@ export async function apiPut<T>(path: string, body: unknown): Promise<ApiRespons
 
 export function isPlanLimitError<T>(res: ApiResponse<T>): res is ApiResponse<T> & { planLimitReached: PlanLimitError } {
   return res.planLimitReached != null;
+}
+
+export interface ProviderUnavailable {
+  code: ProviderUnavailableCode;
+  /** `details.service` of the 503 body, e.g. "gmail" or "ai". */
+  service: string | null;
+}
+
+/**
+ * R0-07: which optional service an error response says is not set up (or has
+ * no provider available), read from the structured 503 body
+ * `{ code: 'provider_not_configured' | 'provider_unavailable', details: { service } }`.
+ * fetchWithRetry hands that 503 back on the first response, so the screen can
+ * say "connect Gmail" instead of "backend unreachable". Null for anything
+ * else, including a plain 503 (gateway down), which is still retried.
+ */
+export function providerUnavailableOf<T>(res: ApiResponse<T>): ProviderUnavailable | null {
+  if (res.status !== 503) return null;
+  const code = providerUnavailableCode(res.rawError);
+  if (!code) return null;
+  const service = (res.rawError?.details as { service?: unknown } | null | undefined)?.service;
+  return { code, service: typeof service === "string" ? service : null };
 }
 
 /**

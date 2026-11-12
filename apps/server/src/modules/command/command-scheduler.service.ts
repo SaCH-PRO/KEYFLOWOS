@@ -4,6 +4,7 @@ import { Interval } from '@nestjs/schedule';
 import { CommandGeneratorService } from './command-generator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class CommandSchedulerService {
@@ -22,6 +23,7 @@ export class CommandSchedulerService {
   // empirically, not assumed.) The work stays in scheduledScan() so callers and
   // tests are unchanged; only the scheduled entry point is guarded.
   scheduledScanTick(): void {
+    if (schedulersDisabled()) return;
     runGuarded('CommandSchedulerService', () => this.scheduledScan(), this.logger);
   }
 

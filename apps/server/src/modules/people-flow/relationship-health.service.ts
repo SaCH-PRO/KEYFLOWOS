@@ -1,5 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+// V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
+// row holding a legacy CLIENT spelling reads the same. V1-38c: those
+// spellings and the predicate are crm.constants.ts's.
+//
+// D-92 (owner ruling): dormancy is not a Contact.status (CF-49: it is a
+// relationshipHealth value). It is always worked out from inactivity: the
+// Dormant segment is the clients with no interaction in 90+ days. A row still
+// holding the legacy DORMANT (the CSV/link import and a playbook's
+// update_status wrote it before D-92; rows are not migrated) is a CLIENT
+// through isClientStatus, so it is Dormant only by its silence, At Risk by its
+// silence like any contact, and never a lead. (Before D-92 such a row was
+// Dormant whatever its silence and left out of At Risk, V1-38b review CR-1.)
+import { isClientStatus } from '../crm/crm.constants';
 
 export interface RelationshipHealth {
   contactId: string;
@@ -132,7 +145,7 @@ export class RelationshipHealthService {
     if (daysSinceInteraction > 30) signals.push(`No interaction in ${daysSinceInteraction} days`);
     if (overdueInvoiceCount > 0) signals.push(`${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''}`);
     if (outstandingBalance > 0) signals.push(`${currency} ${outstandingBalance.toLocaleString()} outstanding`);
-    if (bookingsLast90 === 0 && contact.status === 'CUSTOMER') signals.push('No bookings in 90 days');
+    if (bookingsLast90 === 0 && isClientStatus(contact.status)) signals.push('No bookings in 90 days');
     if (deals.some((d: any) => d.status === 'OPEN')) signals.push('Active deal in pipeline');
 
     return {
@@ -175,28 +188,28 @@ export class RelationshipHealthService {
       {
         id: 'stale-leads',
         name: 'Stale Leads',
-        criteria: 'No interaction in 14+ days, not dormant',
+        criteria: 'No interaction in 14+ days',
         count: 0,
         contacts: [],
       },
       {
         id: 'high-value',
         name: 'High-Value Customers',
-        criteria: 'Status CUSTOMER with high engagement',
+        criteria: 'Status CLIENT with high engagement',
         count: 0,
         contacts: [],
       },
       {
         id: 'at-risk',
         name: 'At Risk',
-        criteria: 'No interaction in 30+ days or status AT_RISK',
+        criteria: 'No interaction in 30+ days',
         count: 0,
         contacts: [],
       },
       {
         id: 'dormant',
         name: 'Dormant',
-        criteria: 'Status DORMANT or no interaction in 90+ days',
+        criteria: 'Status CLIENT with no interaction in 90+ days',
         count: 0,
         contacts: [],
       },
@@ -213,19 +226,19 @@ export class RelationshipHealthService {
         segments[0].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // Stale leads
-      if ((contact.status === 'LEAD' || contact.status === 'PROSPECT') && daysSince >= 14 && contact.status !== 'DORMANT') {
+      if ((contact.status === 'LEAD' || contact.status === 'PROSPECT') && daysSince >= 14) {
         segments[1].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // High-value customers
-      if (contact.status === 'CUSTOMER' && daysSince < 30) {
+      if (isClientStatus(contact.status) && daysSince < 30) {
         segments[2].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // At risk
-      if (daysSince >= 30 && contact.status !== 'DORMANT') {
+      if (daysSince >= 30) {
         segments[3].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
-      // Dormant
-      if (contact.status === 'DORMANT' || daysSince >= 90) {
+      // Dormant (D-92): a client, whatever the stored spelling, silent 90+ days.
+      if (isClientStatus(contact.status) && daysSince >= 90) {
         segments[4].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
     }

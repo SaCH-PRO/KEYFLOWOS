@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuthError, createClient, SupabaseClient } from '@supabase/supabase-js';
+import { AuthError, createClient, SupabaseClient, type User } from '@supabase/supabase-js';
 
 function statusOf(error: unknown): number | null {
   if (error instanceof AuthError) {
@@ -97,27 +97,52 @@ export class SupabaseAdminService {
   }
 
   /**
-   * Revoke all sessions for a user. This invalidates every access and
-   * refresh token issued by Supabase for the user. Call this during logout
-   * and after security events (password change, RISC account-hijacking,
-   * admin ban). Swallows errors but returns whether the call succeeded.
+   * Revoke Supabase sessions of the user an access token belongs to.
+   *
+   * `jwt` is that user's Supabase ACCESS TOKEN, not their id. auth-js
+   * (installed 2.94.0) declares `GoTrueAdminApi.signOut(jwt, scope)` and sends
+   * the first argument as the bearer of `POST /logout?scope=<scope>`; GoTrue
+   * then revokes the refresh tokens of the sessions the scope names — 'global':
+   * every session of that user, 'others': all but the token's own session,
+   * 'local': only the token's own. The installed admin API has no call that
+   * revokes by user id. Until R0-ID-F4 (CR-2) this method was handed the user
+   * id, which GoTrue refused as a bearer, so nothing was ever revoked.
+   *
+   * Access tokens already issued stay valid until their exp (Supabase cannot
+   * recall a JWT): POST /identity/logout's local marker covers those.
+   *
+   * Swallows errors and returns whether the call succeeded. The token is never
+   * logged. A value that is not JWT-shaped (a user id) is refused without a
+   * request.
    */
-  async signOut(userId: string, scope: 'global' | 'local' | 'others' = 'global'): Promise<boolean> {
+  async signOut(jwt: string, scope: 'global' | 'local' | 'others' = 'global'): Promise<boolean> {
+    const parts = typeof jwt === 'string' ? jwt.split('.') : [];
+    if (parts.length !== 3 || parts.some((p) => p.length === 0)) {
+      this.logger.warn(`signOut(${scope}) refused: not a Supabase access token (a user id cannot revoke sessions)`);
+      return false;
+    }
     try {
       const client = this.getClient();
-      const { error } = await client.auth.admin.signOut(userId, scope);
+      const { error } = await client.auth.admin.signOut(jwt, scope);
       if (error) {
-        this.logger.warn(`signOut(${userId}, ${scope}) failed: ${error.message}`);
+        this.logger.warn(`signOut(${scope}) failed: ${error.message}`);
         return false;
       }
       return true;
     } catch (err: any) {
       this.logger.warn(
-        `signOut(${userId}) threw: ${err instanceof Error ? err.message : err}`,
+        `signOut(${scope}) threw: ${err instanceof Error ? err.message : err}`,
       );
       return false;
     }
   }
+
+  // D-97 (W8-RISC-SIGNIN-CUTOFF; owner ruling, resolves D-39): there is no
+  // revoke-every-session-by-user-id call here. W7-RISC-REVOKE minted a user
+  // JWT with SUPABASE_JWT_SECRET for POST /logout, which R0-SEC-02 rules out
+  // (that secret stays empty), and D-97 says the provider global logout is not
+  // used: a RISC event records a durable sign-in cutoff on the User row
+  // instead, which AuthMiddleware enforces (risc.service.ts).
 
   /**
    * Best-effort delete of an auth user. Used to roll back a half-created
@@ -218,6 +243,51 @@ export class SupabaseAdminService {
       `findUserByEmail exhausted ${maxPages} pages without locating ${normalized}`,
     );
     return null;
+  }
+
+  /**
+   * One page of GoTrue's admin user list (GET /auth/v1/admin/users?page=&per_page=
+   * under the service-role key), for an operator walk over every auth user:
+   * scripts/backfill-google-identities.ts (W9-IDENTITY-BACKFILL-SCRIPT, the D-97
+   * residual SEC-W8RSC-3). Pages are 1-based; a page holding fewer than
+   * `perPage` users is the last.
+   *
+   * Unlike findUserByEmail, an error result THROWS (SupabaseAdminError with the
+   * provider's status): a walk must never read a failed page as the end of the
+   * list. auth-js's `nextPage` is not returned: the installed auth-js (2.94.0)
+   * reads only the first digit of the page number in GoTrue's Link header.
+   */
+  async listUsersPage(page: number, perPage: number): Promise<User[]> {
+    const client = this.getClient();
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new SupabaseAdminError(`listUsers failed (page ${page}): ${error.message}`, statusOf(error), error);
+    }
+    return data?.users ?? [];
+  }
+
+  /**
+   * One GoTrue user record by id (GET /auth/v1/admin/users/{id} under the
+   * service-role key), with its identities: GoTrue's handler reads it through
+   * models.findUser, which eager-loads them, whereas the LIST above
+   * (models.FindUsersInAudience, no Eager) serves every user with
+   * `identities: null` (W9-IDENTITY-BACKFILL-SCRIPT review CR-W9IBS-1). The
+   * same record bootstrap reads (IdentityController.verifiedProviderIdentities).
+   *
+   * Like listUsersPage, an error result THROWS (SupabaseAdminError with the
+   * provider's status), as does an answer with no user: a walk must never read
+   * a failed read as a user without identities.
+   */
+  async getUserRecord(userId: string): Promise<User> {
+    const client = this.getClient();
+    const { data, error } = await client.auth.admin.getUserById(userId);
+    if (error) {
+      throw new SupabaseAdminError(`getUserById failed: ${error.message}`, statusOf(error), error);
+    }
+    if (!data?.user) {
+      throw new SupabaseAdminError('getUserById returned no user', null);
+    }
+    return data.user;
   }
 
   /**

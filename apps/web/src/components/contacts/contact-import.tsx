@@ -354,6 +354,11 @@ export function ContactImport({ onImportFile, onImportLink, onDeviceImport, load
   };
 
 
+  // W9-GOOGLE-WEB-403 review CR-W9GW403-1 (owner ruling D-99): starting the
+  // Google Contacts consent is the business owner's; the server answers an
+  // ADMIN or STAFF member 403 GOOGLE_CONNECT_OWNER_ONLY (CrmGoogleService
+  // .getAuthUrl). Show the server's refusal (lib/client.ts apiGet carries its
+  // message) so they are told the step is the owner's, not a generic error.
   const handleGoogleConnect = async () => {
     setGoogleLoading(true);
     try {
@@ -361,7 +366,7 @@ export function ContactImport({ onImportFile, onImportLink, onDeviceImport, load
       if (result?.data?.url) {
         window.location.href = result.data.url;
       } else {
-        toast.error("Could not get Google authorization URL");
+        toast.error(result?.error || "Could not get Google authorization URL");
       }
     } catch {
       toast.error("Failed to start Google connection");

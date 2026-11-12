@@ -40,6 +40,20 @@
       ]
     }
   },
+  "suites": [
+    "src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+    "src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+    "src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+    "src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+    "src/modules/key-autonomy/key-action-proposal.service.spec.ts",
+    "src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+    "src/modules/ai/queue-step-awaiting-approval.spec.ts",
+    "src/modules/key-cortex/key-cortex-tool-registry.service.spec.ts",
+    "src/modules/key-cortex/__tests__/key-cortex-tool-registry.service.spec.ts",
+    "src/modules/ai/cortex-tool-bridge.spec.ts",
+    "test/key-action-boundary.integration.test.ts",
+    "test/key-action-boundary-surfaces.integration.test.ts"
+  ],
   "controls": [
     {
       "id": "NC-P1-WRAPPER-IDENTITY",
@@ -315,20 +329,20 @@
       }
     },
     {
-      "id": "NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES",
+      "id": "NC-P4-OWNER-WITHOUT-MEMBERSHIP-HAS-AUTHORITY",
       "obligation": "P4",
-      "claim": "An owner with no Membership row has no approval tier (the frozen rule refuses an approver with no Membership).",
+      "claim": "An owner recorded only as Business.ownerId (no Membership row) has no authority in the business (D-104)",
       "mutation": {
         "file": "apps/server/src/modules/key-autonomy/action-boundary/control-clearance.ts",
-        "find": "    return { ...none, basis: 'owner_without_membership' };",
-        "replace": "    return { ...none, basis: 'owner_without_membership', approvalTier: 4 };"
+        "find": "  if (rows.membership) {",
+        "replace": "  if (!rows.membership && rows.business.ownerId === rows.userId) {\n    return { ...none, basis: 'membership' };\n  }\n  if (rows.membership) {"
       },
       "mustFail": {
         "unit": [
-          "resolvePrincipalAuthority the owner with no Membership row may act, and cannot approve"
+          "resolvePrincipalAuthority the owner with no Membership row has no authority (D-104): basis none, tier 0, no membership"
         ],
         "core": [
-          "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: approval needs a Membership tier"
+          "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row is refused at the boundary (D-104): prepare answers DENY PRINCIPAL_NOT_AUTHORIZED, nothing can be confirmed, and no ticket is created"
         ]
       }
     },
@@ -348,7 +362,7 @@
         "core": [
           "Q1/Q4 — surfaces with no trusted principal cannot execute INBOUND_CONVERSATION files a human proposal and creates no ticket, at any autonomy level",
           "Q1/Q4 — surfaces with no trusted principal cannot execute PLAN_QUEUE files a human proposal and creates no ticket, at any autonomy level",
-          "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: approval needs a Membership tier"
+          "P4 — revocation or demotion before claim admission yields zero tickets a STAFF member below the capability tier cannot approve a proposal nobody requested: approval needs the capability tier"
         ]
       }
     },
@@ -697,8 +711,8 @@
       "claim": "A boundary refusal does not count towards the dispatcher circuit breaker.",
       "mutation": {
         "file": "apps/server/src/modules/ai/action-dispatcher.service.ts",
-        "find": "    if (!boundaryAnswer) this.recordFailure(ctx.toolName);",
-        "replace": "    this.recordFailure(ctx.toolName);"
+        "find": "    if (!boundaryAnswer && !refused) this.recordFailure(ctx.businessId, ctx.toolName);",
+        "replace": "    this.recordFailure(ctx.businessId, ctx.toolName);"
       },
       "mustFail": {
         "surfaces": [

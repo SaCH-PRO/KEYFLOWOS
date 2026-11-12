@@ -1,6 +1,13 @@
-import { Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
+
+/**
+ * R0-09d (owner ruling D-11): the refusal a non-owner gets on POST
+ * .../templates/:templateId/apply; the code the concierge auto-configure
+ * refusal answers (OnboardingConciergeService, R0-09b).
+ */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
 
 @Injectable()
 export class TemplatesService {
@@ -28,6 +35,56 @@ export class TemplatesService {
     }
 
     return template;
+  }
+
+  /**
+   * Who may apply a template: the business owner only —
+   * R0-09d-D11-GENESIS-TEMPLATES, owner ruling D-11 (2026-10-31: editing the
+   * business profile is OWNER only, regardless of granted scopes; R0-09b review
+   * SEC-1). applyTemplate writes the template's industry and archetype onto the
+   * Business row (fields of the owner-only profile PATCH, PATCH
+   * /identity/businesses/:businessId, R0-09) and records which template the
+   * business was set up from (business_template_usages), besides creating the
+   * template's products, services and expense categories. Every apply records
+   * that setup template, so no apply writes no owner-only configuration and the
+   * route is refused as a whole: 403 BUSINESS_PROFILE_OWNER_ONLY, before the
+   * template is read (a non-owner learns nothing about which template ids
+   * exist) and before anything is written.
+   *
+   * The owner is the OWNER membership or the distinguished owner
+   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
+   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
+   * The rule is restated rather than imported, as R0-08c and R0-09b did
+   * (PresenceService.isSlugOwner, OnboardingConciergeService.isProfileOwner):
+   * injecting IdentityService would need TemplatesModule to import
+   * IdentityModule, and templates.module.ts is outside the R0-09d write set.
+   */
+  async assertProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
+    if (await this.isProfileOwner(businessId, actor)) return;
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can apply a business template.',
+    });
+  }
+
+  private async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+      select: { id: true },
+    });
+    return !!owned;
   }
 
   async applyTemplate(businessId: string, templateId: string) {

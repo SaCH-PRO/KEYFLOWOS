@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
-import { DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
 import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
@@ -16,8 +15,14 @@ const staffOptions = [
   { id: "staff_sam", label: "Sam · Coordinator" },
 ];
 
+/** Only the customer's token page is linked: an http(s) or same-site /public/invoice/<token> URL. */
+function isTokenInvoiceUrl(url: string | null | undefined): url is string {
+  return typeof url === "string" && /^(https?:\/\/[^/\s]+)?\/public\/invoice\/[A-Za-z0-9_-]+$/.test(url);
+}
+
 export default function PublicBookPage() {
-  const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
+  // R0-15d: the visitor names the business; there is no demo-tenant default.
+  const [businessId, setBusinessId] = useState("");
   const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
   const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
   const [startTime, setStartTime] = useState("");
@@ -27,6 +32,10 @@ export default function PublicBookPage() {
   const [success, setSuccess] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  // V1-28 (D-07: token links only): the customer's /public/invoice/<token>
+  // link for the invoice the booking drew up (the booking-time invoice, or the
+  // deposit invoice), where its payment state and receipt are.
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
@@ -35,9 +44,13 @@ export default function PublicBookPage() {
     setSuccess(false);
     setBookingId(null);
     setInvoiceId(null);
+    setInvoiceUrl(null);
     const { data, error } = await apiPost<{
       bookingId: string;
       invoiceId?: string;
+      depositInvoiceId?: string;
+      invoiceUrl?: string;
+      depositInvoiceUrl?: string;
       success: boolean;
     }>({
       path: `/bookings/public/businesses/${encodeURIComponent(businessId)}`,
@@ -52,10 +65,13 @@ export default function PublicBookPage() {
     if (error) {
       setStatus(`Error: ${error}`);
     } else {
-      setStatus(`Booked! bookingId=${data?.bookingId} invoiceId=${data?.invoiceId ?? "none"}`);
+      const bookedInvoiceId = data?.invoiceId ?? data?.depositInvoiceId ?? null;
+      setStatus(`Booked! bookingId=${data?.bookingId} invoiceId=${bookedInvoiceId ?? "none"}`);
       setSuccess(true);
       setBookingId(data?.bookingId ?? null);
-      setInvoiceId(data?.invoiceId ?? null);
+      setInvoiceId(bookedInvoiceId);
+      const link = data?.invoiceUrl ?? data?.depositInvoiceUrl ?? null;
+      setInvoiceUrl(isTokenInvoiceUrl(link) ? link : null);
     }
   };
 
@@ -158,14 +174,15 @@ export default function PublicBookPage() {
                     </div>
                   )}
                   <div className="flex gap-2">
-                    {invoiceId && (
-                      <button
-                        type="button"
+                    {invoiceUrl && (
+                      <a
+                        href={invoiceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
-                        onClick={() => window.open(`${API_BASE}/commerce/invoices/${invoiceId}/receipt`, "_blank")}
                       >
-                        View receipt
-                      </button>
+                        View invoice &amp; receipt
+                      </a>
                     )}
                     {bookingId && (
                       <button

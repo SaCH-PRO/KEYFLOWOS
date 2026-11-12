@@ -1,4 +1,5 @@
-import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, ConflictException, forwardRef } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
@@ -7,7 +8,10 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { ClientMomentumService } from '../momentum/client-momentum.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { CommerceService } from '../commerce/commerce.service';
+import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
+import { schedulersDisabled } from '../../core/config/env';
 
 const MOMENTUM_SWEEP_HOUR = 6;
 
@@ -107,9 +111,45 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Optional() @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService | null,
+    // AutopilotModule does not import CommerceModule; CommerceService is
+    // resolved at call time, as FlowOrchestratorService resolves it.
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
 
+  private getCommerce(): CommerceService {
+    return this.moduleRef.get(CommerceService, { strict: false });
+  }
+
+  /** V1-42: the invoice lifecycle owner, resolved at call time like CommerceService. */
+  private getInvoiceWorkflow(): InvoiceWorkflowService {
+    return this.moduleRef.get(InvoiceWorkflowService, { strict: false });
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the
+   * customer's link in a payment-recovery email is /public/invoice/<token>,
+   * built exactly as the operator's send-email builds it
+   * (CommerceService.publicInvoiceUrl: the live link, or a new one). V1-46b
+   * review (SEC-V46B-2, CR-V46B-01): through automatedInvoiceUrl, so it never
+   * mints a link for an invoice whose links were all revoked or expired. This sent
+   * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
+   * leaves the email without a button (the template renders none), never a
+   * bare-id URL.
+   */
+  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+    try {
+      return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, DelegationLoopService.name);
+      return undefined;
+    }
+  }
+
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.processDueLoops().catch(err =>
         this.logger.error(`Loop processing failed: ${(err as Error).message}`),
@@ -550,18 +590,25 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       if (existingForMilestone && !deferred) continue;
 
       if (invoice.status === 'SENT' && daysPastDue >= graceDays) {
-        await this.prisma.client.invoice.update({
-          where: { id: invoice.id },
-          data: { status: 'OVERDUE' },
-        });
-
-        this.events.emit('invoice.overdue', {
-          businessId,
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          daysPastDue,
-          source: 'delegation_loop',
-        });
+        // V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): the move goes through the
+        // workflow, which writes it compare-and-set and emits invoice.overdue
+        // with the InvoiceStatusPayload ({ invoice, businessId, status }) every
+        // listener reads. This raw-wrote OVERDUE and emitted a flat
+        // { invoiceId, invoiceNumber, daysPastDue, source } payload, and it
+        // overwrote whatever another writer committed after the read above.
+        try {
+          await this.getInvoiceWorkflow().transition(invoice.id, 'OVERDUE');
+        } catch (err) {
+          if (!(err instanceof ConflictException)) throw err;
+          // Another writer moved the invoice after the read: the overdue
+          // scheduler (already OVERDUE: its event stands, the reminder below
+          // still applies) or a payment (nothing to chase: skip it).
+          const now = await this.prisma.client.invoice.findFirst({
+            where: { id: invoice.id, businessId },
+            select: { status: true },
+          });
+          if (now?.status !== 'OVERDUE') continue;
+        }
       }
 
       result.itemsMatched++;
@@ -662,8 +709,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       if (!needsApproval && invoice.contact.email && window.allowed) {
         try {
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
-          const invoiceUrl = `${appUrl}/pay/${invoice.id}`;
+          const invoiceUrl = await this.customerInvoiceUrl(invoice.id, businessId);
 
           await this.emailService.send({
             businessId,

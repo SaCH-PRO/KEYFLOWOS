@@ -46,6 +46,7 @@ export class ContactInsightListener {
       t === 'deal.created' ||
       t === 'deal.stage_changed' ||
       t === 'invoice.paid' ||
+      t === 'invoice.reopened' ||
       t === 'invoice.overdue' ||
       t === 'sequence.unenrolled' ||
       t.startsWith('communication.') ||
@@ -78,5 +79,14 @@ export class ContactInsightListener {
     const contactId = payload?.invoice?.contactId;
     if (!businessId || !contactId) return;
     await this.safeMarkStale(businessId, contactId, 'invoice.paid');
+  }
+
+  /** FOLLOW3-A9: a refund's reopen takes back the paid invoice the snapshot counted. */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: { businessId?: string; invoice?: { contactId?: string | null } | null }): Promise<void> {
+    const businessId = payload?.businessId;
+    const contactId = payload?.invoice?.contactId;
+    if (!businessId || !contactId) return;
+    await this.safeMarkStale(businessId, contactId, 'invoice.reopened');
   }
 }

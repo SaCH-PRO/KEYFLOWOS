@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Patch, Post, Param, Query, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Post, Param, Query, Req, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
@@ -10,6 +11,23 @@ import { apiLink } from '../config/runtime-urls';
 import { randomBytes } from 'crypto';
 import type { ConnectorType, ConnectorCredentialField } from './connector.interface';
 import { UpdateInboxConfigDto } from '../../modules/ingestion/dto/ingestion-item.dto';
+import { resolveGmailService } from './google-suite.service';
+import { assertGoogleConnectOwner } from './google-suite.controller';
+
+type ConnectorRequest = { user?: { id: string; role?: string } };
+
+/**
+ * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T02]): the connections the
+ * Google Suite consent provisions besides gmail (GoogleSuiteService
+ * SERVICE_TO_CONNECTOR). gmail keeps its own rule (GMAIL_OWNER_ONLY, D-11).
+ */
+const GOOGLE_SUITE_CONNECTOR_TYPES: ReadonlySet<string> = new Set([
+  'google_calendar',
+  'google_drive',
+  'google_contacts',
+  'google_forms',
+  'google_business_profile',
+]);
 
 @Controller('connectors')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -20,7 +38,70 @@ export class ConnectorController {
     @Inject(ConnectorHealthMonitorService) private readonly healthMonitor: ConnectorHealthMonitorService,
     @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * R0-CMF5 review ST-CMF5-1: disconnecting (or reconnecting, which disconnects
+   * first) the gmail connector clears the business mailbox invoices,
+   * reminders, receipts and quotes are sent from. That is the commerce
+   * GmailService.disconnectGmail: the Gmail owner rule (403 GMAIL_OWNER_ONLY
+   * before anything is written), the mailbox columns, every PENDING Gmail
+   * connection, and the audit row naming the actor. It runs before the
+   * registry's connector-level disconnect and outside the handlers' error
+   * mapping, so a refusal is the 403 it is.
+   */
+  private async disconnectBusinessMailbox(businessId: string, req: ConnectorRequest): Promise<void> {
+    const gmail = await resolveGmailService(this.moduleRef);
+    await gmail.disconnectGmail(businessId, req.user);
+  }
+
+  /**
+   * R0-CMF6 / D-11: for the gmail connector, the routes that send from the
+   * business mailbox (smoke: a marked self-test email) or read it (sync: the
+   * inbox into Key Inbox) follow the Gmail owner rule,
+   * GmailService.assertConnectAuthority: 403 GMAIL_OWNER_ONLY before the
+   * registry is reached, outside the handlers' error mapping. So does DELETE
+   * credentials/gmail (review SEC-CMF6-1): it marks the gmail connector row
+   * disconnected and clears its account, the state that follows the mailbox,
+   * so a member could otherwise stop the mailbox's nightly sync while the
+   * mailbox stays connected. test (the Gmail profile check: it sends nothing
+   * and reads no message), health, statuses, dashboard and authenticate
+   * (status reads) are unchanged, as is every other connector. PATCH
+   * inbox-config/gmail stays open to members, as for every connector: it
+   * writes Key Inbox processing settings only, never the row's status,
+   * account or connection time, and neither sends nor reads a message.
+   */
+  private async assertBusinessMailboxAuthority(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
+    if (type !== 'gmail') return;
+    const gmail = await resolveGmailService(this.moduleRef);
+    await gmail.assertConnectAuthority(businessId, req.user);
+  }
+
+  /**
+   * W9-GOOGLE-DOORS-SERVER (owner ruling D-99, [V94D-T02]): every Google
+   * connection of a business is started, synced and disconnected only by the
+   * business owner, so sync, disconnect and reconnect (which disconnects first)
+   * of a Google Suite connection follow assertGoogleConnectOwner (OWNER
+   * membership, Business.ownerId or SUPER_ADMIN, else 403
+   * GOOGLE_CONNECT_OWNER_ONLY) before the registry is reached, outside the
+   * handlers' error mapping. test, smoke, health, statuses, dashboard and
+   * authenticate are unchanged, as is every other connector.
+   *
+   * W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1 (D-99, [V94D-H01]): so does
+   * DELETE credentials/:type for these connections. It marks the connector row
+   * disconnected and clears its account and connection time while the stored
+   * Business Google tokens stay, which takes the connection out of the nightly
+   * sync (ConnectorSyncScheduler, connected/syncing rows) and the background
+   * scan (ConnectorIntelligenceService.scanBusinessConnectors), i.e. it stops
+   * that connection's sync: the SEC-CMF6-1 class already closed for gmail.
+   * POST credentials/:type and GET webhook-info/:type write nothing for them
+   * (no credential fields, no webhook: 400 before any write).
+   */
+  private async assertGoogleConnectionAuthority(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
+    if (!GOOGLE_SUITE_CONNECTOR_TYPES.has(type)) return;
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
+  }
 
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
@@ -51,7 +132,10 @@ export class ConnectorController {
   async sync(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       return await this.registry.syncConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -64,7 +148,10 @@ export class ConnectorController {
   async disconnect(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       await this.registry.disconnectConnector(type as ConnectorType, businessId);
       return { success: true };
@@ -91,7 +178,10 @@ export class ConnectorController {
   async reconnect(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
       return await this.registry.reconnectConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -117,7 +207,9 @@ export class ConnectorController {
   async smoke(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
     try {
       return await this.registry.smokeTestConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -270,7 +362,11 @@ export class ConnectorController {
   async deleteCredentials(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
+    // W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1 (D-99, [V94D-H01]): a Google Suite connection's row is the owner's to clear.
+    await this.assertGoogleConnectionAuthority(businessId, type, req);
     const connector = this.registry.get(type as ConnectorType);
     if (!connector) throw new NotFoundException(`Connector ${type} not found`);
     await this.credentials.clearCredentials(businessId, type as ConnectorType);

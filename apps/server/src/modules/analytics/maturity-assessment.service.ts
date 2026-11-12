@@ -1,5 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+// V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
+// row holding the legacy CLIENT spelling counts the same. V1-38c: that
+// spelling and the predicate are crm.constants.ts's.
+import { isClientStatus } from '../crm/crm.constants';
 
 interface DimensionScore {
   dimension: string;
@@ -151,7 +155,7 @@ export class MaturityAssessmentService {
       (c: any) => c.status === 'LEAD'
     ).length;
     const customers = business.contacts.filter(
-      (c: any) => c.status === 'CUSTOMER'
+      (c: any) => isClientStatus(c.status)
     ).length;
 
     let score = 0;

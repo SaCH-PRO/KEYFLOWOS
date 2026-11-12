@@ -49,6 +49,7 @@ function makeRegistrar(): {
     mockReadiness,
     mockScoring,
     mockBus,
+    mockPrisma,
   );
 
   const mockSite = {

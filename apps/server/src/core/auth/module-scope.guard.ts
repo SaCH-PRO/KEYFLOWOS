@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf, isCanonicalModule } from '../authority/module-vocabulary';
 import { EffectiveAuthorityResolver } from '../authority/effective-authority.resolver';
+import { resolveRequestBusinessId } from './request-business-id';
 
 export const MODULE_SCOPE_KEY = 'module_scope';
 
@@ -66,7 +67,8 @@ export class ModuleScopeGuard implements CanActivate {
 
     if (user.role === 'SUPER_ADMIN') return true;
 
-    const businessId = req.params?.businessId || req.body?.businessId || req.query?.businessId;
+    // Same resolver as BusinessGuard and the bare-id handlers (core/auth/request-business-id.ts).
+    const businessId = resolveRequestBusinessId(req);
     if (!businessId) throw new ForbiddenException('businessId is required');
 
     const membership = await this.prisma.client.membership.findUnique({

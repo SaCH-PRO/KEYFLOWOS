@@ -1,6 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { mergeOrderMetadataObject, removeOrderMetadataKeyIf, replaceOrderMetadataKeyIf, setOrderMetadataKeyOnce } from './order-metadata';
+import { memberMayRecordPayments } from '../site/store-order.service';
 import { CrmService } from '../crm/crm.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -16,6 +19,26 @@ import {
   PurchaseOrderReceivedPayload,
   PreorderDelayedPayload,
 } from '../../core/event-bus/events.types';
+
+/** MarketplaceOrder.type of an order placed through the public storefront (StoreOrderService.createOrder). */
+const STOREFRONT_ORDER_TYPE = 'STOREFRONT';
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the order metadata key that claims its shipping Expense, once per
+ * order: { claim, at } while it is booked, then { claim, at, expenseId }.
+ */
+export const SHIPPING_EXPENSE_METADATA_KEY = 'shippingExpense';
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (D-126; review SEC-SEO-1): a shipping Expense claim with no expenseId older than this was
+ * left by a call that never finished (it died, or its booking failed and the claim could not be taken back), and the
+ * next qualifying ship takes it over. A call that is alive is done well within it: its reads are single queries and
+ * createExpense posts in one interactive transaction (Prisma's default 2 s wait for a connection and 5 s timeout).
+ */
+export const SHIPPING_EXPENSE_CLAIM_STALE_MS = 10 * 60_000;
+
+/** The value of metadata.shippingExpense while a call books it; expenseId is added when it is recorded. */
+type ShippingExpenseClaim = { claim: string; at: string };
 
 @Injectable()
 export class CommerceIntegrationService {
@@ -67,10 +90,10 @@ export class CommerceIntegrationService {
     const links = (meta.links as Record<string, unknown>) ?? {};
     if (links.contactId === contactId) return;
 
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { metadata: { ...meta, links: { ...links, contactId } } },
-    });
+    // W10-SOP-FIX (SOP-V4): links.contactId is written in one statement (order-metadata.ts). This listener runs on the
+    // paid door's store_order.paid beside the routing listener and mark_paid's autoRouteOrder, and its copy of the
+    // metadata, written back whole, undid the routing steps they appended meanwhile (and theirs undid this link).
+    await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, 'links', { contactId });
   }
 
   private async linkProjectToOrder(businessId: string, orderId: string, projectId: string): Promise<void> {
@@ -84,10 +107,8 @@ export class CommerceIntegrationService {
     const links = (meta.links as Record<string, unknown>) ?? {};
     if (links.projectId === projectId) return;
 
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { metadata: { ...meta, links: { ...links, projectId } } },
-    });
+    // W10-SOP-FIX (SOP-V4): links.projectId in one statement, as linkContactToOrder writes links.contactId.
+    await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, 'links', { projectId });
   }
 
   private async createNotification(input: {
@@ -155,12 +176,78 @@ export class CommerceIntegrationService {
     }
   }
 
+  /**
+   * `store_order.paid` says money arrived. For a storefront order that is
+   * true only once StoreOrderService.completeCheckout has committed the
+   * invoice, the SUCCESSFUL payment and its posting and set the order PAID;
+   * that emission carries `invoiceId`. The stored order is read, not the
+   * payload: a paid event for an order of another business, for a
+   * storefront order that is not PAID (what CONFIRMED emitted before V1-18,
+   * a queued copy of it, or a forged one), or for a storefront order set
+   * PAID without completeCheckout's invoice (the marketplace fulfillOrder
+   * 'mark_paid' and PATCH .../status 'paid' routes, which record no invoice
+   * and no payment) writes nothing, so no invoice, no 'paid' tag, no paid
+   * timeline event and no "payment received" notification follow from it.
+   * W10-STORE-ORDER-PAID (V18-T2b, D-112): nor does one for an order of any
+   * type that is not stored PAID.
+   *
+   * W10-STORE-ORDER-PAID review (SEC-SOP-3): a stored PAID alone is not a
+   * recorded payment. Since D-112 the marketplace routes mark a STANDARD order
+   * PAID only through the paid door (MarketplaceService.
+   * recordPaymentThroughDoor), but a STANDARD order can still be stored PAID
+   * with no checkout invoice: the Shopify sync writes PAID for an order paid
+   * at Shopify, and rows written before D-112 exist. Such an order's paid
+   * event is no longer emitted: store_order.paid comes from the paid door
+   * only (completeCheckout, with its invoice), and the marketplace status
+   * route, which emitted it on every PATCH 'paid' (any member) and so
+   * replayed this handler's invoice, notification and timeline event, emits
+   * it no more (MarketplaceService.emitOrderLifecycleEvent).
+   */
   @OnEvent('store_order.paid')
-  async handleOrderPaid(payload: StoreOrderPaidPayload) {
+  async handleOrderPaid(payload: StoreOrderPaidPayload & { invoiceId?: string | null }) {
     try {
       const order = payload.order;
+      if (!order?.id) return;
 
-      await this.createRevenueRecord(payload.businessId, order);
+      const stored = await this.prisma.client.marketplaceOrder.findFirst({
+        where: { id: order.id, businessId: payload.businessId },
+        select: { type: true, paymentStatus: true, orderNumber: true },
+      });
+      if (!stored) {
+        this.logger.warn(`[CommerceIntegration] store_order.paid names order ${order.id}, not found in business ${payload.businessId}; ignored`);
+        return;
+      }
+      // W10-STORE-ORDER-PAID (V18-T2b, review STL-SEC-2 / CR-W9SPL-1; D-112): every order type is acted on only when
+      // stored PAID. PATCH .../status 'paid' alone (a fulfilment status change, open to any member) emitted
+      // store_order.paid for a STANDARD order stored UNPAID (it no longer does, review SEC-SOP-2; a copy can still be
+      // queued or forged), and this STANDARD branch wrote its contact timeline event, its "Order Payment Received"
+      // notification and a raw PAID INV-ORD invoice with no payment.
+      if ((stored.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+        this.logger.warn(
+          `[CommerceIntegration] store_order.paid for ${stored.type} order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (an order is paid through the paid door)`,
+        );
+        return;
+      }
+      if (stored.type === STOREFRONT_ORDER_TYPE) {
+        // Settled means completeCheckout's invoice for THIS order exists in
+        // this business (and is the one the event names, when it names one).
+        const settled = await this.prisma.client.invoice.findFirst({
+          where: {
+            businessId: payload.businessId,
+            invoiceNumber: `INV-${stored.orderNumber}`,
+            ...(payload.invoiceId ? { id: payload.invoiceId } : {}),
+          },
+          select: { id: true },
+        });
+        if (!settled) {
+          this.logger.warn(
+            `[CommerceIntegration] store_order.paid for storefront order ${order.id} with no completeCheckout invoice INV-${stored.orderNumber}${payload.invoiceId ? ` matching ${payload.invoiceId}` : ''}; ignored (set PAID outside completeCheckout: no invoice, no payment recorded)`,
+          );
+          return;
+        }
+      }
+
+      await this.createRevenueRecord(payload.businessId, order, stored.type, payload.invoiceId ?? null);
 
       let contactId: string | null = null;
       if (order.customerEmail || order.customerPhone) {
@@ -206,14 +293,46 @@ export class CommerceIntegrationService {
     }
   }
 
-  private async createRevenueRecord(businessId: string, order: any) {
+  /**
+   * The invoice behind a paid order (F206). Before V1-18 this deduplicated on
+   * `notes contains order:<id>` alone. completeCheckout's invoice is
+   * INV-<orderNumber> with the notes "Storefront order <orderNumber>", so it
+   * was never found, and every checkout got a second, raw PAID invoice
+   * INV-ORD-<orderNumber> with no payment and no posting.
+   *
+   *   1. The event names its invoice (completeCheckout): resolve it in this
+   *      business and write nothing, whether or not it is found.
+   *   2. A storefront order is invoiced only by completeCheckout, in one
+   *      transaction with its payment and posting: a paid event without an
+   *      invoiceId (the legacy shape, a replay) writes nothing. (handleOrderPaid
+   *      has already ignored a storefront order without that invoice.)
+   *   3. Any other order with an invoice already (INV-<orderNumber>,
+   *      INV-ORD-<orderNumber> or the notes marker): nothing.
+   *   4. Otherwise (a marketplace order marked paid) the legacy record below.
+   */
+  private async createRevenueRecord(businessId: string, order: any, orderType: string, invoiceId: string | null) {
     try {
+      if (invoiceId) {
+        const settled = await this.prisma.client.invoice.findFirst({
+          where: { id: invoiceId, businessId },
+          select: { id: true },
+        });
+        if (!settled) {
+          this.logger.warn(
+            `[CommerceIntegration] store_order.paid for order ${order.id} names invoice ${invoiceId}, not found in business ${businessId}; no invoice written`,
+          );
+        }
+        return;
+      }
+      if (orderType === STOREFRONT_ORDER_TYPE) return;
+
+      const numbers: string[] = order.orderNumber ? [`INV-${order.orderNumber}`, `INV-ORD-${order.orderNumber}`] : [];
       const existing = await this.prisma.client.invoice.findFirst({
         where: {
           businessId,
-          notes: { contains: `order:${order.id}` },
-          deletedAt: null,
+          OR: [...numbers.map((invoiceNumber) => ({ invoiceNumber })), { notes: { contains: `order:${order.id}` } }],
         },
+        select: { id: true },
       });
       if (existing) return;
 
@@ -277,18 +396,11 @@ export class CommerceIntegrationService {
         });
       }
 
-      if (order.shippingFee && order.shippingFee > 0) {
-        await this.expenses.createExpense({
-          businessId: payload.businessId,
-          description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
-          amount: order.shippingFee,
-          currency: order.currency ?? 'TTD',
-          date: new Date(),
-          vendor: order.carrier ?? 'Shipping Carrier',
-          tags: ['shipping', 'order-expense'],
-          notes: `order:${order.id}`,
-        });
-      }
+      // W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): no Expense is booked here. store_order.shipped follows
+      // every shipped marking by any member (PATCH .../status 'shipped' has no transition check), and booked the
+      // payload's shippingFee as a PAID Expense, posted to the ledger, each time: a revenue:none STAFF member's three
+      // PATCHes booked three. The order routes book it once per order, for a member with revenue write, after their
+      // status write (bookShippingExpenseOnce).
 
       await this.createNotification({
         businessId: payload.businessId,
@@ -300,6 +412,122 @@ export class CommerceIntegrationService {
     } catch (e) {
       this.logger.error(`[CommerceIntegration] store_order.shipped handler failed: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): books the order's shipping fee as a PAID shipping Expense
+   * (Dr expense / Cr cash, ExpensesService.createExpense), once per order, for the first shipped marking made by a
+   * member with revenue write on any order route (MarketplaceService.updateOrderStatus and fulfillOrder 'ship',
+   * StoreOrderService.updateOrderStatus SHIPPED), called by the route after its status write has committed.
+   *
+   * - `actorId` must be a member of the business with revenue write (memberMayRecordPayments: no SUPER_ADMIN bypass,
+   *   D-46). Anyone else's ship books nothing and is not refused: the status change stays open to every member
+   *   (D-112).
+   * - The fee, currency and number are the order as stored in the business, never an event payload. A fee of 0 or
+   *   less books nothing.
+   * - The order is claimed in one statement (setOrderMetadataKeyOnce on metadata.shippingExpense), so repeated and
+   *   concurrent markings, on any route, book once.
+   * - An Expense booked for the order before D-126 (notes `order:<id>`, tag 'shipping', not deleted) is recorded in
+   *   the claim and nothing more is booked.
+   * - Review CR-W11SE-1: if any step after the claim fails (that read, the booking, recording its id) the claim is
+   *   taken back (only while it is still this call's), so the next qualifying ship books it; an Expense that committed
+   *   before the failure is found there by the check above. The failure is logged, never thrown: the status change
+   *   has committed.
+   * - Review SEC-SEO-1: a claim that never got an expenseId (its call died, or failed and could not take it back) and
+   *   is older than SHIPPING_EXPENSE_CLAIM_STALE_MS is taken over by the next qualifying ship, logged, and that ship
+   *   goes through the check above, so an Expense the old call committed is recorded rather than booked again.
+   */
+  async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null | undefined): Promise<void> {
+    if (!(await memberMayRecordPayments(this.prisma, businessId, actorId))) return;
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { id: true, orderNumber: true, shippingFee: true, currency: true },
+    });
+    const fee = Number(order?.shippingFee ?? 0);
+    if (!order || !Number.isFinite(fee) || fee <= 0) return;
+
+    const claim: ShippingExpenseClaim = { claim: randomBytes(16).toString('hex'), at: new Date().toISOString() };
+    if (!(await this.claimShippingExpense(businessId, orderId, claim))) return;
+
+    try {
+      // getOrderCrossLinks reads an order's Expenses by these notes.
+      const notes = `order:${order.id}`;
+      const booked = await this.prisma.client.expense.findFirst({
+        where: { businessId, deletedAt: null, notes, tags: { has: 'shipping' } },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const expenseId =
+        booked?.id ??
+        (
+          await this.expenses.createExpense({
+            businessId,
+            description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
+            amount: fee,
+            currency: order.currency ?? 'TTD',
+            date: new Date(),
+            vendor: 'Shipping Carrier',
+            tags: ['shipping', 'order-expense'],
+            notes,
+          })
+        )?.id ??
+        null;
+      // Recorded only while the claim is still this call's: one taken over meanwhile (SEC-SEO-1) is left to its taker.
+      const recorded = await replaceOrderMetadataKeyIf(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim, {
+        ...claim,
+        expenseId,
+      });
+      if (!recorded) {
+        this.logger.warn(
+          `[CommerceIntegration] Shipping Expense ${expenseId} of order ${orderId} not recorded on the order: its claim was taken over meanwhile`,
+        );
+      }
+    } catch (e) {
+      await removeOrderMetadataKeyIf(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim.claim).catch((undoErr) =>
+        this.logger.error(
+          `[CommerceIntegration] Could not release the shipping Expense claim of order ${orderId}: ${(undoErr as Error).message}; ` +
+            `the first qualifying ship after ${SHIPPING_EXPENSE_CLAIM_STALE_MS / 60_000} minutes takes it over`,
+        ),
+      );
+      this.logger.error(`[CommerceIntegration] Shipping Expense for order ${orderId} not booked: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (D-126): takes the order's shipping Expense claim for `claim`. True when the key was
+   * empty (setOrderMetadataKeyOnce), or held a claim left without an expenseId and older than
+   * SHIPPING_EXPENSE_CLAIM_STALE_MS, replaced in one statement only while it is still the value read (review
+   * SEC-SEO-1), so of two ships meeting it one takes it. False when the order is booked (an expenseId), a younger
+   * claim may still be booking, or another call took it first.
+   */
+  private async claimShippingExpense(businessId: string, orderId: string, claim: ShippingExpenseClaim): Promise<boolean> {
+    const client = this.prisma.client;
+    if (await setOrderMetadataKeyOnce(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim)) return true;
+
+    const row = await client.marketplaceOrder.findFirst({ where: { id: orderId, businessId }, select: { metadata: true } });
+    const metadata = row?.metadata;
+    const held =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)[SHIPPING_EXPENSE_METADATA_KEY]
+        : undefined;
+    // Taken back since the claim above: claim it now (false again if another call is first).
+    if (held === undefined || held === null) {
+      return setOrderMetadataKeyOnce(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim);
+    }
+    const heldObject = typeof held === 'object' && !Array.isArray(held) ? (held as Record<string, unknown>) : null;
+    if (heldObject?.expenseId) return false;
+    const heldAt = typeof heldObject?.at === 'string' ? Date.parse(heldObject.at) : Number.NaN;
+    // A claim made within SHIPPING_EXPENSE_CLAIM_STALE_MS (either way: clocks of two instances differ) may still be booking.
+    if (Number.isFinite(heldAt) && Math.abs(Date.now() - heldAt) < SHIPPING_EXPENSE_CLAIM_STALE_MS) return false;
+
+    const taken = await replaceOrderMetadataKeyIf(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, held, claim);
+    if (taken) {
+      this.logger.warn(
+        `[CommerceIntegration] Order ${orderId}: took over a shipping Expense claim left without an Expense ` +
+          `(made ${typeof heldObject?.at === 'string' ? heldObject.at : 'at an unknown time'}); booking it now`,
+      );
+    }
+    return taken;
   }
 
   @OnEvent('store_order.delivered')
@@ -470,7 +698,11 @@ export class CommerceIntegrationService {
         });
       }
 
-      if (payload.refundAmount && payload.refundAmount > 0) {
+      // Trial-N recheck (G6PUB-RC1-3, D-14): a refund recorded on the order's
+      // invoice (payload.invoiceId: negative REFUNDED rows, the posting
+      // reversed) is already in the books; an Expense beside it would take the
+      // money out twice.
+      if (payload.refundAmount && payload.refundAmount > 0 && !payload.invoiceId) {
         await this.expenses.createExpense({
           businessId: payload.businessId,
           description: `Refund for order ${order.orderNumber ?? order.id}`,
@@ -733,11 +965,14 @@ export class CommerceIntegrationService {
     const linkedProjectId = orderLinks.projectId ?? null;
 
     const [invoices, expenses, contact, project] = await Promise.all([
+      // The order's revenue: the legacy listener invoice carries the notes
+      // marker; completeCheckout's invoice (a storefront order's only one
+      // since V1-18) is INV-<orderNumber> with no marker.
       this.prisma.client.invoice.findMany({
         where: {
           businessId,
           deletedAt: null,
-          notes: { contains: `order:${orderId}` },
+          OR: [{ notes: { contains: `order:${orderId}` } }, { invoiceNumber: `INV-${order.orderNumber}` }],
         },
         select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, paidAt: true },
       }),
@@ -832,6 +1067,16 @@ export class CommerceIntegrationService {
     };
   }
 
+  /**
+   * V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS): the V1-35 claim, unchanged. These
+   * job types are also run by the cross-module poller, and this runner is
+   * reachable by any member (POST marketplace/businesses/:b/post-purchase/process),
+   * so each job is claimed before any effect by a compare-and-set on the version
+   * read (this business, PENDING, same updatedAt, still due; count === 1). A
+   * failed execution marks the row FAILED only while it is still this claim's.
+   * A claim that throws leaves the row PENDING and ends the call. `processed`
+   * counts the jobs this call claimed.
+   */
   async processPostPurchaseJobs(businessId: string) {
     const now = new Date();
     const dueJobs = await this.prisma.client.scheduledAgentJob.findMany({
@@ -844,7 +1089,15 @@ export class CommerceIntegrationService {
       take: 20,
     });
 
+    let processed = 0;
     for (const job of dueJobs) {
+      const claimedAt = new Date();
+      const claim = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { id: job.id, businessId, status: 'PENDING', updatedAt: job.updatedAt, scheduledFor: { lte: claimedAt } },
+        data: { status: 'COMPLETED', executedAt: claimedAt },
+      });
+      if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
+      processed += 1;
       try {
         const p = job.payload as any;
         if (job.jobType === 'post_purchase_review_request') {
@@ -864,20 +1117,20 @@ export class CommerceIntegrationService {
               `Follow up for reorder — order ${p.orderNumber ?? p.orderId}`);
           }
         }
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
-          data: { status: 'COMPLETED', executedAt: new Date() },
-        });
       } catch (e) {
         this.logger.error(`[CommerceIntegration] Failed to process post-purchase job ${job.id} (${job.jobType}): ${(e as Error).message}`);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
+        // Fenced to this claim: a row its writer re-armed during the execution keeps its new run.
+        const failed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: job.id, businessId, status: 'COMPLETED', executedAt: claimedAt },
           data: { status: 'FAILED' },
-        });
+        }).catch(() => null);
+        if (failed && failed.count !== 1) {
+          this.logger.warn(`[CommerceIntegration] Post-purchase job ${job.id} changed during its failed execution; left as its writer set it`);
+        }
       }
     }
 
-    return { processed: dueJobs.length };
+    return { processed };
   }
 
   private async addCrmTaskIfAbsent(businessId: string, contactId: string, _dedupeKey: string, title: string) {

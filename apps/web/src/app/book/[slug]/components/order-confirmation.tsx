@@ -35,7 +35,13 @@ type Props = {
     locations?: (string | null)[];
     businessName: string;
   } | null;
-  bookingResults: { bookingId: string; invoiceId?: string }[];
+  /**
+   * V1-28 (D-07: token links only): `invoiceUrl` is the customer's own
+   * /public/invoice/<token> link the public booking create answers
+   * (invoiceUrl, or depositInvoiceUrl for a deposit), where the invoice's
+   * payment state and receipt are.
+   */
+  bookingResults: { bookingId: string; invoiceId?: string; invoiceUrl?: string }[];
   calendarUrl: string | null;
   apiBase: string;
   orderItems?: CartItem[];
@@ -102,6 +108,11 @@ const paymentMethodLabels: Record<string, string> = {
   cash: "Cash / Manual",
 };
 
+/** Only the customer's token page is opened: an http(s) or same-site /public/invoice/<token> URL. */
+function isTokenInvoiceUrl(url: string | undefined): url is string {
+  return typeof url === "string" && /^(https?:\/\/[^/\s]+)?\/public\/invoice\/[A-Za-z0-9_-]+$/.test(url);
+}
+
 export function OrderConfirmation({
   isOrder,
   businessName,
@@ -130,6 +141,7 @@ export function OrderConfirmation({
   formatTime,
 }: Props) {
   const steps = isOrder ? orderTimelineSteps : timelineSteps;
+  const bookingInvoiceUrl = bookingResults.map((br) => br.invoiceUrl).find(isTokenInvoiceUrl);
 
   if (paymentPending) {
     return (
@@ -479,18 +491,19 @@ export function OrderConfirmation({
             Add to Calendar
           </a>
         )}
-        {(bookingResults.some((br) => br.invoiceId) || orderId) && (
+        {(bookingInvoiceUrl || orderId) && (
           <button
             onClick={() => {
               if (orderId) {
                 const emailParam = customerEmail ? `?email=${encodeURIComponent(customerEmail)}` : "";
                 window.open(`${apiBase}/site/storefront/public/order/${orderId}${emailParam}`, "_blank");
-              } else {
-                const inv = bookingResults.find((br) => br.invoiceId);
-                if (inv?.invoiceId) window.open(`${apiBase}/commerce/invoices/${inv.invoiceId}/receipt`, "_blank");
+              } else if (bookingInvoiceUrl) {
+                // V1-28 (D-07): the customer's token page (payment state and
+                // receipt), never the operator's authenticated receipt (401).
+                window.open(bookingInvoiceUrl, "_blank", "noopener,noreferrer");
               }
             }}
-            aria-label="Download receipt"
+            aria-label={orderId ? "View order details" : "View invoice and receipt"}
             className="w-full py-3.5 rounded-2xl font-semibold text-sm transition-all duration-300 hover:scale-[1.015] active:scale-[0.98] min-h-[48px] flex items-center justify-center gap-2"
             style={{
               backgroundColor: calendarUrl ? "transparent" : primaryColor,
@@ -500,7 +513,7 @@ export function OrderConfirmation({
             }}
           >
             <FileText className="w-4 h-4" />
-            {orderId ? "View Order Details" : "Download Receipt"}
+            {orderId ? "View Order Details" : "View Invoice & Receipt"}
           </button>
         )}
 

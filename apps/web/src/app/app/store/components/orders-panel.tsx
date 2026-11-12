@@ -8,8 +8,10 @@ import {
   fetchStoreOrders,
   updateStoreOrderStatus,
   refundStoreOrder,
+  completeStoreOrderOffline,
   type StoreOrder,
 } from "@/lib/api/store";
+import { canCompleteOffline } from "./fulfillment-panel";
 import {
   Search,
   Filter,
@@ -44,6 +46,11 @@ interface Order {
   total: number;
   status: OrderStatus;
   paymentMethod: string;
+  /** The stored values the Complete offline rule reads (G6PUB-RC1-2). */
+  apiStatus: string;
+  type: string;
+  paymentStatus: string;
+  rawPaymentMethod: string | null;
   /**
    * MarketplaceOrder keeps no status history — there is no audit table and no
    * status-change log. The panel used to render a full invented timeline
@@ -97,6 +104,10 @@ function fromApi(o: StoreOrder): Order {
     total: o.total,
     status: statusFromApi(o.status),
     paymentMethod: o.paymentMethod ?? "—",
+    apiStatus: o.status ?? "",
+    type: o.type ?? "",
+    paymentStatus: o.paymentStatus ?? "",
+    rawPaymentMethod: o.paymentMethod ?? null,
     placedAt: o.createdAt,
     lastUpdatedAt: o.updatedAt,
   };
@@ -126,7 +137,23 @@ const STATUS_FILTERS: { value: OrderStatus | "all"; label: string }[] = [
   { value: "refunded", label: "Refunded" },
 ];
 
-function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; onClose: () => void; onStatusUpdate: (orderId: string, newStatus: OrderStatus) => void }) {
+function OrderDetailSheet({
+  order,
+  onClose,
+  onStatusUpdate,
+  onCompleteOffline,
+}: {
+  order: Order;
+  onClose: () => void;
+  onStatusUpdate: (orderId: string, newStatus: OrderStatus) => void;
+  onCompleteOffline: (orderId: string) => void;
+}) {
+  const offlinePayable = canCompleteOffline({
+    status: order.apiStatus,
+    type: order.type,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.rawPaymentMethod,
+  });
   const currentIdx = STATUS_FLOW.indexOf(order.status);
   const nextStatus = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null;
 
@@ -142,8 +169,24 @@ function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; on
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Customer</h4>
           <p className="text-sm font-medium">{order.customerName}</p>
           <p className="text-xs text-muted-foreground">{order.customerEmail}</p>
-          <p className="text-xs text-muted-foreground">Payment: {order.paymentMethod}</p>
+          <p className="text-xs text-muted-foreground">Payment: {order.paymentMethod}{order.paymentStatus ? ` · ${order.paymentStatus}` : ""}</p>
         </div>
+
+        {/*
+          Trial-N recheck G6PUB-RC1-2 (V1-33): every unpaid CASH or MANUAL
+          storefront order in this list can be completed offline. The server
+          records its invoice, payment and posting, with the signed-in member
+          (revenue write) as the recorder.
+        */}
+        {offlinePayable && (
+          <button
+            onClick={() => onCompleteOffline(order.id)}
+            className="w-full text-sm font-medium px-4 py-2.5 rounded-lg transition-colors min-h-[44px]"
+            style={{ background: "hsl(var(--kf-success))", color: "hsl(var(--kf-success-foreground, 0 0% 100%))" }}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 inline mr-1.5" />Complete offline
+          </button>
+        )}
 
         <div className="rounded-xl p-4 space-y-3" style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</h4>
@@ -238,10 +281,8 @@ export function OrdersPanel() {
   const businessId = getStoredBusinessId() ?? "";
 
   /**
-   * Filtering stays client-side even though the endpoint supports it: the panel
-   * already had working filter UI over an in-memory list, and a page of 100 is
-   * enough for a storefront's recent orders. Server-side paging is the change to
-   * make when a business outgrows that, not before.
+   * The latest 100 orders; the status and date filters run over them here. A
+   * text search asks the server (below), so it reaches every order.
    */
   const load = useCallback(async () => {
     if (!businessId) {
@@ -259,17 +300,54 @@ export function OrdersPanel() {
     void load();
   }, [load]);
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-3): a search asks the server
+   * (the orders route's own `search`: customer name, email or order number),
+   * so an order outside the latest 100 is found, and an unpaid cash order
+   * there can be completed offline. Debounced; the latest answer for the
+   * current text wins. Until it answers, the loaded orders are filtered here.
+   */
+  const [serverSearch, setServerSearch] = useState<{ q: string; orders: Order[] } | null>(null);
+  const query = search.trim();
+  useEffect(() => {
+    if (!query || !businessId) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchStoreOrders(businessId, { search: query, pageSize: 100 })
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            toast.error(error);
+            return;
+          }
+          setServerSearch({ q: query, orders: (data?.data ?? []).map(fromApi) });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, businessId]);
+  const serverHits = query && serverSearch?.q === query ? serverSearch.orders : null;
+
   const filtered = useMemo(() => {
-    let result = orders;
+    let result = serverHits ?? orders;
     if (statusFilter !== "all") result = result.filter((o) => o.status === statusFilter);
     if (dateFrom) result = result.filter((o) => o.date >= dateFrom);
     if (dateTo) result = result.filter((o) => o.date <= dateTo + "T23:59:59Z");
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (query && !serverHits) {
+      const q = query.toLowerCase();
       result = result.filter((o) => o.customerName.toLowerCase().includes(q) || o.ref.toLowerCase().includes(q) || o.customerEmail.toLowerCase().includes(q));
     }
-    return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [orders, search, statusFilter, dateFrom, dateTo]);
+    return [...result].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [orders, serverHits, query, statusFilter, dateFrom, dateTo]);
+
+  /** An order the server answered replaces its row in the loaded list and in the search answer. */
+  const replaceOrder = useCallback((orderId: string, updated: Order) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    setServerSearch((prev) => (prev ? { ...prev, orders: prev.orders.map((o) => (o.id === orderId ? updated : o)) } : prev));
+  }, []);
 
   const handleStatusUpdate = useCallback(async (orderId: string, newStatus: OrderStatus) => {
     if (!businessId) return;
@@ -296,10 +374,24 @@ export function OrdersPanel() {
     // Render what came back, not what was requested. The server decides the
     // resulting status; assuming it matched the request is how a screen ends up
     // showing a state the database never reached.
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    replaceOrder(orderId, updated);
     setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
     toast.success(`Order ${updated.ref} is now ${updated.status}`);
-  }, [businessId, load]);
+  }, [businessId, load, replaceOrder]);
+
+  const handleCompleteOffline = useCallback(async (orderId: string) => {
+    if (!businessId) return;
+    const { data, error } = await completeStoreOrderOffline(businessId, orderId);
+    if (error || !data) {
+      toast.error(error || "Could not record the payment. Please try again.");
+      return;
+    }
+    // Render the order the server answered (paid, its status kept or CONFIRMED).
+    const updated = fromApi(data);
+    replaceOrder(orderId, updated);
+    setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
+    toast.success(`Payment recorded for ${updated.ref}`);
+  }, [businessId, replaceOrder]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };
@@ -415,7 +507,12 @@ export function OrdersPanel() {
       </div>
 
       {selectedOrder && (
-        <OrderDetailSheet order={selectedOrder} onClose={() => setSelectedOrder(null)} onStatusUpdate={handleStatusUpdate} />
+        <OrderDetailSheet
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onStatusUpdate={handleStatusUpdate}
+          onCompleteOffline={handleCompleteOffline}
+        />
       )}
     </motion.div>
   );

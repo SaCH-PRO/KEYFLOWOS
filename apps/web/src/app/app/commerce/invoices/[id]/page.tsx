@@ -36,15 +36,19 @@ import {
   resendInvoiceReceipt,
   createInvoicePaymentLink,
   recordInvoicePayment,
+  confirmPendingInvoicePayment,
+  sendInvoiceEmail,
   Invoice,
   PaymentRecord,
   InvoiceTimelineEntry,
 } from "@/lib/client";
-import { apiDelete } from "@/lib/api";
+import { apiDelete, providerUnavailableOf } from "@/lib/api";
+import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { attemptIdempotencyKey, newPaymentAttempt, type PaymentAttempt } from "../../../finance/components/payment-record-modal";
 
 const STATUS_ORDER = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -55,6 +59,24 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
   OVERDUE: { label: "Overdue", color: "text-red-700", bg: "bg-red-50" },
   VOID: { label: "Void", color: "text-gray-500", bg: "bg-gray-100" },
 };
+
+/**
+ * V1-41 (D-27): Payment.provider of a payment an evidence scan or a Drive
+ * intake recorded PENDING (the server's EXTRACTED_PAYMENT_PROVIDER). Such a
+ * row is not money until a member with revenue write access confirms it
+ * (V1-41b: POST .../payments/:paymentId/confirm). A customer's pay-link intent
+ * is PENDING too, but is not an extracted row and is not confirmed here.
+ */
+const EXTRACTED_PAYMENT_PROVIDER = "extracted";
+const isPendingExtractedPayment = (p: PaymentRecord) => p.status === "PENDING" && p.provider === EXTRACTED_PAYMENT_PROVIDER;
+
+/**
+ * V1-41b (V1-41 review CR-V41-4): a confirmed extracted row (CONFIRMED) keeps
+ * its amount beside the SUCCESSFUL payment the member recorded from it; that
+ * payment is the money, so the row is never listed as a second one. The
+ * payments route no longer serves it; the invoice read still carries it.
+ */
+const isListedPayment = (p: PaymentRecord) => p.status !== "CONFIRMED";
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
@@ -75,33 +97,48 @@ export default function InvoiceDetailPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
+  // V1-41b: the pending extracted payment being confirmed, and whether the
+  // server refused this member the confirmation (403: no revenue write access).
+  const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null);
+  const [confirmForbidden, setConfirmForbidden] = useState(false);
+  const confirmingPaymentRef = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmMessage, setConfirmMessage] = useState("");
   const [showSendReview, setShowSendReview] = useState(false);
+  // W9-WEB-COMMERCE-NAV (R0-07): why the last "Email invoice" did not go out,
+  // when the server said email is not set up or not available.
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   useEffect(() => {
-    const init = async () => { const fresh = await refreshWorkspace(); const id = fresh ?? getStoredBusinessId(); if (id) setBusinessId(id); };
+    const init = async () => {
+      const fresh = await refreshWorkspace();
+      const id = fresh ?? getStoredBusinessId();
+      if (!mountedRef.current) return;
+      if (id) setBusinessId(id);
+      else { setError("Select a workspace to view this invoice"); setLoading(false); }
+    };
     void init();
   }, []);
 
+  // R0-QI-01: the invoice is read through the tenant-bound detail route, so
+  // the load waits for the workspace id instead of falling back to the public
+  // bare-id route (which hid DRAFT and VOID behind its shareable gate).
   useEffect(() => {
-    if (!invoiceId) return;
+    if (!invoiceId || !businessId) return;
     const load = async () => {
       setLoading(true);
       try {
-        const { data, error } = await getInvoice(invoiceId);
+        const { data, error } = await getInvoice(businessId, invoiceId);
         if (!mountedRef.current) return;
         if (error || !data) { setError(error ?? "Not found"); setLoading(false); return; }
         setInvoice(data);
-        if (businessId) {
-          const tl = await getInvoiceTimeline(businessId, invoiceId);
-          if (tl.data && mountedRef.current) setTimeline(tl.data.entries);
-        }
+        const tl = await getInvoiceTimeline(businessId, invoiceId);
+        if (tl.data && mountedRef.current) setTimeline(tl.data.entries);
       } catch { setError("Failed to load"); }
       finally { if (mountedRef.current) setLoading(false); }
     };
@@ -119,9 +156,33 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => { if (activeTab === "payments" && payments.length === 0) void loadPayments(); }, [activeTab, loadPayments, payments.length]);
 
-  const paidAmount = (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-  const remaining = Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
+  // R0-21 (M29): the server's status-aware figures (tenant detail route, and
+  // after a record the payments route's response). A response that carries no
+  // figures is read through the shared balance contract over its rows
+  // (V1-29b-REFUND-READERS, review V36-CR-1: invoiceBalanceOfStoredRows, the
+  // mirror of the server's balanceOfStoredRows): paid is the net received, so
+  // a refund (a separate negative REFUNDED row, D-14) is owed again. The
+  // SUCCESSFUL rows alone read 60 + 40 paid with the 40 refunded as Paid 100,
+  // Remaining 0.
+  const serverFigures = typeof invoice?.paidAmount === "number" && typeof invoice?.remaining === "number"
+    ? { paidAmount: invoice.paidAmount, remaining: invoice.remaining }
+    : null;
+  const rowFigures = (() => {
+    if (serverFigures || !invoice) return null;
+    const balance = invoiceBalanceOfStoredRows(Number(invoice.total), invoice.payments ?? [], invoice.currency);
+    return { paidAmount: balance.net, remaining: balance.remaining };
+  })();
+  const paidAmount = serverFigures?.paidAmount ?? rowFigures?.paidAmount ?? 0;
+  const remaining = serverFigures?.remaining ?? rowFigures?.remaining ?? 0;
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
+
+  // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
+  // key is made on the first submit and reused by every retry; closing drops
+  // it. A submit with a reference is keyed by the server's reference slot
+  // instead (attemptIdempotencyKey, review R021-ST-1).
+  const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
+  const recordingPaymentRef = useRef(false);
+  useEffect(() => { if (!showPaymentForm) paymentAttemptRef.current = null; }, [showPaymentForm]);
 
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     setActionLoading(prev => ({ ...prev, [key]: true }));
@@ -138,6 +199,30 @@ export default function InvoiceDetailPage() {
       else toast.error(error ?? "Failed");
     });
   };
+
+  // W9-WEB-COMMERCE-NAV (R0-07): the send-email door. The server emails the
+  // customer the invoice with its token pay link and moves a DRAFT to SENT
+  // (POST .../invoices/:id/send-email). With no Gmail connection it answers
+  // 503 {code: 'provider_not_configured'} before any outbound call (and
+  // provider_unavailable when Gmail is down): the page says so where the owner
+  // is looking, with the server's message, and the status stays as it was.
+  // "Send" is unchanged: it marks the invoice sent without emailing anyone.
+  const handleEmailInvoice = () => withLoading("email", async () => {
+    if (!businessId || !invoice) return;
+    setEmailError(null);
+    const res = await sendInvoiceEmail(businessId, invoice.id, {});
+    if (!mountedRef.current) return;
+    if (!res.error && res.data) {
+      if (invoice.status === "DRAFT") setInvoice(prev => prev ? { ...prev, status: "SENT" } : prev);
+      toast.success("Invoice emailed");
+      return;
+    }
+    const unavailable = providerUnavailableOf(res);
+    if (unavailable) {
+      const what = unavailable.code === "provider_not_configured" ? "Email is not configured" : "Email is unavailable right now";
+      setEmailError(`${what}: ${res.error ?? "no email provider answered"}. The invoice was not emailed.`);
+    } else toast.error(res.error ?? "Could not email this invoice");
+  });
 
   const handleMarkPaid = () => withLoading("paid", async () => {
     if (!invoice) return;
@@ -171,20 +256,55 @@ export default function InvoiceDetailPage() {
   };
 
   const handleRecordPayment = async () => {
-    if (!businessId || !invoice || recordingPayment) return;
+    if (!businessId || !invoice || recordingPayment || recordingPaymentRef.current) return;
     const amount = parseFloat(paymentForm.amount);
     if (isNaN(amount) || amount <= 0) { toast.error("Enter a valid amount"); return; }
-    if (amount > remaining + 0.005) { if (!window.confirm(`Amount exceeds remaining balance. Continue?`)) return; }
+    if (amount > remaining + 0.005) {
+      if (!window.confirm(`Over-payment of ${formatAmount(amount - remaining, invoice.currency)}: this invoice has ${formatAmount(remaining, invoice.currency)} remaining. Record it anyway? It will need a refund.`)) return;
+    }
+    if (!paymentAttemptRef.current) paymentAttemptRef.current = newPaymentAttempt();
+    recordingPaymentRef.current = true;
     setRecordingPayment(true);
     try {
-      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined });
+      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined, idempotencyKey: attemptIdempotencyKey(paymentAttemptRef.current, paymentForm.reference) });
       if (!error && data) {
-        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments } : prev);
-        setPayments(prev => [data.payment, ...prev]);
+        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
+        // A keyed retry answers the payment already recorded: list it once.
+        setPayments(prev => [data.payment, ...prev.filter(p => p.id !== data.payment.id)]);
         toast.success(data.invoice.status === "PAID" ? "Fully paid!" : `Payment recorded`);
         setShowPaymentForm(false); setPaymentForm({ amount: "", method: "Cash", reference: "", notes: "" });
       } else toast.error(error ?? "Failed");
-    } finally { setRecordingPayment(false); }
+    } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
+  };
+
+  // V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (D-27): confirm a payment an evidence
+  // scan or a Drive intake recorded PENDING. The amount sent is the one shown
+  // on the row, so a pending amount that changed meanwhile is refused (409)
+  // rather than recorded. The server's figures come from the answer; the list
+  // is read again so the confirmed money is listed once. A 403 (no revenue
+  // write access) withdraws the action; any other refusal re-reads the list
+  // (another member may have confirmed it first).
+  const handleConfirmPending = async (p: PaymentRecord) => {
+    if (!businessId || !invoice || confirmingPaymentRef.current) return;
+    confirmingPaymentRef.current = true;
+    setConfirmingPaymentId(p.id);
+    try {
+      const { data, error, status } = await confirmPendingInvoicePayment(businessId, invoice.id, p.id, { amount: Number(p.amount) });
+      if (!error && data) {
+        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
+        toast.success(`Payment of ${formatAmount(data.payment.amount, data.payment.currency)} confirmed`);
+        await loadPayments();
+      } else if (status === 403) {
+        setConfirmForbidden(true);
+        toast.error("Confirming a payment needs revenue write access", { description: error ?? undefined });
+      } else {
+        toast.error(error ?? "Could not confirm this payment");
+        await loadPayments();
+      }
+    } finally {
+      confirmingPaymentRef.current = false;
+      if (mountedRef.current) setConfirmingPaymentId(null);
+    }
   };
 
   const handleSendReminder = () => {
@@ -204,6 +324,20 @@ export default function InvoiceDetailPage() {
     });
   };
 
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the token link
+  // or an error. The fallback was the retired bare-id /pay/:id page, so a
+  // paid or void invoice copied a dead link.
+  const copyPaymentLink = async () => {
+    if (!businessId || !invoice) return;
+    const { data, error: linkError } = await createInvoicePaymentLink(businessId, invoice.id);
+    if (!data?.token) {
+      toast.error(linkError ?? "Could not create a payment link for this invoice");
+      return;
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}/public/invoice/${data.token}`);
+    toast.success("Copied");
+  };
+
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
   if (error || !invoice) return (
     <div className="max-w-4xl mx-auto py-20 text-center">
@@ -216,12 +350,21 @@ export default function InvoiceDetailPage() {
 
   const canEdit = invoice.status === "DRAFT";
   const canSend = invoice.status === "DRAFT";
+  // The server emails any invoice but a VOID one; a PAID one has its receipt door.
+  const canEmail = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canRemind = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canRecordPayment = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canVoid = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canDelete = invoice.status === "DRAFT" || invoice.status === "VOID";
   const meta = STATUS_META[invoice.status] ?? STATUS_META.DRAFT;
   const currentStep = STATUS_ORDER.indexOf(invoice.status);
+  // V1-41b (CR-V41-4): a CONFIRMED extracted row is not a payment of its own.
+  const listedPayments = payments.filter(isListedPayment);
+  const listedInvoicePaymentCount = (invoice.payments ?? []).filter(isListedPayment).length;
+  // V1-41b: a pending extracted payment is confirmed only while the invoice
+  // takes payments (the confirmation records one), and not after the server
+  // refused this member (403).
+  const canConfirmPending = canRecordPayment && !confirmForbidden;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto pb-12">
@@ -248,7 +391,7 @@ export default function InvoiceDetailPage() {
           <div className="relative group">
             <button className="inline-flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><MoreHorizontal className="w-3.5 h-3.5" /></button>
             <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1 hidden group-hover:block">
-              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={async () => { if (!businessId) return; const res = await createInvoicePaymentLink(businessId, invoice.id); const url = res.data?.token ? window.location.origin + "/public/invoice/" + res.data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={copyPaymentLink} />
               <DropdownItem icon={Printer} label="Print / PDF" show onClick={() => window.print()} />
               {invoice.status === "PAID" && <DropdownItem icon={Receipt} label="Resend receipt" show onClick={() => resendInvoiceReceipt(businessId!, invoice.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} />}
               {canEdit && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
@@ -258,6 +401,13 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       </div>
+
+      {emailError && (
+        <div role="alert" className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{emailError}</span>
+          <button onClick={() => setEmailError(null)} className="shrink-0 text-xs font-medium underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Status Timeline */}
       <div className="rounded-xl border border-border bg-card shadow-sm p-5 mb-6">
@@ -297,7 +447,7 @@ export default function InvoiceDetailPage() {
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`flex items-center gap-1.5 px-5 py-3 text-[13px] font-medium transition-colors border-b-2 ${activeTab === tab ? "border-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1))]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
                   {tab === "activity" && <Activity className="w-4 h-4" />}{tab === "payments" && <CreditCard className="w-4 h-4" />}{tab === "notes" && <StickyNote className="w-4 h-4" />}
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  {tab === "payments" && (invoice.payments?.length ?? 0) > 0 && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{invoice.payments!.length}</span>}
+                  {tab === "payments" && listedInvoicePaymentCount > 0 && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{listedInvoicePaymentCount}</span>}
                 </button>
               ))}
             </div>
@@ -317,25 +467,41 @@ export default function InvoiceDetailPage() {
                 {activeTab === "payments" && (
                   <motion.div key="payments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
                     {paymentsLoading ? <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div> :
-                      payments.length === 0 ? (
+                      listedPayments.length === 0 ? (
                         <div className="text-center py-6">
                           <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
                           {canRecordPayment && <button onClick={() => setShowPaymentForm(true)} className="mt-2 text-xs text-[hsl(var(--kf-accent1))] hover:underline">Record a payment</button>}
                         </div>
-                      ) : payments.map(p => (
-                        <div key={p.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/60">
+                      ) : listedPayments.map(p => {
+                        const pendingExtracted = isPendingExtractedPayment(p);
+                        return (
+                        <div key={p.id} data-testid="invoice-payment-row" data-payment-id={p.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/60">
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${p.status === "SUCCESSFUL" ? "bg-emerald-50" : "bg-amber-50"}`}>
                               <DollarSign className={`w-4 h-4 ${p.status === "SUCCESSFUL" ? "text-emerald-600" : "text-amber-600"}`} />
                             </div>
                             <div>
                               <p className="text-sm font-medium">{formatAmount(p.amount, p.currency)}</p>
-                              <p className="text-[11px] text-muted-foreground">{p.provider} · {new Date(p.createdAt).toLocaleDateString()}</p>
+                              <p className="text-[11px] text-muted-foreground">{pendingExtracted ? "Read from evidence" : p.provider} · {new Date(p.createdAt).toLocaleDateString()}</p>
+                              {pendingExtracted && <p className="text-[11px] text-amber-700">Awaiting confirmation: not counted as paid until a member confirms it.</p>}
                             </div>
                           </div>
-                          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {pendingExtracted && canConfirmPending && (
+                              <button
+                                onClick={() => void handleConfirmPending(p)}
+                                disabled={confirmingPaymentId !== null}
+                                className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                              >
+                                {confirmingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+                                Confirm
+                              </button>
+                            )}
+                            <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
+                          </div>
                         </div>
-                      ))}
+                        );
+                      })}
                   </motion.div>
                 )}
                 {activeTab === "notes" && (
@@ -410,9 +576,10 @@ export default function InvoiceDetailPage() {
           <div className="rounded-xl border border-border bg-card shadow-sm p-5 space-y-1">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Actions</h3>
             {canSend && <ActionButton icon={Send} label="Send invoice" onClick={handleSend} loading={actionLoading.send} primary />}
+            {canEmail && <ActionButton icon={Send} label="Email invoice" onClick={handleEmailInvoice} loading={actionLoading.email} />}
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
-            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={async () => { if (!businessId) return; const { data } = await createInvoicePaymentLink(businessId, invoice.id); const url = data?.token ? window.location.origin + "/public/invoice/" + data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />
             <ActionButton icon={Printer} label="Print / PDF" onClick={() => window.print()} />
             {canEdit && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
             {canVoid && <ActionButton icon={Ban} label="Void invoice" onClick={handleVoid} loading={actionLoading.void} />}

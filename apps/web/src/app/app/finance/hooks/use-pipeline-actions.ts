@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   updateQuoteStatus,
@@ -20,6 +20,7 @@ import {
   type Quote,
 } from "@/lib/client";
 import { exportToCsv } from "../../commerce/components/bulk-action-bar";
+import { newPaymentAttemptKey } from "../components/payment-record-modal";
 import type { FinancialRecord } from "@/lib/finance/types";
 
 export interface PaymentForm {
@@ -27,12 +28,68 @@ export interface PaymentForm {
   method: string;
   reference: string;
   notes: string;
+  /** R0-21: the form open's idempotency key (PaymentRecordModal), sent as-is; absent for a submit with a reference. */
+  idempotencyKey?: string;
 }
 
 export interface ConvertForm {
   taxRate: string;
   dueDate: string;
   notes: string;
+}
+
+/**
+ * W3-B6-WEB-BULK-SKIPPED (owner ruling D-66, review CR-B6-1): the answer of
+ * PATCH invoices/bulk {action:"delete"}. Only DRAFT and VOID invoices are
+ * deleted; each invoice the server refused is listed in `skipped` with its
+ * status and the single route's reason ("void it first", "refund ... first"),
+ * and counted in `skippedCount` (FOLLOW3-B6).
+ */
+export interface InvoiceBulkDeleteAnswer {
+  updated: number;
+  skipped?: Array<{ id: string; invoiceStatus?: string; reason?: string }>;
+  skippedCount?: number;
+}
+
+/**
+ * W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): shows what a bulk invoice delete did
+ * (the count deleted, and each skipped invoice with its reason) and returns
+ * the requested ids that are gone: every id the answer does not list in
+ * `skipped` (an id the server did not find is not live there either). When
+ * `skippedCount` counts refusals the answer does not list, which ids were kept
+ * is unknown, so none is removed. The callers dropped every selected invoice
+ * and toasted "N invoice(s) updated", hiding the issued invoices kept.
+ */
+export function reportInvoiceBulkDelete(
+  answer: InvoiceBulkDeleteAnswer,
+  requestedIds: string[],
+  invoices: Pick<Invoice, "id" | "invoiceNumber">[],
+): Set<string> {
+  const skipped = Array.isArray(answer.skipped) ? answer.skipped : [];
+  const unlisted = Math.max(0, (answer.skippedCount ?? skipped.length) - skipped.length);
+  if (answer.updated > 0 || skipped.length + unlisted === 0) toast.success(`${answer.updated} invoice(s) deleted`);
+  for (const skip of skipped) {
+    const label = invoices.find((inv) => inv.id === skip.id)?.invoiceNumber ?? skip.id.slice(0, 8);
+    toast.warning(`Invoice ${label} was not deleted`, {
+      description: skip.reason ?? `Only DRAFT and VOID invoices can be deleted (it is ${skip.invoiceStatus ?? "issued"})`,
+    });
+  }
+  if (unlisted > 0) {
+    toast.warning(`${unlisted} more invoice(s) were not deleted`, { description: "Refresh the list to see which invoices remain." });
+    return new Set();
+  }
+  const skippedIds = new Set(skipped.map((skip) => skip.id));
+  return new Set(requestedIds.filter((id) => !skippedIds.has(id)));
+}
+
+/** V1-45b: the key of a document's pending Duplicate, minted on its first attempt. */
+function pendingDuplicateKey(keys: Map<string, string>, slot: string): string {
+  let key = keys.get(slot);
+  if (!key) {
+    key = newPaymentAttemptKey();
+    keys.set(slot, key);
+  }
+  return key;
 }
 
 export function usePipelineActions({
@@ -198,9 +255,15 @@ export function usePipelineActions({
     [setInvoices],
   );
 
+  // R0-21: one request per invoice at a time. The loading flag disables the
+  // button only after React re-renders; two clicks that land before that
+  // would otherwise both POST.
+  const recordingRef = useRef<Set<string>>(new Set());
+
   const handleRecordPayment = useCallback(
     async (invoice: Invoice, form: PaymentForm) => {
-      if (!businessId) return;
+      if (!businessId || recordingRef.current.has(invoice.id)) return;
+      recordingRef.current.add(invoice.id);
       setLoading(`payment-${invoice.id}`, true);
       try {
         const { data, error } = await recordInvoicePayment(businessId, invoice.id, {
@@ -208,12 +271,19 @@ export function usePipelineActions({
           method: form.method,
           reference: form.reference || undefined,
           notes: form.notes || undefined,
+          idempotencyKey: form.idempotencyKey,
         });
         if (data) {
           setInvoices((prev) =>
             prev.map((inv) =>
               inv.id === invoice.id
-                ? { ...inv, status: data.invoice.status, paidAt: data.invoice.paidAt, payments: [...(inv.payments ?? []), data.payment] }
+                ? {
+                    ...inv,
+                    status: data.invoice.status,
+                    paidAt: data.invoice.paidAt,
+                    // A keyed retry answers the payment already recorded: list it once.
+                    payments: [...(inv.payments ?? []).filter((p) => p.id !== data.payment.id), data.payment],
+                  }
                 : inv,
             ),
           );
@@ -221,6 +291,7 @@ export function usePipelineActions({
           toast.success("Payment recorded");
         } else toast.error(error ?? "Failed to record payment");
       } finally {
+        recordingRef.current.delete(invoice.id);
         setLoading(`payment-${invoice.id}`, false);
       }
     },
@@ -277,6 +348,12 @@ export function usePipelineActions({
   );
 
   /* ─── Duplicate ─── */
+  // V1-45b (D-15): each Duplicate of a document is one create with one
+  // Idempotency-Key, kept until it succeeds: a retry after a failed answer (a
+  // lost response) reuses it and is answered with the copy the first attempt
+  // made; the Duplicate after a success is a new copy and mints a new key.
+  const duplicateKeysRef = useRef(new Map<string, string>());
+
   const handleDuplicateQuote = useCallback(
     async (quote: Quote) => {
       if (!businessId) return;
@@ -292,9 +369,11 @@ export function usePipelineActions({
           discountType: quote.discountType ?? undefined,
           discountValue: quote.discountValue ?? undefined,
           notes: quote.notes ? `${quote.notes} (Copy)` : "Copy",
+          idempotencyKey: pendingDuplicateKey(duplicateKeysRef.current, `quote:${quote.id}`),
         });
         if (data) {
-          setQuotes((prev) => [data, ...prev]);
+          duplicateKeysRef.current.delete(`quote:${quote.id}`);
+          setQuotes((prev) => [data, ...prev.filter((q) => q.id !== data.id)]);
           toast.success("Quote duplicated");
         } else toast.error(error ?? "Failed to duplicate quote");
       } finally {
@@ -319,9 +398,11 @@ export function usePipelineActions({
           discountType: invoice.discountType ?? undefined,
           discountValue: invoice.discountValue ?? undefined,
           notes: invoice.notes ? `${invoice.notes} (Copy)` : "Copy",
+          idempotencyKey: pendingDuplicateKey(duplicateKeysRef.current, `invoice:${invoice.id}`),
         });
         if (data) {
-          setInvoices((prev) => [data, ...prev]);
+          duplicateKeysRef.current.delete(`invoice:${invoice.id}`);
+          setInvoices((prev) => [data, ...prev.filter((inv) => inv.id !== data.id)]);
           toast.success("Invoice duplicated");
         } else toast.error(error ?? "Failed to duplicate invoice");
       } finally {
@@ -351,10 +432,13 @@ export function usePipelineActions({
       if (invoiceIds.length > 0) {
         const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
         const { data, error } = await bulkUpdateInvoices(businessId, invoiceIds, action as "send" | "void" | "delete");
-        if (data) {
+        if (data && action === "delete") {
+          // W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): only the invoices deleted leave the list.
+          const deleted = reportInvoiceBulkDelete(data, invoiceIds, invoices);
+          setInvoices((prev) => prev.filter((inv) => !deleted.has(inv.id)));
+        } else if (data) {
           toast.success(`${data.updated} invoice(s) updated`);
-          if (action === "delete") setInvoices((prev) => prev.filter((inv) => !invoiceIds.includes(inv.id)));
-          else setInvoices((prev) => prev.map((inv) => (invoiceIds.includes(inv.id) ? { ...inv, status } : inv)));
+          setInvoices((prev) => prev.map((inv) => (invoiceIds.includes(inv.id) ? { ...inv, status } : inv)));
         } else toast.error(error ?? "Bulk update failed");
       }
     },

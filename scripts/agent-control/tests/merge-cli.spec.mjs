@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 import {
   REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote, directiveComment, realPlanComment,
 } from './helpers/merge-grant-fixture.mjs';
@@ -59,19 +59,19 @@ const scenario = (comments_by_snapshot, overrides = {}) => ({
   active: common,
   ret: ret('ACCEPT_FOR_ADMISSION'),
   compare: { [`${SEMANTIC}...${HEAD}`]: { status: 'ahead', files: [{ filename: '.agent-control/claude-return.yaml' }] } },
-  runs: REQUIRED_WORKFLOWS.map((name, i) => ({ id: 100 + i, name, head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-10-17T00:00:00Z' })),
+  runs: REQUIRED_WORKFLOWS.map((name, i) => ({ id: 100 + i, name, path: REQUIRED_WORKFLOW_FILES[name], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-10-17T00:00:00Z' })),
   reviews: [{ user: { login: 'copilot-pull-request-reviewer[bot]', type: 'Bot' }, body: '**Findings:** 0', commit_id: HEAD, html_url: REVIEW_URL }],
   events: [],
   comments_by_snapshot,
   ...overrides,
 });
 
-function run(s, args, env = {}) {
+function run(s, args, env = {}, entry = CLI) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-merge-cli-'));
   const tracePath = path.join(dir, 'trace.json');
   const scenarioPath = path.join(dir, 'scenario.json');
   fs.writeFileSync(scenarioPath, JSON.stringify(s));
-  const child = spawnSync(process.execPath, ['--import', PRELOAD, CLI, ...args], {
+  const child = spawnSync(process.execPath, ['--import', PRELOAD, entry, ...args], {
     encoding: 'utf8',
     timeout: 60000,
     // Only what Node needs to start; nothing of this process's credentials.
@@ -434,4 +434,72 @@ test('NC CLI hold chronology (F9-005): HOLD(other, unrelated), HOLD(other, names
 
 test('CLI hold chronology referent (F9-005): a release between the two holds, then the target-naming re-HOLD and its release, merges once', () => {
   assertMergedThroughCli([holdComment('HOLD', 'KF-OTHER-001'), holdComment('RESUME', 'KF-OTHER-001'), holdComment('HOLD', 'KF-OTHER-001', {}, { pr_number: 87 }), holdComment('RESUME', 'KF-OTHER-001'), grantComment()]);
+});
+
+// Review SEC-C5-1: every load of the CLI is a run. Callers read exit 0 as a
+// verdict (agent-control-gate.yml reads `--grant-only` exit 0 as the #80
+// grant), so loading it under another name -- a symlink, a bin shim, a
+// wrapper that imports it -- without credentials exits 2 with the reason,
+// never 0 in silence. A preload refuses every request, so even a CLI that
+// skipped its credential check could reach no network.
+function loadWithoutCredentials(dir, entry, args) {
+  const child = spawnSync(process.execPath, ['--import', pathToFileURL(path.join(dir, 'no-network.mjs')).href, entry, ...args], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH },
+  });
+  if (child.error) throw child.error;
+  return child;
+}
+
+const writeWrapper = (dir) => {
+  const wrapper = path.join(dir, 'wrapper.mjs');
+  fs.writeFileSync(wrapper, `await import(${JSON.stringify(pathToFileURL(CLI).href)});\n`);
+  return wrapper;
+};
+
+test('NC CLI load: run directly, through a link of another name or imported by a wrapper, the CLI without credentials exits 2, never 0', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-merge-cli-load-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'no-network.mjs'), 'globalThis.fetch = async (url) => { throw new Error(`no network in this test: ${url}`); };\n');
+    const entries = [['direct', CLI], ['wrapper import', writeWrapper(dir)]];
+    const link = path.join(dir, 'grant-check');
+    try {
+      fs.symlinkSync(CLI, link);
+      entries.push(['symlink named grant-check', link]);
+    } catch (error) {
+      // An unprivileged Windows account cannot create symlinks; the other entries still run.
+      if (process.platform !== 'win32') throw error;
+      t.diagnostic(`symlink case not run: ${error.code}`);
+    }
+    for (const [label, entry] of entries) {
+      for (const args of [['--grant-only'], ['--merge'], []]) {
+        const r = loadWithoutCredentials(dir, entry, args);
+        const what = `${label} ${args.join(' ') || '(no flag)'}`;
+        assert.equal(r.status, 2, `${what}: exit ${r.status}, stdout ${JSON.stringify(r.stdout)}, stderr ${JSON.stringify(r.stderr)}`);
+        assert.match(r.stderr, /GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required/, what);
+        assert.equal(r.stdout, '', `${what}: no verdict is printed`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CLI load referent: imported by a wrapper with credentials, the CLI evaluates and prints its verdict', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-merge-cli-wrap-'));
+  try {
+    const wrapper = writeWrapper(dir);
+    const denied = run(scenario([[claudeNote('RETURN')]]), ['--grant-only'], {}, wrapper);
+    assert.equal(denied.code, 3, denied.stderr);
+    assert.equal(denied.out.mode, 'grant-only');
+    assert.equal(denied.out.reason, 'merge_grant_not_satisfied');
+    const g = grantComment();
+    const granted = run(scenario([[g]]), ['--grant-only'], {}, wrapper);
+    assert.equal(granted.code, 0, granted.stderr || granted.stdout);
+    assert.equal(granted.out.merge_grant.comment_id, g.id);
+    assert.equal(puts(granted).length, 0, 'grant-only never merges');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

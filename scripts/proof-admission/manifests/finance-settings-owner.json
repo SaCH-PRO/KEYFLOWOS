@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-35-EXIT-PROOF:R0-09-ID-HARDEN",
+  "proofScope": "release0-exit-binding",
+  "description": "R0-35-EXIT-PROOF binds finance-settings.service.spec.ts, created by R0-09f-D11-FINANCE-TAX-AND-WEB (84e4668a; owner ruling D-11: the tax rate is OWNER only), the one R0-09 family suite no manifest bound. Every case that passed at the R0-35 head is required (5 cases); allowAdditionalCases is true so a later packet may add a case without editing this manifest, while a required case that is renamed, skipped, turned into a todo or deleted rejects the verdict, and a new skip or todo fails release0-proof-coverage.spec.ts until scripts/proof-admission/release0-index.json explains it. Run from the repo root: node scripts/proof-admission/run-manifests.mjs --only finance-settings-owner.json (or pnpm --filter server proof:release0 for every Release 0 manifest), against a migrated isolated database and REDIS_URL. W11-D116-PROFILE-OWNER re-pin (owner rulings D-104, D-116, 2026-11-12; not a weakening): the owner case is retitled and strengthened; its fake honours the members filter's role, the OWNER membership and SUPER_ADMIN still keep the rate, and the recorded owner (Business.ownerId) with no membership, holding STAFF or holding ADMIN is now refused the change (403 BUSINESS_PROFILE_OWNER_ONLY) where it was admitted.",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": true,
+  "suites": [
+    "src/modules/finance/finance-settings.service.spec.ts"
+  ],
+  "requiredCases": [
+    "FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f) a submission without defaultTaxRate (or with null, which update does not write) is returned as it is, with no owner lookup",
+    "FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f) a STAFF or ADMIN member's change to the rate is refused: 403 BUSINESS_PROFILE_OWNER_ONLY naming defaultTaxRate",
+    "FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f) a non-owner's resubmitted current rate is not a change: the submission goes through without defaultTaxRate (a stored NULL counts as 0, as get answers it)",
+    "FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f) the owner (an OWNER membership of this business) and a SUPER_ADMIN keep the rate in the submission; the recorded owner (Business.ownerId) holding no OWNER membership (none, STAFF or ADMIN) does not (owner rulings D-104, D-116)",
+    "FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f) no authenticated actor is not the owner (fails closed), and the owner lookups are bound to the route business"
+  ]
+}

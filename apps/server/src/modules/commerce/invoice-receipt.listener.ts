@@ -2,13 +2,16 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { CommerceService } from './commerce.service';
 import { GmailService } from './gmail.service';
-import { buildInvoiceEmailHtml } from './invoice-email.template';
-import { sumSuccessfulPayments, type InvoiceForEmail } from './invoice-email.types';
+import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
+import type { InvoiceForEmail } from './invoice-email.types';
+import { isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { appUrl } from '../../core/config/runtime-urls';
 
 /**
  * Listens for `invoice.paid` and auto-sends a receipt email when:
  *   - the invoice has a contact with an email address, AND
+ *   - the invoice reads back PAID with nothing remaining over its own-tenant
+ *     payment rows (V1-49: no "remaining 0" receipt for a partial), AND
  *   - the business has Gmail connected.
  * The matching `invoice.receipt_sent` ContactEvent is logged via
  * CommerceService.recordReceiptSent so the timeline reflects the auto-send.
@@ -34,6 +37,23 @@ export class InvoiceReceiptListener {
       if (!invoice) return;
       const recipient = invoice.contact?.email;
       if (!recipient) return;
+      // V1-49 (M24): the receipt states what the rows say was received. The
+      // figures are the balance of the invoice's own-tenant rows (M31:
+      // getInvoiceWithBusiness loads full Payment rows, and a row carrying
+      // another businessId is not this invoice's money), read through
+      // balanceOfStoredRows (V1-29b-REFUND-READERS: a pre-V1-29 flipped row is
+      // its payment plus its refund, CR-V29-4). An invoice read back
+      // as anything but PAID with nothing remaining (a refund reopened it
+      // before this ran, rows short of the total, no row at all) gets no
+      // receipt, rather than one claiming full settlement; nothing is written.
+      // The operator's "Resend receipt" applies the same rule (review SEC-V49-1).
+      const balance = ownTenantReceiptBalance(invoice);
+      if (!isSettledForReceiptEmail(invoice, balance)) {
+        this.logger.log(
+          `Auto-receipt not sent for invoice ${invoice.id}: ${invoice.status} with ${balance.remaining} ${invoice.currency} still owed`,
+        );
+        return;
+      }
       // createPaymentLink throws for PAID/VOID; that's an expected business
       // condition for the receipt path, so swallow only that and fall back
       // to the most-recent existing link (or null pay CTA).
@@ -47,7 +67,6 @@ export class InvoiceReceiptListener {
         }
       }
       const paymentUrl = link ? `${appUrl()}/public/invoice/${link.token}` : null;
-      const paid = sumSuccessfulPayments(invoice.payments);
 
       const html = buildInvoiceEmailHtml({
         businessName: invoice.business?.name ?? 'Your business',
@@ -67,11 +86,9 @@ export class InvoiceReceiptListener {
         dueDate: invoice.dueDate
           ? new Date(invoice.dueDate).toLocaleDateString('en-TT', { dateStyle: 'medium' })
           : null,
-        items: (invoice.items ?? []).map((it) => ({
-          description: it.description,
-          quantity: Number(it.quantity),
-          unitPrice: Number(it.unitPrice),
-        })),
+        // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+        // InvoiceItem.total, which the template prints.
+        items: emailLineItems(invoice.items),
         subtotal: Number(invoice.subtotal ?? invoice.total),
         taxRate: invoice.taxRate != null ? Number(invoice.taxRate) : null,
         taxAmount: invoice.taxAmount != null ? Number(invoice.taxAmount) : null,
@@ -79,8 +96,11 @@ export class InvoiceReceiptListener {
         discountValue: invoice.discountValue != null ? Number(invoice.discountValue) : null,
         discountAmount: invoice.discountAmount != null ? Number(invoice.discountAmount) : null,
         total: Number(invoice.total),
-        amountPaid: paid || Number(invoice.total),
-        amountRemaining: 0,
+        // V1-29b-REFUND-READERS (CR-V29-3): the money received net of refunds.
+        // `paid` counts refunded money too: an invoice paid, fully refunded
+        // and paid again read "received TT$200.00" on a TT$100 invoice.
+        amountPaid: balance.net,
+        amountRemaining: balance.remaining,
         currency: invoice.currency,
         notes: invoice.notes,
         invoiceUrl: paymentUrl,

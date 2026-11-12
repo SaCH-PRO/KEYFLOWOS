@@ -4,6 +4,10 @@
   "proofScope": "key-action-boundary-real-database",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/key-action-boundary.integration.test.ts",
+    "test/key-action-boundary-surfaces.integration.test.ts"
+  ],
   "requiredCases": [
     "P1 — capability identity: a wrapper never substitutes for the capability an EXECUTE_TOOL proposal for the tool is sealed as helpdesk_create_ticket",
     "P1 — capability identity: a wrapper never substitutes for the capability it is governed as helpdesk_create_ticket, never as key_autonomy.EXECUTE_TOOL",
@@ -30,9 +34,10 @@
     "P4 — revocation or demotion before claim admission yields zero tickets the approver’s tier is lowered below the capability tier after they approved",
     "P4 — revocation or demotion before claim admission yields zero tickets the requester’s Membership is deleted after they confirmed",
     "P4 — revocation or demotion before claim admission yields zero tickets the requester is banned after KEY autonomy would have cleared their action",
-    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row may request and confirm, as BusinessGuard lets them act",
-    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: approval needs a Membership tier",
-    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row ownership transferred after they confirmed yields zero tickets",
+    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row is refused at the boundary (D-104): prepare answers DENY PRINCIPAL_NOT_AUTHORIZED, nothing can be confirmed, and no ticket is created",
+    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row cannot approve a proposal nobody requested: no authority in this business (D-104)",
+    "P4 — revocation or demotion before claim admission yields zero tickets the owner with no Membership row a confirmation stored under the retired owner_without_membership basis is refused at admission: PRINCIPAL_NOT_AUTHORIZED, zero tickets",
+    "P4 — revocation or demotion before claim admission yields zero tickets a STAFF member below the capability tier cannot approve a proposal nobody requested: approval needs the capability tier",
     "P4 — revocation or demotion before claim admission yields zero tickets SUPER_ADMIN may approve without a Membership, and loses that with the role",
     "P4 — revocation or demotion before claim admission yields zero tickets a revocation still in flight makes admission wait, and is observed once it commits",
     "P4 — revocation or demotion before claim admission yields zero tickets a revocation that starts during admission waits for the claim to commit",
@@ -98,6 +103,7 @@
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E8 — the executor plugin admits a proposal by its id against its sealed envelope, or not at all",
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E8 — KeyActionProposalService.execute never reaches the plugin for this capability",
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E9 — KeyCortexEfferentBridgeService: a context user id is not a principal",
+    "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E10 — asking again before confirming answers the same action; after it ran, the step is settled once",
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E10 — GraphActionsController: an authenticated caller is asked to confirm; quick-confirm is no longer ignored",
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E10 — with autonomy that clears tier 2, a trusted caller’s action runs, and is attributed",
     "P7 — no surface reaches the ticket write around the boundary the classes that own each surface E6 — executePlan: plan approval is not a confirmation of the action",

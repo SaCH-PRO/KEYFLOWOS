@@ -3,7 +3,7 @@
 import { Heart, TrendingUp, DollarSign, Calendar, UserCheck } from "lucide-react";
 
 interface RelationshipHealthStripProps {
-  healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
+  healthMetrics?: { engagement: number; payment?: number; responsiveness: number; relationship: number } | null;
   outstandingBalance?: number | null;
   totalRevenue?: number | null;
   nextBooking?: string | null;
@@ -55,8 +55,15 @@ export function RelationshipHealthStrip({
   profileCompleteness,
   lastInteraction,
 }: RelationshipHealthStripProps) {
-  const overallHealth = healthMetrics
-    ? Math.round((healthMetrics.engagement + healthMetrics.payment + healthMetrics.responsiveness + healthMetrics.relationship) / 4)
+  // W8-MONEY-SIGNALS (D-100; review CR-W8MS-1): average the metrics served
+  // (payment is left out for a member without revenue read).
+  const servedHealth = healthMetrics
+    ? [healthMetrics.engagement, healthMetrics.payment, healthMetrics.responsiveness, healthMetrics.relationship].filter(
+        (value): value is number => typeof value === "number",
+      )
+    : [];
+  const overallHealth = servedHealth.length > 0
+    ? Math.round(servedHealth.reduce((sum, value) => sum + value, 0) / servedHealth.length)
     : null;
 
   const health = overallHealth !== null ? getHealthLabel(overallHealth) : null;

@@ -5,6 +5,12 @@ import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
 import { IdentityService } from '../../modules/identity/identity.service';
 import { DOCUMENT_CATEGORIES, DOCUMENT_TYPES } from '../../modules/documents/document-taxonomy';
 
+/** The configured super admin email (trimmed), or null when SUPER_ADMIN_EMAIL is unset or blank. */
+export function superAdminEmailFrom(env: NodeJS.ProcessEnv): string | null {
+  const email = env.SUPER_ADMIN_EMAIL?.trim();
+  return email ? email : null;
+}
+
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SeedService.name);
@@ -28,26 +34,39 @@ export class SeedService implements OnApplicationBootstrap {
     // cleaned up manually if desired.
   }
 
-  private async seedSuperAdmin() {
-    const SUPER_ADMIN_EMAIL = 'keyflowos.tt@gmail.com';
+  /**
+   * R0-09-ID-HARDEN (D-11): promote the existing User whose email is exactly
+   * SUPER_ADMIN_EMAIL to SUPER_ADMIN — a role every guard bypasses. Unset or
+   * blank, nobody is promoted and no User row is read. This used to promote a
+   * hard-coded address on every boot in every environment.
+   *
+   * Never creates a user. Read through the `env` parameter (process.env by
+   * default), the way main.ts reads LISTEN_HOST, so the spec can drive it.
+   */
+  async seedSuperAdmin(env: NodeJS.ProcessEnv = process.env) {
+    const email = superAdminEmailFrom(env);
+    if (!email) {
+      this.logger.log('SUPER_ADMIN_EMAIL is not set — no super admin promotion');
+      return;
+    }
     try {
       const user = await this.prisma.client.user.findUnique({
-        where: { email: SUPER_ADMIN_EMAIL },
+        where: { email },
         select: { id: true, role: true },
       });
       if (!user) {
-        this.logger.log(`Super admin user (${SUPER_ADMIN_EMAIL}) not found yet — skipping promotion`);
+        this.logger.log('SUPER_ADMIN_EMAIL names no existing user yet — skipping promotion');
         return;
       }
       if (user.role === 'SUPER_ADMIN') {
-        this.logger.log(`Super admin (${SUPER_ADMIN_EMAIL}) already promoted`);
+        this.logger.log('The SUPER_ADMIN_EMAIL user is already SUPER_ADMIN');
         return;
       }
       await this.prisma.client.user.update({
-        where: { email: SUPER_ADMIN_EMAIL },
+        where: { id: user.id },
         data: { role: 'SUPER_ADMIN' },
       });
-      this.logger.log(`Promoted ${SUPER_ADMIN_EMAIL} to SUPER_ADMIN`);
+      this.logger.log(`Promoted the SUPER_ADMIN_EMAIL user (${user.id}) to SUPER_ADMIN`);
     } catch (e) {
       this.logger.warn('Super admin seed failed: ' + (e as Error).message);
     }

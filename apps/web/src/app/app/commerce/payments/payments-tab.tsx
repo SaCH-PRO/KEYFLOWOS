@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import type { Invoice } from "@/lib/client";
 import {
   markInvoicePaid,
-  updateInvoiceStatus,
+  sendInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { getStatusBadge } from "../components/commerce-types";
@@ -35,6 +35,17 @@ function getDaysOverdue(dueDate: string | null | undefined): number {
   const now = new Date();
   const diff = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   return Math.max(0, diff);
+}
+
+// FOLLOW3-A8 review (SEC-A8-1 / A8-CR-1): a reminder is only for an invoice that
+// was issued and is still owed, the same set the invoice detail page and the
+// mobile actions offer one for. DRAFT/PENDING were never issued (the public link
+// in the email would be dead), FULLY_CREDITED/VOID/PAID owe nothing, FAILED is
+// not a live invoice: none of them is reminded from this tab.
+const REMINDABLE_STATUSES: ReadonlySet<string> = new Set(["SENT", "OVERDUE", "PARTIALLY_PAID"]);
+
+function canRemind(status: string | null | undefined): boolean {
+  return !!status && REMINDABLE_STATUSES.has(status);
 }
 
 function getContactName(contact: { firstName?: string | null; lastName?: string | null } | null | undefined): string {
@@ -195,19 +206,32 @@ export default function PaymentsTab({
     [actionLoading, setInvoices]
   );
 
+  // FOLLOW3-A8 (VR-01): the reminder goes through the reminder door
+  // (POST .../invoices/:id/send-reminder), the door the Collections panel uses
+  // since V1-42c. It used to ask the status route for SENT, which since V1-42
+  // answers a SENT invoice without doing anything (and refuses
+  // PARTIALLY_PAID/OVERDUE), while this toasted "Reminder sent" and rewrote the
+  // row to SENT. "Reminder sent" now means the server delivered one; a reminder
+  // changes nothing on the invoice, so the row is left as it is. Only SENT,
+  // OVERDUE and PARTIALLY_PAID rows offer the button (canRemind); the handler
+  // checks the same set so no other status ever reaches the door from here.
   const handleSendReminder = useCallback(
     async (invoiceId: string) => {
       if (actionLoading[invoiceId]) return;
+      if (!canRemind(invoices.find((i) => i.id === invoiceId)?.status)) return;
+      if (!businessId) {
+        toast.error("Select a workspace to send a reminder");
+        return;
+      }
       setActionLoading((prev) => ({ ...prev, [invoiceId]: "send" }));
       try {
-        const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
-        if (!error && data) {
-          setInvoices((prev) =>
-            prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i))
-          );
+        const { data, error } = await sendInvoiceReminder(businessId, invoiceId, {});
+        if (error || !data) {
+          toast.error(error ?? "Failed to send reminder");
+        } else if (data.delivered) {
           toast.success("Reminder sent");
         } else {
-          toast.error(error ?? "Failed to send reminder");
+          toast.warning("Reminder logged but not emailed: this customer has no email address");
         }
       } finally {
         setActionLoading((prev) => {
@@ -217,7 +241,7 @@ export default function PaymentsTab({
         });
       }
     },
-    [actionLoading, setInvoices]
+    [actionLoading, businessId, invoices]
   );
 
   const toggleSelected = useCallback((id: string) => {
@@ -623,18 +647,20 @@ export default function PaymentsTab({
                   </span>
                   {!isPaid && (
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleSendReminder(inv.id)}
-                        disabled={!!isLoading}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-                        title="Send Reminder"
-                      >
-                        {isLoading === "send" ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Send className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                      {canRemind(inv.status) && (
+                        <button
+                          onClick={() => handleSendReminder(inv.id)}
+                          disabled={!!isLoading}
+                          className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                          title="Send Reminder"
+                        >
+                          {isLoading === "send" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Send className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleMarkPaid(inv.id)}
                         disabled={!!isLoading}

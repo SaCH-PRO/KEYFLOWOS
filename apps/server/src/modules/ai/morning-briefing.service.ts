@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CronSchedulerService } from './cron-scheduler.service';
@@ -6,6 +6,7 @@ import { PlannerService } from './planner.service';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { AiOversightService } from './ai-oversight.service';
 import { WorkloadAggregatorService } from './workload-aggregator.service';
+import { filterVisibleActivity, type TimelineViewer } from '../timeline/timeline-visibility';
 
 export interface BriefingCard {
   stepOrder: number;
@@ -19,6 +20,30 @@ export interface BriefingCard {
   oneClickApprove: boolean;
   module: string;
 }
+
+/**
+ * What marks the daily briefing among a business's ai plans (generateBriefing writes them; KEY-R3b
+ * review SEC-R3b-4: POST briefing/:planId/execute-all takes no other plan). W4-D93-NO-MEMBER-CONTACTS
+ * (D-93): plan-step-authority.ts reads them too, to run a briefing stored with no member as the owner.
+ */
+export const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
+export const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
+export const BRIEFING_SCOPE = 'briefing';
+/**
+ * Review SEC-W7BR-2: the states of a briefing the plan queue still runs (PlanExecutorService runs
+ * plans 'approved' or 'executing'), and the states of a step that is done (every other step is still
+ * to run or in hand: pending, approved, executing, awaiting approval).
+ */
+const BRIEFING_OPEN_STATUSES: readonly string[] = ['approved', 'executing'];
+const BRIEFING_STEP_DONE_STATUSES: readonly string[] = ['completed', 'failed', 'skipped'];
+
+/**
+ * W6-BRIEFINGS-SCOPE review SEC-W6BS-3 (owner rulings D-93, D-63): the advisory lock namespace that
+ * serializes the writing of a business's daily briefing (generateBriefing), and the transaction's
+ * bounds, as the plan-change and slot-claim transactions bound theirs.
+ */
+const BRIEFING_WRITE_LOCK_NAMESPACE = 'ai:daily-briefing:';
+const BRIEFING_WRITE_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
 
 export interface BriefingResult {
   planId: string;
@@ -49,7 +74,20 @@ export class MorningBriefingService implements OnModuleInit {
     // A separate scheduler would register them; for now, we provide manual generation
   }
 
-  async generateBriefing(businessId: string): Promise<BriefingResult | null> {
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63): the daily briefing is the business's
+   * (written once a day with every card, run as the owner, D-93); what it answers is the cards `viewer`
+   * may read (forViewer). With no viewer (a system caller) it answers every card, as before.
+   *
+   * Review SEC-W6BS-3: the day's briefing is written once. The check for today's briefing and the
+   * write ran with nothing between concurrent first reads of the day, so each wrote its own briefing
+   * plan (run as the owner, D-93) and emitted plan.approved, and the plan queue ran each one's steps
+   * (payment reminders, tasks, campaign drafts) again. The write now takes a transaction-scoped
+   * advisory lock on the business and day and checks again under it, so a read that finds the
+   * briefing written meanwhile answers that one; only the read that writes it emits
+   * briefing.generated and plan.approved.
+   */
+  async generateBriefing(businessId: string, viewer?: TimelineViewer): Promise<BriefingResult | null> {
     const settings = await this.prisma.client.autopilotSettings.findUnique({ where: { businessId } });
     if (settings && !settings.briefingEnabled) {
       this.logger.log(`Briefing disabled for business ${businessId}`);
@@ -60,12 +98,13 @@ export class MorningBriefingService implements OnModuleInit {
     const briefingModules = settings?.briefingModules ?? ['commerce', 'crm', 'bookings', 'projects'];
 
     // Check if briefing already exists for today
+    const todaysBriefing = { businessId, objective: { startsWith: `Daily Briefing — ${today}` } };
     const existing = await this.prisma.client.aiPlan.findFirst({
-      where: { businessId, objective: { startsWith: `Daily Briefing — ${today}` } },
+      where: todaysBriefing,
       include: { steps: true },
     });
     if (existing) {
-      return this.formatBriefingResult(existing);
+      return this.forViewer(this.formatBriefingResult(existing), viewer);
     }
 
     const cards: BriefingCard[] = [];
@@ -98,35 +137,54 @@ export class MorningBriefingService implements OnModuleInit {
       return null;
     }
 
-    // Create plan with briefing cards as steps
-    const plan = await this.prisma.client.aiPlan.create({
-      data: {
-        businessId,
-        objective: `Daily Briefing — ${today}`,
-        rawInput: 'Morning briefing auto-generated scan',
-        urgency: 'normal',
-        scope: ['briefing'],
-        modules: [...new Set(topCards.map((c) => c.module))],
-        maxRiskTier: Math.max(...topCards.map((c) => this.governance.getToolTier(c.toolName))),
-        status: 'approved', // Briefings are pre-approved as plans
-        steps: {
-          create: topCards.map((card, idx) => ({
-            order: idx + 1,
-            status: 'pending',
-            toolName: card.toolName,
-            module: card.module,
-            action: card.title,
-            description: card.title,
-            riskTier: this.governance.getToolTier(card.toolName),
-            requiresApproval: !card.oneClickApprove,
-            dependsOn: [],
-            inputPayload: card.args as any,
-            role: card.role,
-          })),
+    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the daily briefing is system-created, so it records
+    // the business owner as its member (read now, so an ownership transfer is followed) and its approved
+    // steps run as the owner on the plan queue, rather than as no member (D-73).
+    const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+
+    // Create plan with briefing cards as steps: once a day (SEC-W6BS-3), under the business's lock for
+    // the day, after checking again for a briefing a concurrent read wrote meanwhile.
+    const lockKey = `${BRIEFING_WRITE_LOCK_NAMESPACE}${businessId}:${today}`;
+    const written = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const stored = await tx.aiPlan.findFirst({ where: todaysBriefing, include: { steps: true } });
+      if (stored) return { plan: stored, created: false };
+      const created = await tx.aiPlan.create({
+        data: {
+          businessId,
+          userId: owner?.ownerId ?? null,
+          objective: `${BRIEFING_OBJECTIVE_PREFIX}${today}`,
+          rawInput: BRIEFING_RAW_INPUT,
+          urgency: 'normal',
+          scope: [BRIEFING_SCOPE],
+          modules: [...new Set(topCards.map((c) => c.module))],
+          maxRiskTier: Math.max(...topCards.map((c) => this.governance.getToolTier(c.toolName))),
+          status: 'approved', // Briefings are pre-approved as plans
+          steps: {
+            create: topCards.map((card, idx) => ({
+              order: idx + 1,
+              status: 'pending',
+              toolName: card.toolName,
+              module: card.module,
+              action: card.title,
+              description: card.title,
+              riskTier: this.governance.getToolTier(card.toolName),
+              requiresApproval: !card.oneClickApprove,
+              dependsOn: [],
+              inputPayload: card.args as any,
+              role: card.role,
+            })),
+          },
         },
-      },
-      include: { steps: true },
-    });
+        include: { steps: true },
+      });
+      return { plan: created, created: true };
+    }, BRIEFING_WRITE_TX_OPTIONS);
+    // A concurrent read wrote today's briefing first: answer that one, and emit nothing (it did).
+    if (!written.created) {
+      return this.forViewer(this.formatBriefingResult(written.plan), viewer);
+    }
+    const plan = written.plan;
 
     const result: BriefingResult = {
       planId: plan.id,
@@ -146,7 +204,37 @@ export class MorningBriefingService implements OnModuleInit {
     // Trigger immediate execution — briefing plans are pre-approved
     this.events.emit('plan.approved', { planId: plan.id, businessId });
 
-    return result;
+    return this.forViewer(result, viewer);
+  }
+
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63, the rule V1-84 built in
+   * timeline-visibility.ts, as W5-BRIEFING-SCOPE applied it to the morning briefing): GET briefing
+   * answered every card to every member: overdue invoice numbers and totals in titles, the contact and
+   * the amount in args. A card is now served to `viewer` as the timeline serves a row
+   * (filterVisibleActivity, filtered, not refused): by its module (ACTIVITY_MODULE_SCOPES; a commerce
+   * card, which carries invoice or quote numbers and totals, needs revenue read; a module the table
+   * does not map, such as 'system', OWNER / ADMIN only), its args as the row's data, and the contact its
+   * args.contactId names (crm read and a contact the viewer may open, visibilityClause M7).
+   * totalCards, highImpactCards and totalAtStake are worked out over the cards served, and totalAtStake
+   * is withheld (0, as V1-84 TS-04 withholds a day's revenueImpact) from a viewer without revenue read.
+   */
+  private async forViewer(result: BriefingResult, viewer?: TimelineViewer): Promise<BriefingResult> {
+    if (!viewer) return result;
+    const rows = result.cards.map((card) => ({
+      card,
+      module: card.module,
+      contactId: typeof card.args?.contactId === 'string' ? card.args.contactId : null,
+      data: card.args,
+    }));
+    const cards = (await filterVisibleActivity(this.prisma, viewer, rows)).map((row) => row.card);
+    return {
+      ...result,
+      totalCards: cards.length,
+      highImpactCards: cards.filter((c) => c.impact === 'HIGH').length,
+      totalAtStake: viewer.readable.has('revenue') ? cards.reduce((sum, c) => sum + (c.args?.amount ?? 0), 0) : 0,
+      cards,
+    };
   }
 
   async executeBriefingCard(businessId: string, planId: string, stepId: string): Promise<{ success: boolean; error?: string }> {
@@ -177,7 +265,51 @@ export class MorningBriefingService implements OnModuleInit {
     return { success: true };
   }
 
-  async executeAllBriefingCards(businessId: string, planId: string): Promise<{ executed: number; failed: number }> {
+  /**
+   * W4-D93-NO-MEMBER-CONTACTS (D-93): since D-93 generateBriefing records the business owner as the
+   * briefing's member, so the rules below for a plan another member runs apply to it; a briefing stored
+   * with no member before D-93 is still taken by the member who runs it.
+   *
+   * KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): POST briefing/:planId/execute-all approved
+   * the briefing's steps for no member (the daily briefing was written with no userId), so the plan
+   * queue ran them with no principal: a contact read read every contact. The plan must be of the
+   * business the route checked (it was read by id alone), and the member who runs it is recorded as
+   * the plan's member when it has none, so the plan queue checks every step against that member when
+   * it runs it (QueueService.processPlanStep). A plan another member already runs is that member's:
+   * only it, the business OWNER or an ADMIN executes it.
+   *
+   * KEY-R3b review SEC-R3b-4: only the daily briefing is taken (the plan generateBriefing writes:
+   * scope 'briefing', its objective and raw input), never another plan with no member (a journey,
+   * an agent trigger, a KEY-cortex system plan), which a member could otherwise adopt or bind. And
+   * the business OWNER or an ADMIN who runs a briefing another member took takes it over: the plan
+   * is theirs from then on, so a member who took it first cannot hold it to scopes that refuse its
+   * steps.
+   */
+  async executeAllBriefingCards(businessId: string, planId: string, userId?: string): Promise<{ executed: number; failed: number }> {
+    if (!userId) throw new ForbiddenException('A member runs the briefing');
+    const briefing = {
+      id: planId,
+      businessId,
+      scope: { has: BRIEFING_SCOPE },
+      objective: { startsWith: BRIEFING_OBJECTIVE_PREFIX },
+      rawInput: BRIEFING_RAW_INPUT,
+    };
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true } });
+    if (!plan) throw new NotFoundException('Briefing not found');
+    if (!plan.userId) {
+      await this.prisma.client.aiPlan.updateMany({ where: { ...briefing, userId: null }, data: { userId } });
+    }
+    const runsAs = (await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true } }))?.userId;
+    if (runsAs !== userId) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
+        throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin runs it');
+      }
+      await this.prisma.client.aiPlan.updateMany({ where: briefing, data: { userId } });
+    }
     const steps = await this.prisma.client.aiPlanStep.findMany({
       where: { planId, status: 'pending' },
     });
@@ -193,15 +325,70 @@ export class MorningBriefingService implements OnModuleInit {
     return { executed, failed };
   }
 
-  async skipBriefing(businessId: string, planId: string): Promise<void> {
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
-      data: { status: 'completed' },
-    });
-    await this.prisma.client.aiPlanStep.updateMany({
-      where: { planId },
+  /**
+   * W7-BRIEFINGS-REST (review SEC-W6BS-2; owner ruling D-73, KEY-R3b review SEC-R3b-4): POST
+   * briefing/:planId/skip updated any plan by id alone (another business's, a journey's, a member's
+   * own plan) for any member, with no record of who did it. It is now bound as executeAllBriefingCards
+   * is: only the daily briefing (scope 'briefing', its objective and raw input) of the business the
+   * route checked is taken (anything else is refused as absent, 404), and a briefing another member
+   * runs is that member's: only it, the business OWNER or an ADMIN skips it (403). A briefing stored
+   * with no member (before D-93) is not another member's, as execute-all lets the member who runs it
+   * take it. The route records who skipped it (AiController.skipBriefing, a plan:skip execution-log row).
+   *
+   * Review SEC-W7BR-2 (D-73): the skip set every step to 'skipped' and the plan to 'completed' whatever
+   * their state, so a step that had run (completed), failed, or been handed on to run (approved, which
+   * the plan queue still dispatches, or executing) was recorded as skipped, and every repeat wrote
+   * again and was audited again. It now skips only the steps not yet run ('pending'), leaves every
+   * other step as it is, and closes the plan (completed) only when no step is left to run or running;
+   * otherwise the plan queue finishes the steps in hand and closes it. A briefing already finished
+   * (not approved or executing, the states the plan queue runs) is left as it is. It answers how many
+   * steps it skipped and the plan's status; `changed` is false when it wrote nothing, and the route
+   * then writes no audit row, so a repeat is a no-op. The daily briefing is executing from the moment
+   * it is written (plan.approved), so an executing briefing is still skipped, not refused.
+   */
+  async skipBriefing(
+    businessId: string,
+    planId: string,
+    userId?: string,
+  ): Promise<{ skipped: number; status: string; changed: boolean }> {
+    if (!userId) throw new ForbiddenException('A member skips the briefing');
+    const briefing = {
+      id: planId,
+      businessId,
+      scope: { has: BRIEFING_SCOPE },
+      objective: { startsWith: BRIEFING_OBJECTIVE_PREFIX },
+      rawInput: BRIEFING_RAW_INPUT,
+    };
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { userId: true, status: true } });
+    if (!plan) throw new NotFoundException('Briefing not found');
+    if (plan.userId && plan.userId !== userId) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
+        throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin skips it');
+      }
+    }
+    if (!BRIEFING_OPEN_STATUSES.includes(plan.status)) {
+      return { skipped: 0, status: plan.status, changed: false };
+    }
+    const { count: skipped } = await this.prisma.client.aiPlanStep.updateMany({
+      where: { planId, status: 'pending' },
       data: { status: 'skipped' },
     });
+    const inHand = await this.prisma.client.aiPlanStep.count({
+      where: { planId, status: { notIn: [...BRIEFING_STEP_DONE_STATUSES] } },
+    });
+    let closed = 0;
+    if (inHand === 0) {
+      ({ count: closed } = await this.prisma.client.aiPlan.updateMany({
+        where: { ...briefing, status: { in: [...BRIEFING_OPEN_STATUSES] } },
+        data: { status: 'completed', completedAt: new Date() },
+      }));
+    }
+    const status = (await this.prisma.client.aiPlan.findFirst({ where: briefing, select: { status: true } }))?.status ?? plan.status;
+    return { skipped, status, changed: skipped > 0 || closed > 0 };
   }
 
   async getTodayBriefing(businessId: string): Promise<BriefingResult | null> {

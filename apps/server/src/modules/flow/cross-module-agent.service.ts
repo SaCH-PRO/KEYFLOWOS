@@ -16,6 +16,17 @@ import {
   BookingCancelledPayload,
   BookingRescheduledPayload,
 } from '../../core/event-bus/events.types';
+import { schedulersDisabled } from '../../core/config/env';
+import { isConvertedQuote } from '../commerce/quote-workflow';
+
+/** The stored statuses of a quote still open to the customer (sent, not decided, not expired). */
+const FOLLOW_UP_OPEN_QUOTE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'VIEWED']);
+
+/**
+ * The ScheduledAgentJob types this service's poller executes (executeScheduledJob).
+ * Every other type in the table belongs to another runner and is never read here.
+ */
+const CROSS_MODULE_JOB_TYPES = ['quote_followup', 'post_purchase_review_request', 'post_purchase_reorder_prompt'] as const;
 
 export interface WorkflowDefinition {
   key: string;
@@ -231,6 +242,11 @@ export class CrossModuleAgentService implements OnModuleDestroy {
   }
 
   private startJobPoller() {
+    // V1-24b: a DB poller armed in the constructor is a scheduler like any other.
+    if (schedulersDisabled()) {
+      this.logger.log('[CrossModule] Scheduled job poller disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     const POLL_INTERVAL_MS = 60_000;
     this.jobPollerInterval = setInterval(() => {
       this.processScheduledJobs().catch((e) =>
@@ -240,9 +256,24 @@ export class CrossModuleAgentService implements OnModuleDestroy {
     this.logger.log('[CrossModule] Scheduled job poller started (60s interval)');
   }
 
+  /**
+   * V1-35-DM-POLLER-CLAIM (#174 REL-01/02, PRS-M17/M18). ScheduledAgentJob is
+   * shared with other modules' runners (abandoned_cart_recovery,
+   * review_solicitation, lead_magnet_enroll), so this poller reads only the
+   * job types it executes; it used to close the others COMPLETED without their
+   * effect. Each job is claimed before any effect by a compare-and-set on the
+   * version read (PENDING, same updatedAt, still due; count === 1), so
+   * overlapping ticks, a second server instance, a runner that took the job
+   * after this read, or a writer that re-armed it after this read never repeat
+   * the task or email or run a stale payload (KF-EXEC-TIME-001 "one
+   * claimant"). The claim stamps COMPLETED; a failed execution then marks the
+   * row FAILED only if it is still this claim's. A lease for a crash after the
+   * claim is V1+.
+   */
   private async processScheduledJobs() {
     const dueJobs = await this.prisma.client.scheduledAgentJob.findMany({
       where: {
+        jobType: { in: [...CROSS_MODULE_JOB_TYPES] },
         status: 'PENDING',
         scheduledFor: { lte: new Date() },
       },
@@ -251,18 +282,31 @@ export class CrossModuleAgentService implements OnModuleDestroy {
     });
 
     for (const job of dueJobs) {
+      // The claim is a compare-and-set on the version read (review SEC-V35-1):
+      // still PENDING, the same updatedAt, still due. A row re-armed after the
+      // read (quote re-sent: PENDING again, new scheduledFor and payload) is a
+      // new version and is left for the tick that reads it, never run now with
+      // the stale payload. A claim that throws leaves the row PENDING and ends
+      // this tick (logged by the interval).
+      const claimedAt = new Date();
+      const claim = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { id: job.id, status: 'PENDING', updatedAt: job.updatedAt, scheduledFor: { lte: claimedAt } },
+        data: { status: 'COMPLETED', executedAt: claimedAt },
+      });
+      if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
       try {
         await this.executeScheduledJob(job);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
-          data: { status: 'COMPLETED', executedAt: new Date() },
-        });
       } catch (e) {
         this.logger.error(`[CrossModule] Failed to execute job ${job.id}: ${(e as Error).message}`);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
+        // Fenced to this claim (review SEC-V35-2): a row its writer re-armed
+        // during the execution (PENDING, executedAt null) keeps its new run.
+        const failed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: job.id, status: 'COMPLETED', executedAt: claimedAt },
           data: { status: 'FAILED' },
-        }).catch(() => {});
+        }).catch(() => null);
+        if (failed && failed.count !== 1) {
+          this.logger.warn(`[CrossModule] Job ${job.id} changed during its failed execution; left as its writer set it`);
+        }
       }
     }
   }
@@ -391,11 +435,17 @@ export class CrossModuleAgentService implements OnModuleDestroy {
 
     const quote = await this.prisma.client.quote.findFirst({
       where: { id: quoteId, businessId },
-      select: { status: true },
+      select: { status: true, invoiceId: true },
     });
 
-    if (!quote || quote.status === 'CONVERTED' || quote.status === 'ACCEPTED') {
-      this.logger.log(`[CrossModule] Quote ${p.quoteRef} already converted/accepted, skipping ${checkpoint} follow-up`);
+    // V1-QUOTE-CHAIN-finish (review CR-W10-2): only an open offer is followed
+    // up. The job skipped CONVERTED and ACCEPTED only, so a customer who had
+    // REJECTED the quote (final in the V1-50 table) still got "Following up on
+    // your quote" and the owner an "unconverted" task; so did a converted
+    // quote stored SENT (isConvertedQuote: an invoice linked). A deleted quote
+    // reads as absent.
+    if (!quote || isConvertedQuote(quote) || !FOLLOW_UP_OPEN_QUOTE_STATUSES.has(quote.status)) {
+      this.logger.log(`[CrossModule] Quote ${p.quoteRef} is no longer an open offer (${quote?.status ?? 'gone'}), skipping ${checkpoint} follow-up`);
       return;
     }
 
@@ -639,6 +689,29 @@ export class CrossModuleAgentService implements OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`[CrossModule] quote.sent handler failed: ${(e as Error).message}`, (e as Error).stack);
+    }
+  }
+
+  /**
+   * V1-QUOTE-CHAIN-finish (review CR-W10-2): a rejected quote's pending
+   * follow-up checks are cancelled (a REJECTED quote is final), whether or not
+   * the follow-up workflow is still enabled. The job itself also skips any
+   * quote that is no longer an open offer.
+   */
+  @OnEvent('quote.rejected')
+  async handleQuoteRejected(payload: { quote?: { id?: string } | null; businessId?: string }) {
+    try {
+      const quoteId = payload?.quote?.id;
+      if (!quoteId || !payload.businessId) return;
+      const cancelled = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { businessId: payload.businessId, entityId: quoteId, jobType: 'quote_followup', status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.count > 0) {
+        this.logger.log(`[CrossModule] Cancelled ${cancelled.count} pending follow-up jobs for rejected quote ${quoteId}`);
+      }
+    } catch (e) {
+      this.logger.error(`[CrossModule] quote.rejected handler failed: ${(e as Error).message}`, (e as Error).stack);
     }
   }
 

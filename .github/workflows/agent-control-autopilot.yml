@@ -21,7 +21,9 @@ on:
       - "CI/CD Pipeline"
       - "Agent Control Gate"
       - "Branch divergence"
-      - "DAST (HawkScan)"
+      # The required DAST gate (V1-30, D-22). DAST (HawkScan) is manual-only
+      # and is not an admission gate, so its runs wake nothing.
+      - "DAST (Native)"
       - "Agent Control Worker Proof"
     types: [completed]
   schedule:

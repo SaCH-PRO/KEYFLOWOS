@@ -7,6 +7,7 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { KeyConnectorService } from '../../key-connector/key-connector.service';
+import { connectionView } from '../../key-connector/connection-view';
 import { KeyCortexConnectorService } from '../key-cortex-connector.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
 import {
@@ -15,6 +16,75 @@ import {
   KeyCortexToolResult,
 } from '../key-cortex-tool-registry.service';
 import { KeyCortexEventBusService } from '../key-cortex-event-bus.service';
+import { deepRedact } from '../../../core/security/redaction';
+
+/** deepRedact's marker, so both passes below answer a withheld field the same way. */
+const WITHHELD = '***REDACTED***';
+
+/**
+ * The stored connector credential columns of IntegrationConnection (authData,
+ * authDataRef). Matched case-insensitively on the field NAME, as deepRedact
+ * matches; neither name holds one of the shared SENSITIVE_FIELD_PATTERNS, and
+ * authData's own keys are whatever the provider needs (a bare `key`, a
+ * `username`), so the whole value is withheld.
+ */
+const CONNECTOR_CREDENTIAL_FIELD = 'authdata';
+
+function withholdConnectorCredentials(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    for (const item of value) withholdConnectorCredentials(item);
+  } else if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      if (key.toLowerCase().includes(CONNECTOR_CREDENTIAL_FIELD)) obj[key] = WITHHELD;
+      else withholdConnectorCredentials(obj[key]);
+    }
+  }
+  return value;
+}
+
+/**
+ * W11-KEY-ORGAN-OUTPUT-REDACT review SEC-W11OR-1: key_connector.execute_internal
+ * answered the KeyCortexConnectorService answer as it came, and module actions
+ * behind it answer raw credential rows: social.get_connected_accounts answers
+ * each SocialConnection with its token and refreshToken, and
+ * settings.configure_integration answers the upserted IntegrationConnection
+ * with its stored authData and authDataRef. The answer goes to the LLM
+ * provider, into CortexActionLog.result (auditResultText takes only the call's
+ * input values out, and unified-memory retrieval reads results back into
+ * prompts) and into the BusinessEvent the registry emits.
+ *
+ * So this tool answers a copy: the JSON form (what the LLM and both audit sinks
+ * receive anyway; a BigInt as its decimal text) with every connector
+ * credential column withheld and then deepRedact's shared policy applied
+ * (SENSITIVE_FIELD_PATTERNS: token, secret, password, apikey, ...), at any
+ * depth, whatever module or action produced it. The caller's object is not
+ * touched (an adapter may answer a shared object). An answer with no JSON form
+ * (a cycle) keeps only its outcome: the action may already have written, so it
+ * is not reported as failed.
+ *
+ * A backstop, not the projection: the rows should leave their modules without
+ * secrets (follow-up for the social and settings adapters, and for the other
+ * doors that forward KeyCortexConnectorService answers).
+ */
+function internalAnswerView(result: unknown): unknown {
+  let plain: unknown;
+  try {
+    const json = JSON.stringify(result, (_key, value: unknown) =>
+      typeof value === 'bigint' ? value.toString() : value,
+    );
+    if (json === undefined) return undefined;
+    plain = JSON.parse(json);
+  } catch {
+    const outcome = (result ?? {}) as { success?: unknown; error?: unknown };
+    return {
+      success: outcome.success,
+      ...(typeof outcome.error === 'string' ? { error: outcome.error } : {}),
+      dataWithheld: 'the module answer has no JSON form',
+    };
+  }
+  return deepRedact(withholdConnectorCredentials(plain));
+}
 
 @Injectable()
 export class KeyConnectorAdapterService extends KeyOrganAdapter {
@@ -59,7 +129,14 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
           category: { type: 'string' },
         },
         async (ctx, input) => {
-          const providers = await this.keyConnector.listProviders(ctx.businessId, input.category as string);
+          const entries = await this.keyConnector.listProviders(ctx.businessId, input.category as string);
+          // W11-KEY-ORGAN-OUTPUT-REDACT: each entry's connection is mapped with
+          // its stored credentials (authData); answer it as connectionView, the
+          // shape GET key-connector/providers answers (SEC-W7KC-1).
+          const providers = entries.map((entry) => ({
+            provider: entry.provider,
+            connection: entry.connection ? connectionView(entry.connection) : undefined,
+          }));
           return { success: true, data: { providers, count: providers.length } };
         },
       ),
@@ -71,7 +148,13 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
-          const connections = await this.keyConnector.listConnections(ctx.businessId);
+          // W11-KEY-ORGAN-OUTPUT-REDACT: listConnections maps every row with its
+          // stored provider credentials (authData), and this answer goes to the
+          // LLM provider and into CortexActionLog.result. Answer each one as
+          // connectionView, as GET key-connector/connections does (SEC-W7KC-1).
+          const connections = (await this.keyConnector.listConnections(ctx.businessId)).map((connection) =>
+            connectionView(connection),
+          );
           return { success: true, data: { connections, count: connections.length } };
         },
       ),
@@ -107,7 +190,9 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
             timestamp: new Date(),
             correlationId: ctx.correlationId ?? ctx.sessionId ?? 'unknown',
           });
-          return { success: true, data: result };
+          // W11-KEY-ORGAN-OUTPUT-REDACT review SEC-W11OR-1: answered through
+          // internalAnswerView, never as the raw module answer (see there).
+          return { success: true, data: internalAnswerView(result) };
         },
       ),
       this.makeTool(

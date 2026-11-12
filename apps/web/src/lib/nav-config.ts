@@ -57,6 +57,7 @@ import {
   Landmark,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
+import { NAV_ROUTE_LABELS } from "./semantic-routes";
 
 export interface ResolvedFeatureFlag {
   key: string;
@@ -71,9 +72,41 @@ export interface NavItem {
   href: string;
   icon: LucideIcon;
   matchTab?: string;
+  /**
+   * With matchTab: the entry lights only on this ?view of that tab
+   * (W9-WEB-COMMERCE-NAV). Quotes is the pipeline tab's quotes view, so it
+   * stays dark on the pipeline's other views.
+   */
+  matchView?: string;
   exactMatch?: boolean;
   featureKey?: string;
   dormantFlag?: DormantFeatureFlagKey;
+}
+
+/**
+ * Whether a section entry is the page on screen (the rail's active state).
+ * An entry with matchTab lights on its path with that ?tab (and, with
+ * matchView, that ?view); an exactMatch entry on its path with no ?tab; any
+ * other on its path or below it. `search` is the current search params, read
+ * reactively by the caller so a search-param-only navigation re-lights the
+ * rail (W9-WEB-COMMERCE-NAV: the shell kept the tab it read on the last
+ * pathname change).
+ */
+export function isNavItemActive(
+  item: NavItem,
+  pathname: string,
+  search: { get(name: string): string | null } | null,
+): boolean {
+  const basePath = item.href.split("?")[0];
+  const tab = search?.get("tab") ?? null;
+  if (item.matchTab) {
+    if (pathname !== basePath || tab !== item.matchTab) return false;
+    return item.matchView ? (search?.get("view") ?? null) === item.matchView : true;
+  }
+  if (item.exactMatch) {
+    return pathname === basePath && !tab;
+  }
+  return pathname === basePath || pathname.startsWith(basePath + "/");
 }
 
 export interface NavSection {
@@ -97,7 +130,8 @@ export interface PrimaryNavItem {
 // ============================================================================
 
 export const primaryNav: PrimaryNavItem[] = [
-  { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/command-center" },
+  // Label under decision D-09 — see NAV_ROUTE_LABELS in semantic-routes.ts.
+  { id: "cockpit", label: NAV_ROUTE_LABELS["/app/command-center"], icon: Zap, href: "/app/command-center" },
   { id: "key-chat", label: "KEY", icon: Bot, href: "/app/key/chat" },
   { id: "operate", label: "Operate", icon: Briefcase },
   { id: "build", label: "Build", icon: Wrench },
@@ -131,7 +165,23 @@ export const operateSections: NavSection[] = [
     icon: Banknote,
     items: [
       { label: "Overview", href: "/app/financial-flow", icon: Banknote },
+      // Label under decision D-09 (NAV_ROUTE_LABELS["/app/commerce"]). Kept as
+      // a literal on purpose: nav-destinations.spec.ts and disclosure-mode.spec.ts
+      // read item labels and hrefs from this source as string literals, and a
+      // constant here would drop /app/commerce out of those gates. disclosure-mode.ts
+      // reads the constant, so a D-09 ruling is the constant plus this line;
+      // nav-labels-agree.spec.ts fails if this drifts from the constant.
       { label: "Sales", href: "/app/commerce", icon: Receipt },
+      // Doors to the two documents an owner sends (CF-20). Invoices has its own
+      // hub; quotes have no page of their own and live in the pipeline tab,
+      // which opens its quotes view for ?view=quotes (finance-pipeline.tsx).
+      // Both are allowlisted in every disclosure mode, so the default (startup)
+      // nav shows them. The commerce page follows ?tab and the pipeline ?view
+      // while mounted, so Quotes works from the other tabs and from the
+      // pipeline's other views; it lights only on the quotes view (matchView),
+      // and the rail follows the search params (W9-WEB-COMMERCE-NAV).
+      { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
+      { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline", matchView: "quotes" },
       // The gateway console — transactions, links, refunds across three
       // providers — sits under /app/commerce, so the drawer reached its
       // subtree but never named it.

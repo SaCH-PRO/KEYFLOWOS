@@ -1,5 +1,5 @@
 import { apiGet as apiGetSimple, apiPostSimple, apiDelete } from "../api";
-import { DEFAULT_BUSINESS_ID } from "./_defaults";
+import { noBusinessSelected } from "./_defaults";
 import { getStoredBusinessId } from "../workspace";
 
 export interface ApprovalRequest {
@@ -126,12 +126,16 @@ export async function cancelApprovalRequest(businessId: string, approvalId: stri
 }
 
 export async function approveApprovalRequest(id: string, _approverId: string) {
-  const businessId = getStoredBusinessId() ?? DEFAULT_BUSINESS_ID;
+  // R0-15d: the selected business, never the demo tenant; none selected, no request.
+  const businessId = getStoredBusinessId();
+  if (!businessId) return noBusinessSelected();
   return approveRequest(businessId, id);
 }
 
 export async function rejectApprovalRequest(id: string, _approverId: string) {
-  const businessId = getStoredBusinessId() ?? DEFAULT_BUSINESS_ID;
+  // R0-15d: the selected business, never the demo tenant; none selected, no request.
+  const businessId = getStoredBusinessId();
+  if (!businessId) return noBusinessSelected();
   return rejectRequest(businessId, id);
 }
 

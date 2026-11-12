@@ -3,33 +3,70 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { DollarSign, Clock, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
+import { budgetHasCosts, getProjectBudget, type ProjectBudget } from "@/lib/api/projects";
+import { getCachedBusiness } from "@/lib/workspace";
+import { formatCurrency } from "@/lib/currency";
 
-interface BudgetData {
-  budgetAmount: number;
-  budgetHours: number;
-  totalCost: number;
-  timeCost: number;
-  expenseCost: number;
-  trackedHours: number;
-  remainingBudget: number;
-  percentUsed: number;
-  percentHoursUsed: number;
-  status: string;
+/**
+ * PR196-PROJECTS-WEB (WPD-03, WPD-04): the budget is read through the API client
+ * (lib/api: the API base and the member's token). It used to fetch a web-relative
+ * /api/projects/... URL the web app has no route for, so every project read
+ * "No budget set". Amounts are in the business currency (D-13), not a hard-coded
+ * '$'; a failed read is an error, distinct from a project with no budget.
+ */
+type BudgetState =
+  | { kind: "loading" }
+  | { kind: "denied" }
+  | { kind: "error"; message: string }
+  | { kind: "loaded"; data: ProjectBudget };
+
+/**
+ * Review SEC-W196-2: a member refused the budget's costs sees that, not a number. The Revenue tab
+ * also shows this when the project's expense list refuses the member (the budget route returns the
+ * expense and spend totals that list guards).
+ */
+export function BudgetAccessDenied() {
+  return (
+    <div role="alert" className="p-8 text-center">
+      <p className="text-sm text-muted-foreground">You don&apos;t have access to this project&apos;s budget and costs.</p>
+    </div>
+  );
 }
 
-export function ProjectBudgetView({ businessId, projectId }: { businessId: string; projectId: string }) {
-  const [data, setData] = useState<BudgetData | null>(null);
-  const [loading, setLoading] = useState(true);
+export function ProjectBudgetView({ businessId, projectId, currency }: { businessId: string; projectId: string; currency?: string }) {
+  const [state, setState] = useState<BudgetState>({ kind: "loading" });
+  const money = (amount: number) => formatCurrency(amount, currency ?? getCachedBusiness()?.currency ?? "TTD");
 
   useEffect(() => {
-    fetch(`/api/projects/businesses/${businessId}/projects/${projectId}/budget`)
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    let cancelled = false;
+    void getProjectBudget(businessId, projectId).then((res) => {
+      if (cancelled) return;
+      if (res.data) setState({ kind: "loaded", data: res.data });
+      else if (res.status === 403) setState({ kind: "denied" });
+      else setState({ kind: "error", message: res.error ?? "Request failed" });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [businessId, projectId]);
 
-  if (loading) return <div className="p-8 text-center text-sm text-muted-foreground">Loading budget...</div>;
-  if (!data || data.budgetAmount === 0) return (
+  if (state.kind === "loading") return <div className="p-8 text-center text-sm text-muted-foreground">Loading budget...</div>;
+  if (state.kind === "denied") return <BudgetAccessDenied />;
+  if (state.kind === "error") {
+    return (
+      <div role="alert" className="p-8 text-center">
+        <p className="text-sm text-muted-foreground">Could not load this project&apos;s budget.</p>
+        <p className="text-xs text-muted-foreground mt-1">{state.message}</p>
+      </div>
+    );
+  }
+  // W9-PROJECTS-SERVER repair (review CR-W9PS-1; D-100's withholding rule): the route answers 200
+  // with the costs withheld (null) to a member who does not read expenses. The Revenue tab can still
+  // request it for them (its expense list failed with something other than a 403), so a withheld
+  // budget is the denial state, not a crash on its null status and totals.
+  if (!budgetHasCosts(state.data)) return <BudgetAccessDenied />;
+  const data = state.data;
+  if (!data.budgetAmount) return (
     <div className="p-8 text-center">
       <p className="text-sm text-muted-foreground">No budget set for this project.</p>
       <p className="text-xs text-muted-foreground mt-1">Set a budget in project settings to track profitability.</p>
@@ -49,9 +86,9 @@ export function ProjectBudgetView({ businessId, projectId }: { businessId: strin
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <BudgetCard icon={<DollarSign className="w-4 h-4 text-emerald-400" />} label="Budget" value={`$${data.budgetAmount.toFixed(0)}`} />
-        <BudgetCard icon={<TrendingDown className="w-4 h-4 text-red-400" />} label="Spent" value={`$${data.totalCost.toFixed(0)}`} />
-        <BudgetCard icon={<TrendingUp className="w-4 h-4 text-blue-400" />} label="Remaining" value={`$${data.remainingBudget.toFixed(0)}`} />
+        <BudgetCard icon={<DollarSign className="w-4 h-4 text-emerald-400" />} label="Budget" value={money(data.budgetAmount)} />
+        <BudgetCard icon={<TrendingDown className="w-4 h-4 text-red-400" />} label="Spent" value={money(data.totalCost)} />
+        <BudgetCard icon={<TrendingUp className="w-4 h-4 text-blue-400" />} label="Remaining" value={money(data.remainingBudget)} />
         <BudgetCard icon={<Clock className="w-4 h-4 text-violet-400" />} label="Hours" value={`${data.trackedHours.toFixed(1)}/${data.budgetHours.toFixed(0)}`} />
       </div>
 
@@ -89,11 +126,11 @@ export function ProjectBudgetView({ businessId, projectId }: { businessId: strin
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border border-border bg-card p-3">
           <div className="text-xs text-muted-foreground mb-1">Time Cost</div>
-          <div className="text-lg font-bold">${data.timeCost.toFixed(2)}</div>
+          <div className="text-lg font-bold">{money(data.timeCost)}</div>
         </div>
         <div className="rounded-lg border border-border bg-card p-3">
           <div className="text-xs text-muted-foreground mb-1">Expense Cost</div>
-          <div className="text-lg font-bold">${data.expenseCost.toFixed(2)}</div>
+          <div className="text-lg font-bold">{money(data.expenseCost)}</div>
         </div>
       </div>
     </div>

@@ -35,6 +35,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WORK_OBLIGATION_RAISED, type ObligationRaisedPayload } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 /**
  * Used when a contract has no `renewalNoticeDays`. 30 is the extractor's own
@@ -60,6 +61,14 @@ export class ContractRenewalSweep {
    * nothing and costs a scan of every contract in the system.
    */
   @Cron(CronExpression.EVERY_DAY_AT_7AM)
+  // V1-24b: the scheduled entry point. It returns first when schedulers are
+  // off (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS, or NODE_ENV=test without
+  // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
+  async scheduledSweep(): Promise<void> {
+    if (schedulersDisabled()) return;
+    await this.sweep();
+  }
+
   async sweep(): Promise<{ scanned: number; raised: number }> {
     try {
       return await this.raiseDueRenewals(new Date());

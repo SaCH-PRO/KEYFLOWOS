@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { activityPrefilter, readVisibleActivityPage, type TimelineViewer } from '../timeline/timeline-visibility';
 
 export interface CreateActivityInput {
   businessId: string;
@@ -62,15 +63,29 @@ export class ActivityService {
     }
   }
 
-  async listForBusiness(businessId: string, opts?: { module?: string; limit?: number; cursor?: string }) {
+  /**
+   * One page of the business's rows, newest first, holding only rows the
+   * viewer may read (V1-84: the rule of GET /timeline/businesses/:id/events,
+   * timeline-visibility.ts).
+   */
+  async listForBusiness(
+    businessId: string,
+    opts: { module?: string; limit?: number; cursor?: string },
+    viewer: TimelineViewer,
+  ) {
     const where: any = { businessId };
-    if (opts?.module) where.module = opts.module;
-    if (opts?.cursor) where.createdAt = { lt: new Date(opts.cursor) };
+    if (opts.module) where.module = opts.module;
+    if (opts.cursor) where.createdAt = { lt: new Date(opts.cursor) };
+    const prefilter = activityPrefilter(viewer);
+    if (prefilter.length) where.AND = prefilter;
 
-    return (this.prisma.client as any).activity.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: opts?.limit ?? 50,
-    });
+    return readVisibleActivityPage(this.prisma, viewer, opts.limit ?? 50, (skip, take) =>
+      (this.prisma.client as any).activity.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      }),
+    );
   }
 }

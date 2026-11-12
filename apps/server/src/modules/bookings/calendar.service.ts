@@ -1,10 +1,67 @@
-import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, Logger, Inject, Optional, UnauthorizedException } from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import { GoogleCalendarConnector } from '../../core/connectors/implementations/google-calendar.connector';
 
+/**
+ * W8-GOOGLE-CONSENT-OWNER review repair (owner ruling D-99; SEC-W8GCO-1): the
+ * purpose tag a state minted by getAuthUrl carries. GOOGLE_STATE_SECRET also
+ * signs the Drive, CRM contact import, Gmail and Google Suite states (and the
+ * Microsoft one when MICROSOFT_STATE_SECRET is unset) in the same
+ * base64(payload.hmac) format, and the Microsoft state had this one's old
+ * untagged {businessId, nonce, exp} shape, so only the tag tells a Google
+ * Calendar connection state apart. Both calendar callbacks
+ * (GET /bookings/calendar/callback and GET /calendar/sync/google/callback)
+ * verify through verifyState below.
+ */
+export const GOOGLE_CALENDAR_STATE_FLOW = 'google-calendar';
+
+/**
+ * W11-CALENDAR-NAMES-SCOPE (owner ruling D-120, read with D-125 and D-116):
+ * the names of the owner's Google calendars (listAvailableCalendars below:
+ * every calendar the owner's connection can write to, by name) are listed to
+ * the owner and ADMINs only. STAFF may see that a calendar is connected
+ * (getCalendarStatus, served to every member by GET
+ * /bookings/businesses/:b/calendar/status and GET
+ * /calendar/businesses/:b/sync/status), not its names.
+ */
+export const CALENDAR_NAMES_OWNER_OR_ADMIN = 'CALENDAR_NAMES_OWNER_OR_ADMIN';
+const CALENDAR_NAMES_OWNER_OR_ADMIN_MESSAGE =
+  'Only the business owner or an admin can see the names of the Google calendars';
+
+export type CalendarNamesReader = { id?: string; role?: string };
+
+/**
+ * W11-CALENDAR-NAMES-SCOPE (D-120): who may read the calendar names of
+ * `businessId`. The owner is whoever holds an OWNER membership of this
+ * business (D-125: a co-owner counts; the recorded-owner field Business.ownerId
+ * grants nothing on its own, so a recorded owner holding only a STAFF
+ * membership is STAFF, D-116); an ADMIN membership is admitted too. A platform
+ * SUPER_ADMIN keeps the bypass BusinessGuard (and the D-99 owner doors,
+ * assertGoogleConnectOwner) already grant on these routes. No actor is 401;
+ * anyone else 403 CALENDAR_NAMES_OWNER_OR_ADMIN. The two routes that list the
+ * names (GET /calendar/businesses/:b/sync/calendars and GET
+ * /bookings/businesses/:b/calendar/list) call it first, after AuthGuard and
+ * BusinessGuard and before any Google call.
+ */
+export async function assertCalendarNamesReader(
+  prisma: PrismaService,
+  businessId: string,
+  actor: CalendarNamesReader | undefined,
+): Promise<void> {
+  if (!actor?.id) throw new UnauthorizedException('Authentication required');
+  if (actor.role === 'SUPER_ADMIN') return;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: actor.id, businessId } },
+    select: { role: true },
+  });
+  if (membership?.role === 'OWNER' || membership?.role === 'ADMIN') return;
+  throw new ForbiddenException({ code: CALENDAR_NAMES_OWNER_OR_ADMIN, message: CALENDAR_NAMES_OWNER_OR_ADMIN_MESSAGE });
+}
+
 interface OAuthState {
+  flow: typeof GOOGLE_CALENDAR_STATE_FLOW;
   businessId: string;
   nonce: string;
   exp: number;
@@ -39,6 +96,13 @@ export class CalendarService {
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   private readonly redirectUri = process.env.CALENDAR_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI?.replace('/api/crm/google/callback', '/api/bookings/calendar/callback');
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
+  /**
+   * W8-GOOGLE-CONSENT-OWNER review repair (D-99; SEC-W8GCO-1): nonces of
+   * calendar states this process has accepted, with their expiry; an entry
+   * leaves once its state would have expired anyway. Per process, as the CRM
+   * (SEC-GIS-3), Gmail (R0-07) and Google Suite (SEC-CMF5-R1) stores are.
+   */
+  private readonly acceptedStateNonces = new Map<string, number>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -63,12 +127,24 @@ export class CalendarService {
     return Buffer.from(`${payload}.${signature}`).toString('base64');
   }
 
+  /**
+   * The state a Google Calendar OAuth callback may complete, or null. Besides
+   * the signature and expiry, W8-GOOGLE-CONSENT-OWNER review repair (owner
+   * ruling D-99; SEC-W8GCO-1): only a state getAuthUrl minted for the Google
+   * Calendar connection (its purpose tag) that names a business is good here,
+   * so a Drive, CRM, Gmail, Google Suite or Microsoft state signed with the
+   * same secret is refused; and a state is good for one callback (its nonce is
+   * recorded when it is accepted), at either calendar callback. getAuthUrl is
+   * reached only through the D-99 owner gate (GET /bookings/businesses/:b/
+   * calendar/auth-url, POST /calendar/businesses/:b/sync/google/connect).
+   */
   verifyState(signedState: string): OAuthState | null {
     try {
       if (!this.stateSecret) {
         this.logger.error('Cannot verify state: GOOGLE_STATE_SECRET not configured');
         return null;
       }
+      if (typeof signedState !== 'string' || signedState.length === 0) return null;
       
       const decoded = Buffer.from(signedState, 'base64').toString('utf-8');
       const lastDotIndex = decoded.lastIndexOf('.');
@@ -83,13 +159,34 @@ export class CalendarService {
         return null;
       }
       
-      const state: OAuthState = JSON.parse(payload);
-      if (state.exp < Date.now()) {
+      const state = JSON.parse(payload) as Partial<OAuthState> | null;
+      const now = Date.now();
+      if (!state || typeof state.exp !== 'number' || state.exp < now) {
         this.logger.warn('OAuth state expired');
         return null;
       }
+      if (state.flow !== GOOGLE_CALENDAR_STATE_FLOW) {
+        this.logger.warn('OAuth state was not issued for the Google Calendar connection');
+        return null;
+      }
+      if (typeof state.businessId !== 'string' || state.businessId.length === 0) {
+        this.logger.warn('Calendar OAuth state names no business');
+        return null;
+      }
+      if (typeof state.nonce !== 'string' || state.nonce.length === 0) {
+        this.logger.warn('Calendar OAuth state has no nonce');
+        return null;
+      }
+      for (const [nonce, exp] of this.acceptedStateNonces) {
+        if (exp < now) this.acceptedStateNonces.delete(nonce);
+      }
+      if (this.acceptedStateNonces.has(state.nonce)) {
+        this.logger.warn('Calendar OAuth state already used');
+        return null;
+      }
+      this.acceptedStateNonces.set(state.nonce, state.exp);
       
-      return state;
+      return state as OAuthState;
     } catch {
       this.logger.warn('Failed to verify OAuth state');
       return null;
@@ -102,8 +199,11 @@ export class CalendarService {
     }
 
     const state: OAuthState = {
+      flow: GOOGLE_CALENDAR_STATE_FLOW,
       businessId,
-      nonce: Math.random().toString(36).substring(2),
+      // SEC-W8GCO-1: the nonce is the single-use key verifyState records, so it
+      // comes from a cryptographic source (Math.random() is predictable in V8).
+      nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + 10 * 60 * 1000,
     };
 

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { ActivityService } from './activity.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { ActivityService, type CreateActivityInput } from './activity.service';
 import {
   InvoiceCreatedPayload,
   InvoicePaidPayload,
@@ -15,11 +16,11 @@ import {
   BookingCompletedPayload,
   BookingCancelledPayload,
   BookingRescheduledPayload,
-  ContactCreatedPayload,
   ContactUpdatedPayload,
   ContactMergedPayload,
   ContactImportedPayload,
 } from '../../core/event-bus/events.types';
+import type { ContactCreatedEmit } from '../crm/crm.service';
 
 function contactName(contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null): string {
   if (!contact) return 'Someone';
@@ -27,11 +28,39 @@ function contactName(contact?: { firstName?: string | null; lastName?: string | 
   return name || contact.email || 'Someone';
 }
 
+/** A booking's start as the feed shows it, or null when absent or unreadable. */
+function bookingStart(startTime: unknown): string | null {
+  if (startTime == null || startTime === '') return null;
+  const at = new Date(startTime as string | number | Date);
+  return Number.isNaN(at.getTime()) ? null : at.toLocaleString();
+}
+
 @Injectable()
 export class ActivityEventListener {
   private readonly logger = new Logger(ActivityEventListener.name);
 
-  constructor(@Inject(ActivityService) private readonly activity: ActivityService) {}
+  constructor(
+    @Inject(ActivityService) private readonly activity: ActivityService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * W9-CRM-RESIDUALS (crm-lifecycle-paid-invoice L-12): `contactId` when it is a
+   * contact of `businessId` (a forgotten one in its grace period included:
+   * aggregate is the Contact read the soft-delete extension leaves as written),
+   * otherwise undefined, so a row never names another tenant's contact. A failed
+   * lookup names none.
+   */
+  private async contactOfBusiness(businessId: string, contactId: string | null | undefined): Promise<string | undefined> {
+    if (!businessId || !contactId) return undefined;
+    try {
+      const found = await this.prisma.client.contact.aggregate({ where: { id: contactId, businessId }, _count: { _all: true } });
+      return found._count._all > 0 ? contactId : undefined;
+    } catch (err) {
+      this.logger.warn(`contact lookup failed for business=${businessId}: ${(err as Error).message}`);
+      return undefined;
+    }
+  }
 
   // -- Commerce: Invoices --
 
@@ -69,7 +98,8 @@ export class ActivityEventListener {
       icon: 'dollar-sign',
       tone: 'success',
       data: { invoiceId: inv.id, total: inv.total, currency: inv.currency },
-      contactId: inv.contactId || undefined,
+      // W9-CRM-RESIDUALS (L-12): bound to the payload's business.
+      contactId: await this.contactOfBusiness(payload.businessId, inv.contactId),
       category: 'PAYMENT',
       status: 'COMPLETED',
       revenueImpact: inv.total ? Number(inv.total) : undefined,
@@ -212,9 +242,30 @@ export class ActivityEventListener {
 
   // -- Bookings --
 
+  /**
+   * V1-55b-FEED-DEDUPE-REST (CR-V155-1): the only bookings created row for a
+   * new booking (AutomationExecutorService no longer writes a second, timed
+   * one), and it says when the booking is. No booking.created payload carries
+   * the service (BookingsService puts the booking row and its contact on the
+   * bus), so the start time is in the detail itself.
+   *
+   * Since W4-FEED-COPY-COMPLETE (owner ruling D-90, V55-12b) it is also the
+   * feed's one row for the booking create: BookingsService.createBooking logs
+   * its booking.created ContactEvent with meta.feedCopy=false, which
+   * CrmService.logContactEvent -> CrmTimelineService.logContactEvent now
+   * carries, so no Activity copy (crm:booking.created:contact) is written
+   * beside this row; the ContactEvent stays on the contact's own timeline.
+   * (The storefront booking's copy, PublicEventsService.logStorefrontEvent,
+   * and booking confirm's copy are not in D-90 and stay.)
+   *
+   * W5-FEED-CATEGORIES (CR-FCC-1, D-90): being the one row, it carries category
+   * BOOKING, so ?category= finds the booking create as it found the copy D-90
+   * removed (category CONTACT), as onContactCreated keeps CONTACT (V55-12a).
+   */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
     const bk = payload.booking;
+    const when = bookingStart(bk.startTime);
     await this.activity.log({
       businessId: payload.businessId,
       module: 'bookings',
@@ -222,11 +273,12 @@ export class ActivityEventListener {
       entityType: 'booking',
       entityId: bk.id,
       title: `New booking`,
-      detail: `${contactName(payload.contact)} booked ${(bk as any).service?.name || 'an appointment'}`,
+      detail: `${contactName(payload.contact)} booked ${(bk as any).service?.name || 'an appointment'}${when ? ` for ${when}` : ''}`,
       icon: 'calendar',
       tone: 'info',
       data: { bookingId: bk.id, serviceId: bk.serviceId, startTime: bk.startTime },
-      contactId: bk.contactId || undefined,
+      contactId: bk.contactId || payload.contact?.id || undefined,
+      category: 'BOOKING',
     });
   }
 
@@ -304,8 +356,25 @@ export class ActivityEventListener {
 
   // -- CRM --
 
+  /**
+   * V1-55b-FEED-DEDUPE-REST (V55-08): the only crm created row for a new
+   * contact (AutomationExecutorService no longer writes 'New contact added').
+   * Since W3-V1-55c (CR-V155b-1, V55-12) it is also the feed's one row for
+   * the contact: CrmService.createContact logs its contact.created
+   * ContactEvent with meta.feedCopy=false, so no Activity copy
+   * (crm:contact.created:contact) is shown beside it. crm-network.service.ts
+   * logs the same ContactEvent for a referral without this bus event; there
+   * the copy is kept, as the only row. See onBookingCreated.
+   *
+   * W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90): being the one row, it
+   * names who created the contact, as the dropped copy did: the actor
+   * CrmService.createContact puts on the emit (ContactCreatedEmit, the
+   * ContactEvent's own actor; USER and the member for POST /contacts) and the
+   * copy's category CONTACT. With no actor on the emit none is invented
+   * (ActivityService.log's SYSTEM, no actorId), as the copy wrote it.
+   */
   @OnEvent('contact.created')
-  async onContactCreated(payload: ContactCreatedPayload) {
+  async onContactCreated(payload: ContactCreatedEmit) {
     const c = payload.contact;
     await this.activity.log({
       businessId: payload.businessId,
@@ -319,6 +388,9 @@ export class ActivityEventListener {
       tone: 'info',
       data: { contactId: c.id },
       contactId: c.id,
+      category: 'CONTACT',
+      actorType: payload.actorType as CreateActivityInput['actorType'],
+      actorId: payload.actorId,
     });
   }
 

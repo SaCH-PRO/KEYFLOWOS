@@ -1,7 +1,82 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, fetchWithAuthRetry, emitUnauthorizedEvent, type PlanLimitError } from "./api";
+import {
+  API_BASE,
+  apiPost as sendPost,
+  apiPatch as sendPatch,
+  apiPut as sendPut,
+  apiDelete as sendDelete,
+  apiGet as sendGet,
+  getAuthHeaders,
+  fetchWithAuthRetry as sendWithAuthRetry,
+  emitUnauthorizedEvent,
+  type PlanLimitError,
+} from "./api";
 import { refreshAccessToken, setStoredBusinessId, getStoredBusinessId } from "./workspace";
-import { DEFAULT_BUSINESS_ID, DEMO_MODE_ENABLED } from "./api/_defaults";
+import {
+  DEMO_MODE_ENABLED,
+  NO_BUSINESS_SELECTED,
+  UNSELECTED_BUSINESS,
+  MISSING_ID,
+  NoBusinessSelectedError,
+  namesMissingId,
+  namesNoBusiness,
+  noBusinessSelected,
+  requestNamesNoBusiness,
+} from "./api/_defaults";
+
+/**
+ * R0-15d-WEB-BUSINESS-SCOPE-MOUNTS (M09): the business a helper works in when
+ * its caller names none is the member's selected business (kf_business_id),
+ * read at call time, never the demo tenant. With no business selected it is
+ * UNSELECTED_BUSINESS, which the guarded transports below refuse to send.
+ */
+function selectedBusinessId(): string {
+  return getStoredBusinessId() || UNSELECTED_BUSINESS;
+}
+
+/*
+ * Every request this module sends goes through one of these. A request that
+ * names no business (no business selected, or an empty, "undefined" or "null"
+ * id, in its /businesses/ segment, its businessId query, or the body of a route
+ * that takes its business from the body) is never sent: the ApiResult helpers
+ * answer "No business selected", and the ones that hand back a Response throw
+ * NoBusinessSelectedError (an ApiResult helper built on fetchWithAuthRetry
+ * checks namesNoBusiness first, so it answers rather than rejects).
+ */
+function apiPost<T>(options: Parameters<typeof sendPost>[0]): ReturnType<typeof sendPost<T>> {
+  return requestNamesNoBusiness(options.path, options.body) ? Promise.resolve(noBusinessSelected()) : sendPost<T>(options);
+}
+
+function apiPostSimple<T>(path: string, body: unknown): ReturnType<typeof sendPost<T>> {
+  return apiPost<T>({ path, body });
+}
+
+function apiPatch<T>(path: string, body: unknown): ReturnType<typeof sendPatch<T>> {
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendPatch<T>(path, body);
+}
+
+function apiPut<T>(path: string, body: unknown): ReturnType<typeof sendPut<T>> {
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendPut<T>(path, body);
+}
+
+function apiDelete<T>(path: string, body?: unknown): ReturnType<typeof sendDelete<T>> {
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendDelete<T>(path, body);
+}
+
+function apiGetSimple<T>(path: string, opts?: { signal?: AbortSignal }): ReturnType<typeof sendGet<T>> {
+  return namesNoBusiness(path) ? Promise.resolve(noBusinessSelected()) : sendGet<T>(path, opts);
+}
+
+async function fetchWithAuthRetry(url: string, init?: RequestInit): Promise<Response> {
+  if (requestNamesNoBusiness(url, init?.body)) throw new NoBusinessSelectedError();
+  return sendWithAuthRetry(url, init);
+}
+
+/** `fetch` for the business-scoped requests that carry no auth retry (public storefront events). */
+async function businessFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (requestNamesNoBusiness(url, init?.body)) throw new NoBusinessSelectedError();
+  return fetch(url, init);
+}
 
 
 export * from "./api/product-cost";
@@ -363,6 +438,9 @@ export type Invoice = {
   contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null;
   items?: InvoiceItem[];
   payments?: PaymentRecord[];
+  /** Served by the tenant-bound detail route: derived from the SUCCESSFUL payment rows. */
+  paidAmount?: number;
+  remaining?: number;
 };
 
 type ApiResult<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
@@ -384,6 +462,14 @@ const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
   : [];
 
 async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
+  // R0-15d: a read that names no business is not sent (see selectedBusinessId).
+  if (namesNoBusiness(path)) return { data: fallback ?? null, error: NO_BUSINESS_SELECTED };
+  // W10-WEB-CLIENT-MISSING-ID (FOLLOW3-D11): nor is a read that names a missing
+  // id (an empty, "undefined" or "null" segment, a trailing "/", or a path the
+  // wire rewrites, such as `contacts/.`), the refusal the lib/api.ts transports
+  // give: this helper calls fetch itself, so without it fetchContactDetail("")
+  // sent .../contacts/ and the server answered the detail read from the list route.
+  if (namesMissingId(path)) return { data: fallback ?? null, error: MISSING_ID };
   try {
     // No `_t=${Date.now()}` cache-buster, for the same reason it was removed
     // from apiGet in ./api.ts: `cache: "no-store"` already prevents any HTTP
@@ -442,7 +528,7 @@ const contactListResponseSchema = z.object({
 export type ContactListResponse = z.infer<typeof contactListResponseSchema>;
 
 export async function fetchContacts(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   opts?: {
     status?: string;
     search?: string;
@@ -518,7 +604,7 @@ const contactsPollSchema = z.object({
   totalCount: z.number(),
 });
 
-export async function fetchContactsPoll(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactsPoll(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/poll`,
     contactsPollSchema,
@@ -635,16 +721,25 @@ const flowHighlightsSchema = z.object({
 
 export type FlowHighlights = z.infer<typeof flowHighlightsSchema>;
 
-export async function fetchContactDetail(contactId: string, businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+/**
+ * With no businessId the read is bound to the member's stored business, never
+ * silently to the demo tenant: BusinessGuard refuses a real member there, and
+ * the contact screen reports that refusal as "You do not have access to this
+ * contact" (CONTACTS-v1 section 5). No business means no request (R0-15d: not
+ * even in demo mode).
+ */
+export async function fetchContactDetail(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ContactDetail | null>> {
+  const tenant = businessId ?? getStoredBusinessId();
+  if (!tenant) return { data: null, error: NO_BUSINESS_SELECTED };
   return apiGet(
-    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
+    `/crm/businesses/${encodeURIComponent(tenant)}/contacts/${encodeURIComponent(contactId)}`,
     contactDetailSchema,
     null,
     { signal: opts?.signal },
   );
 }
 
-export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID, orgUnitId?: string) {
+export async function fetchBookings(businessId: string = selectedBusinessId(), orgUnitId?: string) {
   const qs = orgUnitId ? `?orgUnitId=${encodeURIComponent(orgUnitId)}` : '';
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}${qs}`,
@@ -653,7 +748,7 @@ export async function fetchBookings(businessId: string = DEFAULT_BUSINESS_ID, or
   );
 }
 
-export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchProducts(businessId: string = selectedBusinessId()) {
   const envelopeSchema = z.object({
     data: z.array(productSchema),
     total: z.number(),
@@ -668,7 +763,7 @@ export async function fetchProducts(businessId: string = DEFAULT_BUSINESS_ID) {
   return { data: res.data?.data ?? null, error: res.error };
 }
 
-export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchInvoices(businessId: string = selectedBusinessId()) {
   const invoiceItemSchema = z.object({
     id: z.string(),
     description: z.string(),
@@ -721,8 +816,16 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
   return { data: res.data?.data ?? (process.env.NODE_ENV === "development" ? fallbackInvoices : []), error: res.error };
 }
 
-export async function getInvoice(invoiceId: string): Promise<ApiResult<Invoice>> {
-  return apiGetSimple<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+/**
+ * R0-QI-01: the operator detail and edit pages read the tenant-bound route
+ * (AuthGuard + BusinessGuard + ModuleScopeGuard revenue:read), never the
+ * public bare-id route, whose shareable gate hides DRAFT and VOID and whose
+ * shape depends on who is asking. The public pay page keeps the bare route.
+ */
+export async function getInvoice(businessId: string, invoiceId: string): Promise<ApiResult<Invoice>> {
+  return apiGetSimple<Invoice>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}`,
+  );
 }
 
 export async function createContact(input: {
@@ -769,7 +872,7 @@ export async function createContact(input: {
   favorite?: boolean;
   archivedAt?: string | null;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   const body = {
     firstName: input.firstName ?? "Guest",
     lastName: input.lastName ?? "User",
@@ -824,7 +927,7 @@ export async function createContact(input: {
 
 export async function fetchContactEvents(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ): Promise<ApiResult<ContactEvent[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events`,
@@ -835,7 +938,7 @@ export async function fetchContactEvents(
 
 export async function fetchContactNotes(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ): Promise<ApiResult<ContactNote[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
@@ -850,7 +953,7 @@ export async function fetchContactTasks(params: {
   status?: string;
   dueBefore?: string;
 }): Promise<ApiResult<ContactTask[]>> {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? selectedBusinessId();
   const query = new URLSearchParams();
   if (params.contactId) query.set('contactId', params.contactId);
   if (params.status) query.set('status', params.status);
@@ -894,7 +997,7 @@ export type BestChannelExplain = z.infer<typeof bestChannelExplainSchema>;
 
 export async function fetchBestChannelExplain(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   opts?: { signal?: AbortSignal },
 ) {
   return apiGet(
@@ -905,7 +1008,7 @@ export async function fetchBestChannelExplain(
   );
 }
 
-export async function fetchContactPlaybook(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactPlaybook(contactId: string, businessId: string = selectedBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/playbook`,
     contactPlaybookSchema,
@@ -920,7 +1023,7 @@ export async function updateContactPlaybook(params: {
   type?: string;
   businessId?: string;
 }) {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? selectedBusinessId();
   return apiPost<ContactPlaybook>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(params.contactId)}/playbook`,
     body: { data: params.data, type: params.type },
@@ -931,7 +1034,7 @@ export async function logContactEvent(
   contactId: string,
 
   event: { type: string; description?: string; data?: Record<string, unknown> },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<ContactEvent>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/events`,
@@ -947,7 +1050,7 @@ export async function logCommunication(
     duration?: number;
     notes?: string;
   },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<{ event: ContactEvent; note: ContactNote | null }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/log-communication`,
@@ -955,7 +1058,7 @@ export async function logCommunication(
   });
 }
 
-export async function addContactNote(contactId: string, body: string, businessId: string = DEFAULT_BUSINESS_ID, source?: string) {
+export async function addContactNote(contactId: string, body: string, businessId: string = selectedBusinessId(), source?: string) {
   return apiPost<ContactNote>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/notes`,
     body: { body, ...(source ? { source } : {}) },
@@ -966,7 +1069,7 @@ export async function addContactTask(
   contactId: string,
   title: string,
   options?: { dueDate?: string; priority?: "NORMAL" | "HIGH" | "LOW"; assigneeId?: string; remindAt?: string },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/tasks`,
@@ -980,36 +1083,36 @@ export async function addContactTask(
   });
 }
 
-export async function updateContactNote(noteId: string, data: { body?: string; source?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateContactNote(noteId: string, data: { body?: string; source?: string }, businessId: string = selectedBusinessId()) {
   return apiPatch(
     `/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`,
     data,
   );
 }
 
-export async function deleteContactNote(noteId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteContactNote(noteId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/notes/${encodeURIComponent(noteId)}`);
 }
 
-export async function updateContactTask(taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateContactTask(taskId: string, data: { title?: string; dueDate?: string; priority?: string; remindAt?: string }, businessId: string = selectedBusinessId()) {
   return apiPatch(
     `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
     data,
   );
 }
 
-export async function deleteContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteContactTask(taskId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export async function toggleFavorite(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function toggleFavorite(contactId: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ isFavorite: boolean; contact: Contact }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/favorite`,
     body: {},
   });
 }
 
-export async function fetchFavorites(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchFavorites(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/favorites`,
     z.array(contactSchema),
@@ -1036,7 +1139,12 @@ export interface DealStage {
 export interface Deal {
   id: string;
   businessId: string;
-  contactId: string;
+  /**
+   * Null when GET crm deals lists a deal whose contact the member cannot open
+   * (V1-89 W3-CRM-AI-VISIBILITY: contactId and contact are both null).
+   * W4-HOUSEKEEPING: typed so every reader handles it.
+   */
+  contactId: string | null;
   title: string;
   description?: string | null;
   companyName?: string | null;
@@ -1044,7 +1152,7 @@ export interface Deal {
   currency: string;
   stageId: string;
   stage?: DealStage;
-  contact?: { id: string; firstName?: string | null; lastName?: string | null; displayName?: string | null; email?: string | null; companyName?: string | null };
+  contact?: { id: string; firstName?: string | null; lastName?: string | null; displayName?: string | null; email?: string | null; companyName?: string | null } | null;
   status: 'OPEN' | 'WON' | 'LOST';
   probability?: number | null;
   ownerUserId?: string | null;
@@ -1137,24 +1245,24 @@ export interface DealListFilters {
   take?: number;
 }
 
-export async function fetchDealStages(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDealStages(businessId: string = selectedBusinessId()) {
   return apiGetSimple<DealStage[]>(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages`);
 }
 
-export async function createDealStage(data: { name: string; slug?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function createDealStage(data: { name: string; slug?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number }, businessId: string = selectedBusinessId()) {
   return apiPost<DealStage>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deal-stages`, body: data });
 }
 
-export async function updateDealStage(stageId: string, data: { name?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number; archived?: boolean }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateDealStage(stageId: string, data: { name?: string; color?: string; category?: 'OPEN' | 'WON' | 'LOST'; position?: number; archived?: boolean }, businessId: string = selectedBusinessId()) {
   return apiPatch<DealStage>(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages/${encodeURIComponent(stageId)}`, data);
 }
 
-export async function deleteDealStage(stageId: string, opts: { reassignToStageId?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteDealStage(stageId: string, opts: { reassignToStageId?: string } = {}, businessId: string = selectedBusinessId()) {
   const qs = opts.reassignToStageId ? `?reassignToStageId=${encodeURIComponent(opts.reassignToStageId)}` : '';
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/deal-stages/${encodeURIComponent(stageId)}${qs}`);
 }
 
-export async function fetchDeals(filters: DealListFilters = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDeals(filters: DealListFilters = {}, businessId: string = selectedBusinessId()) {
   const params = new URLSearchParams();
   if (filters.stageIds?.length) params.set('stageIds', filters.stageIds.join(','));
   if (filters.ownerId) params.set('ownerId', filters.ownerId);
@@ -1172,7 +1280,7 @@ export async function fetchDeals(filters: DealListFilters = {}, businessId: stri
   return apiGetSimple<DealListResponse>(`/crm/businesses/${encodeURIComponent(businessId)}/deals${qs}`);
 }
 
-export async function fetchDeal(dealId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDeal(dealId: string, businessId: string = selectedBusinessId()) {
   return apiGetSimple<Deal>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`);
 }
 
@@ -1181,7 +1289,7 @@ export async function createDeal(data: {
   value?: number; currency?: string; stageId?: string; ownerUserId?: string | null;
   source?: string; sourceDetail?: string; tags?: string[]; notes?: string;
   expectedCloseAt?: string; probability?: number; accountId?: string | null;
-}, businessId: string = DEFAULT_BUSINESS_ID) {
+}, businessId: string = selectedBusinessId()) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals`, body: data });
 }
 
@@ -1191,7 +1299,7 @@ export async function updateDeal(dealId: string, data: Partial<{
   source: string | null; sourceDetail: string | null; tags: string[];
   notes: string | null; expectedCloseAt: string | null; probability: number | null;
   accountId: string | null;
-}>, businessId: string = DEFAULT_BUSINESS_ID) {
+}>, businessId: string = selectedBusinessId()) {
   return apiPatch<Deal>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`, data);
 }
 
@@ -1235,7 +1343,7 @@ export type AccountListFilters = {
   take?: number;
 };
 
-export async function fetchAccounts(filters: AccountListFilters = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAccounts(filters: AccountListFilters = {}, businessId: string = selectedBusinessId()) {
   const p = new URLSearchParams();
   if (filters.search) p.set('search', filters.search);
   if (filters.industry) p.set('industry', filters.industry);
@@ -1249,7 +1357,7 @@ export async function fetchAccounts(filters: AccountListFilters = {}, businessId
   return apiGetSimple<{ accounts: AccountSummary[]; total: number }>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts${qs}`);
 }
 
-export async function fetchAccountDetail(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAccountDetail(accountId: string, businessId: string = selectedBusinessId()) {
   return apiGetSimple<{
     account: Account;
     contacts: Array<{ id: string; firstName: string | null; lastName: string | null; displayName: string | null; email: string | null; phone: string | null; jobTitle: string | null; lifecycleStage: string | null; relationshipHealth: string | null; ownerId: string | null; lastInteractionAt: string | null; nextActionAt: string | null; nextActionType: string | null; leadScore: number | null }>;
@@ -1281,51 +1389,51 @@ export type AccountInsight = {
   tags: string[];
 };
 
-export async function fetchAccountInsight(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAccountInsight(accountId: string, businessId: string = selectedBusinessId()) {
   return apiGetSimple<AccountInsight>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}/insight`);
 }
 
-export async function createAccount(data: { name: string; domain?: string | null; industry?: string | null; size?: string | null; website?: string | null; ownerUserId?: string | null; tags?: string[]; notes?: string | null; primaryContactId?: string | null }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function createAccount(data: { name: string; domain?: string | null; industry?: string | null; size?: string | null; website?: string | null; ownerUserId?: string | null; tags?: string[]; notes?: string | null; primaryContactId?: string | null }, businessId: string = selectedBusinessId()) {
   return apiPost<Account>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/accounts`, body: data });
 }
 
-export async function updateAccount(accountId: string, data: Partial<{ name: string; domain: string | null; industry: string | null; size: string | null; website: string | null; ownerUserId: string | null; tags: string[]; notes: string | null; primaryContactId: string | null }>, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateAccount(accountId: string, data: Partial<{ name: string; domain: string | null; industry: string | null; size: string | null; website: string | null; ownerUserId: string | null; tags: string[]; notes: string | null; primaryContactId: string | null }>, businessId: string = selectedBusinessId()) {
   return apiPatch<Account>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}`, data);
 }
 
-export async function deleteAccount(accountId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteAccount(accountId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}`);
 }
 
-export async function suggestAccountForContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function suggestAccountForContact(contactId: string, businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ account: Account | null; reason: 'linked' | 'email_domain' | 'company_name' | 'none' }>(`/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/account-suggestion`);
 }
 
-export async function previewAccountMerge(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function previewAccountMerge(businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ proposals: Array<{ companyName: string; contactCount: number; existingAccountId: string | null; suggestedDomain: string | null }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/accounts-merge/preview`);
 }
 
-export async function applyAccountMerge(items: Array<{ companyName: string; useExistingAccountId?: string | null; createWithDomain?: string | null }>, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function applyAccountMerge(items: Array<{ companyName: string; useExistingAccountId?: string | null; createWithDomain?: string | null }>, businessId: string = selectedBusinessId()) {
   return apiPost<{ results: Array<{ companyName: string; accountId: string; contactsLinked: number; dealsLinked: number; created: boolean }> }>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/accounts-merge/apply`, body: { items } });
 }
 
-export async function fetchDealsByAccountPivot(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDealsByAccountPivot(businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ buckets: Array<{ accountId: string | null; label: string; count: number; openValue: number; wonValue: number; currency: string }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/pivot/by-account`);
 }
 
-export async function fetchLifecycleByAccountPivot(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchLifecycleByAccountPivot(businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ rows: Array<{ accountId: string | null; label: string; total: number; stages: Record<string, number> }> }>(`/crm/businesses/${encodeURIComponent(businessId)}/lifecycle/pivot/by-account`);
 }
 
-export async function deleteDeal(dealId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteDeal(dealId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}`);
 }
 
-export async function moveDealStage(dealId: string, stageId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function moveDealStage(dealId: string, stageId: string, businessId: string = selectedBusinessId()) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/move-stage`, body: { stageId } });
 }
 
-export async function bulkMoveDealStage(dealIds: string[], stageId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function bulkMoveDealStage(dealIds: string[], stageId: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ moved: number; failed: number; results: Array<{ id: string; ok: boolean; error?: string }> }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/bulk/move-stage`,
     body: { dealIds, stageId },
@@ -1335,7 +1443,7 @@ export async function bulkMoveDealStage(dealIds: string[], stageId: string, busi
 export async function winDeal(
   dealId: string,
   data: { wonAt?: string; actualValue?: number; reasonId?: string | null; reasonNotes?: string | null } = {},
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/win`, body: data });
 }
@@ -1343,12 +1451,12 @@ export async function winDeal(
 export async function loseDeal(
   dealId: string,
   data: { lossReason?: string; lostAt?: string; reasonId?: string | null; reasonNotes?: string | null } = {},
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<Deal>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/deals/${encodeURIComponent(dealId)}/lose`, body: data });
 }
 
-export async function fetchDealForecast(opts: { windowDays?: number; currency?: string } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDealForecast(opts: { windowDays?: number; currency?: string } = {}, businessId: string = selectedBusinessId()) {
   const params = new URLSearchParams();
   if (opts.windowDays != null) params.set('windowDays', String(opts.windowDays));
   if (opts.currency) params.set('currency', opts.currency);
@@ -1356,40 +1464,40 @@ export async function fetchDealForecast(opts: { windowDays?: number; currency?: 
   return apiGetSimple<DealForecast>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/intelligence/forecast${qs}`);
 }
 
-export async function fetchDealVelocity(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDealVelocity(businessId: string = selectedBusinessId()) {
   return apiGetSimple<DealVelocityReport>(`/crm/businesses/${encodeURIComponent(businessId)}/deals/intelligence/velocity`);
 }
 
-export async function fetchWonLostReasons(opts: { kind?: 'WON' | 'LOST' } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchWonLostReasons(opts: { kind?: 'WON' | 'LOST' } = {}, businessId: string = selectedBusinessId()) {
   const qs = opts.kind ? `?kind=${opts.kind}` : '';
   return apiGetSimple<WonLostReason[]>(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons${qs}`);
 }
 
-export async function createWonLostReason(data: { kind: 'WON' | 'LOST'; label: string; slug?: string; position?: number }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function createWonLostReason(data: { kind: 'WON' | 'LOST'; label: string; slug?: string; position?: number }, businessId: string = selectedBusinessId()) {
   return apiPost<WonLostReason>({ path: `/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons`, body: data });
 }
 
-export async function updateWonLostReason(reasonId: string, data: { label?: string; position?: number; archived?: boolean }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateWonLostReason(reasonId: string, data: { label?: string; position?: number; archived?: boolean }, businessId: string = selectedBusinessId()) {
   return apiPatch<WonLostReason>(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons/${encodeURIComponent(reasonId)}`, data);
 }
 
-export async function deleteWonLostReason(reasonId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteWonLostReason(reasonId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/crm/businesses/${encodeURIComponent(businessId)}/won-lost-reasons/${encodeURIComponent(reasonId)}`);
 }
 
-export async function fetchContactDeals(contactId: string, opts: { status?: 'OPEN' | 'WON' | 'LOST' | 'ALL' } = {}, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchContactDeals(contactId: string, opts: { status?: 'OPEN' | 'WON' | 'LOST' | 'ALL' } = {}, businessId: string = selectedBusinessId()) {
   const qs = opts.status ? `?status=${opts.status}` : '';
   return apiGetSimple<Deal[]>(`/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/deals${qs}`);
 }
 
-export async function approveAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function approveAutopilotAction(actionId: string, businessId: string = selectedBusinessId()) {
   return apiPost({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/autopilot-actions/${encodeURIComponent(actionId)}/approve`,
     body: {},
   });
 }
 
-export async function denyAutopilotAction(actionId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function denyAutopilotAction(actionId: string, businessId: string = selectedBusinessId()) {
   return apiPost({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/autopilot-actions/${encodeURIComponent(actionId)}/deny`,
     body: {},
@@ -1405,7 +1513,7 @@ const contactStatsSchema = z.object({
 });
 export type ContactStats = z.infer<typeof contactStatsSchema>;
 
-export async function fetchContactStats(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+export async function fetchContactStats(businessId: string = selectedBusinessId(), opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contact-stats`,
     contactStatsSchema,
@@ -1414,7 +1522,7 @@ export async function fetchContactStats(businessId: string = DEFAULT_BUSINESS_ID
   );
 }
 
-export async function fetchSegmentSummary(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+export async function fetchSegmentSummary(businessId: string = selectedBusinessId(), opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/segments`,
     z.object({
@@ -1443,7 +1551,7 @@ const relationshipHealthThresholdsSchema = z.object({
 });
 export type RelationshipHealthThresholds = z.infer<typeof relationshipHealthThresholdsSchema>;
 
-export async function fetchRelationshipHealthSettings(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchRelationshipHealthSettings(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/settings`,
     z.object({ thresholds: relationshipHealthThresholdsSchema }),
@@ -1475,7 +1583,7 @@ const atRiskContactSchema = z.object({
 });
 export type AtRiskContact = z.infer<typeof atRiskContactSchema>;
 
-export async function fetchAtRiskContacts(businessId: string = DEFAULT_BUSINESS_ID, limit = 10) {
+export async function fetchAtRiskContacts(businessId: string = selectedBusinessId(), limit = 10) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/relationship-health/at-risk?limit=${limit}`,
     z.array(atRiskContactSchema),
@@ -1484,7 +1592,7 @@ export async function fetchAtRiskContacts(businessId: string = DEFAULT_BUSINESS_
 }
 
 export async function recomputeRelationshipHealth(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   body?: { dryRun?: boolean },
 ) {
   return apiPostSimple<{
@@ -1516,7 +1624,7 @@ export async function clearContactRelationshipHealthOverride(businessId: string,
 }
 
 export async function fetchDuplicateContacts(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   opts?: { importId?: string; minConfidence?: number; limit?: number; offset?: number },
 ) {
   const duplicateGroupSchema = z.object({
@@ -1565,7 +1673,7 @@ export async function fetchDuplicateContacts(
 }
 
 export async function fetchMergePreview(input: { businessId?: string; primaryId: string; duplicateId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   const path = `/crm/businesses/${encodeURIComponent(businessId)}/duplicates/preview/${encodeURIComponent(input.primaryId)}/${encodeURIComponent(input.duplicateId)}`;
   return apiGetSimple<{
     primary: Record<string, unknown>;
@@ -1579,14 +1687,14 @@ export async function fetchMergePreview(input: { businessId?: string; primaryId:
 }
 
 export async function revertMerge(input: { businessId?: string; mergeId: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ mergeId: string; primaryId: string; duplicateId: string; revertedAt: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/duplicates/merges/${encodeURIComponent(input.mergeId)}/revert`,
     body: {},
   });
 }
 
-export async function fetchCrmHighlights(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchCrmHighlights(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/highlights`,
     flowHighlightsSchema,
@@ -1623,7 +1731,7 @@ const nextActionsResponseSchema = z.object({
 });
 
 export async function fetchContactNextActions(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   windowDays = 7,
   limit = 25,
   opts?: { signal?: AbortSignal },
@@ -1642,7 +1750,7 @@ export async function fetchContactNextActions(
 
 export async function completeContactNextAction(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/next-action/complete`,
@@ -1653,7 +1761,7 @@ export async function completeContactNextAction(
 export async function snoozeContactNextAction(
   contactId: string,
   input: { days?: number; snoozeUntil?: string },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<Contact>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/next-action/snooze`,
@@ -1662,7 +1770,7 @@ export async function snoozeContactNextAction(
 }
 
 export async function fetchDueTasks(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   windowDays = 7,
 ): Promise<ApiResult<ContactTask[]>> {
   const params = new URLSearchParams({ windowDays: String(windowDays) });
@@ -1683,7 +1791,7 @@ export async function bulkUpdateContacts(input: {
   favorite?: boolean;
   archived?: boolean;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPatch<{ updated: number }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
     {
@@ -1702,7 +1810,7 @@ export async function bulkDeleteContacts(input: {
   businessId?: string;
   contactIds: string[];
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiDelete<{ deleted: number }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk`,
     { contactIds: input.contactIds },
@@ -1714,7 +1822,7 @@ export async function bulkReassignContacts(input: {
   contactIds: string[];
   newOwnerId: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ reassigned: number; newOwnerId: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/bulk/reassign`,
     body: { contactIds: input.contactIds, newOwnerId: input.newOwnerId },
@@ -1728,7 +1836,7 @@ export type TeamMemberSummary = {
   user: { id: string; email: string; name: string | null; firstName?: string | null; lastName?: string | null; avatarUrl?: string | null };
 };
 
-export async function fetchTeamMembers(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchTeamMembers(businessId: string = selectedBusinessId()) {
   try {
     const res = await apiGetSimple<TeamMemberSummary[]>(
       `/identity/businesses/${encodeURIComponent(businessId)}/team`,
@@ -1741,7 +1849,7 @@ export async function fetchTeamMembers(businessId: string = DEFAULT_BUSINESS_ID)
 }
 
 export async function checkImportDuplicates(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   contacts: Array<{ email?: string; phone?: string; firstName?: string; lastName?: string }>,
 ) {
   return apiPost<{
@@ -1760,7 +1868,7 @@ export async function checkImportDuplicates(
   });
 }
 
-export async function fetchImportJobs(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchImportJobs(businessId: string = selectedBusinessId()) {
   return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/imports`, z.array(contactImportSchema), []);
 }
 
@@ -1769,7 +1877,7 @@ export async function importContactsFromFile(input: {
   type: 'csv' | 'xlsx' | 'pdf' | 'image' | 'vcf';
   file: File;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   const params = new URLSearchParams({ type: input.type });
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/import/file?${params.toString()}`;
   const formData = new FormData();
@@ -1791,14 +1899,14 @@ export async function importContactsFromFile(input: {
   return contactImportSchema.parse(payload);
 }
 
-export async function importContactsFromLink(url: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function importContactsFromLink(url: string, businessId: string = selectedBusinessId()) {
   return apiPost<ContactImportJob>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/import/link`,
     body: { url },
   });
 }
 
-export async function getGoogleContactsAuthUrl(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function getGoogleContactsAuthUrl(businessId: string = selectedBusinessId()) {
   return apiGet(`/crm/businesses/${encodeURIComponent(businessId)}/google/auth-url`, z.object({ url: z.string() }));
 }
 
@@ -1808,7 +1916,7 @@ export async function createContactFromOcr(params: {
   url?: string;
   type?: string;
 }) {
-  const businessId = params.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = params.businessId ?? selectedBusinessId();
   return apiPost<ContactImportOcrResponse>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/import/image/ocr`,
     body: {
@@ -1819,7 +1927,7 @@ export async function createContactFromOcr(params: {
   });
 }
 
-export async function scanContactImage(imageFile: File, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function scanContactImage(imageFile: File, businessId: string = selectedBusinessId()) {
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/import/scan`;
   const formData = new FormData();
   formData.append('image', imageFile);
@@ -1837,14 +1945,14 @@ export async function scanContactImage(imageFile: File, businessId: string = DEF
   return payload;
 }
 
-export async function completeContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function completeContactTask(taskId: string, businessId: string = selectedBusinessId()) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/complete`,
     body: {},
   });
 }
 
-export async function reopenContactTask(taskId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function reopenContactTask(taskId: string, businessId: string = selectedBusinessId()) {
   return apiPost<ContactTask>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/reopen`,
     body: {},
@@ -1853,7 +1961,7 @@ export async function reopenContactTask(taskId: string, businessId: string = DEF
 
 
 export async function mergeContacts(input: { businessId?: string; contactId: string; duplicateId: string; fieldOverrides?: Record<string, unknown> }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Contact & { mergeId?: string; revertableUntil?: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/merge/${encodeURIComponent(input.duplicateId)}`,
     body: { fieldOverrides: input.fieldOverrides },
@@ -1905,7 +2013,7 @@ export async function updateContact(input: {
   favorite?: boolean;
   archivedAt?: string | null;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   const { businessId: _businessId, contactId: _contactId, ...body } = input;
   if (body.email !== undefined) {
     body.email = body.email.trim() || undefined;
@@ -1919,7 +2027,7 @@ export async function updateContact(input: {
   );
 }
 
-export async function deleteContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteContact(contactId: string, businessId: string = selectedBusinessId()) {
   return apiDelete<Contact>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
   );
@@ -1946,8 +2054,13 @@ export interface CustomFieldDefinition {
   updatedAt: string;
 }
 
+/*
+ * The custom-field-definition functions take the business they work in
+ * (SEC-R015c-2): the settings page that manages the definitions and the
+ * contact screens that read them each name the business they are bound to.
+ */
 export async function fetchCustomFieldDefinitions(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
   opts?: { includeArchived?: boolean },
 ): Promise<ApiResult<CustomFieldDefinition[]>> {
   const qs = opts?.includeArchived ? "?includeArchived=true" : "";
@@ -1958,7 +2071,7 @@ export async function fetchCustomFieldDefinitions(
 
 export async function createCustomFieldDefinition(
   data: Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt" | "archivedAt">,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
 ): Promise<ApiResult<CustomFieldDefinition>> {
   return apiPost<CustomFieldDefinition>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions`,
@@ -1969,7 +2082,7 @@ export async function createCustomFieldDefinition(
 export async function updateCustomFieldDefinition(
   definitionId: string,
   data: Partial<Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt">>,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
 ): Promise<ApiResult<CustomFieldDefinition>> {
   return apiPatch<CustomFieldDefinition>(
     `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}`,
@@ -1979,7 +2092,7 @@ export async function updateCustomFieldDefinition(
 
 export async function archiveCustomFieldDefinition(
   definitionId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
 ): Promise<ApiResult<CustomFieldDefinition>> {
   return apiPost<CustomFieldDefinition>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}/archive`,
@@ -1989,7 +2102,7 @@ export async function archiveCustomFieldDefinition(
 
 export async function restoreCustomFieldDefinition(
   definitionId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
 ): Promise<ApiResult<CustomFieldDefinition>> {
   return apiPost<CustomFieldDefinition>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}/restore`,
@@ -1999,7 +2112,7 @@ export async function restoreCustomFieldDefinition(
 
 export async function deleteCustomFieldDefinition(
   definitionId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string,
 ): Promise<ApiResult<void>> {
   return apiDelete(
     `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}`,
@@ -2020,7 +2133,7 @@ export interface ContactCustomFieldValue {
 
 export async function fetchContactCustomFieldValues(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ): Promise<ApiResult<ContactCustomFieldValue[]>> {
   return apiGet<ContactCustomFieldValue[]>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/custom-field-values`,
@@ -2039,7 +2152,7 @@ export async function createProduct(input: {
   sku?: string | null;
   isActive?: boolean;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
 
   const body: Record<string, unknown> = {
     name: input.name,
@@ -2075,7 +2188,7 @@ export async function updateProduct(input: {
   sku?: string | null;
   isActive?: boolean;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
 
   const body: Record<string, unknown> = {};
   if (input.name !== undefined) body.name = input.name;
@@ -2094,7 +2207,7 @@ export async function updateProduct(input: {
   );
 }
 
-export async function deleteProduct(productId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteProduct(productId: string, businessId: string = selectedBusinessId()) {
   return apiDelete(`/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(productId)}`);
 }
 
@@ -2118,7 +2231,7 @@ export async function createBooking(input: {
   locationLatLng?: { lat: number; lng: number };
   orgUnitId?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   const res = await apiPost<Booking>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}`,
     body: {
@@ -2140,7 +2253,7 @@ export async function createBooking(input: {
 }
 
 export async function fetchWaitlist(businessId?: string, filters?: { status?: string; serviceId?: string; contactId?: string }) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   const params = new URLSearchParams();
   if (filters?.status) params.set('status', filters.status);
   if (filters?.serviceId) params.set('serviceId', filters.serviceId);
@@ -2161,7 +2274,7 @@ export async function addToWaitlist(input: {
   preferredTimeOfDay?: string;
   notes?: string;
 }) {
-  const bId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = input.businessId ?? selectedBusinessId();
   return apiPost<BookingWaitlistEntry>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist`,
     body: {
@@ -2186,7 +2299,7 @@ export async function offerWaitlistSlot(
     staffId?: string;
   },
 ) {
-  const bId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = input.businessId ?? selectedBusinessId();
   return apiPost<{ entryId: string; bookingId: string }>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/offer`,
     body: {
@@ -2199,7 +2312,7 @@ export async function offerWaitlistSlot(
 }
 
 export async function convertWaitlistEntry(entryId: string, businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPost<{ entryId: string; bookingId: string }>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/convert`,
     body: {},
@@ -2207,7 +2320,7 @@ export async function convertWaitlistEntry(entryId: string, businessId?: string)
 }
 
 export async function cancelWaitlistEntry(entryId: string, businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean }>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/cancel`,
     body: {},
@@ -2215,7 +2328,7 @@ export async function cancelWaitlistEntry(entryId: string, businessId?: string) 
 }
 
 export async function rescheduleBooking(bookingId: string, startTime: string, businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPost<Booking>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}/reschedule`,
     body: { startTime },
@@ -2223,7 +2336,7 @@ export async function rescheduleBooking(bookingId: string, startTime: string, bu
 }
 
 export async function updateBookingNotes(bookingId: string, notes: string, businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPost<Booking>({
     path: `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}/notes`,
     body: { notes },
@@ -2239,7 +2352,7 @@ export async function updateBookingLocation(
   },
   businessId?: string,
 ) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPatch<Booking>(
     `/bookings/businesses/${encodeURIComponent(bId)}/bookings/${encodeURIComponent(bookingId)}`,
     {
@@ -2251,14 +2364,14 @@ export async function updateBookingLocation(
 }
 
 export async function fetchReminderSettings(businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiGet<{ bookingReminderMins: number }>(
     `/bookings/businesses/${encodeURIComponent(bId)}/reminder-settings`
   );
 }
 
 export async function updateReminderSettings(bookingReminderMins: number, businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   return apiPatch<{ bookingReminderMins: number }>(
     `/bookings/businesses/${encodeURIComponent(bId)}/reminder-settings`,
     { bookingReminderMins },
@@ -2285,7 +2398,7 @@ export async function markInvoicePaid(invoiceId: string, businessId?: string) {
   // param, and the old empty body meant even a corrected verb would 403.
   return apiPatch<Invoice>(
     `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-    { businessId: businessId ?? getStoredBusinessId() },
+    { businessId: businessId ?? selectedBusinessId() },
   );
 }
 
@@ -2296,6 +2409,14 @@ export async function recordInvoicePayment(businessId: string, invoiceId: string
   notes?: string;
   evidenceUrl?: string;
   evidenceMimeType?: string;
+  /**
+   * R0-21: one key per payment-form open, reused on retry (RecordPaymentDto,
+   * R0-D2). The same key returns the payment already recorded instead of a
+   * second one. The server keys on it in preference to the reference, so the
+   * forms leave it out when the submit carries a reference
+   * (attemptIdempotencyKey in payment-record-modal.tsx).
+   */
+  idempotencyKey?: string;
 }): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`,
@@ -2319,9 +2440,37 @@ export async function recordPaymentFromEvidence(businessId: string, invoiceId: s
     notes?: string;
     confidence: number;
   };
+  /**
+   * V1-41 (D-27): the extracted payment is recorded PENDING (payment.status
+   * 'PENDING'); nothing is posted and the balance does not move until a member
+   * confirms it (confirmPendingInvoicePayment).
+   */
+  requiresConfirmation?: boolean;
 }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments/from-evidence`,
+    body: input,
+  });
+}
+
+/**
+ * V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (D-27): a member with revenue write
+ * access confirms a payment an evidence scan or a Drive intake recorded
+ * PENDING (status 'PENDING', provider 'extracted'). The server records the money as the
+ * member, in the manual payment route's envelope with the server's figures,
+ * and retires the pending row (CONFIRMED). `amount` is the amount the member
+ * was shown: a different pending amount is refused (409), as are a row already
+ * confirmed and a row that is not an extracted one; 403 without revenue write
+ * access. `error` carries the server's message and `status` the code.
+ */
+export async function confirmPendingInvoicePayment(
+  businessId: string,
+  invoiceId: string,
+  paymentId: string,
+  input: { amount?: number } = {},
+) {
+  return apiPost<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number; confirmedPaymentId: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments/${encodeURIComponent(paymentId)}/confirm`,
     body: input,
   });
 }
@@ -2442,10 +2591,89 @@ export interface PublicInvoicePayload {
     contact?: { firstName?: string | null; lastName?: string | null } | null;
     business?: { name: string; logoUrl?: string | null; primaryColor?: string | null; email?: string | null; phone?: string | null } | null;
   };
+  /**
+   * V1-48-PUBLIC-TOKEN-VIEW: what has been paid and what is still owed,
+   * computed on the server from the invoice's Payment rows. The page renders
+   * these figures as given and never derives them from the line items.
+   * Absent from an older server.
+   */
+  balance?: { amountPaid: number; amountDue: number; paidAt?: string | null } | null;
 }
 
 export async function getPublicInvoiceByToken(token: string): Promise<ApiResult<PublicInvoicePayload>> {
   return apiGet(`/commerce/public/invoice-link/${encodeURIComponent(token)}`);
+}
+
+// V1-46b-TOKEN-PAY-COMPLETE (M34; D-07: token links only): the customer pay
+// page's payment calls, keyed by the pay-link token. Each resolves the invoice
+// only through a live link, so a revoked or expired link answers 404 on every
+// one; none of them takes or returns the invoice id. They go through
+// lib/api.ts (apiGetSimple / apiPost), whose answers carry `rawError`, so the
+// page can tell a closed link (404) from any other failure.
+function payLinkPaymentsPath(token: string, suffix: string): string {
+  return `/payments/public/invoice-link/${encodeURIComponent(token)}/${suffix}`;
+}
+
+export interface PayLinkStatus {
+  status: string;
+  paid: number;
+  remaining: number;
+  currency: string;
+  lastPaymentAt: string | null;
+}
+
+export interface PayLinkGateway {
+  id: string;
+  name: string;
+  currencies: string[];
+}
+
+export type PayLinkCheckout =
+  | { type: "redirect"; redirectUrl: string }
+  | { type: "paypal_order"; orderId: string };
+
+export type PayLinkCheckoutBody =
+  | { gateway: "stripe"; successUrl: string; cancelUrl: string }
+  | { gateway: "wipay"; returnUrl: string }
+  | { gateway: "paypal" };
+
+export function getPayLinkStatus(token: string) {
+  return apiGetSimple<PayLinkStatus>(payLinkPaymentsPath(token, "status"));
+}
+
+export function getPayLinkGateways(token: string) {
+  return apiGetSimple<PayLinkGateway[]>(payLinkPaymentsPath(token, "gateways"));
+}
+
+export function createPayLinkCheckout(token: string, body: PayLinkCheckoutBody) {
+  return apiPost<PayLinkCheckout>({ path: payLinkPaymentsPath(token, "checkout"), body });
+}
+
+export function capturePayLinkPaypalOrder(token: string, orderId: string) {
+  return apiPost<{ id: string; status: string }>({
+    path: payLinkPaymentsPath(token, `paypal/capture/${encodeURIComponent(orderId)}`),
+    body: {},
+  });
+}
+
+/**
+ * V1-45-DM-CREATE-IDEMPOTENCY (owner ruling D-15): invoice and quote create
+ * carry the caller's key in the `Idempotency-Key` header, never in the body.
+ * A form mints one key when it opens and sends it on every submit of that
+ * form, so a retried submit is answered with the document the first one
+ * created; the same key with a different body is a 409 idempotency_key_reused.
+ * No key (or a blank one) sends no header: every call creates, as before.
+ *
+ * V1-45b-CREATE-IDEMPOTENCY-HTTP: live. The server's CORS allowedHeaders
+ * (app-bootstrap.ts) list Idempotency-Key, so the cross-origin preflight
+ * (NEXT_PUBLIC_API_BASE_URL) allows it, and the create routes forward it with
+ * the acting member (commerce-create-idempotency.integration.test.ts H-01..H-08).
+ * Every create form passes one key per open: invoices-panel, invoices/new,
+ * quotes-panel, revenue-composer, and usePipelineActions' Duplicate actions.
+ */
+function createIdempotencyInit(idempotencyKey: string | undefined): RequestInit | undefined {
+  const key = idempotencyKey?.trim();
+  return key ? { headers: { "Idempotency-Key": key } } : undefined;
 }
 
 export async function createInvoice(input: {
@@ -2458,8 +2686,10 @@ export async function createInvoice(input: {
   discountType?: "PERCENT" | "FIXED";
   discountValue?: number;
   notes?: string;
+  /** V1-45: one key per form open, reused on retry (createIdempotencyInit). */
+  idempotencyKey?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Invoice>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices`,
     body: {
@@ -2472,6 +2702,7 @@ export async function createInvoice(input: {
       discountValue: input.discountValue,
       notes: input.notes,
     },
+    init: createIdempotencyInit(input.idempotencyKey),
   });
 }
 
@@ -2488,7 +2719,7 @@ export async function updateInvoiceStatus(
   return apiPatch<Invoice>(
     `/commerce/invoices/${encodeURIComponent(invoiceId)}/status/${status.toLowerCase()}`,
     {
-      businessId: options?.businessId ?? getStoredBusinessId(),
+      businessId: options?.businessId ?? selectedBusinessId(),
       status,
       ...(options?.dueDate ? { dueDate: options.dueDate } : {}),
       ...(options?.sentAt ? { sentAt: options.sentAt } : {}),
@@ -2512,7 +2743,7 @@ export async function updateInvoice(input: {
   discountValue?: number | null;
   notes?: string | null;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPatch<Invoice>(
     `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(input.invoiceId)}`,
     {
@@ -2562,6 +2793,9 @@ export type Quote = {
   invoice?: Invoice | null;
   createdAt: string;
   // R2 lifecycle fields.
+  // V1-52 review (SEC-V52-1): the operator quote reads (list, stale, detail)
+  // no longer serve the token; the customer link comes from
+  // createQuotePublicLink. Only the signed-token and write responses carry it.
   viewToken?: string | null;
   sentAt?: string | null;
   viewedAt?: string | null;
@@ -2571,16 +2805,27 @@ export type Quote = {
   isStale?: boolean;
   isExpired?: boolean;
   lifecycleStep?: "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "INVOICED" | "PAID";
+  // V1-QUOTE-CHAIN-finish (SEC-5): served by the signed-token view only; the
+  // version of the terms shown, which the customer's accept sends back.
+  termsVersion?: string;
 };
 
 export async function listQuotes(businessId?: string) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   const res = await apiGetSimple<{ data: Quote[]; total: number; page: number; pageSize: number; totalPages: number }>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes`);
   return { data: res.data?.data ?? [], error: res.error };
 }
 
-export async function getQuote(quoteId: string) {
-  return apiGetSimple<Quote>(`/commerce/quotes/${encodeURIComponent(quoteId)}`);
+/**
+ * R0-PC-01: the operator quote read is the tenant-bound route (AuthGuard +
+ * BusinessGuard + ModuleScopeGuard revenue:read). The bare-id route
+ * (/commerce/quotes/:id) answers 404 for every id; customers read a shared
+ * quote through `fetchPublicQuote(token)`.
+ */
+export async function getQuote(businessId: string, quoteId: string): Promise<ApiResult<Quote>> {
+  return apiGetSimple<Quote>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}`,
+  );
 }
 
 export async function createQuote(input: {
@@ -2593,8 +2838,10 @@ export async function createQuote(input: {
   discountType?: "PERCENT" | "FIXED";
   discountValue?: number;
   notes?: string;
+  /** V1-45: one key per form open, reused on retry (createIdempotencyInit). */
+  idempotencyKey?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Quote>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes`,
     body: {
@@ -2607,6 +2854,7 @@ export async function createQuote(input: {
       discountValue: input.discountValue,
       notes: input.notes,
     },
+    init: createIdempotencyInit(input.idempotencyKey),
   });
 }
 
@@ -2622,7 +2870,7 @@ export async function updateQuote(input: {
   discountValue?: number;
   notes?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPatch<Quote>(
     `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}`,
     {
@@ -2648,7 +2896,7 @@ export async function updateQuoteStatus(
   // param, so every call 403'd.
   return apiPatch<Quote>(
     `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
-    { businessId: businessId ?? getStoredBusinessId() },
+    { businessId: businessId ?? selectedBusinessId() },
   );
 }
 
@@ -2679,7 +2927,7 @@ export async function convertQuoteToInvoice(input: {
   notes?: string;
   dueDate?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Invoice>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/convert`,
     body: {
@@ -2693,17 +2941,17 @@ export async function convertQuoteToInvoice(input: {
 }
 
 export async function getGmailAuthUrl(businessId?: string) {
-  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  const biz = businessId ?? selectedBusinessId();
   return apiGetSimple<{ url: string }>(`/commerce/businesses/${encodeURIComponent(biz)}/gmail/auth-url`);
 }
 
 export async function getGmailStatus(businessId?: string) {
-  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  const biz = businessId ?? selectedBusinessId();
   return apiGetSimple<{ connected: boolean; email: string | null }>(`/commerce/businesses/${encodeURIComponent(biz)}/gmail/status`);
 }
 
 export async function disconnectGmail(businessId?: string) {
-  const biz = businessId ?? DEFAULT_BUSINESS_ID;
+  const biz = businessId ?? selectedBusinessId();
   return apiDelete(`/commerce/businesses/${encodeURIComponent(biz)}/gmail`);
 }
 
@@ -2713,7 +2961,7 @@ export async function sendQuoteEmail(input: {
   recipientEmail: string;
   message?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean }>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/send-email`,
     body: {
@@ -2723,9 +2971,23 @@ export async function sendQuoteEmail(input: {
   });
 }
 
+/**
+ * V1-52-QUOTE-PUBLIC-LINK: the quote's customer link (`url` opens the
+ * /quote/<token> page), for copying or sharing without an email provider.
+ * Tenant-bound and revenue:write. The server answers 409 for a DRAFT (send it
+ * first), 400 for an expired or converted quote and 403 to a member without
+ * revenue write access; `error` carries its message and `status` the code.
+ */
+export async function createQuotePublicLink(businessId: string, quoteId: string) {
+  return apiPost<{ token: string; url: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}/public-link`,
+    body: {},
+  });
+}
+
 // R2: stale-quote candidates for the Action Queue.
 export async function fetchStaleQuotes(businessId?: string, days?: number) {
-  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const bId = businessId ?? selectedBusinessId();
   const qs = days ? `?days=${days}` : "";
   return apiGetSimple<Quote[]>(`/commerce/businesses/${encodeURIComponent(bId)}/quotes/stale${qs}`);
 }
@@ -2734,7 +2996,7 @@ export async function fetchStaleQuotes(businessId?: string, days?: number) {
 // card. Stamps `lastFollowUpAt` server-side and resolves any matching
 // pending approval items.
 export async function sendStaleQuoteFollowUp(input: { quoteId: string; businessId?: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean; resolvedApprovals: number }>({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(input.quoteId)}/follow-up`,
     body: {},
@@ -2746,10 +3008,17 @@ export async function fetchPublicQuote(token: string) {
   return apiGetSimple<Quote>(`/commerce/public/quotes/${encodeURIComponent(token)}`);
 }
 
-export async function acceptPublicQuote(token: string) {
+/**
+ * V1-QUOTE-CHAIN-finish (review SEC-5): the accept names the `termsVersion`
+ * the public view served, so the customer accepts the terms they saw. The
+ * server answers 400 quote_terms_version_required without one and 409
+ * quote_terms_changed (under `rawError.code`) when the quote was edited after
+ * it was loaded: reload it and let the customer review the new terms.
+ */
+export async function acceptPublicQuote(token: string, termsVersion: string | null | undefined) {
   return apiPost<Quote>({
     path: `/commerce/public/quotes/${encodeURIComponent(token)}/accept`,
-    body: {},
+    body: { termsVersion },
   });
 }
 
@@ -3089,7 +3358,7 @@ export type Playbook = {
   createdAt: string;
 };
 
-export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchServices(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
     z.array(z.object({
@@ -3108,21 +3377,21 @@ export async function fetchServices(businessId: string = DEFAULT_BUSINESS_ID) {
 }
 
 export async function createService(input: { businessId?: string; name: string; durationMins: number; price: number; description?: string; currency?: string; sourceProductId?: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Service>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/services`,
     body: { name: input.name, duration: input.durationMins, price: input.price, description: input.description, currency: input.currency ?? "TTD", sourceProductId: input.sourceProductId },
   });
 }
 
-export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number | null; leadTimeMins?: number | null }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updateService(serviceId: string, data: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number | null; leadTimeMins?: number | null }, businessId: string = selectedBusinessId()) {
   return apiPatch<Service>(
     `/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
     data,
   );
 }
 
-export async function deleteService(serviceId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteService(serviceId: string, businessId: string = selectedBusinessId()) {
   try {
     const res = await fetchWithAuthRetry(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`, {
       method: "DELETE",
@@ -3135,7 +3404,7 @@ export async function deleteService(serviceId: string, businessId: string = DEFA
   }
 }
 
-export async function fetchStaff(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchStaff(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(businessId)}/staff`,
     z.array(z.object({
@@ -3148,14 +3417,14 @@ export async function fetchStaff(businessId: string = DEFAULT_BUSINESS_ID) {
 }
 
 export async function createStaff(input: { businessId?: string; name: string; email?: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<StaffMember>({
     path: `/bookings/businesses/${encodeURIComponent(businessId)}/staff`,
     body: { name: input.name, email: input.email },
   });
 }
 
-export async function deleteStaff(staffId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deleteStaff(staffId: string, businessId: string = selectedBusinessId()) {
   try {
     const res = await fetchWithAuthRetry(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}`, {
       method: "DELETE",
@@ -3168,7 +3437,7 @@ export async function deleteStaff(staffId: string, businessId: string = DEFAULT_
   }
 }
 
-export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID, opts?: { status?: string; limit?: number }) {
+export async function fetchPosts(businessId: string = selectedBusinessId(), opts?: { status?: string; limit?: number }) {
   const params = new URLSearchParams();
   if (opts?.status) params.set("status", opts.status);
   if (opts?.limit) params.set("limit", String(opts.limit));
@@ -3197,7 +3466,7 @@ export async function fetchPosts(businessId: string = DEFAULT_BUSINESS_ID, opts?
 }
 
 export async function postNow(input: { businessId?: string; content: string; mediaUrls?: string[]; channelIds?: string[] }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ post: SocialPost; results: Array<Record<string, unknown>> }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/now`,
     body: { content: input.content, mediaUrls: input.mediaUrls, channelIds: input.channelIds },
@@ -3205,14 +3474,14 @@ export async function postNow(input: { businessId?: string; content: string; med
 }
 
 export async function schedulePost(input: { businessId?: string; content: string; mediaUrls?: string[]; channelIds?: string[]; scheduleAt: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/schedule`,
     body: { content: input.content, mediaUrls: input.mediaUrls, channelIds: input.channelIds, scheduleAt: input.scheduleAt },
   });
 }
 
-export async function fetchRecentExternalPosts(businessId: string = DEFAULT_BUSINESS_ID, platform?: string) {
+export async function fetchRecentExternalPosts(businessId: string = selectedBusinessId(), platform?: string) {
   const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
   return apiGet(
     `/social/businesses/${encodeURIComponent(businessId)}/recent-posts${qs}`,
@@ -3228,34 +3497,34 @@ export async function fetchRecentExternalPosts(businessId: string = DEFAULT_BUSI
 }
 
 export async function createPost(input: { businessId?: string; content: string; mediaUrls?: string[]; scheduledFor?: string; channelIds?: string[] }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts`,
     body: { content: input.content, mediaUrls: input.mediaUrls, scheduledFor: input.scheduledFor, channelIds: input.channelIds },
   });
 }
 
-export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[]; mediaUrls?: string[] }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function updatePost(postId: string, data: { content?: string; scheduledAt?: string | null; channelIds?: string[]; mediaUrls?: string[] }, businessId: string = selectedBusinessId()) {
   return apiPatch<SocialPost>(
     `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
     data,
   );
 }
 
-export async function deletePost(postId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function deletePost(postId: string, businessId: string = selectedBusinessId()) {
   return apiDelete<SocialPost>(
     `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}`,
   );
 }
 
-export async function publishPost(postId: string, channelIds?: string[], businessId: string = DEFAULT_BUSINESS_ID) {
+export async function publishPost(postId: string, channelIds?: string[], businessId: string = selectedBusinessId()) {
   return apiPost<SocialPost>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/posts/${encodeURIComponent(postId)}/publish`,
     body: { channelIds },
   });
 }
 
-export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSocialConnections(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/social/businesses/${encodeURIComponent(businessId)}/connections`,
     z.array(z.object({
@@ -3274,40 +3543,40 @@ export async function fetchSocialConnections(businessId: string = DEFAULT_BUSINE
   );
 }
 
-export async function startSocialOAuth(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function startSocialOAuth(platform: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ authUrl: string; redirectUri: string; state?: string }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/start`,
     body: {},
   });
 }
 
-export async function completeSocialOAuth(platform: string, code: string, state?: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function completeSocialOAuth(platform: string, code: string, state?: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ success: boolean; error?: string; connection?: SocialConnection }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/oauth/callback`,
     body: { code, state },
   });
 }
 
-export async function fetchOAuthAvailability(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchOAuthAvailability(businessId: string = selectedBusinessId()) {
   return apiGetSimple<Record<string, boolean>>(
     `/social/businesses/${encodeURIComponent(businessId)}/connections/oauth-availability`,
   );
 }
 
-export async function connectSocialManual(platform: string, data: { token: string; platformId?: string; accountName?: string }, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function connectSocialManual(platform: string, data: { token: string; platformId?: string; accountName?: string }, businessId: string = selectedBusinessId()) {
   return apiPost<SocialConnection>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/manual`,
     body: data,
   });
 }
 
-export async function disconnectSocial(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function disconnectSocial(platform: string, businessId: string = selectedBusinessId()) {
   return apiDelete<{ success: boolean }>(
     `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}`,
   );
 }
 
-export async function testSocialConnection(platform: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function testSocialConnection(platform: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ success: boolean; error?: string; status?: string; account?: { id: string; name: string } }>({
     path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${encodeURIComponent(platform)}/test`,
     body: {},
@@ -3349,7 +3618,7 @@ export type SocialAnalytics = {
   lastUpdated: string;
 };
 
-export async function fetchSocialAnalytics(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchSocialAnalytics(businessId: string = selectedBusinessId()) {
   return apiGet<SocialAnalytics>(
     `/social/businesses/${encodeURIComponent(businessId)}/analytics`,
     z.object({
@@ -3389,7 +3658,7 @@ export async function fetchSocialAnalytics(businessId: string = DEFAULT_BUSINESS
   );
 }
 
-export async function fetchAccountMetrics(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAccountMetrics(businessId: string = selectedBusinessId()) {
   return apiGet<{ platform: string; likes: number; comments: number; shares: number; reach: number; impressions: number; followers?: number }[]>(
     `/social/businesses/${encodeURIComponent(businessId)}/account-metrics`,
     z.array(z.object({
@@ -3405,7 +3674,7 @@ export async function fetchAccountMetrics(businessId: string = DEFAULT_BUSINESS_
   );
 }
 
-export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchPlaybooks(businessId: string = selectedBusinessId()) {
   return apiGet(
     `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,
     z.array(z.object({
@@ -3424,7 +3693,7 @@ export async function fetchPlaybooks(businessId: string = DEFAULT_BUSINESS_ID) {
 }
 
 export async function createPlaybook(input: { businessId?: string; name: string; triggerEvent: string; actions: unknown; condition?: string }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Playbook>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/playbooks`,
     body: { name: input.name, triggerEvent: input.triggerEvent, actions: input.actions, condition: input.condition || null },
@@ -3432,7 +3701,7 @@ export async function createPlaybook(input: { businessId?: string; name: string;
 }
 
 export async function updatePlaybook(input: { businessId?: string; playbookId: string; name?: string; triggerEvent?: string; condition?: string | null; actions?: unknown; enabled?: boolean }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   try {
     const res = await fetchWithAuthRetry(`${API_BASE}/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}`, {
       method: "PATCH",
@@ -3448,7 +3717,7 @@ export async function updatePlaybook(input: { businessId?: string; playbookId: s
 }
 
 export async function testRunPlaybook(input: { businessId?: string; playbookId: string }): Promise<ApiResult<{ success: boolean; message?: string; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean; message?: string; error?: string }>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}/test-run`,
     body: {},
@@ -3456,7 +3725,7 @@ export async function testRunPlaybook(input: { businessId?: string; playbookId: 
 }
 
 export async function aiGenerateFlow(input: { businessId?: string; prompt: string }): Promise<ApiResult<{ success: boolean; flow?: { name: string; triggerEvent: string; actions: { type: string; config?: Record<string, string> }[]; conditions: string[]; reasoning: string }; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean; flow?: { name: string; triggerEvent: string; actions: { type: string; config?: Record<string, string> }[]; conditions: string[]; reasoning: string }; error?: string }>({
     path: `/automation/businesses/${encodeURIComponent(businessId)}/ai/generate-flow`,
     body: { prompt: input.prompt },
@@ -3466,71 +3735,71 @@ export async function aiGenerateFlow(input: { businessId?: string; prompt: strin
 /* ---------- KEY Talk Pipeline — Flow Automations ---------- */
 
 export async function keyInterpretFlow(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; proposedFlow?: unknown; alternatives?: unknown[]; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
 export async function keyBuildFlow(input: { businessId?: string; proposedFlow: unknown }): Promise<ApiResult<{ success: boolean; flowId?: string; flow?: unknown; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedFlow: input.proposedFlow } });
 }
 
 export async function keyExecuteFlow(input: { businessId?: string; flowId: string; testContext?: Record<string, unknown> }): Promise<ApiResult<{ success: boolean; executed?: boolean; actionsRun?: string[]; error?: string; proof?: unknown }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { flowId: input.flowId, testContext: input.testContext } });
 }
 
 export async function keyTalkFlow(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 /* ---------- KEY Talk Pipeline — Autopilot Delegations ---------- */
 
 export async function keyInterpretDelegation(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; recommendedLoopType?: string; proposedConfig?: unknown; alternatives?: unknown[]; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
 export async function keyBuildDelegation(input: { businessId?: string; recommendedLoopType: string; proposedConfig?: unknown; enabled?: boolean }): Promise<ApiResult<{ success: boolean; loopId?: string; loop?: unknown; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/build`, body: { recommendedLoopType: input.recommendedLoopType, proposedConfig: input.proposedConfig, enabled: input.enabled } });
 }
 
 export async function keyExecuteDelegation(input: { businessId?: string; loopId: string }): Promise<ApiResult<{ success: boolean; result?: unknown; proof?: unknown; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { loopId: input.loopId } });
 }
 
 export async function keyTalkDelegation(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 /* ---------- KEY Talk — Calendar ---------- */
 
 export async function keyInterpretCalendar(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; actionType?: string; recommendation?: string; confidence?: number; proposedEvent?: unknown; alternatives?: unknown[]; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
 export async function keyBuildCalendar(input: { businessId?: string; proposedEvent: unknown }): Promise<ApiResult<{ success: boolean; eventId?: string; event?: unknown; error?: string }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedEvent: input.proposedEvent } });
 }
 
 export async function keyExecuteCalendar(input: { businessId?: string; eventId: string }): Promise<ApiResult<{ success: boolean; executed?: boolean; event?: unknown; error?: string; proof?: unknown }>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { eventId: input.eventId } });
 }
 
 export async function keyTalkCalendar(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 export async function getCalendarAuthUrl(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/calendar/auth-url`,
     z.object({ url: z.string() }),
@@ -3538,7 +3807,7 @@ export async function getCalendarAuthUrl(businessId?: string) {
 }
 
 export async function getCalendarStatus(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/calendar/status`,
     z.object({ connected: z.boolean(), email: z.string().optional() }),
@@ -3546,7 +3815,7 @@ export async function getCalendarStatus(businessId?: string) {
 }
 
 export async function disconnectCalendar(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean }>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/calendar/disconnect`,
     body: {},
@@ -3554,7 +3823,7 @@ export async function disconnectCalendar(businessId?: string) {
 }
 
 export async function syncBookingToCalendar(bookingId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean; eventId?: string }>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/sync-calendar`,
     body: {},
@@ -3597,7 +3866,7 @@ export async function fetchGoogleCalendarEvents(
 }
 
 export async function updateBookingStatus(bookingId: string, status: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<Booking>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/status`,
     body: { status },
@@ -3611,7 +3880,7 @@ export type BookingInvoiceResult = {
 };
 
 export async function createInvoiceFromBooking(bookingId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<BookingInvoiceResult>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/bookings/${encodeURIComponent(bookingId)}/create-invoice`,
     body: {},
@@ -3639,7 +3908,7 @@ export type ContactRevenueSummary = {
 };
 
 export async function fetchContactRevenueSummary(contactId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<ContactRevenueSummary>(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/revenue-summary`,
   );
@@ -3653,7 +3922,7 @@ export type BookingStats = {
 };
 
 export async function fetchBookingStats(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/stats`,
     z.object({
@@ -3748,7 +4017,7 @@ const scheduleHealthSchema = z.object({
 });
 
 export async function fetchScheduleHealth(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/bookings/businesses/${encodeURIComponent(bid)}/optimizer/schedule-health`,
     scheduleHealthSchema,
@@ -3914,7 +4183,7 @@ const cockpitSummarySchema = z.object({
 });
 
 export async function fetchCockpitSummary(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/api/flows/businesses/${encodeURIComponent(bid)}/cockpit`,
     cockpitSummarySchema,
@@ -3987,7 +4256,7 @@ const autopilotStatsSchema = z.object({
 });
 
 export async function fetchTodaysTasks(businessId?: string, limit?: number) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const query = limit ? `?limit=${limit}` : '';
   return apiGet(
     `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/today${query}`,
@@ -3997,7 +4266,7 @@ export async function fetchTodaysTasks(businessId?: string, limit?: number) {
 }
 
 export async function fetchAllAutopilotTasks(businessId?: string, status?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const query = status ? `?status=${status}` : '';
   return apiGet(
     `/autopilot/businesses/${encodeURIComponent(bid)}/tasks${query}`,
@@ -4007,7 +4276,7 @@ export async function fetchAllAutopilotTasks(businessId?: string, status?: strin
 }
 
 export async function updateAutopilotTaskStatus(taskId: string, status: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<AutopilotTask>(
     `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/status`,
     { status },
@@ -4015,7 +4284,7 @@ export async function updateAutopilotTaskStatus(taskId: string, status: string, 
 }
 
 export async function approveAutopilotTask(taskId: string, approvedBy: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AutopilotTask>({
     path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/approve`,
     body: { approvedBy },
@@ -4023,7 +4292,7 @@ export async function approveAutopilotTask(taskId: string, approvedBy: string, b
 }
 
 export async function denyAutopilotTask(taskId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AutopilotTask>({
     path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/${encodeURIComponent(taskId)}/deny`,
     body: {},
@@ -4031,7 +4300,7 @@ export async function denyAutopilotTask(taskId: string, businessId?: string) {
 }
 
 export async function generateSetupTasks(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AutopilotTask[]>({
     path: `/autopilot/businesses/${encodeURIComponent(bid)}/tasks/generate-setup`,
     body: {},
@@ -4039,7 +4308,7 @@ export async function generateSetupTasks(businessId?: string) {
 }
 
 export async function fetchAutopilotStats(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/autopilot/businesses/${encodeURIComponent(bid)}/stats`,
     autopilotStatsSchema,
@@ -4047,7 +4316,7 @@ export async function fetchAutopilotStats(businessId?: string) {
 }
 
 export async function fetchCriticalAlerts(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/autopilot/businesses/${encodeURIComponent(bid)}/alerts`,
     z.array(autopilotAlertSchema),
@@ -4104,7 +4373,7 @@ export async function generateAutopilotDraft(
   body: { type: string; contactId: string; contactName: string; description: string },
   businessId?: string,
 ): Promise<ApiResult<AutopilotDraft>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AutopilotDraft>({
     path: `/autopilot/businesses/${encodeURIComponent(bid)}/actions/${encodeURIComponent(actionId)}/draft`,
     body,
@@ -4116,7 +4385,7 @@ export async function executeAutopilotAction(
   body: { contactId: string; channel: string; message: string },
   businessId?: string,
 ): Promise<ApiResult<{ success: boolean; eventLogged: boolean }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ success: boolean; eventLogged: boolean }>({
     path: `/autopilot/businesses/${encodeURIComponent(bid)}/actions/${encodeURIComponent(actionId)}/execute`,
     body,
@@ -4124,7 +4393,7 @@ export async function executeAutopilotAction(
 }
 
 export async function fetchAutopilotSettings(businessId?: string): Promise<ApiResult<AutopilotSettings>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/autopilot/businesses/${encodeURIComponent(bid)}/settings`,
     autopilotSettingsSchema,
@@ -4135,7 +4404,7 @@ export async function updateAutopilotSettings(
   settings: Partial<AutopilotSettings>,
   businessId?: string,
 ): Promise<ApiResult<AutopilotSettings>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<AutopilotSettings>(
     `/autopilot/businesses/${encodeURIComponent(bid)}/settings`,
     settings,
@@ -4228,7 +4497,7 @@ const _momentumDraftSchema = z.object({
 export type MomentumDraft = z.infer<typeof _momentumDraftSchema>;
 
 export async function fetchMomentumRecommendations(businessId?: string, limit?: number): Promise<ApiResult<MomentumRecommendation[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const query = limit ? `?limit=${limit}` : '';
   return apiGet(
     `/momentum/businesses/${encodeURIComponent(bid)}/recommendations${query}`,
@@ -4238,7 +4507,7 @@ export async function fetchMomentumRecommendations(businessId?: string, limit?: 
 }
 
 export async function actionMomentumRecommendation(id: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<MomentumRecommendation>({
     path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/action`,
     body: {},
@@ -4246,7 +4515,7 @@ export async function actionMomentumRecommendation(id: string, businessId?: stri
 }
 
 export async function snoozeMomentumRecommendation(id: string, days?: number, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<MomentumRecommendation>({
     path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/snooze`,
     body: { days: days ?? 7 },
@@ -4254,7 +4523,7 @@ export async function snoozeMomentumRecommendation(id: string, days?: number, bu
 }
 
 export async function dismissMomentumRecommendation(id: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<MomentumRecommendation>({
     path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/dismiss`,
     body: {},
@@ -4266,7 +4535,7 @@ export async function generateMomentumDraft(
   body: { contactId: string; contactName: string; type: string; description: string; momentumScore?: number },
   businessId?: string,
 ): Promise<ApiResult<MomentumDraft>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<MomentumDraft>({
     path: `/momentum/businesses/${encodeURIComponent(bid)}/recommendations/${encodeURIComponent(id)}/draft`,
     body,
@@ -4274,7 +4543,7 @@ export async function generateMomentumDraft(
 }
 
 export async function fetchContactMomentum(contactId: string, businessId?: string): Promise<ApiResult<MomentumScore>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/momentum/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}`,
     momentumScoreSchema,
@@ -4282,7 +4551,7 @@ export async function fetchContactMomentum(contactId: string, businessId?: strin
 }
 
 export async function fetchContactMomentumHistory(contactId: string, days?: number, businessId?: string): Promise<ApiResult<MomentumHistory>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const query = days ? `?days=${days}` : '';
   return apiGet(
     `/momentum/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/history${query}`,
@@ -4292,7 +4561,7 @@ export async function fetchContactMomentumHistory(contactId: string, days?: numb
 }
 
 export async function fetchMomentumSummary(businessId?: string): Promise<ApiResult<MomentumSummary>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/momentum/businesses/${encodeURIComponent(bid)}/summary`,
     momentumSummarySchema,
@@ -4300,7 +4569,7 @@ export async function fetchMomentumSummary(businessId?: string): Promise<ApiResu
 }
 
 export async function triggerMomentumSweep(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ contactsProcessed: number; recommendationsGenerated: number }>({
     path: `/momentum/businesses/${encodeURIComponent(bid)}/sweep`,
     body: {},
@@ -4354,7 +4623,10 @@ export type AutopilotActionData = z.infer<typeof autopilotActionSchema>;
 
 const healthMetricsSchema = z.object({
   engagement: z.number(),
-  payment: z.number(),
+  // W8-MONEY-SIGNALS (owner ruling D-100; review CR-W8MS-1): the payment-health
+  // ratio is left out for a member without revenue read; readers average and
+  // draw only the metrics served.
+  payment: z.number().optional(),
   responsiveness: z.number(),
   relationship: z.number(),
 });
@@ -4408,7 +4680,7 @@ const _aiInsightSchema = z.object({
 export type AiInsight = z.infer<typeof _aiInsightSchema>;
 
 export async function fetchFlowIntelligence(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<FlowIntelligenceData>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/flow-intelligence`,
     flowIntelligenceSchema,
@@ -4418,7 +4690,7 @@ export async function fetchFlowIntelligence(businessId?: string, opts?: { signal
 }
 
 export async function fetchAiNextActions(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AiNextAction[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-next-actions`,
     z.array(aiNextActionSchema),
@@ -4428,7 +4700,7 @@ export async function fetchAiNextActions(businessId?: string, opts?: { signal?: 
 }
 
 export async function fetchNextActions(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<CrmNextAction[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/next-actions`,
     z.array(crmNextActionSchema),
@@ -4438,7 +4710,7 @@ export async function fetchNextActions(businessId?: string, opts?: { signal?: Ab
 }
 
 export async function completeNextAction(actionId: string, businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost({
     path: `/crm/businesses/${encodeURIComponent(bid)}/next-actions/${encodeURIComponent(actionId)}/complete`,
     body: {},
@@ -4446,7 +4718,7 @@ export async function completeNextAction(actionId: string, businessId?: string) 
 }
 
 export async function fetchAutopilotActionsForCrm(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AutopilotActionData[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/autopilot-actions`,
     z.array(autopilotActionSchema),
@@ -4456,7 +4728,7 @@ export async function fetchAutopilotActionsForCrm(businessId?: string, opts?: { 
 }
 
 export async function fetchContactHealthMetrics(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<HealthMetrics>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/health-metrics`,
     healthMetricsSchema,
@@ -4466,7 +4738,7 @@ export async function fetchContactHealthMetrics(contactId: string, businessId?: 
 }
 
 export async function fetchContactDossier(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<unknown>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/dossier`,
     undefined,
@@ -4476,7 +4748,7 @@ export async function fetchContactDossier(contactId: string, businessId?: string
 }
 
 export async function fetchContactJourney(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<JourneyMilestone[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/journey`,
     z.array(journeyMilestoneSchema),
@@ -4524,7 +4796,7 @@ export type CrossJourneySummary = z.infer<typeof crossJourneySummarySchema>;
 export type CrossJourneyResponse = z.infer<typeof crossJourneyResponseSchema>;
 
 export async function fetchContactCrossJourney(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<CrossJourneyResponse>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/cross-journey`,
     crossJourneyResponseSchema,
@@ -4534,7 +4806,7 @@ export async function fetchContactCrossJourney(contactId: string, businessId?: s
 }
 
 export async function fetchPredictiveRevenue(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<RevenueData>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/predictive-revenue`,
     revenueDataSchema,
@@ -4570,7 +4842,7 @@ const financialGrowthSchema = z.object({
 });
 
 export async function fetchFinancialGrowth(businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<FinancialGrowthData>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/financial-growth`,
     financialGrowthSchema,
@@ -4580,7 +4852,7 @@ export async function fetchFinancialGrowth(businessId?: string, opts?: { signal?
 }
 
 export async function fetchConversationContext(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<ConversationContextData>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/conversation-context`,
     conversationContextSchema,
@@ -4590,7 +4862,7 @@ export async function fetchConversationContext(contactId: string, businessId?: s
 }
 
 export async function generateAiInsight(contactId: string, businessId?: string, opts?: { signal?: AbortSignal }): Promise<ApiResult<AiInsight>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiInsight>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-insight`,
     body: {},
@@ -4645,7 +4917,7 @@ export async function fetchContactInsightSnapshot(
   businessId?: string,
   opts?: { signal?: AbortSignal },
 ): Promise<ApiResult<ContactInsightSnapshot>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<ContactInsightSnapshot>(
     `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/insight-card`,
     opts?.signal ? { signal: opts.signal } : undefined,
@@ -4657,7 +4929,7 @@ export async function recomputeContactInsightSnapshot(
   businessId?: string,
   opts?: { signal?: AbortSignal },
 ): Promise<ApiResult<ContactInsightSnapshot>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<ContactInsightSnapshot>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/insight-card/recompute`,
     body: {},
@@ -5130,7 +5402,10 @@ export async function fetchStorefrontConfig(businessId: string): Promise<ApiResu
 }
 
 export async function updateStorefrontConfig(businessId: string, config: Partial<StorefrontConfig>): Promise<ApiResult<StorefrontConfig>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -5213,7 +5488,7 @@ export interface StoreReadinessResult {
 }
 
 export async function backfillStoreLinks(businessId: string): Promise<void> {
-  fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(businessId)}/store/backfill-links`, {
+  businessFetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(businessId)}/store/backfill-links`, {
     method: 'POST',
     headers: getAuthHeaders(),
   }).catch(() => {});
@@ -5276,7 +5551,7 @@ export async function trackStoreEvent(
 ): Promise<void> {
   // Legacy storefront analytics bucket — preserved so existing dashboards
   // (conversion funnel, product health) keep working unchanged.
-  fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/analytics/event`, {
+  businessFetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/analytics/event`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, itemId }),
@@ -5322,7 +5597,7 @@ export async function trackStoreEvent(
   if (visitorId) headers['X-Visitor-Id'] = visitorId;
 
   try {
-    const res = await fetch(
+    const res = await businessFetch(
       `${API_BASE}/public-events/businesses/${encodeURIComponent(businessId)}/track`,
       {
         method: 'POST',
@@ -5455,7 +5730,10 @@ export async function fetchConversionSuggestions(businessId: string): Promise<Ap
 }
 
 export async function fetchAiConversionAdvice(businessId: string): Promise<ApiResult<AiConversionAdvice>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'POST',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
   });
@@ -6277,6 +6555,9 @@ export interface ActionExecuteResponse {
   blocked?: boolean;
   requiresApproval?: boolean;
   approvalId?: string;
+  /** The action boundary holds the step for a confirmation (V1-31b CR-5). */
+  requiresConfirmation?: boolean;
+  confirmationId?: string;
   result?: unknown;
   changedEntities?: string[];
   followOnSuggestions?: string[];
@@ -6287,21 +6568,30 @@ export interface ActionExecuteResponse {
 
 export interface ActionQueueItem {
   id: string;
-  type: 'pending_approval' | 'executed' | 'scheduled';
+  /**
+   * 'approved_step' (D-70): a stored plan step whose approval item a member approved and that has
+   * not run yet; listed only for a member who may run it, with its stored planId and planStepId.
+   */
+  type: 'pending_approval' | 'executed' | 'scheduled' | 'approved_step';
   toolName: string;
   title: string;
   description: string | null;
   riskTier: number;
   module: string | null;
-  status: 'pending' | 'scheduled' | 'active' | 'completed' | 'failed';
+  status: 'pending' | 'approved' | 'scheduled' | 'active' | 'completed' | 'failed';
   createdAt: string;
   affectedEntities: string[];
+  /** On an 'approved_step' item: the stored plan and step the Run action executes, by id. */
+  planId?: string;
+  planStepId?: string;
+  approvalId?: string;
 }
 
 export interface ActionQueueResponse {
   items: ActionQueueItem[];
   counts: {
     pending: number;
+    approved?: number;
     scheduled: number;
     active: number;
     completed: number;
@@ -6347,6 +6637,11 @@ export async function planAction(businessId: string, input: string): Promise<Api
   });
 }
 
+/**
+ * Since V1-31b the server executes only a stored plan step (planId and
+ * planStepId); a toolName or args sent beside them are ignored, and without
+ * them the request is refused 400. Prefer executePlanStep.
+ */
 export async function executeAction(
   businessId: string,
   toolName: string,
@@ -6359,6 +6654,95 @@ export async function executeAction(
     path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
     body: { toolName, args, planId, planStepId },
   });
+}
+
+/**
+ * V1-31c (the V1-31b companion): execute one plan step the server holds, by
+ * its ids. The body is exactly {planId, planStepId}: the server runs the step's
+ * own tool with its stored arguments, so the caller never names a tool or sends
+ * arguments.
+ */
+export async function executePlanStep(
+  businessId: string,
+  planId: string,
+  planStepId: string,
+): Promise<ApiResult<ActionExecuteResponse> & { status?: number }> {
+  return apiPost<ActionExecuteResponse>({
+    path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
+    body: { planId, planStepId },
+  });
+}
+
+/**
+ * How a planned action ended: every stored step ran ('completed'); a step is
+ * waiting for an approval or a confirmation ('queued'); governance blocked a
+ * step ('blocked'); a request or a step failed ('failed'); or the planner needs
+ * the request clarified and nothing ran ('clarify').
+ */
+export type PlannedActionOutcome = 'completed' | 'queued' | 'blocked' | 'failed' | 'clarify';
+
+export interface PlannedActionResult {
+  outcome: PlannedActionOutcome;
+  planId?: string;
+  /** What each executed step answered, in order, up to the one that stopped the run. */
+  results: ActionExecuteResponse[];
+  reason?: string;
+}
+
+/**
+ * V1-31c: act on a request in words. The plan route plans the request and
+ * stores the plan (POST .../plan answers its steps with their ids); each stored
+ * step is then executed by id, in order, stopping at the first one that did not
+ * complete. Nothing here names a tool or carries tool arguments: the server
+ * decides both, and runs only what it stored.
+ *
+ * A step with no tool (the planner's 'analyze' steps, toolName null) is the
+ * planner's own reasoning, not an action: the execute route refuses it 400
+ * ("This plan step has no action to execute"), so it is skipped here, as the
+ * command entry does (V1-31c review CRR-1).
+ */
+export async function runPlannedAction(businessId: string, input: string): Promise<PlannedActionResult> {
+  const planned = await planAction(businessId, input);
+  if (!planned.data) return { outcome: 'failed', results: [], reason: planned.error ?? undefined };
+  const plan = planned.data.plan;
+  if (planned.data.clarificationNeeded || !plan) return { outcome: 'clarify', results: [] };
+  const steps = [...(plan.steps ?? [])]
+    .filter((s) => typeof s.id === 'string' && s.id.length > 0 && typeof s.toolName === 'string' && s.toolName.length > 0)
+    .sort((a, b) => a.order - b.order);
+  if (steps.length === 0) return { outcome: 'failed', planId: plan.id, results: [], reason: 'The plan has no action to execute' };
+  const results: ActionExecuteResponse[] = [];
+  for (const step of steps) {
+    const res = await executePlanStep(businessId, plan.id, step.id);
+    if (!res.data) return { outcome: 'failed', planId: plan.id, results, reason: res.error ?? undefined };
+    results.push(res.data);
+    if (res.data.success) continue;
+    if (res.data.requiresApproval || res.data.requiresConfirmation) {
+      return { outcome: 'queued', planId: plan.id, results, reason: res.data.reason };
+    }
+    if (res.data.blocked) return { outcome: 'blocked', planId: plan.id, results, reason: res.data.reason };
+    return { outcome: 'failed', planId: plan.id, results, reason: res.data.error ?? res.data.reason };
+  }
+  return { outcome: 'completed', planId: plan.id, results };
+}
+
+/**
+ * D-70 (2026-11-03): run an approved queued KEY action step from its queue item. The item carries
+ * the stored planId and planStepId the server listed it with; exactly those ids go to the bound
+ * execute route (V1-31b), which runs the stored step once. Nothing is planned again and no tool
+ * name or argument is sent. An item without both ids is not run.
+ *
+ * D-72: the answer carries the HTTP status of a refusal, so the queue can tell a 403 (this member
+ * may not run the step: the access message is shown and the action removed) from a failure that
+ * may succeed when run again.
+ */
+export async function runApprovedQueueItem(
+  businessId: string,
+  item: Pick<ActionQueueItem, 'type' | 'planId' | 'planStepId'>,
+): Promise<ApiResult<ActionExecuteResponse> & { status?: number }> {
+  if (item.type !== 'approved_step' || !item.planId || !item.planStepId) {
+    return { data: null, error: 'This queue item is not an approved step with stored ids' };
+  }
+  return executePlanStep(businessId, item.planId, item.planStepId);
 }
 
 export async function fetchActionQueue(businessId: string, status?: string, limit?: number): Promise<ApiResult<ActionQueueResponse>> {
@@ -6465,8 +6849,11 @@ export async function updateAgentTrigger(
   triggerId: string,
   patch: Partial<{ enabled: boolean; autoExecute: boolean; maxRiskTier: number }>,
 ) {
+  const url = `${API_BASE}/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers/${encodeURIComponent(triggerId)}`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
   const res = await fetchWithAuthRetry(
-    `${API_BASE}/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers/${encodeURIComponent(triggerId)}`,
+    url,
     {
       method: 'PUT',
       headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -8423,7 +8810,7 @@ const contactListSchema = z.object({
   updatedAt: z.string(),
 });
 
-export async function fetchContactLists(businessId: string = DEFAULT_BUSINESS_ID): Promise<ApiResult<ContactList[]>> {
+export async function fetchContactLists(businessId: string = selectedBusinessId()): Promise<ApiResult<ContactList[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/lists`,
     z.array(contactListSchema),
@@ -8494,7 +8881,7 @@ const contactSavedViewSchema = z.object({
 }) as unknown as z.ZodSchema<ContactSavedView>;
 
 export async function fetchSavedViews(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ): Promise<ApiResult<ContactSavedView[]>> {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/saved-views`,
@@ -8806,12 +9193,12 @@ export type CrmSequenceDetail = CrmSequence & {
   enrollments: CrmSequenceEnrollment[];
 };
 
-export async function fetchSequences(businessId: string = DEFAULT_BUSINESS_ID): Promise<ApiResult<CrmSequence[]>> {
+export async function fetchSequences(businessId: string = selectedBusinessId()): Promise<ApiResult<CrmSequence[]>> {
   return apiGetSimple<CrmSequence[]>(`/crm/businesses/${encodeURIComponent(businessId)}/sequences`);
 }
 
 export async function createSequence(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   data: { name: string; description?: string; steps?: CrmSequenceStep[]; graph?: SequenceGraph; status?: string },
 ): Promise<ApiResult<CrmSequence>> {
   return apiPost<CrmSequence>({
@@ -9085,7 +9472,7 @@ export type AiSearchResult = {
 };
 
 export async function aiContactSummary(contactId: string, businessId?: string): Promise<ApiResult<AiContactSummary>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiContactSummary>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-summary`,
     body: {},
@@ -9093,7 +9480,7 @@ export async function aiContactSummary(contactId: string, businessId?: string): 
 }
 
 export async function aiLeadScore(contactId: string, businessId?: string): Promise<ApiResult<AiLeadScore>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiLeadScore>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-score`,
     body: {},
@@ -9113,7 +9500,7 @@ export type AiTagSuggestionsResult = {
 };
 
 export async function aiSuggestTags(contactId: string, businessId?: string): Promise<ApiResult<AiTagSuggestionsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiTagSuggestionsResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-tags`,
     body: {},
@@ -9121,7 +9508,7 @@ export async function aiSuggestTags(contactId: string, businessId?: string): Pro
 }
 
 export async function aiNoteAnalysis(contactId: string, noteBody: string, noteId?: string, businessId?: string): Promise<ApiResult<AiNoteAnalysis>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiNoteAnalysis>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-note-analysis`,
     body: { noteBody, noteId },
@@ -9129,7 +9516,7 @@ export async function aiNoteAnalysis(contactId: string, noteBody: string, noteId
 }
 
 export async function aiChurnDetection(businessId?: string): Promise<ApiResult<AiChurnRisk>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AiChurnRisk>(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-churn-risk`,
     z.any(),
@@ -9137,7 +9524,7 @@ export async function aiChurnDetection(businessId?: string): Promise<ApiResult<A
 }
 
 export async function aiNaturalLanguageSearch(query: string, businessId?: string): Promise<ApiResult<AiSearchResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiSearchResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/ai-search`,
     body: { query },
@@ -9174,7 +9561,7 @@ export type AiPrepBrief = {
 };
 
 export async function aiPrepBrief(contactId: string, businessId?: string): Promise<ApiResult<AiPrepBrief>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiPrepBrief>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-prep-brief`,
     body: {},
@@ -9194,7 +9581,7 @@ export type AiCommandResult = {
 };
 
 export async function aiInterpretCommand(command: string, businessId?: string): Promise<ApiResult<AiCommandResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiCommandResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/ai-command`,
     body: { command },
@@ -9215,7 +9602,7 @@ export async function aiExecuteCommand(
   contactId?: string,
   businessId?: string,
 ): Promise<ApiResult<AiExecuteResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiExecuteResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/ai-execute`,
     body: { action, contactId, params },
@@ -9231,7 +9618,7 @@ export type AiDataQualityResult = {
 };
 
 export async function aiDataQualityScan(businessId?: string): Promise<ApiResult<AiDataQualityResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AiDataQualityResult>(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-data-quality`,
   );
@@ -9248,7 +9635,7 @@ export type AiDuplicatesResult = {
 };
 
 export async function aiFindDuplicates(businessId?: string): Promise<ApiResult<AiDuplicatesResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AiDuplicatesResult>(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-duplicates`,
   );
@@ -9271,7 +9658,7 @@ export type AiReengagementResult = {
 };
 
 export async function aiReengagementSuggestions(businessId?: string): Promise<ApiResult<AiReengagementResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AiReengagementResult>(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-reengagement`,
   );
@@ -9293,7 +9680,7 @@ export type AiRevenueOpportunitiesResult = {
 };
 
 export async function aiRevenueOpportunities(businessId?: string): Promise<ApiResult<AiRevenueOpportunitiesResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AiRevenueOpportunitiesResult>(
     `/crm/businesses/${encodeURIComponent(bid)}/ai-revenue-opportunities`,
   );
@@ -9313,7 +9700,7 @@ export type AiFollowUpDraftResult = {
 };
 
 export async function aiFollowUpDraft(contactId: string, businessId?: string): Promise<ApiResult<AiFollowUpDraftResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiFollowUpDraftResult>({
     path: `/crm/businesses/${encodeURIComponent(bid)}/contacts/${encodeURIComponent(contactId)}/ai-follow-up-draft`,
     body: {},
@@ -9403,7 +9790,7 @@ export type CommerceExecuteResult = {
 };
 
 export async function fetchCommerceStats(businessId?: string): Promise<ApiResult<CommerceStats>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<CommerceStats>(`/commerce/businesses/${encodeURIComponent(bid)}/stats`);
 }
 
@@ -9412,7 +9799,7 @@ export async function fetchCommerceHealth(): Promise<ApiResult<CommerceHealthRes
 }
 
 export async function commerceAiAnalyze(businessId?: string): Promise<ApiResult<CommerceRevenueAnalysis>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceRevenueAnalysis>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-analyze`,
     body: {},
@@ -9420,7 +9807,7 @@ export async function commerceAiAnalyze(businessId?: string): Promise<ApiResult<
 }
 
 export async function commerceAiInvoiceReminder(invoiceId: string, businessId?: string, tone?: string): Promise<ApiResult<CommerceInvoiceReminder>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceInvoiceReminder>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/invoices/${encodeURIComponent(invoiceId)}/ai-reminder`,
     body: tone ? { tone } : {},
@@ -9428,7 +9815,7 @@ export async function commerceAiInvoiceReminder(invoiceId: string, businessId?: 
 }
 
 export async function commerceAiPricing(productId: string, businessId?: string): Promise<ApiResult<CommercePricingSuggestion>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommercePricingSuggestion>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/products/${encodeURIComponent(productId)}/ai-pricing`,
     body: {},
@@ -9436,12 +9823,12 @@ export async function commerceAiPricing(productId: string, businessId?: string):
 }
 
 export async function commerceAiCashFlow(businessId?: string): Promise<ApiResult<CommerceCashFlowForecast>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<CommerceCashFlowForecast>(`/commerce/businesses/${encodeURIComponent(bid)}/ai-cashflow`);
 }
 
 export async function commerceAiCommand(command: string, businessId?: string): Promise<ApiResult<CommerceCommandResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceCommandResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-command`,
     body: { command },
@@ -9449,7 +9836,7 @@ export async function commerceAiCommand(command: string, businessId?: string): P
 }
 
 export async function commerceAiExecute(action: string, params: Record<string, unknown> = {}, businessId?: string): Promise<ApiResult<CommerceExecuteResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceExecuteResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-execute`,
     body: { action, params },
@@ -9467,7 +9854,7 @@ export type ExtractedProduct = {
 };
 
 export async function scanProductImage(imageFile: File, businessId?: string, currency?: string): Promise<ApiResult<{ extracted: ExtractedProduct[]; count: number }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const formData = new FormData();
   formData.append('image', imageFile);
   if (currency) formData.append('currency', currency);
@@ -9490,7 +9877,7 @@ export async function scanProductImage(imageFile: File, businessId?: string, cur
 }
 
 export async function importProductsFile(file: File, businessId?: string): Promise<ApiResult<{ extracted: ExtractedProduct[]; count: number }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const formData = new FormData();
   formData.append('file', file);
   try {
@@ -9512,7 +9899,7 @@ export async function importProductsFile(file: File, businessId?: string): Promi
 }
 
 export async function confirmProductImport(products: Partial<ExtractedProduct>[], businessId?: string): Promise<ApiResult<{ created: Product[]; count: number }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ created: Product[]; count: number }>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/products/import/confirm`,
     body: { products },
@@ -9588,7 +9975,7 @@ export type CommerceQuoteAnalysisResult = {
 };
 
 export async function commerceAiSearch(query: string, businessId?: string): Promise<ApiResult<CommerceNlSearchResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceNlSearchResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-search`,
     body: { query },
@@ -9596,7 +9983,7 @@ export async function commerceAiSearch(query: string, businessId?: string): Prom
 }
 
 export async function commerceAiProductHealth(businessId?: string): Promise<ApiResult<CommerceProductHealthResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceProductHealthResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-product-health`,
     body: {},
@@ -9604,7 +9991,7 @@ export async function commerceAiProductHealth(businessId?: string): Promise<ApiR
 }
 
 export async function commerceAiClientIntelligence(contactId: string, businessId?: string): Promise<ApiResult<CommerceClientIntelligenceResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceClientIntelligenceResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-client-intelligence`,
     body: { contactId },
@@ -9612,7 +9999,7 @@ export async function commerceAiClientIntelligence(contactId: string, businessId
 }
 
 export async function commerceAiQuoteAnalysis(businessId?: string): Promise<ApiResult<CommerceQuoteAnalysisResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceQuoteAnalysisResult>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-quote-analysis`,
     body: {},
@@ -9706,7 +10093,7 @@ export type CommerceRevenueJourney = {
 };
 
 export async function commerceAiCollectionsScore(businessId?: string): Promise<ApiResult<CommerceCollectionsScore>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceCollectionsScore>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-collections-score`,
     body: {},
@@ -9714,7 +10101,7 @@ export async function commerceAiCollectionsScore(businessId?: string): Promise<A
 }
 
 export async function commerceAiPaymentPlan(invoiceId: string, businessId?: string): Promise<ApiResult<CommercePaymentPlan>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommercePaymentPlan>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/invoices/${encodeURIComponent(invoiceId)}/ai-payment-plan`,
     body: {},
@@ -9722,7 +10109,7 @@ export async function commerceAiPaymentPlan(invoiceId: string, businessId?: stri
 }
 
 export async function commerceAiQuoteFollowUp(quoteId: string, businessId?: string): Promise<ApiResult<CommerceQuoteFollowUp>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceQuoteFollowUp>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/quotes/${encodeURIComponent(quoteId)}/ai-follow-up`,
     body: {},
@@ -9730,7 +10117,7 @@ export async function commerceAiQuoteFollowUp(quoteId: string, businessId?: stri
 }
 
 export async function commerceAiChurnRisk(businessId?: string): Promise<ApiResult<CommerceChurnRisk>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceChurnRisk>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-churn-risk`,
     body: {},
@@ -9738,7 +10125,7 @@ export async function commerceAiChurnRisk(businessId?: string): Promise<ApiResul
 }
 
 export async function commerceAiRevenueJourney(businessId?: string): Promise<ApiResult<CommerceRevenueJourney>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<CommerceRevenueJourney>({
     path: `/commerce/businesses/${encodeURIComponent(bid)}/ai-revenue-journey`,
     body: {},
@@ -9796,7 +10183,7 @@ export type BookingsRevenueInsightsResult = {
 };
 
 export async function bookingsAiSearch(query: string, businessId?: string): Promise<ApiResult<BookingsAiSearchResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<BookingsAiSearchResult>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-search`,
     body: { query },
@@ -9804,7 +10191,7 @@ export async function bookingsAiSearch(query: string, businessId?: string): Prom
 }
 
 export async function bookingsAiScheduleOptimizer(businessId?: string): Promise<ApiResult<BookingsScheduleOptimizerResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<BookingsScheduleOptimizerResult>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-schedule-optimizer`,
     body: {},
@@ -9812,7 +10199,7 @@ export async function bookingsAiScheduleOptimizer(businessId?: string): Promise<
 }
 
 export async function bookingsAiNoShowPredictor(businessId?: string): Promise<ApiResult<BookingsNoShowResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<BookingsNoShowResult>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-no-show-predictor`,
     body: {},
@@ -9820,7 +10207,7 @@ export async function bookingsAiNoShowPredictor(businessId?: string): Promise<Ap
 }
 
 export async function bookingsAiRevenueInsights(businessId?: string): Promise<ApiResult<BookingsRevenueInsightsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<BookingsRevenueInsightsResult>({
     path: `/bookings/businesses/${encodeURIComponent(bid)}/ai-revenue-insights`,
     body: {},
@@ -9841,7 +10228,7 @@ export type CrossModuleWorkflow = {
 };
 
 export async function fetchCrossModuleWorkflows(businessId?: string): Promise<ApiResult<CrossModuleWorkflow[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet(
     `/api/flows/businesses/${encodeURIComponent(bid)}/cross-module-workflows`,
     z.array(z.object({
@@ -9866,7 +10253,7 @@ export async function updateCrossModuleWorkflow(input: {
   enabled?: boolean;
   config?: Record<string, unknown>;
 }): Promise<ApiResult<unknown>> {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   try {
     const res = await fetchWithAuthRetry(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
       method: "PATCH",
@@ -10136,22 +10523,22 @@ export interface WeeklyBriefingResponse {
 }
 
 export async function fetchFinancialPulse(businessId?: string): Promise<ApiResult<FinancialPulse>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<FinancialPulse>(`/commerce/businesses/${encodeURIComponent(bid)}/financial-pulse`);
 }
 
 export async function fetchFinancialAlerts(businessId?: string): Promise<ApiResult<{ alerts: FinancialAlert[] }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<{ alerts: FinancialAlert[] }>(`/commerce/businesses/${encodeURIComponent(bid)}/financial-alerts`);
 }
 
 export async function fetchDetailedCashFlowForecast(businessId?: string): Promise<ApiResult<DetailedCashFlowForecast>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<DetailedCashFlowForecast>(`/commerce/businesses/${encodeURIComponent(bid)}/cash-flow-forecast`);
 }
 
 export async function generateWeeklyBriefing(businessId?: string): Promise<ApiResult<WeeklyBriefingResponse>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<WeeklyBriefingResponse>({ path: `/commerce/businesses/${encodeURIComponent(bid)}/weekly-briefing`, body: {} });
 }
 
@@ -10295,18 +10682,18 @@ export type DeliverySummary = {
 };
 
 export async function listChannelConnections(businessId?: string): Promise<ApiResult<ChannelConnection[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<ChannelConnection[]>(`/communications/businesses/${encodeURIComponent(bid)}/connections`);
 }
 
 
 export async function createChannelConnection(data: { provider: string; label?: string; accountEmail?: string; token?: string; refreshToken?: string; scopes?: string; providerMeta?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<ChannelConnection>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<ChannelConnection>({ path: `/communications/businesses/${encodeURIComponent(bid)}/connections`, body: data });
 }
 
 export async function listChannelDestinations(businessId?: string, opts?: { platform?: string; activeOnly?: boolean }): Promise<ApiResult<ChannelDestination[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const params = new URLSearchParams();
   if (opts?.platform) params.set("platform", opts.platform);
   if (opts?.activeOnly) params.set("activeOnly", "true");
@@ -10316,7 +10703,7 @@ export async function listChannelDestinations(businessId?: string, opts?: { plat
 
 
 export async function createOutboundContent(data: { contentType: string; subject?: string; body: string; mediaUrls?: string[]; objective?: string; audience?: string; tone?: string; tags?: string[]; segmentTags?: string[]; contentMeta?: Record<string, unknown> }, businessId?: string): Promise<ApiResult<OutboundContent>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
 
   const payload: Record<string, unknown> = { ...data };
   if (data.segmentTags && data.segmentTags.length > 0) {
@@ -10326,12 +10713,12 @@ export async function createOutboundContent(data: { contentType: string; subject
 }
 
 export async function updateOutboundContent(contentId: string, data: Partial<{ subject: string; body: string; mediaUrls: string[]; objective: string; audience: string; tone: string; tags: string[]; segmentTags: string[] }>, businessId?: string): Promise<ApiResult<OutboundContent>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<OutboundContent>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`, data);
 }
 
 export async function listOutboundContent(businessId?: string, opts?: { contentType?: string; status?: string; limit?: number }): Promise<ApiResult<OutboundContent[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const params = new URLSearchParams();
   if (opts?.contentType) params.set("contentType", opts.contentType);
   if (opts?.status) params.set("status", opts.status);
@@ -10341,48 +10728,48 @@ export async function listOutboundContent(businessId?: string, opts?: { contentT
 }
 
 export async function getOutboundContent(contentId: string, businessId?: string): Promise<ApiResult<OutboundContent>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<OutboundContent>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`);
 }
 
 export async function deleteOutboundContent(contentId: string, businessId?: string): Promise<ApiResult<{ deleted: boolean }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}`);
 }
 
 
 export async function upsertOutboundVariant(contentId: string, data: { platform: string; textBody?: string; htmlBody?: string; mediaUrls?: string[]; variantMeta?: Record<string, unknown>; destinationId?: string }, businessId?: string): Promise<ApiResult<OutboundVariant>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<OutboundVariant>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/variants`, body: data });
 }
 
 export async function publishContentNow(contentId: string, destinationIds: string[], businessId?: string): Promise<ApiResult<{ deliveries: OutboundDelivery[] }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ deliveries: OutboundDelivery[] }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/publish`, body: { destinationIds } });
 }
 
 export async function scheduleContent(contentId: string, data: { destinationIds: string[]; scheduledAt: string; timezone?: string }, businessId?: string): Promise<ApiResult<{ deliveries: OutboundDelivery[] }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ deliveries: OutboundDelivery[] }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/schedule`, body: data });
 }
 
 export async function rescheduleDelivery(deliveryId: string, data: { scheduledAt: string; timezone?: string }, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<OutboundDelivery>(`/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/reschedule`, data);
 }
 
 export async function cancelDelivery(deliveryId: string, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<OutboundDelivery>({ path: `/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/cancel`, body: {} });
 }
 
 export async function retryDelivery(deliveryId: string, businessId?: string): Promise<ApiResult<OutboundDelivery>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<OutboundDelivery>({ path: `/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/retry`, body: {} });
 }
 
 export async function getDeliverySummary(contentId: string, businessId?: string): Promise<ApiResult<DeliverySummary>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<DeliverySummary>(`/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/delivery-summary`);
 }
 
@@ -10414,33 +10801,33 @@ export type HealthCheckResult = {
 };
 
 export async function getChannelHealthSummary(businessId?: string): Promise<ApiResult<HealthSummary>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<HealthSummary>(`/communications/businesses/${encodeURIComponent(bid)}/connections/health-summary`);
 }
 
 export async function runChannelHealthCheck(connectionId: string, businessId?: string): Promise<ApiResult<HealthCheckResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<HealthCheckResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}/health-check`, body: {} });
 }
 
 export async function toggleChannelDestination(destId: string, isActive: boolean, businessId?: string): Promise<ApiResult<ChannelDestination>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<ChannelDestination>(`/communications/businesses/${encodeURIComponent(bid)}/destinations/${encodeURIComponent(destId)}/toggle`, { isActive });
 }
 
 
 export async function updateChannelConnection(connectionId: string, data: Record<string, unknown>, businessId?: string): Promise<ApiResult<ChannelConnection>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<ChannelConnection>(`/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}`, data);
 }
 
 export async function deleteChannelConnection(connectionId: string, businessId?: string): Promise<ApiResult<{ deleted: boolean }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiDelete<{ deleted: boolean }>(`/communications/businesses/${encodeURIComponent(bid)}/connections/${encodeURIComponent(connectionId)}`);
 }
 
 export async function syncChannelConnectionsFromSocial(businessId?: string): Promise<ApiResult<{ synced: number; results: { provider: string; connectionId: string; destinations: number }[] }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ synced: number; results: { provider: string; connectionId: string; destinations: number }[] }>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/connections/sync-from-social`,
     body: {},
@@ -10473,7 +10860,7 @@ export interface AudienceHealthResult {
 }
 
 export async function validateEmailSend(data: { subject?: string; destinationIds?: string[]; segmentTags?: string[]; ageGroups?: string[] }, businessId?: string): Promise<ApiResult<EmailValidationResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<EmailValidationResult>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/email/validate-send`,
     body: data,
@@ -10481,7 +10868,7 @@ export async function validateEmailSend(data: { subject?: string; destinationIds
 }
 
 export async function expandAudience(data: { segmentTags?: string[]; ageGroups?: string[]; limit?: number; channel?: string }, businessId?: string): Promise<ApiResult<AudienceExpandResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AudienceExpandResult>({
     path: `/communications/businesses/${encodeURIComponent(bid)}/audience/expand`,
     body: data,
@@ -10489,7 +10876,7 @@ export async function expandAudience(data: { segmentTags?: string[]; ageGroups?:
 }
 
 export async function getAudienceHealth(businessId?: string): Promise<ApiResult<AudienceHealthResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGet<AudienceHealthResult>(`/communications/businesses/${encodeURIComponent(bid)}/audience/health`);
 }
 
@@ -10548,57 +10935,57 @@ export interface AiContentIdeasResult {
 }
 
 export async function aiGenerateDraft(data: { contentType: string; objective?: string; tone?: string; audience?: string; topic?: string; existingBody?: string }, businessId?: string): Promise<ApiResult<AiDraftResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiDraftResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/generate-draft`, body: data });
 }
 
 export async function aiRewriteContent(data: { body: string; targetChannel: string; tone?: string; objective?: string }, businessId?: string): Promise<ApiResult<AiRewriteResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiRewriteResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/rewrite`, body: data });
 }
 
 export async function aiSuggestSubjects(data: { body: string; objective?: string; tone?: string; audience?: string }, businessId?: string): Promise<ApiResult<AiSubjectsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiSubjectsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-subjects`, body: data });
 }
 
 export async function aiSuggestCta(data: { body: string; objective?: string; contentType?: string }, businessId?: string): Promise<ApiResult<AiCtaResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiCtaResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-cta`, body: data });
 }
 
 export async function aiSuggestHashtags(data: { body: string; industry?: string }, businessId?: string): Promise<ApiResult<AiHashtagsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiHashtagsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-hashtags`, body: data });
 }
 
 export async function aiShortenExpand(data: { body: string; action: "shorten" | "expand"; targetChannel?: string }, businessId?: string): Promise<ApiResult<AiShortenExpandResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiShortenExpandResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/shorten-expand`, body: data });
 }
 
 export async function aiSuggestChannels(data: { body: string; objective?: string; audience?: string; availableChannels: string[] }, businessId?: string): Promise<ApiResult<AiChannelsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiChannelsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-channels`, body: data });
 }
 
 export async function aiSuggestSendTime(data: { contentType: string; audience?: string; timezone?: string }, businessId?: string): Promise<ApiResult<AiSendTimeResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiSendTimeResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-time`, body: data });
 }
 
 export async function aiSuggestPreviewText(data: { subject: string; body: string; objective?: string }, businessId?: string): Promise<ApiResult<AiPreviewTextResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiPreviewTextResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-preview-text`, body: data });
 }
 
 export async function aiSuggestAudienceSegments(data: { body: string; contentType?: string; objective?: string; existingSegments?: string[] }, businessId?: string): Promise<ApiResult<AiAudienceSegmentsResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiAudienceSegmentsResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-audience-segments`, body: data });
 }
 
 export async function aiSuggestContentIdeas(data: { objective?: string; audience?: string; recentTopics?: string[]; contentType?: string }, businessId?: string): Promise<ApiResult<AiContentIdeasResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<AiContentIdeasResult>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content-ai/suggest-content-ideas`, body: data });
 }
 
@@ -10647,7 +11034,7 @@ export interface DeliveryEventItem {
 }
 
 export async function listDeliveries(businessId?: string, opts?: { status?: string; channel?: string; contentId?: string; contentType?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }): Promise<ApiResult<DeliveryListResult>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   const params = new URLSearchParams();
   if (opts?.status) params.set("status", opts.status);
   if (opts?.channel) params.set("channel", opts.channel);
@@ -10662,12 +11049,12 @@ export async function listDeliveries(businessId?: string, opts?: { status?: stri
 }
 
 export async function getDeliveryEvents(deliveryId: string, businessId?: string): Promise<ApiResult<DeliveryEventItem[]>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<DeliveryEventItem[]>(`/communications/businesses/${encodeURIComponent(bid)}/deliveries/${encodeURIComponent(deliveryId)}/events`);
 }
 
 export async function retryAllFailedDeliveries(contentId: string, businessId?: string): Promise<ApiResult<{ retried: number }>> {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPost<{ retried: number }>({ path: `/communications/businesses/${encodeURIComponent(bid)}/content/${encodeURIComponent(contentId)}/retry-all`, body: {} });
 }
 
@@ -10730,7 +11117,10 @@ export async function fetchQualificationConfig(businessId: string): Promise<ApiR
 }
 
 export async function updateQualificationConfig(businessId: string, config: QualificationFlowConfig): Promise<ApiResult<QualificationFlowConfig>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -10747,8 +11137,6 @@ export async function fetchQualificationAnalytics(businessId: string): Promise<A
 export async function quoteFromConversation(businessId: string, conversationText: string): Promise<ApiResult<unknown>> {
   return apiPost<unknown>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/ai-quote-from-conversation`, body: { conversationText } });
 }
-
-export { DEFAULT_BUSINESS_ID };
 
 // ================================================================
 // KEYFLOW COMMAND
@@ -11370,23 +11758,23 @@ export type AccountingPushResult = {
   results: Array<{ invoiceId?: string; contactId?: string; success: boolean; externalId?: string; error?: string }>;
 };
 
-export async function fetchAccountingSummary(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchAccountingSummary(businessId: string = selectedBusinessId()) {
   return apiGetSimple<AccountingSummary>(`/accounting/businesses/${encodeURIComponent(businessId)}/summary`);
 }
 
-export async function fetchUnsyncedInvoices(businessId: string = DEFAULT_BUSINESS_ID, limit = 100) {
+export async function fetchUnsyncedInvoices(businessId: string = selectedBusinessId(), limit = 100) {
   return apiGetSimple<{ invoices: UnsyncedInvoiceRow[] }>(`/accounting/businesses/${encodeURIComponent(businessId)}/invoices/unsynced?limit=${limit}`);
 }
 
-export async function pushInvoicesToAccounting(invoiceIds: string[], businessId: string = DEFAULT_BUSINESS_ID) {
+export async function pushInvoicesToAccounting(invoiceIds: string[], businessId: string = selectedBusinessId()) {
   return apiPostSimple<AccountingPushResult>(`/accounting/businesses/${encodeURIComponent(businessId)}/invoices/push`, { invoiceIds });
 }
 
-export async function pushCustomersToAccounting(businessId: string = DEFAULT_BUSINESS_ID, contactIds?: string[]) {
+export async function pushCustomersToAccounting(businessId: string = selectedBusinessId(), contactIds?: string[]) {
   return apiPostSimple<AccountingPushResult>(`/accounting/businesses/${encodeURIComponent(businessId)}/customers/push`, { contactIds });
 }
 
-export async function fetchChartOfAccounts(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchChartOfAccounts(businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ provider: AccountingProvider; accounts: ChartOfAccountsAccount[] }>(`/accounting/businesses/${encodeURIComponent(businessId)}/chart-of-accounts`);
 }
 
@@ -11401,13 +11789,13 @@ export type MarketingListsResponse = {
 
 export type MarketingCampaign = { id: string; name: string; status: string; emailsSent?: number };
 
-export async function fetchMarketingLists(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchMarketingLists(businessId: string = selectedBusinessId()) {
   return apiGetSimple<MarketingListsResponse>(`/marketing/businesses/${encodeURIComponent(businessId)}/lists`);
 }
 
 export async function pushContactsToMarketingList(
   params: { provider: MarketingProvider; listId: string; contactIds?: string[]; segment?: { tag?: string; status?: string; marketingOptIn?: boolean } },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPostSimple<{ provider: MarketingProvider; listId: string; total: number; created: number; updated: number; failed: number; errors: string[] }>(
     `/marketing/businesses/${encodeURIComponent(businessId)}/lists/push-contacts`,
@@ -11415,13 +11803,13 @@ export async function pushContactsToMarketingList(
   );
 }
 
-export async function fetchMarketingCampaigns(provider: MarketingProvider, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchMarketingCampaigns(provider: MarketingProvider, businessId: string = selectedBusinessId()) {
   return apiGetSimple<{ provider: MarketingProvider; campaigns: MarketingCampaign[] }>(
     `/marketing/businesses/${encodeURIComponent(businessId)}/lists/campaigns/${encodeURIComponent(provider)}`,
   );
 }
 
-export async function triggerMarketingCampaign(provider: MarketingProvider, campaignId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function triggerMarketingCampaign(provider: MarketingProvider, campaignId: string, businessId: string = selectedBusinessId()) {
   return apiPostSimple<{ success: boolean }>(
     `/marketing/businesses/${encodeURIComponent(businessId)}/lists/campaigns/${encodeURIComponent(provider)}/${encodeURIComponent(campaignId)}/trigger`,
     {},
@@ -11561,7 +11949,7 @@ export async function fetchContactConversations(
     signal?: AbortSignal;
   },
 ) {
-  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = opts?.businessId ?? selectedBusinessId();
   const params = new URLSearchParams();
   if (opts?.cursor) params.set("cursor", opts.cursor);
   if (opts?.limit) params.set("limit", String(opts.limit));
@@ -11577,7 +11965,7 @@ export async function fetchContactConversations(
   );
 }
 
-export async function markContactConversationsRead(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+export async function markContactConversationsRead(contactId: string, businessId: string = selectedBusinessId()) {
   return apiPost<{ ok: boolean; lastReadAt: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/read`,
     body: {},
@@ -11633,12 +12021,12 @@ export type DataQualityListResponse = {
   byKind: Record<string, number>;
 };
 
-export async function fetchDataQualityStats(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function fetchDataQualityStats(businessId: string = selectedBusinessId()) {
   return apiGetSimple<DataQualityStats>(`/crm/businesses/${encodeURIComponent(businessId)}/data-quality/stats`);
 }
 
 export async function fetchDataQualityIssues(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   opts?: {
     kinds?: DataQualityKind[];
     severities?: Array<"low" | "medium" | "high">;
@@ -11661,7 +12049,7 @@ export async function fetchDataQualityIssues(
   );
 }
 
-export async function fetchDataQualityWizard(businessId: string = DEFAULT_BUSINESS_ID, limit = 25) {
+export async function fetchDataQualityWizard(businessId: string = selectedBusinessId(), limit = 25) {
   return apiGetSimple<{ items: DataQualityIssue[] }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/data-quality/wizard?limit=${encodeURIComponent(String(limit))}`,
   );
@@ -11673,7 +12061,7 @@ export async function fetchContactDataQuality(businessId: string, contactId: str
   );
 }
 
-export async function runDataQualityScan(businessId: string = DEFAULT_BUSINESS_ID) {
+export async function runDataQualityScan(businessId: string = selectedBusinessId()) {
   return apiPost<{
     businessId: string;
     scanned: number;
@@ -11687,7 +12075,7 @@ export async function runDataQualityScan(businessId: string = DEFAULT_BUSINESS_I
   });
 }
 
-export async function fetchUnreadCounts(businessId: string = DEFAULT_BUSINESS_ID, opts?: { signal?: AbortSignal }) {
+export async function fetchUnreadCounts(businessId: string = selectedBusinessId(), opts?: { signal?: AbortSignal }) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/unread-counts`,
     z.object({ counts: z.record(z.number()) }),
@@ -11699,7 +12087,7 @@ export async function fetchUnreadCounts(businessId: string = DEFAULT_BUSINESS_ID
 export async function sendContactReply(
   contactId: string,
   input: { channel: "whatsapp" | "email" | "sms" | "call" | "meeting" | "note"; body: string },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<{ ok: boolean; channel: string; fallback?: string; error?: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/reply`,
@@ -11727,7 +12115,7 @@ export async function fetchConversationSummary(
   contactId: string,
   opts?: { businessId?: string; refresh?: boolean; signal?: AbortSignal },
 ) {
-  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = opts?.businessId ?? selectedBusinessId();
   const qs = opts?.refresh ? "?refresh=1" : "";
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/summary${qs}`,
@@ -11739,7 +12127,7 @@ export async function fetchConversationSummary(
 
 export async function regenerateConversationSummary(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<{ summary: ThreadSummary | null; cached: boolean }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/summary/regenerate`,
@@ -11757,7 +12145,7 @@ export interface SuggestedReply {
 export async function fetchSuggestedReplies(
   contactId: string,
   input: { count?: number; preferredChannel?: string; tone?: string },
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiPost<{ replies: SuggestedReply[] }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/suggest-replies`,
@@ -11784,7 +12172,7 @@ export async function fetchConversationInsights(
   contactId: string,
   opts?: { businessId?: string; messageRefs?: string[]; signal?: AbortSignal },
 ) {
-  const businessId = opts?.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = opts?.businessId ?? selectedBusinessId();
   const qs = opts?.messageRefs && opts.messageRefs.length > 0
     ? `?messageRefs=${encodeURIComponent(opts.messageRefs.join(","))}`
     : "";
@@ -11803,7 +12191,7 @@ export async function fetchConversationInsights(
 export function subscribeContactConversationStream(
   contactId: string,
   onEvent: (payload: { type: string; contactId: string; eventId?: string }) => void,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ): () => void {
   if (typeof window === "undefined" || typeof EventSource === "undefined") return () => {};
   const token = window.localStorage?.getItem("kf_token");
@@ -11811,6 +12199,7 @@ export function subscribeContactConversationStream(
   const url =
     `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/conversations/stream` +
     (token ? `?access_token=${encodeURIComponent(token)}` : "");
+  if (namesNoBusiness(url)) return () => {};
   let es: EventSource | null = null;
   try {
     es = new EventSource(url, { withCredentials: false });
@@ -11883,7 +12272,7 @@ export type NetworkGraph = z.infer<typeof networkGraphSchema>;
 
 export async function fetchContactRelationships(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiGet(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/relationships`,
@@ -11894,7 +12283,7 @@ export async function fetchContactRelationships(
 
 export async function fetchContactNetwork(
   contactId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   depth: number = 2,
 ) {
   return apiGet(
@@ -11905,7 +12294,7 @@ export async function fetchContactNetwork(
 }
 
 export async function fetchNetworkGraph(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   filter?: { type?: string; relationshipHealth?: string; minDealValue?: number; search?: string },
 ) {
   const params = new URLSearchParams();
@@ -11929,7 +12318,7 @@ export async function createContactRelationship(input: {
   note?: string | null;
   businessId?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<RelationshipEdge>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/relationships`,
     body: {
@@ -11943,7 +12332,7 @@ export async function createContactRelationship(input: {
 
 export async function deleteContactRelationship(
   relationshipId: string,
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
 ) {
   return apiDelete<{ ok: true }>(
     `/crm/businesses/${encodeURIComponent(businessId)}/relationships/${encodeURIComponent(relationshipId)}`,
@@ -11956,7 +12345,7 @@ export async function referContact(input: {
   note?: string | null;
   businessId?: string;
 }) {
-  const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<{ relationship: RelationshipEdge; targetContactId: string }>({
     path: `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}/refer`,
     body: {
@@ -12228,7 +12617,7 @@ export async function fetchCalendarEvents(
   businessId: string,
   filters: CalendarEventFilters = {},
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiGet(
     `/calendar/businesses/${encodeURIComponent(bid)}/events${buildCalendarQuery(filters)}`,
     calendarListResponseSchema,
@@ -12236,7 +12625,7 @@ export async function fetchCalendarEvents(
 }
 
 export async function fetchCalendarAgenda(businessId: string, day: string) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiGet(
     `/calendar/businesses/${encodeURIComponent(bid)}/agenda?day=${encodeURIComponent(day)}`,
     calendarListResponseSchema,
@@ -12248,7 +12637,7 @@ export async function fetchCalendarConflicts(
   from: string,
   to: string,
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiGet(
     `/calendar/businesses/${encodeURIComponent(bid)}/conflicts?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     calendarConflictResponseSchema,
@@ -12260,7 +12649,7 @@ export async function fetchCalendarInsights(
   from: string,
   to: string,
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiGet(
     `/calendar/businesses/${encodeURIComponent(bid)}/insights?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     calendarInsightsResponseSchema,
@@ -12272,7 +12661,7 @@ export async function fetchCalendarDailyPlan(
   day?: string,
   options: { refresh?: boolean } = {},
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   const params = new URLSearchParams();
   if (day) params.set("day", day);
   if (options.refresh) params.set("refresh", "1");
@@ -12288,7 +12677,7 @@ export async function fetchCalendarWeeklyCapacity(
   weekStart?: string,
   options: { refresh?: boolean } = {},
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   const params = new URLSearchParams();
   if (weekStart) params.set("weekStart", weekStart);
   if (options.refresh) params.set("refresh", "1");
@@ -12318,7 +12707,7 @@ export async function createCalendarEvent(
     meta?: Record<string, unknown> | null;
   },
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiPost<CalendarEvent>({
     path: `/calendar/businesses/${encodeURIComponent(bid)}/events`,
     body,
@@ -12336,7 +12725,7 @@ export async function patchCalendarEvent(
     description?: string | null;
   },
 ) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiPatch<CalendarEvent>(
     `/calendar/businesses/${encodeURIComponent(bid)}/events/${encodeURIComponent(eventId)}`,
     patch,
@@ -12344,7 +12733,7 @@ export async function patchCalendarEvent(
 }
 
 export async function cancelCalendarEvent(businessId: string, eventId: string) {
-  const bid = businessId || DEFAULT_BUSINESS_ID;
+  const bid = businessId || selectedBusinessId();
   return apiDelete<{ id: string; cancelled: boolean }>(
     `/calendar/businesses/${encodeURIComponent(bid)}/events/${encodeURIComponent(eventId)}`,
   );
@@ -12420,7 +12809,10 @@ export async function fetchPresenceDraft(businessId: string) {
 }
 
 export async function savePresenceDraft(businessId: string, payload: PresencePayload) {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`, {
+  const url = `${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
@@ -12449,7 +12841,10 @@ export async function publishPresence(businessId: string) {
 }
 
 export async function unpublishPresence(businessId: string) {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`, {
+  const url = `${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'DELETE',
     headers: { ...await getAuthHeaders() },
   });
@@ -12725,7 +13120,7 @@ export interface PresenceFunnelResponse {
 }
 
 export async function fetchPresenceOverview(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   days = 30,
   opts?: { signal?: AbortSignal },
 ) {
@@ -12736,7 +13131,7 @@ export async function fetchPresenceOverview(
 }
 
 export async function fetchPresenceSourcesReport(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   days = 30,
   opts?: { signal?: AbortSignal },
 ) {
@@ -12747,7 +13142,7 @@ export async function fetchPresenceSourcesReport(
 }
 
 export async function fetchPresencePagesReport(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   days = 30,
   opts?: { signal?: AbortSignal },
 ) {
@@ -12758,7 +13153,7 @@ export async function fetchPresencePagesReport(
 }
 
 export async function fetchPresenceFunnelReport(
-  businessId: string = DEFAULT_BUSINESS_ID,
+  businessId: string = selectedBusinessId(),
   days = 30,
   opts?: { signal?: AbortSignal },
 ) {
@@ -13836,7 +14231,7 @@ export interface DocumentTemplate {
 }
 
 export async function fetchDocumentTemplates(businessId?: string) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiGetSimple<{
     templates: DocumentTemplate[];
     branding: { primaryColor?: string; secondaryColor?: string; logoUrl?: string; invoiceTemplate?: string; quoteTemplate?: string };
@@ -13847,7 +14242,7 @@ export async function setDocumentTemplate(
   body: { invoiceTemplate?: 'classic' | 'modern' | 'minimal'; quoteTemplate?: 'classic' | 'modern' | 'minimal' },
   businessId?: string,
 ) {
-  const bid = businessId ?? DEFAULT_BUSINESS_ID;
+  const bid = businessId ?? selectedBusinessId();
   return apiPatch<{
     success: boolean;
     invoiceTemplate?: string;

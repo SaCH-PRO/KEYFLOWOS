@@ -23,6 +23,12 @@ interface Props {
   businessId: string;
   /** Discharge is the parent's job — it owns the reload of every other panel. */
   onDischarge: (id: string) => Promise<void>;
+  /**
+   * W7-WEB-OPS-SCOPE review SEC-WOS-2 (D-40): why this member cannot record an obligation as met
+   * (POST items/:id/discharge needs operations write, like every command-item action), or null
+   * when Done is offered. Set, Done is disabled and carries it as its title.
+   */
+  dischargeDisabledReason?: string | null;
 }
 
 /** "3 days overdue" / "due today" / "in 4 days" — never a bare ISO string. */
@@ -36,7 +42,7 @@ function whenLabel(o: DueObligation): string {
   return `in ${d} days`;
 }
 
-export function DueObligationsPanel({ businessId, onDischarge }: Props) {
+export function DueObligationsPanel({ businessId, onDischarge, dischargeDisabledReason = null }: Props) {
   const [items, setItems] = useState<DueObligation[]>([]);
   const [overdueCount, setOverdueCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -60,6 +66,7 @@ export function DueObligationsPanel({ businessId, onDischarge }: Props) {
   }, [load]);
 
   const discharge = async (id: string) => {
+    if (dischargeDisabledReason) return;
     setBusyId(id);
     try {
       await onDischarge(id);
@@ -131,8 +138,8 @@ export function DueObligationsPanel({ businessId, onDischarge }: Props) {
 
           <button
             onClick={() => void discharge(o.id)}
-            disabled={busyId === o.id}
-            title="Record that this was done"
+            disabled={busyId === o.id || !!dischargeDisabledReason}
+            title={dischargeDisabledReason ?? "Record that this was done"}
             className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-border/50 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 disabled:opacity-50"
           >
             {busyId === o.id ? (

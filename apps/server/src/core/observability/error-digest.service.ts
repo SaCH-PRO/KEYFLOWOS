@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { safeInterval } from '../scheduling/safe-interval';
 import { errorRegistry } from './error-registry';
+import { schedulersDisabled } from '../config/env';
 
 /**
  * Periodically says out loud what has been failing.
@@ -30,6 +31,10 @@ export class ErrorDigestService implements OnModuleInit, OnModuleDestroy {
   static readonly TOP_N = 5;
 
   onModuleInit(): void {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     // Uses safeInterval rather than setInterval for the same reason everything
     // else here does: a throw in this method must not reach the process
     // handler and take the API down. An observability service that can kill

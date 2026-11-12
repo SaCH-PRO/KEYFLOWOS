@@ -2,21 +2,62 @@
 """
 KEYFLOWOS audit script.
 Logs in, visits key modules, captures console errors, screenshots, and network failures.
+
+The login comes from the environment, never from source:
+    KEYFLOWOS_AUDIT_EMAIL=... KEYFLOWOS_AUDIT_PASSWORD=... python3 audit-keyflowos.py
 """
 import asyncio
 import json
 import os
 import re
 import sys
+import traceback
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright, Route, Request
+# Checked before Playwright is imported, so a missing login stops the run
+# before any browser launch, HTTP call or output directory.
+EMAIL = os.environ.get("KEYFLOWOS_AUDIT_EMAIL", "")
+PASSWORD = os.environ.get("KEYFLOWOS_AUDIT_PASSWORD", "")
+_MISSING = [
+    name
+    for name, value in (("KEYFLOWOS_AUDIT_EMAIL", EMAIL), ("KEYFLOWOS_AUDIT_PASSWORD", PASSWORD))
+    if not value
+]
+if _MISSING:
+    print(
+        f"audit-keyflowos.py: {' and '.join(_MISSING)} must be set to the audit "
+        "login; refusing to run.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+REDACTED = "[REDACTED]"
+
+
+def redact(value):
+    """Replace the login values with [REDACTED] in a string, list or dict.
+
+    Playwright appends its call log to an error message, and the call log
+    line for page.fill repeats the typed value verbatim (fill("<value>")).
+    So any error text can hold the password, and audit-output/results.json is
+    a tracked file. Everything printed or written passes through here.
+    """
+    if isinstance(value, str):
+        for secret in sorted({PASSWORD, EMAIL}, key=len, reverse=True):
+            value = value.replace(secret, REDACTED)
+        return value
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact(item) for key, item in value.items()}
+    return value
+
+
+from playwright.async_api import async_playwright, Route, Request  # noqa: E402
 
 BASE_URL = "http://localhost:5000"
 API_URL = "http://localhost:3001"
-EMAIL = "keyflowos.tt@gmail.com"
-PASSWORD = "S@chin1997"
 OUT_DIR = "audit-output"
 
 # Mix of legacy URLs (to verify redirects) and canonical URLs (to test real pages).
@@ -122,7 +163,7 @@ async def audit_viewport(browser, viewport_name: str, viewport: dict, results: l
         if "/app" not in current_url or error_text:
             raise Exception(f"Login did not redirect to /app. URL={current_url}, error={error_text}")
     except Exception as e:
-        results.append({"step": "login", "status": "failed", "viewport": viewport_name, "error": str(e)})
+        results.append({"step": "login", "status": "failed", "viewport": viewport_name, "error": redact(str(e))})
         await page.screenshot(path=os.path.join(OUT_DIR, f"login-failed-{viewport_name}.png"))
         await page.close()
         await context.close()
@@ -168,14 +209,14 @@ async def audit_viewport(browser, viewport_name: str, viewport: dict, results: l
                 screenshot_path = None
             entry.update({
                 "status": "failed",
-                "error": str(e),
+                "error": redact(str(e)),
                 "url": page.url,
                 "errors": route_errors,
                 "failed_requests": list(failed_requests),
                 "navigations": list(navigations),
                 "screenshot": screenshot_path,
             })
-            print(f"[{viewport_name}] {route} FAILED: {e}", flush=True)
+            print(f"[{viewport_name}] {route} FAILED: {redact(str(e))}", flush=True)
         failed_requests.clear()
         results.append(entry)
         await asyncio.sleep(2)
@@ -195,6 +236,7 @@ async def main():
 
         await browser.close()
 
+    results = redact(results)
     out_path = os.path.join(OUT_DIR, "results.json")
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
@@ -203,4 +245,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        # An uncaught Playwright error's traceback carries its call log.
+        sys.stderr.write(redact(traceback.format_exc()))
+        sys.exit(1)

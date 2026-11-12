@@ -13,8 +13,15 @@
     "test:unit": "vitest run -c vitest.unit.config.ts",
     "test:smoke": "vitest run -c vitest.smoke.config.ts",
     "test:integration": "vitest run -c vitest.integration.config.ts",
+    "test:e2e": "vitest run -c vitest.e2e.config.ts",
     "test:ci": "vitest run",
-    "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json"
+    "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json",
+    "proof:manifests": "node ../../scripts/proof-admission/run-manifests.mjs",
+    "proof:release0": "node ../../scripts/proof-admission/release0.mjs",
+    "backfill:google-identities": "tsx --env-file ../../.env scripts/backfill-google-identities.ts",
+    "cleanup:custom-field-values": "tsx --env-file ../../.env scripts/cleanup-cross-tenant-custom-field-values.ts",
+    "backfill:timeline-contacts": "tsx --env-file ../../.env scripts/backfill-timeline-contact-links.ts",
+    "backfill:owner-memberships": "tsx --env-file ../../.env scripts/backfill-owner-memberships.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

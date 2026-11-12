@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 15 * 60 * 1000; // 15 minutes — overdue detection isn't latency-sensitive
 const BATCH_SIZE = 200;
@@ -22,7 +23,7 @@ export class InvoiceOverdueScheduler implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[InvoiceOverdueScheduler] Disabled via env');
       return;
     }

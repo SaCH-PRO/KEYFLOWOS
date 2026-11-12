@@ -1,8 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { businessOwnerRecipient } from '../../core/auth/business.guard';
 import { FinancialCopilotService } from './financial-copilot.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
+import { redactAddresses } from '../../core/security/redaction';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_HOUR = 7;
@@ -91,6 +94,11 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
   }
 
   onModuleInit() {
+    // V1-24: DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test stops it.
+    if (schedulersDisabled()) {
+      this.logger.log('[FinancialBriefingScheduler] Disabled via env');
+      return;
+    }
     this.logger.log('[FinancialBriefingScheduler] Starting — checking every 60s for Monday 7am briefings');
     this.intervalRef = safeInterval('FinancialBriefingSchedulerService', CHECK_INTERVAL_MS, () => this.checkAndRunBriefings(), this.logger);
   }
@@ -238,10 +246,9 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
           // unset; we only log a warning so the notification still lands.
           if (this.email.isConfigured()) {
             try {
-              const owner = await this.prisma.client.user.findUnique({
-                where: { id: business.ownerId },
-                select: { email: true },
-              });
+              // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the
+              // owner receives the business's figures only while a member of it.
+              const owner = await businessOwnerRecipient(this.prisma, business.id, business.ownerId);
               if (owner?.email) {
                 const html = this.buildEmailHtml({
                   businessName: business.name,
@@ -254,13 +261,15 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
                   subject: `Weekly Financial Briefing — ${business.name}`,
                   html,
                 });
-                this.logger.log(`[FinancialBriefingScheduler] Email sent to ${owner.email} for ${business.name}`);
+                // W5-SYSTEM-EMAIL-CALLERS (SE-3, 9B-D2): the business id, never the owner's address.
+                this.logger.log(`[FinancialBriefingScheduler] Email sent for ${business.id}`);
               } else {
                 this.logger.warn(`[FinancialBriefingScheduler] No owner email for ${business.id} — email skipped`);
               }
             } catch (emailErr) {
+              // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): the sink's error text can quote the address.
               this.logger.error(
-                `[FinancialBriefingScheduler] Email send failed for ${business.id}: ${(emailErr as Error).message}`,
+                `[FinancialBriefingScheduler] Email send failed for ${business.id}: ${redactAddresses((emailErr as Error).message)}`,
               );
             }
           }

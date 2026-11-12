@@ -33,13 +33,18 @@ export const identityRouter: AnyRouter = router({
     user: ctx.user,
   })),
   /**
-   * Membership-first workspace discovery.
+   * Membership-only workspace discovery.
    *
-   * KF-EXEC-TENANT-001. Mirrors `IdentityService.listBusinesses`: Membership is
-   * the ordinary relationship and leads the predicate, `ownerId` remains as a
-   * compatibility arm so pre-existing legitimate owners stay discoverable until
-   * the founding-Membership backfill has run everywhere. Filtering on `ownerId`
-   * alone hid every business a user belonged to but did not own.
+   * KF-EXEC-TENANT-001 made Membership lead the predicate: filtering on
+   * `ownerId` alone hid every business a user belonged to but did not own.
+   *
+   * Owner ruling D-104 (W11-TRPC-MEMBERSHIP): Membership is the single rule, as
+   * in the REST `IdentityService.listBusinesses`. The `ownerId` compatibility
+   * arm is gone: an owner recorded only as Business.ownerId is refused by
+   * assertBusinessAccess and by BusinessGuard, so listing them a workspace they
+   * cannot open helped no one. apps/server/scripts/backfill-owner-memberships.ts
+   * (operator, dry run by default) writes their OWNER Membership. Soft-deleted
+   * businesses stay out.
    */
   listBusinesses: protectedProcedure.query(({ ctx }) => {
     const userId = ctx.user?.id;
@@ -51,13 +56,7 @@ export const identityRouter: AnyRouter = router({
     }
     return ctx.db.business.findMany({
       select: BUSINESS_SUMMARY_SELECT,
-      where: {
-        deletedAt: null,
-        OR: [
-          { members: { some: { userId } } },
-          { ownerId: userId },
-        ],
-      },
+      where: { deletedAt: null, members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
     });
   }),

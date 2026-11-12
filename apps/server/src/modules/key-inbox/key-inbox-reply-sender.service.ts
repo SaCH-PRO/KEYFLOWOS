@@ -196,8 +196,14 @@ export class KeyInboxReplySenderService {
       this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_sent', userId, result);
       return result;
     } catch (err: any) {
-      const error = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Gmail reply failed for message ${message.id}: ${error}`);
+      const raw = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Gmail reply failed for message ${message.id}: ${raw}`);
+      // D-82: an email reply leaves only from the business's own Gmail; it never
+      // falls back to the platform sender. Without Gmail it fails, and says so
+      // in words the inbox toast can show (sendResult.error).
+      const error = this.isGmailNotConnected(err)
+        ? `Gmail is not connected for this business, so this reply was not sent. Email replies go out only from the business's own Gmail: connect it in Settings > Connections, then retry. (${raw})`
+        : raw;
       const result: SendReplyResult = { success: false, status: 'FAILED', error, sentVia: 'gmail' };
       await this.persistSendResult(message.id, result, userId);
       this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
@@ -291,6 +297,14 @@ export class KeyInboxReplySenderService {
         metadata: { threadId, ...result },
       })
       .catch((err) => this.logger.warn(`Failed to emit ${eventType}: ${(err as Error).message}`));
+  }
+
+  /** GmailService's 503 for a business with no usable mailbox (gmail.service.ts gmailNotConfigured). */
+  private isGmailNotConnected(err: unknown): boolean {
+    const response = (err as { getResponse?: () => unknown })?.getResponse?.();
+    if (!response || typeof response !== 'object') return false;
+    const r = response as { code?: unknown; service?: unknown; message?: unknown };
+    return r.code === 'provider_not_configured' && r.service === 'gmail' && r.message === 'Gmail not connected';
   }
 
   private escapeHtml(text: string): string {

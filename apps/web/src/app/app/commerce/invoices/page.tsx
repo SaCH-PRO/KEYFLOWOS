@@ -41,6 +41,7 @@ import {
   Product,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
+import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -141,21 +142,30 @@ export default function InvoicesHubPage() {
   const currentPage = Math.min(page, totalPages);
   const paginated = searchFiltered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  // Stats
+  // Stats. V1-29b-REFUND-READERS (review V36-CR-1): each invoice's balance is
+  // the shared contract over the rows the list route serves
+  // (invoiceBalanceOfStoredRows, the mirror of the server's balanceOfStoredRows),
+  // so a refund (a separate negative REFUNDED row, D-14) is owed again and
+  // PENDING / FAILED rows are not paid. Summing the SUCCESSFUL rows alone read
+  // a refunded invoice as nothing owed. The cards add whole cents.
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const stats = (() => {
-    let unpaidTotal = 0, unpaidCount = 0, overdueTotal = 0, overdueCount = 0, paidMonthTotal = 0, paidMonthCount = 0, draftsTotal = 0, draftsCount = 0;
+    const cents = (amount: number) => Math.round(amount * 100);
+    let unpaidCents = 0, unpaidCount = 0, overdueCents = 0, overdueCount = 0, paidMonthCents = 0, paidMonthCount = 0, draftsCents = 0, draftsCount = 0;
     for (const inv of invoices) {
-      const total = Number(inv.total);
-      const paid = (inv.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-      const remaining = Math.max(0, total - paid);
-      if (inv.status === "DRAFT") { draftsTotal += total; draftsCount++; }
-      else if (inv.status === "PAID" && inv.paidAt && new Date(inv.paidAt) >= startOfMonth) { paidMonthTotal += total; paidMonthCount++; }
-      else if (inv.status === "OVERDUE") { overdueTotal += remaining; overdueCount++; }
-      else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") { unpaidTotal += remaining; unpaidCount++; }
+      const { total, remaining } = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+      if (inv.status === "DRAFT") { draftsCents += cents(total); draftsCount++; }
+      else if (inv.status === "PAID" && inv.paidAt && new Date(inv.paidAt) >= startOfMonth) { paidMonthCents += cents(total); paidMonthCount++; }
+      else if (inv.status === "OVERDUE") { overdueCents += cents(remaining); overdueCount++; }
+      else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") { unpaidCents += cents(remaining); unpaidCount++; }
     }
-    return { unpaid: { total: unpaidTotal, count: unpaidCount }, overdue: { total: overdueTotal, count: overdueCount }, paid: { total: paidMonthTotal, count: paidMonthCount }, drafts: { total: draftsTotal, count: draftsCount } };
+    return {
+      unpaid: { total: unpaidCents / 100, count: unpaidCount },
+      overdue: { total: overdueCents / 100, count: overdueCount },
+      paid: { total: paidMonthCents / 100, count: paidMonthCount },
+      drafts: { total: draftsCents / 100, count: draftsCount },
+    };
   })();
 
   const statusBadge = (status: string) => {
@@ -211,11 +221,15 @@ export default function InvoicesHubPage() {
     router.push("/app/commerce/invoices/new");
   };
 
-  const buildPublicUrl = async (inv: Invoice) => {
-    if (!businessId) return "";
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the token link
+  // or nothing. The fallback was the retired bare-id /pay/:id page.
+  const buildPublicUrl = async (inv: Invoice): Promise<string | null> => {
+    if (!businessId) return null;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const { data } = await createInvoicePaymentLink(businessId, inv.id);
-    return data?.token ? `${origin}/public/invoice/${data.token}` : `${origin}/pay/${inv.id}`;
+    if (data?.token) return `${origin}/public/invoice/${data.token}`;
+    toast.error("Could not create a payment link for this invoice");
+    return null;
   };
 
   return (
@@ -309,8 +323,8 @@ export default function InvoicesHubPage() {
                 <tbody className="divide-y divide-border/60">
                   {paginated.map(inv => {
                     const due = getDaysUntilDue(inv.dueDate);
-                    const paid = (inv.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-                    const pct = Number(inv.total) > 0 ? Math.round((paid / Number(inv.total)) * 100) : 0;
+                    // V1-29b-REFUND-READERS: the share actually paid, net of refunds (the shared contract).
+                    const pct = invoicePaidPercent(invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency));
                     return (
                       <tr key={inv.id} className="group hover:bg-muted/20 transition-colors">
                         <td className="px-5 py-4">
@@ -352,7 +366,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
-                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"))} show />
+                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => { if (url) window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"); })} show />
                                 <DropdownItem icon={Ban} label="Void" onClick={() => handleVoid(inv.id)} show={inv.status !== "VOID" && inv.status !== "PAID"} loading={actionLoading[inv.id] === "void"} />
                                 <div className="border-t border-border my-1" />
                                 <DropdownItem icon={Trash2} label="Delete" destructive onClick={() => handleDelete(inv.id)} show={inv.status === "DRAFT" || inv.status === "VOID"} />

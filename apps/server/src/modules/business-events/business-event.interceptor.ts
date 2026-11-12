@@ -21,6 +21,154 @@ export const SkipBusinessEvent = () =>
   Reflect.metadata(SKIP_BUSINESS_EVENT_KEY, true);
 
 /**
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1; review
+ * CR-V45c-1; D-15): a handler whose answer several requests share (an
+ * idempotent create: the request that created the document, its keyed
+ * replays and the losers of a concurrent burst all answer the one document)
+ * hands the audit a claim. The audit is written only by a request that wins
+ * it, and the claim is won once per document, by the first of those requests
+ * to reach the audit. So the document gets exactly one event: a replay is not
+ * a second one, and a request that committed the document but failed before
+ * its audit (a 5xx after the commit) leaves the event to its retry or to a
+ * loser of its burst, never to no one. A claim that cannot be decided (it
+ * throws) writes nothing, so a retry may still win it.
+ *
+ * A symbol on the request object: it never reaches the response body, and it
+ * lives exactly as long as the request. Read after the handler ran.
+ */
+const BUSINESS_EVENT_CLAIM = Symbol('businessEvent.claim');
+
+/** Resolves true for the one request that may write the shared answer's business event. */
+export type BusinessEventClaim = () => Promise<boolean>;
+
+/** Audit this request's answer only if it wins this claim (see BUSINESS_EVENT_CLAIM). */
+export function auditOnClaim(req: object, claim: BusinessEventClaim): void {
+  (req as { [BUSINESS_EVENT_CLAIM]?: BusinessEventClaim })[BUSINESS_EVENT_CLAIM] = claim;
+}
+
+function claimOf(req: unknown): BusinessEventClaim | undefined {
+  if (!req || typeof req !== 'object') return undefined;
+  const claim = (req as { [BUSINESS_EVENT_CLAIM]?: unknown })[BUSINESS_EVENT_CLAIM];
+  return typeof claim === 'function' ? (claim as BusinessEventClaim) : undefined;
+}
+
+/** What a rule may know about the call it audits. */
+interface RouteCall {
+  /** Date.now() when the interceptor took the request, before the handler ran. */
+  startedAt: number;
+  /** The authenticated user the handler acts for (req.user.id), or null. */
+  userId: string | null;
+}
+
+/**
+ * A route whose audit label is not "<last entity segment>.<HTTP verb>".
+ * `subjectId` reads the subject from the handler's response. `isReplay`, when
+ * set, says the handler answered an idempotent replay: it wrote nothing, so
+ * the interceptor writes no audit row either.
+ */
+interface RouteEventRule {
+  subjectType: string;
+  action: string;
+  subjectId: (response: unknown) => string | undefined;
+  isReplay?: (response: unknown, call: RouteCall) => boolean;
+}
+
+/** `response[key]`, when the handler nests its subject under that key. */
+function nested(response: unknown, key: string): Record<string, unknown> | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const inner = (response as Record<string, unknown>)[key];
+  return inner && typeof inner === 'object' ? (inner as Record<string, unknown>) : undefined;
+}
+
+/** The `id` of `response[key]`. */
+function nestedId(response: unknown, key: string): string | undefined {
+  const id = nested(response, key)?.id;
+  return id ? String(id) : undefined;
+}
+
+/** A Date, an ISO string or epoch millis, as epoch millis. */
+function toMillis(value: unknown): number | undefined {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string' || typeof value === 'number') {
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? undefined : ms;
+  }
+  return undefined;
+}
+
+/**
+ * R0-19 review (R19-ST-1): the manual payment route answers an R0-D2
+ * idempotent replay (same idempotency key, or same reference + amount) with
+ * the payment it already recorded, in the same envelope and status as a fresh
+ * record, and writes, posts and logs nothing (CommerceService
+ * .replayRecordedPayment). Auditing that answer as payment.record would claim
+ * the caller recorded a payment someone else (or the same member, earlier)
+ * recorded. The envelope carries no replay flag, so the Payment row decides:
+ *
+ *   - recordedBy is not the acting user: the route always records the
+ *     authenticated user (R0-PL-07), so this request did not record it. This
+ *     holds even when the two submits race and the replay loses the insert.
+ *   - createdAt is before this request reached the interceptor: Prisma stamps
+ *     @default(now()) in this process (the INSERT carries created_at), so a
+ *     row this request created is never older than the request.
+ *
+ * A response without those fields (no payment, or a payment shape without
+ * them) is not a replay: the row is written as before. Residual: two
+ * concurrent submits by the SAME user both pass both checks, so that payment
+ * gets two payment.record rows, each naming its true recorder.
+ */
+function isPaymentReplay(response: unknown, call: RouteCall): boolean {
+  const payment = nested(response, 'payment');
+  if (!payment) return false;
+  if ('recordedBy' in payment && (payment.recordedBy ?? null) !== call.userId) return true;
+  const createdAt = toMillis(payment.createdAt);
+  return createdAt !== undefined && createdAt < call.startedAt;
+}
+
+/**
+ * Route-specific audit labels, keyed on "<METHOD> <route path without leading
+ * slash>" exactly as the router reports it, so no other route's label moves.
+ *
+ * R0-19-EVIDENCE-BASELINE (M16): the manual payment route walked back to
+ * `invoices` and was audited as `invoice.create` on the invoice. It records a
+ * Payment, and its handler answers { payment, invoice, paidAmount, remaining },
+ * so the subject is response.payment.id. A replay is not audited (R19-ST-1).
+ *
+ * V1-41b review (SEC-V41b-1, CR-V41b-1): the pending-payment confirm route
+ * records the money of a PENDING extracted row through the same door
+ * (CommerceService.recordPayment, as the confirming member) and answers the
+ * same envelope plus confirmedPaymentId. Without a rule it walked back to
+ * `invoices` too (invoice.create on the invoice). It is audited exactly as a
+ * manual payment: payment.record on the SUCCESSFUL Payment it recorded, by the
+ * confirming member (metadata.route and the snapshot's confirmedPaymentId say
+ * it was a confirmation). A confirm that answers a Payment this request did
+ * not record (the door's keyed replay after a confirm that recorded the money
+ * but failed before retiring the row, or a manual payment that took the
+ * door's key) is not audited as a record by this member (R19-ST-1).
+ *
+ * Invoice and quote create keep their inferred labels (invoice.create /
+ * quote.create on the created document). A keyed create's replays are not
+ * told apart by a rule: a createdAt rule cannot see the losers of a burst,
+ * which started before the winner stamped its createdAt, and every request is
+ * by the same member (another member's key is a 409, SEC-V45-3). The create
+ * routes hand the audit a claim instead (auditOnClaim, W3-V1-45c-EVENT-REPLAY).
+ */
+const ROUTE_EVENT_RULES: Record<string, RouteEventRule> = {
+  'POST commerce/businesses/:businessId/invoices/:invoiceId/payments': {
+    subjectType: 'payment',
+    action: 'record',
+    subjectId: (response) => nestedId(response, 'payment'),
+    isReplay: isPaymentReplay,
+  },
+  'POST commerce/businesses/:businessId/invoices/:invoiceId/payments/:paymentId/confirm': {
+    subjectType: 'payment',
+    action: 'record',
+    subjectId: (response) => nestedId(response, 'payment'),
+    isReplay: isPaymentReplay,
+  },
+};
+
+/**
  * Auto-log interceptor: creates a BusinessEvent for every mutation.
  *
  * Applied to @Post, @Patch, @Delete handlers.
@@ -54,6 +202,7 @@ export class BusinessEventInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    const startedAt = Date.now();
     const before = this.safeSnapshot(req.body);
     const actorId = req.user?.id ?? 'anonymous';
     const actorType = req.user ? 'human' : 'system';
@@ -61,17 +210,28 @@ export class BusinessEventInterceptor implements NestInterceptor {
 
     // Derive event type from route
     const routePath = req.route?.path ?? req.url ?? '';
-    const { subjectType, action } = this.inferEventMeta(routePath, method);
+    const rule = this.routeRule(routePath, method);
+    const { subjectType, action } = rule ?? this.inferEventMeta(routePath, method);
 
     return next.handle().pipe(
       tap(async (response) => {
         try {
+          // An idempotent replay wrote nothing; it is not a new mutation to audit.
+          if (rule?.isReplay?.(response, { startedAt, userId: req.user?.id ?? null })) return;
+          // W3-V1-45c-EVENT-REPLAY review CR-V45c-1 (D-15): an answer several
+          // requests share is audited by the one that wins its claim. Read now,
+          // after the handler ran; a claim that throws writes nothing (catch).
+          const claim = claimOf(req);
+          if (claim && !(await claim())) return;
           const after = this.safeSnapshot(response);
           await this.resilient.emit({
             businessId,
             eventType: `${subjectType}.${action}`,
             subjectType,
-            subjectId: this.extractSubjectId(response, req.params),
+            // A rule names its subject; never fall back to a path id of another entity.
+            subjectId: rule
+              ? (rule.subjectId(response) ?? 'unknown')
+              : this.extractSubjectId(response, req.params),
             actorType,
             actorId,
             action: action.toLowerCase(),
@@ -108,6 +268,11 @@ export class BusinessEventInterceptor implements NestInterceptor {
     }
     // Fallback: look for :id or :entityId in params
     return params.id ?? params.contactId ?? params.taskId ?? params.invoiceId ?? 'unknown';
+  }
+
+  private routeRule(routePath: string, method: string): RouteEventRule | undefined {
+    const key = `${method} ${routePath.split('/').filter(Boolean).join('/')}`;
+    return ROUTE_EVENT_RULES[key];
   }
 
   private inferEventMeta(routePath: string, method: string): { subjectType: string; action: string } {

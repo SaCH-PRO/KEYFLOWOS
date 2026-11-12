@@ -1,11 +1,15 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { businessOwnerRecipient } from '../../core/auth/business.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { schedulersDisabled } from '../../core/config/env';
+import { redactAddresses } from '../../core/security/redaction';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const SCHEDULER_DISABLED = process.env.AI_USAGE_ALERT_SCHEDULER_DISABLED === '1' || process.env.NODE_ENV === 'test';
+/** Its own flag, read when onModuleInit runs (NODE_ENV=test is handled by schedulersDisabled(), V1-24b). */
+const schedulerFlagDisabled = (): boolean => process.env.AI_USAGE_ALERT_SCHEDULER_DISABLED === '1';
 
 @Injectable()
 export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -23,7 +27,11 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
-    if (SCHEDULER_DISABLED) {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
+    if (schedulerFlagDisabled()) {
       this.logger.log('AI usage alert scheduler disabled via env');
       return;
     }
@@ -137,7 +145,7 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
     // Email notification
     if (systemEmail) {
       try {
-        const recipientEmail = business.email || await this.resolveOwnerEmail(business.ownerId);
+        const recipientEmail = business.email || await this.resolveOwnerEmail(alert.businessId, business.ownerId);
         if (recipientEmail) {
           await systemEmail.sendTransactional({
             to: recipientEmail,
@@ -147,7 +155,9 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
           });
         }
       } catch (err: any) {
-        this.logger.warn(`Email notification failed for alert ${alert.id}: ${(err as Error).message}`);
+        // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): the sink's error text can
+        // quote the recipient, so the alert id stays and any address is redacted.
+        this.logger.warn(`Email notification failed for alert ${alert.id}: ${redactAddresses((err as Error).message)}`);
       }
     }
 
@@ -161,12 +171,13 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
     });
   }
 
-  private async resolveOwnerEmail(ownerId: string | null): Promise<string | null> {
-    if (!ownerId) return null;
-    const user = await this.prisma.client.user.findUnique({
-      where: { id: ownerId },
-      select: { email: true },
-    });
+  /**
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the fallback
+   * recipient is the Business.ownerId user only while they hold a Membership
+   * in the business (businessOwnerRecipient).
+   */
+  private async resolveOwnerEmail(businessId: string, ownerId: string | null): Promise<string | null> {
+    const user = await businessOwnerRecipient(this.prisma, businessId, ownerId);
     return user?.email ?? null;
   }
 

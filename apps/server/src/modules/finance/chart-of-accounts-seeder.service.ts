@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
 
 export interface CoaSeed {
   systemKey: string;
@@ -78,18 +79,62 @@ const EXPENSE_CATEGORY_NAME_MAP: Array<{ pattern: RegExp; systemKey: string }> =
   { pattern: /bank|fee|charge|processor|interchange/i, systemKey: 'EXPENSE_BANK_FEES' },
 ];
 
+/**
+ * Prisma's unique-constraint violation (P2002). Matched on the code rather
+ * than `instanceof` so it holds whichever `@prisma/client` copy raised it.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
+}
+
 @Injectable()
 export class ChartOfAccountsSeederService {
+  /**
+   * System-account seeding in flight, keyed by the tenant the run's queries
+   * execute under: the active AsyncLocalStorage tenant when there is one (the
+   * `@keyflow/db` extension rewrites every `where.businessId` and
+   * `create.businessId` to it), else the businessId argument. Keying on the
+   * argument alone would let a run started under another tenant's context be
+   * joined by a legitimate caller for the argument's tenant, which would then
+   * re-read under its own context and find nothing seeded.
+   *
+   * Concurrent callers in this process (e.g. the deposit and credit lookups
+   * of one payment posting) await the same run instead of racing each other
+   * into P2002 on the (businessId, systemKey) unique index. An entry is
+   * removed when its run settles, so a failed run is retried by the next
+   * caller, not pinned.
+   */
+  private readonly inFlight = new Map<string, Promise<void>>();
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
    * Idempotently ensure the system Chart of Accounts exists for the given
-   * business. Safe to call on every read of `/finance/accounts` — uses
-   * the (businessId, systemKey) unique index so re-runs are no-ops.
+   * business and every ExpenseCategory is linked to its bucket. Safe to call
+   * on every read of `/finance/accounts` — uses the (businessId, systemKey)
+   * unique index so re-runs are no-ops, and serializes concurrent seeding per
+   * tenant so a first run is never raced by a second one.
+   *
+   * Only the seed is shared between concurrent callers. The link pass runs
+   * for every caller after it, so a category committed after a shared run
+   * took its scan is still linked when this call resolves — callers such as
+   * ExpensePostingService re-read `chartOfAccountId` right after this.
    */
   async ensureDefaults(businessId: string): Promise<void> {
-    await this.seedSystemAccounts(businessId);
+    await this.seedSystemAccountsOnce(businessId);
     await this.linkExpenseCategories(businessId);
+  }
+
+  /** One seed run per tenant at a time; concurrent callers await the same run. */
+  private seedSystemAccountsOnce(businessId: string): Promise<void> {
+    const tenant = getCurrentBusinessId() ?? businessId;
+    const running = this.inFlight.get(tenant);
+    if (running) return running;
+    const run = this.seedSystemAccounts(businessId).finally(() => {
+      if (this.inFlight.get(tenant) === run) this.inFlight.delete(tenant);
+    });
+    this.inFlight.set(tenant, run);
+    return run;
   }
 
   private async seedSystemAccounts(businessId: string): Promise<void> {
@@ -99,28 +144,14 @@ export class ChartOfAccountsSeederService {
     });
     const haveBySystemKey = new Map(existing.map((r) => [r.systemKey, r.id] as const));
 
-    // First pass — upsert rows without parents so concurrent first-runs
-    // (e.g. two requests calling ensureDefaults() simultaneously) cannot
-    // race into a P2002 violation. The (businessId, systemKey) index
-    // makes this safe.
+    // First pass — upsert rows without parents. In-process concurrency is
+    // serialized by `ensureDefaults`; a concurrent run in ANOTHER process
+    // (a second server replica) can still land a key first, and that case
+    // is absorbed by `upsertSystemAccount` rather than thrown.
     for (const seed of SYSTEM_COA) {
       if (haveBySystemKey.has(seed.systemKey)) continue;
-      const created = await this.prisma.client.chartOfAccount.upsert({
-        where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
-        create: {
-          businessId,
-          systemKey: seed.systemKey,
-          name: seed.name,
-          type: seed.type,
-          subtype: seed.subtype ?? null,
-          code: seed.code ?? null,
-          isSystem: true,
-          isActive: true,
-        },
-        update: {},
-        select: { id: true, systemKey: true },
-      });
-      haveBySystemKey.set(created.systemKey ?? seed.systemKey, created.id);
+      const row = await this.upsertSystemAccount(businessId, seed);
+      if (row) haveBySystemKey.set(row.systemKey ?? seed.systemKey, row.id);
     }
 
     // Second pass — apply parent links for newly created rows.
@@ -137,6 +168,42 @@ export class ChartOfAccountsSeederService {
       await this.prisma.client.chartOfAccount.update({
         where: { id },
         data: { parentId },
+      });
+    }
+  }
+
+  /**
+   * Upsert one system account. Prisma emulates this upsert as SELECT then
+   * INSERT, so a seed run in another process can land the same key between
+   * the two and the INSERT raises P2002. That only means the account already
+   * exists: re-read it instead of throwing, so a payment posting that
+   * triggered the seed is never failed by someone else finishing it first.
+   */
+  private async upsertSystemAccount(
+    businessId: string,
+    seed: CoaSeed,
+  ): Promise<{ id: string; systemKey: string | null } | null> {
+    try {
+      return await this.prisma.client.chartOfAccount.upsert({
+        where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
+        create: {
+          businessId,
+          systemKey: seed.systemKey,
+          name: seed.name,
+          type: seed.type,
+          subtype: seed.subtype ?? null,
+          code: seed.code ?? null,
+          isSystem: true,
+          isActive: true,
+        },
+        update: {},
+        select: { id: true, systemKey: true },
+      });
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      return this.prisma.client.chartOfAccount.findUnique({
+        where: { businessId_systemKey: { businessId, systemKey: seed.systemKey } },
+        select: { id: true, systemKey: true },
       });
     }
   }

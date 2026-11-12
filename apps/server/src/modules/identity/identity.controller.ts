@@ -16,9 +16,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { isIPv4, isIPv6 } from 'node:net';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
-import { AuthSecurityService } from './auth-security.service';
+import { AuthSecurityService, type RateLimitRule } from './auth-security.service';
 import { IdentityPasswordService } from './identity-password.service';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -32,6 +33,13 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import {
+  LOGOUT_REVOCATION_TTL_SECONDS,
+  logoutRevocationKey,
+  logoutRevocationValue,
+  signInCutoffRefusalOfIssuedSession,
+  type SignInCutoffRefusal,
+} from '../../core/auth/auth.middleware';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { CreateBusinessDto } from './dto/create-business.dto';
@@ -39,12 +47,152 @@ import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { GenerateFieldDto } from './dto/generate-field.dto';
 import { GenerateProfileDto } from './dto/generate-profile.dto';
-import { BootstrapDto } from './dto/bootstrap.dto';
+import { BootstrapDto, UserIdentityDataDto } from './dto/bootstrap.dto';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { generateDocumentRecommendations } from './document-guidance.util';
 import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-completeness.constants';
+
+/**
+ * Throttle for GET /identity/check-username (V1-56-AUTH-USERNAME-THROTTLE).
+ * The route is unauthenticated and says whether a username exists, so without
+ * a limit it is an enumeration oracle.
+ *
+ * The bound comes from what the signup form sends, because the form cannot
+ * tell a refusal from a failure: any non-2xx answer becomes 'unknown', and
+ * 'unknown' blocks signup ("Unable to verify username", signup/page.tsx).
+ * A limit the form can reach is a signup outage, not a throttle.
+ *
+ * The form checks once per keystroke after a 300 ms debounce
+ * (apps/web/src/hooks/use-username-availability.ts) and once more on submit.
+ * A debounced check fires only after 300 ms without a keystroke, so two of
+ * them are at least 300 ms apart and one 60 s window holds at most
+ * 60_000 / 300 + 1 = 201. The submit check comes on top, one per click, with
+ * the button disabled while it is in flight. 240 leaves 39 above that ceiling
+ * for submits and for requests arriving closer together than they were sent.
+ * It still cuts a script from thousands of probes a second to four per client
+ * (see usernameCheckSubject for what one client is). Both numbers are pinned
+ * by apps/server/test/identity-signup.e2e.test.ts, and
+ * apps/web/src/app/auth/signup/__tests__/signup-username-throttle.test.tsx
+ * reads them from here and drives the real form against them.
+ *
+ * Keyed by client address (req.ip, so TRUST_PROXY decides the hops; an IPv6
+ * address counts as its /64, usernameCheckSubject) and enforced by
+ * AuthSecurityService like every other limit in this controller. That store
+ * fails open, so signup gains no dependency it lacked: this handler reads the
+ * user table anyway. The Redis-backed PublicRateLimitGuard fails closed, and
+ * would make a Redis outage a signup outage, which AuthMiddleware deliberately
+ * avoids.
+ */
+export const USERNAME_CHECK_RULE = { scope: 'check_username:ip', limit: 240, windowMs: 60_000 } as const satisfies RateLimitRule;
+
+/**
+ * D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): what POST /identity/login
+ * and /identity/refresh say, beside the code, when AuthMiddleware would refuse
+ * the session GoTrue just issued because of a RISC sign-in cutoff. The web
+ * sign-in shows password_reset_required with the reset link.
+ */
+export const SIGN_IN_CUTOFF_REFUSAL_MESSAGES: Readonly<Record<SignInCutoffRefusal, string>> = {
+  password_reset_required:
+    'Password reset required after a security event. Reset your password to sign in with it again, or continue with Google.',
+  google_or_email_link_required: 'After a security event, sign in with Google or an emailed link.',
+  signed_in_before_cutoff: 'This session ended after a security event. Please sign in again.',
+};
+
+/** The sign-in cutoff refusal code a 401 from refuseSessionAfterSignInCutoff carries, or undefined for any other error. */
+function signInCutoffRefusalCodeOf(err: unknown): SignInCutoffRefusal | undefined {
+  if (!(err instanceof UnauthorizedException)) return undefined;
+  const response = err.getResponse();
+  const code = typeof response === 'object' && response !== null ? (response as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(SIGN_IN_CUTOFF_REFUSAL_MESSAGES, code)
+    ? (code as SignInCutoffRefusal)
+    : undefined;
+}
+
+/**
+ * The client a check-username call is counted against: an IPv4 address as it
+ * is, an IPv6 address as the /64 it sits in (ST-V156-1).
+ *
+ * Keyed by the whole IPv6 address, the limit bound nothing: one /64 is what a
+ * VPS or a home line is handed, it holds 2^64 addresses, and a script rotating
+ * through them got a fresh bucket per call. The /64 is the smallest block one
+ * customer is given (SLAAC needs a whole one), so keying by it never merges two
+ * customers of an ordinary provider. A caller holding a whole /48 still has
+ * 65,536 buckets: that is the bound this buys, not zero.
+ *
+ * An IPv4-mapped address (::ffff:a.b.c.d, what a dual-stack socket reports for
+ * an IPv4 client) is that IPv4 client: masked to a /64 it would put every IPv4
+ * client in the one bucket ::/64. Anything that is not an address (req.ip can
+ * be absent; clientIp then says 'unknown') is returned unchanged.
+ *
+ * Exported for apps/server/test/identity-signup.e2e.test.ts.
+ */
+export function usernameCheckSubject(ip: string): string {
+  const address = ip.trim();
+  if (!isIPv6(address)) return address;
+  const groups = ipv6Groups(address);
+  if (!groups) return address;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+  }
+  return `${groups.slice(0, 4).map((g) => g.toString(16)).join(':')}::/64`;
+}
+
+/** The eight 16-bit groups of an address net.isIPv6 accepted; null if it does not parse. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.split('%')[0]; // zone id (fe80::1%eth0)
+  const lastColon = text.lastIndexOf(':');
+  const tail = text.slice(lastColon + 1);
+  if (isIPv4(tail)) {
+    // Embedded IPv4 (::ffff:1.2.3.4, 64:ff9b::1.2.3.4): its two groups in hex.
+    const [a, b, c, d] = tail.split('.').map(Number);
+    text = `${text.slice(0, lastColon + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const zeros = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  if (zeros < 0) return null;
+  const groups = [...head, ...Array<string>(zeros).fill('0'), ...rest].map((g) => Number.parseInt(g, 16));
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+/**
+ * How many refused check-username clients are remembered for the one-audit-row-
+ * per-client-per-window rule (IdentityController.firstUsernameCheckRefusal).
+ * Entries older than the window are dropped first; past this many live ones the
+ * oldest goes, so memory is bounded however many clients a campaign uses.
+ */
+const USERNAME_CHECK_AUDIT_MEMORY = 10_000;
+
+/**
+ * D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: whether the
+ * bearer AuthMiddleware has ALREADY verified (its payload bytes are covered by
+ * the signature getUserFromToken checked, locally or at Supabase) says its user
+ * signed in with an identity provider other than email or phone: GoTrue's
+ * server-set app_metadata.provider / app_metadata.providers. Only then is
+ * there an identity a RISC event could name (a Google sub), so only then does
+ * bootstrap read the verified provider record. Any other bearer (an admin
+ * local-auth token, an unparseable one) reads as no.
+ */
+function bearerNamesExternalProvider(req: Request | undefined): boolean {
+  const header = req?.headers?.authorization;
+  const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
+      app_metadata?: { provider?: unknown; providers?: unknown };
+    } | null;
+    const meta = payload?.app_metadata;
+    const named = [...(Array.isArray(meta?.providers) ? meta.providers : []), meta?.provider];
+    return named.some((p) => typeof p === 'string' && p !== '' && p !== 'email' && p !== 'phone');
+  } catch {
+    return false;
+  }
+}
 
 @Controller('identity')
 export class IdentityController {
@@ -116,6 +264,57 @@ export class IdentityController {
 
   private clientUa(req: Request): string {
     return ((req.headers['user-agent'] as string | undefined) ?? '').slice(0, 512);
+  }
+
+  /**
+   * check-username clients refused so far, with when their refusal was last
+   * audited. Oldest first: every write goes to the end at `now`.
+   */
+  private readonly usernameCheckRefusalsAudited = new Map<string, number>();
+
+  /**
+   * True the first time `subject` is refused within a USERNAME_CHECK_RULE
+   * window (and records it), false for its later refusals in that window. The
+   * check and the record are one synchronous step, so concurrent refusals of
+   * one client cannot both pass.
+   */
+  private firstUsernameCheckRefusal(subject: string, now: number): boolean {
+    const seen = this.usernameCheckRefusalsAudited;
+    const last = seen.get(subject);
+    if (last !== undefined && now - last < USERNAME_CHECK_RULE.windowMs) return false;
+    seen.delete(subject);
+    for (const [key, at] of seen) {
+      if (now - at < USERNAME_CHECK_RULE.windowMs && seen.size < USERNAME_CHECK_AUDIT_MEMORY) break;
+      seen.delete(key);
+    }
+    seen.set(subject, now);
+    return true;
+  }
+
+  /**
+   * The caller's Supabase access token: the `Authorization: Bearer` value
+   * AuthMiddleware authenticated this request with, read the same way. It is
+   * what auth-js admin.signOut needs to revoke that user's Supabase sessions
+   * (CR-2, R0-ID-F4). Null when there is none, or when the bearer is an admin
+   * local-auth token (`type: 'admin'`, admin-token.util): that is this server's
+   * own credential, it names no Supabase session, and it is not sent to the
+   * provider.
+   */
+  private supabaseAccessToken(req: Request): string | null {
+    const header = req.headers['authorization'];
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+    const token = header.replace('Bearer ', '').trim();
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as {
+        type?: unknown;
+      } | null;
+      if (payload?.type === 'admin') return null;
+    } catch {
+      // No decodable payload, so not an admin token. Passed on: SupabaseAdminService.signOut
+      // refuses anything not JWT-shaped, and GoTrue anything it did not sign.
+    }
+    return token;
   }
 
   /**
@@ -208,19 +407,22 @@ export class IdentityController {
     }
     try {
       const session = await this.signupSvc.signInWithPassword(email, body.password);
-      // A deliberate re-login supersedes a prior logout's revocation marker.
-      // Without this, logging out sets auth:revoked:user:<id> for 24h and the
-      // middleware rejects EVERY request — including ones bearing this fresh
-      // token — so a logged-out user is locked out for a full day. Supabase
-      // signOut('global') at logout already invalidated the old sessions, so
-      // clearing the marker on a proven re-auth is safe.
-      if (session.userId) {
-        try {
-          await this.redis.del(`auth:revoked:user:${session.userId}`);
-        } catch (err: any) {
-          this.logger.warn(`Redis revocation clear failed for ${session.userId}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
+      // Login deliberately leaves the logout revocation marker alone (ST-4,
+      // R0-ID-F3-REVOCATION-IAT-CUTOFF). It used to delete it, because the
+      // marker was a bare flag that refused every token including this fresh
+      // one — and deleting it re-admitted every token issued before the
+      // logout, a stolen one included, until its own exp. The marker is now the
+      // logout time: AuthMiddleware refuses tokens of every session
+      // authenticated at or before it (refreshed ones too) and admits the
+      // tokens of the session this login opens, authenticated after it. A bare
+      // '1' left by the previous release is read by its TTL as the time it was
+      // written, so this login is admitted under it too.
+      //
+      // D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): after a RISC sign-in
+      // cutoff, a session AuthMiddleware will refuse is not answered
+      // 'authenticated' and not audited as login_success: the 401 names why
+      // (password_reset_required until a password reset after the cutoff).
+      await this.refuseSessionAfterSignInCutoff(session.accessToken);
       await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
       return {
         status: 'authenticated',
@@ -229,11 +431,39 @@ export class IdentityController {
         refreshToken: session.refreshToken,
       };
     } catch (err: any) {
-      const reason = err instanceof BadRequestException
+      // D-113: the sign-in cutoff refusal is a 401, audited by its code.
+      const reason = signInCutoffRefusalCodeOf(err) ?? (err instanceof BadRequestException
         ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
-        : err instanceof Error ? err.message : 'unknown';
+        : err instanceof Error ? err.message : 'unknown');
       await this.authSec.audit({ event: 'login_failure', outcome: 'failure', email, ip, userAgent: ua, reason });
       throw err;
+    }
+  }
+
+  /**
+   * D-113 (W10-RISC-RESET; D-101 review CR-W9RPC-2): POST /identity/login and
+   * /identity/refresh receive the session from GoTrue itself, so after a RISC
+   * sign-in cutoff they used to answer it ('authenticated', login_success)
+   * while AuthMiddleware refused it on every request and the web showed a
+   * generic error. The issued session is judged by the middleware's own rule
+   * (signInCutoffVerdict) and a refusal is a 401 naming its code:
+   * password_reset_required (D-113: a password sign-in waits for a password
+   * reset through KEYFLOW after the cutoff; the web shows it with the reset
+   * link), google_or_email_link_required (D-101) or signed_in_before_cutoff
+   * (D-97). The middleware stays the control: when the User row cannot be
+   * read here the session is answered as before (logged) and the middleware,
+   * which fails closed, decides.
+   */
+  private async refuseSessionAfterSignInCutoff(accessToken: string): Promise<void> {
+    let refusal: SignInCutoffRefusal | null;
+    try {
+      refusal = await signInCutoffRefusalOfIssuedSession(this.prisma.client, accessToken);
+    } catch (err) {
+      this.logger.warn(`Sign-in cutoff check unavailable (${(err as Error).message}); the session is answered and AuthMiddleware decides`);
+      return;
+    }
+    if (refusal !== null) {
+      throw new UnauthorizedException({ code: refusal, message: SIGN_IN_CUTOFF_REFUSAL_MESSAGES[refusal] });
     }
   }
 
@@ -305,17 +535,20 @@ export class IdentityController {
     }
 
     try {
-      await this.passwordSvc.changePassword({
+      const { providerSignedOut } = await this.passwordSvc.changePassword({
         userId: user.id,
         email: user.email,
         currentPassword: body.currentPassword,
         newPassword: body.newPassword,
+        // The caller's own access JWT: the session 'others' keeps (CR-2).
+        accessToken: this.supabaseAccessToken(req),
         // The signup service owns credential exchange; passing the function in
         // keeps the password service free of a dependency on it.
         verifyCurrent: (email, password) => this.signupSvc.signInWithPassword(email, password),
       });
       await this.authSec.audit({
         event: 'password_changed', outcome: 'success', email: user.email, userId: user.id, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Other sessions have been signed out.' };
     } catch (err) {
@@ -361,6 +594,9 @@ export class IdentityController {
 
     try {
       const session = await this.signupSvc.refreshSession(body.refreshToken);
+      // D-113 / CR-W9RPC-2: a refreshed session AuthMiddleware will refuse
+      // after a sign-in cutoff is not handed back; the 401 names why.
+      await this.refuseSessionAfterSignInCutoff(session.accessToken);
       return {
         status: 'ok',
         accessToken: session.accessToken,
@@ -369,12 +605,13 @@ export class IdentityController {
         refreshToken: session.refreshToken,
       };
     } catch (err) {
+      // D-113: a sign-in cutoff refusal is audited by its code.
       await this.authSec.audit({
         event: 'token_refresh_failed',
         outcome: 'failure',
         ip,
         userAgent: ua,
-        reason: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+        reason: signInCutoffRefusalCodeOf(err) ?? (err instanceof Error ? err.message.slice(0, 200) : 'unknown'),
       });
       throw err;
     }
@@ -463,9 +700,10 @@ export class IdentityController {
     }
 
     try {
-      const { userId, email } = await this.passwordSvc.completeReset(body.accessToken, body.password);
+      const { userId, email, providerSignedOut } = await this.passwordSvc.completeReset(body.accessToken, body.password);
       await this.authSec.audit({
         event: 'password_reset_completed', outcome: 'success', email, userId, ip, userAgent: ua,
+        reason: providerSignedOut ? undefined : 'revocation_incomplete: provider_signout',
       });
       return { status: 'ok', message: 'Password updated. Please sign in.' };
     } catch (err) {
@@ -492,36 +730,95 @@ export class IdentityController {
   }
 
   /**
-   * Server-driven logout. Revokes all Supabase sessions for the user and
-   * sets a short-lived Redis revocation marker so that any in-flight access
-   * tokens are rejected by AuthMiddleware until they naturally expire.
-   * Audits the event and swallows external failures so the client can always
-   * clear its own storage.
+   * Server-driven logout. Records the logout time in Redis so that
+   * AuthMiddleware refuses every token of a session authenticated up to now —
+   * Supabase and admin, including access tokens a pre-logout session mints
+   * LATER from its refresh token — while tokens of a session a later login
+   * opens are not refused; then asks Supabase, with the caller's access JWT,
+   * to revoke all the user's sessions (their refresh tokens).
+   * Audits the event, naming any revocation leg that failed, and swallows
+   * external failures so the client can always clear its own storage.
    */
   @UseGuards(AuthGuard)
   @Post('logout')
   async logout(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
     const userId = user?.id;
     if (!userId) throw new UnauthorizedException('Missing authenticated user');
+    const failed: string[] = [];
 
+    // The local revocation is written FIRST, so nothing the provider call does
+    // (fail, throw or hang) can stand in its way.
+    //
+    // Revoke by session authentication time (ST-4, R0-ID-F3). The marker holds
+    // the logout time in epoch seconds; AuthMiddleware refuses a Supabase token
+    // whose session was authenticated at or before it, and the next login
+    // leaves it in place. Its TTL is at least the longest token lifetime, so no
+    // token issued before this logout outlives it, and it is how long a
+    // pre-logout session whose refresh token survived stays refused.
+    // Overwriting rewrites a bare '1' left by the previous release in this
+    // format.
+    const now = Date.now();
+    let markerWritten = false;
     try {
-      await this.supabaseAdmin.signOut(userId, 'global');
-    } catch (err: any) {
-      this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
-    }
-
-    // Revoke in-flight tokens for up to 24 hours. Access tokens are typically
-    // 1-hour JWTs; this window covers the maximum plausible clock skew plus
-    // any long-lived cached token.
-    try {
-      await this.redis.setex(`auth:revoked:user:${userId}`, 86400, '1');
+      await this.redis.setex(logoutRevocationKey(userId), LOGOUT_REVOCATION_TTL_SECONDS, logoutRevocationValue(now));
+      markerWritten = true;
     } catch (err: any) {
       this.logger.warn(`Redis revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      failed.push('revocation_marker');
     }
+    // Admin tokens are revoked by their own cutoff — the key
+    // POST /api/admin/auth/logout writes and verifyAdminToken reads, in the
+    // admin token's milliseconds — so a logout here revokes them too. Its TTL
+    // is the admin token lifetime (buildAdminToken: 24h), so it outlives every
+    // admin token issued before now.
+    try {
+      await this.redis.set(`admin:user:${userId}:revokedAt`, String(now), 'EX', LOGOUT_REVOCATION_TTL_SECONDS);
+    } catch (err: any) {
+      this.logger.warn(`Redis admin-token revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      failed.push('admin_cutoff');
+    }
+
+    // Then the provider. auth-js admin.signOut(jwt, scope) takes the user's
+    // ACCESS JWT, not their id: GoTrue revokes, for 'global', every session of
+    // the user that JWT belongs to, which ends their refresh tokens at
+    // Supabase. The caller's bearer is that JWT. (Until R0-ID-F4 this passed
+    // the user id, GoTrue refused it, and no logout ever revoked a Supabase
+    // session — CR-2.) Access tokens already issued stay valid at Supabase
+    // until their exp; the marker above is what refuses them here. A failure
+    // is not thrown past the local revocation: SupabaseAdminService.signOut
+    // reports it by resolving false, it is logged, and the audit row names it.
+    // With no Supabase access token to present (an admin local-auth token is
+    // never sent to the provider) the leg is not attempted and named the same.
+    const accessToken = this.supabaseAccessToken(req);
+    let providerSignedOut = false;
+    if (!accessToken) {
+      this.logger.warn(`Supabase signOut not attempted for ${userId}: no Supabase access token on the request`);
+    } else {
+      try {
+        providerSignedOut = (await this.supabaseAdmin.signOut(accessToken, 'global')) === true;
+        if (!providerSignedOut) this.logger.warn(`Supabase signOut failed for ${userId}`);
+      } catch (err: any) {
+        this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    // Listed first, where it stood before the provider call moved after the
+    // local legs, so the audit reason reads as it always has.
+    if (!providerSignedOut) failed.unshift('provider_signout');
 
     const ip = this.clientIp(req);
     const ua = this.clientUa(req);
-    await this.authSec.audit({ event: 'logout', outcome: 'success', email: user.email ?? '', userId, ip, userAgent: ua });
+    // 'success' means the server-side revocation (the marker) holds; the
+    // reason names every leg that did not, so a logout that left the provider
+    // sessions alive is not recorded as a clean one.
+    await this.authSec.audit({
+      event: 'logout',
+      outcome: markerWritten ? 'success' : 'error',
+      email: user.email ?? '',
+      userId,
+      ip,
+      userAgent: ua,
+      reason: failed.length > 0 ? `revocation_incomplete: ${failed.join(', ')}` : undefined,
+    });
 
     return { status: 'logged_out' };
   }
@@ -576,9 +873,35 @@ export class IdentityController {
   /**
    * Username availability check — public, no auth required.
    * Checks whether the given username is already taken in the local User table.
+   *
+   * Throttled per client (usernameCheckSubject) by USERNAME_CHECK_RULE before
+   * anything is read; see the rule for why its numbers sit above what the signup
+   * form can send.
+   *
+   * A refusal is audited as `rate_limited` like the other limits here, so the
+   * admin Security view (admin/auth-audit?event=rate_limited) shows a campaign
+   * against this oracle (ST-V156-2). Unlike them it is audited at most once per
+   * client per window: a script refused thousands of times a minute writes one
+   * row a minute, not thousands. Each refused client has already spent `limit`
+   * accepted calls, each of which wrote an auth_rate_limits row, so these rows
+   * are at most 1/240 of the limiter's own writes. The memory is per process,
+   * so N instances write at most N rows per client per window.
    */
   @Get('check-username')
-  async checkUsernameAvailability(@Query('username') username?: string) {
+  async checkUsernameAvailability(@Req() req: Request, @Query('username') username?: string) {
+    const ip = this.clientIp(req);
+    const subject = usernameCheckSubject(ip);
+    try {
+      await this.authSec.enforce(USERNAME_CHECK_RULE, subject);
+    } catch (rateErr) {
+      if (this.firstUsernameCheckRefusal(subject, Date.now())) {
+        await this.authSec.audit({
+          event: 'rate_limited', outcome: 'rate_limited', ip, userAgent: this.clientUa(req),
+          reason: 'check_username', metadata: { subject },
+        });
+      }
+      throw rateErr;
+    }
     if (!username || username.trim().length === 0) {
       return { available: false, reason: 'Username is required' };
     }
@@ -616,12 +939,22 @@ export class IdentityController {
     });
   }
 
+  /**
+   * R0-09-ID-HARDEN, owner ruling D-11: editing the business profile is OWNER
+   * only, regardless of granted scopes — BusinessGuard admits any member, so
+   * the owner check runs here before the write. onboardingComplete is not part
+   * of UpdateBusinessDto and the service no longer writes it: completion goes
+   * through the onboarding concierge's gated path.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId')
-  updateBusiness(
+  async updateBusiness(
     @Param('businessId') businessId: string,
     @Body() body: UpdateBusinessDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    await this.identity.assertBusinessOwner(businessId, user);
     return this.identity.updateBusiness(businessId, body);
   }
 
@@ -832,8 +1165,11 @@ export class IdentityController {
     return this.identity.inviteTeamMember(businessId, body.email, body.role, user.id, body.scopes, body.maxApprovalTier);
   }
 
+  // team:admin, as on .../permissions: a role change rewrites the target's scope map
+  // and approval tier (R0-ID-F1-ROLE-ROUTE-AUTHORITY, ST-1). IdentityService.updateMemberRole
+  // enforces the same gate, self-target and the caller's ceiling for non-HTTP callers.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
-  @RequireModuleScope('team', 'write')
+  @RequireModuleScope('team', 'admin')
   @Patch('businesses/:businessId/team/:membershipId')
   updateMemberRole(
     @Param('businessId') businessId: string,
@@ -841,7 +1177,8 @@ export class IdentityController {
     @Body() body: { role: string },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.identity.updateMemberRole(businessId, membershipId, body.role, user?.id);
+    if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
+    return this.identity.updateMemberRole(businessId, membershipId, body.role, user.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -896,14 +1233,20 @@ export class IdentityController {
 
   @UseGuards(AuthGuard)
   @Post('bootstrap')
-  async bootstrap(@Body() body: BootstrapDto, @CurrentUser() user: AuthenticatedUser) {
+  async bootstrap(@Body() body: BootstrapDto, @CurrentUser() user: AuthenticatedUser, @Req() req?: Request) {
     if (!user?.id || !user?.email) {
       throw new UnauthorizedException('Missing authenticated user');
     }
+    // Narrowed here; the proof closure below runs later and keeps these.
+    const userId: string = user.id;
+    const tokenEmail: string = user.email;
 
     return this.identity.bootstrapUser({
       userId: user.id,
-      email: body.email ?? user.email,
+      // R0-SEC-01: the email comes only from the verified token. A body
+      // `email` is ignored, never a 400: the web sends the address the user
+      // typed, which can differ from the token's in case or whitespace.
+      email: user.email,
       username: body.username,
       name: body.name,
       firstName: body.firstName,
@@ -912,7 +1255,72 @@ export class IdentityController {
       avatarUrl: body.avatarUrl,
       company: body.company,
       referralCode: body.referralCode,
+      // D-97 (W8-RISC-SIGNIN-CUTOFF) / W7-RISC-REVOKE review SEC-W7RR-1: the
+      // identity-provider links persisted for RISC come from the VERIFIED
+      // provider record of the token's own subject, never from
+      // body.identities: an upsert of a client-supplied Google sub would let a
+      // signed-in user claim another person's sub and redirect that person's
+      // hijacking revocation to itself.
+      identities: bearerNamesExternalProvider(req) ? await this.verifiedProviderIdentities(userId) : [],
+    }, {
+      // Asked only when a pending team invitation holds the token's email.
+      proveEmailOwnership: () => this.tokenEmailOwnershipProven(userId, tokenEmail),
     });
+  }
+
+  /**
+   * The identity-provider links (Google sub, ...) of the Supabase user the
+   * verified token names, read on the server from GoTrue's admin user record
+   * with the service-role key (D-97, SEC-W7RR-1), shaped as bootstrapUser
+   * persists them. A RISC event resolves its user through these
+   * (RiscService.resolveUser). Asked only when the verified bearer names an
+   * external sign-in provider (bearerNamesExternalProvider), so an
+   * email/password bootstrap makes no Supabase call. Best effort, like the
+   * persistence itself: with the admin client not configured, a read that
+   * fails, or a record for another id, none is returned and bootstrap goes on.
+   */
+  private async verifiedProviderIdentities(userId: string): Promise<UserIdentityDataDto[]> {
+    try {
+      if (!this.supabaseAdmin.isConfigured()) return [];
+      const { data, error } = await this.supabaseAdmin.getClient().auth.admin.getUserById(userId);
+      const record = data?.user;
+      if (error || !record || record.id !== userId) return [];
+      return (record.identities ?? [])
+        .filter((identity) => !identity.user_id || identity.user_id === userId)
+        .map((identity) => ({
+          identity_id: identity.identity_id,
+          id: identity.id,
+          provider: identity.provider,
+          identity_data: identity.identity_data,
+        }));
+    } catch (err: unknown) {
+      this.logger.warn(`Verified identity read for bootstrap failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Whether the caller is proven to own its token's `email`, which accepting a
+   * pending team invitation on bootstrap requires (R0-SEC-01 review repair).
+   * The token alone is no proof: with AUTH_REQUIRE_EMAIL_VERIFICATION off,
+   * POST /identity/signup creates the Supabase user already confirmed without
+   * proving the address, so anyone could sign up as an invitee and take the
+   * invitation. Proven means: verification is required on this deployment, and
+   * the Supabase user with the token's `sub` holds the same address and has
+   * confirmed it (`email_confirmed_at`, read with the service-role key, not
+   * from the token). Anything missing or failing is unproven.
+   */
+  private async tokenEmailOwnershipProven(userId: string, email: string): Promise<boolean> {
+    if (!isEmailVerificationRequired() || !this.supabaseAdmin.isConfigured()) return false;
+    try {
+      const { data, error } = await this.supabaseAdmin.getClient().auth.admin.getUserById(userId);
+      const record = data?.user;
+      if (error || !record || record.id !== userId || !record.email_confirmed_at) return false;
+      return (record.email ?? '').trim().toLowerCase() === email.trim().toLowerCase();
+    } catch (err: unknown) {
+      this.logger.warn(`Supabase user lookup for invite acceptance failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+      return false;
+    }
   }
 
   @UseGuards(AuthGuard)

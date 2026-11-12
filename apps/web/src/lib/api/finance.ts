@@ -1,4 +1,5 @@
 import { apiGet, apiPost, apiPatch, apiDelete } from "../api";
+import type { Expense } from "../client";
 
 export interface ReserveBucket {
   id: string;
@@ -189,6 +190,19 @@ export async function applyCreditNote(businessId: string, id: string) {
 
 export async function voidCreditNote(businessId: string, id: string) {
   return apiPost<CreditNote>({ path: `/finance/businesses/${businessId}/credit-notes/${id}/void`, body: {} });
+}
+
+// ---------- Bills (FOLLOW3-B7, owner ruling D-67) ----------
+// The expense detail page's Approve pays a BILL (Dr AP / Cr cash) and Reject
+// voids it (the reversal of its postings), through the existing bill doors.
+// Each answers the expense row as it now stands.
+
+export async function payBill(businessId: string, billId: string, body: { paymentMethod?: string; paidAt?: string } = {}) {
+  return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills/${encodeURIComponent(billId)}/pay`, body });
+}
+
+export async function voidBill(businessId: string, billId: string, body: { reason?: string } = {}) {
+  return apiPost<Expense>({ path: `/finance/businesses/${encodeURIComponent(businessId)}/bills/${encodeURIComponent(billId)}/void`, body });
 }
 
 // ---------- Accounting Periods ----------

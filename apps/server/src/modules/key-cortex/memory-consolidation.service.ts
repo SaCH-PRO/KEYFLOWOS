@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /**
  * Nightly-style memory consolidation job.
@@ -56,6 +57,8 @@ export class MemoryConsolidationService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledConsolidation(now: Date = new Date()): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const businesses = await this.prisma.client.business
       .findMany({ where: { deletedAt: null }, select: { id: true, timezone: true } })
       .catch(() => [] as Array<{ id: string; timezone: string | null }>);

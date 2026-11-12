@@ -1,9 +1,11 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
-import { CommerceService } from '../commerce/commerce.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
+import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -35,12 +37,14 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { JobRolePolicyService } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
@@ -59,7 +63,7 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
-import { CallLogService } from '../call-tasks/call-log.service';
+import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
@@ -111,6 +115,22 @@ import {
   KeyActionBoundaryService,
   type ActionContext,
 } from '../key-autonomy/action-boundary/key-action-boundary.service';
+import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
+
+/**
+ * W3-D64-COMMERCE-CREATE review (SEC-W3D64-3, CR-D64C-2; owner rulings D-64, D-88): what a
+ * dispatcher call carries beside the action boundary's ActionContext.
+ *
+ * `onBehalfOfUserId` is the member a surface with no established principal runs this call for,
+ * as the caller knows it: an approved proposal's executor (PROPOSAL), the member whose KEY-cortex
+ * turn called a bridged flow tool (CORTEX_BRIDGE), the member whose call ran an
+ * execute_custom_logic snippet (CUSTOM_LOGIC). It is never a principal and grants nothing: the
+ * action boundary never reads it (an inner CUSTOM_LOGIC call stays requested by nobody), and the
+ * dispatcher reads it only in contactBindMember, to judge the contact a KEY commerce write binds
+ * by that member's CRM view (D-64). A member's view can only narrow what the OWNER's view, the
+ * no-member answer, would bind, so a stale or unauthenticated id here refuses, never widens.
+ */
+export type KeyDispatchAction = ActionContext & { onBehalfOfUserId?: string | null };
 
 
 export interface FlowAttachment {
@@ -157,6 +177,30 @@ export interface FlowToolResult {
   notCleared?: { actionId: string | null; disposition: string; code: string };
 }
 
+/**
+ * W10-DISPATCH-STATUS (review SEC-W9DC-1, owner ruling D-73): the HttpException a tool threw, kept
+ * beside the failed FlowToolResult executeTool answers rather than on it, so the envelope the chat, a
+ * plan run over HTTP and executeToolDirect's callers read keeps its shape, and executeToolDirectly
+ * rethrows it with its status. executeToolDirectly used to rethrow a plain Error(result.error), so
+ * ActionDispatcherService, its production caller (the plan queue), could not tell a member's 404/403
+ * refusal from a failure: it retried the refusal and counted it toward that business's circuit for
+ * the tool (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
+ */
+const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
+
+/**
+ * W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): the statuses executeToolDirectly does not hand the
+ * dispatcher as the tool's HttpException, because in this codebase they do not say that asking again
+ * gets the same answer. A 409 is also the optimistic-concurrency conflict that tells the caller to try
+ * again (ProjectsService.updateTask's ConflictException, reached by projects_complete_task and
+ * projects_update_task), and a 400 is also a provider that did not answer (GmailService.searchMessages'
+ * BadRequestException('Gmail search failed (503)'), reached by reconcile_sweep_statements; the Drive,
+ * Google and Graph clients do the same). The dispatcher takes every 4xx but 408 and 429 as final
+ * (isToolRefusal), so these reach it as the plain Error they did before this packet: retried, and
+ * counted toward that business's circuit for the tool, with the HttpException as the Error's cause.
+ */
+const TOOL_STATUSES_RETRIED: ReadonlySet<number> = new Set([HttpStatus.BAD_REQUEST, HttpStatus.CONFLICT]);
+
 export interface PendingConfirmation {
   toolCallId: string;
   name: string;
@@ -176,7 +220,10 @@ export interface PendingConfirmation {
 interface GovernedToolCall {
   tc: FlowToolCall;
   decision: GovernanceDecision;
-  /** Context for the executor, when the action boundary prepared the call. */
+  /**
+   * Context for the executor: the surface's own (its member as principalUserId) for a tool the
+   * action boundary has not adopted, and the boundary's, with its action id, for one it prepared.
+   */
   action?: ActionContext;
   /** The boundary is waiting for the requester to confirm this id. */
   confirmationId?: string;
@@ -264,8 +311,173 @@ export interface FlowPageContext {
   recent?: Array<{ label: string; href?: string; at?: string }>;
   notes?: Array<{ title?: string; body: string }>;
   hints?: string[];
-  /** Position-scoped governance envelope (staff positions talking to KEY). */
-  jobRoleEnvelope?: JobRoleEnvelope;
+}
+
+/**
+ * What only server code may hand a turn (V1-21b review 7 ENV-FORGE / INP5-2 / DRV5-3).
+ *
+ * A position envelope used to ride in FlowPageContext, the shape a member's client sends to
+ * POST flow/chat and flow/chat/stream; their inline-typed bodies were never whitelisted, so a
+ * member could send { approvedTools: ['*'], maxRiskTier: 4 } and skip the crew check. chat()
+ * and streamChat() now take an envelope only as this separate argument, which no controller
+ * passes (StaffChatBridgeService does), and only one JobRolePolicyService issued; a
+ * jobRoleEnvelope inside pageContext is dropped.
+ */
+export interface FlowServerContext {
+  /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
+  jobRoleEnvelope: JobRoleEnvelope;
+  /**
+   * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): the holder of a
+   * membership-backed staff position, as JobRolePolicyService.holderForPosition resolved it; null
+   * or absent for a contact-only position. Read only by chatToolAction.
+   */
+  positionHolderUserId?: string | null;
+}
+
+/**
+ * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88). The dispatch context of
+ * one model tool call in chat()'s turn: `base` (the surface's own: its principal, crew, source and
+ * session), and for call_create_task (JobRolePolicyService HOLDER_ONLY_TOOLS) on a staff position's
+ * turn, which has no principal, the position's holder as onBehalfOfUserId. call_create_task records
+ * the member the command runs for as the caller (contactBindMember), so on WhatsApp/SMS it now runs
+ * as the holder, never as the member the model names; a contact-only position has no holder and is
+ * refused before anything is written, as before. Every other tool, and a turn with a principal,
+ * keeps `base` unchanged: the holder is never a principal and grants nothing. Governance still decides
+ * whether the call runs: a call it holds for a quick confirmation is not run on a turn with no
+ * member, since no confirmation is bound for one (review SEC-W9KDI-2 / CR-W9KDI-2, a known limitation).
+ * Pinned through the real chat() in test/staff-bridge-boundary.integration.test.ts (CR-W7CTC-2,
+ * SEC-W9KDI-1) and by flow-chat-tool-action.spec.ts.
+ */
+export function chatToolAction(base: ActionContext, toolName: string, server?: FlowServerContext): KeyDispatchAction {
+  const holder = server?.positionHolderUserId;
+  if (!holder || base.principalUserId || !HOLDER_ONLY_TOOLS.includes(toolName)) return base;
+  return { ...base, onBehalfOfUserId: holder };
+}
+
+/**
+ * V1-31 KEY-CONFIRM-BIND (M46). A Flow quick-confirmation for a tool the action boundary has not
+ * adopted is bound on the server when it is issued: one `idempotency_keys` row, keyed
+ * `flow-confirm:<id>` under the business, holds the call (tool, arguments, tool call id), the
+ * member it was issued to and the crew it was proposed under, with a sha256 over all of it. The
+ * client gets only the id. A confirmation executes what that row holds, once: the row moves
+ * pending -> claimed by compare-and-set, so a replay or a concurrent confirmation finds it gone.
+ * A tool name and arguments sent back beside the id are never read, and a confirmation without
+ * a bound id executes nothing (KF-EXEC-ACTION-001 already held this for the boundary's own
+ * capability). Flow ids carry their own prefix, so they never reach the boundary and a boundary
+ * id never reaches this store.
+ */
+const FLOW_CONFIRMATION_ID_PREFIX = 'flowc_';
+const FLOW_CONFIRMATION_KEY_PREFIX = 'flow-confirm:';
+/** How long a bound confirmation can be confirmed after it is issued. */
+export const FLOW_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
+/** What a confirmation that carries no server-bound call is told. */
+const UNBOUND_CONFIRMATION_REPLY =
+  'This action was not executed. It has to be confirmed with the confirmation issued for it; a tool name and arguments sent back by the client are not a confirmation. Please ask again.';
+
+/** The call a Flow confirmation id is bound to, as stored in idempotency_keys.response. */
+interface FlowBoundConfirmation {
+  kind: 'flow_confirmation';
+  toolName: string;
+  /**
+   * The arguments as JSON text, exactly as proposed. Text, not a JSON object: jsonb and the
+   * Prisma engine round numbers past 15 significant digits, which would change both the
+   * arguments executed and the hash over them.
+   */
+  argsJson: string;
+  /**
+   * The model's tool call id, or '' when the provider sent none (the stream accumulator starts
+   * every id as '', and a gateway can pass a missing one through). It is not what binds the
+   * confirmation (the confirmation id is), so an empty one is stored and honoured (V1-31 CR-2).
+   */
+  toolCallId: string;
+  requestedBy: string;
+  crew: BusinessRole[];
+  role: BusinessRole | null;
+  surface: 'CHAT' | 'CHAT_STREAM';
+  sessionId: string | null;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+/** A confirmation id the Flow issued (as opposed to one the action boundary issued). */
+export function isFlowConfirmationId(id: unknown): id is string {
+  return typeof id === 'string' && id.startsWith(FLOW_CONFIRMATION_ID_PREFIX) && id.length > FLOW_CONFIRMATION_ID_PREFIX.length;
+}
+
+function flowConfirmationKey(confirmationId: string): string {
+  return `${FLOW_CONFIRMATION_KEY_PREFIX}${confirmationId}`;
+}
+
+/** sha256 over the business and every field of the bound call. */
+function flowConfirmationHash(businessId: string, bound: FlowBoundConfirmation): string {
+  return createHash('sha256').update(canonicalJson({ v: 1, businessId, bound })).digest('hex');
+}
+
+/** The stored call and its parsed arguments, or null when the row does not hold one this code wrote. */
+function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmation; args: Record<string, unknown> } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const isText = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
+  if (v.kind !== 'flow_confirmation') return null;
+  if (!isText(v.toolName) || typeof v.toolCallId !== 'string' || !isText(v.requestedBy) || !isText(v.issuedAt) || !isText(v.expiresAt)) return null;
+  if (!isText(v.argsJson)) return null;
+  if (!Array.isArray(v.crew) || !v.crew.every((r) => typeof r === 'string')) return null;
+  if (v.surface !== 'CHAT' && v.surface !== 'CHAT_STREAM') return null;
+  if (v.role !== null && typeof v.role !== 'string') return null;
+  if (v.sessionId !== null && typeof v.sessionId !== 'string') return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(v.argsJson);
+  } catch {
+    return null;
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  return { bound: v as unknown as FlowBoundConfirmation, args: args as Record<string, unknown> };
+}
+
+/**
+ * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The level the routes require for a
+ * KEY tool CANONICAL_MODULE_TOOLS.operations lists (the command-centre items, procurement and the
+ * other operations routes); undefined for every other tool, which this rule leaves alone.
+ */
+function operationsLevelFor(toolName: string): 'read' | 'write' | 'admin' | undefined {
+  const tools = CANONICAL_MODULE_TOOLS.operations;
+  return Object.prototype.hasOwnProperty.call(tools, toolName) ? tools[toolName] : undefined;
+}
+
+/** The surfaces a member's own chat turn arrives on (E1 to E3); their principal is that member. */
+const MEMBER_CHAT_SURFACES: ReadonlySet<string> = new Set(['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']);
+
+/**
+ * W8-KEY-REVENUE-GATE (owner ruling D-98: "when a member drives KEY (chat or a plan)"): the member whose
+ * own revenue write KEY's money-writing tools need on this call (memberScopeRefusal), or null:
+ *   - a member's own chat turn (MEMBER_CHAT_SURFACES): its principal;
+ *   - an approved plan run over HTTP (PLAN_HTTP, POST ai/businesses/:b/flow/execute-plan/:planId, which
+ *     only AuthGuard and BusinessGuard guard): the calling member, its principal. Review SEC-W8KRG-1: a
+ *     revenue:read member who ran an approved plan had KEY mark an invoice PAID as them;
+ *   - a KEY-cortex turn's bridged flow tool (CORTEX_BRIDGE, KeyCortexEfferentBridgeService): the member
+ *     the turn runs for (onBehalfOfUserId). Review SEC-W8KRG-2: at TRUSTED_AUTOPILOT a revenue:read
+ *     member's cortex chat ran a tier-2 money tool directly. The id is never a principal and grants
+ *     nothing; here it can only refuse.
+ * Every other surface answers null: the plan queue, an approved proposal and the Pro Auto monitor hold
+ * their member to every module scope before dispatch (memberToolRunAuthority, D-71; D-73 with no
+ * member), the graph route holds its caller (assertMayRunGraphAction), an inner execute_custom_logic
+ * call is held through its outer turn's context, and the staff bridge by its envelope.
+ */
+function memberRevenueGateMember(action?: KeyDispatchAction): string | null {
+  if (!action) return null;
+  if (MEMBER_CHAT_SURFACES.has(action.surface) || action.surface === 'PLAN_HTTP') return action.principalUserId || null;
+  if (action.surface === 'CORTEX_BRIDGE') return action.onBehalfOfUserId || null;
+  return null;
+}
+
+/** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
+function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
+  if (!ctx || typeof ctx !== 'object') return ctx;
+  if (!('jobRoleEnvelope' in ctx)) return ctx;
+  const rest: Record<string, unknown> = { ...ctx };
+  delete rest.jobRoleEnvelope;
+  return rest as FlowPageContext;
 }
 
 function formatPageContextSection(ctx?: FlowPageContext): string {
@@ -413,6 +625,118 @@ function withEvidenceDiscipline(systemPrompt: string): string {
   if (systemPrompt.includes(discipline)) return systemPrompt;
   return `${systemPrompt}\n\n=== EVIDENCE DISCIPLINE ===\n${discipline}`;
 }
+
+/**
+ * V1-21d-KEY-DISPATCHER-TENANT-INCLUDES (V1-21c review ST-1, the TD9 class): a dispatcher read's
+ * to-one relations, each kept only when the related row is `businessId`'s.
+ *
+ * Prisma cannot put a where on a to-one include, and neither the tenant extension nor the
+ * soft-delete extension filters a nested read. A row cross-linked before the TD9 repairs (an A task
+ * filed on B's project, an A booking naming B's service and contact, an A invoice naming B's
+ * contact) therefore handed the model another business's row. Each such relation is read with its
+ * businessId and replaced by null here when that is not the caller's business (null included: a row
+ * of no business is not this one's). The row itself stays: it is the caller's own.
+ *
+ * A relation read without businessId is kept as read; the census in flow-dispatcher-tenant.spec.ts
+ * fails on a dispatcher read whose to-one relation does not select businessId or does not pass
+ * through here.
+ */
+export function ownRelations<T extends object, K extends keyof T & string>(
+  businessId: string,
+  row: T,
+  relations: readonly K[],
+): Omit<T, K> & { [P in K]: T[P] | null } {
+  const out = { ...row } as unknown as Record<string, unknown>;
+  for (const key of relations) {
+    const related = out[key];
+    if (related && typeof related === 'object' && 'businessId' in related && (related as { businessId: unknown }).businessId !== businessId) {
+      out[key] = null;
+    }
+  }
+  return out as Omit<T, K> & { [P in K]: T[P] | null };
+}
+
+/**
+ * The contact keys a KEY commerce write hands the model: what the HTTP write routes answer
+ * (toInvoiceWriteResponse / toQuoteWriteResponse in commerce.controller.ts), the operator read's
+ * customer fields plus `id` and `businessId`, which repeat the row's own contactId and tenant.
+ */
+const KEY_INVOICE_CONTACT_KEYS: readonly string[] = ['id', 'businessId', ...Object.keys(OPERATOR_INVOICE_CONTACT_SELECT)];
+const KEY_QUOTE_CONTACT_KEYS: readonly string[] = ['id', 'businessId', ...Object.keys(OPERATOR_QUOTE_CONTACT_SELECT)];
+
+function withWriteContact(businessId: string, row: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const contact = row.contact as Record<string, unknown> | null | undefined;
+  if (!contact) return row;
+  // a contact of another business (a row cross-linked before TD9-4) is not the caller's to read
+  if ('businessId' in contact && contact.businessId !== businessId) return { ...row, contact: null };
+  return { ...row, contact: Object.fromEntries(keys.map((key) => [key, contact[key]])) };
+}
+
+/**
+ * V1-21d (R0-SEC3 review SEC3-ST-2): what a KEY invoice write hands the model. markInvoicePaid
+ * reloads the invoice with `booking: true` and `contact: true` (the invoice listeners need both),
+ * createInvoice with `contact: true`, and the dispatcher returned those rows as they came: the
+ * model (and through it the chat response and the FlowSession) received a PRIVATE contact's
+ * internal notes, phone, owner and visibility, and the booking's notes, location and calendar id.
+ * The HTTP routes answer the same writes through toInvoiceWriteResponse; this is that projection:
+ * no booking, the contact's KEY_INVOICE_CONTACT_KEYS only. A row without a loaded contact passes
+ * through with only the booking dropped.
+ */
+export function toKeyInvoiceResult(businessId: string, invoice: object): Record<string, unknown> {
+  const rest = Object.fromEntries(Object.entries(invoice).filter(([key]) => key !== 'booking'));
+  return withWriteContact(businessId, rest, KEY_INVOICE_CONTACT_KEYS);
+}
+
+/** V1-21d (SEC3-ST-2): what a KEY quote write hands the model, as toQuoteWriteResponse answers it. */
+export function toKeyQuoteResult(businessId: string, quote: object): Record<string, unknown> {
+  return withWriteContact(businessId, { ...quote }, KEY_QUOTE_CONTACT_KEYS);
+}
+
+/**
+ * V1-21d review SEC-V21D-2: the related rows of a booking the dispatcher resolved inside the
+ * business (bookingWithinBusiness), relation -> the id of the row it found there (null: none).
+ */
+export type KeyBookingLinks = Partial<Record<'contact' | 'service' | 'staff', string | null>>;
+const KEY_BOOKING_LINKS = ['contact', 'service', 'staff'] as const;
+
+/**
+ * V1-21d review SEC-V21D-2: what a KEY booking write hands the model. rescheduleBooking and
+ * updateBookingStatus reload the booking with its contact, service and staff member, read by id
+ * with no business (bookings.service.ts), and the dispatcher returned that row as it came: on a
+ * booking cross-linked before TD9-3 the model read another business's service (name, price) and
+ * contact. A related row is kept only when it is the one bookingWithinBusiness resolved inside the
+ * business before the write (same id); any other (relinked since, or never resolved) is null.
+ */
+export function toKeyBookingResult(booking: object, links: KeyBookingLinks): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...booking };
+  for (const key of KEY_BOOKING_LINKS) {
+    const related = out[key] as { id?: unknown } | null | undefined;
+    if (related != null && (links[key] == null || related.id !== links[key])) out[key] = null;
+  }
+  return out;
+}
+
+/**
+ * The tenant models whose model-supplied ids the dispatcher resolves itself (V1-21d), because the
+ * service it hands them to looks them up by id alone.
+ */
+type DispatcherTenantModel =
+  | 'contentRequest'
+  | 'evidence'
+  | 'approvalRequest'
+  | 'bookingWaitlistEntry'
+  | 'service'
+  | 'staffMember'
+  | 'procurementRequest';
+
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): what the Pro Auto monitor's execution log row
+ * keeps for the arguments and answer of a tool that ran only because the monitor runs for the business
+ * owner (autoExecuteToolForMonitoring): GET ai/execution-logs answers every member.
+ */
+const MONITOR_MEMBER_VIEW_WITHHELD: Readonly<Record<string, string>> = Object.freeze({
+  withheld: "Run for the business owner (D-93): the owner's view is not kept where every member reads it",
+});
 
 @Injectable()
 export class FlowOrchestratorService {
@@ -737,6 +1061,20 @@ export class FlowOrchestratorService {
   private getJobRolePolicy() {
     return this.moduleRef.get(JobRolePolicyService, { strict: false });
   }
+
+  /**
+   * The position envelope a turn is governed by (V1-21b review 7 ENV-FORGE): only one passed
+   * as chat()'s / streamChat()'s server-only argument, and only one JobRolePolicyService
+   * issued. Any other envelope there fails closed to the baseline a position with no JobRole
+   * gets, never to the text-detected crew.
+   */
+  private serverEnvelope(server: FlowServerContext | undefined): JobRoleEnvelope | undefined {
+    if (!server) return undefined;
+    const policy = this.getJobRolePolicy();
+    if (policy.isIssued(server.jobRoleEnvelope)) return server.jobRoleEnvelope;
+    this.logger.warn('Ignored a position envelope JobRolePolicyService did not issue; the turn keeps the baseline');
+    return policy.envelopeForJobRole(NO_JOB_ROLE);
+  }
   private getPayroll() {
     return this.moduleRef.get(PayrollService, { strict: false });
   }
@@ -775,6 +1113,26 @@ export class FlowOrchestratorService {
   }
   private getCommerce() {
     return this.moduleRef.get(CommerceService, { strict: false });
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the customer's
+   * invoice link in commerce_send_invoice is /public/invoice/<token>, built
+   * exactly as the operator's send-email builds it
+   * (CommerceService.publicInvoiceUrl: the live link, or a new one). V1-46b
+   * review (SEC-V46B-2, CR-V46B-01): through automatedInvoiceUrl, so it never
+   * mints a link for an invoice whose links were all revoked or expired. It was
+   * /pay/<invoiceId>, the retired bare-id page. A link that cannot be issued
+   * leaves the email without a button (the template renders none), never a
+   * bare-id URL.
+   */
+  private async customerInvoiceUrl(invoiceId: string, businessId: string): Promise<string | undefined> {
+    try {
+      return (await this.getCommerce().automatedInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      Logger.warn(`No pay link for invoice ${invoiceId}: ${(e as Error).message}`, FlowOrchestratorService.name);
+      return undefined;
+    }
   }
   private getBookings() {
     return this.moduleRef.get(BookingsService, { strict: false });
@@ -1286,6 +1644,8 @@ export class FlowOrchestratorService {
     crew: readonly BusinessRole[],
     contextText: string,
     envelope?: JobRoleEnvelope,
+    /** The member whose chat turn this is (member chat only; the staff bridge passes none). */
+    principalUserId?: string | null,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
     const all = getOpenAiToolDefinitions();
     let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
@@ -1305,6 +1665,30 @@ export class FlowOrchestratorService {
       candidates = all.filter((t) => this.roleEngine.crewAllows(crew, t.function.name));
     } else {
       candidates = all;
+    }
+
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): in a member's own chat, an operations tool is offered
+    // only when the member's operations level reaches the level its routes require, as
+    // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
+    // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
+    // W8-KEY-REVENUE-GATE (owner ruling D-98): likewise a money-writing tool is offered only when the
+    // member's revenue level reaches what its routes require (keyRevenueMenuLevel, the rule
+    // memberScopeRefusal refuses a call with). Review CR-W8KRG-1: a tool whose money write depends on
+    // its arguments (update_status_with_confirmation, which also moves contact statuses) stays offered,
+    // and its call is judged by its arguments when it runs.
+    if (!envelope && principalUserId) {
+      const level = await this.memberOperationsLevel(businessId, principalUserId);
+      // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
+      const { keyRevenueMenuLevel, memberRevenueLevel } = await import('./plan-step-authority');
+      const revenue = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
+        ? await memberRevenueLevel(this.prisma, businessId, principalUserId)
+        : 'none';
+      candidates = candidates.filter((t) => {
+        const required = operationsLevelFor(t.function.name);
+        if (required && rankOf(level) < LEVEL_RANK[required]) return false;
+        const money = keyRevenueMenuLevel(t.function.name);
+        return !money || rankOf(revenue) >= LEVEL_RANK[money];
+      });
     }
 
     // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
@@ -1541,6 +1925,39 @@ export class FlowOrchestratorService {
     yield { type: 'done', sessionId };
   }
 
+  /**
+   * The "RELEVANT CONTEXT FROM MEMORY" section of a KEY chat turn: optional
+   * enrichment, so any failure of the semantic search leaves it out and the turn
+   * goes on.
+   *
+   * W7-AI-SERVICES-503 review repair (SEC503-1 / CR-503-1; the R0-07a rule,
+   * COST-LEDGER-001 section 7 item 7). Since W7-AI-SERVICES-503,
+   * SemanticMemoryService.search rethrows the provider 503 (no platform OpenAI
+   * key for embeddings: provider_not_configured, or the gateway's
+   * provider_unavailable) so GET .../agent/memory/search fails visibly. A chat
+   * turn whose own chat provider is configured (another env provider, or the
+   * business's BYOK key through the gateway) still answers, without this
+   * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
+   * do. Only the memory lookup is caught: a missing chat provider still fails
+   * the turn from the gateway dispatch with its own 503.
+   */
+  private async buildSemanticMemorySection(businessId: string, query: string): Promise<string> {
+    try {
+      const relevant = await this.semanticMemory.search({
+        businessId,
+        query,
+        limit: 5,
+        minSimilarity: 0.65,
+      });
+      if (relevant.length === 0) return '';
+      return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
+        relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
+    } catch (err: unknown) {
+      this.logger.warn(`Semantic memory left out of the turn: ${err instanceof Error ? err.message : String(err)}`);
+      return '';
+    }
+  }
+
   async chat(
     businessId: string,
     message: string,
@@ -1553,8 +1970,12 @@ export class FlowOrchestratorService {
     /** Owner of the conversation. A session created without one is private to
      *  nobody and will not appear in any listing — see saveConversationHistory. */
     userId?: string,
+    /** Server-only: a staff position's envelope (FlowServerContext). Never from a client. */
+    server?: FlowServerContext,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
+    pageContext = withoutClientEnvelope(pageContext);
+    const envelope = this.serverEnvelope(server);
 
     // Enrich message with any uploaded document/PDF/image context so role detection
     // and the LLM prompt both see the attachment contents.
@@ -1588,21 +2009,12 @@ export class FlowOrchestratorService {
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
-    // Semantic memory search based on last user message
+    // Semantic memory search based on last user message (optional enrichment:
+    // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
-    let semanticMemorySection = '';
-    if (lastUserMessage?.content) {
-      const relevant = await this.semanticMemory.search({
-        businessId,
-        query: lastUserMessage.content,
-        limit: 5,
-        minSimilarity: 0.65,
-      });
-      if (relevant.length > 0) {
-        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
-          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
-      }
-    }
+    const semanticMemorySection = lastUserMessage?.content
+      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content)
+      : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
@@ -1620,7 +2032,8 @@ export class FlowOrchestratorService {
       businessId,
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
-      pageContext?.jobRoleEnvelope,
+      envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -1693,50 +2106,88 @@ ${triage.standingContext}`;
       const boundaryConfirmation = await this.confirmThroughBoundary(businessId, pendingConfirmation, userId);
       if (boundaryConfirmation) return boundaryConfirmation;
 
-      if (!pendingConfirmation.confirmed) {
-        return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
-      }
-      if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, crew, pageContext?.jobRoleEnvelope);
-        if (!confirmDecision.allowed) {
+      // V1-31: every other confirmation is the call the Flow bound on the
+      // server under its id, claimed once, by the member it was issued to.
+      // This path used to re-evaluate only the tool NAME and then execute (or
+      // file as an approval item) the name and arguments the client sent, so a
+      // member could confirm a call KEY never proposed. From here on
+      // `pendingConfirmation` is the bound call; the client's name and
+      // arguments are never read again.
+      const claim = await this.claimFlowConfirmation(businessId, pendingConfirmation, userId, crew, envelope);
+      if (claim.kind === 'answered') return claim.response;
+      pendingConfirmation = claim.confirmation;
+      // The member the call was issued to, verified by the claim. The approval
+      // item, the queue's log row and the executed call's log row name them
+      // (V1-31 review SEC-V131-2; they used to say 'system', or no one).
+      const confirmedBy = claim.requestedBy;
+
+      // Whatever throws once the claim is held (governance, the approval
+      // queue, the executor) records the claim as failed before it
+      // propagates, so a retry is told the truth instead of "already used"
+      // (V1-31 review CR-1). settle() is a compare-and-set from 'claimed', so
+      // an outcome already recorded is never overwritten.
+      try {
+        if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
+          // Governed again now, on the bound tool and the crew it was proposed under.
+          const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
+          if (!confirmDecision.allowed) {
+            await claim.settle('refused', confirmDecision.reason);
+            return {
+              reply: `This action is blocked: ${confirmDecision.reason}`,
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            };
+          }
+          if (confirmDecision.requiresFormalApproval) {
+            const item = await this.governance.createApprovalItem(businessId, {
+              toolName: pendingConfirmation.toolName,
+              title: `Chat action: ${pendingConfirmation.toolName}`,
+              description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
+              rationale: confirmDecision.reason,
+              inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
+            });
+            await this.attributeApprovalItem(businessId, item?.id, confirmedBy);
+            await this.executionLog.log({
+              businessId,
+              action: `approval_queued_chat`,
+              toolName: pendingConfirmation.toolName,
+              riskTier: confirmDecision.tier,
+              mode: 'assisted',
+              actor: 'user',
+              userId: confirmedBy,
+              rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+              success: true,
+            });
+            await claim.settle('completed');
+            return {
+              reply: confirmDecision.requiresAdminApproval
+                ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
+                : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            };
+          }
+          // It runs as the member who confirmed it (V1-84, D-37): the Flow binds only calls the
+          // action boundary has not adopted (issuePendingConfirmations), and for those the executor
+          // reads the principal only to apply that member's contact and calendar visibility.
+          const confirmedAction: ActionContext | undefined = this.getActionBoundary().adopts(pendingConfirmation.toolName)
+            ? undefined
+            : { surface: 'CHAT', principalUserId: confirmedBy, crew: claim.crew, sourceId: pendingConfirmation.toolCallId || null, sessionId: effectiveSessionId };
+          // A call the provider sent with no id keeps the executor's own id (CR-2).
+          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy }, confirmedAction);
+          await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
           return {
-            reply: `This action is blocked: ${confirmDecision.reason}`,
-            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            reply: result.success
+              ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
+              : `Something went wrong: ${result.error || 'Unknown error'}. Please try again or contact support.`,
+            toolResults: [result],
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
           };
         }
-        if (confirmDecision.requiresFormalApproval) {
-          await this.governance.createApprovalItem(businessId, {
-            toolName: pendingConfirmation.toolName,
-            title: `Chat action: ${pendingConfirmation.toolName}`,
-            description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
-            rationale: confirmDecision.reason,
-            inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
-          });
-          await this.executionLog.log({
-            businessId,
-            action: `approval_queued_chat`,
-            toolName: pendingConfirmation.toolName,
-            riskTier: confirmDecision.tier,
-            mode: 'assisted',
-            actor: 'system',
-            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
-            success: true,
-          });
-          return {
-            reply: confirmDecision.requiresAdminApproval
-              ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
-              : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
-            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
-          };
-        }
-        const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, undefined, { planId: '', planStepId: '', role: detectedRole ?? undefined });
-        return {
-          reply: result.success
-            ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
-            : `Something went wrong: ${result.error || 'Unknown error'}. Please try again or contact support.`,
-          toolResults: [result],
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
-        };
+        // Unreachable for a call this code bound (it always has both).
+        await claim.settle('failed', 'No call was bound to this confirmation');
+        return { reply: UNBOUND_CONFIRMATION_REPLY, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 } };
+      } catch (err: unknown) {
+        await claim.settle('failed', err instanceof Error ? err.message : String(err));
+        throw err;
       }
     }
 
@@ -1810,14 +2261,16 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
-          return this.governToolCall(businessId, tc, decision, {
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
+          // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
+          // runs for its holder (chatToolAction); every other call keeps this context.
+          return this.governToolCall(businessId, tc, decision, chatToolAction({
             surface: 'CHAT',
             principalUserId: userId ?? null,
             crew,
             sourceId: tc.id,
             sessionId: effectiveSessionId,
-          });
+          }, tc.name, server));
         }),
       );
 
@@ -1858,14 +2311,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
-          toolCallId: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-          description: this.describeToolCall(tc.name, tc.arguments),
-          riskLevel: tc.riskLevel,
-          ...(confirmationId ? { confirmationId } : {}),
-        }));
+        const pendingConfirmations = await this.issuePendingConfirmations(businessId, needsQuickConfirm, {
+          userId,
+          crew,
+          role: detectedRole ?? null,
+          surface: 'CHAT',
+          sessionId: effectiveSessionId,
+        });
 
         return {
           reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
@@ -1960,7 +2412,11 @@ ${triage.standingContext}`;
     sessionId?: string,
     /** Owner of the conversation — see saveConversationHistory. */
     userId?: string,
+    /** Server-only: a staff position's envelope (FlowServerContext). Never from a client. */
+    server?: FlowServerContext,
   ): AsyncGenerator<FlowStreamChunk> {
+    pageContext = withoutClientEnvelope(pageContext);
+    const envelope = this.serverEnvelope(server);
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
     const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
@@ -1998,20 +2454,11 @@ ${triage.standingContext}`;
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
-    // Semantic memory search based on current message
-    let semanticMemorySection = '';
-    if (enrichedMessage) {
-      const relevant = await this.semanticMemory.search({
-        businessId,
-        query: enrichedMessage,
-        limit: 5,
-        minSimilarity: 0.65,
-      });
-      if (relevant.length > 0) {
-        semanticMemorySection = '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
-          relevant.map((m) => `- ${m.content} (similarity: ${Math.round(m.similarity * 100)}%)`).join('\n');
-      }
-    }
+    // Semantic memory search based on current message (optional enrichment:
+    // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
+    const semanticMemorySection = enrichedMessage
+      ? await this.buildSemanticMemorySection(businessId, enrichedMessage)
+      : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
@@ -2029,7 +2476,8 @@ ${triage.standingContext}`;
       businessId,
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
-      pageContext?.jobRoleEnvelope,
+      envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -2295,7 +2743,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT_STREAM',
             principalUserId: userId ?? null,
@@ -2369,14 +2817,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
-          toolCallId: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-          description: this.describeToolCall(tc.name, tc.arguments),
-          riskLevel: tc.riskLevel,
-          ...(confirmationId ? { confirmationId } : {}),
-        }));
+        const pendingConfirmations = await this.issuePendingConfirmations(businessId, needsQuickConfirm, {
+          userId,
+          crew,
+          role: detectedRole ?? null,
+          surface: 'CHAT_STREAM',
+          sessionId: effectiveSessionId,
+        });
 
         yield {
           type: 'confirmation_required',
@@ -2487,7 +2934,26 @@ ${triage.standingContext}`;
     ctx: ActionContext,
   ): Promise<GovernedToolCall> {
     const boundary = this.getActionBoundary();
-    if (!legacy.allowed || !boundary.adopts(tc.name)) return { tc, decision: legacy };
+    if (!legacy.allowed) return { tc, decision: legacy };
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): a call the member's operations scope does not reach is
+    // neither proposed for confirmation nor filed for approval. It goes to the executor, which
+    // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
+    // member and the model are told why. W8-KEY-REVENUE-GATE (D-98): so is a money-writing call
+    // the member's revenue scope does not reach (memberScopeRefusal; judged with the call's arguments,
+    // review CR-W8KRG-1).
+    if (await this.memberScopeRefusal(businessId, tc.name, ctx, tc.arguments)) {
+      return {
+        tc,
+        decision: { ...legacy, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false },
+        action: ctx,
+      };
+    }
+    // V1-84 (FOLLOW3-D7, owner ruling D-37): a tool the boundary has not adopted still runs as the
+    // member this surface established, so the dispatcher's contact and calendar reads apply that
+    // member's visibility (contactReadAccess, calendar_list_events). The context used to be dropped
+    // here, and member chat read the whole business. A surface with no member (the staff bridge,
+    // the support desk) passes principalUserId null and keeps the business-wide read.
+    if (!boundary.adopts(tc.name)) return { tc, decision: legacy, action: ctx };
 
     const flags = { requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false };
     try {
@@ -2534,13 +3000,15 @@ ${triage.standingContext}`;
    * and the boundary executes the action recorded under it. A resubmitted name
    * and arguments execute nothing.
    *
-   * Returns null when the confirmation is not the boundary's to answer.
+   * Returns null when the confirmation is not the boundary's to answer,
+   * including every id the Flow itself issued (V1-31, claimFlowConfirmation).
    */
   private async confirmThroughBoundary(
     businessId: string,
     pending: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any>; confirmationId?: string },
     userId?: string,
   ): Promise<FlowResponse | null> {
+    if (isFlowConfirmationId(pending.confirmationId)) return null;
     const boundary = this.getActionBoundary();
     const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 };
 
@@ -2586,13 +3054,254 @@ ${triage.standingContext}`;
     }
 
     if (pending.confirmed && boundary.adopts(pending.toolName)) {
-      return {
-        reply:
-          'This action was not executed. It has to be confirmed with the confirmation issued for it; a tool name and arguments sent back by the client are not a confirmation. Please ask again.',
-        usage: noUsage,
-      };
+      return { reply: UNBOUND_CONFIRMATION_REPLY, usage: noUsage };
     }
     return null;
+  }
+
+  /**
+   * The pending confirmations a quick-confirm turn hands the client (V1-31).
+   *
+   * A call the action boundary recorded keeps the boundary's id. Every other
+   * call is bound here, on the server, and the client is given only the id it
+   * is bound under. When nothing could be bound (no authenticated requester,
+   * or the store refused the row) the confirmation carries no id, and a
+   * confirmation without one executes nothing.
+   */
+  private async issuePendingConfirmations(
+    businessId: string,
+    calls: GovernedToolCall[],
+    ctx: {
+      userId?: string;
+      crew: readonly BusinessRole[];
+      role: BusinessRole | null;
+      surface: FlowBoundConfirmation['surface'];
+      sessionId: string;
+    },
+  ): Promise<PendingConfirmation[]> {
+    const boundary = this.getActionBoundary();
+    return Promise.all(
+      calls.map(async ({ tc, confirmationId }) => {
+        const id = confirmationId ?? (boundary.adopts(tc.name) ? undefined : await this.bindFlowConfirmation(businessId, tc, ctx));
+        return {
+          toolCallId: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          description: this.describeToolCall(tc.name, tc.arguments),
+          riskLevel: tc.riskLevel,
+          ...(id ? { confirmationId: id } : {}),
+        };
+      }),
+    );
+  }
+
+  /** Record the call on the server and return the id it is bound under, or undefined. */
+  private async bindFlowConfirmation(
+    businessId: string,
+    tc: FlowToolCall,
+    ctx: {
+      userId?: string;
+      crew: readonly BusinessRole[];
+      role: BusinessRole | null;
+      surface: FlowBoundConfirmation['surface'];
+      sessionId: string;
+    },
+  ): Promise<string | undefined> {
+    // Nobody could ever confirm it: a confirmation needs the member it was
+    // issued to (the staff bridge and the support desk pass no member).
+    if (!ctx.userId) return undefined;
+    const confirmationId = `${FLOW_CONFIRMATION_ID_PREFIX}${randomUUID()}`;
+    const issuedAt = new Date();
+    const bound: FlowBoundConfirmation = {
+      kind: 'flow_confirmation',
+      toolName: tc.name,
+      argsJson: JSON.stringify(tc.arguments ?? {}),
+      // A provider can send no id (V1-31 review CR-2); '' is stored, not a
+      // missing field, so the row reads back and hashes the same.
+      toolCallId: typeof tc.id === 'string' ? tc.id : '',
+      requestedBy: ctx.userId,
+      crew: [...ctx.crew],
+      role: ctx.role,
+      surface: ctx.surface,
+      sessionId: ctx.sessionId,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + FLOW_CONFIRMATION_TTL_MS).toISOString(),
+    };
+    try {
+      await this.prisma.client.idempotencyKey.create({
+        data: {
+          businessId,
+          idempotencyKey: flowConfirmationKey(confirmationId),
+          status: 'pending',
+          requestHash: flowConfirmationHash(businessId, bound),
+          response: bound as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return confirmationId;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Could not bind a confirmation for ${tc.name}; it cannot be confirmed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Name the member who confirmed as the requester of the approval item their
+   * confirmation filed (V1-31 review SEC-V131-2). AiOversightService.
+   * createApprovalItem takes no requester, so the item it creates has none;
+   * this sets it, on that item in this business only. The item is already in
+   * the queue, so a failure here is logged and the confirmation still answers
+   * as queued.
+   */
+  private async attributeApprovalItem(businessId: string, itemId: unknown, userId: string): Promise<void> {
+    if (typeof itemId !== 'string' || itemId.length === 0) return;
+    try {
+      await this.prisma.client.aiApprovalItem.updateMany({ where: { id: itemId, businessId }, data: { userId } });
+    } catch (err: unknown) {
+      this.logger.warn(`Could not name the requester of approval item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Name the member on whose confirmation a tool ran on its execution log row
+   * (V1-31 review SEC-V131-2). AiExecutionLogService.logToolExecution writes
+   * the row as actor 'flow' with no user; this adds the user, on that row in
+   * this business only.
+   */
+  private async attributeExecutionLog(businessId: string, logId: unknown, userId: string | undefined): Promise<void> {
+    if (!userId || typeof logId !== 'string' || logId.length === 0) return;
+    await this.prisma.client.aiExecutionLog.updateMany({ where: { id: logId, businessId }, data: { userId } });
+  }
+
+  /**
+   * Claim the call a confirmation is bound to (V1-31), or answer it.
+   *
+   * Only an id the Flow issued is a confirmation here (the boundary answered
+   * its own ids first). The call is the one stored under the id; whatever
+   * name and arguments came with it are not read. The id belongs to its
+   * business and to the member it was issued to, expires, and is spent by the
+   * first confirmation that claims it (pending -> claimed, compare-and-set).
+   * A confirmation with no Flow id executes nothing; a tool governance
+   * refuses anyway is still named as refused, as before.
+   *
+   * `claimed` hands back the bound call, the crew it was proposed under, the
+   * member it was issued to (who has just been verified as the confirming
+   * user) and `settle`, which records the outcome on the claimed row.
+   */
+  private async claimFlowConfirmation(
+    businessId: string,
+    pending: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown>; confirmationId?: string },
+    userId: string | undefined,
+    turnCrew: readonly BusinessRole[],
+    envelope: JobRoleEnvelope | undefined,
+  ): Promise<
+    | { kind: 'answered'; response: FlowResponse }
+    | {
+        kind: 'claimed';
+        confirmation: { toolCallId: string; confirmed: true; toolName: string; toolArgs: Record<string, unknown>; confirmationId: string };
+        crew: BusinessRole[];
+        role: BusinessRole | null;
+        requestedBy: string;
+        settle: (to: 'completed' | 'failed' | 'refused', error?: string) => Promise<boolean>;
+      }
+  > {
+    const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 };
+    const answer = (reply: string, withUsage = true) => ({ kind: 'answered' as const, response: withUsage ? { reply, usage: noUsage } : { reply } });
+    const notExecuted = (why: string) => answer(`This action was not executed: ${why}`);
+    const cancelled = 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.';
+    // A claimed row may also be one whose run was interrupted: at most once, so never run again.
+    const alreadyDone = answer('That confirmation was already used; the action is not run again.');
+
+    const confirmationId = pending.confirmationId;
+    if (!isFlowConfirmationId(confirmationId)) {
+      if (!pending.confirmed) return answer(cancelled, false);
+      if (pending.toolName) {
+        const decision = await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
+        if (!decision.allowed) return answer(`This action is blocked: ${decision.reason}`);
+      }
+      return answer(UNBOUND_CONFIRMATION_REPLY);
+    }
+    if (!userId) return notExecuted('an authenticated user is required to confirm it.');
+
+    const idempotencyKey = flowConfirmationKey(confirmationId);
+    const store = this.prisma.client.idempotencyKey;
+    /** Compare-and-set on the row's status: true when this call moved it. */
+    const transition = async (from: string, to: string, error?: string): Promise<boolean> => {
+      const { count } = await store.updateMany({
+        where: { businessId, idempotencyKey, status: from },
+        data: { status: to, ...(error !== undefined ? { error } : {}) },
+      });
+      return count === 1;
+    };
+
+    let row: { status: string; requestHash: string | null; response: unknown } | null;
+    try {
+      row = await store.findUnique({ where: { businessId_idempotencyKey: { businessId, idempotencyKey } } });
+    } catch (err: unknown) {
+      this.logger.warn(`Could not read confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+      return notExecuted('the confirmation could not be checked. Please try again.');
+    }
+    const stored = row ? readFlowBoundConfirmation(row.response) : null;
+    if (!row || !stored || row.requestHash !== flowConfirmationHash(businessId, stored.bound)) return answer(UNBOUND_CONFIRMATION_REPLY);
+    const { bound, args } = stored;
+    if (bound.requestedBy !== userId) return notExecuted('this confirmation was issued to someone else.');
+    // Never bound for one (issuePendingConfirmations), and never honoured: the boundary owns those.
+    if (this.getActionBoundary().adopts(bound.toolName)) return answer(UNBOUND_CONFIRMATION_REPLY);
+
+    if (!pending.confirmed) {
+      let moved: boolean;
+      try {
+        moved = await transition('pending', 'cancelled');
+      } catch (err: unknown) {
+        this.logger.warn(`Could not cancel confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+        return answer('I could not cancel that confirmation. Please try again.');
+      }
+      if (!moved) {
+        // Spent, refused, expired or cancelled already; say so when it was used.
+        const current = await store.findUnique({ where: { businessId_idempotencyKey: { businessId, idempotencyKey } } }).catch(() => null);
+        if (current?.status === 'completed' || current?.status === 'claimed') {
+          return answer('That confirmation was already used, so there is nothing to cancel.');
+        }
+      }
+      return answer(cancelled, false);
+    }
+
+    if (row.status === 'completed' || row.status === 'claimed') return alreadyDone;
+    if (row.status !== 'pending') return notExecuted(`this confirmation is ${row.status}. Please ask again.`);
+    if (!(Date.parse(bound.expiresAt) > Date.now())) {
+      await transition('pending', 'expired').catch(() => undefined);
+      return notExecuted('this confirmation has expired. Please ask again.');
+    }
+    if (
+      (pending.toolName !== undefined && pending.toolName !== bound.toolName) ||
+      (pending.toolArgs !== undefined && canonicalJson(pending.toolArgs) !== canonicalJson(args))
+    ) {
+      this.logger.warn(`Confirmation ${confirmationId} came with a different call than the one bound to it; only the bound call is considered`);
+    }
+
+    // The claim. Exactly one confirmation moves the row out of 'pending'.
+    let claimed: boolean;
+    try {
+      claimed = await transition('pending', 'claimed');
+    } catch (err: unknown) {
+      this.logger.warn(`Could not claim confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+      return notExecuted('the confirmation could not be claimed. Please try again.');
+    }
+    if (!claimed) return alreadyDone;
+
+    return {
+      kind: 'claimed',
+      confirmation: { toolCallId: bound.toolCallId, confirmed: true, toolName: bound.toolName, toolArgs: args, confirmationId },
+      crew: bound.crew,
+      role: bound.role,
+      requestedBy: bound.requestedBy,
+      settle: (to, error) =>
+        transition('claimed', to, error).catch((e: unknown) => {
+          this.logger.warn(`Could not record the outcome of confirmation ${confirmationId}: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
+        }),
+    };
   }
 
   async executeToolDirectly(
@@ -2600,7 +3309,7 @@ ${triage.standingContext}`;
     toolName: string,
     args: Record<string, any>,
     planContext?: { planId: string; planStepId: string },
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     const result = await this.executeTool(businessId, toolName, args, `direct_${toolName}`, planContext, action);
     if (!result.success) {
@@ -2614,7 +3323,13 @@ ${triage.standingContext}`;
           result.notCleared.disposition as ActionNotClearedError['disposition'],
         );
       }
-      throw new Error(result.error ?? `Tool ${toolName} failed`);
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the tool's own HttpException, its status and its
+      // message (result.error), so the dispatcher answers a 4xx refusal once and counts it toward no
+      // circuit (isToolRefusal). Review CR-W10DS-1 (D-73): a 400 or 409 (TOOL_STATUSES_RETRIED) and
+      // anything else stay the plain Error they were, a 400 or 409 with the HttpException as its cause.
+      const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
+      if (httpException && !TOOL_STATUSES_RETRIED.has(httpException.getStatus())) throw httpException;
+      throw new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
     }
     return result.result;
   }
@@ -2624,25 +3339,41 @@ ${triage.standingContext}`;
     toolName: string,
     args: Record<string, any>,
     toolCallId?: string,
-    planContext?: { planId: string; planStepId: string; role?: string },
-    action?: ActionContext,
+    /**
+     * `actorUserId`: the authenticated member the call runs for (a confirmed
+     * Flow call, V1-31). Their id goes on the execution log row, and the call
+     * answers only after the row is written, so the row exists and names them
+     * when the confirmation returns.
+     */
+    planContext?: { planId: string; planStepId: string; role?: string; actorUserId?: string },
+    action?: KeyDispatchAction,
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
+    const actorUserId = planContext?.actorUserId;
     const startTime = Date.now();
     try {
+      // V1-84 (FOLLOW3-D16, D-40): read when the call runs, as the route reads it per request, so a
+      // confirmation issued before the member's operations scope was lowered runs nothing either.
+      // W8-KEY-REVENUE-GATE (D-98): and the revenue write KEY's money-writing tools need, on every
+      // surface a member drives KEY on (memberRevenueGateMember: member chat, a plan run over HTTP, a
+      // KEY-cortex turn's bridged call; review SEC-W8KRG-1, SEC-W8KRG-2), judged with these arguments
+      // (review CR-W8KRG-1).
+      const refusal = await this.memberScopeRefusal(businessId, toolName, action, args);
+      if (refusal) throw new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
         role: planContext?.role,
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, actorUserId)).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (actorUserId) await logged;
       this.businessGraph.invalidateCache(businessId);
       return {
         toolCallId: id,
@@ -2657,16 +3388,17 @@ ${triage.standingContext}`;
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
         role: planContext?.role,
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, actorUserId)).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (actorUserId) await logged;
       const errorEnvelope = wrapToolResult(toolName, null);
-      return {
+      const failed: FlowToolResult = {
         toolCallId: id,
         name: toolName,
         result: null,
@@ -2680,6 +3412,9 @@ ${triage.standingContext}`;
           ? { notCleared: { actionId: error.actionId, disposition: error.disposition, code: error.code } }
           : {}),
       };
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the status goes beside the envelope, not on it.
+      if (error instanceof HttpException) TOOL_HTTP_EXCEPTIONS.set(failed, error);
+      return failed;
     }
   }
 
@@ -2727,9 +3462,352 @@ ${triage.standingContext}`;
     businessId: string,
     toolName: string,
     args: Record<string, any>,
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<unknown> {
     return this.executeToolAction(businessId, toolName, args, action);
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The member's `operations` level, read
+   * exactly as ModuleScopeGuard reads it for the routes behind CANONICAL_MODULE_TOOLS.operations
+   * (the command-centre items, procurement and the other operations routes): a platform
+   * SUPER_ADMIN passes every requirement; else the membership's explicit permissionScopes map,
+   * where a missing key is none; else the role defaults (OWNER and ADMIN admin, STAFF read). No
+   * membership is none.
+   */
+  private async memberOperationsLevel(businessId: string, userId: string): Promise<string> {
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    ]);
+    if (user?.role === 'SUPER_ADMIN') return 'admin';
+    if (!membership) return 'none';
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return scopes.operations || 'none';
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D16, D-40). Why a member's chat call may not run `toolName`, in the words
+   * ModuleScopeGuard answers the route with: an operations tool whose routes require a level above
+   * the member's operations level. null for every other tool, for a level that reaches it, and for
+   * a call with no member or from another surface: the staff bridge (whose issued envelope
+   * JobRolePolicyService already bounds by the holder's membership), the support desk and the
+   * system surfaces are unchanged. execute_custom_logic asks it for each inner api.callTool with
+   * the member's outer chat context (review SEC-D16-1), so a snippet reaches no further than the
+   * member's own calls do.
+   */
+  private async operationsScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
+    const required = operationsLevelFor(toolName);
+    if (!required || !action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
+    const level = await this.memberOperationsLevel(businessId, action.principalUserId);
+    if (rankOf(level) >= LEVEL_RANK[required]) return null;
+    return `Insufficient permissions: ${toolName} needs operations ${required} access (you have ${level})`;
+  }
+
+  /**
+   * Why a member's call may not run `toolName`: the operations scope on the member's own chat (D-40,
+   * operationsScopeRefusal), then W8-KEY-REVENUE-GATE (owner ruling D-98; review residuals
+   * SEC-W7IAR-2, SEC-W7KMP-2): KEY's money-writing tools (keyRevenueWriteLevel: mark an invoice
+   * paid, update, send or bulk-move an invoice, the other revenue writes the routes govern) need the
+   * driving member's own revenue write, read as PATCH .../paid reads it (memberRevenueWriteRefusal, the
+   * rule plan-step-authority.ts shares with the plan queue and approved proposals). A revenue:read
+   * member had KEY mark an invoice PAID that the route refuses them. The driving member is
+   * memberRevenueGateMember's: a member chat turn's principal, the caller who runs an approved plan
+   * over HTTP (review SEC-W8KRG-1), the member a KEY-cortex turn's bridged call runs for (review
+   * SEC-W8KRG-2). `args`: the call's arguments, so a tool whose money write depends on them
+   * (update_status_with_confirmation moving contacts) is judged by them (review CR-W8KRG-1). null for
+   * every other tool, for a member whose scopes reach it, and for a call with no such member: the staff
+   * bridge (its issued envelope already bounds the holder), the support desk and the system surfaces
+   * are unchanged; the plan queue, an approved proposal and the monitor are held before dispatch
+   * (memberToolRunAuthority, D-71), and a plan or a monitor with no member writes no money (D-73).
+   * Checked when the call runs (executeTool), before it is proposed (governToolCall), for each inner
+   * call of an execute_custom_logic snippet, and on the tool menu (selectToolsForRequest).
+   */
+  private async memberScopeRefusal(
+    businessId: string,
+    toolName: string,
+    action?: KeyDispatchAction,
+    args?: unknown,
+  ): Promise<string | null> {
+    const operations = await this.operationsScopeRefusal(businessId, toolName, action);
+    if (operations) return operations;
+    const memberId = memberRevenueGateMember(action);
+    if (!memberId) return null;
+    // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
+    const { memberRevenueWriteRefusal } = await import('./plan-step-authority');
+    return memberRevenueWriteRefusal(this.prisma, businessId, memberId, toolName, args);
+  }
+
+  /**
+   * Trial-N repair round 2 (CONTACT-READ-ABORT, NEW-4-REST; D-37: KEY contact reads apply the
+   * member's visibility). The CRM access of the principal a surface established for this call
+   * (resolveCrmAccess, which refuses a non-member 403) and the clause GET contacts ANDs onto its
+   * rows for them (visibilityClause: another member's PRIVATE contact stays out; a member kept to
+   * their own book reads only it). null when the call has no principal (a system surface; the
+   * routes that run contact reads that way keep them to the OWNER) or the clause is empty (the
+   * OWNER, a SUPER_ADMIN): the read is then the whole business, as before.
+   */
+  private async contactReadAccess(
+    businessId: string,
+    action?: ActionContext,
+  ): Promise<{ userId: string; access: CrmAccess; clause: Prisma.ContactWhereInput } | null> {
+    const userId = action?.principalUserId;
+    if (!userId) return null;
+    const access = await resolveCrmAccess(this.prisma, businessId, userId);
+    const clause = visibilityClause(access, userId) as Prisma.ContactWhereInput | null;
+    return clause ? { userId, access, clause } : null;
+  }
+
+  /**
+   * W3-D64-COMMERCE-CREATE review (SEC-W3D64-1, SEC-W3D64-3, CR-D64C-2; owner rulings D-64, D-88,
+   * D-73). The member the command runs for, whose CRM view judges the contact a KEY commerce write
+   * binds (CommerceService.memberContactClause): KEY acts as that member (D-88). In order:
+   *   - the principal the surface established (a member's chat turn, PLAN_HTTP, GRAPH_ACTION);
+   *   - the member a surface with no principal runs the call for (KeyDispatchAction.onBehalfOfUserId:
+   *     an approved proposal's executor, a KEY-cortex turn's member, an execute_custom_logic snippet's
+   *     caller);
+   *   - on the plan queue, the stored plan's member (D-73: a KEY plan always runs as its member), or
+   *     for a plan the system stored with no member the business owner (systemPlanMember, D-93). The
+   *     queue dispatches with no principal, and any other plan with no member is refused these tools
+   *     before dispatch (noMemberToolRefusal), so every PLAN_QUEUE run that reaches a bind is a
+   *     member's plan; the plan id is the one ActionDispatcher hands the dispatcher, read in this
+   *     business.
+   * Undefined when none applies (a run with no member: an inbound conversation, a plan id that names
+   * no plan of this business): the OWNER's view (D-88; D-93 narrows it to these writes, which D-73
+   * refuses to a plan with no member). Never a value from the tool's arguments.
+   */
+  private async contactBindMember(businessId: string, action?: KeyDispatchAction): Promise<string | undefined> {
+    if (action?.principalUserId) return action.principalUserId;
+    if (action?.onBehalfOfUserId) return action.onBehalfOfUserId;
+    if (action?.surface === 'PLAN_QUEUE' && action.planId) {
+      const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: action.planId, businessId }, select: { userId: true } });
+      if (plan?.userId) return plan.userId;
+      if (!plan) return undefined;
+      // W4-D93-NO-MEMBER-CONTACTS (D-93). Imported at call time: plan-step-authority imports
+      // graph-actions.controller, which imports this file.
+      const { systemPlanMember } = await import('./plan-step-authority');
+      return (await systemPlanMember(this.prisma, businessId, action.planId)) ?? undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's). Setting
+   * up a statement source (reconcile_connect_statement_source) or running a sweep of the business's Gmail
+   * or Drive (reconcile_sweep_statements) is the business owner's. The member KEY runs the call for
+   * (contactBindMember: a chat turn's or PLAN_HTTP's principal, the member a CORTEX_BRIDGE, CUSTOM_LOGIC,
+   * PROPOSAL or PRO_AUTO_MONITOR run is for, a queued plan's member) must pass the rule the web doors
+   * apply (assertGoogleConnectOwner: an OWNER membership of this business, the distinguished owner holding
+   * a membership, or a SUPER_ADMIN), else 403 GOOGLE_CONNECT_OWNER_ONLY. A run with no such member is
+   * refused too (fail closed). Called before StatementSourceService is resolved; the nightly sweep
+   * (StatementSourceService.sweepAll, no actor) does not come through here and is unchanged.
+   *
+   * Review SEC-W11GSS-1 (D-132, D-46): assertGoogleConnectOwner lets any SUPER_ADMIN through, but the two
+   * web doors refuse a platform SUPER_ADMIN who is no member of the business for this same action: the
+   * HTTP routes by FinanceController.ensureAccess (a Membership row, D-104) and the graph route, plan queue
+   * and approved proposals by the D-46 non-member revenue-write rule (assertMayRunGraphAction). Until a
+   * ruling says otherwise, KEY refuses them the same way (403 'Not a member of this business', not the
+   * owner code), so a non-member SUPER_ADMIN cannot store a Gmail search on the account or sweep the
+   * mailbox or Drive into the books from a chat turn, a KEY-cortex turn or a plan run for them. A
+   * SUPER_ADMIN who holds a membership passes, as both web doors let them.
+   */
+  private async assertStatementSourceOwner(businessId: string, action?: KeyDispatchAction): Promise<void> {
+    // Imported at call time, as plan-step-authority is here: a controller module, kept off this file's import graph.
+    const { assertGoogleConnectOwner, GOOGLE_CONNECT_OWNER_ONLY } = await import('../../core/connectors/google-suite.controller');
+    const memberId = await this.contactBindMember(businessId, action);
+    if (!memberId) {
+      throw new HttpException(
+        {
+          code: GOOGLE_CONNECT_OWNER_ONLY,
+          message: 'A statement source of the business Gmail or Drive is set up or swept only for the business owner, and this run is for no member (D-132, D-99).',
+        },
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const user = await this.prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
+    if (user?.role === 'SUPER_ADMIN') {
+      // Review SEC-W11GSS-1 (D-46, D-132): a non-member SUPER_ADMIN is refused here as on the web doors.
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: memberId, businessId } },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new ForbiddenException(
+          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not set up or sweep its statement sources (D-46, D-132)',
+        );
+      }
+    }
+    await assertGoogleConnectOwner(this.prisma, businessId, { id: memberId, role: user?.role ?? undefined });
+  }
+
+  /**
+   * W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88; V1-84 review ST-2). The member the command
+   * runs for (contactBindMember) as the viewer the call-log routes take from the session
+   * (CallLogViewer: their id and their User row's role, as AuthMiddleware attaches it), so KEY's
+   * call-log tools reach only the call logs and contacts that member may open, as the routes do.
+   * Undefined for a run with no member, whose call-log tools read the business's call logs as before.
+   */
+  private async callLogViewer(businessId: string, action?: KeyDispatchAction): Promise<CallLogViewer | undefined> {
+    const userId = await this.contactBindMember(businessId, action);
+    if (!userId) return undefined;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return { userId, role: user?.role ?? null };
+  }
+
+  /**
+   * W9-KEY-OBLIGATIONS-CALLS review (SEC-W9KOC-1, SEC-W9KOC-2; owner rulings D-64, D-88). Refuses the
+   * call unless the row ids a call-log tool names (`fields` of `args`) are what its schema declares:
+   * present, non-empty strings. The chat path checks them in validateToolInput before dispatch, but an
+   * execute_custom_logic inner call reaches the dispatcher through executeToolByName, which does not:
+   * a missing contactId was no contact check while contact.findFirst({ id: undefined }) read any
+   * contact of the business into the script's prompt, and a Prisma filter passed the member's check
+   * on the visible row it matched first while the service read or wrote every row it matched
+   * (completeCall's updateMany). Refused before any lookup, in validateToolInput's words, so the inner
+   * call answers as the chat call does. The cases then read the ids from `args`, so the tool-family
+   * analysis still follows them as the model's (job-role-tool-families.spec.ts, DD8-1).
+   */
+  private assertCallLogToolIds(toolName: string, args: Record<string, unknown>, fields: string[]): void {
+    const missing = fields.filter((field) => args[field] === undefined || args[field] === null || args[field] === '');
+    if (missing.length > 0) throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+    for (const field of fields) {
+      if (typeof args[field] !== 'string') throw new Error(`Field "${field}" for ${toolName} must be a string`);
+    }
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3). The clause a member's calendar read ANDs onto `where`
+   * so no event on a contact their CRM view does not open is answered (contactVisibilityFilter, the
+   * GET contacts/:id rule; GET calendar events and GET calendar conflicts apply the same cascade
+   * through CalendarEvent.contactId). An event with no contact stays. null with no principal or for
+   * the OWNER and a SUPER_ADMIN: the read is unchanged.
+   */
+  private async calendarContactScope(
+    businessId: string,
+    action: ActionContext | undefined,
+    where: Prisma.CalendarEventWhereInput,
+  ): Promise<Prisma.CalendarEventWhereInput | null> {
+    const reader = await this.contactReadAccess(businessId, action);
+    if (!reader) return null;
+    const linked = await this.prisma.client.calendarEvent.findMany({
+      where: { ...where, contactId: { not: null } },
+      select: { contactId: true },
+      distinct: ['contactId'],
+    });
+    const ids = linked.map((e: { contactId: string | null }) => e.contactId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, ids);
+    if (!canOpen) return null;
+    return { OR: [{ contactId: null }, { contactId: { in: ids.filter((id): id is string => !!id && canOpen(id)) } }] };
+  }
+
+  /**
+   * A contact id the model chose, refused unless it is a live contact of `businessId` (V1-21b
+   * review 9 TD9-4). CommerceService.createInvoice / createQuote store contactId as given on this
+   * base (R0-27's assertContactInBusiness is not on it): on the staff bridge, with no tenant
+   * context, commerce_create_invoice bound another business's contact and echoed its row, and
+   * commerce_create_quote wrote the quote before logContactEvent refused it. An absent id is left
+   * to the service, as before.
+   */
+  private async contactWithinBusiness(businessId: string, contactId: unknown): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || !contactId) throw new BadRequestException('contactId must be a non-empty string');
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
+  /**
+   * V1-21d: a model-supplied id, refused unless it names a row of `businessId`, before it reaches a
+   * service that looks it up by id alone (ContentRequestService.getById, EvidenceService.verify,
+   * ApprovalRequestService.decideStep, BookingWaitlistService.offerSlot, and the ProcurementService
+   * status writes, which take businessId but update where { id } alone). On the staff bridge, a
+   * plan or a monitor there is no tenant context, so nothing else binds the id: KEY in A read and
+   * moved B's content request, verified B's evidence, decided B's approval request, booked a slot
+   * in B and moved B's procurement request. NotFound, as for an unknown id, so the answer confirms
+   * nothing about another business's ids.
+   */
+  private async idWithinBusiness(model: DispatcherTenantModel, businessId: string, id: unknown, label: string): Promise<string> {
+    if (typeof id !== 'string' || !id) throw new BadRequestException(`${label} id must be a non-empty string`);
+    const delegate = this.prisma.client[model] as unknown as {
+      findFirst(args: { where: { id: string; businessId: string }; select: { id: true } }): Promise<{ id: string } | null>;
+    };
+    const row = await delegate.findFirst({ where: { id, businessId }, select: { id: true } });
+    if (!row) throw new NotFoundException(`${label} not found`);
+    return row.id;
+  }
+
+  /**
+   * V1-21d: user ids the model chose to assign work to, refused unless every one is a member of
+   * `businessId`. content_assign_request stored them as given, and the chaser then notifies each
+   * assignee about the business's content request.
+   */
+  private async membersWithinBusiness(businessId: string, userIds: unknown): Promise<string[]> {
+    if (!Array.isArray(userIds) || userIds.some((u) => typeof u !== 'string' || !u)) {
+      throw new BadRequestException('teamMemberIds must be an array of user ids');
+    }
+    const wanted = [...new Set(userIds as string[])];
+    const members = await this.prisma.client.membership.findMany({
+      where: { businessId, userId: { in: wanted } },
+      select: { userId: true },
+    });
+    const found = new Set(members.map((mm) => mm.userId));
+    const missing = wanted.filter((u) => !found.has(u));
+    if (missing.length) throw new NotFoundException(`Team member not found: ${missing.join(', ')}`);
+    return userIds as string[];
+  }
+
+  /**
+   * V1-21d review SEC-V21D-1: the assignee projects_update_task hands ProjectsService.updateTask,
+   * refused unless it is a staff member of `businessId` or a member of it (the two kinds updateTask
+   * assigns). updateTask finds the task inside the business but resolves the assignee by findUnique
+   * on its id alone and records the assignment: KEY in A assigned A's task to B's staff member.
+   */
+  private async assigneeWithinBusiness(businessId: string, assigneeId: unknown): Promise<string> {
+    if (typeof assigneeId !== 'string' || !assigneeId) throw new BadRequestException('assigneeId must be a non-empty string');
+    const [staff, member] = await Promise.all([
+      this.prisma.client.staffMember.findFirst({ where: { id: assigneeId, businessId }, select: { id: true } }),
+      this.prisma.client.membership.findFirst({ where: { userId: assigneeId, businessId }, select: { userId: true } }),
+    ]);
+    if (!staff && !member) throw new NotFoundException('Assignee not found');
+    return assigneeId;
+  }
+
+  /**
+   * V1-21d review SEC-V21D-2: the booking a KEY booking write (reschedule, cancel, no-show) is
+   * about to change, resolved inside `businessId` together with the business of each row it names.
+   * BookingsService writes first and then emits the booking event with the booking's contact,
+   * service and staff member (read by id, with no business), which drives the customer mail and the
+   * calendar; only after that does logContactEvent refuse a contact of another business. On a
+   * booking cross-linked before TD9-3 the write and the event therefore went out through the other
+   * business's contact or service. Such a booking is refused here, before anything is written (it
+   * is corrected by a person, not by KEY); the answer carries only the links resolved here.
+   */
+  private async bookingWithinBusiness(businessId: string, bookingId: unknown): Promise<KeyBookingLinks> {
+    if (typeof bookingId !== 'string' || !bookingId) throw new BadRequestException('bookingId must be a non-empty string');
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+      select: {
+        contact: { select: { id: true, businessId: true } },
+        service: { select: { id: true, businessId: true } },
+        staff: { select: { id: true, businessId: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    const names = { contact: 'contact', service: 'service', staff: 'staff member' } as const;
+    const crossed = KEY_BOOKING_LINKS.filter((key) => booking[key] != null && booking[key]!.businessId !== businessId);
+    if (crossed.length) {
+      throw new ConflictException(
+        `This booking names a ${crossed.map((key) => names[key]).join(' and a ')} of another business; KEY does not change it until a person corrects the booking.`,
+      );
+    }
+    return { contact: booking.contact?.id ?? null, service: booking.service?.id ?? null, staff: booking.staff?.id ?? null };
   }
 
   private async executeToolAction(
@@ -2739,7 +3817,7 @@ ${triage.standingContext}`;
     // KF-EXEC-ACTION-001: what the calling surface knows about the action.
     // Read only by a capability the action boundary has adopted. A surface
     // that passes nothing arrives there undeclared and is refused.
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     // Bridged MCP tools route to the allowlisted remote server.
     if (isMcpToolName(toolName)) {
@@ -2770,6 +3848,7 @@ ${triage.standingContext}`;
         const q = args.query?.trim();
         if (!q) return { contacts: [] };
         const containsFilter = { contains: q, mode: 'insensitive' as const };
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const contacts = await this.prisma.client.contact.findMany({
           where: {
             businessId,
@@ -2781,6 +3860,7 @@ ${triage.standingContext}`;
               { email: containsFilter },
               { phone: containsFilter },
             ],
+            ...(visible ? { AND: [visible] } : {}),
           },
           select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
           take: 10,
@@ -2789,8 +3869,9 @@ ${triage.standingContext}`;
       }
 
       case 'crm_list_contacts': {
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const contacts = await this.prisma.client.contact.findMany({
-          where: { businessId, deletedAt: null, ...(args.status ? { status: args.status } : {}) },
+          where: { businessId, deletedAt: null, ...(args.status ? { status: args.status } : {}), ...(visible ? { AND: [visible] } : {}) },
           select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
           take: args.limit ?? 10,
           orderBy: { createdAt: 'desc' },
@@ -3030,6 +4111,8 @@ ${triage.standingContext}`;
         return { accounts: rows, configuredCount: rows.filter((r) => r.automatic).length };
       }
       case 'reconcile_connect_statement_source': {
+        // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the owner's, refused before anything is read or stored.
+        await this.assertStatementSourceOwner(businessId, action);
         if (args.driveFolderId === undefined && args.gmailQuery === undefined) {
           throw new BadRequestException('Give a driveFolderId or a gmailQuery to connect.');
         }
@@ -3040,6 +4123,8 @@ ${triage.standingContext}`;
         return saved;
       }
       case 'reconcile_sweep_statements': {
+        // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the owner's, refused before the mailbox or Drive is read.
+        await this.assertStatementSourceOwner(businessId, action);
         const source = String(args.source ?? '').toLowerCase();
         if (source !== 'drive' && source !== 'gmail') {
           throw new BadRequestException('source must be "drive" or "gmail"');
@@ -3209,11 +4294,23 @@ ${triage.standingContext}`;
         // returns the gateway's refund record; report that, never the request —
         // a partial refund can come back at a different amount than asked for,
         // and the gateway is the authority on what actually happened.
-        const refund = await this.getPaymentsOps().refundCharge(businessId, args.gateway, {
-          chargeId: args.chargeId,
-          amount: args.amount,
-          reason: args.reason,
-        });
+        // W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07): KEY records the refund as its system
+        // actor, distinct from any human, as the manual refund door records KEY (SYSTEM).
+        // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member the turn runs for is kept beside
+        // KEY as initiatedBy (audit data on the refund's feed row, never the refunder), as
+        // commerce_mark_invoice_paid keeps it; never a tool argument.
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
+        const refund = await this.getPaymentsOps().refundCharge(
+          businessId,
+          args.gateway,
+          {
+            chargeId: args.chargeId,
+            amount: args.amount,
+            reason: args.reason,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy },
+        );
         return { refund };
       }
 
@@ -3298,19 +4395,27 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_list_invoices': {
-        const invoices = await this.prisma.client.invoice.findMany({
+        // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) reads no contact
+        const rows = await this.prisma.client.invoice.findMany({
           where: { businessId, deletedAt: null },
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
           take: args.limit ?? 10,
           orderBy: { createdAt: 'desc' },
         });
+        const invoices = rows.map((invoice) => ownRelations(businessId, invoice, ['contact']));
         return { invoices, count: invoices.length };
       }
 
       case 'commerce_create_invoice': {
+        // the contact is this business's (V1-21b review 9 TD9-4), before anything is written
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
-        const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
-        const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
+        // V1-43 (D-15): numbered by CommerceService's allocator, the business's
+        // one sequence. INV-<count+1> skipped soft-deleted rows and collided.
+        // W3-D64-COMMERCE-CREATE (D-88): KEY acts as the member the command runs for, so the
+        // contact must be one that member may open (D-64); no member: the OWNER's view. Review
+        // SEC-W3D64-1/-3: that member on every surface that runs for one (contactBindMember).
+        const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().createInvoice({
           businessId,
           contactId: args.contactId,
@@ -3319,17 +4424,24 @@ ${triage.standingContext}`;
             quantity: item.quantity,
             unitPrice: item.unitPrice,
           })),
-          invoiceNumber,
           currency: args.currency ?? 'TTD',
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
+          actorUserId: bindMember,
         });
-        return { invoice, id: invoice.id, invoiceNumber: invoice.invoiceNumber };
+        // V1-21d (SEC3-ST-2): the write projection, not createInvoice's row with the whole Contact
+        return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id, invoiceNumber: invoice.invoiceNumber };
       }
 
       case 'commerce_mark_invoice_paid': {
-        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId);
-        return { invoice, id: invoice.id };
+        // W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88, D-90): KEY records the payment, and the member
+        // the turn runs for is kept beside KEY as initiatedBy (audit data, never authority), as
+        // commerce_update_invoice keeps it (SEC-W7IAR-2). Who may run this at all: D-98 (memberScopeRefusal).
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
+        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId, { initiatedBy });
+        // V1-21d (R0-SEC3 review SEC3-ST-2): markInvoicePaid reloads with booking: true and
+        // contact: true; the model gets what PATCH .../paid answers (toInvoiceWriteResponse).
+        return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id };
       }
 
       case 'commerce_create_product': {
@@ -3346,9 +4458,12 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_create_quote': {
+        // as commerce_create_invoice: no quote is written for another business's contact (TD9-4)
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
-        const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
-        const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
+        // V1-43 (D-15): numbered by CommerceService's allocator, as commerce_create_invoice.
+        // W3-D64-COMMERCE-CREATE (D-88): as commerce_create_invoice, for the member the command runs for.
+        const bindMember = await this.contactBindMember(businessId, action);
         const quote = await this.getCommerce().createQuote({
           businessId,
           contactId: args.contactId,
@@ -3357,11 +4472,12 @@ ${triage.standingContext}`;
             quantity: item.quantity,
             unitPrice: item.unitPrice,
           })),
-          quoteNumber,
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
+          actorUserId: bindMember,
         });
-        return { quote, id: quote.id, quoteNumber: quote.quoteNumber };
+        // V1-21d (SEC3-ST-2): the write projection, as POST .../quotes answers (toQuoteWriteResponse)
+        return { quote: toKeyQuoteResult(businessId, quote), id: quote.id, quoteNumber: quote.quoteNumber };
       }
 
       case 'commerce_delete_invoice': {
@@ -3370,15 +4486,27 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_list_bookings': {
-        const bookings = await this.prisma.client.booking.findMany({
+        // V1-21d: a booking cross-linked to another business's service or contact (before TD9-3)
+        // reads neither; binding the where on one relation would leave the other leaking.
+        const rows = await this.prisma.client.booking.findMany({
           where: { businessId, deletedAt: null },
           include: {
-            contact: { select: { firstName: true, lastName: true, email: true } },
-            service: { select: { name: true } },
+            contact: { select: { businessId: true, firstName: true, lastName: true, email: true } },
+            service: { select: { businessId: true, name: true } },
           },
           take: args.limit ?? 10,
           orderBy: { startTime: 'asc' },
         });
+        const owned = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
+        // V1-84 (FOLLOW3-D7, D-37): the booking stays, but its contact is named only when the
+        // member may open it (contactVisibilityFilter, the GET contacts/:id rule); otherwise neither
+        // the relation nor its id is answered (review SEC-D7-2: the id alone opened the contact through
+        // fetch_client_health). Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, owned.map((b) => b.contactId))
+          : null;
+        const bookings = canOpen ? owned.map((b) => (canOpen(b.contactId) ? b : { ...b, contactId: null, contact: null })) : owned;
         return { bookings, count: bookings.length };
       }
 
@@ -3458,13 +4586,18 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_reschedule_booking': {
+        // V1-21d review SEC-V21D-2: a booking linked to another business's row is refused before
+        // the write, and the answer carries only the related rows resolved inside the business
+        const links = await this.bookingWithinBusiness(businessId, args.bookingId);
         const updated = await this.getBookings().rescheduleBooking(businessId, args.bookingId, new Date(args.startTime));
-        return { booking: updated, id: updated.id };
+        return { booking: toKeyBookingResult(updated, links), id: updated.id };
       }
 
       case 'bookings_cancel_booking': {
+        // V1-21d review SEC-V21D-2, as bookings_reschedule_booking
+        const links = await this.bookingWithinBusiness(businessId, args.bookingId);
         const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
-        return { booking: updated, id: updated.id };
+        return { booking: toKeyBookingResult(updated, links), id: updated.id };
       }
 
       case 'bookings_add_to_waitlist': {
@@ -3482,15 +4615,33 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_list_waitlist': {
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-4): as bookings_list_bookings, an entry stays but
+        // its contact (relation and id) is named only when the member may open it; a contactId
+        // filter naming a contact they may not open answers as an unknown contact does (none).
+        // Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && args.contactId) {
+          const mayOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, [args.contactId]);
+          if (mayOpen && !mayOpen(args.contactId)) return { items: [], total: 0 };
+        }
         const result = await this.getWaitlist().listWaitlist(businessId, {
           status: args.status,
           serviceId: args.serviceId,
           contactId: args.contactId,
         });
-        return { items: result.items, total: result.total };
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, result.items.map((e) => e.contactId))
+          : null;
+        const items = canOpen ? result.items.map((e) => (canOpen(e.contactId) ? e : { ...e, contactId: null, contact: null })) : result.items;
+        return { items, total: result.total };
       }
 
       case 'bookings_offer_waitlist_slot': {
+        // V1-21d: offerSlot reads the entry by id alone and books in the entry's business, with
+        // the slot's staff member when the entry names none: each id is this business's first.
+        await this.idWithinBusiness('bookingWaitlistEntry', businessId, args.entryId, 'Waitlist entry');
+        await this.idWithinBusiness('service', businessId, args.serviceId, 'Service');
+        if (args.staffId != null) await this.idWithinBusiness('staffMember', businessId, args.staffId, 'Staff member');
         const result = await this.getWaitlist().offerSlot(args.entryId, {
           startTime: new Date(args.startTime),
           endTime: new Date(args.endTime),
@@ -3664,10 +4815,16 @@ ${triage.standingContext}`;
         const now = new Date();
         const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000);
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-2, SEC-D7-5): a member reads, counts and is named
+        // only the contacts their CRM view opens (visibilityClause, the rule GET contacts and GET
+        // contacts/:id apply); a contact they may not open answers as an unknown one. Unchanged with
+        // no principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        const scoped = visible ? { AND: [visible] } : {};
 
         if (args.contactId) {
           const contact = await this.prisma.client.contact.findFirst({
-            where: { id: args.contactId, businessId, deletedAt: null },
+            where: { id: args.contactId, businessId, deletedAt: null, ...scoped },
             select: { id: true, firstName: true, lastName: true, email: true, status: true, updatedAt: true, tags: true },
           });
           if (!contact) throw new Error('Contact not found');
@@ -3691,16 +4848,17 @@ ${triage.standingContext}`;
         }
 
         const [totalContacts, staleLeads, atRiskClients, topSpenders] = await Promise.all([
-          this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+          this.prisma.client.contact.count({ where: { businessId, deletedAt: null, ...scoped } }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo }, ...scoped },
           }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo }, ...scoped },
           }),
           this.prisma.client.invoice.groupBy({
             by: ['contactId'],
-            where: { businessId, deletedAt: null, status: 'PAID' },
+            // for a member, only the spend of contacts they may open is ranked (and so named)
+            where: { businessId, deletedAt: null, status: 'PAID', ...(visible ? { contact: { is: { businessId, deletedAt: null, ...scoped } } } : {}) },
             _sum: { total: true },
             orderBy: { _sum: { total: 'desc' } },
             take: 5,
@@ -3871,7 +5029,8 @@ ${triage.standingContext}`;
           where: projectWhere,
           include: {
             tasks: {
-              where: { deletedAt: null },
+              // V1-21d: the project's own tasks, not another business's task filed on it (before TD9-1)
+              where: { deletedAt: null, businessId },
               select: { id: true, title: true, isCompleted: true, dueDate: true, priority: true },
             },
           },
@@ -4021,14 +5180,16 @@ ${triage.standingContext}`;
       }
 
       case 'draft_payment_reminder': {
-        const invoice = await this.prisma.client.invoice.findFirst({
+        const found = await this.prisma.client.invoice.findFirst({
           where: { id: args.invoiceId, businessId, deletedAt: null },
           include: {
-            contact: { select: { firstName: true, lastName: true, email: true } },
+            contact: { select: { businessId: true, firstName: true, lastName: true, email: true } },
             business: { select: { name: true } },
           },
         });
-        if (!invoice) throw new Error('Invoice not found');
+        if (!found) throw new Error('Invoice not found');
+        // V1-21d: another business's contact (an invoice cross-linked before TD9-4) never reaches the prompt
+        const invoice = ownRelations(businessId, found, ['contact']);
 
         const contactName = invoice.contact ? `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim() || invoice.contact.email || 'Customer' : 'Customer';
         const now = new Date();
@@ -4088,7 +5249,8 @@ ${triage.standingContext}`;
           where: { id: args.projectId, businessId, deletedAt: null },
           include: {
             tasks: {
-              where: { deletedAt: null },
+              // V1-21d: another business's task filed on this project (before TD9-1) is not in the update
+              where: { deletedAt: null, businessId },
               select: { title: true, isCompleted: true, dueDate: true },
               orderBy: { sortOrder: 'asc' },
             },
@@ -4151,9 +5313,20 @@ ${triage.standingContext}`;
         const maxContacts = Math.min(args.maxContacts ?? 20, 50);
         const titleTemplate = args.taskTitle ?? 'Follow up with {name}';
         const cutoff = new Date(Date.now() - staleDays * 86400000);
+        // W3-KEY-CRM-VISIBILITY (D-37; KEY-R3b residual): a member's queue covers only the stale
+        // leads their CRM view opens (visibilityClause, as segment_contacts and GET contacts): no
+        // task is written on, and no name returned of, any other. Unchanged with no principal (the
+        // OWNER's view, D-88's convention) or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
 
         const staleContacts = await this.prisma.client.contact.findMany({
-          where: { businessId, deletedAt: null, status: { in: ['LEAD', 'PROSPECT'] }, updatedAt: { lt: cutoff } },
+          where: {
+            businessId,
+            deletedAt: null,
+            status: { in: ['LEAD', 'PROSPECT'] },
+            updatedAt: { lt: cutoff },
+            ...(visible ? { AND: [visible] } : {}),
+          },
           select: { id: true, firstName: true, lastName: true, email: true },
           take: maxContacts,
           orderBy: { updatedAt: 'asc' },
@@ -4200,6 +5373,11 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;
         if (args.tag) where.tags = { has: args.tag };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-1): a segment is a contact list read, so a member's
+        // answers only the contacts their CRM view opens, as crm_list_contacts does. Unchanged with no
+        // principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        if (visible) where.AND = [visible];
 
         let contacts = await this.prisma.client.contact.findMany({
           where,
@@ -4319,25 +5497,37 @@ ${triage.standingContext}`;
         const newStatus = args.newStatus;
 
         if (entityType === 'contact') {
+          // D-92 (owner ruling; W4-D92-DORMANT-AS-CLIENT review CR-D92-1):
+          // newStatus has no enum (the tool also moves invoices), so it is
+          // stored only through canonicalContactStatus, as the CSV/link import
+          // and a playbook's update_status store one: DORMANT and CUSTOMER in
+          // any case are CLIENT. A status with no ContactStatus is refused, as
+          // an unsupported invoice transition is, and nothing is written.
+          const status = canonicalContactStatus(typeof newStatus === 'string' ? newStatus : null);
+          if (!status) throw new Error(`Unsupported contact status: ${String(newStatus)}`);
           const result = await this.getCrm().bulkUpdateContacts({
             businessId,
             contactIds: ids,
-            status: newStatus,
+            status,
           });
-          return { entityType, updatedCount: result.updated, newStatus };
+          return { entityType, updatedCount: result.updated, newStatus: status };
         }
 
         if (entityType === 'invoice') {
-          let action: 'send' | 'void' | 'delete';
-          if (newStatus === 'SENT') action = 'send';
-          else if (newStatus === 'VOID') action = 'void';
+          // W8-KEY-REVENUE-GATE: named bulkAction so the dispatcher's `action` (the surface) stays in reach.
+          let bulkAction: 'send' | 'void' | 'delete';
+          if (newStatus === 'SENT') bulkAction = 'send';
+          else if (newStatus === 'VOID') bulkAction = 'void';
           else if (newStatus === 'PAID') {
             // PAID bulk transition is not supported by bulkUpdateInvoices;
             // fall back to individual mark-paid calls.
+            // W8-KEY-REVENUE-GATE (review SEC-W7KMP-1; D-88, D-90): the member the turn runs for is
+            // kept beside KEY on each payment, as commerce_mark_invoice_paid keeps them.
+            const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
             let updated = 0;
             for (const id of ids) {
               try {
-                await this.getCommerce().markInvoicePaid(id, KEY_SYSTEM_ACTOR_ID, businessId);
+                await this.getCommerce().markInvoicePaid(id, KEY_SYSTEM_ACTOR_ID, businessId, { initiatedBy });
                 updated++;
               } catch (err: any) {
                 this.logger.warn(`bulk mark paid skipped for ${id}: ${(err as Error).message}`);
@@ -4347,7 +5537,9 @@ ${triage.standingContext}`;
           } else {
             throw new Error(`Unsupported invoice status transition: ${newStatus}`);
           }
-          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action);
+          // W7-INVOICE-ACTOR-RULES review (SEC-W7IAR-1, D-88, PA-16p): KEY sends or voids, and is
+          // named on the ACCRUAL invoice_finalized posting and its reversal.
+          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, bulkAction, KEY_SYSTEM_ACTOR_ID);
           return { entityType, updatedCount: result.updated, newStatus };
         }
 
@@ -4363,7 +5555,8 @@ ${triage.standingContext}`;
         if (args.status) where.status = args.status;
         const projects = await this.prisma.client.project.findMany({
           where,
-          include: { _count: { select: { tasks: { where: { deletedAt: null } } } } },
+          // V1-21d: counts the project's own tasks, not another business's task filed on it (before TD9-1)
+          include: { _count: { select: { tasks: { where: { deletedAt: null, businessId } } } } },
           orderBy: { createdAt: 'desc' },
           take: limit,
         });
@@ -4383,12 +5576,15 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.projectId) where.projectId = args.projectId;
         if (args.onlyOpen) where.isCompleted = false;
-        const tasks = await this.prisma.client.projectTask.findMany({
+        // V1-21d (V1-21c review ST-1): a task of this business filed on another business's
+        // project (before TD9-1) is listed without that project
+        const rows = await this.prisma.client.projectTask.findMany({
           where,
-          include: { project: { select: { id: true, name: true } } },
+          include: { project: { select: { businessId: true, id: true, name: true } } },
           orderBy: [{ isCompleted: 'asc' }, { dueDate: 'asc' }],
           take: 100,
         });
+        const tasks = rows.map((task) => ownRelations(businessId, task, ['project']));
         return { tasks };
       }
 
@@ -4525,12 +5721,14 @@ ${triage.standingContext}`;
       }
 
       case 'store_list_recent_orders': {
-        const orders = await this.prisma.client.invoice.findMany({
+        // V1-21d: an order cross-linked to another business's contact (before TD9-4) reads no contact
+        const rows = await this.prisma.client.invoice.findMany({
           where: { businessId, deletedAt: null, status: 'PAID' },
           orderBy: { paidAt: 'desc' },
           take: args.limit ?? 25,
-          include: { contact: { select: { id: true, firstName: true, lastName: true } } },
+          include: { contact: { select: { businessId: true, id: true, firstName: true, lastName: true } } },
         });
+        const orders = rows.map((order) => ownRelations(businessId, order, ['contact']));
         return { orders };
       }
 
@@ -4717,7 +5915,10 @@ ${triage.standingContext}`;
         });
         return { items: result.items, total: result.total };
       }
+      // V1-21d: ContentRequestService reads and writes a request by id alone (getById), so each
+      // content tool below resolves the request inside the business first.
       case 'content_get_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const request = await this.getContentRequest().getById(args.requestId);
         return { request };
       }
@@ -4744,6 +5945,9 @@ ${triage.standingContext}`;
       // content_transition_status raised BadRequestException — KEY reporting a
       // step it had just completed and then being unable to act on it.
       case 'content_assign_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
+        // V1-21d: only members of the business are assigned (the chaser notifies each assignee)
+        await this.membersWithinBusiness(businessId, args.teamMemberIds);
         const assigned = await this.getContentRequest().assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
         return {
           requestId: assigned.id,
@@ -4752,16 +5956,19 @@ ${triage.standingContext}`;
         };
       }
       case 'content_transition_status': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const moved = await this.getContentRequest().transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
         return { requestId: moved.id, newStatus: moved.status };
       }
       case 'content_submit_for_review': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const submitted = await this.getContentRequest().submitForReview(args.requestId, 'key_ai', args.comment);
         return { requestId: submitted.id, status: submitted.status };
       }
       case 'content_upload_deliverables': {
         // `uploaded: args.fileIds.length` was the count KEY asked for, not the
         // count that persisted.
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const uploaded = await this.getContentRequest().uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
         return {
           requestId: uploaded.id,
@@ -4770,6 +5977,7 @@ ${triage.standingContext}`;
         };
       }
       case 'content_deliver_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const delivered = await this.getContentRequest().deliverRequest(args.requestId, 'key_ai');
         if (delivered.invoiceRequested && !delivered.deliveryInvoiceId) {
           throw new Error(
@@ -4795,22 +6003,58 @@ ${triage.standingContext}`;
         return { items: result.items, total: result.total };
       }
       case 'call_create_task': {
-        const log = await this.getCallLog().createCallLog({
-          businessId,
-          contactId: args.contactId,
-          callerId: args.callerId,
-          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
-          script: args.script ?? null,
-          notes: args.notes ?? null,
-        });
-        return { id: log.id, contactId: args.contactId };
+        // W7-CALL-TASK-CALLER (review ST-4; owner rulings D-73, D-88): the caller is the member the
+        // command runs for, as POST calls takes it from the session (V1-54): the surface's principal,
+        // the member a surface with no principal runs for, or the queued plan's member
+        // (contactBindMember, never a value from the arguments). args.callerId, which the model
+        // chooses, is ignored. A run with no member (an inbound conversation, the staff bridge's
+        // chat, a monitor run for no one, a plan id that names no plan here) is refused before
+        // anything is written. CallLogService.assertCaller still holds that member to the caller
+        // rule: a member of the business who may open the contact.
+        const callerId = await this.contactBindMember(businessId, action);
+        if (!callerId) {
+          throw new Error(
+            'call_create_task records the member it runs for as the caller, and this run has no member (D-73, D-88)',
+          );
+        }
+        // Review SEC-W7CTC-1: that member is the actor, as the session member is on POST calls, so
+        // they go to createCallLog as its session (their User row's role, as AuthMiddleware attaches
+        // it), not as a callerId another writer chose. A contact they may not open then answers 404
+        // 'Contact not found', exactly as an unknown id and as POST calls answers them (no 400 that
+        // tells a restricted member a hidden contact exists, in words about a callerId the model no
+        // longer controls), and a principal who is no member (a SUPER_ADMIN, D-46) is refused 403.
+        const caller = await this.prisma.client.user.findUnique({ where: { id: callerId }, select: { role: true } });
+        const log = await this.getCallLog().createCallLog(
+          {
+            businessId,
+            contactId: args.contactId,
+            callerId,
+            scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : undefined,
+            script: args.script ?? null,
+            notes: args.notes ?? null,
+          },
+          { userId: callerId, role: caller?.role ?? null },
+        );
+        // The recorded caller is answered, so KEY does not report the member the model named.
+        return { id: log.id, contactId: args.contactId, callerId: log.callerId };
       }
       case 'call_log_outcome': {
         // `completed` used to be assigned and dropped, and the return echoed the
         // arguments back. completeCall throws if the call was already completed
         // and computes completedAt itself, so the echo could report an outcome
-        // that was never written.
-        const completed = await this.getCallLog().completeCall(args.callLogId, {
+        // that was never written. The business is handed over: CallLogService looks the call log
+        // up within it, since on the staff bridge no ambient tenant binds a bare id (V1-21b
+        // review 8 DD8-1).
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): KEY acts as the member the command runs for, so a
+        // call log on a contact that member may not open answers 404 'Call log not found', exactly as
+        // an unknown id and as POST calls/:id/complete answers them (getVisibleCallLog). No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), and the row completed is the
+        // row checked, so no filter passes the check on one call log and completes others.
+        this.assertCallLogToolIds('call_log_outcome', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
+        const viewer = await this.callLogViewer(businessId, action);
+        const checkedId = viewer ? (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id : callLogId;
+        const completed = await this.getCallLog().completeCall(businessId, checkedId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
@@ -4823,9 +6067,26 @@ ${triage.standingContext}`;
         };
       }
       case 'call_generate_script': {
-        const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): for the member the command runs for, the contact and
+        // the call log must be ones they may open, as POST calls/:id/generate-script requires; each
+        // hidden row answers as an unknown one, in the order CallScriptService looks them up (the
+        // contact, then the call log), so no answer tells a hidden row from a missing one. No member:
+        // as before.
+        // Review SEC-W9KOC-1: both ids are strings (assertCallLogToolIds), so a missing contact is no
+        // longer no check while the script reads any contact, and no filter passes the check on a
+        // visible contact while the script reads a hidden one. The script is made for the call log checked.
+        this.assertCallLogToolIds('call_generate_script', args, ['callLogId', 'contactId']);
+        const callLogId: string = args.callLogId;
+        const contactId: string = args.contactId;
+        const viewer = await this.callLogViewer(businessId, action);
+        let checkedId = callLogId;
+        if (viewer) {
+          await this.getCallLog().assertContactVisibleTo(businessId, contactId, viewer);
+          checkedId = (await this.getCallLog().getVisibleCallLog(businessId, callLogId, viewer)).id;
+        }
+        const script = await this.getCallScript().generateScript(businessId, checkedId, contactId);
         return {
-          callLogId: args.callLogId,
+          callLogId: checkedId,
           greeting: script.greeting,
           talkingPoints: script.talkingPoints,
           ask: script.ask,
@@ -4834,12 +6095,20 @@ ${triage.standingContext}`;
         };
       }
       case 'call_schedule_followup': {
-        const task = await this.getCallLog().createFollowUpTask(args.callLogId, {
+        // within the business, as call_log_outcome (V1-21b review 8 DD8-1)
+        // W9-KEY-OBLIGATIONS-CALLS (D-64, D-88): and on a call log the member the command runs for may
+        // open, as POST calls/:id/follow-up requires: handed that member, createFollowUpTask looks the
+        // call log up with getVisibleCallLog in place of its own lookup. No member: as before.
+        // Review SEC-W9KOC-2: the id is a string (assertCallLogToolIds), as for call_log_outcome.
+        this.assertCallLogToolIds('call_schedule_followup', args, ['callLogId']);
+        const callLogId: string = args.callLogId;
+        const viewer = await this.callLogViewer(businessId, action);
+        const task = await this.getCallLog().createFollowUpTask(businessId, callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
           assigneeId: args.assigneeId,
-        }, 'key_ai');
+        }, 'key_ai', viewer);
         return { taskId: task.id, title: args.title };
       }
 
@@ -4869,6 +6138,8 @@ ${triage.standingContext}`;
         // `verified: true` was hardcoded — the tool asserted success rather than
         // reporting it. verify() returns the updated row with verifiedAt set, so
         // the flag can be derived from what was actually written.
+        // V1-21d: EvidenceService.verify finds the evidence by id alone; this business's first.
+        await this.idWithinBusiness('evidence', businessId, args.evidenceId, 'Evidence');
         const verified = await this.getEvidence().verify({
           evidenceId: args.evidenceId,
           verifierId: 'key_ai',
@@ -4905,6 +6176,8 @@ ${triage.standingContext}`;
         return { id: approval.id, status: approval.status };
       }
       case 'approval_decide_step': {
+        // V1-21d: ApprovalRequestService.decideStep finds the request by id alone; this business's first.
+        await this.idWithinBusiness('approvalRequest', businessId, args.approvalRequestId, 'Approval request');
         const decision = await this.getApprovalRequest().decideStep({
           approvalRequestId: args.approvalRequestId,
           approverId: 'key_ai',
@@ -4931,6 +6204,10 @@ ${triage.standingContext}`;
         if (args.endDate) where.startAt = { ...(where.startAt ?? {}), lte: new Date(args.endDate) };
         if (args.module) where.module = args.module;
         if (args.status) where.status = args.status;
+        // V1-84 (FOLLOW3-D7, D-37): for a member, no event on a contact their CRM view does not
+        // open (calendarContactScope). An event with no contact stays.
+        const scope = await this.calendarContactScope(businessId, action, where);
+        if (scope) where.AND = [scope];
         const events = await this.prisma.client.calendarEvent.findMany({
           where,
           orderBy: { startAt: 'asc' },
@@ -4958,13 +6235,17 @@ ${triage.standingContext}`;
       case 'calendar_check_conflicts': {
         const startAt = new Date(args.startAt);
         const endAt = new Date(args.endAt);
+        const where: Prisma.CalendarEventWhereInput = {
+          businessId,
+          status: { not: 'CANCELLED' },
+          startAt: { lt: endAt },
+          endAt: { gt: startAt },
+        };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3): the events calendar_list_events leaves out for a
+        // member are left out here too, as GET calendar conflicts leaves them out (calendarContactScope).
+        const scope = await this.calendarContactScope(businessId, action, where);
         const conflicts = await this.prisma.client.calendarEvent.findMany({
-          where: {
-            businessId,
-            status: { not: 'CANCELLED' },
-            startAt: { lt: endAt },
-            endAt: { gt: startAt },
-          },
+          where: scope ? { ...where, AND: [scope] } : where,
           orderBy: { startAt: 'asc' },
           take: 10,
         });
@@ -5007,12 +6288,18 @@ ${triage.standingContext}`;
 
       // === HELPDESK ===
       case 'command_list_due_obligations': {
-        const due = await this.getCommandService().findDue(businessId, {
+        const window = {
           windowDays: args.windowDays as number | undefined,
           includeOverdue: args.includeOverdue as boolean | undefined,
           limit: args.limit as number | undefined,
-        });
-        return due;
+        };
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88: KEY acts as the member the command runs for): the
+        // member goes to findDue as GET items/due hands it the session member, so an obligation that
+        // names a contact they may not open is left out (FOLLOW3-D10). No member: the list as before.
+        const member = await this.contactBindMember(businessId, action);
+        return member
+          ? this.getCommandService().findDue(businessId, window, member)
+          : this.getCommandService().findDue(businessId, window);
       }
 
       case 'command_discharge_obligation': {
@@ -5023,11 +6310,14 @@ ${triage.standingContext}`;
         // already has sixteen writers across twelve modules; this handler is
         // not going to be the seventeenth. discharge() also scopes by
         // businessId via findOne, so a foreign id cannot be discharged here.
-        const out = await this.getCommandService().discharge(
-          businessId,
-          id,
-          (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation',
-        );
+        // W9-KEY-OBLIGATIONS-CALLS (KEY-01; D-88): and with the member the command runs for, as POST
+        // items/:id/discharge hands it the session member, so an obligation that names a contact they
+        // may not open answers 404 'Command item not found', exactly as an unknown id. No member: as before.
+        const dischargeRef = (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation';
+        const member = await this.contactBindMember(businessId, action);
+        const out = member
+          ? await this.getCommandService().discharge(businessId, id, dischargeRef, member)
+          : await this.getCommandService().discharge(businessId, id, dischargeRef);
         return {
           id: out.id,
           title: out.title,
@@ -5040,12 +6330,14 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;
         if (args.priority) where.priority = args.priority;
-        const tickets = await this.prisma.client.supportTicket.findMany({
+        // V1-21d: a ticket naming another business's contact reads no contact
+        const rows = await this.prisma.client.supportTicket.findMany({
           where,
           orderBy: { createdAt: 'desc' },
           take: args.limit ?? 25,
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
+        const tickets = rows.map((ticket) => ownRelations(businessId, ticket, ['contact']));
         return { tickets, count: tickets.length };
       }
       case 'helpdesk_create_ticket': {
@@ -5589,11 +6881,13 @@ ${triage.standingContext}`;
         return { id: message.id, ticketId: args.ticketId };
       }
       case 'helpdesk_draft_reply': {
-        const ticket = await this.prisma.client.supportTicket.findFirst({
+        const found = await this.prisma.client.supportTicket.findFirst({
           where: { id: args.ticketId, businessId, deletedAt: null },
-          include: { contact: { select: { firstName: true, lastName: true, companyName: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, companyName: true } } },
         });
-        if (!ticket) throw new Error('Ticket not found');
+        if (!found) throw new Error('Ticket not found');
+        // V1-21d: another business's contact on the ticket never reaches the prompt
+        const ticket = ownRelations(businessId, found, ['contact']);
         const thread = await this.getHelpdeskService().listTicketMessages(businessId, args.ticketId);
         const threadCtx = thread
           .slice(-10)
@@ -5675,13 +6969,35 @@ ${triage.standingContext}`;
         return { id: deal.id, stageId: deal.stageId };
       }
       case 'crm_find_duplicates': {
-        return this.getCrmDuplicates().findCandidatesScoped({
+        const reader = await this.contactReadAccess(businessId, action);
+        if (!reader) {
+          return this.getCrmDuplicates().findCandidatesScoped({
+            businessId,
+            minConfidence: args.minConfidence ?? 0.6,
+            limit: args.limit ?? 20,
+          });
+        }
+        // Trial-N repair round 2 (NEW-4-REST, D-37): only the pairs whose two contacts the member may open.
+        const limit = args.limit ?? 20;
+        const all = await this.getCrmDuplicates().findCandidatesScoped({
           businessId,
           minConfidence: args.minConfidence ?? 0.6,
-          limit: args.limit ?? 20,
+          limit: Number.MAX_SAFE_INTEGER,
         });
+        const canOpen = await contactVisibilityFilter(
+          this.prisma, businessId, reader.access, reader.userId,
+          all.pairs.flatMap((pair) => [pair.primaryId, pair.duplicateId]),
+        );
+        const pairs = canOpen ? all.pairs.filter((pair) => canOpen(pair.primaryId) && canOpen(pair.duplicateId)) : all.pairs;
+        return { pairs: pairs.slice(0, limit), total: pairs.length };
       }
       case 'crm_merge_preview': {
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader) {
+          // Trial-N repair round 2 (NEW-4-REST, D-37): a contact the member may not open is answered as an unknown one.
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, [args.primaryId, args.duplicateId]);
+          if (canOpen && !(canOpen(args.primaryId) && canOpen(args.duplicateId))) return { preview: null };
+        }
         const preview = await this.getCrmDuplicates().preview({
           businessId,
           primaryId: args.primaryId,
@@ -5704,11 +7020,21 @@ ${triage.standingContext}`;
         return { overview };
       }
       case 'bookings_mark_no_show': {
+        // V1-21d review SEC-V21D-2: the booking.no_show event carries the booking's contact (the
+        // no-show notice), so a booking linked to another business's row is refused before the write
+        await this.bookingWithinBusiness(businessId, args.bookingId);
         const booking = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'NO_SHOW');
         return { id: booking.id, status: booking.status };
       }
       case 'projects_get_budget': {
-        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId);
+        // W9-PROJECTS-SERVER repair (review SEC-W9PS-1, CR-W9PS-2; D-100's withholding rule): the
+        // budget is read for the member KEY runs for (contactBindMember: the surface's principal, else
+        // the member it runs the call for, else a plan's member), so a member without expenses read
+        // gets the costs withheld as GET .../projects/:pid/budget withholds them. The graph-action
+        // authority and the chat menu hold this tool to projects read only. A run with no member (an
+        // inbound conversation, an undeclared caller) reads no costs.
+        const viewerUserId = (await this.contactBindMember(businessId, action)) ?? null;
+        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId, { viewerUserId });
         return { budget };
       }
       case 'projects_get_timeline': {
@@ -5728,18 +7054,37 @@ ${triage.standingContext}`;
         return { updated: (result as { count?: number }).count ?? (Array.isArray(result) ? result.length : 0) };
       }
       case 'commerce_convert_quote': {
+        // W3-D64-COMMERCE-CREATE (D-88): converted for the member the command runs for, so the
+        // quote's contact must be one that member may open (D-64); no member: the OWNER's view.
+        // Review SEC-W3D64-1/-3: that member on every surface that runs for one (contactBindMember).
+        const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().convertQuoteToInvoice({
           quoteId: args.quoteId,
           businessId,
+          actorUserId: bindMember,
         });
         return { invoiceId: (invoice as { id: string }).id };
       }
       case 'execute_custom_logic': {
+        // V1-84 (FOLLOW3-D16 review SEC-D16-1, D-40): every api.callTool the snippet makes is a call
+        // of the member whose chat turn ran it, so the operations scope that turn's own calls are
+        // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
+        // inner call itself still arrives on CUSTOM_LOGIC. W8-KEY-REVENUE-GATE (D-98): and the
+        // revenue write a money-writing inner call needs (memberScopeRefusal).
+        const withinMemberScope = async (bizId: string, name: string, toolArgs?: unknown): Promise<void> => {
+          const refusal = await this.memberScopeRefusal(bizId, name, action, toolArgs);
+          if (refusal) throw new Error(refusal);
+        };
+        // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
+        // write binds is judged by that same member's CRM view. The member rides as onBehalfOfUserId,
+        // never as the inner call's principal: the action boundary keeps an inner call requested by
+        // nobody (KF-EXEC-ACTION-001), and no other check reads it.
+        const onBehalfOfUserId = (await this.contactBindMember(businessId, action)) ?? null;
         const result = await this.getCodeExecutor().execute({
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' }),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name, toolArgs).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
         });
         return result;
       }
@@ -5827,13 +7172,30 @@ ${triage.standingContext}`;
         return { id: sequence.id, name: sequence.name };
       }
       case 'sequence_enroll': {
+        // W3-KEY-CRM-VISIBILITY review SEC-W3CV-4 (D-37): a member enrols only contacts their CRM view
+        // opens (contactVisibilityFilter, the GET contacts/:id rule). One they may not open answers as
+        // an unknown contact does and nothing is enrolled, not even the others named with it.
+        // Unchanged with no principal (the OWNER's view; graphActionRequirement keeps it to the OWNER
+        // there) or for the OWNER and a SUPER_ADMIN.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && Array.isArray(args.contactIds)) {
+          const ids: unknown[] = args.contactIds;
+          const named = ids.filter((id): id is string => typeof id === 'string');
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, named);
+          if (canOpen && ids.some((id) => typeof id !== 'string' || !canOpen(id))) throw new NotFoundException('Contact not found');
+        }
         const result = await this.getCrmSequences().enrollContacts(businessId, args.sequenceId, args.contactIds);
         return result;
       }
       case 'sequence_enroll_overdue': {
+        // W3-KEY-CRM-VISIBILITY (D-37; KEY-R3b residual): a member enrols only the overdue contacts
+        // their CRM view opens (the same visibilityClause, handed to the sequence service). Unchanged
+        // with no principal (the OWNER's view, D-88's convention) or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const result = await this.getCrmSequences().enrollOverdueContacts(businessId, args.sequenceId, {
           minDaysOverdue: args.minDaysOverdue,
           limit: args.limit,
+          ...(visible ? { contactWhere: visible } : {}),
         });
         return result;
       }
@@ -5889,6 +7251,9 @@ ${triage.standingContext}`;
 
       // === PROJECT UPDATES ===
       case 'projects_update_task': {
+        // V1-21d review SEC-V21D-1: updateTask resolves the assignee by its id alone; this
+        // business's staff member or member first ('' unassigns and names no one)
+        if (args.assigneeId) await this.assigneeWithinBusiness(businessId, args.assigneeId);
         const task = await this.getProjects().updateTask(businessId, args.taskId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
@@ -5905,13 +7270,26 @@ ${triage.standingContext}`;
 
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
-        const invoice = await this.getCommerce().updateInvoice({
-          invoiceId: args.invoiceId,
-          businessId,
-          status: args.status,
-          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
-          notes: args.notes ?? undefined,
-        });
+        // W3-D64-COMMERCE-CREATE (D-88): the member the command runs for judges any new contact
+        // (D-64); a status change stays KEY's (R0-CMF1). This tool forwards no contact, so KEY's
+        // invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        // W7-INVOICE-ACTOR-RULES (SEC-CMF1-3, D-88): KEY is named explicitly; updateInvoice
+        // refuses a status change with no actor rather than reading the omission as KEY.
+        // Review SEC-W7IAR-2 (D-90, PA-16r): the member the turn runs for is kept beside KEY as
+        // initiatedBy (audit data, never authority), as KEY's process_payment keeps it (PA-19c).
+        const bindMember = await this.contactBindMember(businessId, action);
+        const invoice = await this.getCommerce().updateInvoice(
+          {
+            invoiceId: args.invoiceId,
+            businessId,
+            status: args.status,
+            dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+            notes: args.notes ?? undefined,
+            actorUserId: bindMember,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy: bindMember ?? null },
+        );
         return { id: invoice.id, status: invoice.status };
       }
       case 'commerce_update_product': {
@@ -5925,11 +7303,18 @@ ${triage.standingContext}`;
         return { id: product.id, name: product.name, fieldsUpdated: Object.keys(updateData) };
       }
       case 'commerce_send_invoice': {
-        const invoice = await this.prisma.client.invoice.findFirst({
+        const found = await this.prisma.client.invoice.findFirst({
           where: { id: args.invoiceId, businessId },
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
-        if (!invoice) throw new Error('Invoice not found');
+        if (!found) throw new Error('Invoice not found');
+        // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) is emailed
+        // to no one: that contact is not this business's to write to.
+        const invoice = ownRelations(businessId, found, ['contact']);
+        // V1-21b review 7 DRV5-2: the only route that emails an invoice by hand (POST
+        // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
+        // VOID -> SENT transition. Refused before any mail.
+        if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
         // ACTUALLY SEND IT.
         //
@@ -5956,7 +7341,8 @@ ${triage.standingContext}`;
         // is not a guard.
         const contactName =
           [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
+        // V1-46b: the token link, not the retired /pay/<invoiceId> (customerInvoiceUrl).
+        const invoiceUrl = await this.customerInvoiceUrl(invoice.id, businessId);
 
         const delivery = await this.getTransactionalEmail().send({
           businessId,
@@ -5968,7 +7354,7 @@ ${triage.standingContext}`;
             invoiceNumber: invoice.invoiceNumber,
             total: Number(invoice.total).toFixed(2),
             currency: invoice.currency ?? 'TTD',
-            invoiceUrl: `${appUrl}/pay/${invoice.id}`,
+            invoiceUrl,
           },
           dedupeKey: `invoice_sent_${invoice.id}`,
         });
@@ -5998,6 +7384,10 @@ ${triage.standingContext}`;
           action: 'invoice_sent',
           entityType: 'invoice',
           entityId: invoice.id,
+          // W9-TEXT-ONLY-CONTACT-WRITERS (review ST-2, owner ruling D-63): the title names the
+          // invoice's contact, so the row carries its contactId; the timeline rule then serves it
+          // only to members who may open that contact (timeline-scope TS-13a).
+          contactId: invoice.contactId,
           title: `Invoice ${invoice.invoiceNumber} sent to ${contactName}`,
           tone: 'success',
         });
@@ -6144,16 +7534,25 @@ ${triage.standingContext}`;
       }
 
       case 'procurement_acknowledge_vendor': {
+        // V1-21d review SEC-V21D-1: ProcurementService.acknowledgeVendor updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().acknowledgeVendor(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }
 
       case 'procurement_mark_fulfilled': {
+        // V1-21d review SEC-V21D-1: ProcurementService.markFulfilled updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().markFulfilled(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }
 
       case 'procurement_mark_invoiced': {
+        // V1-21d review SEC-V21D-1: ProcurementService.markInvoiced updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().markInvoiced(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }
@@ -6228,7 +7627,7 @@ ${triage.standingContext}`;
         // through the cortex registry rather than reimplementing the handler
         // here. See CORTEX_TOOL_BRIDGE.
         if (isCortexBridgedTool(toolName)) {
-          return this.executeBridgedCortexTool(businessId, toolName, args);
+          return this.executeBridgedCortexTool(businessId, toolName, args, action);
         }
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -6253,11 +7652,19 @@ ${triage.standingContext}`;
    *
    * It does NOT bypass KeyAutonomySafetyService: the kill switch, the daily
    * action cap and the spend cap are checked before this and still apply.
+   *
+   * W9-KEY-CORTEX-AUDIT: the call names its principal and command thread
+   * from the dispatch's `action`, so the organ tool's CortexActionLog row is
+   * attributed outside a request too (V1-19c's auditActor reads the request
+   * only). Review SEC-W9KCA-4: a surface with no principal names no acting
+   * user; W11-BRIDGED-ORGAN-AUDIT-MEMBER hands the member it runs for to the
+   * registry as the audit-only actor (see below).
    */
   private async executeBridgedCortexTool(
     businessId: string,
     toolName: string,
     args: Record<string, any>,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     const cortexName = CORTEX_TOOL_BRIDGE[toolName];
 
@@ -6275,7 +7682,45 @@ ${triage.standingContext}`;
       throw new Error(`${toolName} is unavailable: no organ has registered ${cortexName}`);
     }
 
-    const result = await registry.execute(cortexName, { businessId, preApproved: true }, args);
+    // W9-KEY-CORTEX-AUDIT: who authenticated the call and the thread it belongs to, as the dispatch
+    // knows them (the action boundary and memberScopeRefusal already ran on this dispatch). An approved
+    // proposal's action id is the proposal the call executes.
+    //
+    // Review SEC-W9KCA-4: only a principal (the member who authenticated this call: their chat turn,
+    // PLAN_HTTP, GRAPH_ACTION) is the registry's acting user. The registry has one actor field,
+    // ctx.userId: it records a call that names one as that human's action on the business-event ledger
+    // (actorType 'human'), and hands it to the organ handler as the acting user (an inbox reply's
+    // author, the safe database's caller). onBehalfOfUserId is never a principal (KeyDispatchAction),
+    // and the plan queue, the Pro Auto monitor, an inner custom-logic call, an approved proposal and a
+    // KEY-cortex turn's bridged call authenticate nobody, so none is passed there: the call stays KEY's
+    // own ('ai'), as before this packet, and its CortexActionLog row names the request's member when it
+    // runs in one (auditActor).
+    //
+    // W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, CR-W9KCA-2; D-73, D-93): with no principal, the
+    // member the call runs for (contactBindMember: the surface's onBehalfOfUserId; on the plan queue, which
+    // dispatches no member, the stored plan's member, or for a daily-briefing plan stored with none the
+    // owner; nobody for a plan id that names no plan of this business) is the registry's audit-only actor
+    // (ctx.auditUserId): it is named on the organ call's CortexActionLog row alone, so the row names the
+    // member outside a request too. It is never ctx.userId (SEC-W9KCA-4 holds: the organ handler gets no
+    // acting user, the ledger records the AI) and no permission is decided from it. A KEY-cortex turn's
+    // bridged call (CORTEX_BRIDGE) is left as it is: it runs inside the turn's own registry call, whose
+    // actor and command id the registry already names on the organ row (W10-CORTEX-CHAT-SCOPE).
+    const principalUserId = action?.principalUserId || undefined;
+    const auditUserId =
+      principalUserId || action?.surface === 'CORTEX_BRIDGE' ? undefined : await this.contactBindMember(businessId, action);
+    const result = await registry.execute(
+      cortexName,
+      {
+        businessId,
+        preApproved: true,
+        ...(principalUserId ? { userId: principalUserId } : {}),
+        ...(auditUserId ? { auditUserId } : {}),
+        ...(action?.sessionId ? { sessionId: action.sessionId } : {}),
+        ...(action?.correlationId ? { correlationId: action.correlationId } : {}),
+        ...(action?.surface === 'PROPOSAL' && action.actionId ? { proposalId: action.actionId } : {}),
+      },
+      args,
+    );
 
     if (!result.success) {
       throw new Error(result.error ?? `${toolName} failed`);
@@ -6926,7 +8371,7 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     planId?: string,
     planStepId?: string,
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<FlowToolResult> {
     const planContext = planId && planStepId ? { planId, planStepId } : undefined;
     return this.executeTool(businessId, toolName, args, undefined, planContext, action);
@@ -6936,7 +8381,50 @@ ${triage.standingContext}`;
     businessId: string,
     toolName: string,
     args: Record<string, any>,
+    /**
+     * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the member the monitor runs for. ProAutoMonitorService
+     * passes the business owner (the monitor is system-created). Absent: the monitor acts for no member.
+     */
+    options: { memberId?: string | null } = {},
   ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
+    // KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): run for no member, the monitor reads no
+    // contacts (with no principal contactReadAccess reads every contact, PRIVATE ones included; D-93:
+    // the tools only a principal's visibility bounds too) and writes no money or invoices; nor does it
+    // run a tool the authority map refuses or does not map (KEY-R3b review SEC-R3b-2).
+    // W4-D93-NO-MEMBER-CONTACTS (D-93): run for a member (the owner), the member is held to the rule the
+    // plan queue applies to a plan's member (memberToolRunAuthority, no principal), and the tool runs on
+    // their behalf: KeyDispatchAction.onBehalfOfUserId (the member KEY's commerce binds act for) and the
+    // execution log row names them. The member is not the run's principal: the monitor authenticates no
+    // human, so the action boundary still sends a write it adopted to a human for approval.
+    // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
+    // graph-actions.controller, which imports this file.)
+    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
+    const memberId = options.memberId || undefined;
+    const refusal = memberId
+      ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
+      : noMemberToolRefusal(toolName);
+    if (refusal) {
+      await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${refusal}`, false, 0, {
+        riskTier: this.governance.getToolTier(toolName),
+        mode: 'pro_auto',
+        rationale: memberId
+          ? 'Refused for Pro Auto monitoring, run for the business owner (D-93)'
+          : 'Refused for Pro Auto monitoring: it acts for no member (D-73)',
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
+        this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: `Refused: ${refusal}`, blocked: true };
+    }
+    const action: KeyDispatchAction = memberId
+      ? { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: memberId }
+      : { surface: 'PRO_AUTO_MONITOR' };
+    // W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): a tool that runs only because the monitor runs
+    // for a member (one D-73 refuses a run with no member: a contact read, a money write) takes its
+    // arguments from, and answers in, that member's view (the owner's: another member's PRIVATE
+    // contacts). GET ai/execution-logs answers every member, so its row keeps neither.
+    const memberView = !!memberId && noMemberToolRefusal(toolName) !== null;
+    const loggedArgs: Record<string, unknown> = memberView ? MONITOR_MEMBER_VIEW_WITHHELD : args;
+
     const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
     if (!decision.allowed) {
       return { success: false, error: decision.reason || `Tool ${toolName} blocked by governance`, blocked: true };
@@ -6945,29 +8433,32 @@ ${triage.standingContext}`;
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
-      const rawResult = await this.executeToolAction(businessId, toolName, args, { surface: 'PRO_AUTO_MONITOR' });
+      const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+      const loggedEnvelope = memberView ? { ...envelope, result: MONITOR_MEMBER_VIEW_WITHHELD } : envelope;
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, loggedEnvelope, true, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-executed by Pro Auto monitoring engine (governance approved)',
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (memberId) await logged;
       this.businessGraph.invalidateCache(businessId);
       return { success: true, result: envelope.result };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, (error as Error).message, false, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-execution attempt by Pro Auto monitoring engine',
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log auto-execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (memberId) await logged;
       return { success: false, error: (error as Error).message };
     }
   }

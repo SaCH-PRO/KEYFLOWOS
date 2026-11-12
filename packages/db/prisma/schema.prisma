@@ -2625,8 +2625,30 @@ model Contact {
   crmActivities     CrmActivity[]
   keyInboxThreads   KeyInboxThread[]
 
-  @@unique([businessId, emailNormalized])
-  @@unique([businessId, phoneNormalized])
+  // IDENTITY UNIQUES ARE SQL-ONLY (D-16, migration
+  // 20261101000000_contact_partial_identity_uniques). Two live contacts of a
+  // business may not share an email or a phone; a soft-deleted contact keeps
+  // its row but releases both. That needs partial unique indexes, which Prisma
+  // cannot declare, so they exist only in the migration:
+  //   contacts_business_id_email_normalized_live_key
+  //     ON contacts (business_id, email_normalized) WHERE deleted_at IS NULL
+  //   contacts_business_id_phone_normalized_live_key
+  //     ON contacts (business_id, phone_normalized) WHERE deleted_at IS NULL
+  // Do not put @@unique([businessId, emailNormalized]) or
+  // @@unique([businessId, phoneNormalized]) back here: the full index would
+  // make a soft-deleted contact block re-adding the customer again (M12).
+  // Prisma 6 does not read partial indexes, so `prisma migrate diff` is silent
+  // about these two. Never run `prisma migrate dev` on this schema without
+  // `--create-only` and a review of the generated SQL: a Prisma that reads
+  // partial indexes would propose dropping them. Never sync a database with
+  // `prisma db push` (pnpm db:push) either: on a database the migration has
+  // not reached it drops both full *_key indexes and creates nothing in their
+  // place, and on a fresh database it creates no identity unique at all, so
+  // two live contacts could share an email or phone and the 409 contract is
+  // lost. Apply migrations with `prisma migrate deploy` (pnpm db:deploy).
+  // scripts/post-merge.sh and scripts/start-cloud-app.sh still run db push
+  // and must move to migrate deploy. The MIGRATE-001 drift gate must
+  // allowlist both names.
   @@index([businessId])
   @@index([businessId, createdAt])
   @@index([businessId, status])

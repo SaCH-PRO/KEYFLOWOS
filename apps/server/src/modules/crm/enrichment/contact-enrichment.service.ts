@@ -1,8 +1,7 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { CrmService } from '../crm.service';
-import { contactWhereWithId } from '../crm.helpers';
-import { resolveCrmAccess } from '../crm-permissions.helper';
 import { ApolloEnrichmentProvider } from './apollo-enrichment.provider';
 import type { EnrichmentProvider } from './enrichment-provider';
 
@@ -73,18 +72,18 @@ export class ContactEnrichmentService {
       return { status: 'not_configured', provider: provider.key, filled: [] };
     }
 
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(input.businessId, input.contactId),
-    });
+    // Enforce the SAME contact-level check CrmService.updateContact enforces,
+    // up front: before we read the row, spend a paid lookup or stamp any
+    // metadata. A contact the caller cannot see answers 404 exactly like an
+    // unknown id, so its email and name never reach the provider; a member
+    // with crm:write but edit-scope owned/none cannot reach the direct stamp
+    // below and mutate another contact's custom (and its cooldown).
+    const reachableWhere = await this.assertCanEdit(input.businessId, input.contactId, input.actorUserId);
+
+    const contact = await this.prisma.client.contact.findFirst({ where: reachableWhere });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
-
-    // Enforce the SAME contact-level edit permission CrmService.updateContact
-    // enforces, up front — before we spend a paid lookup or stamp any metadata.
-    // Otherwise a member with crm:write but edit-scope owned/none could reach the
-    // direct stamp below and mutate another contact's custom (and its cooldown).
-    await this.assertCanEdit(input.businessId, input.contactId, input.actorUserId);
 
     const custom = (contact.custom as Record<string, unknown> | null) ?? {};
     const meta = custom.enrichment as { lastRunAt?: string } | undefined;
@@ -109,7 +108,7 @@ export class ContactEnrichmentService {
       return { status: 'provider_error', provider: provider.key, filled: [] };
     }
     if (outcome.status === 'no_match') {
-      await this.stampAttempt(input.businessId, input.contactId, custom, provider.key, []);
+      await this.stampAttempt(reachableWhere, custom, provider.key, []);
       return { status: 'no_match', provider: provider.key, filled: [] };
     }
 
@@ -117,9 +116,7 @@ export class ContactEnrichmentService {
     // network time, during which a user or import may have filled a field. The
     // patch must be computed from the CURRENT row, not the pre-request snapshot,
     // so enrichment stays strictly additive.
-    const fresh = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(input.businessId, input.contactId),
-    });
+    const fresh = await this.prisma.client.contact.findFirst({ where: reachableWhere });
     if (!fresh) {
       throw new NotFoundException('Contact not found');
     }
@@ -136,7 +133,7 @@ export class ContactEnrichmentService {
     }
 
     if (filled.length === 0) {
-      await this.stampAttempt(input.businessId, input.contactId, freshCustom, provider.key, []);
+      await this.stampAttempt(reachableWhere, freshCustom, provider.key, []);
       return { status: 'no_new_data', provider: provider.key, filled: [] };
     }
 
@@ -163,50 +160,36 @@ export class ContactEnrichmentService {
   }
 
   /**
-   * Mirror of the contact-level edit check inside CrmService.updateContact: an
-   * owner/super-admin may edit anything; otherwise edit-scope 'none' is denied
-   * and 'owned' is limited to contacts the actor owns or has shared. Enforced
-   * here so the direct-write stamp paths carry the same guarantee as the CRM
-   * service. No actor (system/internal call) skips the check, exactly as
-   * updateContact does.
+   * The contact-level edit check, delegated to CrmService.assertCanEditContact,
+   * the very check updateContact applies (no mirror to drift from it, R0-13c
+   * review CR-1): the GET visibility clause (a contact the caller cannot see is
+   * 404 like an unknown id), then edit-scope 'none' denied and 'owned' limited
+   * to contacts the actor owns or has shared; an owner/super-admin may edit
+   * anything, and no actor (system/internal call) skips the check. Returns the
+   * where clause of the row the caller may reach, which every read and the
+   * direct-write stamp below use, so they carry the same guarantee.
    */
-  private async assertCanEdit(businessId: string, contactId: string, actorUserId?: string): Promise<void> {
-    if (!actorUserId) return;
-    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
-    if (access.isOwner || access.isSuperAdmin) return;
-    if (access.editScope === 'none') {
-      throw new ForbiddenException('You do not have permission to edit contacts');
-    }
-    if (access.editScope === 'owned') {
-      const owned = await this.prisma.client.contact.findFirst({
-        where: {
-          ...contactWhereWithId(businessId, contactId),
-          OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }],
-        },
-        select: { id: true },
-      });
-      if (!owned) {
-        throw new ForbiddenException('You can only edit contacts you own');
-      }
-    }
+  private async assertCanEdit(businessId: string, contactId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput> {
+    const { reachableWhere } = await this.crm.assertCanEditContact(businessId, contactId, actorUserId);
+    return reachableWhere;
   }
 
   /**
    * Record that we tried — even on a miss — so the recent-guard can skip a
    * repeat lookup. Written directly (no field change to route through the CRM
    * service) since this is provenance metadata, not contact data. Access is
-   * already enforced up front by assertCanEdit before this is reached.
+   * already enforced up front by assertCanEdit, whose reachable row `where`
+   * names.
    */
   private async stampAttempt(
-    businessId: string,
-    contactId: string,
+    where: Prisma.ContactWhereInput,
     custom: Record<string, unknown>,
     providerKey: string,
     filled: MappableField[],
   ): Promise<void> {
     try {
       await this.prisma.client.contact.updateMany({
-        where: contactWhereWithId(businessId, contactId),
+        where,
         data: {
           custom: {
             ...custom,

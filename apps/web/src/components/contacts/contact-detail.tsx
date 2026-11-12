@@ -116,7 +116,7 @@ interface ContactDetailProps {
   onDelete?: () => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onLogEvent?: (type: string, description?: string) => Promise<void>;
-  healthMetrics?: { engagement: number; payment: number; responsiveness: number; relationship: number } | null;
+  healthMetrics?: { engagement: number; payment?: number; responsiveness: number; relationship: number } | null;
   journeyMilestones?: Array<{ id: string; type: string; title: string; description?: string; date: string; value?: number; isNext?: boolean }>;
   crossJourney?: CrossJourneyResponse | null;
   conversationContext?: { lastDiscussed?: string; concerns?: string[]; preferences?: string[]; suggestedOpening?: string; sentiment?: string; engagementLevel?: string } | null;
@@ -359,6 +359,9 @@ export function ContactDetail({
           contactId={contact.id}
           contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "client"}
           onAddTask={onAddTask}
+          // SEC-R015d-1 (R0-15d review): momentum is read from the business this
+          // contact is shown in, not whatever kf_business_id says.
+          businessId={businessId}
         />
 
         {(insightSnapshot || insightLoading) && (
@@ -395,6 +398,7 @@ export function ContactDetail({
               events={events}
               onSetActiveTab={setActiveTab}
               onQuickAction={onQuickAction}
+              businessId={businessId}
             />
             <ContactDetailInfo
               contact={contact}
@@ -402,6 +406,10 @@ export function ContactDetail({
               onSelectRelatedContact={onSelectRelatedContact}
               onAddTask={onAddTask}
               customFieldValues={customFieldValues}
+              // SEC-R015c-1 (R0-15d): the panel reads the custom fields of, and
+              // writes the consent flags to (SEC-R015d-1), the business this
+              // contact is shown in, not whatever kf_business_id says.
+              businessId={businessId}
             />
           </div>
 

@@ -78,6 +78,38 @@ const ACTION_PARAM_SCHEMA: Record<CortexActionType, string[]> = {
   EXECUTE_TOOL: ['toolName'],
 };
 
+/**
+ * V1-02b: the usability check the parsed-command gate applies since V1-02
+ * (KeyCortexQueryPipelineService.isUsableAutonomyVerdict), applied to the
+ * legacy gate too. That one is a private method of the pipeline, which imports
+ * this service, so it is mirrored here; a parity spec
+ * (key-cortex-actions.legacy-gate.spec.ts, V1-02b-UV01) pins the two together.
+ *
+ * A verdict is usable only when it is an object that states every field the
+ * execution decision reads: a boolean `allowed`, a boolean `requiresApproval`
+ * and a recognized `tier`. An omitted `requiresApproval` or `tier` is not a
+ * statement that no approval is needed.
+ */
+export function isUsableAutonomyVerdict(verdict: unknown): boolean {
+  if (typeof verdict !== 'object' || verdict === null) {
+    return false;
+  }
+  const { allowed, requiresApproval, tier } = verdict as Record<string, unknown>;
+  return (
+    typeof allowed === 'boolean' &&
+    typeof requiresApproval === 'boolean' &&
+    (tier === 'manual' || tier === 'supervised' || tier === 'full')
+  );
+}
+
+interface LegacyAutonomyDecision {
+  allowed: boolean;
+  requiresApproval: boolean;
+  reason?: string;
+  /** Set when the authority could not give a usable answer: the batch fails closed. */
+  failedClosed?: string;
+}
+
 @Injectable()
 export class KeyCortexActionsService implements OnModuleInit {
   private readonly logger = new Logger(KeyCortexActionsService.name);
@@ -144,7 +176,9 @@ export class KeyCortexActionsService implements OnModuleInit {
     requiresApproval: boolean,
     required: string[],
     properties: Record<string, unknown>,
-    legacyHandler: (params: Record<string, unknown>, businessId: string) => Promise<KeyCortexToolResult>,
+    // W9-KEY-CORTEX-AUDIT: the call's context rides along for a handler that hands the call on
+    // (handleExecuteTool), so the call it makes names the same actor and command thread.
+    legacyHandler: (params: Record<string, unknown>, businessId: string, ctx: KeyCortexToolContext) => Promise<KeyCortexToolResult>,
   ): KeyCortexToolDefinition {
     return {
       name,
@@ -153,7 +187,7 @@ export class KeyCortexActionsService implements OnModuleInit {
       riskTier,
       requiresApproval,
       parameters: { type: 'object', properties, required },
-      handler: async (ctx, input) => legacyHandler(input, ctx.businessId),
+      handler: async (ctx, input) => legacyHandler(input, ctx.businessId, ctx),
     };
   }
 
@@ -171,17 +205,32 @@ export class KeyCortexActionsService implements OnModuleInit {
 
     const results: CortexActionResult[] = [];
 
+    // V1-02b: every action is put to the authority before any of them runs,
+    // as the parsed-command gate does (V1-02). The batch is atomic: one
+    // evaluation that throws or returns an unusable verdict fails the whole
+    // batch closed, so no action runs and no approval is created.
+    const verdicts: LegacyAutonomyDecision[] = [];
     for (const action of actions) {
+      const verdict = await this.evaluateAutonomy(action, session);
+      if (verdict.failedClosed !== undefined) {
+        return this.failBatchClosed(actions, session, verdict.failedClosed);
+      }
+      verdicts.push(verdict);
+    }
+
+    for (const [index, action] of actions.entries()) {
       try {
-        const verdict = await this.evaluateAutonomy(action, session);
+        const verdict = verdicts[index];
         if (!verdict.allowed) {
-          results.push({
+          const blocked: CortexActionResult = {
             ...action,
             status: 'blocked',
             description: verdict.reason || `Action "${action.actionType}" blocked by autonomy guard.`,
             requiresApproval: false,
             error: verdict.reason,
-          });
+          };
+          results.push(blocked);
+          await this.trackActionExecution(blocked, session);
           continue;
         }
 
@@ -202,7 +251,7 @@ export class KeyCortexActionsService implements OnModuleInit {
 
         const result = await this.executeAction(action, session.businessId, session.userId, session.id);
         results.push(result);
-        await this.trackActionExecution(result, session.id);
+        await this.trackActionExecution(result, session);
         this.emitActionEvent(action.actionType, result, session);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -217,7 +266,7 @@ export class KeyCortexActionsService implements OnModuleInit {
           error: message,
         };
         results.push(failedResult);
-        await this.trackActionExecution(failedResult, session.id);
+        await this.trackActionExecution(failedResult, session);
       }
     }
 
@@ -282,7 +331,7 @@ export class KeyCortexActionsService implements OnModuleInit {
   private async evaluateAutonomy(
     action: CortexActionResult,
     session?: CortexSession,
-  ): Promise<{ allowed: boolean; requiresApproval: boolean; reason?: string }> {
+  ): Promise<LegacyAutonomyDecision> {
     if (!this.autonomyOrchestrator) {
       // Legacy static fallback
       return {
@@ -291,13 +340,18 @@ export class KeyCortexActionsService implements OnModuleInit {
       };
     }
 
+    const actionKey = `key_cortex.${action.actionType}`;
     try {
       const verdict = await this.autonomyOrchestrator.evaluateAction(
         session?.businessId ?? 'unknown',
-        `key_cortex.${action.actionType}`,
+        actionKey,
         (action.result as Record<string, unknown>) ?? {},
         { proposedBy: session?.userId },
       );
+      // V1-02b: an answer the authority did not fully state is not an answer.
+      if (!isUsableAutonomyVerdict(verdict)) {
+        throw new Error(`Unusable autonomy verdict for ${actionKey}`);
+      }
       return {
         allowed: verdict.allowed,
         requiresApproval: verdict.requiresApproval || verdict.tier === 'manual',
@@ -305,9 +359,45 @@ export class KeyCortexActionsService implements OnModuleInit {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`[evaluateAutonomy] ${action.actionType}: ${message}`);
-      return { allowed: false, requiresApproval: true, reason: `Autonomy evaluation failed: ${message}` };
+      this.logger.error(`[evaluateAutonomy] ${actionKey}: ${message}`);
+      return {
+        allowed: false,
+        requiresApproval: true,
+        reason: `Autonomy evaluation failed: ${message}`,
+        failedClosed: message,
+      };
     }
+  }
+
+  /**
+   * V1-02b: the authority could not give a usable answer for one action of
+   * the batch, so none of them runs and no approval is created (the parsed-
+   * command gate's failed_closed disposition). Each action is refused and
+   * goes through this gate's audit door; a failed audit write is logged by
+   * trackActionExecution and never changes the answer.
+   */
+  private async failBatchClosed(
+    actions: CortexActionResult[],
+    session: CortexSession,
+    error: string,
+  ): Promise<CortexActionResult[]> {
+    const reason = `Authority check failed closed; execution blocked for safety: ${error}`;
+    this.logger.error(
+      `[executeActions][${session.id}] Autonomy check failed, failing closed: 0/${actions.length} actions executable: ${error}`,
+    );
+    const results: CortexActionResult[] = [];
+    for (const action of actions) {
+      const blocked: CortexActionResult = {
+        ...action,
+        status: 'blocked',
+        description: reason,
+        requiresApproval: false,
+        error: reason,
+      };
+      results.push(blocked);
+      await this.trackActionExecution(blocked, session);
+    }
+    return results;
   }
 
   requiresApproval(action: CortexActionResult): boolean {
@@ -405,14 +495,26 @@ export class KeyCortexActionsService implements OnModuleInit {
   // Audit & History
   // ========================================================================
 
+  /**
+   * The legacy gate's audit door: one CortexActionLog row per gate outcome.
+   *
+   * V1-02b review (SEC-V102b-1, CR-V102b-1): the row names its tenant and its
+   * actor from the session itself. businessId is a required column (a required
+   * Business relation), so a row without it was refused by Prisma unless an
+   * ambient tenant context happened to inject one, and even then it carried no
+   * user. A refusal (denied or failed closed) is attributed to the member the
+   * gate refused, as the parsed-command gate's rows are.
+   */
   async trackActionExecution(
     action: CortexActionResult,
-    sessionId: string,
+    session: Pick<CortexSession, 'id' | 'businessId' | 'userId'>,
   ): Promise<void> {
     try {
       await (this.prisma.client as any).cortexActionLog.create({
         data: {
-          sessionId,
+          sessionId: session.id,
+          businessId: session.businessId,
+          userId: session.userId ?? null,
           actionType: action.actionType,
           status: action.status,
           description: action.description,
@@ -425,7 +527,9 @@ export class KeyCortexActionsService implements OnModuleInit {
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.error(`Failed to track action execution: ${message}`);
+      this.logger.error(
+        `Failed to track action execution (business ${session.businessId}, session ${session.id}): ${message}`,
+      );
     }
   }
 
@@ -667,10 +771,30 @@ export class KeyCortexActionsService implements OnModuleInit {
     }
   }
 
-  private async handleExecuteTool(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
+  private async handleExecuteTool(
+    params: Record<string, unknown>,
+    businessId: string,
+    ctx?: KeyCortexToolContext,
+  ): Promise<KeyCortexToolResult> {
     const { toolName, toolParams = {} } = params;
     // Phase 3 Skeleton: delegate to canonical registry instead of old AI-module registry.
-    return this.keyCortexToolRegistry.execute(String(toolName), { businessId, autonomyLevel: 2 }, toolParams as Record<string, unknown>);
+    //
+    // W9-KEY-CORTEX-AUDIT: the tool this call runs is part of this call, so it names the same actor
+    // and command thread (its CortexActionLog row is attributed outside a request too). Only the
+    // identity is handed on: not preApproved (the named tool meets its own autonomy gate, at level 2
+    // as before), and not the idempotency key or saga, which this call has claimed for itself.
+    const thread: Partial<KeyCortexToolContext> = {
+      ...(ctx?.userId ? { userId: ctx.userId } : {}),
+      ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
+      ...(ctx?.commandId ? { commandId: ctx.commandId } : {}),
+      ...(ctx?.correlationId ? { correlationId: ctx.correlationId } : {}),
+      ...(ctx?.proposalId ? { proposalId: ctx.proposalId } : {}),
+    };
+    return this.keyCortexToolRegistry.execute(
+      String(toolName),
+      { businessId, autonomyLevel: 2, ...thread },
+      toolParams as Record<string, unknown>,
+    );
   }
 
   private async handleQueryDatabase(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {

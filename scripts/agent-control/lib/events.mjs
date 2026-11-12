@@ -36,13 +36,33 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   'CI/CD Pipeline',
   'Agent Control Gate',
   'Branch divergence',
-  'DAST (HawkScan)',
+  // The native DAST proof (V1-13): it needs no third-party account or secret
+  // and cannot conclude success without probing. 'DAST (HawkScan)' is
+  // manual-only: without its key it skipped every scan step and still
+  // concluded success (PRS-M08; V1-30, owner ruling D-22).
+  'DAST (Native)',
   // Portable Ubuntu + Windows proof of the control plane and local worker
   // (WORKER-CI-PLATFORM-001). Deliberately NOT "KEYFLOWOS Agent Autopilot":
   // its workflow_run-triggered runs share the PR head sha but skip self-test,
   // so a latest-run-by-name lookup would count a run that proved nothing.
   'Agent Control Worker Proof',
 ]);
+
+/**
+ * The workflow file of each required gate (owner ruling D-61; FOLLOW3-C5).
+ * A workflow's name is whatever its file declares, so any second file may
+ * declare a required name. Admission therefore counts a run for a gate only
+ * when GitHub's `path` for that run is this file (lib/admission.mjs), and
+ * tests/workflow-integrity.spec.mjs proves each file exists and declares its
+ * name.
+ */
+export const REQUIRED_WORKFLOW_FILES = Object.freeze({
+  'CI/CD Pipeline': '.github/workflows/ci-cd.yml',
+  'Agent Control Gate': '.github/workflows/agent-control-gate.yml',
+  'Branch divergence': '.github/workflows/branch-divergence.yml',
+  'DAST (Native)': '.github/workflows/native-dast.yml',
+  'Agent Control Worker Proof': '.github/workflows/agent-control-worker-proof.yml',
+});
 
 /**
  * Read a top-level `key: value` from a control message body, through the one
@@ -312,4 +332,5 @@ export default {
   HOLD_MESSAGE_TYPES,
   HOLD_REFUSALS,
   REQUIRED_WORKFLOWS,
+  REQUIRED_WORKFLOW_FILES,
 };

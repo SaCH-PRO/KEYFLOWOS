@@ -69,6 +69,22 @@ const HOUR_PRESETS = [
 
 type HoursMap = Record<number, { open: string; close: string; enabled: boolean }>;
 
+/**
+ * R0-ID-WEB-AUTHORITY-UX (R0-09 review CR-1): business hours are written through
+ * PATCH /identity/businesses/:id, which owner ruling D-11 makes OWNER only. A
+ * refused write comes back as `{ error, status }` rather than a throw, so the save
+ * reads the result and shows the server's refusal; a 403 without a usable message
+ * names the owner-only rule.
+ */
+const OWNER_ONLY_FALLBACK_TEXT = "Only the business owner can change this.";
+const GENERIC_FORBIDDEN = new Set(["forbidden", "forbidden resource", "request failed"]);
+
+function saveRefusalText(res: { error: string | null; status?: number }, fallback: string): string {
+  const message = res.error?.trim() ?? "";
+  if (res.status === 403 && (!message || GENERIC_FORBIDDEN.has(message.toLowerCase()))) return OWNER_ONLY_FALLBACK_TEXT;
+  return message || fallback;
+}
+
 function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null; onSaved?: () => void }) {
   const [hours, setHours] = useState<HoursMap>(() => {
     const defaults: HoursMap = {};
@@ -79,6 +95,7 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
   });
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [loadedForBiz, setLoadedForBiz] = useState<string | null>(null);
 
   useEffect(() => {
@@ -106,6 +123,7 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
   const updateHours = useCallback((fn: (prev: HoursMap) => HoursMap) => {
     setHours(fn);
     setDirty(true);
+    setRefusal(null);
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -117,7 +135,14 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
       payload[key] = { open: hours[i].open, close: hours[i].close, closed: !hours[i].enabled };
     }
     try {
-      await updateBusiness({ businessId, businessHours: payload });
+      const res = await updateBusiness({ businessId, businessHours: payload });
+      if (res.error) {
+        const text = saveRefusalText(res, "Failed to save business hours");
+        setRefusal(text);
+        toast.error(text);
+        return;
+      }
+      setRefusal(null);
       toast.success("Business hours saved");
       setDirty(false);
       onSaved?.();
@@ -162,6 +187,17 @@ function AvailabilityHours({ businessId, onSaved }: { businessId?: string | null
           {saving ? "Saving..." : "Save Hours"}
         </button>
       </div>
+
+      {refusal && (
+        <p
+          role="alert"
+          className="flex items-center gap-1.5 text-[11px] rounded-lg px-2.5 py-1.5"
+          style={{ background: "hsl(var(--kf-error) / 0.06)", color: "hsl(var(--kf-error))" }}
+        >
+          <AlertTriangle className="w-3 h-3 shrink-0" />
+          {refusal}
+        </p>
+      )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
         {HOUR_PRESETS.map((preset) => (
