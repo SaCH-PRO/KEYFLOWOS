@@ -813,6 +813,11 @@
       "packet": "V1-96 (W10-DATA-CLEANUP-SCRIPTS)"
     },
     {
+      "prefix": "v97o_",
+      "owner": "apps/server/test/key-cortex-read-scope.integration.test.ts",
+      "packet": "V1-97 (W11-CORTEX-READ-ROUTES-SCOPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
