@@ -33,7 +33,7 @@ jobs:
 
       - name: Restore monitor state
         id: state-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .uptime-state
           key: uptime-state-v1-${{ github.run_id }}
@@ -61,7 +61,7 @@ jobs:
 
       - name: Save monitor state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .uptime-state
           key: uptime-state-v1-${{ github.run_id }}
