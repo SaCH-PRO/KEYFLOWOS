@@ -20,6 +20,7 @@ function makeStubs() {
     EXPENSE_GENERAL: { id: 'coa_exp_gen' },
     EXPENSE_OTHER: { id: 'coa_exp_other' },
     EXPENSE_MARKETING: { id: 'coa_exp_mkt' },
+    EXPENSE_PAYROLL: { id: 'coa_exp_payroll' },
   };
   const coa = {
     getBySystemKey: vi.fn(async (_b: string, key: string) => coaByKey[key] ?? null),
@@ -204,5 +205,100 @@ describe('ExpensePostingService.onProductSold', () => {
     });
     expect(r).toBeNull();
     expect(posting.post).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PR195-PORT (owner PR #195 part 2): the payroll disbursement recipe. Dr
+ * Payroll & Contractors (EXPENSE_PAYROLL, 6400) / Cr the cash-class chart row
+ * the money left, through PostingService (V1-15: one door, idempotent on
+ * PayrollRun:<id>:paid, period-checked, actor named). No FinancialAccount
+ * balance is written (V1-34: cash is the ledger's) and nothing is converted
+ * (D-13: the posting is in the run's currency, which the door holds to D-13).
+ */
+describe('ExpensePostingService.onPayrollRunPaid', () => {
+  const baseRun = {
+    id: 'pr_1',
+    businessId: 'biz_1',
+    totalGross: 8500,
+    currency: 'TTD',
+    paidAt: new Date('2026-08-31T12:00:00Z'),
+    periodStart: new Date('2026-08-01T00:00:00Z'),
+    periodEnd: new Date('2026-08-31T00:00:00Z'),
+    paymentMethod: 'bank_transfer',
+    actorId: 'u_owner',
+    notes: 'August payroll',
+  };
+
+  it('PP-01 posts Dr EXPENSE_PAYROLL / Cr BANK for a paid run, keyed PayrollRun:<id>:paid, dated paidAt, with its actor', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onPayrollRunPaid(baseRun, 'tx_client' as any);
+    expect(posting.post).toHaveBeenCalledOnce();
+    const [input, txArg] = posting.post.mock.calls[0];
+    expect(txArg).toBe('tx_client');
+    expect(input).toMatchObject({
+      businessId: 'biz_1',
+      type: 'EXPENSE',
+      sourceType: 'PayrollRun',
+      sourceId: 'pr_1',
+      kind: 'paid',
+      amount: 8500,
+      currency: 'TTD',
+      date: baseRun.paidAt,
+      createdById: 'u_owner',
+    });
+    expect(input.entries).toEqual([
+      expect.objectContaining({ accountId: 'coa_exp_payroll', debit: 8500, credit: 0 }),
+      expect.objectContaining({ accountId: 'coa_bank', debit: 0, credit: 8500 }),
+    ]);
+    // V1-34: the door is given ledger entries only; no FinancialAccount target.
+    for (const e of input.entries) expect(e).not.toHaveProperty('financialAccountId');
+  });
+
+  it('PP-02 self-heals the chart via ensureDefaults when EXPENSE_PAYROLL is missing on first lookup', async () => {
+    const { svc, posting, coa } = makeStubs();
+    let seeded = false;
+    coa.getBySystemKey = vi.fn(async (_b: string, key: string) => {
+      if (key === 'EXPENSE_PAYROLL') return seeded ? { id: 'coa_exp_payroll' } : null;
+      if (key === 'CASH') return { id: 'coa_cash' };
+      return null;
+    });
+    coa.ensureDefaults = vi.fn(async () => {
+      seeded = true;
+    });
+    await svc.onPayrollRunPaid({ ...baseRun, paymentMethod: 'cash' });
+    expect(coa.ensureDefaults).toHaveBeenCalledWith('biz_1');
+    expect(posting.post).toHaveBeenCalledOnce();
+    expect(posting.post.mock.calls[0][0].entries[0].accountId).toBe('coa_exp_payroll');
+  });
+
+  it('PP-03 skips a zero-gross run (nothing to post)', async () => {
+    const { svc, posting } = makeStubs();
+    const res = await svc.onPayrollRunPaid({ ...baseRun, totalGross: 0 });
+    expect(res).toBeNull();
+    expect(posting.post).not.toHaveBeenCalled();
+  });
+
+  it('PP-04 an explicit cash-class chart row (the payment account\'s) is credited, and the account is recorded on the posting', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onPayrollRunPaid({ ...baseRun, paymentMethod: null, paymentCoaId: 'coa_bank_custom', paymentAccountId: 'fa_bank_custom' });
+    const input = posting.post.mock.calls[0][0];
+    expect(input.entries[1]).toMatchObject({ accountId: 'coa_bank_custom', credit: 8500 });
+    expect(input.metadata).toMatchObject({ payrollRunId: 'pr_1', paymentAccountId: 'fa_bank_custom' });
+  });
+
+  it('PP-05 refuses with no chart row and no cash-class method (a card is not a disbursement account)', async () => {
+    const { svc, posting } = makeStubs();
+    await expect(svc.onPayrollRunPaid({ ...baseRun, paymentMethod: null })).rejects.toThrow(/paymentAccountId or paymentMethod/);
+    await expect(svc.onPayrollRunPaid({ ...baseRun, paymentMethod: 'credit_card' })).rejects.toThrow(/paymentAccountId or paymentMethod/);
+    expect(posting.post).not.toHaveBeenCalled();
+  });
+
+  it('PP-06 KEY: the posting is KEY\'s (system actor) and names the member it ran for as initiatedBy', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onPayrollRunPaid({ ...baseRun, actorId: 'key_ai', initiatedBy: 'u_admin' });
+    const input = posting.post.mock.calls[0][0];
+    expect(input.createdById).toBe('key_ai');
+    expect(input.metadata).toMatchObject({ initiatedBy: 'u_admin' });
   });
 });
