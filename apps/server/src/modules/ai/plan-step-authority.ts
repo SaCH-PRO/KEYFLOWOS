@@ -100,9 +100,11 @@ export function noMemberToolRefusal(toolName: string): string | null {
  *     the approver): every module scope of the tool (D-71), the OWNER for an owner-only tool and for
  *     a contact read (graphActionReadsContacts: no visibility clause bounds it with no principal;
  *     D-37), the CRM sub-permission for a contact write, D-46 for a SUPER_ADMIN who is not a member;
- *   - the business owner (an OWNER membership: owner rulings D-116, D-125) holds every module, but a
- *     tool the authority map never runs (execute_custom_logic) is refused to the owner too (KEY-R3b
- *     review SEC-R3b-2).
+ *   - the business owner (an OWNER membership: owner rulings D-116, D-125) runs every tool the
+ *     authority map does not map (D-119) and holds every module (the OWNER defaults) unless its
+ *     membership carries an explicit scope map, which binds it as it binds any member (review
+ *     SEC-W11D116K-1), but a tool the authority map never runs (execute_custom_logic) is refused to
+ *     the owner too (KEY-R3b review SEC-R3b-2).
  * A plan not of `businessId` is refused as not found.
  */
 export async function planStepRunRefusal(
@@ -205,15 +207,17 @@ async function systemPlanOwner(
  * dispatcher may take them as the run's principal. The rule the plan queue applies to a plan's member
  * (planStepRunAuthority), shared with KeyCortexActionExecutorPlugin for the member an approved
  * proposal that is no plan step runs for (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2):
- *   - the business owner holds every module (D-71) and runs every tool the authority map maps, an
- *     owner-only one included, and every tool it does not map (a dotted organ or legacy cortex tool,
- *     D-119: the owner's only), but a tool the authority map never runs (execute_custom_logic) is
- *     refused to the owner too (KEY-R3b review SEC-R3b-2). W11-D116-KEY-OWNER (owner rulings D-116,
- *     D-125): the business owner is whoever holds an OWNER membership of this business, the recorded
- *     owner (Business.ownerId) or a co-owner; Business.ownerId grants nothing on its own, and a
- *     recorded owner holding only an ADMIN or STAFF membership is that role (the next arm). The owner
- *     is a member, so the dispatcher may take them as the run's principal when asked (review
- *     CR-W4PP-2: resolveCrmAccess refuses a non-member);
+ *   - the business owner runs every tool the authority map does not map (a dotted organ or legacy
+ *     cortex tool, D-119: the owner's only), but a tool the authority map never runs
+ *     (execute_custom_logic) is refused to the owner too (KEY-R3b review SEC-R3b-2). W11-D116-KEY-OWNER
+ *     (owner rulings D-116, D-125): the business owner is whoever holds an OWNER membership of this
+ *     business, the recorded owner (Business.ownerId) or a co-owner; Business.ownerId grants nothing on
+ *     its own, and a recorded owner holding only an ADMIN or STAFF membership is that role (the next
+ *     arm). The owner is a member, so the dispatcher may take them as the run's principal when asked
+ *     (review CR-W4PP-2: resolveCrmAccess refuses a non-member). A tool the map maps is the next arm's
+ *     for the owner too (review SEC-W11D116K-1): an OWNER with no explicit scope map holds every module
+ *     there (D-71: the OWNER defaults) and every owner-only tool, and an explicit map on an OWNER
+ *     membership binds it, as ModuleScopeGuard and POST .../execute read it;
  *   - any other member: assertMayRunGraphAction with the member as the caller, either with no
  *     principal (`asPrincipal` false: the rule POST ai/plans/:planId/approve applies, so a contact read
  *     no visibility clause bounds is the OWNER's only) or as the principal (`asPrincipal`: the rule
@@ -230,11 +234,17 @@ export async function memberToolRunAuthority(
   // W11-D116-KEY-OWNER (owner rulings D-116, D-125; D-119): the owner arm is the OWNER membership, the
   // recorded owner's or a co-owner's, never Business.ownerId (D-104 had admitted the recorded owner
   // holding any membership, so one holding ADMIN ran D-119's owner-only tools).
-  const membership = await prisma.client.membership.findUnique({ where: { userId_businessId: { userId: memberId, businessId } }, select: { role: true } });
-  if (membership?.role === 'OWNER') {
-    const requirement = graphActionRequirement(toolName);
-    const refusal = requirement && 'refused' in requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
-    return { refusal, principal: !!options.asPrincipal };
+  // Review SEC-W11D116K-1 (D-125, D-71): the owner arm takes only a tool the authority map does not map
+  // (D-119: the owner's only) or never runs. A mapped tool goes through assertMayRunGraphAction below,
+  // so an OWNER membership's explicit permissionScopes map binds it there as ModuleScopeGuard and POST
+  // .../execute read it; an OWNER with no map holds every module (the OWNER defaults), as before.
+  const requirement = graphActionRequirement(toolName);
+  if (!requirement || 'refused' in requirement) {
+    const membership = await prisma.client.membership.findUnique({ where: { userId_businessId: { userId: memberId, businessId } }, select: { role: true } });
+    if (membership?.role === 'OWNER') {
+      const refusal = requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
+      return { refusal, principal: !!options.asPrincipal };
+    }
   }
   const user = await prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
   try {

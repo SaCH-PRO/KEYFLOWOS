@@ -477,6 +477,94 @@ describe('W11-D116-KEY-OWNER (D-116, D-119, D-125): memberToolRunAuthority — t
   });
 });
 
+/**
+ * W11-D116-KEY-OWNER review SEC-W11D116K-1 (owner rulings D-125, D-116, D-71, D-119): the owner arm
+ * of memberToolRunAuthority took any OWNER membership past assertMayRunGraphAction, so an OWNER
+ * membership's explicit permissionScopes map (writable onto a co-owner through POST structure
+ * assignments: StructureService.writeCopy) no longer bound it on the plan queue, the proposal executor
+ * or KEY chat's tool calls, while ModuleScopeGuard, POST .../execute and D-98's revenue gate still read
+ * it. At the packet's base the co-owner went through assertMayRunGraphAction and was refused. A mapped
+ * tool goes through assertMayRunGraphAction for every member (an OWNER with no map holds every module
+ * there, the OWNER defaults); only a tool the map does not map (D-119: the owner's only) is the owner
+ * arm's. D-125: the recorded owner's OWNER membership is read the same way (Business.ownerId grants
+ * nothing on its own).
+ *
+ * FIXTURES: bizM, Business.ownerId = recM; recM and coM each hold an OWNER membership whose explicit
+ * map is SCOPED_MAP (revenue none, crm read, expenses none, ai write). Created here, removed by the
+ * suite's prefix cleanup.
+ */
+describe('W11-D116-KEY-OWNER review SEC-W11D116K-1 (D-125, D-116, D-71, D-119): an OWNER membership\'s explicit scope map binds it on KEY\'s mapped tools', () => {
+  const M = { bizM: `${P}bizM`, recM: `${P}recM`, coM: `${P}coM`, planCo: `${P}bizM_plan_co`, planRec: `${P}bizM_plan_rec` };
+  const SCOPED_MAP = { revenue: 'none', crm: 'read', expenses: 'none', ai: 'write' };
+  /** Mapped tools SCOPED_MAP does not reach, and the refusal assertMayRunGraphAction gives each. */
+  const OUT_OF_MAP: ReadonlyArray<readonly [string, string]> = [
+    ['commerce_mark_invoice_paid', 'Insufficient permissions: revenue requires write access (you have none)'],
+    ['expenses_create', 'Insufficient permissions: expenses requires write access (you have none)'],
+    [OWNER_ONLY_TOOL, 'Insufficient permissions: crm requires write access (you have read)'],
+  ];
+  /** A mapped contact read SCOPED_MAP reaches (crm read; with no principal the OWNER's only, D-37). */
+  const IN_MAP_TOOL = 'crm_list_contacts';
+
+  beforeAll(async () => {
+    for (const id of [M.recM, M.coM]) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: M.bizM, name: `${M.bizM}-name`, ownerId: M.recM } });
+    for (const userId of [M.recM, M.coM]) {
+      await db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}`, userId, businessId: M.bizM, role: 'OWNER', permissionScopes: SCOPED_MAP } });
+    }
+    for (const [id, userId] of [[M.planCo, M.coM], [M.planRec, M.recM]] as const) {
+      await db.aiPlan.create({ data: { id, businessId: M.bizM, userId, objective: `v97x ${id}`, status: 'approved' } });
+    }
+  });
+
+  it('fixture sanity: bizM is recorded as recM\'s; recM and coM each hold an OWNER membership carrying the explicit map', async () => {
+    expect(await db.business.findUnique({ where: { id: M.bizM }, select: { ownerId: true } })).toEqual({ ownerId: M.recM });
+    const rows = await db.membership.findMany({ where: { businessId: M.bizM }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
+    expect(rows).toEqual([
+      { userId: M.coM, role: 'OWNER', permissionScopes: SCOPED_MAP },
+      { userId: M.recM, role: 'OWNER', permissionScopes: SCOPED_MAP },
+    ]);
+  });
+
+  it('RED-BEFORE (review SEC-W11D116K-1; D-125, D-71): the co-owner whose OWNER membership carries an explicit map is refused the mapped tools the map does not reach, with or without the principal (was admitted: null)', async () => {
+    for (const [tool, refusal] of OUT_OF_MAP) {
+      for (const asPrincipal of [false, true]) {
+        expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, tool, { asPrincipal }), `${tool} asPrincipal ${asPrincipal}`).toEqual({ refusal, principal: false });
+      }
+    }
+  });
+
+  it('RED-BEFORE (review SEC-W11D116K-1; D-125: Business.ownerId grants nothing on its own): the recorded owner whose OWNER membership carries the same map is held to it as the co-owner is', async () => {
+    for (const [tool, refusal] of OUT_OF_MAP) {
+      expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.recM, tool), tool).toEqual({ refusal, principal: false });
+    }
+  });
+
+  it('RED-BEFORE (review SEC-W11D116K-1): the plan queue (planStepRunRefusal) refuses a revenue write step of a plan either scoped owner created', async () => {
+    const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
+    for (const planId of [M.planCo, M.planRec]) {
+      expect(await planStepRunRefusal(prismaSvc, M.bizM, planId, 'commerce_mark_invoice_paid'), planId).toBe(OUT_OF_MAP[0][1]);
+    }
+  });
+
+  it('control (D-119, D-125, D-71): the scoped co-owner still runs the unmapped dotted tool (the owner\'s only) and a mapped tool its map reaches, as the principal when asked; a tool the map never runs stays refused', async () => {
+    for (const tool of [UNMAPPED_TOOL, IN_MAP_TOOL]) {
+      expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, tool), tool).toEqual({ refusal: null, principal: false });
+      expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, tool, { asPrincipal: true }), tool).toEqual({ refusal: null, principal: true });
+    }
+    expect(String((await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
+  });
+
+  it('control (D-125, D-71): an OWNER membership with no explicit map (the co-owner of bizA, the recorded owner of bizO) still runs every mapped tool the scoped owners are refused (the OWNER defaults)', async () => {
+    for (const [businessId, userId] of [[ID.bizA, ID.coOwner], [ID.bizO, ID.ownerO]] as const) {
+      for (const [tool] of OUT_OF_MAP) {
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool), `${userId} ${tool}`).toEqual({ refusal: null, principal: false });
+      }
+    }
+  });
+});
+
 describe('W11-D116-KEY-OWNER (D-116, D-125): PUT agent/triggers — owner-run default rules and schedules are the OWNER membership\'s', () => {
   it('RED-BEFORE (D-116): the recorded owner holding ADMIN switching on or editing bizA\'s owner-run default rule is 403 AGENT_TRIGGER_OWNER_ONLY and the rule is byte-identical', async () => {
     await resetTriggers();
