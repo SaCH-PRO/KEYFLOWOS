@@ -101,6 +101,21 @@ function makeService(overrides: {
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
       business: {
         findUnique: vi.fn().mockResolvedValue(overrides.business ?? {}),
+        // The owner rule's recorded-owner lookup (isProfileOwner): the business's ownerId, and,
+        // owner rulings D-104 and D-116, the members filter honoured against the caller's
+        // membership (its role too, when the filter names one).
+        findFirst: vi.fn(async (args: { where?: { ownerId?: string; members?: { some?: { userId?: string; role?: string } } } }) => {
+          const where = args?.where ?? {};
+          const business = (overrides.business ?? {}) as { ownerId?: string };
+          if (!where.ownerId || business.ownerId !== where.ownerId) return null;
+          const some = where.members?.some;
+          if (some) {
+            const membership = overrides.membership === undefined ? { role: 'OWNER' } : overrides.membership;
+            if (!membership || some.userId !== where.ownerId) return null;
+            if (some.role !== undefined && membership.role !== some.role) return null;
+          }
+          return { id: 'biz_1' };
+        }),
         update: vi.fn().mockResolvedValue({}),
       },
       product: {
@@ -416,8 +431,22 @@ describe('OnboardingConciergeService', () => {
       expectRefused(error, prisma, demoSeeder);
     });
 
+    // Owner rulings D-104 and D-116 (2026-11-12): the recorded owner (Business.ownerId) is the
+    // owner only with an OWNER membership; with none, or holding STAFF or ADMIN, they are that
+    // role (none: not a member) and completion is refused (F-17: the ownerId arm admitted them).
     it.each([
-      ['the business owner (ownerId, no membership row)', { business: { ...minimalProfile, ownerId: 'user_x' }, membership: null }],
+      ['the recorded owner (Business.ownerId) with no membership row', null],
+      ['the recorded owner (Business.ownerId) holding STAFF', { role: 'STAFF', permissionScopes: null }],
+      ['the recorded owner (Business.ownerId) holding ADMIN granted settings:admin', { role: 'ADMIN', permissionScopes: { settings: 'admin' } }],
+    ])('ST-R032-1 (owner rulings D-104, D-116): %s is refused before anything is written', async (_label, membership) => {
+      const { service, prisma, demoSeeder, tx } = makeService({ business: { ...minimalProfile, ownerId: 'user_x' }, membership });
+      const error = await asUser('user_x', () => service.markOnboardingComplete('biz_1')).catch((e: unknown) => e);
+      expectRefused(error, prisma, demoSeeder);
+      expect(tx.business.updateMany).not.toHaveBeenCalled();
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
       ['an OWNER membership', { business: minimalProfile, membership: { role: 'OWNER', permissionScopes: { settings: 'none' } } }],
       ['a SUPER_ADMIN without a membership (platform bypass, as BusinessGuard)', { business: minimalProfile, membership: null, userRole: 'SUPER_ADMIN' }],
       ['a SUPER_ADMIN who is a STAFF member with settings none (platform bypass)', { business: minimalProfile, membership: { role: 'STAFF', permissionScopes: { settings: 'none' } }, userRole: 'SUPER_ADMIN' }],

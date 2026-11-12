@@ -947,7 +947,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
 });
 
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis and onboarding completion\'s ownerId arm, and the informational reads that grant nothing', () => {
+  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis (onboarding completion\'s ownerId arm removed by owner ruling D-116), and the informational reads that grant nothing', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -974,11 +974,9 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       // action-001-real-db manifest and its negative control
       // NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES; aligning it changes both.
       ['modules/key-autonomy/action-boundary/control-clearance.ts: ownerId compared to the caller', 'referred: ACTION-001 manifests'],
-      // Referred (W10-OWNER-MEMBERSHIP deviation): resolveCompletionActor runs
-      // only under a tenant context TenantInterceptor verified (a Membership
-      // since D-104, or SUPER_ADMIN); its ownerId arm is pinned by
-      // release0-edited-suites (onboarding-concierge.service.spec ST-R032-1).
-      ['modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId compared to the caller', 'referred: release0-edited-suites'],
+      // (W11-D116-PROFILE-OWNER, owner ruling D-116: onboarding completion's
+      // ownerId arm is gone; resolveCompletionActor asks isProfileOwner, so it
+      // has no entry here.)
       // Informational (review OMV-3), none grants anything on ownerId alone:
       // checkSlugAvailability's `existing.ownerId === userId` only answers
       // { available: true, ownedByYou: true } on the slug route; writing a slug

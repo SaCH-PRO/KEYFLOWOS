@@ -126,12 +126,16 @@ describe('SettingsAdapterService', () => {
  *
  * This block runs the REAL IdentityService.assertBusinessOwner (updateBusiness
  * is a spy) over a Prisma stand-in holding one business: an OWNER membership,
- * an ADMIN and a STAFF member, an ownerId owner with no membership, and a
- * SUPER_ADMIN with none.
+ * an ADMIN and a STAFF member, the recorded owner (Business.ownerId) holding an
+ * ADMIN membership (or, in one case, none), and a SUPER_ADMIN with none. The
+ * stand-in honours the recorded-owner lookup's members filter, its role
+ * included (owner rulings D-104, D-116).
  */
 describe('SettingsAdapterService — the D-11 owner rule on the command actor (R0-09c, review CR-3)', () => {
   const BIZ = 'biz_d11';
-  const MEMBERSHIPS: Record<string, string> = { owner_member: 'OWNER', admin_member: 'ADMIN', staff_member: 'STAFF' };
+  // Owner ruling D-116: the recorded owner (owner_by_id, Business.ownerId) holds only an ADMIN membership.
+  const SEEDED_MEMBERSHIPS: Record<string, string> = { owner_member: 'OWNER', admin_member: 'ADMIN', staff_member: 'STAFF', owner_by_id: 'ADMIN' };
+  let MEMBERSHIPS: Record<string, string>;
   const USERS: Record<string, string> = {
     owner_member: 'USER', admin_member: 'USER', staff_member: 'USER', owner_by_id: 'USER', outsider: 'USER', platform: 'SUPER_ADMIN',
   };
@@ -149,6 +153,7 @@ describe('SettingsAdapterService — the D-11 owner rule on the command actor (R
   const BRANDING = { primaryColor: '#ff0000', logoUrl: 'https://x.test/hijack.png', emailSignature: 'hijack' };
 
   beforeEach(() => {
+    MEMBERSHIPS = { ...SEEDED_MEMBERSHIPS };
     prisma = {
       client: {
         membership: {
@@ -159,7 +164,13 @@ describe('SettingsAdapterService — the D-11 owner rule on the command actor (R
           findFirst: vi.fn(),
         },
         business: {
-          findFirst: vi.fn(async ({ where }: any) => (where.id === BIZ && where.ownerId === 'owner_by_id' ? { id: BIZ } : null)),
+          // Business.ownerId is owner_by_id; the members filter is honoured, its role included (D-104, D-116).
+          findFirst: vi.fn(async ({ where }: any) => {
+            if (where.id !== BIZ || where.ownerId !== 'owner_by_id') return null;
+            const some = where.members?.some;
+            if (some && (!MEMBERSHIPS[some.userId] || (some.role !== undefined && MEMBERSHIPS[some.userId] !== some.role))) return null;
+            return { id: BIZ };
+          }),
         },
         user: {
           findUnique: vi.fn(async ({ where }: any) => (USERS[where.id] ? { role: USERS[where.id] } : null)),
@@ -204,13 +215,22 @@ describe('SettingsAdapterService — the D-11 owner rule on the command actor (R
       }
     });
 
-    it(`the OWNER (membership), the ownerId owner and SUPER_ADMIN pass the rule and ${action} reaches updateBusiness`, async () => {
-      for (const actor of ['owner_member', 'owner_by_id', 'platform']) {
+    it(`the OWNER (membership) and SUPER_ADMIN pass the rule and ${action} reaches updateBusiness; the recorded owner (Business.ownerId) with no membership or only an ADMIN membership is refused and updateBusiness is not called (owner rulings D-104, D-116)`, async () => {
+      for (const actor of ['owner_member', 'platform']) {
         const result = await service.execute(cmd(action, actor, parameters));
         expect(result.success, actor).toBe(true);
       }
-      expect(updateBusiness).toHaveBeenCalledTimes(3);
+      expect(updateBusiness).toHaveBeenCalledTimes(2);
       for (const [businessId] of updateBusiness.mock.calls) expect(businessId).toBe(BIZ);
+
+      // Owner ruling D-116: the recorded owner holding only ADMIN is an ADMIN; with no membership row, no member.
+      updateBusiness.mockClear();
+      const asAdmin = await service.execute(cmd(action, 'owner_by_id', parameters));
+      expect(asAdmin, 'the recorded owner holding ADMIN').toMatchObject({ success: false, error: OWNER_ONLY });
+      delete MEMBERSHIPS.owner_by_id;
+      const asNone = await service.execute(cmd(action, 'owner_by_id', parameters));
+      expect(asNone, 'the recorded owner with no membership').toMatchObject({ success: false, error: OWNER_ONLY });
+      expect(updateBusiness).not.toHaveBeenCalled();
     });
   }
 
