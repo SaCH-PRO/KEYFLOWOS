@@ -941,7 +941,7 @@ describe('W11A-SEAM-REPAIR (D-128, D-100, D-131): the KEY genome organ tools ser
       [KEY.staffSettings, 'STAFF', { settings: 'read', revenue: 'none' }],
       [KEY.staffSettingsRev, 'STAFF', { settings: 'read', revenue: 'read' }],
     ] as const) {
-      await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
       await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.biz, role, permissionScopes } });
     }
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
