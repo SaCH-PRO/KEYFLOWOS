@@ -474,8 +474,10 @@ export class OnboardingConciergeService {
     });
     if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
       select: { id: true },
     });
     return !!owned;
@@ -1259,10 +1261,10 @@ EXTRACTED: archetype=service_provider`;
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { ownerId: true, onboardingComplete: true, onboardingCompletedAt: true, name: true, currency: true, timezone: true },
+      select: { onboardingComplete: true, onboardingCompletedAt: true, name: true, currency: true, timezone: true },
     });
 
-    const actorId = await this.resolveCompletionActor(businessId, business?.ownerId);
+    const actorId = await this.resolveCompletionActor(businessId);
 
     if (business?.onboardingComplete && business?.onboardingCompletedAt) {
       return { complete: true, alreadyComplete: true };
@@ -1312,10 +1314,12 @@ EXTRACTED: archetype=service_provider`;
    * settings:admin admits no ADMIN or STAFF member (this replaces review
    * ST-R032-1's owner-or-settings:write rule).
    *
-   * The owner is the distinguished owner (Business.ownerId) or the OWNER
-   * membership: the two arms BusinessGuard admits an owner by. A SUPER_ADMIN
-   * keeps the platform bypass BusinessGuard already grants it; nothing here
-   * widens that.
+   * The owner is the profile owner isProfileOwner decides (owner rulings
+   * D-116 / D-125, W11-D116-PROFILE-OWNER): an OWNER membership of this
+   * business, the recorded owner (Business.ownerId) only when they hold one
+   * (holding only ADMIN or STAFF they are that role, review F-17), and a
+   * SUPER_ADMIN on the platform bypass BusinessGuard already grants it;
+   * nothing here widens that.
    *
    * This guards POST /complete. The profile PATCH
    * (PATCH /identity/businesses/:businessId) used to let any member write
@@ -1332,26 +1336,15 @@ EXTRACTED: archetype=service_provider`;
    * request; with no request context, or one for another business, completion
    * fails closed.
    */
-  private async resolveCompletionActor(businessId: string, ownerId: string | null | undefined): Promise<string> {
+  private async resolveCompletionActor(businessId: string): Promise<string> {
     const context = getTenantContext();
     const actorId = context?.businessId === businessId ? context.userId : undefined;
     if (!actorId) throw this.completionForbidden();
-    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review CR-W10OM-2): the actor is the
-    // user TenantInterceptor verified for this business (a Membership, or SUPER_ADMIN),
-    // so this arm admits no member-less owner over HTTP. Left as is: pinned by
-    // release0-edited-suites (ST-R032-1); a census exception in owner-membership-backfill OMB-09.
-    if (ownerId && ownerId === actorId) return actorId;
-
-    const [membership, user] = await Promise.all([
-      this.prisma.client.membership.findUnique({
-        where: { userId_businessId: { userId: actorId, businessId } },
-        select: { role: true },
-      }),
-      this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } }),
-    ]);
-
-    if (user?.role === 'SUPER_ADMIN') return actorId;
-    if (membership?.role === 'OWNER') return actorId;
+    // Owner ruling D-116 (W11-D116-PROFILE-OWNER, review F-17): the recorded-owner arm that admitted
+    // Business.ownerId with any membership or none is gone; the owner rule is isProfileOwner's, on the
+    // actor with the role its User row holds (the SUPER_ADMIN bypass).
+    const user = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+    if (await this.isProfileOwner(businessId, { id: actorId, role: user?.role })) return actorId;
     throw this.completionForbidden();
   }
 

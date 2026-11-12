@@ -78,8 +78,10 @@ export class TemplatesService {
     });
     if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+      // holding only ADMIN or STAFF is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
       select: { id: true },
     });
     return !!owned;
