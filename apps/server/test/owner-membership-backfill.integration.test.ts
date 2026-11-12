@@ -951,7 +951,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
 });
 
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis (onboarding completion\'s ownerId arm removed by owner ruling D-116), and the informational reads that grant nothing', () => {
+  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the informational reads that grant nothing (onboarding completion\'s ownerId arm removed by owner ruling D-116; the ACTION-001 principal basis aligned by W11-ACTION-BOUNDARY-OWNER-ARM under D-104/D-125)', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -973,11 +973,10 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
     const EXCEPTIONS: Array<[string, string]> = [
       // Classifies businesses for the KF-EXEC-TENANT-001 repair report; it grants nothing.
       ['modules/identity/founding-membership.service.ts: ownerId compared to the caller', 'repair classifier, no access decision'],
-      // Referred (W10-OWNER-MEMBERSHIP deviation): ACTION-001's principal basis
-      // 'owner_without_membership' (approval tier 0) is pinned by the
-      // action-001-real-db manifest and its negative control
-      // NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES; aligning it changes both.
-      ['modules/key-autonomy/action-boundary/control-clearance.ts: ownerId compared to the caller', 'referred: ACTION-001 manifests'],
+      // (W11-ACTION-BOUNDARY-OWNER-ARM, owner rulings D-104, D-116, D-125: the
+      // KEY action boundary's 'owner_without_membership' principal basis is
+      // retired; resolvePrincipalAuthority answers a member-less owner 'none',
+      // so control-clearance.ts has no entry here.)
       // (W11-D116-PROFILE-OWNER, owner ruling D-116: onboarding completion's
       // ownerId arm is gone; resolveCompletionActor asks isProfileOwner, so it
       // has no entry here.)

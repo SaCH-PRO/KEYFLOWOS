@@ -326,31 +326,92 @@ describe('P4 — revocation or demotion before claim admission yields zero ticke
     expect(await fx.tickets(ID.bizA)).toHaveLength(0);
   });
 
+  // W11-ACTION-BOUNDARY-OWNER-ARM (owner rulings D-104, D-116, D-125): the
+  // recorded owner field grants nothing on its own. bizBare's owner is recorded
+  // only as Business.ownerId and holds no Membership row, so on the KEY action
+  // boundary they are anyone else, as BusinessGuard already treats them.
   describe('the owner with no Membership row', () => {
-    it('may request and confirm, as BusinessGuard lets them act', async () => {
+    it('is refused at the boundary (D-104): prepare answers DENY PRINCIPAL_NOT_AUTHORIZED, nothing can be confirmed, and no ticket is created', async () => {
+      const prepared = await fx.boundary.prepare(ID.bizBare, TOOL, { title: 'Owner ticket' }, chat(ID.bareOwner));
+      expect(prepared.disposition).toBe('DENIED');
+      expect(prepared.requirement).toMatchObject({ kind: 'DENY', code: 'PRINCIPAL_NOT_AUTHORIZED' });
+      // Nothing was recorded, so there is no action to confirm.
+      expect(prepared.actionId).toBeNull();
+      expect(await fx.actions(ID.bizBare)).toHaveLength(0);
+
+      // Not at the most permissive autonomy either: KEY autonomy is not authority.
+      await fx.db.autopilotSettings.create({
+        data: { businessId: ID.bizBare, autonomyLevel: 4, blockedTools: [], approvedTools: [TOOL] },
+      });
+      const err = await expectRefused(
+        fx.boundary.executeFromTool(ID.bizBare, TOOL, { title: 'Owner ticket' }, chat(ID.bareOwner)),
+        'PRINCIPAL_NOT_AUTHORIZED',
+      );
+      expect(err.disposition).toBe('DENIED');
+      expect(err.actionId).toBeNull();
+      expect(await fx.actions(ID.bizBare)).toHaveLength(0);
+      expect(await fx.claims(ID.bizBare)).toHaveLength(0);
+      expect(await fx.tickets(ID.bizBare)).toHaveLength(0);
+    });
+
+    it('cannot approve a proposal nobody requested: no authority in this business (D-104)', async () => {
+      const prepared = await fx.boundary.prepare(ID.bizBare, TOOL, { title: 'From the queue' }, { surface: 'PLAN_QUEUE' });
+      expect(prepared.disposition).toBe('AWAITING_APPROVAL');
+      await expect(fx.boundary.recordEvidence(ID.bizBare, prepared.actionId, ID.bareOwner)).rejects.toThrow(
+        /You have no authority in this business/,
+      );
+      expect((await fx.action(prepared.actionId)).control_evidence).toBeNull();
+      expect(await fx.tickets(ID.bizBare)).toHaveLength(0);
+    });
+
+    it('a confirmation stored under the retired owner_without_membership basis is refused at admission: PRINCIPAL_NOT_AUTHORIZED, zero tickets', async () => {
+      // The row the retired arm produced: the member-less owner's own chat
+      // request, waiting on their confirmation. A short-lived OWNER Membership
+      // records it; it is gone before the legacy evidence is stored.
+      const mTemp = `${fx.P}m_bare_temp`;
+      await fx.db.membership.create({ data: { id: mTemp, userId: ID.bareOwner, businessId: ID.bizBare, role: 'OWNER' } });
       const prepared = await fx.boundary.prepare(ID.bizBare, TOOL, { title: 'Owner ticket' }, chat(ID.bareOwner));
       expect(prepared.requirement).toMatchObject({ kind: 'PRINCIPAL_CONFIRMATION', principalUserId: ID.bareOwner });
-      await fx.boundary.confirmAndExecute(ID.bizBare, prepared.actionId, ID.bareOwner);
+      await fx.db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = '${mTemp}'`);
 
-      const row = await fx.action(prepared.actionId);
-      expect(row.control_evidence.assumptions).toEqual({ basis: 'owner_without_membership', membershipId: null, approvalTier: 0 });
-      expect(await fx.tickets(ID.bizBare)).toHaveLength(1);
-    });
-
-    it('cannot approve a proposal nobody requested: approval needs a Membership tier', async () => {
-      const prepared = await fx.boundary.prepare(ID.bizBare, TOOL, { title: 'From the queue' }, { surface: 'PLAN_QUEUE' });
-      await expect(fx.boundary.recordEvidence(ID.bizBare, prepared.actionId, ID.bareOwner)).rejects.toThrow(/approval tier 2 or higher/);
-      expect(await fx.tickets(ID.bizBare)).toHaveLength(0);
-    });
-
-    it('ownership transferred after they confirmed yields zero tickets', async () => {
-      const prepared = await fx.boundary.prepare(ID.bizBare, TOOL, { title: 'Owner ticket' }, chat(ID.bareOwner));
-      await fx.boundary.recordEvidence(ID.bizBare, prepared.actionId, ID.bareOwner);
-      await fx.db.$executeRawUnsafe(`UPDATE businesses SET owner_id = '${ID.owner}' WHERE id = '${ID.bizBare}'`);
+      // The confirmation exactly as the retired arm stored it.
+      const recorded = await fx.action(prepared.actionId);
+      const now = Date.now();
+      const expiresAt = new Date(now + 10 * 60 * 1000);
+      const legacy = {
+        v: 1,
+        kind: 'CONFIRMATION',
+        fingerprint: recorded.action_fingerprint,
+        principalUserId: ID.bareOwner,
+        issuedAt: new Date(now).toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        assumptions: { basis: 'owner_without_membership', membershipId: null, approvalTier: 0 },
+      };
+      await fx.db.keyActionProposal.update({
+        where: { id: prepared.actionId },
+        data: {
+          status: 'APPROVED',
+          approvedBy: ID.bareOwner,
+          approvedAt: new Date(now),
+          resolvedByUserId: ID.bareOwner,
+          controlEvidence: legacy as any,
+          evidenceExpiresAt: expiresAt,
+        },
+      });
+      expect((await fx.action(prepared.actionId)).control_evidence.assumptions.basis).toBe('owner_without_membership');
 
       await expectRefused(fx.boundary.admit(ID.bizBare, prepared.actionId, { executedBy: ID.bareOwner }), 'PRINCIPAL_NOT_AUTHORIZED');
+      expect((await fx.action(prepared.actionId)).status).not.toBe('EXECUTED');
       expect(await fx.tickets(ID.bizBare)).toHaveLength(0);
     });
+  });
+
+  it('a STAFF member below the capability tier cannot approve a proposal nobody requested: approval needs the capability tier', async () => {
+    const prepared = await fx.boundary.prepare(ID.bizA, TOOL, { title: 'From the queue' }, { surface: 'PLAN_QUEUE' });
+    expect(prepared.requirement).toMatchObject({ kind: 'HUMAN_APPROVAL', minApprovalTier: 2 });
+    await expect(fx.boundary.recordEvidence(ID.bizA, prepared.actionId, ID.staff)).rejects.toThrow(/approval tier 2 or higher/);
+    expect((await fx.action(prepared.actionId)).control_evidence).toBeNull();
+    expect(await fx.tickets(ID.bizA)).toHaveLength(0);
   });
 
   it('SUPER_ADMIN may approve without a Membership, and loses that with the role', async () => {
