@@ -2,11 +2,13 @@ import { ForbiddenException } from '@nestjs/common';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
+import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import {
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
   graphActionReadsContacts,
   graphActionRequirement,
+  isExplicitScopeMap,
 } from './graph-actions.controller';
 
 /**
@@ -103,7 +105,9 @@ export function noMemberToolRefusal(toolName: string): string | null {
  *   - the business owner (an OWNER membership: owner rulings D-116, D-125) runs every tool the
  *     authority map does not map (D-119) and holds every module (the OWNER defaults) unless its
  *     membership carries an explicit scope map, which binds it as it binds any member (review
- *     SEC-W11D116K-1), but a tool the authority map never runs (execute_custom_logic) is refused to
+ *     SEC-W11D116K-1); with no such map it also runs every mapped KEY organ (dotted) tool, the
+ *     connector reads whose connect read no role default holds included (W11A-SEAM-REPAIR, D-131
+ *     binds members), but a tool the authority map never runs (execute_custom_logic) is refused to
  *     the owner too (KEY-R3b review SEC-R3b-2).
  * A plan not of `businessId` is refused as not found.
  */
@@ -217,7 +221,11 @@ async function systemPlanOwner(
  *     (review CR-W4PP-2: resolveCrmAccess refuses a non-member). A tool the map maps is the next arm's
  *     for the owner too (review SEC-W11D116K-1): an OWNER with no explicit scope map holds every module
  *     there (D-71: the OWNER defaults) and every owner-only tool, and an explicit map on an OWNER
- *     membership binds it, as ModuleScopeGuard and POST .../execute read it;
+ *     membership binds it, as ModuleScopeGuard and POST .../execute read it. W11A-SEAM-REPAIR (D-119,
+ *     D-131): the exception is a mapped KEY organ (dotted) tool, which an OWNER with no explicit map runs
+ *     in this arm, as it ran every dotted tool before D-131 mapped them: the OWNER defaults hold no
+ *     connect (no role default does), so through the next arm the owner alone would be refused the
+ *     connector reads D-131 opens to members holding connect read;
  *   - any other member: assertMayRunGraphAction with the member as the caller, either with no
  *     principal (`asPrincipal` false: the rule POST ai/plans/:planId/approve applies, so a contact read
  *     no visibility clause bounds is the OWNER's only) or as the principal (`asPrincipal`: the rule
@@ -238,12 +246,30 @@ export async function memberToolRunAuthority(
   // (D-119: the owner's only) or never runs. A mapped tool goes through assertMayRunGraphAction below,
   // so an OWNER membership's explicit permissionScopes map binds it there as ModuleScopeGuard and POST
   // .../execute read it; an OWNER with no map holds every module (the OWNER defaults), as before.
+  //
+  // W11A-SEAM-REPAIR (seam of C0 W11-D116-KEY-OWNER x B1 W11-KEY-ORGAN-AUTHORITY-MAP; D-119, D-125, D-131, D-71):
+  // a mapped KEY organ (dotted) tool is the owner arm's too while the OWNER membership carries no explicit scope
+  // map. D-119 made every dotted tool the owner's; D-131's entries open them to members and take none from the
+  // owner. B1 maps the KEY connector reads to connect read, which no role default holds (the OWNER defaults
+  // included: module-vocabulary CONNECT_DEFAULT), so through assertMayRunGraphAction the owner was refused them
+  // while running the far wider unmapped key_connector.execute_internal. For an OWNER with no map every other
+  // check there passes for any organ tool (owner-only, the CRM sub-permission, the proposer), so connect is the
+  // only difference. An explicit map on an OWNER membership still binds it on every mapped tool, organ tools
+  // included (review SEC-W11D116K-1 stays closed), and a FLOW tool keeps assertMayRunGraphAction's answer, which
+  // POST .../execute and ModuleScopeGuard give the owner too.
   const requirement = graphActionRequirement(toolName);
-  if (!requirement || 'refused' in requirement) {
-    const membership = await prisma.client.membership.findUnique({ where: { userId_businessId: { userId: memberId, businessId } }, select: { role: true } });
+  const organ = keyOrganToolAuthority(toolName) !== null;
+  if (!requirement || 'refused' in requirement || organ) {
+    const membership = await prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: memberId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
     if (membership?.role === 'OWNER') {
-      const refusal = requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
-      return { refusal, principal: !!options.asPrincipal };
+      if (!requirement || 'refused' in requirement) {
+        const refusal = requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
+        return { refusal, principal: !!options.asPrincipal };
+      }
+      if (!isExplicitScopeMap(membership.permissionScopes)) return { refusal: null, principal: !!options.asPrincipal };
     }
   }
   const user = await prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });

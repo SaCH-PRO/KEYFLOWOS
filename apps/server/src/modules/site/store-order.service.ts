@@ -243,10 +243,13 @@ export class StoreOrderService {
     @Optional() @Inject(forwardRef(() => CommerceService)) private readonly commerce?: CommerceService,
     /**
      * W11-SHIPPING-EXPENSE-ONCE (D-126): resolves CommerceIntegrationService (MarketplaceModule, which SiteModule does
-     * not import) when a SHIPPED marking books the order's shipping fee. Optional and last, so the positional unit
-     * constructions still build; without it nothing is booked and a warning is logged.
+     * not import) when a SHIPPED marking books the order's shipping fee. W11A-SEAM-REPAIR: ModuleRef is a Nest
+     * framework provider every module resolves, so it is injected without @Optional() (it is never undefined under
+     * Nest, and phantom-injection.spec.ts holds every @Optional() injection to a registered provider). The parameter
+     * stays optional in TypeScript and last only so the positional unit constructions still build; without it
+     * nothing is booked and a warning is logged.
      */
-    @Optional() @Inject(ModuleRef) private readonly moduleRef?: ModuleRef,
+    @Inject(ModuleRef) private readonly moduleRef?: ModuleRef,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {

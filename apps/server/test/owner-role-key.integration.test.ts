@@ -101,6 +101,9 @@ const UNMAPPED_TOOL = 'cortex.execute_tool';
 const REFUSED_TOOL = 'execute_custom_logic';
 const OWNER_ONLY_REFUSAL = /^Tool "crm_update_contact" is executed from here only for the business owner: /;
 const UNMAPPED_REFUSAL = 'Tool "cortex.execute_tool" is mapped to no module scope, so it is not executed from this route';
+/** W11A-SEAM-REPAIR: the KEY connector reads B1 maps to connect read (D-131), which no role default holds. */
+const KEY_CONNECTOR_READS = ['key_connector.list_providers', 'key_connector.list_connections', 'key_connector.check_health'] as const;
+const CONNECT_READ_REFUSAL = 'Insufficient permissions: connect requires read access (you have none)';
 
 /** The profile each tenant holds before every autonomy case: the kill switch on, a tier ceiling of 3. */
 const BASELINE_PROFILE = { globalKillSwitch: true, maxDailyAutoActions: 10, maxDailySpendTtd: 0, maxTierWithoutApproval: 3, notifyOnBlock: true };
@@ -560,6 +563,63 @@ describe('W11-D116-KEY-OWNER review SEC-W11D116K-1 (D-125, D-116, D-71, D-119): 
     for (const [businessId, userId] of [[ID.bizA, ID.coOwner], [ID.bizO, ID.ownerO]] as const) {
       for (const [tool] of OUT_OF_MAP) {
         expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool), `${userId} ${tool}`).toEqual({ refusal: null, principal: false });
+      }
+    }
+  });
+
+  it('W11A-SEAM-REPAIR control (SEC-W11D116K-1 stays closed for organ tools; D-125, D-131): the scoped recorded owner and co-owner (explicit map: no connect, revenue none) are refused the three KEY connector reads and temporal_flow.list_events, with or without the principal, and run cortex.create_task (ai write in their map)', async () => {
+    for (const userId of [M.recM, M.coM]) {
+      for (const asPrincipal of [false, true]) {
+        for (const tool of KEY_CONNECTOR_READS) {
+          expect(await memberToolRunAuthority(prismaSvc, M.bizM, userId, tool, { asPrincipal }), `${userId} ${tool} asPrincipal ${asPrincipal}`).toEqual({ refusal: CONNECT_READ_REFUSAL, principal: false });
+        }
+        expect(await memberToolRunAuthority(prismaSvc, M.bizM, userId, 'temporal_flow.list_events', { asPrincipal }), `${userId} asPrincipal ${asPrincipal}`).toEqual({
+          refusal: 'Insufficient permissions: revenue requires read access (you have none)',
+          principal: false,
+        });
+        expect(await memberToolRunAuthority(prismaSvc, M.bizM, userId, 'cortex.create_task', { asPrincipal }), `${userId} asPrincipal ${asPrincipal}`).toEqual({ refusal: null, principal: asPrincipal });
+      }
+    }
+  });
+});
+
+/**
+ * W11A-SEAM-REPAIR (seam C0 W11-D116-KEY-OWNER x B1 W11-KEY-ORGAN-AUTHORITY-MAP; owner rulings D-116, D-119,
+ * D-125, D-131). B1 maps key_connector.list_providers, list_connections and check_health to connect read (D-131);
+ * C0 (review SEC-W11D116K-1) sends every mapped tool, for the owner too, through assertMayRunGraphAction, where an
+ * OWNER membership with no explicit map reads the OWNER role defaults, and those give connect 'none' (every role's
+ * default, module-vocabulary CONNECT_DEFAULT). At 8109839a the business owner (the recorded owner or a co-owner,
+ * each holding an OWNER membership) was therefore refused the three reads on every KEY surface, while still
+ * running the far wider unmapped key_connector.execute_internal. The owner keeps every KEY organ tool, mapped or
+ * unmapped; D-131 binds members; an explicit map on an OWNER membership still binds it (case above).
+ */
+describe('W11A-SEAM-REPAIR (D-116, D-119, D-125, D-131): memberToolRunAuthority — the business owner runs the KEY connector reads', () => {
+  it('RED-BEFORE (D-125, D-131): the co-owner of bizA and the OWNER-holding recorded owner of bizO (no explicit map) run the three KEY connector reads, with or without the principal (was refused: connect requires read access)', async () => {
+    for (const [businessId, userId] of [[ID.bizA, ID.coOwner], [ID.bizO, ID.ownerO]] as const) {
+      for (const tool of KEY_CONNECTOR_READS) {
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool), `${userId} ${tool}`).toEqual({ refusal: null, principal: false });
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool, { asPrincipal: true }), `${userId} ${tool}`).toEqual({ refusal: null, principal: true });
+      }
+    }
+  });
+
+  it('RED-BEFORE (D-125): the plan queue (planStepRunRefusal) admits the three KEY connector reads on a plan the co-owner created', async () => {
+    const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
+    const planId = `${P}bizA_plan_co_connect`;
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.bizA, userId: ID.coOwner, objective: `v97x ${planId}`, status: 'approved' } });
+    try {
+      for (const tool of KEY_CONNECTOR_READS) {
+        expect(await planStepRunRefusal(prismaSvc, ID.bizA, planId, tool), tool).toBeNull();
+      }
+    } finally {
+      await db.aiPlan.delete({ where: { id: planId } });
+    }
+  });
+
+  it('control (D-131, D-116): members are still held to connect read: the recorded owner holding ADMIN (bizA) and the recorded owner holding STAFF (bizS), on role defaults, are refused the three KEY connector reads', async () => {
+    for (const [businessId, userId] of [[ID.bizA, ID.recAdmin], [ID.bizS, ID.recStaff]] as const) {
+      for (const tool of KEY_CONNECTOR_READS) {
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool), `${userId} ${tool}`).toEqual({ refusal: CONNECT_READ_REFUSAL, principal: false });
       }
     }
   });

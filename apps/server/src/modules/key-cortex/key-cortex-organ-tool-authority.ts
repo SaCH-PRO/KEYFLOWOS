@@ -27,7 +27,10 @@ import type { CanonicalModule } from '../../core/authority/module-vocabulary';
  *
  * Consequences of the existing rule, with no code here: an ADMIN whose explicit scope map sets revenue to
  * none is refused the revenue:read entries (D-114: assertMayRunGraphAction checks an explicit map); no
- * entry writes revenue, so D-46's SUPER_ADMIN refusal never applies to one; the owner keeps every tool.
+ * entry writes revenue, so D-46's SUPER_ADMIN refusal never applies to one; the owner (an OWNER membership,
+ * D-116/D-125) with no explicit scope map keeps every tool, mapped or not, the connect:read entries included
+ * although no role default holds connect (memberToolRunAuthority's owner arm, W11A-SEAM-REPAIR); an explicit
+ * map on an OWNER membership binds it on the mapped entries as on any member's (review SEC-W11D116K-1).
  * A stored plan step naming a mapped dotted tool becomes readable to a member holding its scopes
  * (graphPlanReadScope), and its approved proposal runs it in the KEY cortex registry as the plan's member
  * (KeyCortexActionExecutorPlugin). The FLOW dispatcher runs no dotted tool (it answers 'Unknown tool'), so
@@ -66,7 +69,10 @@ export const KEY_ORGAN_TOOL_AUTHORITY: Readonly<Record<string, KeyOrganToolAutho
   'temporal_flow.mark_resolved': { scopes: [write('ai')] },
   'temporal_flow.analyze_timeline': { scopes: [read('ai'), read('revenue')] },
 
-  // Business genome: genome -> settings (D-63).
+  // Business genome: genome -> settings (D-63). W11A-SEAM-REPAIR (D-128, D-100): list_signals and
+  // list_recommendations withhold the finance signals and FINANCIAL recommendations from a member without
+  // revenue read (KeyGenomeAdapterService, by the projection GET .../key-genome/signals and recommendations
+  // apply: genome-finance-scope.ts), so KEY serves a member the rows REST serves them.
   'key_genome.get_blueprint': { scopes: [read('settings')] },
   'key_genome.calculate_integrity': { scopes: [read('settings')] },
   'key_genome.list_signals': { scopes: [read('settings')] },

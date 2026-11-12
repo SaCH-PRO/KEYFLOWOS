@@ -1956,8 +1956,9 @@ export class KeyCortexQueryPipelineService {
    * owner-only tool and for a contact read no visibility clause bounds (a bridged flow tool runs with no
    * principal), the CRM sub-permission, D-46 for a platform SUPER_ADMIN who is no member, and deny by
    * default for a tool the authority map does not map (a dotted organ or legacy cortex tool, such as
-   * cortex.execute_tool, which runs any tool by name): only the business owner runs one. The owner by
-   * Business.ownerId runs every tool but those refused to everyone. A call that names no tool, and every
+   * cortex.execute_tool, which runs any tool by name): only the business owner runs one. The owner (an
+   * OWNER membership, D-116/D-125) with no explicit scope map runs every tool but those refused to everyone
+   * (W11A-SEAM-REPAIR: the KEY connector reads included). A call that names no tool, and every
    * call of a requester with no user, is refused (D-104: membership is the single rule; a user with no
    * membership is refused by the rule itself). A read that fails refuses every call (fail closed).
    */

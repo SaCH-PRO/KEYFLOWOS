@@ -811,6 +811,15 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Whether a membership's stored permissionScopes is an explicit scope map, which assertMayRunGraphAction (and
+ * graphPlanReadScope) read instead of the role's defaults. W11A-SEAM-REPAIR: memberToolRunAuthority asks it of an
+ * OWNER membership, by this same test.
+ */
+export function isExplicitScopeMap(permissionScopes: unknown): boolean {
+  return isJsonObject(permissionScopes);
+}
+
 function safeInt(val: string | undefined, fallback: number): number {
   if (!val) return fallback;
   const n = parseInt(val, 10);
