@@ -41,6 +41,75 @@ function marksPaymentPaid(paymentStatus: unknown): boolean {
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
 
+/** inventory_stocks.quantity, reserved and reorder_at are Postgres integers: the largest whole number they hold. */
+const STOCK_INT_MAX = 2_147_483_647;
+
+/** W11-INV-UPSERT-SCOPE: a POST .../inventory body once read (ids, then each field absent or of its shape). */
+interface InventoryUpsertFields {
+  productId: string;
+  warehouseId: string;
+  quantity?: number;
+  reserved?: number;
+  reorderAt?: number;
+  costPerUnit?: number;
+  currency?: string;
+}
+
+/**
+ * W11-INV-UPSERT-SCOPE (D-136 whole stock quantities): reads a POST
+ * .../inventory body (body: any, no DTO; or the Excel import's row), 400
+ * naming the field otherwise, before anything is read. productId and
+ * warehouseId are non-empty strings: the row is read by findFirst, where a
+ * filter object such as {not:''} would match any row of the business and a
+ * missing id would be no filter at all (W10-Z5 Z5SEC-1). Every other field is
+ * absent (undefined, null or '', kept as it is on an update) or of its shape:
+ * quantity, reserved and reorderAt a whole number of 0 or more, as a number
+ * or as digit text (the web form sends its number inputs as text: '7' is 7);
+ * costPerUnit a finite number of 0 or more, as a number or as decimal text;
+ * currency a non-empty string.
+ */
+function readInventoryUpsert(data: unknown): InventoryUpsertFields {
+  const body = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const id = (field: 'productId' | 'warehouseId'): string => {
+    const value = body[field];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new BadRequestException(`Inventory ${field} is required (a non-empty string)`);
+    }
+    return value;
+  };
+  const absent = (value: unknown) => value === undefined || value === null || value === '';
+  const whole = (field: 'quantity' | 'reserved' | 'reorderAt'): number | undefined => {
+    const value = body[field];
+    if (absent(value)) return undefined;
+    const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+    if (!Number.isInteger(n) || n < 0 || n > STOCK_INT_MAX) {
+      throw new BadRequestException(`Inventory ${field} must be a whole number of 0 or more`);
+    }
+    return n;
+  };
+  const productId = id('productId');
+  const warehouseId = id('warehouseId');
+  const quantity = whole('quantity');
+  const reserved = whole('reserved');
+  const reorderAt = whole('reorderAt');
+
+  let costPerUnit: number | undefined;
+  const cost = body.costPerUnit;
+  if (!absent(cost)) {
+    const n = typeof cost === 'number' ? cost : typeof cost === 'string' && /^\d+(\.\d+)?$/.test(cost) ? Number(cost) : NaN;
+    if (!Number.isFinite(n) || n < 0) throw new BadRequestException('Inventory costPerUnit must be a number of 0 or more');
+    costPerUnit = n;
+  }
+  let currency: string | undefined;
+  if (!absent(body.currency)) {
+    if (typeof body.currency !== 'string' || body.currency.trim().length === 0) {
+      throw new BadRequestException('Inventory currency must be a non-empty string');
+    }
+    currency = body.currency;
+  }
+  return { productId, warehouseId, quantity, reserved, reorderAt, costPerUnit, currency };
+}
+
 /**
  * W10-STORE-ORDER-PAID review (SEC-SOP-1, D-112): a field the order routes
  * write is a plain string (or null, where it may be cleared), 400 otherwise.
@@ -360,43 +429,74 @@ export class MarketplaceService {
     return { success: true };
   }
 
+  /**
+   * W11-INV-UPSERT-SCOPE (the Z4RV-SEC-1 sibling; D-136, D-137): POST
+   * .../inventory (body: any, no DTO) and importInventoryExcel write only the
+   * business's own stock row of the pair named.
+   *
+   * It read the row by (productId, warehouseId) alone (findUnique, unique
+   * across every business), updated it by id, else created a row of the
+   * business for whatever pair the body named, neither id checked. With no
+   * ambient tenant (a direct call, as any non-HTTP caller makes) a member of
+   * one business rewrote another business's row named by its ids; with the
+   * TenantInterceptor's ambient tenant the read was scoped, so the create hit
+   * the other business's row on the unique pair (500, P2002), and a pair with
+   * no row planted a row of this business for another business's product or
+   * warehouse (which then read as stock-tracked, and held the pair against
+   * the other business's own receipts and transfers).
+   *
+   * Now, as the transfer does (core/inventory/stock-ownership.ts): the body is
+   * read first (readInventoryUpsert, 400 naming the field); the product and
+   * the warehouse must be the business's (raw SQL by its own id; a soft-deleted
+   * product of the business counts), 404 'Product not found' / 'Warehouse not
+   * found' otherwise, the same for a missing and another business's id, naming
+   * no id; then one transaction locks the business's row of the pair
+   * (core/inventory/stock-lock-order.ts), reads it by (business, product,
+   * warehouse), and updates only the fields sent, or creates the row, where a
+   * row of another record holding the pair (planted by the old cross-business
+   * receipt; D-137, an operator repairs it) answers 409, not a 500.
+   */
   async upsertInventory(businessId: string, data: any) {
-    const existing = await this.prisma.client.inventoryStock.findUnique({
-      where: {
-        productId_warehouseId: {
-          productId: data.productId,
-          warehouseId: data.warehouseId,
-        },
-      },
-    });
+    const fields = readInventoryUpsert(data);
+    const { productId, warehouseId } = fields;
+    const owned = await ownedProductsAndWarehouses(this.prisma.client, businessId, [productId], [warehouseId]);
+    if (!owned.products.has(productId)) throw new NotFoundException('Product not found');
+    if (!owned.warehouses.has(warehouseId)) throw new NotFoundException('Warehouse not found');
 
-    if (existing) {
-      return this.prisma.client.inventoryStock.update({
-        where: { id: existing.id },
-        data: {
-          quantity: data.quantity ?? existing.quantity,
-          reserved: data.reserved ?? existing.reserved,
-          reorderAt: data.reorderAt ?? existing.reorderAt,
-          costPerUnit: data.costPerUnit ?? existing.costPerUnit,
-          currency: data.currency ?? existing.currency,
-        },
-        include: { product: true, warehouse: true },
-      });
-    }
+    return this.prisma.client.$transaction(async (tx) => {
+      await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+      const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
 
-    return this.prisma.client.inventoryStock.create({
-      data: {
-        businessId,
-        productId: data.productId,
-        warehouseId: data.warehouseId,
-        quantity: data.quantity || 0,
-        reserved: data.reserved || 0,
-        reorderAt: data.reorderAt,
-        costPerUnit: data.costPerUnit,
-        currency: data.currency || 'TTD',
-      },
-      include: { product: true, warehouse: true },
-    });
+      if (existing) {
+        return tx.inventoryStock.update({
+          where: { id: existing.id },
+          data: {
+            quantity: fields.quantity ?? existing.quantity,
+            reserved: fields.reserved ?? existing.reserved,
+            reorderAt: fields.reorderAt ?? existing.reorderAt,
+            costPerUnit: fields.costPerUnit ?? existing.costPerUnit,
+            currency: fields.currency ?? existing.currency,
+          },
+          include: { product: true, warehouse: true },
+        });
+      }
+
+      return createStockRowOrConflict(() =>
+        tx.inventoryStock.create({
+          data: {
+            businessId,
+            productId,
+            warehouseId,
+            quantity: fields.quantity ?? 0,
+            reserved: fields.reserved ?? 0,
+            reorderAt: fields.reorderAt,
+            costPerUnit: fields.costPerUnit,
+            currency: fields.currency ?? 'TTD',
+          },
+          include: { product: true, warehouse: true },
+        }),
+      );
+    }, STOCK_LOCK_TX_OPTIONS);
   }
 
   async getInventory(businessId: string, warehouseId?: string) {
@@ -2396,8 +2496,10 @@ export class MarketplaceService {
         const warehouse = warehouseName ? whByName[warehouseName.toLowerCase()] : warehouses[0];
         if (!warehouse) { results.errors.push(`Warehouse not found: ${warehouseName}`); results.skipped++; continue; }
 
-        const existingStock = await this.prisma.client.inventoryStock.findUnique({
-          where: { productId_warehouseId: { productId: product.id, warehouseId: warehouse.id } },
+        // W11-INV-UPSERT-SCOPE: the business's own row of the pair (a row of another record holding it is not this
+        // business's stock; upsertInventory then answers 409, recorded as this row's error).
+        const existingStock = await this.prisma.client.inventoryStock.findFirst({
+          where: { businessId, productId: product.id, warehouseId: warehouse.id },
         });
         const previousQty = existingStock?.quantity ?? null;
 
