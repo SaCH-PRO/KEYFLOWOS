@@ -28,19 +28,46 @@
  *           for the revenue:'none' member; exactly the seven finance handlers
  *           carry a module scope, the other 85 routes none.
  *
+ * Review repairs (SEC-GFS-1..4, GFS-R1, GFS-R2) extend the same rulings to
+ * the sibling routes that reached the same rows:
+ *
+ *   GFS-09..GFS-12  D-128: POST cross-domain/snapshot/compute and POST
+ *           outcomes/:id/close-observation recompute the finance snapshot
+ *           (through GenomeCrossDomainService) and need revenue write; the
+ *           ranked-recommendation, opportunity and autonomy-gate routes
+ *           recompute it when no cross-domain snapshot exists, so they refuse
+ *           a member without revenue write then; once one exists a revenue
+ *           read member is served without any recompute.
+ *   GFS-13, GFS-14  D-100: the cross-domain composite (its overall score
+ *           averages the finance health score and carries the finance warning
+ *           text) and the customer-sales snapshot (revenue per customer,
+ *           lifetime value and acquisition cost read from the finance metrics)
+ *           need revenue read.
+ *   GFS-15..GFS-20  D-128's read clause: the genome's finance signals,
+ *           finance recommendations and finance or cross-domain memory events
+ *           are withheld from a member without revenue read (lists drop them;
+ *           by id 403), as are the governance queue items naming them and the
+ *           outcome rows (their health scores are the composite's); acting on
+ *           a finance signal or recommendation needs revenue write.
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, the global TenantInterceptor, GenomeFinancialMetricService,
  * FinanceGenomeService's finance reads and GenomeDepartmentService run against
- * the database at DATABASE_URL. The finance service methods are wrapped by
- * vi.spyOn, which calls through, only to record whether a refused request
+ * the database at DATABASE_URL, and so do (review repairs) GenomeSignalService,
+ * GenomeRecommendationService, GenomeMemoryService, CustomerSalesGenomeService,
+ * the segment and sales-motion services, GenomeCrossDomainService, the ranker,
+ * the opportunity detector, the autonomy gate, the outcome service and the
+ * governance service on the routes under test. The service methods are wrapped
+ * by vi.spyOn, which calls through, only to record whether a refused request
  * reached them. Identity attachment is a stand-in: a test middleware reads
  * `x-test-user`, loads that seeded user row and attaches `{ id, email, role }`
  * exactly as the Supabase-verifying AuthMiddleware would. KeyGenomeController's
- * collaborators off these routes are stubbed, and FinanceGenomeService's
- * compute collaborators (facts, signals, recommendations, memory, department
- * readiness) are stand-ins that throw if reached: a refused POST never reaches
- * them, so on unmodified code GFS-06 shows the request running (500 from the
- * stand-in) instead of the 403.
+ * collaborators off these routes are stubbed. Collaborators the real services
+ * call beyond Prisma are stand-ins: the fact service answers "no fact", outcome
+ * learning, department readiness and the recommendation outcome recorder are
+ * no-ops, readiness and scoring answer empty, the operations and marketing
+ * snapshot computes reject (the cross-domain service reads that as "no
+ * snapshot", as it does any failure), and anything else throws if reached.
  *
  * Fixtures: prefix `v97u_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order
@@ -68,7 +95,21 @@ const ID = {
   biz: `${P}biz`,
   snapshot: `${P}snap`,
   department: `${P}dept`,
+  sigFin: `${P}sig_fin`,
+  sigOps: `${P}sig_ops`,
+  recFin: `${P}rec_fin`,
+  recOps: `${P}rec_ops`,
+  memFin: `${P}mem_fin`,
+  memCross: `${P}mem_cd`,
+  memOps: `${P}mem_ops`,
+  outOps: `${P}out_ops`,
+  csSnapshot: `${P}cs_snap`,
 };
+
+/** The finance signal's reason, as generateFinanceSignals writes it (SEC-GFS-4). */
+const RUNWAY = 'Runway is 0.8 months — critically low.';
+/** Text only a finance signal, recommendation or memory event of this fixture carries. */
+const MONEY_TEXT = /Runway is 0\.8|health score 42|Net margin is negative/;
 
 const READ_DENIED = 'Insufficient permissions: revenue requires read access (you have none)';
 const WRITE_DENIED = (has: 'none' | 'read') => `Insufficient permissions: revenue requires write access (you have ${has})`;
@@ -95,6 +136,9 @@ async function cleanup() {
     `DELETE FROM genome_module_readiness WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_departments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_finance_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_cross_domain_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_customer_sales_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_customer_segments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_financial_metrics WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -173,11 +217,28 @@ async function metricRows(metricType: string) {
   ) as Promise<Array<{ value: number }>>;
 }
 
-async function snapshotCount() {
+async function countRows(table: string) {
   const [row]: Array<{ n: number }> = await db.$queryRawUnsafe(
-    `SELECT COUNT(*)::int AS n FROM genome_finance_snapshots WHERE business_id = $1`, ID.biz,
+    `SELECT COUNT(*)::int AS n FROM ${table} WHERE business_id = $1`, ID.biz,
   );
   return row.n;
+}
+
+async function snapshotCount() {
+  return countRows('genome_finance_snapshots');
+}
+
+async function crossDomainCount() {
+  return countRows('genome_cross_domain_snapshots');
+}
+
+async function statusOf(table: 'genome_signals' | 'genome_recommendations', id: string) {
+  const rows: Array<{ status: string }> = await db.$queryRawUnsafe(`SELECT status FROM ${table} WHERE id = $1`, id);
+  return rows[0]?.status;
+}
+
+function patch(route: string, as: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer()).patch(`${base()}/${route}`).set(HEADER, as).send(body);
 }
 
 beforeAll(async () => {
@@ -198,39 +259,81 @@ beforeAll(async () => {
   controllerClass = KeyGenomeController;
   moduleScopeKey = MODULE_SCOPE_KEY;
 
-  // KeyGenomeController's collaborators off the finance routes and the
-  // departments control are stubbed (the controller injects each by token).
+  const { GenomeSignalService } = await import('../src/modules/business-genome/key-genome/genome-signal.service');
+  const { GenomeRecommendationService } = await import('../src/modules/business-genome/key-genome/genome-recommendation.service');
+  const { GenomeMemoryService } = await import('../src/modules/business-genome/key-genome/genome-memory.service');
+  const { GenomeCustomerSegmentService } = await import('../src/modules/business-genome/key-genome/genome-customer-segment.service');
+  const { GenomeSalesMotionService } = await import('../src/modules/business-genome/key-genome/genome-sales-motion.service');
+  const { CustomerSalesGenomeService } = await import('../src/modules/business-genome/key-genome/customer-sales-genome.service');
+  const { GenomeCrossDomainService } = await import('../src/modules/business-genome/key-genome/genome-cross-domain.service');
+  const { GenomeRecommendationRankerService } = await import('../src/modules/business-genome/key-genome/genome-recommendation-ranker.service');
+  const { GenomeOpportunityDetectorService } = await import('../src/modules/business-genome/key-genome/genome-opportunity-detector.service');
+  const { GenomeAutonomyGateService } = await import('../src/modules/business-genome/key-genome/genome-autonomy-gate.service');
+  const { GenomeRecommendationOutcomeService } = await import('../src/modules/business-genome/key-genome/genome-recommendation-outcome.service');
+  const { KeyGenomeGovernanceService } = await import('../src/modules/business-genome/key-genome/key-genome-governance.service');
+
+  // KeyGenomeController's collaborators off the routes under test are stubbed
+  // (the controller injects each by token).
   const stubs = await Promise.all([
-    import('../src/modules/business-genome/key-genome/genome-signal.service').then((m) => m.GenomeSignalService),
-    import('../src/modules/business-genome/key-genome/genome-recommendation.service').then((m) => m.GenomeRecommendationService),
     import('../src/modules/business-genome/key-genome/genome-experiment.service').then((m) => m.GenomeExperimentService),
-    import('../src/modules/business-genome/key-genome/key-genome-governance.service').then((m) => m.KeyGenomeGovernanceService),
-    import('../src/modules/business-genome/key-genome/genome-memory.service').then((m) => m.GenomeMemoryService),
     import('../src/modules/business-genome/key-genome/department-readiness.service').then((m) => m.DepartmentReadinessService),
-    import('../src/modules/business-genome/key-genome/genome-customer-segment.service').then((m) => m.GenomeCustomerSegmentService),
-    import('../src/modules/business-genome/key-genome/genome-sales-motion.service').then((m) => m.GenomeSalesMotionService),
-    import('../src/modules/business-genome/key-genome/customer-sales-genome.service').then((m) => m.CustomerSalesGenomeService),
     import('../src/modules/business-genome/key-genome/genome-operational-process.service').then((m) => m.GenomeOperationalProcessService),
     import('../src/modules/business-genome/key-genome/genome-delivery-capability.service').then((m) => m.GenomeDeliveryCapabilityService),
     import('../src/modules/business-genome/key-genome/operations-genome.service').then((m) => m.OperationsGenomeService),
     import('../src/modules/business-genome/key-genome/genome-growth-channel.service').then((m) => m.GenomeGrowthChannelService),
     import('../src/modules/business-genome/key-genome/genome-content-strategy.service').then((m) => m.GenomeContentStrategyService),
     import('../src/modules/business-genome/key-genome/marketing-genome.service').then((m) => m.MarketingGenomeService),
-    import('../src/modules/business-genome/key-genome/genome-cross-domain.service').then((m) => m.GenomeCrossDomainService),
-    import('../src/modules/business-genome/key-genome/genome-recommendation-ranker.service').then((m) => m.GenomeRecommendationRankerService),
-    import('../src/modules/business-genome/key-genome/genome-opportunity-detector.service').then((m) => m.GenomeOpportunityDetectorService),
-    import('../src/modules/business-genome/key-genome/genome-autonomy-gate.service').then((m) => m.GenomeAutonomyGateService),
-    import('../src/modules/business-genome/key-genome/genome-recommendation-outcome.service').then((m) => m.GenomeRecommendationOutcomeService),
   ]);
-  // FinanceGenomeService's collaborators beyond Prisma and the metric service
-  // serve only the compute/generate paths, which a refused member never
-  // reaches; each stand-in throws, so reaching one fails loudly.
+  // Collaborators the live services reach beyond Prisma. offRoute throws if
+  // reached (nothing under test should); noop answers null to every call
+  // (outcome learning, department readiness, the outcome recorder: bookkeeping
+  // the services do after their own write); rejecting answers a rejected
+  // promise (the cross-domain service reads that as "no snapshot").
   const offRoute = (name: string) => new Proxy({}, {
     get: (_t, prop) => () => { throw new Error(`${name}.${String(prop)} is off the routes under test`); },
   });
+  const noop = () => new Proxy({}, { get: (_t, prop) => (prop === 'then' ? undefined : async () => null) });
+  const rejecting = (name: string) => new Proxy({}, {
+    get: (_t, prop) => (prop === 'then' ? undefined : async () => { throw new Error(`${name}.${String(prop)} is off the routes under test`); }),
+  });
+  const factStandIn = { getFact: async () => null, listFacts: async () => [] };
+  const readinessStandIn = { getReadiness: async () => [] };
+  const scoringStandIn = {
+    computeFactScores: async () => [],
+    computeBusinessScore: () => ({ overall: 0, confidence: 0, readiness: 0, sections: [] }),
+  };
 
   // The test runner emits no decorator metadata, so the live services (which
-  // inject PrismaService by type) are built by factory, as Nest would build them.
+  // inject PrismaService by type) are built by factory, as Nest would build
+  // them; each is built once and shared, as Nest's singletons are.
+  const built: Record<string, any> = {};
+  const once = (name: string, make: () => any) => (built[name] ??= make());
+  const memoryOf = (prisma: any) => once('memory', () => new GenomeMemoryService(prisma));
+  const metricsOf = (prisma: any) => once('metrics', () => new GenomeFinancialMetricService(prisma));
+  const signalsOf = (prisma: any) => once('signals', () => new GenomeSignalService(
+    prisma, offRoute('GenomeFactService') as any, offRoute('GenomeEvidenceService') as any, offRoute('GenomeScoringService') as any,
+    offRoute('GenomeModuleReadinessService') as any, offRoute('EventEmitter2') as any, noop() as any,
+  ));
+  const recommendationsOf = (prisma: any) => once('recommendations', () => new GenomeRecommendationService(
+    prisma, signalsOf(prisma), readinessStandIn as any, scoringStandIn as any, offRoute('GenomeExperimentService') as any,
+    memoryOf(prisma), noop() as any, noop() as any,
+  ));
+  const departmentsOf = (prisma: any) => once('departments', () => new GenomeDepartmentService(prisma));
+  const financeOf = (prisma: any) => once('finance', () => new FinanceGenomeService(
+    prisma, metricsOf(prisma), factStandIn as any, signalsOf(prisma), recommendationsOf(prisma), memoryOf(prisma), noop() as any,
+  ));
+  const segmentsOf = (prisma: any) => once('segments', () => new GenomeCustomerSegmentService(prisma));
+  const motionsOf = (prisma: any) => once('motions', () => new GenomeSalesMotionService(prisma));
+  const customerSalesOf = (prisma: any) => once('customerSales', () => new CustomerSalesGenomeService(
+    prisma, metricsOf(prisma), segmentsOf(prisma), motionsOf(prisma), signalsOf(prisma), recommendationsOf(prisma),
+    memoryOf(prisma), noop() as any,
+  ));
+  const crossDomainOf = (prisma: any) => once('crossDomain', () => new GenomeCrossDomainService(
+    prisma, financeOf(prisma), customerSalesOf(prisma), rejecting('OperationsGenomeService') as any,
+    rejecting('MarketingGenomeService') as any, memoryOf(prisma), departmentsOf(prisma),
+  ));
+  const live = (token: any, make: (prisma: any) => any) => ({ provide: token, inject: [PrismaService], useFactory: make });
+
   const moduleRef = await Test.createTestingModule({
     controllers: [KeyGenomeController],
     providers: [
@@ -238,17 +341,32 @@ beforeAll(async () => {
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
-      { provide: GenomeFinancialMetricService, inject: [PrismaService], useFactory: (prisma: any) => new GenomeFinancialMetricService(prisma) },
-      {
-        provide: FinanceGenomeService,
-        inject: [PrismaService, GenomeFinancialMetricService],
-        useFactory: (prisma: any, metrics: any) => new FinanceGenomeService(
-          prisma, metrics, offRoute('GenomeFactService') as any, offRoute('GenomeSignalService') as any,
-          offRoute('GenomeRecommendationService') as any, offRoute('GenomeMemoryService') as any,
-          offRoute('DepartmentReadinessService') as any,
-        ),
-      },
-      { provide: GenomeDepartmentService, inject: [PrismaService], useFactory: (prisma: any) => new GenomeDepartmentService(prisma) },
+      live(GenomeFinancialMetricService, metricsOf),
+      live(FinanceGenomeService, financeOf),
+      live(GenomeDepartmentService, departmentsOf),
+      live(GenomeMemoryService, memoryOf),
+      live(GenomeSignalService, signalsOf),
+      live(GenomeRecommendationService, recommendationsOf),
+      live(GenomeCustomerSegmentService, segmentsOf),
+      live(GenomeSalesMotionService, motionsOf),
+      live(CustomerSalesGenomeService, customerSalesOf),
+      live(GenomeCrossDomainService, crossDomainOf),
+      live(GenomeRecommendationRankerService, (prisma) => new GenomeRecommendationRankerService(
+        recommendationsOf(prisma), crossDomainOf(prisma), memoryOf(prisma), { getLearnedImpact: async () => 0 } as any,
+      )),
+      live(GenomeOpportunityDetectorService, (prisma) => new GenomeOpportunityDetectorService(
+        crossDomainOf(prisma), recommendationsOf(prisma), memoryOf(prisma),
+      )),
+      live(GenomeAutonomyGateService, (prisma) => new GenomeAutonomyGateService(
+        crossDomainOf(prisma), readinessStandIn as any, factStandIn as any, memoryOf(prisma),
+      )),
+      live(GenomeRecommendationOutcomeService, (prisma) => new GenomeRecommendationOutcomeService(
+        prisma, crossDomainOf(prisma), noop() as any,
+      )),
+      live(KeyGenomeGovernanceService, (prisma) => new KeyGenomeGovernanceService(
+        prisma, signalsOf(prisma), recommendationsOf(prisma), { listExperiments: async () => [] } as any,
+        readinessStandIn as any, scoringStandIn as any, departmentsOf(prisma),
+      )),
       ...stubs.map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
@@ -264,6 +382,28 @@ beforeAll(async () => {
     'generateFinanceRecommendations',
   ] as const) {
     SPY[method] = vi.spyOn(financeGenome, method);
+  }
+  // Review repairs: the sibling service methods a refused request must not reach.
+  SPY.computeCrossDomainSnapshot = vi.spyOn(moduleRef.get(GenomeCrossDomainService), 'computeCrossDomainSnapshot');
+  const customerSales = moduleRef.get(CustomerSalesGenomeService);
+  SPY.computeCustomerSalesSnapshot = vi.spyOn(customerSales, 'computeCustomerSalesSnapshot');
+  SPY.getLatestCustomerSalesSnapshot = vi.spyOn(customerSales, 'getLatestCustomerSalesSnapshot');
+  const ranker = moduleRef.get(GenomeRecommendationRankerService);
+  SPY.rankRecommendations = vi.spyOn(ranker, 'rankRecommendations');
+  SPY.generateAndRankRecommendations = vi.spyOn(ranker, 'generateAndRankRecommendations');
+  SPY.detectOpportunities = vi.spyOn(moduleRef.get(GenomeOpportunityDetectorService), 'detectOpportunities');
+  SPY.checkGate = vi.spyOn(moduleRef.get(GenomeAutonomyGateService), 'checkGate');
+  SPY.closeObservationWindow = vi.spyOn(moduleRef.get(GenomeRecommendationOutcomeService), 'closeObservationWindow');
+  const signalService = moduleRef.get(GenomeSignalService);
+  for (const method of ['reviewSignal', 'acceptSignal', 'rejectSignal', 'mergeSignal'] as const) {
+    SPY[method] = vi.spyOn(signalService, method);
+  }
+  const recommendationService = moduleRef.get(GenomeRecommendationService);
+  for (const method of [
+    'acceptRecommendation', 'dismissRecommendation', 'applyRecommendation', 'ignoreRecommendation',
+    'escalateRecommendation', 'trackOutcome',
+  ] as const) {
+    SPY[method] = vi.spyOn(recommendationService, method);
   }
 
   app = moduleRef.createNestApplication();
@@ -305,6 +445,55 @@ beforeAll(async () => {
   });
   await db.genomeDepartment.create({
     data: { id: ID.department, businessId: ID.biz, code: 'OPERATIONS', name: 'V97u Operations' },
+  });
+
+  // Review repairs (SEC-GFS-4, GFS-R2): a finance signal, recommendation and
+  // memory events in the shapes FinanceGenomeService and the cross-domain
+  // service write them, beside operations rows of the same tables, and an
+  // outcome row whose health score was taken from the cross-domain composite.
+  await db.genomeSignal.create({
+    data: {
+      id: ID.sigFin, businessId: ID.biz, sourceModule: 'finance', sourceEntityType: 'FINANCE_GENOME',
+      signalType: 'RISK_PATTERN', section: 'FINANCIAL', domain: 'finance', field: 'LOW_RUNWAY',
+      reason: RUNWAY, confidence: 0.95, status: 'NEW',
+    },
+  });
+  await db.genomeSignal.create({
+    data: {
+      id: ID.sigOps, businessId: ID.biz, sourceModule: 'operations', sourceEntityType: 'OPERATIONS_GENOME',
+      signalType: 'RISK_PATTERN', section: 'OPERATIONS', domain: 'operations', field: 'NO_SOP',
+      reason: 'Core processes have no documented SOP.', confidence: 0.9, status: 'NEW',
+    },
+  });
+  await db.genomeRecommendation.create({
+    data: {
+      id: ID.recFin, businessId: ID.biz, domain: 'FINANCIAL',
+      title: 'Business is losing money on each dollar of revenue',
+      insight: 'Net margin is negative (-28.6%).', diagnosis: 'Net margin is negative (-28.6%).',
+      recommendation: 'Cut costs or raise prices.', expectedGainScore: 90, riskLevel: 'HIGH', status: 'ACTIVE',
+    },
+  });
+  await db.genomeRecommendation.create({
+    data: {
+      id: ID.recOps, businessId: ID.biz, domain: 'OPERATIONS', title: 'Document core SOPs',
+      insight: 'Core processes have no documented SOP.', diagnosis: 'No SOP recorded.',
+      recommendation: 'Write the SOPs.', expectedGainScore: 60, riskLevel: 'HIGH', status: 'ACTIVE',
+    },
+  });
+  for (const [id, sourceType, eventType, domain, summary, impactScore] of [
+    [ID.memFin, 'FINANCE_GENOME', 'FINANCE_SNAPSHOT_COMPUTED', 'FINANCIAL', 'Overall risk HIGH, health score 42. 2 warning(s), 0 missing input(s).', 0.42],
+    [ID.memCross, 'CROSS_DOMAIN_GENOME', 'CROSS_DOMAIN_SNAPSHOT_COMPUTED', 'CROSS_DOMAIN', 'Overall risk HIGH, health score 42. 1 bottleneck(s), 0 opportunity(ies).', 0.42],
+    [ID.memOps, 'OPERATIONS_GENOME', 'OPERATIONS_SNAPSHOT_COMPUTED', 'OPERATIONS', 'Overall risk MEDIUM, delivery readiness 60.', 0.6],
+  ] as const) {
+    await db.genomeMemoryEvent.create({
+      data: { id, businessId: ID.biz, sourceType, eventType, domain, section: domain, title: `${eventType} (${P})`, summary, outcome: 'MIXED', impactScore, occurredAt },
+    });
+  }
+  await db.genomeRecommendationOutcome.create({
+    data: {
+      id: ID.outOps, businessId: ID.biz, recommendationId: ID.recOps, domain: 'OPERATIONS', actionType: 'RECOMMENDATION',
+      decision: 'ACCEPTED', preHealthScore: 42, preReadinessScore: 50, preConfidence: 40, preRiskLevel: 'HIGH',
+    },
   });
 }, 60_000);
 
@@ -392,7 +581,7 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
     expect((res.body as any[]).map((d) => [d.id, d.code])).toEqual([[ID.department, 'OPERATIONS']]);
   }, 30_000);
 
-  it('[GFS-08] exactly the seven finance handlers carry a module scope (revenue read on the three GETs, revenue write on the four POSTs); the other 85 routes carry none', () => {
+  it('[GFS-08] the module-scoped handlers are exactly the finance, cross-domain, customer-sales snapshot, outcome and memory-summary routes (revenue read; revenue write on the six that write the finance metrics, signals or recommendations or recompute the finance snapshot); the other 67 routes carry none', () => {
     const proto = controllerClass.prototype;
     const handlers = Object.getOwnPropertyNames(proto).filter(
       (name) => name !== 'constructor' && Reflect.getMetadata('path', proto[name]) !== undefined,
@@ -403,14 +592,318 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
         .map((name) => [name, Reflect.getMetadata(moduleScopeKey, proto[name])] as const)
         .filter(([, requirement]) => requirement !== undefined),
     );
+    const read = { module: 'revenue', minLevel: 'read' };
+    const write = { module: 'revenue', minLevel: 'write' };
     expect(scoped).toEqual({
-      listFinanceMetrics: { module: 'revenue', minLevel: 'read' },
-      getFinanceSnapshot: { module: 'revenue', minLevel: 'read' },
-      listFinanceSnapshots: { module: 'revenue', minLevel: 'read' },
-      upsertFinanceMetric: { module: 'revenue', minLevel: 'write' },
-      computeFinanceSnapshot: { module: 'revenue', minLevel: 'write' },
-      generateFinanceSignals: { module: 'revenue', minLevel: 'write' },
-      generateFinanceRecommendations: { module: 'revenue', minLevel: 'write' },
+      // D-100 / D-128: the finance figures.
+      listFinanceMetrics: read,
+      getFinanceSnapshot: read,
+      listFinanceSnapshots: read,
+      upsertFinanceMetric: write,
+      computeFinanceSnapshot: write,
+      generateFinanceSignals: write,
+      generateFinanceRecommendations: write,
+      // Review repairs (SEC-GFS-1/2, GFS-R1): the cross-domain composite.
+      getCrossDomainSnapshot: read,
+      listCrossDomainSnapshots: read,
+      computeCrossDomainSnapshot: write,
+      getRankedRecommendations: read,
+      generateAndRankRecommendations: read,
+      getOpportunities: read,
+      detectOpportunities: read,
+      checkAutonomyGate: read,
+      // SEC-GFS-3: the customer-sales snapshot's revenue, LTV and CAC figures.
+      getCustomerSalesSnapshot: read,
+      computeCustomerSalesSnapshot: read,
+      listCustomerSalesSnapshots: read,
+      // GFS-R2: outcome health scores (the composite's) and the memory summary.
+      getRecommendationOutcome: read,
+      listRecommendationOutcomes: read,
+      getRecommendationOutcomesSummary: read,
+      getRecommendationLearningSummary: read,
+      updateOutcomeObservation: read,
+      closeObservationWindow: write,
+      memorySummary: read,
     });
   });
+});
+
+describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128, SEC-GFS-1, GFS-R1): no member without revenue write recomputes the finance snapshot through a sibling route', () => {
+  /** The five routes that compute the cross-domain snapshot (and so the finance snapshot) when none exists. */
+  const DERIVED: Array<{ method: 'get' | 'post'; route: string; spy: string; body?: Record<string, unknown> }> = [
+    { method: 'get', route: 'cross-domain/recommendations/ranked', spy: 'rankRecommendations' },
+    { method: 'post', route: 'cross-domain/recommendations/ranked/generate', spy: 'generateAndRankRecommendations' },
+    { method: 'get', route: 'cross-domain/opportunities', spy: 'detectOpportunities' },
+    { method: 'post', route: 'cross-domain/opportunities/detect', spy: 'detectOpportunities' },
+    { method: 'post', route: 'cross-domain/autonomy-gate/check', spy: 'checkGate', body: { actionType: 'CREATE_TASK', affectedDomains: ['operations_delivery'] } },
+  ];
+  const call = (d: (typeof DERIVED)[number], as: string) => (d.method === 'get' ? get(d.route, as) : post(d.route, as, d.body));
+
+  it('[GFS-09] RED-BEFORE (D-128, SEC-GFS-1): POST cross-domain/snapshot/compute refuses the revenue none and the revenue read STAFF member 403 before the cross-domain or finance compute runs, and no snapshot is written', async () => {
+    const before = await snapshotCount();
+    for (const [as, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
+      clearSpies();
+      const res = await post('cross-domain/snapshot/compute', as);
+      expect(res.status, `revenue ${has}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, `revenue ${has}`).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED(has) });
+      expect(SPY.computeCrossDomainSnapshot, `computeCrossDomainSnapshot never runs for revenue ${has}`).not.toHaveBeenCalled();
+      expect(SPY.computeFinanceSnapshot, `computeFinanceSnapshot never runs for revenue ${has}`).not.toHaveBeenCalled();
+    }
+    expect(await snapshotCount(), 'no finance snapshot written').toBe(before);
+    expect(await crossDomainCount(), 'no cross-domain snapshot written').toBe(0);
+  }, 60_000);
+
+  it('[GFS-10] RED-BEFORE (D-128, SEC-GFS-1): with no cross-domain snapshot, the ranked-recommendation, opportunity and autonomy-gate routes refuse the revenue read STAFF member 403 (revenue write needed to recompute) before the service runs, and the revenue none member 403 (revenue read)', async () => {
+    const before = await snapshotCount();
+    expect(await crossDomainCount()).toBe(0);
+    for (const d of DERIVED) {
+      for (const [as, message] of [[ID.staffRead, WRITE_DENIED('read')], [ID.staffNone, READ_DENIED]] as const) {
+        clearSpies();
+        const res = await call(d, as);
+        expect(res.status, `${d.route} as ${as}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body, `${d.route} as ${as}`).toMatchObject({ code: 'FORBIDDEN', message });
+        expect(SPY[d.spy], `${d.spy} never runs for ${as}`).not.toHaveBeenCalled();
+        expect(SPY.computeFinanceSnapshot, `${d.route}: no finance recompute for ${as}`).not.toHaveBeenCalled();
+      }
+    }
+    expect(await snapshotCount(), 'no finance snapshot written').toBe(before);
+    expect(await crossDomainCount(), 'no cross-domain snapshot written').toBe(0);
+  }, 60_000);
+
+  it('[GFS-11] RED-BEFORE (D-128): POST outcomes/:outcomeId/close-observation (which always recomputes the cross-domain snapshot) refuses the revenue read STAFF member 403 before the service runs', async () => {
+    const before = await snapshotCount();
+    clearSpies();
+    const res = await post(`outcomes/${ID.outOps}/close-observation`, ID.staffRead);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED('read') });
+    expect(SPY.closeObservationWindow).not.toHaveBeenCalled();
+    expect(SPY.computeFinanceSnapshot).not.toHaveBeenCalled();
+    expect(await snapshotCount()).toBe(before);
+    expect(await crossDomainCount()).toBe(0);
+  }, 30_000);
+
+  it('[GFS-12] control (D-128): the revenue write STAFF member computes the cross-domain snapshot (201, one finance snapshot written); then the revenue read STAFF member is served the ranked recommendations, opportunities and autonomy gate with no further recompute', async () => {
+    const before = await snapshotCount();
+    clearSpies();
+    const res = await post('cross-domain/snapshot/compute', ID.staffWrite);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect((res.body.domainScores as any[]).map((d) => d.domain)).toContain('finance');
+    expect(SPY.computeFinanceSnapshot).toHaveBeenCalledTimes(1);
+    expect(await snapshotCount()).toBe(before + 1);
+    expect(await crossDomainCount()).toBe(1);
+
+    for (const d of DERIVED.filter((x) => x.route !== 'cross-domain/recommendations/ranked/generate')) {
+      clearSpies();
+      const served = await call(d, ID.staffRead);
+      expect(served.status, `${d.route}: ${JSON.stringify(served.body)}`).toBe(d.method === 'get' ? 200 : 201);
+      expect(served.body.businessId, d.route).toBe(ID.biz);
+      expect(SPY[d.spy], d.route).toHaveBeenCalledTimes(1);
+      expect(SPY.computeCrossDomainSnapshot, `${d.route} reuses the snapshot`).not.toHaveBeenCalled();
+    }
+    expect(await snapshotCount()).toBe(before + 1);
+    expect(await crossDomainCount()).toBe(1);
+  }, 60_000);
+});
+
+describe('W11-GENOME-FINANCE-SCOPE review repairs (D-100, SEC-GFS-2, SEC-GFS-3): the cross-domain composite and the customer-sales figures need revenue read', () => {
+  it('[GFS-13] RED-BEFORE (D-100, SEC-GFS-2): the revenue none STAFF member is refused 403 on GET cross-domain/snapshot, cross-domain/snapshots, the ranked recommendations and the opportunities; the revenue read member reads the snapshot', async () => {
+    for (const route of ['cross-domain/snapshot', 'cross-domain/snapshots', 'cross-domain/recommendations/ranked', 'cross-domain/opportunities']) {
+      clearSpies();
+      const res = await get(route, ID.staffNone);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+      expect(JSON.stringify(res.body), route).not.toMatch(/healthScore|bottlenecks/);
+      expect(SPY.rankRecommendations).not.toHaveBeenCalled();
+      expect(SPY.detectOpportunities).not.toHaveBeenCalled();
+    }
+    const control = await get('cross-domain/snapshot', ID.staffRead);
+    expect(control.status, JSON.stringify(control.body)).toBe(200);
+    expect((control.body.domainScores as any[]).map((d) => d.domain)).toContain('finance');
+  }, 60_000);
+
+  it('[GFS-14] RED-BEFORE (D-100, SEC-GFS-3): a revenue none STAFF member may still record a segment, but POST customer-sales/snapshot/compute, GET customer-sales/snapshot and customer-sales/snapshots answer 403 before the service runs, with no revenue per customer or lifetime value; the revenue read member computes and reads them', async () => {
+    await db.genomeFinancialMetric.create({
+      data: { id: `${P}m_LIFETIME_VALUE`, businessId: ID.biz, metricType: 'LIFETIME_VALUE', period: PERIOD, value: 777.77, currency: 'TTD', confidence: 0.9, occurredAt: new Date(Date.now() - 86400_000) },
+    });
+    const segment = await post('customer-sales/segments', ID.staffNone, { name: `${P}one`, segmentType: 'B2C', estimatedSize: 1 });
+    expect(segment.status, JSON.stringify(segment.body)).toBe(201);
+
+    const before = await countRows('genome_customer_sales_snapshots');
+    for (const [method, route, spy] of [
+      ['post', 'customer-sales/snapshot/compute', 'computeCustomerSalesSnapshot'],
+      ['get', 'customer-sales/snapshot', 'getLatestCustomerSalesSnapshot'],
+      ['get', 'customer-sales/snapshots', 'getLatestCustomerSalesSnapshot'],
+    ] as const) {
+      clearSpies();
+      const res = method === 'get' ? await get(route, ID.staffNone) : await post(route, ID.staffNone);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+      expect(JSON.stringify(res.body), route).not.toMatch(/4321\.5|777\.77/);
+      expect(SPY[spy], `${spy} never runs for ${route}`).not.toHaveBeenCalled();
+    }
+    expect(await countRows('genome_customer_sales_snapshots'), 'no customer-sales snapshot written').toBe(before);
+
+    const computed = await post('customer-sales/snapshot/compute', ID.staffRead);
+    expect(computed.status, JSON.stringify(computed.body)).toBe(201);
+    expect(computed.body).toMatchObject({ averageRevenuePerCustomer: 4321.5, lifetimeValue: 777.77 });
+    const latest = await get('customer-sales/snapshot', ID.staffRead);
+    expect(latest.status).toBe(200);
+    expect(latest.body).toMatchObject({ id: computed.body.id, averageRevenuePerCustomer: 4321.5 });
+  }, 60_000);
+});
+
+describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128 read clause, D-100, SEC-GFS-4, GFS-R2): the genome finance signals, recommendations and memory need revenue read', () => {
+  it('[GFS-15] RED-BEFORE (D-128, SEC-GFS-4): GET signals and signals?sourceModule=finance serve the revenue none STAFF member no finance signal (the operations signal stays), and GET signals/:id of the finance signal answers 403; the revenue read member reads it', async () => {
+    const all = await get('signals', ID.staffNone);
+    expect(all.status, JSON.stringify(all.body)).toBe(200);
+    const ids = (all.body as any[]).map((r) => r.id);
+    expect(ids).toContain(ID.sigOps);
+    expect(ids).not.toContain(ID.sigFin);
+    expect(JSON.stringify(all.body)).not.toMatch(MONEY_TEXT);
+
+    const finance = await get('signals?sourceModule=finance', ID.staffNone);
+    expect(finance.status).toBe(200);
+    expect(finance.body).toEqual([]);
+    const limited = await get('signals?limit=1', ID.staffNone);
+    expect((limited.body as any[]).map((r) => r.id)).toEqual([ID.sigOps]);
+
+    const byId = await get(`signals/${ID.sigFin}`, ID.staffNone);
+    expect(byId.status, JSON.stringify(byId.body)).toBe(403);
+    expect(byId.body).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+    expect((await get(`signals/${ID.sigOps}`, ID.staffNone)).status).toBe(200);
+
+    const control = await get('signals?sourceModule=finance', ID.staffRead);
+    expect((control.body as any[]).map((r) => [r.id, r.reason])).toEqual([[ID.sigFin, RUNWAY]]);
+    expect((await get(`signals/${ID.sigFin}`, ID.staffRead)).body).toMatchObject({ id: ID.sigFin, reason: RUNWAY });
+  }, 30_000);
+
+  it('[GFS-16] RED-BEFORE (D-128): GET recommendations and recommendations?domain=FINANCIAL serve the revenue none STAFF member no finance recommendation, and GET recommendations/:id and its execution-status answer 403; the revenue read member reads it', async () => {
+    const all = await get('recommendations', ID.staffNone);
+    expect(all.status, JSON.stringify(all.body)).toBe(200);
+    const ids = (all.body as any[]).map((r) => r.id);
+    expect(ids).toContain(ID.recOps);
+    expect(ids).not.toContain(ID.recFin);
+    expect(JSON.stringify(all.body)).not.toMatch(MONEY_TEXT);
+    expect((await get('recommendations?domain=FINANCIAL', ID.staffNone)).body).toEqual([]);
+
+    for (const route of [`recommendations/${ID.recFin}`, `recommendations/${ID.recFin}/execution-status`]) {
+      const res = await get(route, ID.staffNone);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+    }
+    expect((await get(`recommendations/${ID.recOps}`, ID.staffNone)).status).toBe(200);
+
+    const control = await get('recommendations?domain=FINANCIAL', ID.staffRead);
+    expect((control.body as any[]).map((r) => r.id)).toEqual([ID.recFin]);
+    expect((await get(`recommendations/${ID.recFin}`, ID.staffRead)).body).toMatchObject({ id: ID.recFin, domain: 'FINANCIAL' });
+  }, 30_000);
+
+  it('[GFS-17] RED-BEFORE (D-100, SEC-GFS-4): GET memory, memory?domain=FINANCIAL and memory/similar serve the revenue none STAFF member no finance or cross-domain event, GET memory/:id of one and GET memory/summary answer 403; the revenue read member reads them', async () => {
+    const isMoney = (e: any) => /financ/i.test(`${e.domain} ${e.section} ${e.sourceType}`) || e.sourceType === 'CROSS_DOMAIN_GENOME';
+    for (const route of ['memory', 'memory?domain=FINANCIAL', 'memory?domain=CROSS_DOMAIN', 'memory/similar', 'memory/similar?domain=FINANCIAL']) {
+      const res = await get(route, ID.staffNone);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect((res.body as any[]).filter(isMoney), route).toEqual([]);
+      expect(JSON.stringify(res.body), route).not.toMatch(MONEY_TEXT);
+    }
+    expect(((await get('memory', ID.staffNone)).body as any[]).map((e) => e.id)).toContain(ID.memOps);
+
+    for (const route of [`memory/${ID.memFin}`, `memory/${ID.memCross}`, 'memory/summary']) {
+      const res = await get(route, ID.staffNone);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+    }
+    expect((await get(`memory/${ID.memOps}`, ID.staffNone)).status).toBe(200);
+
+    const control = await get('memory?domain=FINANCIAL', ID.staffRead);
+    expect((control.body as any[]).map((e) => e.id)).toContain(ID.memFin);
+    expect((await get(`memory/${ID.memFin}`, ID.staffRead)).status).toBe(200);
+    expect((await get('memory/summary', ID.staffRead)).status).toBe(200);
+  }, 30_000);
+
+  it('[GFS-18] RED-BEFORE (D-128): GET governance and governance/queue carry no item naming the finance signal or recommendation for the revenue none STAFF member (the operations items stay); the revenue read member sees them', async () => {
+    const summary = await get('governance', ID.staffNone);
+    expect(summary.status, JSON.stringify(summary.body)).toBe(200);
+    const sourceIds = (items: any[]) => (items ?? []).map((i) => i.sourceId);
+    for (const list of ['urgentReviewItems', 'signalReviewQueue', 'recommendationQueue']) {
+      expect(sourceIds(summary.body[list]), list).not.toContain(ID.sigFin);
+      expect(sourceIds(summary.body[list]), list).not.toContain(ID.recFin);
+    }
+    expect(sourceIds(summary.body.signalReviewQueue)).toContain(ID.sigOps);
+    expect(sourceIds(summary.body.recommendationQueue)).toContain(ID.recOps);
+    expect(JSON.stringify(summary.body)).not.toMatch(MONEY_TEXT);
+
+    const queue = await get('governance/queue', ID.staffNone);
+    expect(queue.status).toBe(200);
+    expect(sourceIds(queue.body)).not.toContain(ID.sigFin);
+    expect(sourceIds(queue.body)).not.toContain(ID.recFin);
+    expect(JSON.stringify(queue.body)).not.toMatch(MONEY_TEXT);
+
+    const control = await get('governance', ID.staffRead);
+    expect(sourceIds(control.body.signalReviewQueue)).toContain(ID.sigFin);
+    expect(sourceIds(control.body.recommendationQueue)).toContain(ID.recFin);
+  }, 30_000);
+
+  it('[GFS-19] RED-BEFORE (D-128): reviewing, accepting, rejecting or merging the finance signal and accepting, dismissing, applying, ignoring, escalating or tracking the finance recommendation refuse the revenue read STAFF member 403 before the service runs; the operations rows stay open to that member and the revenue write member acts on the finance rows', async () => {
+    for (const action of ['review', 'accept', 'reject', 'merge']) {
+      clearSpies();
+      const res = await post(`signals/${ID.sigFin}/${action}`, ID.staffRead);
+      expect(res.status, `signal ${action}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, `signal ${action}`).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED('read') });
+      expect(SPY[`${action}Signal`], `${action}Signal never runs`).not.toHaveBeenCalled();
+    }
+    expect(await statusOf('genome_signals', ID.sigFin)).toBe('NEW');
+
+    for (const [action, spy, body] of [
+      ['accept', 'acceptRecommendation', undefined],
+      ['dismiss', 'dismissRecommendation', { reason: 'no' }],
+      ['apply', 'applyRecommendation', undefined],
+      ['ignore', 'ignoreRecommendation', { reason: 'no' }],
+      ['escalate', 'escalateRecommendation', undefined],
+      ['track-outcome', 'trackOutcome', { success: false, notes: 'no' }],
+    ] as const) {
+      clearSpies();
+      const res = await post(`recommendations/${ID.recFin}/${action}`, ID.staffRead, body);
+      expect(res.status, `recommendation ${action}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, `recommendation ${action}`).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED('read') });
+      expect(SPY[spy], `${spy} never runs`).not.toHaveBeenCalled();
+    }
+    expect(await statusOf('genome_recommendations', ID.recFin)).toBe('ACTIVE');
+
+    const opsSignal = await post(`signals/${ID.sigOps}/accept`, ID.staffRead);
+    expect(opsSignal.status, JSON.stringify(opsSignal.body)).toBe(201);
+    expect(await statusOf('genome_signals', ID.sigOps)).toBe('ACCEPTED');
+    const opsRec = await post(`recommendations/${ID.recOps}/accept`, ID.staffRead);
+    expect(opsRec.status, JSON.stringify(opsRec.body)).toBe(201);
+    expect(await statusOf('genome_recommendations', ID.recOps)).toBe('ACCEPTED');
+
+    const finSignal = await post(`signals/${ID.sigFin}/accept`, ID.staffWrite);
+    expect(finSignal.status, JSON.stringify(finSignal.body)).toBe(201);
+    expect(await statusOf('genome_signals', ID.sigFin)).toBe('ACCEPTED');
+    const finRec = await post(`recommendations/${ID.recFin}/accept`, ID.staffWrite);
+    expect(finRec.status, JSON.stringify(finRec.body)).toBe(201);
+    expect(await statusOf('genome_recommendations', ID.recFin)).toBe('ACCEPTED');
+  }, 60_000);
+
+  it('[GFS-20] RED-BEFORE (D-100): the outcome reads (their health scores are the cross-domain composite\'s) answer the revenue none STAFF member 403; the revenue read member reads them', async () => {
+    for (const [method, route] of [
+      ['get', 'outcomes'],
+      ['get', 'outcomes/summary'],
+      ['get', 'outcomes/learning-summary'],
+      ['get', `recommendations/${ID.recOps}/outcome`],
+      ['patch', `outcomes/${ID.outOps}/observation`],
+    ] as const) {
+      const res = method === 'get' ? await get(route, ID.staffNone) : await patch(route, ID.staffNone, { postHealthScore: 50 });
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+    }
+    const rows: Array<{ post_health_score: number | null }> = await db.$queryRawUnsafe(
+      `SELECT post_health_score FROM genome_recommendation_outcomes WHERE id = $1`, ID.outOps,
+    );
+    expect(rows).toEqual([{ post_health_score: null }]);
+
+    const control = await get('outcomes', ID.staffRead);
+    expect(control.status, JSON.stringify(control.body)).toBe(200);
+    expect(JSON.stringify(control.body)).toContain(ID.outOps);
+  }, 30_000);
 });

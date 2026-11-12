@@ -2,18 +2,23 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Inject,
+  NotFoundException,
   Param,
   Patch,
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../../core/auth/module-scope.guard';
+import { PrismaService } from '../../../core/prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../../core/authority/module-vocabulary';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -59,6 +64,63 @@ import type {
   UpsertGenomeSalesMotionInput,
 } from './key-genome.types';
 
+/**
+ * W11-GENOME-FINANCE-SCOPE review repairs (owner rulings D-128 and D-100;
+ * SEC-GFS-1..4, GFS-R1, GFS-R2). The genome's shared tables hold finance rows
+ * beside the other domains' rows: FinanceGenomeService writes signals with
+ * sourceModule 'finance' (section FINANCIAL, domain 'finance') whose reason is
+ * the warning text ("Runway is 0.8 months"), recommendations in domain
+ * FINANCIAL, and FINANCE_GENOME memory events carrying the health score and
+ * overall risk; outcome learning copies those rows' domain and text into its
+ * own memory events. The cross-domain service's events carry the composite's
+ * overall health score, which averages the finance health score, and the
+ * customer-sales snapshot's event carries the revenue quality worked out from
+ * the lifetime value and acquisition cost metrics. D-128: reading them needs
+ * revenue read; acting on a finance signal or recommendation needs revenue
+ * write. The match is on "financ" in any of the row's module fields, so a row
+ * a temporal or KEY writer files under section FINANCIAL is caught too.
+ */
+const FINANCE_FIELD = /financ/i;
+
+type GenomeRowFields = {
+  sourceModule?: string | null;
+  sourceType?: string | null;
+  section?: string | null;
+  domain?: string | null;
+  eventType?: string | null;
+};
+
+function mentionsFinance(...values: Array<string | null | undefined>): boolean {
+  return values.some((v) => typeof v === 'string' && FINANCE_FIELD.test(v));
+}
+
+/** A genome signal the finance genome (or any writer filing under finance) wrote: D-128. */
+export function isFinanceSignal(row: GenomeRowFields): boolean {
+  return mentionsFinance(row.sourceModule, row.section, row.domain);
+}
+
+/** A genome recommendation in the finance domain (FINANCIAL): D-128. */
+export function isFinanceRecommendation(row: GenomeRowFields): boolean {
+  return mentionsFinance(row.domain);
+}
+
+/** A memory event that carries a finance or composite money signal: D-128, D-100. */
+export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
+  return (
+    mentionsFinance(row.sourceType, row.domain, row.section) ||
+    row.sourceType === 'CROSS_DOMAIN_GENOME' ||
+    row.domain === 'CROSS_DOMAIN' ||
+    row.eventType === 'CUSTOMER_SALES_SNAPSHOT_COMPUTED'
+  );
+}
+
+function firstN<T>(rows: T[], limit: number | undefined): T[] {
+  return limit === undefined ? rows : rows.slice(0, limit);
+}
+
+/** The request fields these handlers read (attached by AuthMiddleware; AuthGuard has passed). */
+type GenomeRequest = { user?: { id?: string; role?: string } };
+
 @Controller('business-genome/businesses/:businessId/key-genome')
 @UseGuards(AuthGuard, BusinessGuard)
 export class KeyGenomeController {
@@ -88,7 +150,69 @@ export class KeyGenomeController {
     @Inject(GenomeAutonomyGateService) private readonly autonomyGate: GenomeAutonomyGateService,
     @Inject(GenomeRecommendationOutcomeService)
     private readonly outcomeService: GenomeRecommendationOutcomeService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): the member's
+  // revenue level, read by ModuleScopeGuard's rule (SUPER_ADMIN passes; else
+  // the membership's explicit scope map, a missing key being 'none', or its
+  // role defaults). A request without a user (never past AuthGuard) is 'none':
+  // the finance rows fail closed.
+  // ---------------------------------------------------------------------------
+
+  private async revenueLevel(businessId: string, req?: GenomeRequest): Promise<string> {
+    const user = req?.user;
+    if (user?.role === 'SUPER_ADMIN') return 'admin';
+    if (!user?.id) return 'none';
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: user.id, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return 'none';
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return scopes.revenue || 'none';
+  }
+
+  /** 403 with ModuleScopeGuard's message when the member's revenue level is below `minLevel`. */
+  private async requireRevenue(businessId: string, req: GenomeRequest | undefined, minLevel: 'read' | 'write'): Promise<void> {
+    const level = await this.revenueLevel(businessId, req);
+    if (rankOf(level) < LEVEL_RANK[minLevel]) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires ${minLevel} access (you have ${level})`);
+    }
+  }
+
+  private async readsRevenue(businessId: string, req?: GenomeRequest): Promise<boolean> {
+    return rankOf(await this.revenueLevel(businessId, req)) >= LEVEL_RANK.read;
+  }
+
+  /**
+   * SEC-GFS-1 / GFS-R1 (D-128): the ranker, the opportunity detector and the
+   * autonomy gate compute the cross-domain snapshot, and with it the finance
+   * snapshot, when the business has none yet (their ensureSnapshot). That
+   * recompute is a finance write, so a member without revenue write is refused
+   * before the service runs; once a snapshot exists they reuse it and no
+   * recompute happens.
+   */
+  private async requireRecomputeAuthorityIfNoSnapshot(businessId: string, req?: GenomeRequest): Promise<void> {
+    const latest = await this.crossDomainGenome.getLatestCrossDomainSnapshot(businessId);
+    if (!latest) await this.requireRevenue(businessId, req, 'write');
+  }
+
+  /** D-128: acting on a finance signal needs revenue write (getSignal 404s an unknown id, as the action would). */
+  private async requireSignalAction(businessId: string, signalId: string, req?: GenomeRequest): Promise<void> {
+    const signal = await this.signalService.getSignal(businessId, signalId);
+    if (isFinanceSignal(signal)) await this.requireRevenue(businessId, req, 'write');
+  }
+
+  /** D-128: acting on a finance recommendation needs revenue write (getRecommendation 404s an unknown id, as the action would). */
+  private async requireRecommendationAction(businessId: string, recommendationId: string, req?: GenomeRequest): Promise<void> {
+    const recommendation = await this.recommendationService.getRecommendation(businessId, recommendationId);
+    if (isFinanceRecommendation(recommendation)) await this.requireRevenue(businessId, req, 'write');
+  }
 
   @Get('signals')
   async list(
@@ -99,30 +223,42 @@ export class KeyGenomeController {
     @Query('signalType') signalType?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.signalService.listSignals(businessId, {
+    const filters = {
       status,
       sourceModule,
       section,
       signalType,
       minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    };
+    if (await this.readsRevenue(businessId, req)) return this.signalService.listSignals(businessId, filters);
+    // SEC-GFS-4 (D-128 read clause): no finance signal for a member without
+    // revenue read; the limit counts the signals that member is served.
+    const rows = await this.signalService.listSignals(businessId, { ...filters, limit: undefined });
+    return firstN(rows.filter((s) => !isFinanceSignal(s)), filters.limit);
   }
 
   @Get('signals/:signalId')
   async get(
     @Param('businessId') businessId: string,
     @Param('signalId') signalId: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.signalService.getSignal(businessId, signalId);
+    const signal = await this.signalService.getSignal(businessId, signalId);
+    // SEC-GFS-4 (D-128 read clause): a finance signal needs revenue read.
+    if (isFinanceSignal(signal)) await this.requireRevenue(businessId, req, 'read');
+    return signal;
   }
 
   @Post('signals/:signalId/review')
   async review(
     @Param('businessId') businessId: string,
     @Param('signalId') signalId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireSignalAction(businessId, signalId, req); // D-128
     return this.signalService.reviewSignal(businessId, signalId);
   }
 
@@ -130,7 +266,9 @@ export class KeyGenomeController {
   async accept(
     @Param('businessId') businessId: string,
     @Param('signalId') signalId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireSignalAction(businessId, signalId, req); // D-128
     return this.signalService.acceptSignal(businessId, signalId);
   }
 
@@ -138,7 +276,9 @@ export class KeyGenomeController {
   async reject(
     @Param('businessId') businessId: string,
     @Param('signalId') signalId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireSignalAction(businessId, signalId, req); // D-128
     return this.signalService.rejectSignal(businessId, signalId);
   }
 
@@ -146,7 +286,9 @@ export class KeyGenomeController {
   async merge(
     @Param('businessId') businessId: string,
     @Param('signalId') signalId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireSignalAction(businessId, signalId, req); // D-128
     return this.signalService.mergeSignal(businessId, signalId);
   }
 
@@ -157,20 +299,27 @@ export class KeyGenomeController {
     @Query('domain') domain?: string,
     @Query('minExpectedGainScore') minExpectedGainScore?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.recommendationService.listRecommendations(businessId, {
+    const filters = {
       status,
       domain,
       minExpectedGainScore:
         minExpectedGainScore !== undefined ? Number(minExpectedGainScore) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    };
+    if (await this.readsRevenue(businessId, req)) return this.recommendationService.listRecommendations(businessId, filters);
+    // SEC-GFS-4 (D-128 read clause): no finance recommendation for a member
+    // without revenue read; the limit counts the rows that member is served.
+    const rows = await this.recommendationService.listRecommendations(businessId, { ...filters, limit: undefined });
+    return firstN(rows.filter((r) => !isFinanceRecommendation(r)), filters.limit);
   }
 
   @Post('recommendations/generate')
   async generateRecommendations(
     @Param('businessId') businessId: string,
     @Body() body?: GenerateGenomeRecommendationsInput,
+    @Req() req?: GenomeRequest,
   ) {
     // Spread FIRST. businessId must be the guarded @Param, never a value the
     // request body chose for itself.
@@ -183,25 +332,36 @@ export class KeyGenomeController {
     //
     // The sweep in b53eef9e missed this: its gate matches `...` followed by a
     // BARE identifier, and this spread is parenthesised.
-    return this.recommendationService.generateRecommendations({
+    const created = await this.recommendationService.generateRecommendations({
       ...(body ?? {}),
       businessId,
     });
+    // SEC-GFS-4 (D-128 read clause): the generator turns NEW finance signals
+    // into FINANCIAL recommendations whose insight is the signal's warning
+    // text; a member without revenue read is not served them.
+    if (await this.readsRevenue(businessId, req)) return created;
+    return created.filter((r) => !isFinanceRecommendation(r));
   }
 
   @Get('recommendations/:recommendationId')
   async getRecommendation(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.recommendationService.getRecommendation(businessId, recommendationId);
+    const recommendation = await this.recommendationService.getRecommendation(businessId, recommendationId);
+    // SEC-GFS-4 (D-128 read clause): a finance recommendation needs revenue read.
+    if (isFinanceRecommendation(recommendation)) await this.requireRevenue(businessId, req, 'read');
+    return recommendation;
   }
 
   @Post('recommendations/:recommendationId/accept')
   async acceptRecommendation(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.acceptRecommendation(businessId, recommendationId);
   }
 
@@ -210,7 +370,9 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
     @Body() body: { reason?: string },
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.dismissRecommendation(
       businessId,
       recommendationId,
@@ -223,7 +385,9 @@ export class KeyGenomeController {
   async applyRecommendation(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.applyRecommendation(businessId, recommendationId);
   }
 
@@ -232,7 +396,9 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
     @Body() body: { reason?: string },
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.ignoreRecommendation(
       businessId,
       recommendationId,
@@ -245,7 +411,9 @@ export class KeyGenomeController {
   async escalateRecommendation(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.escalateRecommendation(businessId, recommendationId);
   }
 
@@ -254,10 +422,23 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
     @Body() body: RecommendationOutcome,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecommendationAction(businessId, recommendationId, req); // D-128
     return this.recommendationService.trackOutcome(businessId, recommendationId, body);
   }
 
+  // ---------------------------------------------------------------------------
+  // GFS-R2 (D-100): every outcome row's health scores are the cross-domain
+  // composite's (its domain score, else its overall score, which averages the
+  // finance health score), so the outcome reads need revenue read; closing an
+  // observation window recomputes the cross-domain snapshot, and with it the
+  // finance snapshot, so it needs revenue write (D-128, as SEC-GFS-1). The
+  // learning windows carry no figure and are unchanged.
+  // ---------------------------------------------------------------------------
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('recommendations/:recommendationId/outcome')
   async getRecommendationOutcome(
     @Param('businessId') businessId: string,
@@ -270,10 +451,22 @@ export class KeyGenomeController {
   async getRecommendationExecutionStatus(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: GenomeRequest,
   ): Promise<GenomeRecommendationExecutionStatus | null> {
+    // SEC-GFS-4 (D-128 read clause): a finance recommendation's status needs
+    // revenue read. An unknown id keeps the service's answer (null).
+    const recommendation = await this.recommendationService
+      .getRecommendation(businessId, recommendationId)
+      .catch((err: unknown) => {
+        if (err instanceof NotFoundException) return null;
+        throw err;
+      });
+    if (recommendation && isFinanceRecommendation(recommendation)) await this.requireRevenue(businessId, req, 'read');
     return this.outcomeService.getExecutionStatus(businessId, recommendationId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('outcomes')
   async listRecommendationOutcomes(
     @Param('businessId') businessId: string,
@@ -290,6 +483,8 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100 (GFS-R2)
   @Get('outcomes/summary')
   async getRecommendationOutcomesSummary(
     @Param('businessId') businessId: string,
@@ -297,6 +492,8 @@ export class KeyGenomeController {
     return this.outcomeService.getSummary(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100 (GFS-R2)
   @Get('outcomes/learning-summary')
   async getRecommendationLearningSummary(
     @Param('businessId') businessId: string,
@@ -304,6 +501,8 @@ export class KeyGenomeController {
     return this.outcomeService.getLearningSummary(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100 (GFS-R2): answers the outcome row with its composite health scores
   @Patch('outcomes/:outcomeId/observation')
   async updateOutcomeObservation(
     @Param('businessId') businessId: string,
@@ -313,6 +512,8 @@ export class KeyGenomeController {
     return this.outcomeService.updateObservation({ ...body, outcomeId, businessId });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128: recomputes the cross-domain (and finance) snapshot
   @Post('outcomes/:outcomeId/close-observation')
   async closeObservationWindow(
     @Param('businessId') businessId: string,
@@ -405,8 +606,9 @@ export class KeyGenomeController {
     @Query('outcome') outcome?: string,
     @Query('minImpactScore') minImpactScore?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.memoryService.listMemoryEvents(businessId, {
+    const filters = {
       sourceType,
       eventType,
       domain,
@@ -414,9 +616,23 @@ export class KeyGenomeController {
       outcome: outcome as GenomeOutcome | undefined,
       minImpactScore: minImpactScore !== undefined ? Number(minImpactScore) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    };
+    if (await this.readsRevenue(businessId, req)) return this.memoryService.listMemoryEvents(businessId, filters);
+    // SEC-GFS-4 / GFS-R2 (D-100): no finance or composite memory event (health
+    // score, overall risk) for a member without revenue read; the limit counts
+    // the events that member is served.
+    const rows = await this.memoryService.listMemoryEvents(businessId, { ...filters, limit: undefined });
+    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), filters.limit);
   }
 
+  /**
+   * GFS-R2 (D-100): the summary averages every event's impact score (a finance
+   * or composite event's is its health score) and lists the latest events, so
+   * it needs revenue read; GET memory serves a member without it the events
+   * they may read.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('memory/summary')
   async memorySummary(@Param('businessId') businessId: string) {
     return this.memoryService.summarizeMemory(businessId);
@@ -429,31 +645,83 @@ export class KeyGenomeController {
     @Query('eventType') eventType?: string,
     @Query('outcome') outcome?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.memoryService.findSimilarMemory(businessId, {
+    const query = {
       domain,
       eventType,
       outcome,
       limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    };
+    if (await this.readsRevenue(businessId, req)) return this.memoryService.findSimilarMemory(businessId, query);
+    // SEC-GFS-4 (D-100): as GET memory. findSimilarMemory serves 25 by default;
+    // the readable ones are taken from the latest 1000 (summarizeMemory's window).
+    const rows = await this.memoryService.findSimilarMemory(businessId, { ...query, limit: 1000 });
+    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), query.limit ?? 25);
   }
 
   @Get('memory/:memoryEventId')
   async getMemoryEvent(
     @Param('businessId') businessId: string,
     @Param('memoryEventId') memoryEventId: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.memoryService.getMemoryEvent(businessId, memoryEventId);
+    const event = await this.memoryService.getMemoryEvent(businessId, memoryEventId);
+    // SEC-GFS-4 (D-100): a finance or composite memory event needs revenue read.
+    if (isMoneyMemoryEvent(event)) await this.requireRevenue(businessId, req, 'read');
+    return event;
+  }
+
+  /**
+   * SEC-GFS-4 (D-128 read clause): the governance queues list the business's
+   * signals and recommendations with their reason or insight as the summary;
+   * for a member without revenue read the items naming a finance signal or
+   * recommendation are dropped (the counts carry no figure and stay).
+   */
+  private async withoutFinanceItems<T extends { type?: string; sourceId?: string | null }>(
+    businessId: string,
+    lists: Array<T[] | undefined>,
+  ): Promise<(items: T[] | undefined) => T[] | undefined> {
+    if (!lists.some((items) => Array.isArray(items) && items.length > 0)) return (items) => items;
+    const [signals, recommendations] = await Promise.all([
+      this.signalService.listSignals(businessId, {}),
+      this.recommendationService.listRecommendations(businessId, {}),
+    ]);
+    const hiddenSignals = new Set(signals.filter((s) => isFinanceSignal(s)).map((s) => s.id));
+    const hiddenRecommendations = new Set(recommendations.filter((r) => isFinanceRecommendation(r)).map((r) => r.id));
+    return (items) =>
+      Array.isArray(items)
+        ? items.filter(
+            (item) =>
+              !(item.type === 'SIGNAL' && item.sourceId && hiddenSignals.has(item.sourceId)) &&
+              !(item.type === 'RECOMMENDATION' && item.sourceId && hiddenRecommendations.has(item.sourceId)),
+          )
+        : items;
   }
 
   @Get('governance')
-  async governance(@Param('businessId') businessId: string) {
-    return this.governanceService.summary(businessId);
+  async governance(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const summary = await this.governanceService.summary(businessId);
+    if (await this.readsRevenue(businessId, req)) return summary;
+    const keep = await this.withoutFinanceItems(businessId, [
+      summary.urgentReviewItems,
+      summary.signalReviewQueue,
+      summary.recommendationQueue,
+    ]);
+    return {
+      ...summary,
+      urgentReviewItems: keep(summary.urgentReviewItems),
+      signalReviewQueue: keep(summary.signalReviewQueue),
+      recommendationQueue: keep(summary.recommendationQueue),
+    };
   }
 
   @Get('governance/queue')
-  async governanceQueue(@Param('businessId') businessId: string) {
-    return this.governanceService.queue(businessId);
+  async governanceQueue(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const queue = await this.governanceService.queue(businessId);
+    if (await this.readsRevenue(businessId, req)) return queue;
+    const keep = await this.withoutFinanceItems(businessId, [queue]);
+    return keep(queue);
   }
 
   @Get('departments')
@@ -512,8 +780,10 @@ export class KeyGenomeController {
   // (revenue, profit, cash, receivables, payables, runway) needs revenue read
   // (D-100: a member without revenue read sees no money signals at all).
   // BusinessGuard checks membership only, so each of these seven handlers adds
-  // ModuleScopeGuard, as the finance controller's money reads do. The other
-  // key-genome routes are unchanged.
+  // ModuleScopeGuard, as the finance controller's money reads do. The review
+  // repairs extend the rulings to the sibling routes that reach the same rows
+  // (the finance signals, recommendations and memory events above, the
+  // outcome reads, the customer-sales snapshot and the cross-domain routes).
   // ---------------------------------------------------------------------------
 
   @UseGuards(ModuleScopeGuard)
@@ -665,11 +935,23 @@ export class KeyGenomeController {
     return this.salesMotions.deleteMotion(businessId, motionId);
   }
 
+  // SEC-GFS-3 (D-100): the customer-sales snapshot reads the finance metrics:
+  // averageRevenuePerCustomer is the REVENUE metric over the segments' sizes
+  // (a one-customer segment serves it whole), lifetimeValue and
+  // customerAcquisitionCost are the LIFETIME_VALUE and CUSTOMER_ACQUISITION_COST
+  // metrics, and the revenue quality score and risks are worked out from them.
+  // Computing and reading it need revenue read, as finance/metrics does; the
+  // segments, motions and the qualitative signals and recommendations are
+  // unchanged.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('customer-sales/snapshot')
   async getCustomerSalesSnapshot(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.getLatestCustomerSalesSnapshot(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Post('customer-sales/snapshot/compute')
   async computeCustomerSalesSnapshot(
     @Param('businessId') businessId: string,
@@ -678,6 +960,8 @@ export class KeyGenomeController {
     return this.customerSalesGenome.computeCustomerSalesSnapshot(businessId, period);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('customer-sales/snapshots')
   async listCustomerSalesSnapshots(
     @Param('businessId') businessId: string,
@@ -926,13 +1210,29 @@ export class KeyGenomeController {
 
   // ---------------------------------------------------------------------------
   // Phase 17B: Cross-Domain Genome Intelligence
+  //
+  // W11-GENOME-FINANCE-SCOPE review repairs (SEC-GFS-1, SEC-GFS-2, GFS-R1):
+  // the cross-domain snapshot is computed from the finance snapshot (its
+  // finance domain score and risk are the finance health score and overall
+  // risk, its overall score averages them, its bottlenecks carry the finance
+  // warning text such as the runway), and every route below serves it or what
+  // is ranked or gated from it. D-100: reading them needs revenue read. D-128:
+  // computing it recomputes the finance snapshot (a genome_finance_snapshots
+  // row, a FINANCE_SNAPSHOT_COMPUTED memory event, the CFO readiness), so it
+  // needs revenue write, and the five routes that compute it when the business
+  // has none yet refuse a member without revenue write then
+  // (requireRecomputeAuthorityIfNoSnapshot).
   // ---------------------------------------------------------------------------
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('cross-domain/snapshot')
   async getCrossDomainSnapshot(@Param('businessId') businessId: string) {
     return this.crossDomainGenome.getLatestCrossDomainSnapshot(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-128: recomputes the finance snapshot
   @Post('cross-domain/snapshot/compute')
   async computeCrossDomainSnapshot(
     @Param('businessId') businessId: string,
@@ -941,6 +1241,8 @@ export class KeyGenomeController {
     return this.crossDomainGenome.computeCrossDomainSnapshot(businessId, period);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100
   @Get('cross-domain/snapshots')
   async listCrossDomainSnapshots(
     @Param('businessId') businessId: string,
@@ -955,6 +1257,8 @@ export class KeyGenomeController {
     } as ListGenomeCrossDomainSnapshotsQuery);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100: overall health, finance viability
   @Get('cross-domain/recommendations/ranked')
   async getRankedRecommendations(
     @Param('businessId') businessId: string,
@@ -962,7 +1266,9 @@ export class KeyGenomeController {
     @Query('limit') limit?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('maxEffortLevel') maxEffortLevel?: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
     return this.recommendationRanker.rankRecommendations(businessId, {
       status,
       limit: limit !== undefined ? Number(limit) : undefined,
@@ -972,13 +1278,17 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100: overall health, finance viability
   @Post('cross-domain/recommendations/ranked/generate')
   async generateAndRankRecommendations(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('maxEffortLevel') maxEffortLevel?: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
     return this.recommendationRanker.generateAndRankRecommendations(businessId, {
       limit: limit !== undefined ? Number(limit) : undefined,
       minConfidence:
@@ -987,13 +1297,17 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100: finance health thresholds and evidence
   @Get('cross-domain/opportunities')
   async getOpportunities(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
     @Query('minPotentialImpact') minPotentialImpact?: string,
     @Query('includeRiskMitigation') includeRiskMitigation?: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
     return this.opportunityDetector.detectOpportunities(businessId, {
       limit: limit !== undefined ? Number(limit) : undefined,
       minPotentialImpact: minPotentialImpact as
@@ -1008,13 +1322,17 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100: finance health thresholds and evidence
   @Post('cross-domain/opportunities/detect')
   async detectOpportunities(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
     @Query('minPotentialImpact') minPotentialImpact?: string,
     @Query('includeRiskMitigation') includeRiskMitigation?: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
     return this.opportunityDetector.detectOpportunities(businessId, {
       limit: limit !== undefined ? Number(limit) : undefined,
       minPotentialImpact: minPotentialImpact as
@@ -1029,11 +1347,15 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-100: "Finance risk is CRITICAL" reasons
   @Post('cross-domain/autonomy-gate/check')
   async checkAutonomyGate(
     @Param('businessId') businessId: string,
     @Body() body: CheckGenomeAutonomyGateInput,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireRecomputeAuthorityIfNoSnapshot(businessId, req); // D-128
     return this.autonomyGate.checkGate({ ...body, businessId });
   }
 }
