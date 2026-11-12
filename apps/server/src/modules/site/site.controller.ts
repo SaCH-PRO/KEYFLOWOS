@@ -10,6 +10,11 @@ import { StorefrontConversionService } from './storefront-conversion.service';
 import { CustomerReferralService } from './customer-referral.service';
 import { CaseStudyService } from './case-study.service';
 import { PaymentsService } from '../payments/payments.service';
+import {
+  STOREFRONT_CHECKOUT_METHODS,
+  normalizeStorefrontMethod,
+  storefrontMethodUnsupported,
+} from '../payments/storefront-checkout-methods';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -161,6 +166,19 @@ export class SiteController {
     },
     @Req() req: Request,
   ) {
+    // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106, D-18): the method, read
+    // once, trimmed and upper-cased. Only no method, CASH, MANUAL, WIPAY,
+    // PAYPAL or STRIPE is taken; anything else is refused here, before an
+    // order is written (it was refused by createStorePayment after the order,
+    // its retry slot and its promo use had committed). Whether this business
+    // offers the provider is StoreOrderService.createOrder's check, also
+    // before the write. The normalised value is what the order stores, the
+    // retry key's request hash reads and the payment step is started with.
+    const paymentMethod = normalizeStorefrontMethod(body.paymentMethod);
+    if (paymentMethod !== null && !STOREFRONT_CHECKOUT_METHODS.includes(paymentMethod)) {
+      throw new BadRequestException(storefrontMethodUnsupported(body.paymentMethod as string));
+    }
+
     const storefront = await this.siteService.getPublicStorefront(slug);
     const businessId = storefront.business.id;
     const cookieVid = readVisitorIdFromRequest(req);
@@ -183,15 +201,14 @@ export class SiteController {
       customerInfo: cleanCustomer,
       promoCode: body.promoCode ? sanitize(body.promoCode) ?? undefined : undefined,
       shippingInfo: body.shipping,
-      paymentMethod: body.paymentMethod,
+      paymentMethod: paymentMethod ?? undefined,
       notes: sanitize(body.notes ?? null) ?? undefined,
       storefrontSlug: slug,
       visitorId: resolvedVid,
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     };
 
-    // CASH, MANUAL and no method start no provider session.
-    const paymentMethod = body.paymentMethod;
+    // CASH, MANUAL and no method start no provider session (D-18).
     const startPayment = paymentMethod && paymentMethod !== 'CASH' && paymentMethod !== 'MANUAL'
       ? (order: { id: string; total: number; currency: string }) =>
           this.paymentsService.createStorePayment({

@@ -26,6 +26,7 @@ import {
 } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { paypalCurrencyRefusal, paypalTakesCurrency } from './paypal-currency';
+import { paypalConfigured, storefrontMethodNotOffered, stripeConfigured } from './storefront-checkout-methods';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -972,9 +973,10 @@ export class PaymentsService {
     // W10-PAYPAL-CURRENCY (D-106, PC-08b): PayPal is offered only for an amount in a currency PayPal supports
     // (paypal-currency.ts; never TTD, JMD, BBD, GYD or XCD), and in that currency: the order is made in the
     // payable's own currency (V1-05), not USD.
-    const paypalId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
-    const paypalSecret = meta.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET;
-    if (paypalId && paypalSecret && paypalTakesCurrency(currency)) {
+    // W11-STORE-CHECKOUT-METHOD-GATE (F-21): "configured" is one reading (storefront-checkout-methods.ts), shared
+    // with the storefront checkout, which refuses PayPal and Stripe before the order is written where this list
+    // leaves them out.
+    if (paypalConfigured(meta) && paypalTakesCurrency(currency)) {
       gateways.push({
         id: 'paypal',
         name: 'PayPal',
@@ -982,10 +984,7 @@ export class PaymentsService {
       });
     }
 
-    const stripePub = meta.stripePublishableKey || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-    const stripeSecret = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
-    const stripeWh = meta.stripeWebhookSecret || process.env.STRIPE_WEBHOOK_SECRET;
-    if (stripePub && stripeSecret && stripeWh) {
+    if (stripeConfigured(meta)) {
       gateways.push({
         id: 'stripe',
         name: 'Stripe',
@@ -3184,7 +3183,10 @@ export class PaymentsService {
       const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
       const paypalClientSecret = meta.paypalClientSecret || process.env.PAYPAL_CLIENT_SECRET;
       const paypal = this.getPaypalClient(paypalClientId, paypalClientSecret);
-      if (!paypal) throw new Error('PayPal is not configured');
+      // W11-STORE-CHECKOUT-METHOD-GATE (F-21): a store with no PayPal (its own or the platform's) is a 400 the payer
+      // can act on, as the storefront checkout's refusal before the order is written (StoreOrderService.createOrder).
+      // It was a plain Error, so the generic storefront checkout (createGenericCheckout) answered 500.
+      if (!paypal) throw new BadRequestException(storefrontMethodNotOffered('PAYPAL'));
 
       const { result } = await paypal.ordersController.createOrder({
         body: {
