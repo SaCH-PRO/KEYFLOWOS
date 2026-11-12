@@ -132,6 +132,29 @@
  *         order stayed SHIPPED). Now 409 naming no other business's id;
  *         nothing is written, and the planted row is left for an operator.
  *
+ * W11-INV-UPSERT-SCOPE (the Z4RV-SEC-1 sibling): POST .../inventory
+ * (MarketplaceService.upsertInventory, body: any, no DTO) read the stock row by
+ * (productId, warehouseId) alone, updated it by id, else created a row of the
+ * caller's business for whatever pair the body named. Each case below was red
+ * at fb00af1c:
+ *
+ *   RC-20 with no ambient tenant (the service called directly, as here and as
+ *         any non-HTTP caller): a body naming B's stocked pair rewrote B's row
+ *         (999 at 0.01), and bodies naming B's product or warehouse created
+ *         rows of this business. Now the product and the warehouse must be the
+ *         business's (raw SQL by its own id): 404, nothing written.
+ *   RC-21 the same with the ambient tenant armed as main.ts arms it: the scoped
+ *         read missed B's row and the create hit the unique pair (500, P2002),
+ *         and the others planted rows of this business (B's XB2 then read as
+ *         stock-tracked). Now the same 404s.
+ *   RC-22 malformed ids and fields answered 500 (PrismaClientValidationError)
+ *         or stored fractions and negatives. Now 400 naming the field, before
+ *         any read (an id filter object would match any row once the read is
+ *         by business, the Z5SEC-1 lesson).
+ *   RC-23 the business's own rows keep today's partial update (only the fields
+ *         sent; digit text from the web form is that number, D-136) and create;
+ *         a pair a planted row holds answers 409 (D-137: the operator repairs).
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -213,8 +236,11 @@ let prismaService: any;
 let deliveryNotes: any;
 let goodsReceipts: any;
 let stockCounts: any;
-/** MarketplaceController, as POST .../inventory/transfer calls it (body: any, no DTO). */
+/** MarketplaceController, as POST .../inventory/transfer and POST .../inventory call it (body: any, no DTO). */
 let controller: any;
+/** @keyflow/db (its setTenantContextProvider) and src/core/tenant/tenant-context, for the cases that arm the ambient tenant. */
+let dbModule: any;
+let tenantContext: any;
 
 /** store_order.* events in emit order. */
 let seen: Array<{ name: string; payload: any }> = [];
@@ -264,6 +290,8 @@ async function cleanup() {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  dbModule = dbMod;
+  tenantContext = await import('../src/core/tenant/tenant-context');
 
   const { Test } = await import('@nestjs/testing');
   const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -393,6 +421,8 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  // RC-21 restores it in its own finally; this keeps a failed run from leaving the ambient tenant armed.
+  dbModule?.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
   await drain();
   await cleanup();
   await app?.close();
@@ -711,6 +741,41 @@ async function plantRows(rows: Array<[id: string, productId: string, warehouseId
   }
 }
 const removeRows = (ids: string[]) => db.$executeRaw`DELETE FROM inventory_stocks WHERE id = ANY(${ids}::text[])`;
+
+/** POST .../inventory as the route runs it: its handler (MarketplaceController.upsertInventory), with the body as sent. */
+const upsertByRoute = (businessId: string, body: Record<string, unknown>) =>
+  Promise.resolve().then(() => controller.upsertInventory(businessId, body));
+/** An upsert's answer as the route gives it: 'committed' when it returned a stock row, else as routeAnswer reads it. */
+const upsertAnswer = (work: Promise<unknown>) => routeAnswer(work.then((row: any) => ({ success: typeof row?.id === 'string' })));
+
+/** The other business's own stock row (XB in WB) as the suite seeds it, read with no tenant: [businessId, quantity, reserved, cost]. */
+const otherBusinessRow = async () => {
+  const [row]: any[] = await db.$queryRaw`
+    SELECT business_id, quantity, reserved, cost_per_unit FROM inventory_stocks WHERE id = ${ID.stockXB}`;
+  return [row.business_id, row.quantity, row.reserved, row.cost_per_unit];
+};
+const restoreOtherBusinessRow = () =>
+  db.$executeRaw`UPDATE inventory_stocks SET business_id = ${ID.bizB}, quantity = ${IN_STOCK}, reserved = 0, cost_per_unit = 5 WHERE id = ${ID.stockXB}`;
+/** How many stock rows hold a product, whatever their business (raw SQL: no tenant filter). */
+const stockRowsOfProduct = async (productId: string) => {
+  const [{ n }]: any[] = await db.$queryRaw`SELECT COUNT(*)::int AS n FROM inventory_stocks WHERE product_id = ${productId}`;
+  return n as number;
+};
+
+/**
+ * W11-INV-UPSERT-SCOPE: the four bodies a member of this business (ID.biz) sent naming the other business's product or
+ * warehouse, measured at fb00af1c, each with the answer it gets now.
+ */
+const foreignUpserts = (): Array<[name: string, body: Record<string, unknown>, answer: string]> => [
+  [
+    "B's stocked pair (XB in WB), 999 at cost 0.01",
+    { productId: ID.productXB, warehouseId: ID.warehouseB, quantity: 999, costPerUnit: 0.01 },
+    '404: Product not found',
+  ],
+  ["B's unstocked product in B's warehouse (XB2 in WB)", { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 5 }, '404: Product not found'],
+  ["this business's own product into B's warehouse", { productId: ID.productA, warehouseId: ID.warehouseB, quantity: 5 }, '404: Warehouse not found'],
+  ["B's product into this business's warehouse", { productId: ID.productXB, warehouseId: ID.warehouse, quantity: 5 }, '404: Product not found'],
+];
 
 describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real database)', () => {
   it('RC-01 (SEAMZ4-CR-1) two paid orders with the same tracked products in opposite line order, routed at once and each held after its first reservation: no deadlock, both routed once (2 LOCAL_STOCK RESERVED routes each), 2 reserved of each product, and no store_order.routing_failed', async () => {
@@ -1483,13 +1548,172 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     expect(JSON.stringify(outcome), "the answer names no id of the suite's").not.toContain(P);
   });
 
+  it("RC-20 (W11-INV-UPSERT-SCOPE, Z4RV-SEC-1 sibling) POST .../inventory with no ambient tenant, naming the other business's product or warehouse (its stocked pair at 999 / 0.01, its unstocked product in its warehouse, this business's product into its warehouse, its product into this business's warehouse), is refused with 404 'Product not found' or 'Warehouse not found' naming no id: B's own row unchanged, no stock row created, no stock movement", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    try {
+      for (const [name, body, answer] of foreignUpserts()) {
+        outcomes[name] = await answerAndWrites(() => upsertAnswer(upsertByRoute(ID.biz, body)));
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+      expect(await otherBusinessRow(), "B's own stock row as it was [business, quantity, reserved, cost]").toEqual([ID.bizB, IN_STOCK, 0, 5]);
+      expect(await stockRowsOfProduct(ID.productXB2), "B's unstocked product has no stock row (it does not read as tracked)").toBe(0);
+    } finally {
+      await restoreOtherBusinessRow();
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first rewrote B's row to 999 at 0.01 and the other three created rows of this business for B's
+    // product or in B's warehouse (B's XB2 then read as stock-tracked).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-21 (W11-INV-UPSERT-SCOPE, Z4RV-SEC-1 sibling) the same four bodies with the ambient tenant armed as main.ts arms it (setTenantContextProvider, the call run in runWithTenant for this business) are refused with the same 404s: no 500, no stock row planted, B's own row unchanged", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    dbModule.setTenantContextProvider({ getCurrentBusinessId: tenantContext.getCurrentBusinessId });
+    try {
+      for (const [name, body, answer] of foreignUpserts()) {
+        outcomes[name] = await answerAndWrites(() =>
+          upsertAnswer(tenantContext.runWithTenant(ID.biz, ID.owner, () => upsertByRoute(ID.biz, body))),
+        );
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+    } finally {
+      // Every other case runs with no ambient tenant.
+      dbModule.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+    }
+    let otherRow: unknown;
+    let xb2Rows: unknown;
+    try {
+      otherRow = await otherBusinessRow();
+      xb2Rows = await stockRowsOfProduct(ID.productXB2);
+    } finally {
+      await restoreOtherBusinessRow();
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first answered 500 (the tenant-scoped read missed B's row; the create hit the unique pair, P2002)
+    // and the other three planted rows of this business: (XB2, WB), (A, WB), (XB, this business's warehouse).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(otherRow, "B's own stock row as it was [business, quantity, reserved, cost]").toEqual([ID.bizB, IN_STOCK, 0, 5]);
+    expect(xb2Rows, "B's unstocked product has no stock row (at fb00af1c: 1, so B's checkout refused it)").toBe(0);
+  });
+
+  it('RC-22 (W11-INV-UPSERT-SCOPE; D-136 whole stock quantities) POST .../inventory with productId or warehouseId missing, empty, null, a number, an array or a filter object, or with a quantity, reserved, reorderAt, costPerUnit or currency of the wrong shape (a fraction, a negative, a word, an object), is refused with 400 naming the field before anything is read or written', async () => {
+    const body = { productId: ID.productA, warehouseId: ID.warehouse, quantity: 3 };
+    const without = (key: keyof typeof body) => Object.fromEntries(Object.entries(body).filter(([k]) => k !== key));
+    const productId = '400: Inventory productId is required (a non-empty string)';
+    const warehouseId = '400: Inventory warehouseId is required (a non-empty string)';
+    const whole = (field: string) => `400: Inventory ${field} must be a whole number of 0 or more`;
+    const probes: Array<[string, Record<string, unknown>, string]> = [
+      ['no productId', without('productId'), productId],
+      ['productId an empty string', { ...body, productId: '' }, productId],
+      ['productId null', { ...body, productId: null }, productId],
+      ['productId a number', { ...body, productId: 42 }, productId],
+      ['productId a filter object', { ...body, productId: { not: '' } }, productId],
+      ['no warehouseId', without('warehouseId'), warehouseId],
+      ['warehouseId an array', { ...body, warehouseId: [ID.warehouse] }, warehouseId],
+      ['warehouseId a filter object', { ...body, warehouseId: { not: '' } }, warehouseId],
+      ['quantity a fraction', { ...body, quantity: 1.5 }, whole('quantity')],
+      ['quantity negative', { ...body, quantity: -5 }, whole('quantity')],
+      ['quantity a word', { ...body, quantity: 'abc' }, whole('quantity')],
+      ['quantity a fraction as text', { ...body, quantity: '1.5' }, whole('quantity')],
+      ['quantity an object', { ...body, quantity: {} }, whole('quantity')],
+      ['quantity above the largest stored whole number', { ...body, quantity: 2_147_483_648 }, whole('quantity')],
+      ['reserved negative', { ...body, reserved: -1 }, whole('reserved')],
+      ['reorderAt a fraction', { ...body, reorderAt: 2.5 }, whole('reorderAt')],
+      ['costPerUnit a word', { ...body, costPerUnit: 'x' }, '400: Inventory costPerUnit must be a number of 0 or more'],
+      ['costPerUnit negative', { ...body, costPerUnit: -1 }, '400: Inventory costPerUnit must be a number of 0 or more'],
+      ['currency a number', { ...body, currency: 42 }, '400: Inventory currency must be a non-empty string'],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    const ownRow = async () => {
+      const a = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      return [a.businessId, a.quantity, a.reserved, a.reorderAt, a.costPerUnit, a.currency];
+    };
+    let before: unknown;
+    let after: unknown;
+    try {
+      await resetBusinessStock();
+      before = await ownRow();
+      for (const [name, sent, answer] of probes) {
+        await resetBusinessStock();
+        outcomes[name] = await answerAndWrites(() => upsertAnswer(upsertByRoute(ID.biz, sent)));
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+      after = await ownRow();
+    } finally {
+      await resetBusinessStock();
+    }
+    // At fb00af1c a missing or filter-object id, a quantity as a word or an object, and a costPerUnit word answered 500
+    // (PrismaClientValidationError), and a fraction or a negative quantity was stored.
+    expect(outcomes).toEqual(expected);
+    expect(after, "this business's row (A) as it was, reorderAt and currency too").toEqual(before);
+  });
+
+  it("RC-23 (W11-INV-UPSERT-SCOPE; D-137 planted rows left for an operator) on the business's own rows: an existing pair updates only the fields sent (quantity '7' from the web form stored as 7, reorderAt and cost kept, the row returned with its product and warehouse), a new own pair is created for the business, and a pair a planted row holds is refused with 409 naming no id, writing nothing", async () => {
+    const outcomes: Record<string, unknown> = {};
+    let returned: any;
+    let updated: unknown;
+    let created: unknown;
+    let planted: unknown;
+    const seeded = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    try {
+      await resetBusinessStock();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reorderAt: 4, costPerUnit: 3 } });
+      outcomes['own existing pair, quantity as the web form sends it'] = await answerAndWrites(() =>
+        upsertAnswer(
+          upsertByRoute(ID.biz, { productId: ID.productA, warehouseId: ID.warehouse, quantity: '7', reserved: '' }).then((row: any) => (returned = row)),
+        ),
+      );
+      const a = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      updated = [a.businessId, a.quantity, a.reserved, a.reorderAt, a.costPerUnit, a.currency];
+
+      outcomes['own new pair'] = await answerAndWrites(() =>
+        upsertAnswer(upsertByRoute(ID.biz, { productId: ID.productU, warehouseId: ID.warehouse2, quantity: 3, costPerUnit: '2.5', reorderAt: '1' })),
+      );
+      const rows = await db.inventoryStock.findMany({ where: { productId: ID.productU, warehouseId: ID.warehouse2 } });
+      created = rows.map((r: any) => [r.businessId, r.quantity, r.reserved, r.reorderAt, r.costPerUnit, r.currency]);
+
+      await plantRows([[ID.plantedXB2InB, ID.productXB2, ID.warehouseB]]);
+      outcomes["B's own pair, held by a planted row of this business"] = await answerAndWrites(() =>
+        upsertAnswer(upsertByRoute(ID.bizB, { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 3 })),
+      );
+      const p = await db.inventoryStock.findUnique({ where: { id: ID.plantedXB2InB } });
+      planted = [p.businessId, p.quantity, p.reserved, p.costPerUnit];
+    } finally {
+      await removeRows([ID.plantedXB2InB]);
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reorderAt: seeded.reorderAt, costPerUnit: seeded.costPerUnit, currency: seeded.currency } });
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first answered 500 (quantity '7' and reserved '' reached Prisma as text) and the third rewrote the
+    // planted row (read by its pair alone) and answered success.
+    expect(outcomes).toEqual({
+      'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
+      'own new pair': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
+      "B's own pair, held by a planted row of this business": {
+        answer: '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it',
+        stockRowsWritten: 0,
+        movementsWritten: 0,
+      },
+    });
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(updated, 'quantity 7; reserved, reorderAt, cost and currency kept').toEqual([ID.biz, 7, 0, 4, 3, 'TTD']);
+    expect([returned?.id, returned?.product?.id, returned?.warehouse?.id], 'the row returned with its product and warehouse').toEqual([
+      ID.stockA,
+      ID.productA,
+      ID.warehouse,
+    ]);
+    expect(created, 'one row, of this business').toEqual([[ID.biz, 3, 0, 1, 2.5, 'TTD']]);
+    expect(planted, 'the planted row untouched').toEqual([ID.biz, IN_STOCK, 0, 5]);
+  });
+
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
   );
   it.todo(
     'Z4RV-SEC-1 follow-up (not this packet): POST .../purchase-orders (MarketplaceService.createPurchaseOrder, body: any) stores lines naming another business\'s product or warehouse as sent; they are refused only when the purchase order is received (RC-10)',
-  );
-  it.todo(
-    'Z4RV-SEC-1 sibling (by reading, not reproduced; not this packet): POST .../inventory (MarketplaceService.upsertInventory) finds the stock row by (productId, warehouseId) with no business filter and updates it, so a member of one business could rewrite another business\'s stock row named by its product and warehouse ids',
   );
 });
