@@ -729,6 +729,20 @@ jobs:
       - name: Apply migrations to the test database
         run: pnpm db:deploy
 
+      # The suites make Postgres refuse statements on purpose (unique, foreign-key
+      # and check violations they assert on), and the service logs each one with its
+      # statement. GitHub prints the whole service log when the job stops, after the
+      # test output, so a failing run's vitest summary sits under tens of thousands of
+      # Postgres lines and cannot be read from the end of the log. Fatal-only logging
+      # keeps the summary at the end; it changes nothing a test sees.
+      - name: Quiet the Postgres service log
+        run: >-
+          docker exec ${{ job.services.postgres.id }}
+          psql -U keyflow -d keyflowos
+          -c "ALTER SYSTEM SET log_min_messages = 'fatal'"
+          -c "ALTER SYSTEM SET log_min_error_statement = 'panic'"
+          -c "SELECT pg_reload_conf()"
+
       # app-module-boots.integration.test.ts spawns apps/server/dist/main.js to
       # prove the application actually starts — the class of failure where tsc is
       # clean, 3300 tests pass, and Nest still cannot resolve a provider. dist/ is
