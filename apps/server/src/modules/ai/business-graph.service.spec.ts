@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessGraphService, keyContextSight } from './business-graph.service';
+import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 
 /**
  * PR195-PORT (owner PR #195 part 4): KEY's standing context gains treasury
@@ -21,7 +22,7 @@ import { BusinessGraphService, keyContextSight } from './business-graph.service'
  *     what the snapshot it is given carries.
  */
 
-type Scopes = Record<string, string> | null;
+type Scopes = Record<string, string> | unknown[] | null;
 
 function makeStubs(opts: {
   membership?: { role: string; permissionScopes: Scopes } | null;
@@ -273,5 +274,38 @@ describe('BusinessGraphService: KEY treasury, pipeline and support sight (PR195-
     invalidateBusinessFinancialSnapshotCache('biz_rev');
     await svc.getSnapshotForViewer('biz_rev', 'u_owner');
     expect(prisma.client.payrollRun.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('BG-13 (review SEC-P195-2 / CR-P195-2) a membership whose permissionScopes is [] is an explicit map in which every module is none: no treasury, pipeline or support', async () => {
+    const { svc, prisma } = makeStubs({ membership: { role: 'STAFF', permissionScopes: [] } });
+    expect(await keyContextSight(prisma, 'biz_1', 'u_arr')).toEqual({ treasury: false, pipeline: false, support: false });
+    const snapshot = await svc.getSnapshotForViewer('biz_1', 'u_arr', true);
+    expect(snapshot.treasury).toBeUndefined();
+    expect(snapshot.pipeline).toBeUndefined();
+    expect(snapshot.support).toBeUndefined();
+    expect(snapshot.healthIndicators.filter((h) => h.area === 'treasury')).toEqual([]);
+    expect(svc.buildContextString(snapshot)).not.toMatch(/Cash & Obligations|committed payroll|Pipeline:|Support:/);
+  });
+
+  it.each([
+    ['null (role defaults)', null],
+    ['{} (explicit, every module none)', {}],
+    ['[] (explicit, every module none)', []],
+    ['an explicit map', { revenue: 'read', crm: 'none', operations: 'write' }],
+    ['an explicit map without the module keys', { marketing: 'admin' }],
+  ])('BG-14 (anti-drift) keyContextSight reads permissionScopes %s exactly as ModuleScopeGuard does', async (_label, permissionScopes) => {
+    const { prisma } = makeStubs({ membership: { role: 'STAFF', permissionScopes: permissionScopes as Scopes } });
+    const guardAllows = async (module: string) => {
+      const reflector = { get: (key: string) => (key === MODULE_SCOPE_KEY ? { module, minLevel: 'read' } : undefined) } as any;
+      const req = { user: { id: 'u_m', role: 'USER' }, params: { businessId: 'biz_1' } };
+      const ctx = { getHandler: () => undefined, getClass: () => undefined, switchToHttp: () => ({ getRequest: () => req }) } as any;
+      return new ModuleScopeGuard(prisma, reflector).canActivate(ctx).then(() => true, () => false);
+    };
+    const sight = await keyContextSight(prisma, 'biz_1', 'u_m');
+    expect(sight).toEqual({
+      treasury: await guardAllows('revenue'),
+      pipeline: await guardAllows('crm'),
+      support: await guardAllows('operations'),
+    });
   });
 });

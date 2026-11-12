@@ -116,4 +116,30 @@ describe('SafeToSpendService: committed payroll reserve (PR195-PORT)', () => {
     expect(dto.payrollReserved).toBe(9_000);
     expect(dto.safeToSpend).toBe(0);
   });
+
+  it('STS-07 (review CR-P195-3) draft runs are named apart under the reserve: not yet approved, still reserved', async () => {
+    const { svc, prisma } = makeStubs({
+      cashBalance: 50_000,
+      runs: [
+        { totalGross: 6_000, currency: 'TTD', status: 'APPROVED' },
+        { totalGross: '2500.50', currency: 'TTD', status: 'DRAFT' },
+        { totalGross: 700, currency: 'USD', status: 'DRAFT' },
+      ],
+    });
+    const dto = await svc.calculate('biz_1');
+    expect(prisma.client.payrollRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ status: true, totalGross: true, currency: true }) }),
+    );
+    expect(dto.payrollReserved).toBe(8_500.5);
+    const at = dto.explanation.indexOf('Payroll reserved: TTD 8500.50 (2 committed runs)');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(dto.explanation[at + 1]).toBe('  - includes 1 draft run not yet approved: TTD 2500.50');
+    expect(dto.explanation.join('\n')).not.toMatch(/draft run not yet approved: USD/);
+  });
+
+  it('STS-08 (review CR-P195-3) with only approved runs no draft line is said', async () => {
+    const { svc } = makeStubs({ runs: [{ totalGross: 1_000, currency: 'TTD', status: 'APPROVED' }] });
+    const dto = await svc.calculate('biz_1');
+    expect(dto.explanation.join('\n')).not.toMatch(/draft run/);
+  });
 });

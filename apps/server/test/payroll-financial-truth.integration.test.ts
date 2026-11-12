@@ -36,11 +36,32 @@
  *           committed payroll, pipeline and tickets; a member without revenue
  *           read sees no cash, bills or payroll; one without crm read no
  *           pipeline; a non-member none; the shared snapshot none
+ *
+ * Review repair (PR195-PORT review findings):
+ *   PFT-07  SEC-P195-1 (FinanceController.ensureAccess's Books-write rule; D-46;
+ *           D-73): a platform SUPER_ADMIN with no Membership passes the payroll
+ *           route's guards (unchanged) but is refused 403 by mark-paid on REST
+ *           and on KEY, and by KEY's authority map; KEY with no member is
+ *           refused; nothing is claimed or posted
+ *   PFT-08  SEC-P195-3 (restrictive pick, owner question): a member with
+ *           operations write but no expenses write is refused 403; one with
+ *           expenses write posts, named as the actor
+ *   PFT-09  CR-P195-1 (D-13): in a USD business a rate set with no currency is
+ *           USD, so is its run; safe-to-spend reserves it in USD; mark-paid
+ *           posts USD and the USD ledger cash falls (no TTD bucket appears). A
+ *           run labelled TTD in that business is refused 400, nothing changes,
+ *           and safe-to-spend names it apart
+ *   PFT-10  SEC-P195-2 / CR-P195-2: a member whose permissionScopes is [] is
+ *           refused safe-to-spend by ModuleScopeGuard, and KEY's standing
+ *           context shows it no treasury, pipeline or support figures
+ *   PFT-11  atomic after the claim (real transaction): a failure after the
+ *           posting was written rolls back both the run's PAID and the posting
  */
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Reflector } from '@nestjs/core';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -69,6 +90,19 @@ const ID = {
   stage1: `${P}stage1`,
   deal1: `${P}deal1`,
   ticket1: `${P}ticket1`,
+  // Review repair fixtures.
+  superAdmin: `${P}superAdmin`,
+  opsOnly: `${P}opsOnly`,
+  opsExpenses: `${P}opsExpenses`,
+  arrStaff: `${P}arrStaff`,
+  ownerUsd: `${P}ownerUsd`,
+  bizUsd: `${P}bizUsd`,
+  orgUnitUsd: `${P}orgUnitUsd`,
+  assignUsd: `${P}assignUsd`,
+  runSa: `${P}runSa`,
+  runOps: `${P}runOps`,
+  runUsdTtd: `${P}runUsdTtd`,
+  runAtomic: `${P}runAtomic`,
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -78,7 +112,19 @@ let payroll: any;
 let safeToSpend: any;
 let cashPosition: any;
 let graph: any;
+let prisma: any;
+let expensePosting: any;
+let mods: any = {};
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+/** A Nest ExecutionContext over `req` for `handler` of `cls`, as the guards read one. */
+function ctxFor(handler: unknown, cls: unknown, req: unknown) {
+  return {
+    getHandler: () => handler,
+    getClass: () => cls,
+    switchToHttp: () => ({ getRequest: () => req }),
+  } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
 
 async function cleanup() {
   for (const sql of [
@@ -135,11 +181,20 @@ beforeAll(async () => {
   const { PayrollService } = await import('../src/modules/payroll/payroll.service');
   const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
 
-  const prisma = new PrismaService();
+  mods.PayrollService = PayrollService;
+  mods.PayrollController = (await import('../src/modules/payroll/payroll.controller')).PayrollController;
+  mods.FinanceController = (await import('../src/modules/finance/finance.controller')).FinanceController;
+  mods.BusinessGuard = (await import('../src/core/auth/business.guard')).BusinessGuard;
+  mods.ModuleScopeGuard = (await import('../src/core/auth/module-scope.guard')).ModuleScopeGuard;
+  mods.KEY_SYSTEM_ACTOR_ID = (await import('../src/core/auth/system-actor')).KEY_SYSTEM_ACTOR_ID;
+  mods.graphActions = await import('../src/modules/ai/graph-actions.controller');
+  mods.planStepAuthority = await import('../src/modules/ai/plan-step-authority');
+
+  prisma = new PrismaService();
   coaSeeder = new ChartOfAccountsSeederService(prisma);
   const periods = new AccountingPeriodService(prisma);
   const posting = new PostingService(prisma, periods);
-  const expensePosting = new ExpensePostingService(prisma, posting, coaSeeder);
+  expensePosting = new ExpensePostingService(prisma, posting, coaSeeder);
   cashPosition = new CashPositionService(prisma);
   safeToSpend = new SafeToSpendService(prisma, coaSeeder, cashPosition);
   payroll = new PayrollService(prisma, expensePosting);
@@ -152,9 +207,15 @@ beforeAll(async () => {
     [ID.staffNoRevenue, `${P}staff-norev@t.local`],
     [ID.staffNoCrm, `${P}staff-nocrm@t.local`],
     [ID.ownerB, `${P}ownerb@t.local`],
+    [ID.opsOnly, `${P}ops-only@t.local`],
+    [ID.opsExpenses, `${P}ops-expenses@t.local`],
+    [ID.arrStaff, `${P}arr-staff@t.local`],
+    [ID.ownerUsd, `${P}owner-usd@t.local`],
   ]) {
     await db.user.create({ data: { id, email, role: 'USER' } });
   }
+  // A platform SUPER_ADMIN who holds no Membership in any business here.
+  await db.user.create({ data: { id: ID.superAdmin, email: `${P}superadmin@t.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.bizA, name: 'PR195 Port A', slug: `${P}biz-a`, ownerId: ID.owner, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.bizB, name: 'PR195 Port B', slug: `${P}biz-b`, ownerId: ID.ownerB, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
@@ -177,9 +238,20 @@ beforeAll(async () => {
     },
   });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await db.membership.create({
+    data: { id: `${P}m_opsOnly`, userId: ID.opsOnly, businessId: ID.bizA, role: 'STAFF', permissionScopes: { operations: 'write', expenses: 'none', revenue: 'read' } },
+  });
+  await db.membership.create({
+    data: { id: `${P}m_opsExp`, userId: ID.opsExpenses, businessId: ID.bizA, role: 'STAFF', permissionScopes: { operations: 'write', expenses: 'write', revenue: 'read' } },
+  });
+  // An explicit scope map stored as an empty JSON array (IdentityService.validateScopesPayload accepts []).
+  await db.membership.create({ data: { id: `${P}m_arr`, userId: ID.arrStaff, businessId: ID.bizA, role: 'STAFF', permissionScopes: [] } });
+  await db.business.create({ data: { id: ID.bizUsd, name: 'PR195 Port USD', slug: `${P}biz-usd`, ownerId: ID.ownerUsd, currency: 'USD' } });
+  await db.membership.create({ data: { id: `${P}m_ownerUsd`, userId: ID.ownerUsd, businessId: ID.bizUsd, role: 'OWNER' } });
 
   await coaSeeder.ensureDefaults(ID.bizA);
   await coaSeeder.ensureDefaults(ID.bizB);
+  await coaSeeder.ensureDefaults(ID.bizUsd);
   const bankA = await coaSeeder.getBySystemKey(ID.bizA, 'BANK');
   const cashA = await coaSeeder.getBySystemKey(ID.bizA, 'CASH');
   const cardA = await coaSeeder.getBySystemKey(ID.bizA, 'CREDIT_CARD');
@@ -212,6 +284,10 @@ beforeAll(async () => {
     data: { id: ID.assignA, businessId: ID.bizA, orgUnitId: ID.orgUnitA, isContactOnly: true, contactName: 'Maya Singh' },
   });
   await payroll.setRate(ID.bizA, { assignmentId: ID.assignA, amount: 8_000, currency: 'TTD', periodType: 'monthly' });
+  await db.orgUnit.create({ data: { id: ID.orgUnitUsd, businessId: ID.bizUsd, name: 'Field', type: 'DEPARTMENT' } });
+  await db.orgAssignment.create({
+    data: { id: ID.assignUsd, businessId: ID.bizUsd, orgUnitId: ID.orgUnitUsd, isContactOnly: true, contactName: 'Dana Ruiz' },
+  });
 
   await db.contact.create({ data: { id: ID.contact1, businessId: ID.bizA, displayName: 'Acme Ltd', status: 'CLIENT' } });
   await db.dealStage.create({ data: { id: ID.stage1, businessId: ID.bizA, name: 'PR195 Open', slug: `${P}open` } });
@@ -366,7 +442,9 @@ describe('PR195-PORT payroll -> ledger -> cash -> safe-to-spend -> KEY (real Pos
     expect((await cashPosition.getCashPosition(ID.bizA)).cashBalance).toBe(cashBefore - 2_000);
   });
 
-  it('PFT-04 a posting the door refuses after the claim leaves the run APPROVED, unpaid, unposted', async () => {
+  // Review repair CR-P195-1 (D-13): a run not in the business currency is now refused before the claim (it was
+  // refused by the door after it). Its outcome is the same; PFT-11 proves atomicity after the claim instead.
+  it('PFT-04 a run in a currency that is not the business currency is refused 400: the run stays APPROVED, unpaid, unposted', async () => {
     await db.payrollRun.create({
       data: {
         id: ID.runJmd,
@@ -456,5 +534,161 @@ describe('PR195-PORT payroll -> ledger -> cash -> safe-to-spend -> KEY (real Pos
     expect(shared.pipeline).toBeUndefined();
     expect(shared.support).toBeUndefined();
     expect(graph.buildContextString(shared)).not.toMatch(/Cash & Obligations|Pipeline:|Support:/);
+  });
+
+  it('PFT-07 (review SEC-P195-1) a SUPER_ADMIN with no Membership passes the route guards but is refused 403 on REST, on KEY and by the authority map; nothing changes', async () => {
+    await db.payrollRun.create({
+      data: {
+        id: ID.runSa,
+        businessId: ID.bizA,
+        periodStart: new Date('2026-12-01T00:00:00Z'),
+        periodEnd: new Date('2026-12-31T00:00:00Z'),
+        status: 'APPROVED',
+        totalGross: 4_321,
+        currency: 'TTD',
+        itemCount: 0,
+      },
+    });
+    const req = { user: { id: ID.superAdmin, role: 'SUPER_ADMIN' }, params: { businessId: ID.bizA, runId: ID.runSa }, body: { paymentMethod: 'bank_transfer' } };
+    const handler = mods.PayrollController.prototype.markRunPaid;
+    // The head's guards let a platform SUPER_ADMIN through (unchanged); the refusal is mark-paid's own.
+    expect(await new mods.BusinessGuard(prisma).canActivate(ctxFor(handler, mods.PayrollController, req))).toBe(true);
+    expect(await new mods.ModuleScopeGuard(prisma, new Reflector()).canActivate(ctxFor(handler, mods.PayrollController, req))).toBe(true);
+
+    const controller = new mods.PayrollController(payroll);
+    await expect(controller.markRunPaid(ID.bizA, ID.runSa, { paymentMethod: 'bank_transfer' }, req)).rejects.toMatchObject({ status: 403 });
+    // KEY: KEY's system actor for the SUPER_ADMIN, and for no member at all (D-73).
+    await expect(
+      payroll.markRunPaid(ID.bizA, ID.runSa, { paymentMethod: 'bank_transfer', actorId: mods.KEY_SYSTEM_ACTOR_ID, initiatedBy: ID.superAdmin }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(payroll.markRunPaid(ID.bizA, ID.runSa, { paymentMethod: 'bank_transfer', actorId: mods.KEY_SYSTEM_ACTOR_ID }))
+      .rejects.toMatchObject({ status: 403 });
+    // The authority map the plan queue, approved proposals, graph actions and the cortex chat read (D-46).
+    await expect(
+      mods.graphActions.assertMayRunGraphAction(prisma, ID.bizA, { id: ID.superAdmin, role: 'SUPER_ADMIN' }, 'payroll_mark_paid', null),
+    ).rejects.toMatchObject({ status: 403 });
+    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.superAdmin, 'payroll_mark_paid')).refusal).toMatch(/D-46/);
+
+    const row = await runRow(ID.runSa);
+    expect(row.status).toBe('APPROVED');
+    expect(row.paidAt).toBeNull();
+    expect(await postingsOf(ID.runSa)).toHaveLength(0);
+  });
+
+  it('PFT-08 (review SEC-P195-3) operations write without expenses write is refused 403; with expenses write the member posts', async () => {
+    await db.payrollRun.create({
+      data: {
+        id: ID.runOps,
+        businessId: ID.bizA,
+        periodStart: new Date('2027-01-01T00:00:00Z'),
+        periodEnd: new Date('2027-01-31T00:00:00Z'),
+        status: 'APPROVED',
+        totalGross: 1_100,
+        currency: 'TTD',
+        itemCount: 0,
+      },
+    });
+    const handler = mods.PayrollController.prototype.markRunPaid;
+    const opsReq = { user: { id: ID.opsOnly, role: 'USER' }, params: { businessId: ID.bizA, runId: ID.runOps } };
+    // The route's own guard (operations write) passes this member, as on the head.
+    expect(await new mods.ModuleScopeGuard(prisma, new Reflector()).canActivate(ctxFor(handler, mods.PayrollController, opsReq))).toBe(true);
+    const controller = new mods.PayrollController(payroll);
+    await expect(controller.markRunPaid(ID.bizA, ID.runOps, { paymentMethod: 'cash' }, opsReq)).rejects.toMatchObject({ status: 403 });
+    expect((await runRow(ID.runOps)).status).toBe('APPROVED');
+    expect(await postingsOf(ID.runOps)).toHaveLength(0);
+    expect((await mods.planStepAuthority.memberToolRunAuthority(prisma, ID.bizA, ID.opsOnly, 'payroll_mark_paid')).refusal)
+      .toMatch(/expenses requires write access/);
+
+    const paid = await controller.markRunPaid(ID.bizA, ID.runOps, { paymentMethod: 'cash' }, { user: { id: ID.opsExpenses, role: 'USER' } });
+    expect(paid.status).toBe('PAID');
+    const postings = await postingsOf(ID.runOps);
+    expect(postings).toHaveLength(1);
+    expect(postings[0].createdById).toBe(ID.opsExpenses);
+  });
+
+  it('PFT-09 (review CR-P195-1, D-13) a USD business: rate, run, reserve and posting are USD; a TTD-labelled run is refused and named apart', async () => {
+    const rate = await payroll.setRate(ID.bizUsd, { assignmentId: ID.assignUsd, amount: 1_000, periodType: 'monthly' });
+    expect(rate.currency).toBe('USD');
+    const run = await payroll.generateRun(ID.bizUsd, new Date('2026-09-01T00:00:00Z'), new Date('2026-09-30T00:00:00Z'));
+    expect(run.currency).toBe('USD');
+
+    const reserved = await safeToSpend.calculate(ID.bizUsd);
+    expect(reserved.currency).toBe('USD');
+    expect(reserved.payrollReserved).toBe(1_000);
+    expect(reserved.otherCurrencyPayroll).toEqual([]);
+
+    await payroll.approveRun(ID.bizUsd, run.id, ID.ownerUsd);
+    await payroll.markRunPaid(ID.bizUsd, run.id, { paymentMethod: 'bank_transfer', actorId: ID.ownerUsd });
+    const postings = await postingsOf(run.id);
+    expect(postings).toHaveLength(1);
+    expect(postings[0].currency).toBe('USD');
+    expect(Number(postings[0].amount)).toBe(1_000);
+    const cash = await cashPosition.getCashPosition(ID.bizUsd);
+    expect(cash.currency).toBe('USD');
+    expect(cash.cashBalance).toBe(-1_000);
+    expect(Object.keys(cash.byCurrency)).toEqual(['USD']);
+
+    await db.payrollRun.create({
+      data: {
+        id: ID.runUsdTtd,
+        businessId: ID.bizUsd,
+        periodStart: new Date('2026-10-01T00:00:00Z'),
+        periodEnd: new Date('2026-10-31T00:00:00Z'),
+        status: 'APPROVED',
+        totalGross: 500,
+        currency: 'TTD',
+        itemCount: 0,
+      },
+    });
+    await expect(payroll.markRunPaid(ID.bizUsd, ID.runUsdTtd, { paymentMethod: 'bank_transfer', actorId: ID.ownerUsd }))
+      .rejects.toMatchObject({ status: 400 });
+    const refused = await runRow(ID.runUsdTtd);
+    expect(refused.status).toBe('APPROVED');
+    expect(refused.paidAt).toBeNull();
+    expect(await postingsOf(ID.runUsdTtd)).toHaveLength(0);
+    expect((await cashPosition.getCashPosition(ID.bizUsd)).byCurrency).toEqual({ USD: -1_000 });
+    const after = await safeToSpend.calculate(ID.bizUsd);
+    expect(after.payrollReserved).toBe(0);
+    expect(after.otherCurrencyPayroll).toEqual([{ currency: 'TTD', amount: 500 }]);
+  });
+
+  it('PFT-10 (review SEC-P195-2 / CR-P195-2) a member whose permissionScopes is [] is refused safe-to-spend and sees no treasury, pipeline or support in KEY', async () => {
+    const req = { user: { id: ID.arrStaff, role: 'USER' }, params: { businessId: ID.bizA } };
+    await expect(
+      new mods.ModuleScopeGuard(prisma, new Reflector()).canActivate(ctxFor(mods.FinanceController.prototype.getSafeToSpend, mods.FinanceController, req)),
+    ).rejects.toMatchObject({ status: 403 });
+    const snapshot = await graph.getSnapshotForViewer(ID.bizA, ID.arrStaff, true);
+    expect(snapshot.treasury).toBeUndefined();
+    expect(snapshot.pipeline).toBeUndefined();
+    expect(snapshot.support).toBeUndefined();
+    expect(graph.buildContextString(snapshot)).not.toMatch(/Cash & Obligations|committed payroll|Pipeline:|Support:/);
+  });
+
+  it('PFT-11 atomic after the claim: a failure once the posting is written rolls back the run\'s PAID and the posting', async () => {
+    await db.payrollRun.create({
+      data: {
+        id: ID.runAtomic,
+        businessId: ID.bizA,
+        periodStart: new Date('2027-02-01T00:00:00Z'),
+        periodEnd: new Date('2027-02-28T00:00:00Z'),
+        status: 'APPROVED',
+        totalGross: 777,
+        currency: 'TTD',
+        itemCount: 0,
+      },
+    });
+    let written: unknown = null;
+    const failing = Object.create(expensePosting);
+    failing.onPayrollRunPaid = async (run: unknown, tx: unknown) => {
+      written = await expensePosting.onPayrollRunPaid(run, tx);
+      throw new Error('PFT-11: failed after the posting was written');
+    };
+    const svc = new mods.PayrollService(prisma, failing);
+    await expect(svc.markRunPaid(ID.bizA, ID.runAtomic, { paymentMethod: 'cash', actorId: ID.owner })).rejects.toThrow(/PFT-11/);
+    expect(written).toBeTruthy();
+    const row = await runRow(ID.runAtomic);
+    expect(row.status).toBe('APPROVED');
+    expect(row.paidAt).toBeNull();
+    expect(await postingsOf(ID.runAtomic)).toHaveLength(0);
   });
 });
