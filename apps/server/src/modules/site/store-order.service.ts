@@ -778,8 +778,20 @@ export class StoreOrderService {
    * status only (SITE_FULFILMENT_STATUSES, any case, stored upper-case).
    * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-2): a payment state or any
    * other string is refused (400) before anything is read or written.
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): so is a body carrying
+   * paymentStatus, paymentMethod or paymentRef (`body`, the route's whole
+   * body): they were answered 200 and silently dropped. A status-only call is
+   * unchanged.
    */
-  async updateOrderStatus(orderId: string, status: string, businessId: string) {
+  async updateOrderStatus(orderId: string, status: string, businessId: string, body?: Record<string, unknown> | null) {
+    const paymentFields = ['paymentStatus', 'paymentMethod', 'paymentRef'].filter((field) => body?.[field] !== undefined);
+    if (paymentFields.length > 0) {
+      throw new BadRequestException(
+        `An order's payment fields (${paymentFields.join(', ')}) are not written here: this route moves its fulfilment status only. ` +
+          'It is paid through its checkout (its payment provider, or POST .../orders/:orderId/complete-offline) and refunded with ' +
+          'POST .../orders/:orderId/refund',
+      );
+    }
     const normalized = typeof status === 'string' ? status.trim().toUpperCase() : '';
     if (!SITE_FULFILMENT_STATUSES.has(normalized)) {
       throw new BadRequestException(

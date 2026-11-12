@@ -340,14 +340,19 @@ export class SiteController {
     return this.storeOrderService.getOrder(orderId, businessId);
   }
 
+  /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): the whole body goes to the service, which refuses (400) one that
+   * carries paymentStatus, paymentMethod or paymentRef. Only body.status was passed, so a payment field was answered
+   * 200 and silently dropped. A status-only body is unchanged.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/orders/:orderId/status')
   updateOrderStatus(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
-    @Body() body: { status: string },
+    @Body() body: { status: string; paymentStatus?: unknown; paymentMethod?: unknown; paymentRef?: unknown },
   ) {
-    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId);
+    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId, body);
   }
 
   /**

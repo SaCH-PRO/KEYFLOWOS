@@ -33,10 +33,29 @@ function offlinePaymentMethod(requested: unknown): string {
   return OFFLINE_RECORDED_METHODS.has(method) ? method : 'manual';
 }
 
-/** D-112: a payment status written on an order that marks it paid (any case, as assertNotPayingDoorOrder reads it). */
-function marksPaymentPaid(paymentStatus: unknown): boolean {
-  return typeof paymentStatus === 'string' && paymentStatus.toUpperCase() === 'PAID';
+/**
+ * W11-ORDER-PAID-VALUES (owner ruling D-117): the payment status PATCH .../status reads, compared and stored as
+ * trimmed and upper-cased (assertPlainStatusBody has refused a value that is not a string). ' PAID' was stored raw,
+ * and a lowercase 'paid' replaced an order's stored PAID.
+ */
+function normalisedPaymentStatus(paymentStatus: unknown): string | undefined {
+  return typeof paymentStatus === 'string' ? paymentStatus.trim().toUpperCase() : undefined;
 }
+
+/** D-112 / D-117: a payment status written on an order that marks it paid (any case, trimmed). */
+function marksPaymentPaid(paymentStatus: unknown): boolean {
+  return normalisedPaymentStatus(paymentStatus) === 'PAID';
+}
+
+/**
+ * W11-ORDER-PAID-VALUES (owner ruling D-117; SOP-V3, CR-W10SOP-6): the payment statuses PATCH .../status writes (upper-
+ * cased) on an order not on the doors, besides PAID, which goes through the paid door (D-112). Any other value is
+ * refused (400): COMPLETED (counted as paid by customer-referral.service.ts, site.service.ts and case-study.service.ts,
+ * and dropped from the open payables by payments-ops.service.ts), SETTLED, SUCCEEDED and every other synonym a reader
+ * may treat as paid were stored with no invoice, no payment and no books. An allow-list, as a deny-list cannot name
+ * every synonym.
+ */
+const PATCH_WRITABLE_PAYMENT_STATUSES = new Set(['UNPAID', 'PENDING', 'PARTIAL', 'REFUNDED']);
 
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
@@ -784,6 +803,36 @@ export class MarketplaceService {
   }
 
   /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117; SOP-V3, CR-W10SOP-6): PATCH .../status writes a payment status only
+   * from the allow-list (PATCH_WRITABLE_PAYMENT_STATUSES), upper-cased; PAID is recorded through the paid door
+   * (D-112). Anything else is refused (400) with nothing written and no event: COMPLETED (in any case), SETTLED,
+   * SUCCEEDED and every other value a reader may count as paid was stored as sent, with no invoice, no payment and
+   * no books.
+   */
+  private assertWritablePaymentStatus(paymentStatus: string | undefined): void {
+    if (paymentStatus === undefined || marksPaymentPaid(paymentStatus) || PATCH_WRITABLE_PAYMENT_STATUSES.has(paymentStatus)) return;
+    throw new BadRequestException(
+      "An order is marked paid only through the paid door, which records its invoice, its payment and its books: the fulfil 'mark_paid' " +
+        'action (POST .../orders/:orderId/fulfill) or PATCH .../status with paymentStatus PAID. The other payment statuses written here are ' +
+        `${[...PATCH_WRITABLE_PAYMENT_STATUSES].join(', ')}`,
+    );
+  }
+
+  /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): a paid marking (paymentStatus PAID) whose status is 'cancelled' is
+   * refused (400) before anything is read or written. completeCheckout's refuseClosedOrder checks only the stored
+   * status, so the door recorded the payment of an order it then stored cancelled, and the store_order.paid that
+   * followed made StoreOrderRoutingListener try to route it. ('refunded' is refused by assertNotRefundingThroughStatus.)
+   */
+  private assertNotPaidAndCancelled(status: string, paymentStatus: string | undefined): void {
+    if (!marksPaymentPaid(paymentStatus) || status.trim().toLowerCase() !== 'cancelled') return;
+    throw new BadRequestException(
+      'An order is not marked paid and cancelled at once: mark it paid (paymentStatus PAID with its fulfilment status), or cancel it ' +
+        'without a payment status',
+    );
+  }
+
+  /**
    * W10-STORE-ORDER-PAID (owner ruling D-112; V18-T2c, review STL-SEC-1): a
    * STANDARD order not created paid is marked PAID (PATCH .../status with
    * paymentStatus PAID, the fulfil 'mark_paid' action) only through the paid
@@ -992,13 +1041,16 @@ export class MarketplaceService {
    */
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     this.assertPlainStatusBody(status, paymentData);
+    // W11-ORDER-PAID-VALUES (D-117): the payment status as it is compared and written, trimmed and upper-cased.
+    const paymentStatus = normalisedPaymentStatus(paymentData?.paymentStatus);
+    this.assertNotPaidAndCancelled(status, paymentStatus);
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
     this.assertNotRefundingThroughStatus(status);
     const onDoors = await this.moneyOnTheDoors(order);
-    this.assertNotPayingDoorOrder(onDoors, status, paymentData?.paymentStatus);
+    this.assertNotPayingDoorOrder(onDoors, status, paymentStatus);
     this.assertNoDoorPaymentFields(onDoors, paymentData);
 
     // W10-STORE-ORDER-PAID (D-112, V18-T2c): paymentStatus PAID takes a member with revenue write (403 otherwise,
@@ -1009,8 +1061,11 @@ export class MarketplaceService {
     // door refuse the owner, 409), and any method or reference.
     const writesPayment = ORDER_PAYMENT_FIELDS.some((field) => paymentData?.[field] !== undefined);
     if (writesPayment) await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+    // W11-ORDER-PAID-VALUES (D-117): after the 403 (a member without revenue write is refused whatever the value), a
+    // payment status outside PAID and the allow-list is refused with nothing written and no event.
+    this.assertWritablePaymentStatus(paymentStatus);
     const include = { items: { include: { product: true } }, shipments: true } as const;
-    if (marksPaymentPaid(paymentData?.paymentStatus) && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+    if (marksPaymentPaid(paymentStatus) && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
       const { doorStatus } = await this.recordPaymentThroughDoor(order, {
         actorId,
         paymentMethod: paymentData?.paymentMethod,
@@ -1040,7 +1095,10 @@ export class MarketplaceService {
 
     const updateData: any = { status };
     if (paymentData) {
-      updateData.paymentStatus = paymentData.paymentStatus;
+      // W11-ORDER-PAID-VALUES (D-117): an allow-listed value is written upper-cased. PAID reaches here only for an order
+      // already stored PAID (outside the door: the Shopify sync, a legacy row), whose stored 'PAID' is kept: a lowercase
+      // 'paid' replaced it, and the readers that filter paymentStatus 'PAID' stopped counting the order.
+      if (paymentStatus !== undefined && paymentStatus !== 'PAID') updateData.paymentStatus = paymentStatus;
       updateData.paymentMethod = paymentData.paymentMethod;
       updateData.paymentRef = paymentData.paymentRef;
     }
