@@ -60,7 +60,7 @@ function registeredOrganToolNames(): { names: string[]; adapters: number } {
     capture as never,
     new TemporalFlowAdapterService(stub, bus),
     new KeyInboxAdapterService(stub, stub, bus),
-    new KeyGenomeAdapterService(stub, stub, stub, stub, stub, stub, bus),
+    new KeyGenomeAdapterService(stub, stub, stub, stub, stub, stub, bus, stub),
     new StorelinkAdapterService(stub, stub, stub, stub, stub, bus),
     new KeyConnectorAdapterService(stub, stub, bus),
     new KeyCortexSafeDatabaseService(stub, bus),

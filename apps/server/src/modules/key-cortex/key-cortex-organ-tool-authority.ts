@@ -69,7 +69,10 @@ export const KEY_ORGAN_TOOL_AUTHORITY: Readonly<Record<string, KeyOrganToolAutho
   'temporal_flow.mark_resolved': { scopes: [write('ai')] },
   'temporal_flow.analyze_timeline': { scopes: [read('ai'), read('revenue')] },
 
-  // Business genome: genome -> settings (D-63).
+  // Business genome: genome -> settings (D-63). W11A-SEAM-REPAIR (D-128, D-100): list_signals and
+  // list_recommendations withhold the finance signals and FINANCIAL recommendations from a member without
+  // revenue read (KeyGenomeAdapterService, by the projection GET .../key-genome/signals and recommendations
+  // apply: genome-finance-scope.ts), so KEY serves a member the rows REST serves them.
   'key_genome.get_blueprint': { scopes: [read('settings')] },
   'key_genome.calculate_integrity': { scopes: [read('settings')] },
   'key_genome.list_signals': { scopes: [read('settings')] },

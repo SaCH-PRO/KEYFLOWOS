@@ -6,10 +6,16 @@
  */
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { PrismaService } from '../../../core/prisma/prisma.service';
 import { BlueprintService } from '../../blueprint/blueprint.service';
 import { DnaSectionKey } from '../../blueprint/blueprint.types';
 import { GenomeSignalService } from '../../business-genome/key-genome/genome-signal.service';
 import { GenomeRecommendationService } from '../../business-genome/key-genome/genome-recommendation.service';
+import {
+  genomeReaderReadsRevenue,
+  listRecommendationsForReader,
+  listSignalsForReader,
+} from '../../business-genome/key-genome/genome-finance-scope';
 import { GenomeFactService } from '../../business-genome/key-genome/genome-fact.service';
 import { GenomeModuleReadinessService } from '../../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeScoringService } from '../../business-genome/key-genome/genome-scoring.service';
@@ -36,9 +42,28 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
     private readonly readinessService: GenomeModuleReadinessService,
     private readonly scoringService: GenomeScoringService,
     eventBus: KeyCortexEventBusService,
+    /** W11A-SEAM-REPAIR (D-128): reads the revenue level of the member a list call runs for. */
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {
     super();
     this.connect(eventBus);
+  }
+
+  /**
+   * W11A-SEAM-REPAIR (seam of B1 W11-KEY-ORGAN-AUTHORITY-MAP x B2 W11-GENOME-FINANCE-SCOPE; owner rulings
+   * D-128, D-100, D-131): whether the member this call runs for reads revenue, by the rule GET .../key-genome
+   * signals and recommendations apply (genome-finance-scope.ts: SUPER_ADMIN passes; else the membership's
+   * explicit map or its role's defaults). D-131 opens key_genome.list_signals and list_recommendations to a
+   * member holding settings read, so the finance rows are withheld here from one without revenue read, as REST
+   * withholds them. The member is ctx.userId: the chat's requester (KeyCortexToolLoopService), an approved
+   * proposal's plan member or executor (KeyCortexActionExecutorPlugin), the member memberToolRunAuthority judged.
+   * ctx.auditUserId decides no permission (KeyCortexToolContext), and a call for no member is served no finance
+   * row (fail closed; D-73: a run with no member reads no money).
+   */
+  private async readerReadsRevenue(ctx: KeyCortexToolContext): Promise<boolean> {
+    if (!ctx.userId) return false;
+    const user = await this.prisma.client.user.findUnique({ where: { id: ctx.userId }, select: { role: true } });
+    return genomeReaderReadsRevenue(this.prisma, ctx.businessId, { id: ctx.userId, role: user?.role ?? undefined });
   }
 
   async getState(businessId: string): Promise<import('./key-organ-adapter.interface').KeyOrganState> {
@@ -100,10 +125,13 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           limit: { type: 'number' },
         },
         async (ctx, input) => {
-          const signals = await this.signalService.listSignals(ctx.businessId, {
-            status: input.status as string,
-            limit: input.limit as number,
-          });
+          // W11A-SEAM-REPAIR (D-128): no finance signal for a member without revenue read, as on REST.
+          const signals = await listSignalsForReader(
+            this.signalService,
+            ctx.businessId,
+            { status: input.status as string, limit: input.limit as number },
+            await this.readerReadsRevenue(ctx),
+          );
           return { success: true, data: { signals, count: signals.length } };
         },
       ),
@@ -118,10 +146,13 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           limit: { type: 'number' },
         },
         async (ctx, input) => {
-          const recommendations = await this.recommendationService.listRecommendations(ctx.businessId, {
-            status: input.status as string,
-            limit: input.limit as number,
-          });
+          // W11A-SEAM-REPAIR (D-128): no FINANCIAL recommendation for a member without revenue read, as on REST.
+          const recommendations = await listRecommendationsForReader(
+            this.recommendationService,
+            ctx.businessId,
+            { status: input.status as string, limit: input.limit as number },
+            await this.readerReadsRevenue(ctx),
+          );
           return { success: true, data: { recommendations, count: recommendations.length } };
         },
       ),

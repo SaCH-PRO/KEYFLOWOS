@@ -18,7 +18,16 @@ import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../../core/auth/module-scope.guard';
 import { PrismaService } from '../../../core/prisma/prisma.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../../core/authority/module-vocabulary';
+import { LEVEL_RANK, rankOf } from '../../../core/authority/module-vocabulary';
+import {
+  firstN,
+  genomeReaderRevenueLevel,
+  isFinanceRecommendation,
+  isFinanceSignal,
+  isMoneyMemoryEvent,
+  listRecommendationsForReader,
+  listSignalsForReader,
+} from './genome-finance-scope';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -66,57 +75,13 @@ import type {
 
 /**
  * W11-GENOME-FINANCE-SCOPE review repairs (owner rulings D-128 and D-100;
- * SEC-GFS-1..4, GFS-R1, GFS-R2). The genome's shared tables hold finance rows
- * beside the other domains' rows: FinanceGenomeService writes signals with
- * sourceModule 'finance' (section FINANCIAL, domain 'finance') whose reason is
- * the warning text ("Runway is 0.8 months"), recommendations in domain
- * FINANCIAL, and FINANCE_GENOME memory events carrying the health score and
- * overall risk; outcome learning copies those rows' domain and text into its
- * own memory events. The cross-domain service's events carry the composite's
- * overall health score, which averages the finance health score, and the
- * customer-sales snapshot's event carries the revenue quality worked out from
- * the lifetime value and acquisition cost metrics. D-128: reading them needs
- * revenue read; acting on a finance signal or recommendation needs revenue
- * write. The match is on "financ" in any of the row's module fields, so a row
- * a temporal or KEY writer files under section FINANCIAL is caught too.
+ * SEC-GFS-1..4, GFS-R1, GFS-R2): the finance rows of the genome's shared tables
+ * and the reader's revenue level are read by genome-finance-scope.ts, where
+ * W11A-SEAM-REPAIR moved the rule (unchanged) so that the KEY organ tools serve
+ * a member the rows these routes serve them (D-128, D-131). Re-exported here for
+ * the importers of this file.
  */
-const FINANCE_FIELD = /financ/i;
-
-type GenomeRowFields = {
-  sourceModule?: string | null;
-  sourceType?: string | null;
-  section?: string | null;
-  domain?: string | null;
-  eventType?: string | null;
-};
-
-function mentionsFinance(...values: Array<string | null | undefined>): boolean {
-  return values.some((v) => typeof v === 'string' && FINANCE_FIELD.test(v));
-}
-
-/** A genome signal the finance genome (or any writer filing under finance) wrote: D-128. */
-export function isFinanceSignal(row: GenomeRowFields): boolean {
-  return mentionsFinance(row.sourceModule, row.section, row.domain);
-}
-
-/** A genome recommendation in the finance domain (FINANCIAL): D-128. */
-export function isFinanceRecommendation(row: GenomeRowFields): boolean {
-  return mentionsFinance(row.domain);
-}
-
-/** A memory event that carries a finance or composite money signal: D-128, D-100. */
-export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
-  return (
-    mentionsFinance(row.sourceType, row.domain, row.section) ||
-    row.sourceType === 'CROSS_DOMAIN_GENOME' ||
-    row.domain === 'CROSS_DOMAIN' ||
-    row.eventType === 'CUSTOMER_SALES_SNAPSHOT_COMPUTED'
-  );
-}
-
-function firstN<T>(rows: T[], limit: number | undefined): T[] {
-  return limit === undefined ? rows : rows.slice(0, limit);
-}
+export { isFinanceRecommendation, isFinanceSignal, isMoneyMemoryEvent };
 
 /** The request fields these handlers read (attached by AuthMiddleware; AuthGuard has passed). */
 type GenomeRequest = { user?: { id?: string; role?: string } };
@@ -162,19 +127,7 @@ export class KeyGenomeController {
   // ---------------------------------------------------------------------------
 
   private async revenueLevel(businessId: string, req?: GenomeRequest): Promise<string> {
-    const user = req?.user;
-    if (user?.role === 'SUPER_ADMIN') return 'admin';
-    if (!user?.id) return 'none';
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: user.id, businessId } },
-      select: { role: true, permissionScopes: true },
-    });
-    if (!membership) return 'none';
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object'
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    return scopes.revenue || 'none';
+    return genomeReaderRevenueLevel(this.prisma, businessId, req?.user);
   }
 
   /** 403 with ModuleScopeGuard's message when the member's revenue level is below `minLevel`. */
@@ -233,11 +186,11 @@ export class KeyGenomeController {
       minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
     };
-    if (await this.readsRevenue(businessId, req)) return this.signalService.listSignals(businessId, filters);
     // SEC-GFS-4 (D-128 read clause): no finance signal for a member without
-    // revenue read; the limit counts the signals that member is served.
-    const rows = await this.signalService.listSignals(businessId, { ...filters, limit: undefined });
-    return firstN(rows.filter((s) => !isFinanceSignal(s)), filters.limit);
+    // revenue read; the limit counts the signals that member is served. The
+    // KEY organ tool key_genome.list_signals applies the same projection
+    // (W11A-SEAM-REPAIR).
+    return listSignalsForReader(this.signalService, businessId, filters, await this.readsRevenue(businessId, req));
   }
 
   @Get('signals/:signalId')
@@ -308,11 +261,11 @@ export class KeyGenomeController {
         minExpectedGainScore !== undefined ? Number(minExpectedGainScore) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
     };
-    if (await this.readsRevenue(businessId, req)) return this.recommendationService.listRecommendations(businessId, filters);
     // SEC-GFS-4 (D-128 read clause): no finance recommendation for a member
     // without revenue read; the limit counts the rows that member is served.
-    const rows = await this.recommendationService.listRecommendations(businessId, { ...filters, limit: undefined });
-    return firstN(rows.filter((r) => !isFinanceRecommendation(r)), filters.limit);
+    // The KEY organ tool key_genome.list_recommendations applies the same
+    // projection (W11A-SEAM-REPAIR).
+    return listRecommendationsForReader(this.recommendationService, businessId, filters, await this.readsRevenue(businessId, req));
   }
 
   @Post('recommendations/generate')
