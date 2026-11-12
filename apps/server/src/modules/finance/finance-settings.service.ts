@@ -114,10 +114,13 @@ export class FinanceSettingsService {
 
   /**
    * Whether the actor is the business owner for owner ruling D-11
-   * (R0-09f-D11-FINANCE-TAX-AND-WEB): the OWNER membership or the distinguished
-   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
-   * and BusinessGuard admit an owner by, both looked up on the route's
-   * business; a SUPER_ADMIN keeps the platform bypass BusinessGuard grants.
+   * (R0-09f-D11-FINANCE-TAX-AND-WEB): an OWNER membership of the route's
+   * business, as IdentityService.assertBusinessOwner admits an owner (owner
+   * rulings D-116 / D-125: Business.ownerId counts only holding an OWNER
+   * membership; a recorded owner holding only ADMIN or STAFF is that role); a
+   * SUPER_ADMIN keeps the platform bypass BusinessGuard grants. Consumers: the
+   * tax rate on PATCH /finance/businesses/:id/settings and PATCH
+   * /commerce/businesses/:id/document-templates (R0-09g; review CR-D116P-1).
    * The actor is the authenticated user AuthMiddleware attached (req.user);
    * none is not the owner (fails closed). The rule is restated rather than
    * imported, as R0-08c, R0-09b and R0-09d did (PresenceService.isSlugOwner,

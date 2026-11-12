@@ -24,6 +24,8 @@
  *   POST  /onboarding-concierge/.../auto-configure and chat (intake)  OnboardingConciergeService.isProfileOwner
  *   POST  /onboarding-concierge/.../complete     OnboardingConciergeService.resolveCompletionActor
  *   POST  /onboarding-concierge/.../seed-demo    DemoDataSeederService.resolveSeedOwner (D-84, no platform bypass, D-46)
+ *   PATCH /commerce/businesses/:id/document-templates  FinanceSettingsService.isProfileOwner (R0-09g, D-11), the
+ *         consumer of the finance owner test outside the finance module (review CR-D116P-1)
  *
  * FIXTURES (prefix v97w_, registered in test/helpers/fixture-prefixes.json):
  *   bizR  Business.ownerId = recStaff, who holds a STAFF membership granted
@@ -46,7 +48,9 @@
  *               DemoDataSeederService, CatalogService);
  *   genesisApp  BusinessGenesisController, TemplatesController (real
  *               BusinessGenesisService, TemplatesService, CatalogService);
- *   financeApp  FinanceController (real FinanceSettingsService, AccountingPeriodService).
+ *   financeApp  FinanceController (real FinanceSettingsService, AccountingPeriodService);
+ *   commerceApp CommerceController (its document-templates routes, with the real
+ *               FinanceSettingsService they ask; the controller's other collaborators are stubs).
  * The one stand-in on the authorization path is identity attachment: a test
  * middleware reads `x-test-user` and attaches the seeded user's
  * { id, email, role } exactly as AuthMiddleware does. Collaborators these
@@ -126,6 +130,7 @@ let db: any;
 let profileApp: any;
 let genesisApp: any;
 let financeApp: any;
+let commerceApp: any;
 /** The business ids BlueprintService.inferFromOnboarding was called for (genesis answers and concierge intake). */
 const blueprintInferred: string[] = [];
 
@@ -190,7 +195,7 @@ async function resetBusiness(businessId: string) {
     `UPDATE businesses SET name = $2, slug = $3, currency = 'TTD', timezone = 'America/Port_of_Spain', country = NULL,
        business_intent = NULL, industry = NULL, archetype = NULL, business_hours = $4::jsonb, store_enabled = false,
        meta_data = '{}'::jsonb, default_tax_rate = $5, onboarding_complete = false, onboarding_completed_at = NULL,
-       onboarding_step = 'welcome' WHERE id = $1`,
+       onboarding_step = 'welcome', invoice_template = 'classic', quote_template = 'classic' WHERE id = $1`,
     businessId, nameOf(businessId), LIVE[businessId], JSON.stringify(SEEDED_HOURS), SEEDED_TAX_RATE,
   );
   blueprintInferred.length = 0;
@@ -231,6 +236,10 @@ const applyTemplate = (actor: string, businessId: string) =>
   withActor(request(genesisApp.getHttpServer()).post(`/businesses/${businessId}/templates/${ID.template}/apply`), actor).send({});
 const patchSettings = (actor: string, businessId: string, body: Record<string, unknown>) =>
   withActor(request(financeApp.getHttpServer()).patch(`/finance/businesses/${businessId}/settings`), actor).send(body);
+const patchDocumentTemplates = (actor: string, businessId: string, body: Record<string, unknown>) =>
+  withActor(request(commerceApp.getHttpServer()).patch(`/commerce/businesses/${businessId}/document-templates`), actor).send(body);
+const getDocumentTemplates = (actor: string, businessId: string) =>
+  withActor(request(commerceApp.getHttpServer()).get(`/commerce/businesses/${businessId}/document-templates`), actor);
 function period(actor: string, businessId: string, method: 'post' | 'patch' | 'delete', suffix: string, body: Record<string, unknown> = {}) {
   const req = (request(financeApp.getHttpServer()) as any)[method](`/finance/businesses/${businessId}/accounting-periods${suffix}`);
   return withActor(req, actor).send(body);
@@ -468,6 +477,38 @@ beforeAll(async () => {
     ...unused.map((token) => ({ provide: token, useValue: {} })),
   ]);
 
+  // ---- commerceApp: the document-templates routes (the d11-sibling-writes R0-09g composition). Review
+  // CR-D116P-1: PATCH .../document-templates asks FinanceSettingsService.isProfileOwner, so owner ruling
+  // D-116 reaches it too; the real service on the real database, every other collaborator a stub.
+  const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+  const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
+  const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+  const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
+  const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
+  const { GmailService } = await import('../src/modules/commerce/gmail.service');
+  const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
+  const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
+  const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
+  commerceApp = await buildApp([CommerceController], [
+    ModuleScopeGuard,
+    PublicRateLimitGuard,
+    PlanLimitGuard,
+    TeamAuditInterceptor,
+    FinanceSettingsService,
+    // Not on the document-templates routes.
+    { provide: CommerceService, useValue: {} },
+    { provide: TimeEntryService, useValue: {} },
+    { provide: InvoiceReceiptBuilderService, useValue: {} },
+    { provide: GmailService, useValue: {} },
+    { provide: CommerceVisionService, useValue: {} },
+    { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+    { provide: StoreReadinessService, useValue: {} },
+    { provide: PaymentEvidenceService, useValue: {} },
+    { provide: REDIS_CLIENT, useValue: {} },
+  ]);
+
   await cleanup(); // in case a prior run aborted
 
   for (const id of USERS) await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER' } });
@@ -505,7 +546,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  for (const app of [profileApp, genesisApp, financeApp]) if (app) await app.close();
+  for (const app of [profileApp, genesisApp, financeApp, commerceApp]) if (app) await app.close();
   if (db) await cleanup();
 }, 60_000);
 
@@ -793,6 +834,35 @@ describe('POST /onboarding-concierge/businesses/:id/seed-demo (DemoDataSeederSer
       expect(await db.invoice.count({ where: { businessId: a.biz, status: 'DRAFT' } }), a.label).toBe(1);
       const seeded = await db.teamActivityLog.findMany({ where: { businessId: a.biz, action: 'demo_data_seeded' }, select: { userId: true } });
       expect(seeded, a.label).toEqual([{ userId: a.id }]);
+    }
+  });
+});
+
+describe('PATCH /commerce/businesses/:id/document-templates (FinanceSettingsService.isProfileOwner, R0-09g): owner rulings D-116, D-125 (review CR-D116P-1)', () => {
+  const templates = (businessId: string) =>
+    db.business.findUnique({ where: { id: businessId }, select: { invoiceTemplate: true, quoteTemplate: true } });
+
+  it('[ORP-20] RED-BEFORE (D-116): the recorded owner holding STAFF (every scope admin) or ADMIN setting the invoice and quote templates is refused 403 BUSINESS_PROFILE_OWNER_ONLY: the Business row byte-identical, no success flag or template echoed; GET .../document-templates stays open to them (200)', async () => {
+    for (const a of REFUSED) {
+      await resetBusiness(a.biz);
+      const before = await businessRowText(a.biz);
+      const res = await patchDocumentTemplates(a.id, a.biz, { invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+      expect(await businessRowText(a.biz), `${a.label}: document-templates ${res.status}: the Business row is byte-identical`).toBe(before);
+      expectCode(res, PROFILE_CODE, a.label);
+      expect(res.body?.message, a.label).toBe('Only the business owner can change the document templates.');
+      for (const key of ['success', 'invoiceTemplate', 'quoteTemplate']) expect(res.body, `${a.label}: ${key}`).not.toHaveProperty(key);
+      const read = await getDocumentTemplates(a.id, a.biz);
+      expect(read.status, `${a.label}: GET ${JSON.stringify(read.body)}`).toBe(200);
+    }
+  });
+
+  it('[ORP-21] controls (D-116, D-125): the co-owner and the recorded owner holding OWNER set the invoice and quote templates (200): both columns take the new values', async () => {
+    for (const a of ADMITTED) {
+      await resetBusiness(a.biz);
+      const res = await patchDocumentTemplates(a.id, a.biz, { invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+      expect(res.status, `${a.label}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body, a.label).toMatchObject({ success: true, invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+      expect(await templates(a.biz), a.label).toEqual({ invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
     }
   });
 });
