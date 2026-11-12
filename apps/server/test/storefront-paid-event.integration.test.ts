@@ -169,9 +169,20 @@
  *           the marking) are marked PAID through the door; they were refused
  *           for good
  *   V18-T2h an order marked paid through the door is refunded through the
- *           D-14 refund door (in full; a partial amount is 400)
- *   V18-T2i (it.todo, outside this packet's write set): a partial refund
- *           through the door
+ *           D-14 refund door (in full; an amount above what was paid is 400;
+ *           W10 refused every partial amount, 400, until D-121)
+ *
+ *           W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2, ruling
+ *           R-8), the former it.todo V18-T2i, red at d3937867 (every partial
+ *           amount was 400):
+ *   V18-T2i a partial refund of a door-paid order goes through the same door:
+ *   ..T2i5  one negative REFUNDED row of the amount against the door payment,
+ *           a partial refund posting of that amount, the order still PAID with
+ *           metadata.refundedTotal and a partially_refunded step; an amount
+ *           over what is left (or not two decimals, or in another currency)
+ *           is 400; partials that reach what was paid end as the full refund
+ *           (REFUNDED, reversals once); racing partials never refund more than
+ *           was paid; a member without revenue write is 403
  *
  *           W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3), red
  *           at fb00af1c:
@@ -1920,7 +1931,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     }
   });
 
-  it('V18-T2h (W10-STORE-ORDER-PAID review CR-W10SOP-2; D-112, D-14) an order marked paid through the paid door is refunded through the D-14 refund door: a partial refundAmount is 400 with nothing written (the door refunds in full; before D-112 it booked an Expense of the amount), and the full refund is a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, one store_order.refunded and no Expense', async () => {
+  it('V18-T2h (W10-STORE-ORDER-PAID review CR-W10SOP-2; D-112, D-14, D-121) an order marked paid through the paid door is refunded through the D-14 refund door: a refundAmount above what was paid is 400 with nothing written (before D-112 it booked an Expense of the amount; a partial amount is refunded in part since D-121, V18-T2i), and the full refund is a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, one store_order.refunded and no Expense', async () => {
     const { market, controller } = await marketRoutes();
     const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
     try {
@@ -1934,8 +1945,10 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expenses.length = 0;
 
       expect(
-        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
-        'a partial refund',
+        // W11-PARTIAL-REFUND-DOOR (D-121): a partial amount (30) is now refunded in part (V18-T2i); one above what was
+        // paid is still refused with nothing written.
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: ORDER_TOTAL + 10 }, signedIn(ID.owner))),
+        'a refund above what was paid',
       ).toBe(400);
       await settle();
       expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
@@ -2639,9 +2652,357 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(`${res.status}/${res.paymentStatus}`).toBe('placed/PENDING');
   });
 
-  it.todo(
-    "V18-T2i (W10-STORE-ORDER-PAID review CR-W10SOP-2; needs an owner ruling and StoreOrderService.refundOrder, outside this packet's write set) a partial refund of an order paid through the paid door is recorded on its invoice (D-14): a negative REFUNDED row of the amount refunded and its posting reversed by that amount. Before D-112 a marked-paid order had no payment on the books and its partial refund booked an Expense of the amount; the D-14 refund door refunds in full only (V18-T2h)",
-  );
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2, ruling R-8), the former it.todo V18-T2i: a store order
+   * paid through the audited paid door (D-112) is refunded in part through the same door, the fulfil 'refund' with a
+   * refundAmount below what is left of its payment. The member needs revenue write (D-46, as D-112). One negative
+   * REFUNDED row of the amount is recorded against the order's door payment (CommerceService.markPaymentRefunded, the
+   * D-14 refund door, under its invoice lock), its books are reversed by that amount (RevenuePostingService's partial
+   * refund posting, Payment:<id>:payment_refunded:<n>), and the order keeps its status and its payment status PAID (the
+   * order vocabulary has no partly refunded value, and no schema change is made): metadata.refundedTotal holds what is
+   * refunded and a 'partially_refunded' timeline step names the amount. Partial refunds that reach what was paid end as
+   * the full refund does (V18-T2h): the order REFUNDED, the posting and the partials reversed once, the invoice
+   * reopened, one store_order.refunded naming the invoice. At the base every refundAmount other than the order total
+   * was 400 (V18-T2h).
+   */
+  /** An order of A marked paid through the paid door by the owner (routing stubbed by the caller), with its books. */
+  async function doorPaidOrderOfA(controller: any, suffix: string) {
+    const order = await standardOrderOfA(suffix);
+    await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner));
+    await settle();
+    const { invoice, payment } = await expectOnePaidInvoice(order);
+    return { order, invoice, payment };
+  }
+  /** The payment rows of an invoice as `status:amount`, in order. */
+  const rowsOf = async (invoiceId: string) =>
+    (await paymentsOf([invoiceId])).map((p: any) => `${p.status}:${Number(p.amount)}`);
+  /** The payment's postings (recording, partial refunds, reversals) as `externalRef:status:amount`, sorted. */
+  const paymentPostings = async (paymentId: string) =>
+    (await postingsOf([paymentId])).map((t: any) => `${t.externalRef}:${t.status}:${Number(t.amount)}`).sort();
+  /** The deposit-account net of the payment's postings: what the ledger says is still held. */
+  const depositNetOf = async (paymentId: string) =>
+    money(
+      (await postingsOf([paymentId]))
+        .flatMap((t: any) => t.entries)
+        .filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+        .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+    );
+  const expectTrialBalance = async () => {
+    const totals = await db.ledgerEntry.aggregate({ where: { businessId: ID.biz }, _sum: { debit: true, credit: true } });
+    expect(money(Number(totals._sum.debit ?? 0)), 'tenant trial balance').toBe(money(Number(totals._sum.credit ?? 0)));
+  };
+  /** What the order shows of its refunds: status/paymentStatus, metadata.refundedTotal and its refund steps. */
+  async function refundShape(orderId: string) {
+    const o = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+    const meta = (o.metadata ?? {}) as Record<string, any>;
+    return {
+      row: `${o.status}/${o.paymentStatus}`,
+      refundedTotal: meta.refundedTotal ?? null,
+      steps: ((meta.statusTimeline ?? []) as any[])
+        .filter((t) => String(t.status).includes('refund'))
+        .map((t) => `${t.status}:${t.refundAmount}`),
+    };
+  }
+  /** The FINANCE payment_refunded audit rows of a payment: who refunded what. */
+  const refundAudit = async (paymentId: string) =>
+    (
+      await db.activity.findMany({
+        where: { businessId: ID.biz, action: 'payment_refunded', entityId: paymentId },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      })
+    ).map((a: any) => `${a.actorId}:${Number((a.data as any)?.amount)}`);
+  /**
+   * The D-14 refund door (CommerceService.markPaymentRefunded, real) held until `parties` refunds have reached it (or
+   * `windowMs` has passed), so each has read the order and its payment before any refund commits: the race made
+   * certain. The door's own invoice lock then serializes them.
+   */
+  async function holdRefundDoor(parties: number, windowMs = 2_000) {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const commerce = app.get(CommerceService) as Record<string, any>;
+    const real = commerce.markPaymentRefunded.bind(commerce);
+    let arrived = 0;
+    let allIn!: () => void;
+    const gathered = new Promise<void>((resolve) => (allIn = resolve));
+    const spy = vi.spyOn(commerce, 'markPaymentRefunded').mockImplementation(async (...args: unknown[]) => {
+      arrived += 1;
+      if (arrived >= parties) allIn();
+      await Promise.race([gathered, new Promise((resolve) => setTimeout(resolve, windowMs))]);
+      return real(...args);
+    });
+    return { arrivals: () => arrived, restore: () => spy.mockRestore() };
+  }
+  /** invoice.reopened emissions (the D-14 reopen whose listeners undo the money effects, D-102), while `work` runs. */
+  async function reopenedDuring(work: () => Promise<void>): Promise<string[]> {
+    const reopened: string[] = [];
+    const listener = (payload: any) => reopened.push(String(payload?.invoice?.id));
+    events.on('invoice.reopened', listener);
+    try {
+      await work();
+    } finally {
+      events.off('invoice.reopened', listener);
+    }
+    return reopened;
+  }
+
+  it('V18-T2i (W11-PARTIAL-REFUND-DOOR, D-121, was it.todo; W10-STORE-ORDER-PAID review CR-W10SOP-2, D-112, D-14) a partial refund of an order marked paid through the paid door is refunded through the same door: the owner\'s fulfil refund of 30 of 80 records one negative REFUNDED row of 30 against the door payment naming the refunder (and one payment_refunded audit row of 30), posts one partial refund of 30 (Payment:<id>:payment_refunded:1, the recording still POSTED, the deposit net 50, the trial balance balanced), leaves the invoice PARTIALLY_PAID, and the order keeps its status and paymentStatus PAID with metadata.refundedTotal 30 and a partially_refunded step of 30; no store_order.refunded and no Expense', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i');
+      const statusBefore = (await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status;
+      seen = [];
+      expenses.length = 0;
+
+      const answer = await answered(
+        controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30, reason: 'one item returned' }, signedIn(ID.owner)),
+      );
+      await settle();
+      expect(answer, 'the partial refund is answered').toBe(200);
+
+      const rows = await paymentsOf([invoice.id]);
+      expect(rows.map((p) => `${p.status}:${Number(p.amount)}:${p.recordedBy}`), 'the original kept, one negative refund row of the amount').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}:${ID.owner}`,
+        `REFUNDED:-30:${ID.owner}`,
+      ]);
+      expect(rows[1].reference, 'the refund links to the door payment').toBe(payment.providerPaymentId);
+      expect(await refundAudit(payment.id), 'the refunder named on the audit row, with the amount').toEqual([`${ID.owner}:30`]);
+
+      expect(await paymentPostings(payment.id), 'the recording kept, one partial refund posting of the amount').toEqual(
+        [`Payment:${payment.id}:payment_recorded:POSTED:${ORDER_TOTAL}`, `Payment:${payment.id}:payment_refunded:1:POSTED:30`].sort(),
+      );
+      expect(await depositNetOf(payment.id), 'the ledger holds what is left').toBe(ORDER_TOTAL - 30);
+      const balance = storedBalanceFn(Number(invoice.total), rows.map((p) => ({ amount: Number(p.amount), status: p.status })), invoice.currency);
+      expect(balance.net, 'the balance read contract agrees').toBe(ORDER_TOTAL - 30);
+      await expectTrialBalance();
+      const reopened = await db.invoice.findUnique({ where: { id: invoice.id } });
+      expect(reopened.status, 'part of the money is still received (D-14)').toBe('PARTIALLY_PAID');
+
+      expect(await refundShape(order.id), 'the order shows it is partly refunded').toEqual({
+        row: `${statusBefore}/PAID`,
+        refundedTotal: 30,
+        steps: ['partially_refunded:30'],
+      });
+      expect(storeEvents(), 'the order is not refunded: no store_order event').toEqual([]);
+      expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i2 (W11-PARTIAL-REFUND-DOOR, D-121) a refund amount the door cannot take is 400 with nothing written: after a partial refund of 30 of 80, a refundAmount of 60 (more than the 50 left), of 80 (the order total), 0, -5, 10.005 (not two decimals), "12abc", an object, or one in another currency than the order\'s; the order, its payment rows, its postings and its refunded total are as they were, with no store_order event and no Expense', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i2');
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'the first partial refund',
+      ).toBe(200);
+      await settle();
+      const before = { counts: await counts(), rows: await rowsOf(invoice.id), postings: await paymentPostings(payment.id), shape: await refundShape(order.id) };
+      expect(before.shape.refundedTotal).toBe(30);
+      seen = [];
+      expenses.length = 0;
+
+      for (const body of [
+        { refundAmount: 60 },
+        { refundAmount: ORDER_TOTAL },
+        { refundAmount: 0 },
+        { refundAmount: -5 },
+        { refundAmount: 10.005 },
+        { refundAmount: '12abc' },
+        { refundAmount: { set: 10 } },
+        { refundAmount: 10, currency: 'USD' },
+      ]) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', ...body }, signedIn(ID.owner))),
+          `refund ${JSON.stringify(body)}`,
+        ).toBe(400);
+      }
+      await settle();
+      expect(await counts(), 'no invoice, payment or posting').toEqual(before.counts);
+      expect(await rowsOf(invoice.id), 'the payment rows as they were').toEqual(before.rows);
+      expect(await paymentPostings(payment.id), 'the postings as they were').toEqual(before.postings);
+      expect(await refundShape(order.id), 'the order as it was').toEqual(before.shape);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i3 (W11-PARTIAL-REFUND-DOOR, D-121, D-14, D-102) two partial refunds summing to what was paid end as the full refund: 30 then 50 of 80 leave the original kept and two negative rows (-30, -50), the recording and the first partial posting each reversed once (deposit net 0, trial balance balanced), the invoice reopened to SENT with paidAt cleared (one invoice.reopened), the order REFUNDED/REFUNDED with refundedTotal 80, one store_order.refunded naming the invoice and no Expense; a further refund is 400 with nothing written', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i3');
+      seen = [];
+      expenses.length = 0;
+
+      const reopened = await reopenedDuring(async () => {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+          'the first partial refund',
+        ).toBe(200);
+        await settle();
+        expect((await refundShape(order.id)).row.toUpperCase(), 'partly refunded: still PAID').toMatch(/\/PAID$/);
+        expect(storeEvents(), 'no store_order.refunded for the first part').toEqual([]);
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: '50.00' }, signedIn(ID.owner))),
+          'the partial refund of what is left',
+        ).toBe(200);
+        await settle();
+      });
+
+      expect(await rowsOf(invoice.id), 'the original kept, one negative row per refund').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}`,
+        'REFUNDED:-30',
+        'REFUNDED:-50',
+      ]);
+      expect(await refundAudit(payment.id), 'each refund names the refunder').toEqual([`${ID.owner}:30`, `${ID.owner}:50`]);
+      expect(await paymentPostings(payment.id), 'the recording and the partial reversed, each once').toEqual(
+        [
+          `Payment:${payment.id}:payment_recorded:REVERSED:${ORDER_TOTAL}`,
+          `Payment:${payment.id}:payment_recorded:reversal:POSTED:${ORDER_TOTAL}`,
+          `Payment:${payment.id}:payment_refunded:1:REVERSED:30`,
+          `Payment:${payment.id}:payment_refunded:1:reversal:POSTED:30`,
+        ].sort(),
+      );
+      expect(await depositNetOf(payment.id), 'the cash taken is given back on the ledger').toBe(0);
+      await expectTrialBalance();
+      const inv = await db.invoice.findUnique({ where: { id: invoice.id } });
+      expect(`${inv.status}/${inv.paidAt}`, 'a full refund reopens the invoice to SENT, paidAt cleared (D-14)').toBe('SENT/null');
+      expect(reopened, 'one invoice.reopened, whose listeners undo the money effects (D-102)').toEqual([invoice.id]);
+
+      const shape = await refundShape(order.id);
+      expect(shape.row.toUpperCase(), 'the order refunded').toBe('REFUNDED/REFUNDED');
+      expect(shape.refundedTotal, 'all of it refunded').toBe(ORDER_TOTAL);
+      expect(shape.steps, 'the part, then the refund of what was left').toEqual(['partially_refunded:30', 'refunded:50']);
+      const refundedEvents = seen.filter((e) => e.name === 'store_order.refunded');
+      expect(refundedEvents.map((e) => e.payload?.invoiceId), 'one store_order.refunded naming the invoice').toEqual([invoice.id]);
+      expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+
+      // A further refund, in part or in full, is refused and writes nothing.
+      const before = await counts();
+      seen = [];
+      for (const body of [{ refundAmount: 10 }, {}]) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', ...body }, signedIn(ID.owner))),
+          `again ${JSON.stringify(body)}`,
+        ).toBe(400);
+      }
+      await settle();
+      expect(await counts()).toEqual(before);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i4 (W11-PARTIAL-REFUND-DOOR, D-121) partial refunds racing on one order never refund more than was paid: three refunds of 30 of 80, each past its own checks before any commits, record two (-30, -30: two partial postings, the deposit net 20) and the third is 400, the order PAID with refundedTotal 60; two refunds of 40 of 80 racing both record and end as the full refund once: the order REFUNDED with refundedTotal 80, the recording and the first partial reversed once, the deposit net 0 and one store_order.refunded', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      // Three refunds of 30: what was paid holds two.
+      const three = await doorPaidOrderOfA(controller, 't2i4_three');
+      seen = [];
+      expenses.length = 0;
+      let held = await holdRefundDoor(3);
+      const answers = await Promise.all(
+        [1, 2, 3].map(() =>
+          answered(controller.fulfillOrder(ID.biz, three.order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        ),
+      );
+      held.restore();
+      await settle();
+      expect(held.arrivals(), 'each refund reached the door').toBe(3);
+      expect(answers.slice().sort(), 'two recorded, the one over what was paid refused').toEqual([200, 200, 400]);
+      expect(await rowsOf(three.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30', 'REFUNDED:-30']);
+      expect(await paymentPostings(three.payment.id)).toEqual(
+        [
+          `Payment:${three.payment.id}:payment_recorded:POSTED:${ORDER_TOTAL}`,
+          `Payment:${three.payment.id}:payment_refunded:1:POSTED:30`,
+          `Payment:${three.payment.id}:payment_refunded:2:POSTED:30`,
+        ].sort(),
+      );
+      expect(await depositNetOf(three.payment.id)).toBe(ORDER_TOTAL - 60);
+      const threeShape = await refundShape(three.order.id);
+      expect(threeShape.row.toUpperCase()).toMatch(/\/PAID$/);
+      expect(threeShape.refundedTotal).toBe(60);
+      expect(threeShape.steps).toEqual(['partially_refunded:30', 'partially_refunded:30']);
+      expect(storeEvents()).toEqual([]);
+
+      // Two refunds of 40: together they are what was paid.
+      const two = await doorPaidOrderOfA(controller, 't2i4_two');
+      seen = [];
+      held = await holdRefundDoor(2);
+      const pair = await Promise.all(
+        [1, 2].map(() =>
+          answered(controller.fulfillOrder(ID.biz, two.order.id, { action: 'refund', refundAmount: 40 }, signedIn(ID.owner))),
+        ),
+      );
+      held.restore();
+      await settle();
+      expect(pair, 'both recorded').toEqual([200, 200]);
+      expect(await rowsOf(two.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-40', 'REFUNDED:-40']);
+      expect(await paymentPostings(two.payment.id), 'the recording and the first partial reversed once').toEqual(
+        [
+          `Payment:${two.payment.id}:payment_recorded:REVERSED:${ORDER_TOTAL}`,
+          `Payment:${two.payment.id}:payment_recorded:reversal:POSTED:${ORDER_TOTAL}`,
+          `Payment:${two.payment.id}:payment_refunded:1:REVERSED:40`,
+          `Payment:${two.payment.id}:payment_refunded:1:reversal:POSTED:40`,
+        ].sort(),
+      );
+      expect(await depositNetOf(two.payment.id)).toBe(0);
+      await expectTrialBalance();
+      const twoShape = await refundShape(two.order.id);
+      expect(twoShape.row.toUpperCase()).toBe('REFUNDED/REFUNDED');
+      expect(twoShape.refundedTotal).toBe(ORDER_TOTAL);
+      expect(storeEvents().filter((n) => n === 'store_order.refunded'), 'refunded once').toHaveLength(1);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i5 (W11-PARTIAL-REFUND-DOOR, D-121, D-112, D-46) a partial refund takes revenue write: a revenue:read STAFF member and a call with no member are 403 with nothing written (no refund row, no posting, the order as it was, no store_order event, no Expense); control: the owner\'s partial refund of the same order is recorded', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const staff = await memberOfA('t2i5_staff');
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i5');
+      const before = { counts: await counts(), rows: await rowsOf(invoice.id), postings: await paymentPostings(payment.id), shape: await refundShape(order.id) };
+      seen = [];
+      expenses.length = 0;
+
+      for (const [who, actor] of [['a revenue:read STAFF member', staff], ['no member', null]] as const) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(actor))),
+          who,
+        ).toBe(403);
+      }
+      await settle();
+      expect(await counts()).toEqual(before.counts);
+      expect(await rowsOf(invoice.id)).toEqual(before.rows);
+      expect(await paymentPostings(payment.id)).toEqual(before.postings);
+      expect(await refundShape(order.id)).toEqual(before.shape);
+      expect(await refundAudit(payment.id)).toEqual([]);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+
+      // Control: the owner's partial refund of the same order.
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'the owner',
+      ).toBe(200);
+      await settle();
+      expect(await rowsOf(invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30']);
+      expect((await refundShape(order.id)).refundedTotal).toBe(30);
+    } finally {
+      routing.mockRestore();
+    }
+  });
 
   /**
    * W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3, FIN3): the paid door
