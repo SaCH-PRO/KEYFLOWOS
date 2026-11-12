@@ -25,7 +25,8 @@ import type { ConnectorCommand } from '../key-cortex-connector.types';
  *  2. PATCH api/v1/cortex/autonomy-profile (the global kill switch and the
  *     autonomy tier ceiling) was guarded by membership alone: any STAFF member
  *     could switch the kill switch off or raise maxTierWithoutApproval. Required:
- *     only OWNER or ADMIN (or the business owner of record, or SUPER_ADMIN) may
+ *     only OWNER or ADMIN (by membership: the owner of record, Business.ownerId,
+ *     is the role it holds, owner rulings D-104, D-116; or SUPER_ADMIN) may
  *     write it, and nobody may raise maxTierWithoutApproval above the approval
  *     tier they hold themselves (resolveMembershipApprovalTier: OWNER 4, ADMIN 3,
  *     STAFF 0 by default). The check is a route guard on the PATCH handler
@@ -261,7 +262,17 @@ function guardPrisma(memberships: Record<string, MembershipRow>, owners: Record<
         findUnique: vi.fn(async ({ where }: any) => memberships[`${where.userId_businessId.userId}@${where.userId_businessId.businessId}`] ?? null),
       },
       business: {
-        findFirst: vi.fn(async ({ where }: any) => (owners[where.id] === where.ownerId ? { id: where.id } : null)),
+        // W11-D116-KEY-OWNER (owner rulings D-104, D-116): the owner-of-record lookup's members filter is
+        // honoured, its role included, so Business.ownerId counts only with a membership of that role.
+        findFirst: vi.fn(async ({ where }: any) => {
+          if (owners[where.id] !== where.ownerId) return null;
+          const some = where.members?.some;
+          if (some) {
+            const row = memberships[`${some.userId}@${where.id}`];
+            if (!row || (some.role !== undefined && some.role !== row.role)) return null;
+          }
+          return { id: where.id };
+        }),
       },
     },
   };
@@ -368,9 +379,17 @@ describe('V1-03: PATCH autonomy-profile is limited to OWNER/ADMIN at the require
     expect(await decide(guard, patchRequest({ id: 'u_owner_t2' }, { maxTierWithoutApproval: 2 }))).toBe(true);
   });
 
-  it('the owner of record (Business.ownerId) with no membership row is the OWNER, at the OWNER tier', async () => {
-    const guard = guardFor({ biz_1: 'u_founder' });
-    expect(await decide(guard, patchRequest({ id: 'u_founder' }, { maxTierWithoutApproval: 4 }))).toBe(true);
+  it('the owner of record (Business.ownerId) with no membership row, or holding only STAFF, is refused 403; holding ADMIN writes at the ADMIN tier (owner rulings D-104, D-116)', async () => {
+    // W11-D116-KEY-OWNER (D-104, D-116): Business.ownerId grants nothing on its own; a recorded owner
+    // holding only STAFF or ADMIN is that role.
+    expect(await decide(guardFor({ biz_1: 'u_founder' }), patchRequest({ id: 'u_founder' }, { maxTierWithoutApproval: 4 }))).toBeInstanceOf(ForbiddenException);
+    const staffOwner = guardFor({ biz_1: 'u_staff' });
+    for (const body of [{ maxTierWithoutApproval: 4 }, { globalKillSwitch: false }, { maxTierWithoutApproval: 1 }]) {
+      expect(await decide(staffOwner, patchRequest({ id: 'u_staff' }, body)), JSON.stringify(body)).toBeInstanceOf(ForbiddenException);
+    }
+    const adminOwner = guardFor({ biz_1: 'u_admin' });
+    expect(await decide(adminOwner, patchRequest({ id: 'u_admin' }, { maxTierWithoutApproval: 4 }))).toBeInstanceOf(ForbiddenException);
+    expect(await decide(adminOwner, patchRequest({ id: 'u_admin' }, { maxTierWithoutApproval: 3, globalKillSwitch: false }))).toBe(true);
   });
 
   it('SUPER_ADMIN (the platform bypass BusinessGuard grants) is allowed', async () => {

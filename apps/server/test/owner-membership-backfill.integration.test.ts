@@ -60,7 +60,9 @@
  *           names that business (ids only) for review.
  *   OMB-13  review SEC-W10OM-6: mail addressed to the business owner (weekly
  *           financial briefing, quote alerts, AI usage alerts) reaches the
- *           Business.ownerId user only while they hold a Membership.
+ *           Business.ownerId user only while they hold an OWNER membership
+ *           (owner ruling D-116, W11-D116-KEY-OWNER: one holding only STAFF
+ *           gets none).
  *   OMB-14  review OMV-2 (a sign-in lockout): a caller a co-owner removed from
  *           their oldest owned business, who is OWNER of a newer one and STAFF
  *           of another, signs in: the bootstrap answers the oldest owned
@@ -924,9 +926,11 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
     expect(await grantAudits([ID.bizRemoved])).toEqual([]);
   });
 
-  it('[OMB-13] (D-104; review SEC-W10OM-6) mail addressed to the business owner (the weekly financial briefing, the public quote alerts, the AI usage alerts) reaches the Business.ownerId user only while they hold a Membership: none for the removed ownerId member or an unresolvable owner, the member owner\'s address otherwise; the three senders read their recipient through that rule', async () => {
+  it('[OMB-13] (D-104, D-116; review SEC-W10OM-6) mail addressed to the business owner (the weekly financial briefing, the public quote alerts, the AI usage alerts) reaches the Business.ownerId user only while they hold an OWNER membership (D-116): none for the removed ownerId member, the ownerId member holding only STAFF or an unresolvable owner, the OWNER-holding owner\'s address otherwise; the three senders read their recipient through that rule', async () => {
     const { businessOwnerRecipient } = await import('../src/core/auth/business.guard');
     expect(await businessOwnerRecipient(prismaSvc, ID.bizRemoved, ID.removedOwner)).toBeNull();
+    // W11-D116-KEY-OWNER (owner ruling D-116): a recorded owner holding only STAFF is that role, no recipient.
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizStaffOwner, ID.staffOwner)).toBeNull();
     expect(await businessOwnerRecipient(prismaSvc, ID.bizGhost, ID.ghost)).toBeNull();
     expect(await businessOwnerRecipient(prismaSvc, ID.bizGuard, null)).toBeNull();
     // A member of another business is no recipient for this one.

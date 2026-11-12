@@ -39,13 +39,14 @@ class OrchestratorStub {
 
 /**
  * W4-PROPOSAL-PRINCIPAL: the rows the plugin's run authority reads (plan-step-authority): plan_1's
- * member is user_1, who owns biz_1 and holds its OWNER membership.
+ * member is user_1, who owns biz_1 and holds its OWNER membership (the owner rule since owner rulings
+ * D-116 and D-125, W11-D116-KEY-OWNER: an OWNER membership, never Business.ownerId alone).
  */
 class PrismaStub {
   client = {
     aiPlan: { findFirst: vi.fn(async () => ({ userId: 'user_1' })) },
     business: { findFirst: vi.fn(async () => ({ id: 'biz_1' })) },
-    membership: { findUnique: vi.fn(async () => ({ id: 'm_1' })) },
+    membership: { findUnique: vi.fn(async () => ({ id: 'm_1', role: 'OWNER', permissionScopes: null })) },
     user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
   };
 }
