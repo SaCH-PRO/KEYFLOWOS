@@ -206,6 +206,31 @@
  *   RC-33 (green before and after) a RECEIVED made after the first committed
  *         keeps the transition table's 400 and writes nothing.
  *
+ * W11-STOCK-ROW-RACE (the packet's cases RC-31..RC-34 are RC-34..RC-37 here;
+ * D-137 keeps the 'ask an operator' 409 for planted rows only): a stock writer
+ * creating a (product, warehouse) row that does not exist yet takes no lock on
+ * it (the pair lock locks existing rows only), and createStockRowOrConflict
+ * answered every unique violation with 409 'held by another record; ask an
+ * operator to repair it', also when the row was the business's own, created a
+ * moment earlier by a concurrent writer. Each case below except RC-36 was red
+ * at 488b35d5:
+ *
+ *   RC-34 transfers of M from the first and from the second warehouse into a
+ *         third where M has no row, each held after its first stock write
+ *         until both have made it: ['committed', 409 'ask an operator']. Now
+ *         the loser runs its transaction once more and adds to the new row.
+ *   RC-35 the same between a transfer into a new pair and a purchase order
+ *         received with a line into an existing row, then a line into that
+ *         pair, each held once it has read no row of the pair until the other
+ *         has (the receipt reads it after its first stock write): both
+ *         commit, the purchase order received once.
+ *   RC-36 (green before and after) a pair a planted row holds still answers
+ *         the 409 for a transfer, a receipt and POST .../inventory, writing
+ *         nothing, each transaction run at most twice.
+ *   RC-37 a transfer note that is not text (42, an object, an array, true)
+ *         answered 500 (PrismaClientValidationError). Now 400 'Transfer note
+ *         must be text', nothing written; a text note is stored as sent.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -269,6 +294,8 @@ const ID = {
   plantedXBInA: `${P}planted_xb_wh`,
   plantedAInB: `${P}planted_a_whb`,
   plantedXBInB2: `${P}planted_xb_whb2`,
+  /** W11-STOCK-ROW-RACE: a third warehouse of the business, created by its describe block (no stock row of its own). */
+  warehouse3: `${P}wh_3`,
 };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const PRICE = 10;
@@ -2324,5 +2351,278 @@ describe('W11-PO-RECEIPT-CLAIM a purchase order status change is a compare-and-s
       await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
       await resetBusinessStock();
     }
+  });
+});
+
+/** A transfer of product M as POST .../inventory/transfer runs it, as the route answers it ('committed', or the status and message). */
+const transferMAnswer = (fromWarehouseId: string, toWarehouseId: string, quantity: number, note?: unknown) =>
+  routeAnswer(
+    transferByRoute(ID.biz, { productId: ID.productM, fromWarehouseId, toWarehouseId, quantity, ...(note === undefined ? {} : { note }) }),
+  );
+/** Every stock row of a (product, warehouse), whatever its business (raw SQL: no tenant filter): [businessId, quantity, reserved]. */
+const rowsOfPair = async (productId: string, warehouseId: string) =>
+  ((await db.$queryRaw`
+    SELECT business_id, quantity, reserved FROM inventory_stocks WHERE product_id = ${productId} AND warehouse_id = ${warehouseId}`) as any[]).map(
+    (r) => [r.business_id, r.quantity, r.reserved],
+  );
+/** The 409 a stock row create gets where a row the business does not read holds its (product, warehouse) (D-137). */
+const HELD_ELSEWHERE = '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it';
+
+describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the same business is retried once, not sent to an operator (D-137; real database)', () => {
+  beforeAll(async () => {
+    // Created after the suite's two warehouses, so the first stays the business's default (the receipt's fallback).
+    await db.warehouse.create({ data: { id: ID.warehouse3, businessId: ID.biz, name: 'V18R Warehouse 3' } });
+  });
+  afterAll(async () => {
+    await db.$executeRaw`DELETE FROM stock_movements WHERE warehouse_id = ${ID.warehouse3}`;
+    await db.$executeRaw`DELETE FROM inventory_stocks WHERE warehouse_id = ${ID.warehouse3}`;
+    await db.$executeRaw`DELETE FROM warehouses WHERE id = ${ID.warehouse3}`;
+  });
+
+  it("RC-34 (W11-STOCK-ROW-RACE; packet case RC-31; D-137 keeps the 409 for planted rows only) transfers of product M from the first and from the second warehouse into a third where M has no stock row yet, each held after its first stock write until both have made it: both commit, one row of the business in the third warehouse holding 2, each source row 1 lower, 4 movements, and neither answers 409 'ask an operator' (the row holding the pair is the business's own)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const hold = holdAfterFirstStockWrite(2, ['update']);
+    try {
+      const before = await stockState();
+      const answers = await Promise.all([
+        transferMAnswer(ID.warehouse, ID.warehouse3, 1, 'rc34 from the first'),
+        transferMAnswer(ID.warehouse2, ID.warehouse3, 1, 'rc34 from the second'),
+      ]);
+      hold.restore();
+      const after = await stockState();
+      // Measured at fb00af1c and at 488b35d5: ['committed', '409: ... ask an operator to repair it'], the third
+      // warehouse's row the business's own; retrying the refused transfer committed.
+      expect({
+        heldAfterFirstWrites: hold.firstWrites().slice(0, 2).sort(),
+        answers: [...answers].sort(),
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        sources: [await stockOf(ID.stockMLo), await stockOf(ID.stockMHi)],
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        heldAfterFirstWrites: [ID.stockMLo, ID.stockMHi].sort(),
+        answers: ['committed', 'committed'],
+        newRows: [[ID.biz, 2, 0]],
+        sources: [`${IN_STOCK - 1}/0`, `${IN_STOCK - 1}/0`],
+        movementsWritten: 4,
+      });
+    } finally {
+      hold.restore();
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-35 (W11-STOCK-ROW-RACE; packet case RC-32; D-137) a transfer of M into the third warehouse (no row yet) and a purchase order received with lines [A into its existing row, then M into the third warehouse], each held after reading no row of the new pair until the other has read too (the receipt after its first stock write): both commit, the new row holds the transferred plus the received quantity, and the purchase order is received once (RECEIVED, two RECEIPT movements, one ledger posting, one purchaseOrder.received)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const po = await db.purchaseOrder.create({
+      data: {
+        businessId: ID.biz,
+        poNumber: `${P}po_${++orderSeq}_${Date.now()}`,
+        status: 'SHIPPED',
+        supplierName: 'V18R Supplier',
+        items: [
+          { productId: ID.productA, warehouseId: ID.warehouse, name: 'A', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 },
+          { productId: ID.productM, warehouseId: ID.warehouse3, name: 'M', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 },
+        ],
+        subtotal: 12,
+        shippingCost: 0,
+        taxAmount: 0,
+        total: 12,
+        currency: 'TTD',
+      },
+    });
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const received = countReceivedEvents();
+    // Each transaction is held once it has read the new pair's row (none) until the other has read it too, so both
+    // create it: the transfer reads it before its first stock write, the receipt after its first (line A's update). A
+    // hold after each one's first stock write alone leaves the race to timing: the receipt reads its second line's row
+    // after that hold, and saw the transfer's row when the transfer had committed first (measured: green once in two
+    // runs at 488b35d5). A retried transaction (the third) passes the hold.
+    const reads = new Map<number, string>();
+    let allIn!: () => void;
+    const gathered = new Promise<void>((resolve) => (allIn = resolve));
+    const firstWrites = new Map<number, string>();
+    const writes = hookStockWrites(async (no, args) => {
+      if (!firstWrites.has(no)) firstWrites.set(no, String(args?.where?.id));
+    });
+    const hook = hookStockWrites(async (no, args) => {
+      if (args?.where?.warehouseId !== ID.warehouse3 || reads.has(no)) return;
+      reads.set(no, String(args?.where?.productId));
+      if (reads.size >= 2) allIn();
+      await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+    }, 'findFirst');
+    try {
+      const before = await stockState();
+      const answers = await Promise.all([transferMAnswer(ID.warehouse, ID.warehouse3, 1, 'rc35'), receiveAnswer(po.id)]);
+      hook.restore();
+      writes.restore();
+      const after = await stockState();
+      // At 488b35d5 whichever created the third warehouse's row second answered '409: ... ask an operator to repair it'
+      // (the transfer, or the receipt with the purchase order left SHIPPED).
+      expect({
+        bothReadTheNewPair: [...reads.values()].slice(0, 2),
+        firstWrites: [...firstWrites.values()].slice(0, 2).sort(),
+        answers,
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        stockA: await stockOf(ID.stockA),
+        transferSource: await stockOf(ID.stockMLo),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        bothReadTheNewPair: [ID.productM, ID.productM],
+        firstWrites: [ID.stockA, ID.stockMLo].sort(),
+        answers: ['committed', 'committed'],
+        newRows: [[ID.biz, 1 + 3, 0]],
+        stockA: `${IN_STOCK + 3}/0`,
+        transferSource: `${IN_STOCK - 1}/0`,
+        status: 'RECEIVED',
+        receiptMovements: 2,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        movementsWritten: 4,
+      });
+    } finally {
+      hook.restore();
+      writes.restore();
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-36 (W11-STOCK-ROW-RACE; packet case RC-33, a characterization; D-137 planted rows left for an operator) a pair a planted row holds (this business's id on the other business's product or warehouse) still answers 409 'ask an operator' for B's transfer, B's purchase order received and B's POST .../inventory, writes nothing, names no id, and runs each call's transaction at most twice", async () => {
+    await plantRows([
+      [ID.plantedXBInB2, ID.productXB, ID.warehouseB2],
+      [ID.plantedXB2InB, ID.productXB2, ID.warehouseB],
+    ]);
+    const outcomes: Record<string, unknown> = {};
+    const runs: Record<string, number> = {};
+    let poStatus: unknown;
+    let planted: unknown;
+    // Every interactive transaction the call runs on PrismaService.client ($transaction), counted; nothing held.
+    const counted = async (name: string, call: () => Promise<unknown>) => {
+      const hook = hookStockWrites(async () => undefined);
+      try {
+        outcomes[name] = await answerAndWrites(call);
+      } finally {
+        hook.restore();
+      }
+      runs[name] = hook.transactions();
+    };
+    try {
+      await counted("B's transfer into B's second warehouse, where a planted row holds XB", () =>
+        routeAnswer(
+          transferByRoute(ID.bizB, { productId: ID.productXB, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouseB2, quantity: 2, note: 'rc36' }),
+        ),
+      );
+      const po = await db.purchaseOrder.create({
+        data: {
+          businessId: ID.bizB,
+          poNumber: `${P}po_b_${++orderSeq}_${Date.now()}`,
+          status: 'SHIPPED',
+          supplierName: 'V18R Supplier',
+          items: [{ productId: ID.productXB2, name: 'XB2', quantity: 3, unitPrice: 1, unitCost: 1, total: 3, warehouseId: ID.warehouseB }],
+          subtotal: 0,
+          shippingCost: 0,
+          taxAmount: 0,
+          total: 0,
+          currency: 'TTD',
+        },
+      });
+      await counted("B's purchase order received into XB2 in B's warehouse, where a planted row holds it", () =>
+        routeAnswer(routing.advancePurchaseOrderStatus(ID.bizB, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+      );
+      poStatus = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+      await counted("B's POST .../inventory for XB2 in B's warehouse, where a planted row holds it", () =>
+        upsertAnswer(upsertByRoute(ID.bizB, { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 3 })),
+      );
+      planted = Object.fromEntries(
+        (await db.inventoryStock.findMany({ where: { id: { in: [ID.plantedXBInB2, ID.plantedXB2InB] } } })).map((p: any) => [
+          p.id,
+          [p.businessId, p.quantity, p.reserved, p.costPerUnit],
+        ]),
+      );
+    } finally {
+      await removeRows([ID.plantedXBInB2, ID.plantedXB2InB]);
+      await restoreOtherBusinessRow();
+    }
+    const refused = { answer: HELD_ELSEWHERE, stockRowsWritten: 0, movementsWritten: 0 };
+    expect(outcomes).toEqual({
+      "B's transfer into B's second warehouse, where a planted row holds XB": refused,
+      "B's purchase order received into XB2 in B's warehouse, where a planted row holds it": refused,
+      "B's POST .../inventory for XB2 in B's warehouse, where a planted row holds it": refused,
+    });
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(poStatus, 'the purchase order stays SHIPPED').toBe('SHIPPED');
+    expect(planted, 'the planted rows untouched').toEqual({
+      [ID.plantedXBInB2]: [ID.biz, IN_STOCK, 0, 5],
+      [ID.plantedXB2InB]: [ID.biz, IN_STOCK, 0, 5],
+    });
+    // One run, then at most one more (the run again a pair the business's own row holds gets): never a loop.
+    expect(Object.fromEntries(Object.entries(runs).map(([name, n]) => [name, n >= 1 && n <= 2 ? 'once or twice' : n]))).toEqual(
+      Object.fromEntries(Object.keys(outcomes).map((name) => [name, 'once or twice'])),
+    );
+  });
+
+  it("RC-37 (W11-STOCK-ROW-RACE; packet case RC-34) a transfer note that is not text (42, an object, an array, true), as the route's body or a KEY tool's arguments send it, is refused with 400 'Transfer note must be text' before anything is written; a text note is stored on both movements exactly as sent (not trimmed), and a transfer with no note or a null note commits with none", async () => {
+    const probes: Array<[name: string, note: unknown]> = [
+      ['note 42', 42],
+      ['note {a: 1}', { a: 1 }],
+      ["note ['x']", ['x']],
+      ['note true', true],
+      ['a text note, spaces kept', '  rc37 text  '],
+      ['no note', undefined],
+      ['a null note', null],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const notes: Record<string, unknown> = {};
+    try {
+      for (const [name, note] of probes) {
+        await resetBusinessStock();
+        let ref: string | undefined;
+        outcomes[name] = await answerAndWrites(() =>
+          routeAnswer(
+            transferByRoute(ID.biz, {
+              productId: ID.productM,
+              fromWarehouseId: ID.warehouse2,
+              toWarehouseId: ID.warehouse,
+              quantity: 2,
+              ...(note === undefined ? {} : { note }),
+            }).then((r: any) => {
+              ref = r?.transferRef;
+              return r;
+            }),
+          ),
+        );
+        if (ref) {
+          notes[name] = (await db.stockMovement.findMany({ where: { businessId: ID.biz, referenceId: ref }, orderBy: { type: 'asc' } })).map(
+            (m: any) => `${m.type}:${JSON.stringify(m.note)}`,
+          );
+        }
+      }
+    } finally {
+      await resetBusinessStock();
+    }
+    const refused = { answer: '400: Transfer note must be text', stockRowsWritten: 0, movementsWritten: 0 };
+    const committed = { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 };
+    // At 488b35d5 the four answered 500 (PrismaClientValidationError on the movement's note), nothing written.
+    expect(outcomes).toEqual({
+      'note 42': refused,
+      'note {a: 1}': refused,
+      "note ['x']": refused,
+      'note true': refused,
+      'a text note, spaces kept': committed,
+      'no note': committed,
+      'a null note': committed,
+    });
+    expect(notes).toEqual({
+      'a text note, spaces kept': ['TRANSFER_IN:"  rc37 text  "', 'TRANSFER_OUT:"  rc37 text  "'],
+      'no note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
+      'a null note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
+    });
   });
 });
