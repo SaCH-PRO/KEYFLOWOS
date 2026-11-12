@@ -188,6 +188,24 @@
  *         word as quantity. Now a malformed id or stock quantity is 400 with
  *         nothing received, and digit text is received as that number (D-136).
  *
+ * W11-PO-RECEIPT-CLAIM (the packet's cases RC-27..RC-30 are RC-30..RC-33 here:
+ * RC-27..RC-29 were taken by W11-PO-LINES): advancePurchaseOrderStatus reads
+ * the purchase order before its transaction and checks the transition on that
+ * read; its write is a compare-and-set on the status read. Each caller is held
+ * after that read until the other has read too:
+ *
+ *   RC-30, RC-31 two RECEIVED calls at once (a line into an existing stock row;
+ *         a line into a pair with no row, serialized by the purchase order's
+ *         row alone). At fb00af1c both committed (stock 10 -> 16, two RECEIPT
+ *         movements, two purchaseOrder.received); at 92468080 (SEC-POL-4, RC-29)
+ *         the other was refused 400 'Cannot transition PO from RECEIVED to
+ *         RECEIVED'. Now 409 'changed by another request', nothing written,
+ *         one ledger posting and one event.
+ *   RC-32 two non-RECEIVED changes at once from SUBMITTED: both committed (the
+ *         last write won). Now one wins and the other is 409.
+ *   RC-33 (green before and after) a RECEIVED made after the first committed
+ *         keeps the transition table's 400 and writes nothing.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -2062,7 +2080,7 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
     expect(statuses).toEqual(expectedStatuses);
   });
 
-  it('RC-29 (W11-PO-LINES review SEC-POL-4) two receipts of one SHIPPED purchase order at once, each having read it SHIPPED and waiting behind a lock on its stock row, receive it once: one commits, adding its stock with one movement, and the other is refused with 400 (the purchase order is RECEIVED) and writes nothing', async () => {
+  it('RC-29 (W11-PO-LINES review SEC-POL-4) two receipts of one SHIPPED purchase order at once, each having read it SHIPPED and waiting behind a lock on its stock row, receive it once: one commits, adding its stock with one movement, and the other is refused with 409 (W11-PO-RECEIPT-CLAIM: the purchase order was changed by another request) and writes nothing', async () => {
     await resetBusinessStock();
     const po = await shippedPurchaseOrder([{ productId: ID.productA, name: 'A', quantity: 3, warehouseId: ID.warehouse }]);
     const receive = () =>
@@ -2073,15 +2091,237 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
       const after = await stockState();
       const status = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
       // At f3e7740a both committed: stock A went from 10 to 16 with two RECEIPT movements (the status was read before
-      // the transaction and the update did not compare it).
+      // the transaction and the update did not compare it). W11-PO-RECEIPT-CLAIM: the loser of the compare-and-set
+      // answered 400 'Cannot transition PO from RECEIVED to RECEIVED' at 92468080 (a sequential refusal's text); it is
+      // the 409 a lost claim gets (RC-30), and a receipt made after the first committed keeps the 400 (RC-33).
       expect({ firstWaited, answers: [...answers].sort(), stockA: await stockOf(ID.stockA), movementsWritten: after.movements - before.movements, status }).toEqual({
         firstWaited: true,
-        answers: ['400: Cannot transition PO from RECEIVED to RECEIVED', 'committed'],
+        answers: ['409: The purchase order was changed by another request; reload it and try again', 'committed'],
         stockA: `${IN_STOCK + 3}/0`,
         movementsWritten: 1,
         status: 'RECEIVED',
       });
     } finally {
+      await resetBusinessStock();
+    }
+  });
+});
+
+/**
+ * W11-PO-RECEIPT-CLAIM: every read of a purchase order on PrismaService.client (purchaseOrder.findFirst, the read
+ * advancePurchaseOrderStatus makes before its transaction; a read on a transaction client is not one) is held once it
+ * has run until `parties` reads have run, or HOLD_WINDOW_MS has passed, so every caller has read the status before any
+ * writes it. Records the status each read returned. Restored by the returned function.
+ */
+function holdPurchaseOrderReads(parties: number) {
+  const real = prismaService.client;
+  const statuses: string[] = [];
+  let allIn!: () => void;
+  const gathered = new Promise<void>((resolve) => (allIn = resolve));
+  const bound = (target: any, prop: PropertyKey) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === 'function' ? value.bind(target) : value;
+  };
+  prismaService.client = new Proxy(real, {
+    get(target, prop) {
+      if (prop !== 'purchaseOrder') return bound(target, prop);
+      return new Proxy(Reflect.get(target, prop), {
+        get(delegate, p) {
+          if (p !== 'findFirst') return bound(delegate, p);
+          return async (args: any) => {
+            const po = await delegate.findFirst(args);
+            statuses.push(po?.status ?? 'none');
+            if (statuses.length >= parties) allIn();
+            await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+            return po;
+          };
+        },
+      });
+    },
+  });
+  return {
+    statusesRead: () => [...statuses],
+    restore: () => {
+      prismaService.client = real;
+    },
+  };
+}
+
+/** purchaseOrder.received events emitted on the suite's bus, counted by purchase order. Stopped by the returned function. */
+function countReceivedEvents() {
+  const ids: string[] = [];
+  const onAny = (name: string | string[], payload: any) => {
+    if ((Array.isArray(name) ? name.join('.') : String(name)) === 'purchaseOrder.received') ids.push(payload?.purchaseOrderId);
+  };
+  events.onAny(onAny);
+  return { of: (poId: string) => ids.filter((id) => id === poId).length, stop: () => events.offAny(onAny) };
+}
+
+/** The ledger postings of a purchase order (financial_transactions whose source is it). */
+const ledgerPostingsOf = async (poId: string) => {
+  const [{ n }]: any[] = await db.$queryRaw`SELECT COUNT(*)::int AS n FROM financial_transactions WHERE source_id = ${poId}`;
+  return n as number;
+};
+/** The RECEIPT stock movements a purchase order wrote. */
+const receiptMovementsOf = (poId: string) => db.stockMovement.count({ where: { referenceId: poId, type: 'RECEIPT' } });
+
+/** A purchase order of the business in `status` with one line of 3 units at cost 2 (total 6, so its receipt is posted). */
+const claimPurchaseOrder = (status: string, line: { productId: string; warehouseId: string }) =>
+  db.purchaseOrder.create({
+    data: {
+      businessId: ID.biz,
+      poNumber: `${P}po_${++orderSeq}_${Date.now()}`,
+      status,
+      supplierName: 'V18R Supplier',
+      items: [{ ...line, name: 'Claimed', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 }],
+      subtotal: 6,
+      shippingCost: 0,
+      taxAmount: 0,
+      total: 6,
+      currency: 'TTD',
+    },
+  });
+
+/** advancePurchaseOrderStatus(RECEIVED) as the route answers it: 'committed' when it returned the PO RECEIVED. */
+const receiveAnswer = (poId: string) =>
+  routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, poId, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' })));
+
+/** The refusal a status change gets when the status it read was changed by another request first (W11-PO-RECEIPT-CLAIM). */
+const CLAIM_LOST = '409: The purchase order was changed by another request; reload it and try again';
+
+describe('W11-PO-RECEIPT-CLAIM a purchase order status change is a compare-and-set on the status it read (real database)', () => {
+  it('RC-30 (W11-PO-RECEIPT-CLAIM; packet case RC-27) two RECEIVED calls at once on one SHIPPED purchase order whose line goes into an existing stock row, each having read it SHIPPED before either writes: exactly one answers RECEIVED and the other 409 with nothing written; the stock is received once (+3, its weighted-average cost recomputed once) with one RECEIPT movement, one ledger posting and one purchaseOrder.received', async () => {
+    await resetBusinessStock();
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: 4 } });
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const received = countReceivedEvents();
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = await Promise.all([receiveAnswer(po.id), receiveAnswer(po.id)]);
+      gate.restore();
+      const rowA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      // At 92468080 (W11-PO-LINES review SEC-POL-4 compared the status already) the other was refused with
+      // '400: Cannot transition PO from RECEIVED to RECEIVED', a sequential refusal's text; at fb00af1c both answered
+      // RECEIVED: stock 10 -> 16, two RECEIPT movements, the cost averaged twice, two purchaseOrder.received.
+      expect({
+        statusesRead: gate.statusesRead(),
+        answers: [...answers].sort(),
+        stockA: `${rowA.quantity}/${rowA.reserved}`,
+        // To 9 places (the stored double comes back a last digit off): averaged twice it was 3.25.
+        costA: Number(rowA.costPerUnit.toFixed(9)),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+      }).toEqual({
+        statusesRead: ['SHIPPED', 'SHIPPED'],
+        answers: [CLAIM_LOST, 'committed'],
+        stockA: `${IN_STOCK + 3}/0`,
+        costA: Number(((IN_STOCK * 4 + 3 * 2) / (IN_STOCK + 3)).toFixed(9)),
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      gate.restore();
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-31 (W11-PO-RECEIPT-CLAIM; packet case RC-28) the same with the line into a (product, warehouse) that has no stock row yet (no stock row to lock; the purchase order's row serializes the two): one row is created holding 3 at cost 2, and the other answers 409 that the purchase order changed (not a second receipt, not the 'held by another record' 409), with one RECEIPT movement, one ledger posting and one purchaseOrder.received", async () => {
+    await resetBusinessStock();
+    const pair = { businessId: ID.biz, productId: ID.productA, warehouseId: ID.warehouse2 };
+    expect(await db.inventoryStock.count({ where: pair }), 'product A has no stock row in the second warehouse').toBe(0);
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse2 });
+    const received = countReceivedEvents();
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = await Promise.all([receiveAnswer(po.id), receiveAnswer(po.id)]);
+      gate.restore();
+      const rows = await db.inventoryStock.findMany({ where: pair });
+      // At 92468080 the other was refused with '400: Cannot transition PO from RECEIVED to RECEIVED'.
+      expect({
+        statusesRead: gate.statusesRead(),
+        answers: [...answers].sort(),
+        rows: rows.map((r: any) => `${r.quantity}/${r.reserved}/${r.costPerUnit}`),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+      }).toEqual({
+        statusesRead: ['SHIPPED', 'SHIPPED'],
+        answers: [CLAIM_LOST, 'committed'],
+        rows: ['3/0/2'],
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      gate.restore();
+      received.stop();
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-32 (W11-PO-RECEIPT-CLAIM; packet case RC-29) two status changes at once from SUBMITTED, one to ACKNOWLEDGED and one to DRAFT, each having read it SUBMITTED before either writes: exactly one wins and the purchase order ends in the winner's status (acknowledgedAt set only if ACKNOWLEDGED won); the other answers 409", async () => {
+    const po = await claimPurchaseOrder('SUBMITTED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const move = (to: string) =>
+      routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, to as any).then((r: any) => `moved to ${r?.status}`));
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = (await Promise.all([move('ACKNOWLEDGED'), move('DRAFT')])) as string[];
+      gate.restore();
+      const winners = answers.filter((a) => a.startsWith('moved to ')).map((a) => a.slice('moved to '.length));
+      const after = await db.purchaseOrder.findUnique({ where: { id: po.id } });
+      // At 92468080 both answered (the non-RECEIVED update did not compare the status it read): the purchase order ended
+      // in whichever wrote last.
+      expect({ statusesRead: gate.statusesRead(), winners: winners.length, losers: answers.filter((a) => !a.startsWith('moved to ')) }).toEqual({
+        statusesRead: ['SUBMITTED', 'SUBMITTED'],
+        winners: 1,
+        losers: [CLAIM_LOST],
+      });
+      expect(['ACKNOWLEDGED', 'DRAFT']).toContain(winners[0]);
+      expect({ status: after.status, acknowledgedAt: after.acknowledgedAt !== null }).toEqual({
+        status: winners[0],
+        acknowledgedAt: winners[0] === 'ACKNOWLEDGED',
+      });
+    } finally {
+      gate.restore();
+    }
+  });
+
+  it("RC-33 (W11-PO-RECEIPT-CLAIM; packet case RC-30, a characterization) a second RECEIVED made after the first committed still answers 400 'Cannot transition PO from RECEIVED to RECEIVED' and writes nothing: no stock row, movement, ledger posting or purchaseOrder.received, and the purchase order unchanged", async () => {
+    await resetBusinessStock();
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const received = countReceivedEvents();
+    try {
+      expect(await receiveAnswer(po.id)).toBe('committed');
+      const poAfterFirst = JSON.stringify(await db.purchaseOrder.findUnique({ where: { id: po.id } }));
+      const second = await answerAndWrites(() => receiveAnswer(po.id));
+      expect({
+        second,
+        purchaseOrderUnchanged: JSON.stringify(await db.purchaseOrder.findUnique({ where: { id: po.id } })) === poAfterFirst,
+        stockA: await stockOf(ID.stockA),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+      }).toEqual({
+        second: { answer: '400: Cannot transition PO from RECEIVED to RECEIVED', stockRowsWritten: 0, movementsWritten: 0 },
+        purchaseOrderUnchanged: true,
+        stockA: `${IN_STOCK + 3}/0`,
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+      });
+    } finally {
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
       await resetBusinessStock();
     }
   });
