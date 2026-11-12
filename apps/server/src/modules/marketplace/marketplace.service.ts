@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
 import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
@@ -469,6 +469,12 @@ export class MarketplaceService {
    * with the fields sent; only a pair still held by a row the business does
    * not read (a planted row) answers the 409. No advisory lock: the retry
    * covers every creator of the pair and adds no lock to the stock lock order.
+   *
+   * W11-STOCK-ROW-RACE: that retry is now the one every stock row creator
+   * shares (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts): the
+   * transaction is run once more only when the row holding the pair is the
+   * business's own (or gone), read outside the rolled-back transaction; a
+   * planted row's 409 (D-137) is answered after one run, not two.
    */
   async upsertInventory(businessId: string, data: any) {
     const fields = readInventoryUpsert(data);
@@ -477,9 +483,8 @@ export class MarketplaceService {
     if (!owned.products.has(productId)) throw new NotFoundException('Product not found');
     if (!owned.warehouses.has(warehouseId)) throw new NotFoundException('Warehouse not found');
 
-    // SEC-UPS-1: 'again' rethrows a create's unique violation so the caller runs the transaction once more; 'refuse'
-    // (that second run) answers it as a pair held by another record (409).
-    const upsertOnce = (onPairTaken: 'again' | 'refuse') =>
+    // SEC-UPS-1 / W11-STOCK-ROW-RACE: a create that loses the pair to the business's own row is run again once.
+    return retryOnOwnStockRowRace(this.prisma.client, businessId, () =>
       this.prisma.client.$transaction(async (tx) => {
         await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
         const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
@@ -512,16 +517,9 @@ export class MarketplaceService {
             },
             include: { product: true, warehouse: true },
           });
-        return onPairTaken === 'refuse' ? createStockRowOrConflict(create) : create();
-      }, STOCK_LOCK_TX_OPTIONS);
-
-    try {
-      return await upsertOnce('again');
-    } catch (err) {
-      // Only the create writes a unique column (the update writes none), so a P2002 here is the pair taken meanwhile.
-      if ((err as { code?: unknown } | null)?.code !== 'P2002') throw err;
-      return upsertOnce('refuse');
-    }
+        return createStockRowOrConflict({ productId, warehouseId }, create);
+      }, STOCK_LOCK_TX_OPTIONS),
+    );
   }
 
   async getInventory(businessId: string, warehouseId?: string) {
@@ -2385,6 +2383,11 @@ export class MarketplaceService {
     const malformed = Object.entries(ids).find(([, id]) => typeof id !== 'string' || id.length === 0);
     if (malformed) throw new BadRequestException(`Transfer ${malformed[0]} is required (a non-empty string)`);
     if (data.fromWarehouseId === data.toWarehouseId) throw new BadRequestException('Source and destination warehouses must be different');
+    // W11-STOCK-ROW-RACE: the note is written into both movements as sent; one that is not text (the route's body is
+    // any, and a KEY tool's arguments reach here unchecked) was a 500 (PrismaClientValidationError). Absent or null is
+    // no note; a string is kept exactly as sent.
+    const note: unknown = data.note;
+    if (note !== undefined && note !== null && typeof note !== 'string') throw new BadRequestException('Transfer note must be text');
 
     const owned = await ownedProductsAndWarehouses(
       this.prisma.client,
@@ -2398,7 +2401,10 @@ export class MarketplaceService {
 
     const refId = `TRF-${Date.now()}`;
 
-    await this.prisma.client.$transaction(async (tx) => {
+    // W11-STOCK-ROW-RACE (D-137): a to row created meanwhile by another writer of the business (a transfer into the same
+    // new pair, a purchase order received) runs the transaction once more, which then adds to that row; a to row of
+    // another business_id (a planted row) keeps the 409 (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts).
+    const transferOnce = () => this.prisma.client.$transaction(async (tx) => {
       await lockStockRowPairsInOrder(tx, businessId, [
         { productId: data.productId, warehouseId: data.fromWarehouseId },
         { productId: data.productId, warehouseId: data.toWarehouseId },
@@ -2434,7 +2440,7 @@ export class MarketplaceService {
         });
       } else {
         // Z5SEC-2: a row of another business_id holding this (product, warehouse) is a 409, not a 500 (P2002).
-        await createStockRowOrConflict(() =>
+        await createStockRowOrConflict({ productId: data.productId, warehouseId: data.toWarehouseId }, () =>
           tx.inventoryStock.create({
             data: {
               businessId,
@@ -2450,12 +2456,13 @@ export class MarketplaceService {
         );
       }
       await tx.stockMovement.create({
-        data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+        data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note, createdBy: data.userId, referenceId: refId },
       });
       await tx.stockMovement.create({
-        data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+        data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note, createdBy: data.userId, referenceId: refId },
       });
     }, STOCK_LOCK_TX_OPTIONS);
+    await retryOnOwnStockRowRace(this.prisma.client, businessId, transferOnce);
 
     return { success: true, transferRef: refId };
   }

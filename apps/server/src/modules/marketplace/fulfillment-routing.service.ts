@@ -9,7 +9,7 @@ import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order-metadata';
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
 import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
 import { readPurchaseOrderLine, STOCK_QUANTITY_MAX } from '../../core/inventory/purchase-order-lines';
 
 /**
@@ -1254,7 +1254,12 @@ export class FulfillmentRoutingService {
       // be the business's first (400 otherwise, nothing written).
       const receipts = await this.receivedStockLines(businessId, po.items, defaultWarehouseId);
 
-      updatedPO = await this.prisma.client.$transaction(async (rawTx) => {
+      // W11-STOCK-ROW-RACE (D-137): a line's stock row created meanwhile by another writer of the business (a transfer or
+      // an inventory set into the same new pair) runs the transaction once more, which then adds to that row; a row of
+      // another business_id (a planted row) keeps the 409 (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts).
+      // The run again repeats the status compare-and-set below (W11-PO-RECEIPT-CLAIM): the first run rolled back, so the
+      // purchase order is received once, or the run again answers 409 when another request moved it meanwhile.
+      updatedPO = await retryOnOwnStockRowRace(this.prisma.client, businessId, () => this.prisma.client.$transaction(async (rawTx) => {
         const tx = rawTx as unknown as Prisma.TransactionClient;
         // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): the stock rows the lines add to, locked first, at once, in the global order
         // (core/inventory/stock-lock-order.ts), then the purchase order, its routes and the stock written. Updated line
@@ -1335,8 +1340,9 @@ export class FulfillmentRoutingService {
           } else {
             // W10-Z5-TRANSFER-FIX (Z5SEC-2): a row of another business_id holding this (product, warehouse), planted by
             // the old cross-business receipt, is a 409 naming no ids (the purchase order stays as it was), not an
-            // unhandled P2002 (a 500). The row is left for an operator to repair.
-            await createStockRowOrConflict(() =>
+            // unhandled P2002 (a 500). The row is left for an operator to repair. W11-STOCK-ROW-RACE: the pair is carried
+            // on the 409 so the run again above can tell such a row from the business's own, created meanwhile.
+            await createStockRowOrConflict({ productId, warehouseId }, () =>
               tx.inventoryStock.create({
                 data: {
                   businessId,
@@ -1390,7 +1396,7 @@ export class FulfillmentRoutingService {
         }
 
         return updated;
-      });
+      }));
     } else {
       // W11-PO-RECEIPT-CLAIM: compared and set on the status read above, as the receipt is. Written unconditionally, two
       // changes from SUBMITTED at once (to ACKNOWLEDGED and to DRAFT) both answered and the last write won. One update
