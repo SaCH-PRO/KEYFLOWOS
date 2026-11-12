@@ -72,6 +72,71 @@ export function appendOrderTimeline(
 }
 
 /**
+ * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-2; D-112): appends `steps` to the
+ * order's statusTimeline and, only where the order's status is still
+ * `advance.from` when the statement runs, writes `advance.to` and appends
+ * `advance.steps` after them, in one UPDATE. Every SET expression reads the
+ * row as it is before this UPDATE (after any wait for a concurrent writer of
+ * the row, the newest committed version), so a status committed since the
+ * caller read `from` (the paid door's paid, a cancel) is kept with no step
+ * claiming otherwise.
+ *
+ * Fulfilment routing wrote the status it computed from the status it read when
+ * its claim began; the paid door and the cancel action do not take the claim,
+ * so a placed order marked paid while it was routed got 'placed' back, and a
+ * cancelled one 'routed'.
+ */
+export function appendOrderTimelineAdvancingStatus(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  steps: readonly OrderTimelineStep[],
+  advance: { from: string; to: string; steps: readonly OrderTimelineStep[] } | null,
+): Promise<number> {
+  if (!advance) return appendOrderTimeline(client, businessId, orderId, steps);
+  const stillFrom = Prisma.sql`marketplace_orders.status = ${advance.from}`;
+  return client.$executeRaw`
+    UPDATE marketplace_orders
+       SET status = CASE WHEN ${stillFrom} THEN ${advance.to} ELSE status END,
+           metadata = ${METADATA} || jsonb_build_object('statusTimeline', ${TIMELINE} || ${JSON.stringify(steps)}::jsonb
+             || CASE WHEN ${stillFrom} THEN ${JSON.stringify(advance.steps)}::jsonb ELSE '[]'::jsonb END),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}`;
+}
+
+/**
+ * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-4): the order's public tracking
+ * token, written in one statement only where none is stored (absent, null or
+ * empty), the rest of the metadata as stored. Returns the token stored once it
+ * has run: `token` where this call wrote it, the one another call stored first
+ * otherwise, or null when there is no such order in the business.
+ *
+ * GET .../orders/:id/token read the whole metadata and wrote its copy back
+ * with the token: a routing step or link committed in between was undone, and
+ * a token another call had just stored (and handed out) was replaced.
+ */
+export async function setOrderPublicTokenOnce(
+  client: Pick<BusinessMetaTx, '$queryRaw'>,
+  businessId: string,
+  orderId: string,
+  token: string,
+): Promise<string | null> {
+  const written = await client.$queryRaw<Array<{ token: string | null }>>`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object('publicToken', ${token}::text),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND COALESCE(${METADATA} ->> 'publicToken', '') = ''
+    RETURNING metadata ->> 'publicToken' AS token`;
+  if (written.length > 0) return written[0].token;
+  // Not written: stored already (read in a new statement, so a token committed while the UPDATE waited is seen), or no
+  // such order.
+  const stored = await client.$queryRaw<Array<{ token: string | null }>>`
+    SELECT ${METADATA} ->> 'publicToken' AS token FROM marketplace_orders WHERE id = ${orderId} AND business_id = ${businessId}`;
+  return stored.length > 0 ? stored[0].token : null;
+}
+
+/**
  * Takes the last statusTimeline step equal to `step` (jsonb equality: the same
  * keys and values, in any key order) off the order: a marking that recorded
  * nothing takes back its own step. Nothing is written when there is none.

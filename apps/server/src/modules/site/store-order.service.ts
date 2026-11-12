@@ -1,6 +1,7 @@
 import { Injectable, Inject, Optional, forwardRef, BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, Logger } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
+import { lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -1123,7 +1124,25 @@ export class StoreOrderService {
     // state if a later tx step rolls back.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
 
+    // W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): the stock rows this checkout
+    // decrements (each tracked line's product, in the default warehouse).
+    const decrementedStockProducts =
+      input.stockMovesOnFulfilment || !defaultWarehouse
+        ? []
+        : order.items.filter((i) => productMode.get(i.productId) === 'tracked').map((i) => i.productId);
+
     const result = await this.prisma.client.$transaction(async (tx) => {
+      // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): first, before any other row, every
+      // stock row the decrement below writes is locked at once in the global
+      // order (core/inventory/stock-lock-order.ts). Decremented line by line
+      // in line order and held to commit, this checkout and a routing
+      // reserving the same products in the other order each held one row and
+      // waited for the other's (40P01), and one of them (the customer's
+      // settlement, or the routing) was rolled back. The order row (the offline
+      // completion's FOR UPDATE below, and the final write) comes after the
+      // stock rows, as in routing.
+      await lockStockRowsInOrder(tx, order.businessId, decrementedStockProducts, defaultWarehouse?.id);
+
       // The order's status as of this transaction (SEC-V33-5): read under a
       // row lock for the offline completion, which refuses a closed order.
       let currentStatus = order.status;

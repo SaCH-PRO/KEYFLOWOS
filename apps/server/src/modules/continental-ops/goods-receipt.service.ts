@@ -1,5 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 
 export interface CreateGoodsReceiptInput {
   grNumber: string;
@@ -123,6 +124,16 @@ export class GoodsReceiptService {
     const items = gr.items as unknown as Array<{ productId?: string; qtyAccepted: number }>;
 
     return this.prisma.client.$transaction(async (tx) => {
+      // W10-Z4-ROUTE-FIX review (Z4RV-CR-1): every stock row the loop below writes (each line's product, in
+      // every warehouse: its updateMany writes them all) locked first, at once, in the global order
+      // (core/inventory/stock-lock-order.ts). Written line by line in line order, a goods receipt posted with
+      // lines [B, A] and a routing reserving [A, B] each held one row and waited for the other's (40P01), and
+      // one was rolled back.
+      await lockStockRowsInOrder(
+        tx,
+        businessId,
+        items.filter((item) => item.productId && item.qtyAccepted > 0).map((item) => item.productId),
+      );
       for (const item of items) {
         if (!item.productId || item.qtyAccepted <= 0) continue;
         await tx.inventoryStock.updateMany({
