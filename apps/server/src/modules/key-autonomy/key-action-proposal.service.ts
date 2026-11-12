@@ -620,8 +620,11 @@ export class KeyActionProposalService {
 
   /**
    * The approver's authority, by the rule the action boundary applies to an
-   * evidence giver (resolvePrincipalAuthority: SUPER_ADMIN, a Membership with
-   * its approval tier, or Business.ownerId).
+   * evidence giver (resolvePrincipalAuthority: SUPER_ADMIN, or a Membership
+   * with its approval tier). The recorded owner field grants nothing on its
+   * own (owner rulings D-104, D-125, W11-ACTION-BOUNDARY-OWNER-ARM): an
+   * approval recorded under the retired 'owner_without_membership' basis
+   * lapses here, because its approver now resolves to 'none'.
    */
   private async readApproverAuthority(
     client: AuthorityReader,

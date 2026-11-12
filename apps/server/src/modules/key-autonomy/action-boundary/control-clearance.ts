@@ -65,7 +65,11 @@ export interface PrincipalRows {
   userId: string;
   /** Null when no such user row exists. */
   user: { role: string | null; deletedAt: Date | null; bannedAt: Date | null } | null;
-  /** Null when the business does not exist or is deleted. */
+  /**
+   * Null when the business does not exist or is deleted. Its recorded owner
+   * grants nothing here (owner rulings D-104, D-116, D-125): only the
+   * business's existence is read from this row.
+   */
   business: { ownerId: string } | null;
   membership: { id: string; role: string; maxApprovalTier: number | null; permissionScopes: unknown } | null;
 }
@@ -74,15 +78,23 @@ export interface PrincipalAuthority {
   userId: string;
   /**
    * The manual-equivalent rule, which is what BusinessGuard enforces on the
-   * human helpdesk route: SUPER_ADMIN, a Membership, or Business.ownerId.
+   * human helpdesk route: SUPER_ADMIN, or a Membership of this business.
+   *
+   * W11-ACTION-BOUNDARY-OWNER-ARM (owner rulings D-104, D-116, D-125): there
+   * is no owner basis. A user recorded as the business's owner who holds no
+   * Membership row is 'none', as everywhere else D-104 refuses them; one who
+   * holds a Membership is that Membership's role. Evidence or a recorded
+   * approval stored under the retired 'owner_without_membership' basis still
+   * parses (the basis is read as a string) and is refused at admission: the
+   * fresh principal is 'none', and the basis differs from the one stored.
    */
-  basis: 'super_admin' | 'membership' | 'owner_without_membership' | 'none';
+  basis: 'super_admin' | 'membership' | 'none';
   membershipId: string | null;
   membershipRole: string | null;
   /**
    * The frozen AUTH-001 rule for a Membership. SUPER_ADMIN is the maximum, as
-   * AiOversightService.resolveApproval treats it. An owner with no Membership
-   * row is 0: that same method refuses an approver who has no Membership.
+   * AiOversightService.resolveApproval treats it. Anyone else is 0: that same
+   * method refuses an approver who has no Membership.
    */
   approvalTier: number;
 }
@@ -110,9 +122,7 @@ export function resolvePrincipalAuthority(rows: PrincipalRows): PrincipalAuthori
       approvalTier: resolveMembershipApprovalTier(rows.membership).tier,
     };
   }
-  if (rows.business.ownerId === rows.userId) {
-    return { ...none, basis: 'owner_without_membership' };
-  }
+  // D-104: a member-less recorded owner is anyone else here (no owner arm).
   return none;
 }
 
