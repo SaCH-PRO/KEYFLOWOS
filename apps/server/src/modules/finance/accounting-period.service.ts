@@ -422,9 +422,10 @@ export class AccountingPeriodService {
    * V1-15 review SEC-V15-2: closing or reopening a period opens or shuts the
    * posting door, and changing or deleting one decides which month a close
    * shuts (repair2, review SEC9-1), so each is the business owner's or an
-   * admin's call: the distinguished owner (Business.ownerId) or an OWNER /
-   * ADMIN membership. A STAFF member, a stranger, or no actor at all is
-   * refused (403).
+   * admin's call: an OWNER / ADMIN membership (D-50), or the distinguished
+   * owner (Business.ownerId) holding an OWNER membership (owner rulings
+   * D-116 / D-125: a recorded owner holding only STAFF is STAFF). A STAFF
+   * member, a stranger, or no actor at all is refused (403).
    */
   private async assertMayGate(
     businessId: string,
@@ -440,8 +441,10 @@ export class AccountingPeriodService {
       });
       if (membership && PERIOD_GATE_ROLES.has(membership.role)) return actorId;
       const owned = await this.prisma.client.business.findFirst({
-        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-        where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId } } },
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+        // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
+        // holding only STAFF is STAFF; ADMIN keeps the gate as an ADMIN, D-50).
+        where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId, role: 'OWNER' } } },
         select: { id: true },
       });
       if (owned) return actorId;

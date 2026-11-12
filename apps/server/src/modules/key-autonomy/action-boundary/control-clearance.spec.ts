@@ -68,9 +68,17 @@ describe('resolvePrincipalAuthority', () => {
     expect(sa).toMatchObject({ basis: 'super_admin', approvalTier: 4, membershipId: null });
   });
 
-  it('the owner with no Membership row may act, and cannot approve', () => {
+  // W11-ACTION-BOUNDARY-OWNER-ARM (owner rulings D-104, D-116, D-125): the
+  // recorded owner field grants nothing on its own. An owner recorded only as
+  // Business.ownerId, with no Membership row, is anyone else: no authority.
+  it('the owner with no Membership row has no authority (D-104): basis none, tier 0, no membership', () => {
     const owner = resolvePrincipalAuthority(rows({ userId: 'u_owner' }));
-    expect(owner).toMatchObject({ basis: 'owner_without_membership', approvalTier: 0, membershipId: null });
+    expect(owner).toEqual({ userId: 'u_owner', basis: 'none', membershipId: null, membershipRole: null, approvalTier: 0 });
+    // D-116: a recorded owner who holds a Membership is that Membership's role.
+    const asStaff = resolvePrincipalAuthority(
+      rows({ userId: 'u_owner', membership: { id: 'm_os', role: 'STAFF', maxApprovalTier: 0, permissionScopes: null } }),
+    );
+    expect(asStaff).toMatchObject({ basis: 'membership', membershipId: 'm_os', membershipRole: 'STAFF', approvalTier: 0 });
   });
 
   it.each([

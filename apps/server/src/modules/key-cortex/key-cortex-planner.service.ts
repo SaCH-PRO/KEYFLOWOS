@@ -768,9 +768,9 @@ export class KeyCortexPlannerService {
 
   /**
    * Who may execute a plan over HTTP (R0-09e, pinned): its creator, the
-   * business OWNER (the OWNER membership or Business.ownerId, the two arms
-   * IdentityService.assertBusinessOwner admits) or SUPER_ADMIN. A plan no member
-   * created (plan.userId null) is the OWNER's or SUPER_ADMIN's to run.
+   * business OWNER (an OWNER membership: owner rulings D-104, D-116, D-125; a
+   * recorded owner holding ADMIN or STAFF is that role) or SUPER_ADMIN. A plan
+   * no member created (plan.userId null) is the OWNER's or SUPER_ADMIN's to run.
    *
    * Trial-N repair round 2 (KEY-PLANS-D46): a plan with a step that writes the
    * business's invoices or payments (INVOICE_WRITE_MODULES) runs only for a
@@ -1039,7 +1039,7 @@ export class KeyCortexPlannerService {
 
   /**
    * Whether a run may skip the executor's approval policy (V1-10 review ST-3):
-   * only for the business OWNER (the OWNER membership or Business.ownerId) or
+   * only for the business OWNER (an OWNER membership: D-116, D-125) or
    * SUPER_ADMIN, who hold authority over that policy. Never for a STAFF
    * creator or a system caller.
    */
@@ -1049,7 +1049,11 @@ export class KeyCortexPlannerService {
     return this.isBusinessOwner(businessId, member.userId);
   }
 
-  /** The two arms IdentityService.assertBusinessOwner admits: the OWNER membership or Business.ownerId. */
+  /**
+   * The business owner: an OWNER membership of this business (owner rulings D-116, D-125,
+   * W11-D116-KEY-OWNER, as IdentityService.assertBusinessOwner admits it): a co-owner is the owner,
+   * Business.ownerId grants nothing on its own, a recorded owner holding ADMIN or STAFF is that role.
+   */
   private async isBusinessOwner(businessId: string, userId: string): Promise<boolean> {
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId, businessId } },
@@ -1057,8 +1061,9 @@ export class KeyCortexPlannerService {
     });
     if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: userId, members: { some: { userId: userId } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // D-116 (W11-D116-KEY-OWNER): only with an OWNER one.
+      where: { id: businessId, ownerId: userId, members: { some: { userId: userId, role: 'OWNER' } } },
       select: { id: true },
     });
     return !!owned;

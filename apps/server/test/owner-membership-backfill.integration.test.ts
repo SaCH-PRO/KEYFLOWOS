@@ -60,7 +60,9 @@
  *           names that business (ids only) for review.
  *   OMB-13  review SEC-W10OM-6: mail addressed to the business owner (weekly
  *           financial briefing, quote alerts, AI usage alerts) reaches the
- *           Business.ownerId user only while they hold a Membership.
+ *           Business.ownerId user only while they hold an OWNER membership
+ *           (owner ruling D-116, W11-D116-KEY-OWNER: one holding only STAFF
+ *           gets none).
  *   OMB-14  review OMV-2 (a sign-in lockout): a caller a co-owner removed from
  *           their oldest owned business, who is OWNER of a newer one and STAFF
  *           of another, signs in: the bootstrap answers the oldest owned
@@ -924,9 +926,11 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
     expect(await grantAudits([ID.bizRemoved])).toEqual([]);
   });
 
-  it('[OMB-13] (D-104; review SEC-W10OM-6) mail addressed to the business owner (the weekly financial briefing, the public quote alerts, the AI usage alerts) reaches the Business.ownerId user only while they hold a Membership: none for the removed ownerId member or an unresolvable owner, the member owner\'s address otherwise; the three senders read their recipient through that rule', async () => {
+  it('[OMB-13] (D-104, D-116; review SEC-W10OM-6) mail addressed to the business owner (the weekly financial briefing, the public quote alerts, the AI usage alerts) reaches the Business.ownerId user only while they hold an OWNER membership (D-116): none for the removed ownerId member, the ownerId member holding only STAFF or an unresolvable owner, the OWNER-holding owner\'s address otherwise; the three senders read their recipient through that rule', async () => {
     const { businessOwnerRecipient } = await import('../src/core/auth/business.guard');
     expect(await businessOwnerRecipient(prismaSvc, ID.bizRemoved, ID.removedOwner)).toBeNull();
+    // W11-D116-KEY-OWNER (owner ruling D-116): a recorded owner holding only STAFF is that role, no recipient.
+    expect(await businessOwnerRecipient(prismaSvc, ID.bizStaffOwner, ID.staffOwner)).toBeNull();
     expect(await businessOwnerRecipient(prismaSvc, ID.bizGhost, ID.ghost)).toBeNull();
     expect(await businessOwnerRecipient(prismaSvc, ID.bizGuard, null)).toBeNull();
     // A member of another business is no recipient for this one.
@@ -947,7 +951,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
 });
 
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis and onboarding completion\'s ownerId arm, and the informational reads that grant nothing', () => {
+  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the informational reads that grant nothing (onboarding completion\'s ownerId arm removed by owner ruling D-116; the ACTION-001 principal basis aligned by W11-ACTION-BOUNDARY-OWNER-ARM under D-104/D-125)', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -969,16 +973,13 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
     const EXCEPTIONS: Array<[string, string]> = [
       // Classifies businesses for the KF-EXEC-TENANT-001 repair report; it grants nothing.
       ['modules/identity/founding-membership.service.ts: ownerId compared to the caller', 'repair classifier, no access decision'],
-      // Referred (W10-OWNER-MEMBERSHIP deviation): ACTION-001's principal basis
-      // 'owner_without_membership' (approval tier 0) is pinned by the
-      // action-001-real-db manifest and its negative control
-      // NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES; aligning it changes both.
-      ['modules/key-autonomy/action-boundary/control-clearance.ts: ownerId compared to the caller', 'referred: ACTION-001 manifests'],
-      // Referred (W10-OWNER-MEMBERSHIP deviation): resolveCompletionActor runs
-      // only under a tenant context TenantInterceptor verified (a Membership
-      // since D-104, or SUPER_ADMIN); its ownerId arm is pinned by
-      // release0-edited-suites (onboarding-concierge.service.spec ST-R032-1).
-      ['modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId compared to the caller', 'referred: release0-edited-suites'],
+      // (W11-ACTION-BOUNDARY-OWNER-ARM, owner rulings D-104, D-116, D-125: the
+      // KEY action boundary's 'owner_without_membership' principal basis is
+      // retired; resolvePrincipalAuthority answers a member-less owner 'none',
+      // so control-clearance.ts has no entry here.)
+      // (W11-D116-PROFILE-OWNER, owner ruling D-116: onboarding completion's
+      // ownerId arm is gone; resolveCompletionActor asks isProfileOwner, so it
+      // has no entry here.)
       // Informational (review OMV-3), none grants anything on ownerId alone:
       // checkSlugAvailability's `existing.ownerId === userId` only answers
       // { available: true, ownedByYou: true } on the slug route; writing a slug

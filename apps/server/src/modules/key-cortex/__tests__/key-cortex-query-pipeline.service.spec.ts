@@ -617,7 +617,10 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
   const CONTACTS = 'crm_list_contacts';
   const ORGAN = 'cortex.execute_tool';
 
-  /** The member the chat runs for: the business owner by Business.ownerId, or a membership row (null: none) and a User role. */
+  /**
+   * The member the chat runs for: the business owner (Business.ownerId holding an OWNER membership: owner
+   * rulings D-116, D-125, W11-D116-KEY-OWNER), or a membership row (null: none) and a User role.
+   */
   function setup(member: { owner?: boolean; membership?: { role: string; permissionScopes: Record<string, string> | null } | null; role?: string; fail?: boolean }) {
     vi.clearAllMocks();
     mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
@@ -633,6 +636,8 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
         membership: {
           findUnique: vi.fn(async () => {
             if (member.fail) throw new Error('membership store down');
+            // W11-D116-KEY-OWNER (D-116, D-125): the owner holds an OWNER membership; Business.ownerId alone grants nothing.
+            if (member.owner) return { role: 'OWNER', permissionScopes: null };
             return member.membership ?? null;
           }),
         },

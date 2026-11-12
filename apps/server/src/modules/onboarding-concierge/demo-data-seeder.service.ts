@@ -166,16 +166,18 @@ export class DemoDataSeederService {
   }
 
   /**
-   * The owner D-84 names, as BusinessGuard and completion admit an owner: the
-   * distinguished owner (Business.ownerId) or the OWNER membership, both read
-   * for this business. No platform bypass (D-46); no actor fails closed.
+   * The owner D-84 names, as completion admits an owner: the OWNER membership,
+   * or the distinguished owner (Business.ownerId) holding one (owner rulings
+   * D-116 / D-125), both read for this business. No platform bypass (D-46); no
+   * actor fails closed.
    */
   private async resolveSeedOwner(businessId: string, actor: DemoSeedActor | undefined): Promise<string> {
     const actorId = actor?.id;
     if (actorId) {
       const [owned, membership] = await Promise.all([
-        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-        this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId } } }, select: { id: true } }),
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+        // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one.
+        this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId, members: { some: { userId: actorId, role: 'OWNER' } } }, select: { id: true } }),
         this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: actorId, businessId } },
           select: { role: true },

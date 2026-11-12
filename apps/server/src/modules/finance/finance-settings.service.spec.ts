@@ -26,7 +26,18 @@ function makeService(opts: { membershipRole?: string; ownerId?: string; storedRa
       }),
     },
     business: {
-      findFirst: vi.fn(async (args: any) => (args.where.id === BIZ && opts.ownerId && args.where.ownerId === opts.ownerId ? { id: BIZ } : null)),
+      // The recorded-owner lookup: Business.ownerId of this business and, owner rulings D-104 and
+      // D-116, the members filter honoured against the fake membership (its role too, when named).
+      findFirst: vi.fn(async (args: any) => {
+        const { where } = args;
+        if (where.id !== BIZ || !opts.ownerId || where.ownerId !== opts.ownerId) return null;
+        const some = where.members?.some;
+        if (some) {
+          if (!opts.membershipRole || some.userId !== 'member') return null;
+          if (some.role !== undefined && some.role !== opts.membershipRole) return null;
+        }
+        return { id: BIZ };
+      }),
       findUnique: vi.fn(async () => ({ defaultTaxRate: opts.storedRate === undefined ? 12.5 : opts.storedRate })),
       update: vi.fn(),
     },
@@ -66,11 +77,19 @@ describe('FinanceSettingsService.assertTaxRateOwner (owner ruling D-11, R0-09f)'
     }
   });
 
-  it('the owner (OWNER membership or Business.ownerId of this business) and a SUPER_ADMIN keep the rate in the submission', async () => {
+  it('the owner (an OWNER membership of this business) and a SUPER_ADMIN keep the rate in the submission; the recorded owner (Business.ownerId) holding no OWNER membership (none, STAFF or ADMIN) does not (owner rulings D-104, D-116)', async () => {
     const input = { defaultTaxRate: 15 };
     await expect(makeService({ membershipRole: 'OWNER' }).service.assertTaxRateOwner(BIZ, input, { id: 'member', role: 'USER' })).resolves.toBe(input);
-    await expect(makeService({ ownerId: 'member' }).service.assertTaxRateOwner(BIZ, input, { id: 'member', role: 'USER' })).resolves.toBe(input);
+    await expect(makeService({ membershipRole: 'OWNER', ownerId: 'member' }).service.assertTaxRateOwner(BIZ, input, { id: 'member', role: 'USER' })).resolves.toBe(input);
     await expect(makeService().service.assertTaxRateOwner(BIZ, input, { id: 'platform', role: 'SUPER_ADMIN' })).resolves.toBe(input);
+    // Owner ruling D-116: the recorded owner holding only STAFF or ADMIN is that role; with no membership they are no member.
+    for (const membershipRole of [undefined, 'STAFF', 'ADMIN']) {
+      const { service, client } = makeService({ membershipRole, ownerId: 'member' });
+      const err = await service.assertTaxRateOwner(BIZ, { defaultTaxRate: 15 }, { id: 'member', role: 'USER' }).then(() => null, (e) => e);
+      expect(err, String(membershipRole)).toBeInstanceOf(ForbiddenException);
+      expect((err as ForbiddenException).getResponse()).toMatchObject({ code: BUSINESS_PROFILE_OWNER_ONLY, fields: ['defaultTaxRate'] });
+      expect(client.business.update).not.toHaveBeenCalled();
+    }
   });
 
   it('no authenticated actor is not the owner (fails closed), and the owner lookups are bound to the route business', async () => {

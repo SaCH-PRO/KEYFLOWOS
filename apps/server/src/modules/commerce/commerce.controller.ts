@@ -672,14 +672,15 @@ export class CommerceController {
    * revenue:write or settings:write included — is refused 403
    * BUSINESS_PROFILE_OWNER_ONLY before the body is read or anything is written.
    *
-   * The owner test is FinanceSettingsService.isProfileOwner (R0-09f): the OWNER
-   * membership or the distinguished owner (Business.ownerId), the two arms
-   * IdentityService.assertBusinessOwner and BusinessGuard admit an owner by,
-   * plus the SUPER_ADMIN bypass BusinessGuard grants. Without it the route
-   * refuses everyone (fails closed). The route carries AuthGuard and
-   * BusinessGuard but not ModuleScopeGuard, as the Gmail connect routes below
-   * (R0-CMF5): a revenue scope admits no one the owner rule refuses, and
-   * ModuleScopeGuard would refuse a distinguished owner with no membership row.
+   * The owner test is FinanceSettingsService.isProfileOwner (R0-09f): an OWNER
+   * membership of this business (owner rulings D-116 / D-125: a co-owner
+   * holding OWNER is the owner; Business.ownerId grants nothing on its own, so
+   * a recorded owner holding only ADMIN or STAFF is that role and is refused
+   * here, owner-role-profile.integration.test.ts ORP-20), plus the SUPER_ADMIN
+   * bypass BusinessGuard grants. Without it the route refuses everyone (fails
+   * closed). The route carries AuthGuard and BusinessGuard but not
+   * ModuleScopeGuard, as the Gmail connect routes below (R0-CMF5): a revenue
+   * scope admits no one the owner rule refuses.
    * GET .../document-templates above stays open to every member.
    */
   @UseGuards(AuthGuard, BusinessGuard)

@@ -9,9 +9,10 @@
  * AuthGuard and BusinessGuard only, so any member, STAFF included, could
  * switch the kill switch off or raise the tier ceiling to 4.
  *
- * Required, and pinned here: only OWNER or ADMIN (the owner of record,
- * Business.ownerId, counts as OWNER, with a Membership row since owner ruling
- * D-104; SUPER_ADMIN keeps the platform bypass
+ * Required, and pinned here: only OWNER or ADMIN (by membership: the owner of
+ * record, Business.ownerId, grants nothing on its own since owner ruling D-104,
+ * and one holding only ADMIN or STAFF is that role since D-116,
+ * W11-D116-KEY-OWNER; SUPER_ADMIN keeps the platform bypass
  * BusinessGuard grants) may write the profile, and nobody may raise
  * maxTierWithoutApproval above the approval tier they hold themselves (the
  * Membership rule in core/authority/approval-tier.ts: OWNER 4, ADMIN 3, STAFF 0

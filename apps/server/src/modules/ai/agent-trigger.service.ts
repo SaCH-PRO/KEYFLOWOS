@@ -93,8 +93,9 @@ function conditionToStore(filter: Record<string, unknown> | null, creator: strin
 }
 
 /**
- * The business owner: the OWNER membership or the distinguished owner (Business.ownerId), the two arms
- * BusinessGuard admits an owner by (as GmailService.connectStanding restates them; D-94, D-11).
+ * The business owner: whoever holds an OWNER membership of this business (owner rulings D-116, D-125,
+ * W11-D116-KEY-OWNER): a co-owner is the owner, Business.ownerId grants nothing on its own, and a
+ * recorded owner holding only an ADMIN or STAFF membership is that role.
  */
 async function isBusinessOwner(prisma: PrismaService, businessId: string, userId: string): Promise<boolean> {
   const membership = await prisma.client.membership.findUnique({
@@ -102,8 +103,9 @@ async function isBusinessOwner(prisma: PrismaService, businessId: string, userId
     select: { role: true },
   });
   if (membership?.role === 'OWNER') return true;
-  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId, members: { some: { userId: userId } } }, select: { id: true } });
+  // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+  // D-116 (W11-D116-KEY-OWNER): only with an OWNER one.
+  const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: userId, members: { some: { userId: userId, role: 'OWNER' } } }, select: { id: true } });
   return Boolean(owned);
 }
 

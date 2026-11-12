@@ -262,7 +262,8 @@ describe('KeyCortexPlannerService', () => {
  * so whoever named the OWNER as a plan's userId ran its steps as the OWNER, and
  * any member ran any plan. Pinned here: with a member (the HTTP route) the plan
  * is read in the member's tenant only, the member must be its creator, the
- * business OWNER (OWNER membership or Business.ownerId) or SUPER_ADMIN, and
+ * business OWNER (an OWNER membership; Business.ownerId alone, or holding only
+ * ADMIN or STAFF, is not: owner rulings D-104, D-116) or SUPER_ADMIN, and
  * every step runs as that executing member; with no member (a system trigger) a
  * member's plan runs as that member and only a plan no member created runs as
  * SYSTEM_PLAN_ACTOR ('key_cortex'). The executePlan cases above run with no
@@ -311,7 +312,17 @@ describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, 
           }),
         },
         business: {
-          findFirst: vi.fn(async ({ where }: any) => (where.id === 'biz_1' && where.ownerId === ownerId ? { id: 'biz_1' } : null)),
+          // W11-D116-KEY-OWNER (owner rulings D-104, D-116): the recorded-owner lookup's members filter is
+          // honoured, its role included: Business.ownerId counts only with a membership of that role.
+          findFirst: vi.fn(async ({ where }: any) => {
+            if (where.id !== 'biz_1' || where.ownerId !== ownerId) return null;
+            const some = where.members?.some;
+            if (some) {
+              const role = memberships[some.userId];
+              if (!role || (some.role !== undefined && some.role !== role)) return null;
+            }
+            return { id: 'biz_1' };
+          }),
         },
       },
     };
@@ -337,7 +348,7 @@ describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, 
     expect(actorsRun()).toEqual([STAFF, STAFF]);
   });
 
-  it("RED-BEFORE: a member who is neither the creator, the OWNER (membership or Business.ownerId) nor SUPER_ADMIN is refused 403 before the plan starts, on another member's plan and on a plan no member created", async () => {
+  it("RED-BEFORE: a member who is neither the creator, the OWNER (an OWNER membership) nor SUPER_ADMIN is refused 403 before the plan starts, on another member's plan and on a plan no member created", async () => {
     for (const userId of [OWNER, null]) {
       build({ id: 'plan_1', businessId: 'biz_1', userId }, { [STAFF]: 'STAFF', user_admin: 'ADMIN' }, 'someone_else');
       for (const member of [STAFF, 'user_admin']) {
@@ -349,16 +360,24 @@ describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, 
     }
   });
 
-  it('RED-BEFORE: the OWNER membership, the Business.ownerId owner and SUPER_ADMIN may run a plan no member created, each as itself', async () => {
+  it('RED-BEFORE: the OWNER membership and SUPER_ADMIN may run a plan no member created, each as itself; the recorded owner (Business.ownerId) with no membership or a STAFF membership is refused 403 before the plan starts (owner rulings D-104, D-116)', async () => {
     for (const [userId, role, memberships, ownerId] of [
       ['user_owner_member', 'USER', { user_owner_member: 'OWNER' }, 'someone_else'],
-      ['user_owner_id', 'USER', {}, 'user_owner_id'],
       ['user_super', 'SUPER_ADMIN', {}, 'someone_else'],
     ] as const) {
       build({ id: 'plan_1', businessId: 'biz_1', userId: null }, memberships as Record<string, string>, ownerId);
       const result = await service.executePlan('plan_1', {}, { userId, role, businessId: 'biz_1' });
       expect(result.status, userId).toBe('completed');
       expect(actorsRun(), userId).toEqual([userId, userId]);
+    }
+    // W11-D116-KEY-OWNER (D-104, D-116): Business.ownerId grants nothing on its own, and a recorded owner
+    // holding only STAFF is that role.
+    for (const memberships of [{}, { user_owner_id: 'STAFF' }]) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId: null }, memberships as Record<string, string>, 'user_owner_id');
+      await expect(service.executePlan('plan_1', {}, { userId: 'user_owner_id', role: 'USER', businessId: 'biz_1' }), JSON.stringify(memberships)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.client.aiPlan.update).not.toHaveBeenCalled();
+      expect(prisma.client.aiPlan.updateMany).not.toHaveBeenCalled();
+      expect(executor.execute).not.toHaveBeenCalled();
     }
   });
 
