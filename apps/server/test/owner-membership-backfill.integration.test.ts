@@ -837,6 +837,17 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['destructured ownerId compared to user.id', 'const { ownerId } = await load(businessId); if (ownerId === user.id) return;', 'ownerId compared to the caller'],
       ['destructured ownerId, caller first, optional chain', 'if (user?.id !== ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
       ['bare ownerId against the actor', 'if (ownerId && ownerId === actorId) return actorId;', 'ownerId compared to the caller'],
+      // Reviews OMV3-R1, OMV-R1: the repo reads across tenants by wrapping the
+      // argument in skipTenantIsolation(...); its where sits one call deeper.
+      ['business read wrapped in skipTenantIsolation', 'tx.business.findFirst(skipTenantIsolation({ where: { id: businessId, ownerId: userId } }))', 'business read on ownerId without membership'],
+      ['cross-tenant business read wrapped, multi-line', 'this.prisma.client.business.findFirst(\n  skipTenantIsolation({\n    where: { id: businessId, ownerId: userId },\n    select: { id: true },\n  }),\n)', 'business read on ownerId without membership'],
+      ['business relation filter wrapped in skipTenantIsolation (a cross-tenant read)', 'this.prisma.client.invoice.findFirst(skipTenantIsolation({ where: { id: invoiceId, business: { ownerId: userId } } }))', 'business relation on ownerId without membership'],
+      ['membership read with an ownerId relation arm, wrapped', 'tx.membership.findFirst(skipTenantIsolation({ where: { businessId, OR: [{ business: { ownerId: userId } }, { userId }] } }))', 'business relation on ownerId without membership'],
+      // Review OMV-R1: indexed and parenthesised receivers.
+      ['indexed receiver compared', 'if (rows[0].ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['indexed receiver, optional chain, caller on the left', 'if (userId !== rows[0]?.ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      ['parenthesised receiver compared', 'if ((await this.load(id)).ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['parenthesised read result compared (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId !== user.id) throw new ForbiddenException();', 'ownerId compared to the caller'],
     ];
     const PASSED: Array<[string, string]> = [
       ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
@@ -847,6 +858,11 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['a contact OR arm (shares, not members)', 'this.prisma.client.contact.findFirst({ where: { OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }] } })'],
       ['type and presence checks', "if (typeof config.ownerId === 'string' && ownerId !== undefined && ownerId !== null) return config.ownerId;"],
       ['ownerId against a stored value', 'if (ownerId !== null && ownerId === storedOwnerId) return ownerId;'],
+      // The wrapped forms of the membership-carrying and Membership reads.
+      ['the D-104 owner arm, wrapped', 'tx.business.findFirst(skipTenantIsolation({ where: { id: businessId, ownerId: userId, members: { some: { userId } } } }))'],
+      ["the bootstrap's oldest-Membership read, wrapped", 'tx.membership.findFirst(skipTenantIsolation({ where: { userId, business: { deletedAt: null } }, select: { business: true } }))'],
+      ['ownerId selected under a wrapped read', 'this.prisma.client.business.findUnique(skipTenantIsolation({ where: { id: businessId }, select: { ownerId: true } }))'],
+      ["an indexed contact's owner", 'if (contacts[0].ownerId !== actorId) throw new ForbiddenException();'],
     ];
     expect(FLAGGED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(FLAGGED.map(([shape, , label]) => [shape, [label]]));
     expect(PASSED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(PASSED.map(([shape]) => [shape, []]));
