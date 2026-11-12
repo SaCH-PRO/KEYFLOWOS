@@ -85,8 +85,9 @@ export class KeyCortexActionExecutorPlugin
     // .../actions/proposals stores the client's sourceType and payload, never
     // a planId), so no payload chooses the member a proposal runs as; a
     // payload.planContext naming a plan the proposal was not filed for is
-    // refused. Every other flow-tool proposal runs only if the member it runs
-    // for may run the tool with no principal (runAuthority).
+    // refused. Every other proposal runs only if the member it runs for may run
+    // the tool with no principal (runAuthority), a dotted tool included
+    // (W11A-SEAM-REPAIR review SEC-SR-1).
     let authority: ProposalRunAuthority;
     try {
       authority = await this.runAuthority(businessId, proposal, payload.planContext, toolName, executedBy);
@@ -213,8 +214,11 @@ export class KeyCortexActionExecutorPlugin
    * asked: the member KEY-04 binds contacts for, D-64/D-88) may run the tool
    * with no principal (memberToolRunAuthority: the approve rule, so a contact
    * read no visibility clause bounds is the OWNER's only; module scopes D-71;
-   * D-46); with no member, noMemberToolRefusal (D-73). A KEY-cortex (dotted)
-   * tool keeps its own registry's rules.
+   * D-46); with no member, noMemberToolRefusal (D-73). W11A-SEAM-REPAIR review
+   * SEC-SR-1 (closes SEC-W11KOAM-2; D-119, D-131, D-37): a KEY-cortex (dotted)
+   * tool is held to the same rule (memberToolRunAuthority reads the KEY organ
+   * map for it, as the KEY chat does), before its registry, which judges no
+   * member, runs it preApproved.
    */
   private async runAuthority(
     businessId: string,
@@ -253,7 +257,11 @@ export class KeyCortexActionExecutorPlugin
       if (refusal) return { refusal };
       plan = { memberId: null, principalId: null };
     }
-    if (toolName.includes('.')) return { refusal: null, plan };
+    // W11A-SEAM-REPAIR review SEC-SR-1 (closes SEC-W11KOAM-2; D-119, D-131, D-37, D-73): a dotted (KEY cortex)
+    // tool is judged here as a flow tool is. It skipped this check, and the KEY cortex registry judges no member,
+    // so a member who filed, approved and executed a MANUAL EXECUTE_TOOL proposal ran the connector reads without
+    // connect read, unmapped owner-only tools (cortex.query_database) and contact reads (storelink.list_intakes).
+    // memberToolRunAuthority now judges every dotted name by the KEY organ map, as the KEY chat does.
     const member = [executedBy, proposal.approvedBy, proposal.userId].find((id): id is string => !!id && !isSystemActor(id));
     if (!member) return { refusal: noMemberToolRefusal(toolName), plan };
     const run = await memberToolRunAuthority(prisma(), businessId, member, toolName);
