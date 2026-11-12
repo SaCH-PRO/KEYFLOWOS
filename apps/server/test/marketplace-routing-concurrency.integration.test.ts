@@ -99,6 +99,39 @@
  *         write, they deadlocked. Now each locks its products' rows in the
  *         global order first: both commit, routing claims once.
  *
+ * W10-Z5-TRANSFER-FIX: the transfer rewrite (b668df8b, one interactive
+ * transaction locking its from and to rows first) read its rows by
+ * findFirst({ businessId, productId, warehouseId }); two reviews found, and
+ * each case below except RC-16 was red at 0cbcd4c3:
+ *
+ *   RC-15 (Z5SEC-1 / Z5-CR-1, introduced by b668df8b) POST .../inventory/transfer
+ *         (body: any, no DTO) with productId, fromWarehouseId or toWarehouseId
+ *         missing: Prisma read the undefined field as no filter, the lock
+ *         skipped the incomplete pair, and the transfer committed wrong stock
+ *         and answered success (the to row read as the from row and written
+ *         q-n then q+n; any warehouse and any row of the product as the
+ *         destination; rows of two different products, unlocked, with
+ *         movements naming no product). At its parent findUnique on an
+ *         incomplete compound key threw before writing. Now a transfer whose
+ *         ids are not non-empty strings, or whose quantity is not a positive
+ *         whole number, is refused with 400 before any transaction.
+ *   RC-16 (Z5SEC-1, a characterization, green before and after) a well-formed
+ *         transfer keeps its refusals, texts and order.
+ *   RC-17 (Z5SEC-2, pre-existing) the transfer never checked that its product
+ *         and warehouses are the business's: a row the old cross-business
+ *         purchase order receipt planted (this business's id on another
+ *         business's product or warehouse) could be moved out of, creating
+ *         rows of this business for another business's product. Now the
+ *         product and both warehouses are checked as the receipt checks its
+ *         lines (raw SQL by the business's own id): 404 with the existing
+ *         texts.
+ *   RC-18, RC-19 (Z5SEC-2, pre-existing) such a planted row holds the unique
+ *         (product_id, warehouse_id) of the other business's own pair: that
+ *         business's purchase order received, or its transfer, into the pair
+ *         created its row and failed on an unhandled P2002 (500; the purchase
+ *         order stayed SHIPPED). Now 409 naming no other business's id;
+ *         nothing is written, and the planted row is left for an operator.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -151,6 +184,17 @@ const ID = {
   productXB: `${P}prod_xb`,
   stockXB: `${P}stock_xb`,
   productXB2: `${P}prod_xb2`,
+  /** A second warehouse of the other business (no stock row of its own). */
+  warehouseB2: `${P}wh_b2`,
+  /**
+   * Rows the old cross-business purchase order receipt planted (W10-Z5-TRANSFER-FIX, Z5SEC-2): business_id is this
+   * business while the product or the warehouse is the other business's. Planted by a case with raw SQL and removed by
+   * it.
+   */
+  plantedXB2InB: `${P}planted_xb2_whb`,
+  plantedXBInA: `${P}planted_xb_wh`,
+  plantedAInB: `${P}planted_a_whb`,
+  plantedXBInB2: `${P}planted_xb_whb2`,
 };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const PRICE = 10;
@@ -169,6 +213,8 @@ let prismaService: any;
 let deliveryNotes: any;
 let goodsReceipts: any;
 let stockCounts: any;
+/** MarketplaceController, as POST .../inventory/transfer calls it (body: any, no DTO). */
+let controller: any;
 
 /** store_order.* events in emit order. */
 let seen: Array<{ name: string; payload: any }> = [];
@@ -241,6 +287,7 @@ beforeAll(async () => {
   const { DeliveryNoteService } = await import('../src/modules/continental-ops/delivery-note.service');
   const { GoodsReceiptService } = await import('../src/modules/continental-ops/goods-receipt.service');
   const { StockCountService } = await import('../src/modules/continental-ops/stock-count.service');
+  const { MarketplaceController } = await import('../src/modules/marketplace/marketplace.controller');
 
   const crmStub = {
     findOrCreateContact: async (businessId: string, input: { email?: string | null }) =>
@@ -288,6 +335,8 @@ beforeAll(async () => {
   deliveryNotes = app.get(DeliveryNoteService);
   goodsReceipts = app.get(GoodsReceiptService);
   stockCounts = app.get(StockCountService);
+  // The route's handler over the suite's MarketplaceService (the transfer route uses no other dependency).
+  controller = new (MarketplaceController as any)(market, {}, prismaService);
   // The routing listener as production builds it, called by a case (or put on the bus by one).
   listener = new (StoreOrderRoutingListener as any)(prismaService, routing, events);
 
@@ -331,6 +380,7 @@ beforeAll(async () => {
   // Another business (inventoryMode not set: tracked only while it keeps a stock row, resolveInventoryMode).
   await db.business.create({ data: { id: ID.bizB, name: 'V18R Other Business', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
   await db.warehouse.create({ data: { id: ID.warehouseB, businessId: ID.bizB, name: 'V18R Other Warehouse' } });
+  await db.warehouse.create({ data: { id: ID.warehouseB2, businessId: ID.bizB, name: 'V18R Other Warehouse 2' } });
   for (const [id, name] of [
     [ID.productXB, 'V18R Other Stocked'],
     [ID.productXB2, 'V18R Other Unstocked'],
@@ -595,6 +645,72 @@ const shippedPurchaseOrder = (items: any[]) =>
       currency: 'TTD',
     },
   });
+
+/** POST .../inventory/transfer as the route runs it: its handler, with the body as sent and the member's id. */
+const transferByRoute = (businessId: string, body: Record<string, unknown>) =>
+  Promise.resolve().then(() => controller.transferInventory(businessId, body, { user: { id: ID.owner } }));
+
+/**
+ * A call's answer as the route gives it: 'committed' when it returned success, else the HTTP status it is answered with
+ * (500 for an error that carries none, with its code) and its message.
+ */
+const routeAnswer = (work: Promise<unknown>) =>
+  work.then(
+    (r: any) => (r?.success ? 'committed' : r),
+    (err: any) =>
+      typeof err?.getStatus === 'function' ? `${err.getStatus()}: ${err.message}` : `500: ${err?.code ?? err?.name}`,
+  );
+/** The status alone ('committed', or the number). */
+const routeStatus = (work: Promise<unknown>) =>
+  routeAnswer(work).then((a) => (typeof a === 'string' && /^\d{3}: /.test(a) ? Number(a.slice(0, 3)) : a));
+
+/** Every stock row the suite's fixtures own or name (by business, product or warehouse), and its stock movement count. */
+async function stockState() {
+  const rows: any[] = await db.$queryRawUnsafe(
+    `SELECT id, business_id, product_id, warehouse_id, quantity, reserved, cost_per_unit FROM inventory_stocks
+      WHERE business_id LIKE ${sqlLikePrefix(P)} OR product_id LIKE ${sqlLikePrefix(P)} OR warehouse_id LIKE ${sqlLikePrefix(P)}
+      ORDER BY id`,
+  );
+  const [{ n }]: any[] = await db.$queryRawUnsafe(
+    `SELECT COUNT(*)::int AS n FROM stock_movements
+      WHERE business_id LIKE ${sqlLikePrefix(P)} OR product_id LIKE ${sqlLikePrefix(P)} OR warehouse_id LIKE ${sqlLikePrefix(P)}`,
+  );
+  return { rows: new Map(rows.map((r) => [String(r.id), JSON.stringify(r)])), movements: n as number };
+}
+
+/** A call's answer and what it wrote: stock rows changed, created or removed, and stock movements added. */
+async function answerAndWrites(call: () => Promise<unknown>) {
+  const before = await stockState();
+  const answer = await call();
+  const after = await stockState();
+  const ids = new Set([...before.rows.keys(), ...after.rows.keys()]);
+  return {
+    answer,
+    stockRowsWritten: [...ids].filter((id) => before.rows.get(id) !== after.rows.get(id)).length,
+    movementsWritten: after.movements - before.movements,
+  };
+}
+
+/** This business's stock as the suite seeds it: no row a call created, every row (a planted one too) at IN_STOCK, none reserved. */
+async function resetBusinessStock() {
+  await db.$executeRawUnsafe(
+    `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)} AND id NOT LIKE ${sqlLikePrefix(P)}`,
+  );
+  await db.inventoryStock.updateMany({ where: { businessId: ID.biz }, data: { quantity: IN_STOCK, reserved: 0 } });
+}
+
+/**
+ * Plants rows as the old cross-business purchase order receipt left them (raw SQL, as it wrote them): business_id is
+ * this business (ID.biz), the product and the warehouse as given, IN_STOCK of each at cost 5.
+ */
+async function plantRows(rows: Array<[id: string, productId: string, warehouseId: string]>) {
+  for (const [id, productId, warehouseId] of rows) {
+    await db.$executeRaw`
+      INSERT INTO inventory_stocks (id, business_id, product_id, warehouse_id, quantity, reserved, cost_per_unit, currency, updated_at)
+      VALUES (${id}, ${ID.biz}, ${productId}, ${warehouseId}, ${IN_STOCK}, 0, 5, 'TTD', now())`;
+  }
+}
+const removeRows = (ids: string[]) => db.$executeRaw`DELETE FROM inventory_stocks WHERE id = ANY(${ids}::text[])`;
 
 describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real database)', () => {
   it('RC-01 (SEAMZ4-CR-1) two paid orders with the same tracked products in opposite line order, routed at once and each held after its first reservation: no deadlock, both routed once (2 LOCAL_STOCK RESERVED routes each), 2 reserved of each product, and no store_order.routing_failed', async () => {
@@ -1178,6 +1294,198 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     expect(outcomes).toEqual(expected);
   }, 30_000);
 
+  it('RC-15 (Z5SEC-1 / Z5-CR-1) POST .../inventory/transfer with productId, fromWarehouseId or toWarehouseId missing, empty, null, a number or a filter object, or with a quantity that is missing, a string or a fraction, is refused with 400 before anything is written: no stock row changed or created and no stock movement', async () => {
+    const body = { productId: ID.productM, fromWarehouseId: ID.warehouse2, toWarehouseId: ID.warehouse, quantity: 2, note: 'rc15' };
+    const without = (key: keyof typeof body) => Object.fromEntries(Object.entries(body).filter(([k]) => k !== key));
+    const probes: Record<string, Record<string, unknown>> = {
+      // The review's three probes.
+      'no fromWarehouseId (the to row read as the from row: stock made from nothing, a TRANSFER_OUT with no warehouse)': without('fromWarehouseId'),
+      'no toWarehouseId (any warehouse, and any row of the product, possibly the from row)': without('toWarehouseId'),
+      'no productId (rows of different products, not locked; movements with no product)': without('productId'),
+      'productId an empty string': { ...body, productId: '' },
+      'fromWarehouseId an empty string': { ...body, fromWarehouseId: '' },
+      'toWarehouseId an empty string': { ...body, toWarehouseId: '' },
+      'toWarehouseId null': { ...body, toWarehouseId: null },
+      'fromWarehouseId a number': { ...body, fromWarehouseId: 42 },
+      'productId a filter object': { ...body, productId: { not: '' } },
+      'fromWarehouseId a filter object': { ...body, fromWarehouseId: { not: ID.warehouse } },
+      'no quantity': without('quantity'),
+      'quantity a string': { ...body, quantity: '2' },
+      'quantity a fraction': { ...body, quantity: 1.5 },
+    };
+    const outcomes: Record<string, unknown> = {};
+    try {
+      for (const [name, sent] of Object.entries(probes)) {
+        await resetBusinessStock();
+        outcomes[name] = await answerAndWrites(() => routeStatus(transferByRoute(ID.biz, sent)));
+      }
+    } finally {
+      await resetBusinessStock();
+    }
+    // At 0cbcd4c3 the three probes (and the empty or null ids) committed and answered success: probe 1 wrote the to
+    // row q-n then q+n, probe 2 any row of M, probe 3 rows of two products; their parent commit threw before writing.
+    expect(outcomes).toEqual(
+      Object.fromEntries(Object.keys(probes).map((name) => [name, { answer: 400, stockRowsWritten: 0, movementsWritten: 0 }])),
+    );
+  });
+
+  it('RC-16 (Z5SEC-1) a well-formed transfer keeps its refusals, their texts and their order (quantity, the same warehouse, the source row, the stock available, the destination warehouse), writes nothing when refused, and commits when it can (a soft-deleted product of the business too)', async () => {
+    const body = { productId: ID.productM, fromWarehouseId: ID.warehouse2, toWarehouseId: ID.warehouse, quantity: 2, note: 'rc16' };
+    const probes: Record<string, Record<string, unknown>> = {
+      'quantity 0 and the same warehouse': { ...body, quantity: 0, toWarehouseId: ID.warehouse2 },
+      'quantity -1': { ...body, quantity: -1 },
+      'the same warehouse, more than is available': { ...body, toWarehouseId: ID.warehouse2, quantity: IN_STOCK + 1 },
+      'no stock row of the product in the source warehouse': { ...body, productId: ID.productU },
+      "more than is available, into a warehouse that is not the business's": { ...body, toWarehouseId: ID.warehouseB, quantity: IN_STOCK + 1 },
+      'more than is available': { ...body, quantity: IN_STOCK + 1 },
+      "into a warehouse that is not the business's": { ...body, toWarehouseId: ID.warehouseB },
+      'into a warehouse that does not exist': { ...body, toWarehouseId: `${P}wh_none` },
+    };
+    const outcomes: Record<string, unknown> = {};
+    try {
+      for (const [name, sent] of Object.entries(probes)) {
+        await resetBusinessStock();
+        outcomes[name] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, sent)));
+      }
+      await resetBusinessStock();
+      outcomes['a transfer it can make'] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, body)));
+      expect([await stockOf(ID.stockMHi), await stockOf(ID.stockMLo)], 'S_HI 2 out, S_LO 2 in').toEqual([`${IN_STOCK - 2}/0`, `${IN_STOCK + 2}/0`]);
+      // A soft-deleted product of the business is still the business's (the purchase order receipt's rule): it moves.
+      await resetBusinessStock();
+      await db.$executeRaw`UPDATE products SET deleted_at = now() WHERE id = ${ID.productM}`;
+      outcomes['a soft-deleted product of the business'] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, body)));
+    } finally {
+      await db.$executeRaw`UPDATE products SET deleted_at = NULL WHERE id = ${ID.productM}`;
+      await resetBusinessStock();
+    }
+    const refused = (answer: string) => ({ answer, stockRowsWritten: 0, movementsWritten: 0 });
+    expect(outcomes).toEqual({
+      'quantity 0 and the same warehouse': refused('400: Transfer quantity must be positive'),
+      'quantity -1': refused('400: Transfer quantity must be positive'),
+      'the same warehouse, more than is available': refused('400: Source and destination warehouses must be different'),
+      'no stock row of the product in the source warehouse': refused('404: Source inventory not found'),
+      "more than is available, into a warehouse that is not the business's": refused(`400: Insufficient available stock. Available: ${IN_STOCK}`),
+      'more than is available': refused(`400: Insufficient available stock. Available: ${IN_STOCK}`),
+      "into a warehouse that is not the business's": refused('404: Destination warehouse not found'),
+      'into a warehouse that does not exist': refused('404: Destination warehouse not found'),
+      'a transfer it can make': { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 },
+      'a soft-deleted product of the business': { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 },
+    });
+  });
+
+  it("RC-17 (Z5SEC-2) a transfer moves only its own business's product between its own warehouses: out of a planted row (this business's id on another business's product or warehouse) it is refused with 404 'Source inventory not found', into another business's warehouse with 404 'Destination warehouse not found', naming no other business's id, and nothing is written", async () => {
+    await plantRows([
+      [ID.plantedXB2InB, ID.productXB2, ID.warehouseB],
+      [ID.plantedXBInA, ID.productXB, ID.warehouse],
+      [ID.plantedAInB, ID.productA, ID.warehouseB],
+    ]);
+    const probes: Record<string, Record<string, unknown>> = {
+      "B's product out of the planted row in B's warehouse, into this business's warehouse": {
+        productId: ID.productXB2, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouse, quantity: 2,
+      },
+      "B's product out of the planted row in this business's warehouse, into its second warehouse": {
+        productId: ID.productXB, fromWarehouseId: ID.warehouse, toWarehouseId: ID.warehouse2, quantity: 2,
+      },
+      "this business's product out of the planted row in B's warehouse, into this business's warehouse": {
+        productId: ID.productA, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouse, quantity: 2,
+      },
+      "B's product out of the planted row in B's warehouse, into B's second warehouse": {
+        productId: ID.productXB2, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouseB2, quantity: 2,
+      },
+      "this business's product into B's warehouse, where a planted row holds it": {
+        productId: ID.productA, fromWarehouseId: ID.warehouse, toWarehouseId: ID.warehouseB, quantity: 2,
+      },
+    };
+    const outcomes: Record<string, unknown> = {};
+    try {
+      for (const [name, sent] of Object.entries(probes)) {
+        await resetBusinessStock();
+        outcomes[name] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, sent)));
+      }
+    } finally {
+      await removeRows([ID.plantedXB2InB, ID.plantedXBInA, ID.plantedAInB]);
+      await resetBusinessStock();
+    }
+    const refused = (answer: string) => ({ answer, stockRowsWritten: 0, movementsWritten: 0 });
+    // At 0cbcd4c3 the first three committed: stock moved out of the planted rows, and rows of this business were
+    // created for B's products (which then read as stock-tracked).
+    expect(outcomes).toEqual({
+      "B's product out of the planted row in B's warehouse, into this business's warehouse": refused('404: Source inventory not found'),
+      "B's product out of the planted row in this business's warehouse, into its second warehouse": refused('404: Source inventory not found'),
+      "this business's product out of the planted row in B's warehouse, into this business's warehouse": refused('404: Source inventory not found'),
+      "B's product out of the planted row in B's warehouse, into B's second warehouse": refused('404: Source inventory not found'),
+      "this business's product into B's warehouse, where a planted row holds it": refused('404: Destination warehouse not found'),
+    });
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    const otherStock = await db.inventoryStock.findUnique({ where: { id: ID.stockXB } });
+    expect([otherStock.quantity, otherStock.reserved, otherStock.costPerUnit], "B's own stock row as it was").toEqual([IN_STOCK, 0, 5]);
+  });
+
+  it("RC-18 (Z5SEC-2) B's own purchase order received for a (product, warehouse) whose stock row another business holds (planted by the old cross-business receipt) is refused with 409 naming no other business's id, not a 500: the purchase order stays SHIPPED, the planted row is untouched, and nothing is written", async () => {
+    await plantRows([[ID.plantedXB2InB, ID.productXB2, ID.warehouseB]]);
+    let outcome: unknown;
+    try {
+      const po = await db.purchaseOrder.create({
+        data: {
+          businessId: ID.bizB,
+          poNumber: `${P}po_b_${++orderSeq}_${Date.now()}`,
+          status: 'SHIPPED',
+          supplierName: 'V18R Supplier',
+          items: [{ productId: ID.productXB2, name: 'XB2', quantity: 3, unitPrice: 1, unitCost: 1, total: 3, warehouseId: ID.warehouseB }],
+          subtotal: 0,
+          shippingCost: 0,
+          taxAmount: 0,
+          total: 0,
+          currency: 'TTD',
+        },
+      });
+      outcome = await answerAndWrites(() =>
+        routeAnswer(routing.advancePurchaseOrderStatus(ID.bizB, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+      );
+      expect((await db.purchaseOrder.findUnique({ where: { id: po.id } })).status, 'the purchase order stays SHIPPED').toBe('SHIPPED');
+      const planted = await db.inventoryStock.findUnique({ where: { id: ID.plantedXB2InB } });
+      expect([planted.businessId, planted.quantity, planted.reserved, planted.costPerUnit], 'the planted row untouched').toEqual([ID.biz, IN_STOCK, 0, 5]);
+      expect(await db.stockMovement.count({ where: { referenceId: po.id } }), 'no stock movement').toBe(0);
+    } finally {
+      await removeRows([ID.plantedXB2InB]);
+    }
+    // At 0cbcd4c3: 500, an unhandled P2002 on the unique key (product_id, warehouse_id).
+    expect(outcome).toEqual({
+      answer: '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it',
+      stockRowsWritten: 0,
+      movementsWritten: 0,
+    });
+    expect(JSON.stringify(outcome), "the answer names no id of the suite's").not.toContain(P);
+  });
+
+  it("RC-19 (Z5SEC-2) B's own transfer into a warehouse of B where another business holds the product's stock row (planted) is refused with 409 naming no other business's id, not a 500: B's source row and the planted row are untouched, and nothing is written", async () => {
+    await plantRows([[ID.plantedXBInB2, ID.productXB, ID.warehouseB2]]);
+    let outcome: unknown;
+    try {
+      outcome = await answerAndWrites(() =>
+        routeAnswer(
+          transferByRoute(ID.bizB, { productId: ID.productXB, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouseB2, quantity: 2, note: 'rc19' }),
+        ),
+      );
+      const planted = await db.inventoryStock.findUnique({ where: { id: ID.plantedXBInB2 } });
+      expect([planted.businessId, planted.quantity, planted.reserved], 'the planted row untouched').toEqual([ID.biz, IN_STOCK, 0]);
+      const own = await db.inventoryStock.findUnique({ where: { id: ID.stockXB } });
+      expect([own.quantity, own.reserved, own.costPerUnit], "B's source row as it was").toEqual([IN_STOCK, 0, 5]);
+    } finally {
+      await removeRows([ID.plantedXBInB2]);
+    }
+    // At 0cbcd4c3: 500, an unhandled P2002 on the unique key (product_id, warehouse_id).
+    expect(outcome).toEqual({
+      answer: '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it',
+      stockRowsWritten: 0,
+      movementsWritten: 0,
+    });
+    expect(JSON.stringify(outcome), "the answer names no id of the suite's").not.toContain(P);
+  });
+
+  it.todo(
+    'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
+  );
   it.todo(
     'Z4RV-SEC-1 follow-up (not this packet): POST .../purchase-orders (MarketplaceService.createPurchaseOrder, body: any) stores lines naming another business\'s product or warehouse as sent; they are refused only when the purchase order is received (RC-10)',
   );
