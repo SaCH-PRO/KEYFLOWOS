@@ -126,6 +126,13 @@
  *   onBehalfOfUserId as the audit-only actor (and action-dispatcher.service.ts to name the plan's member),
  *   outside the W10-CORTEX-CHAT-SCOPE write set.
  *
+ * W11-BRIDGED-ORGAN-AUDIT-MEMBER (W11a) turned that dispatcher it.todo live: executeBridgedCortexTool hands the
+ * registry, for a dispatch with no principal, the member the call runs for (contactBindMember: the surface's
+ * onBehalfOfUserId; the plan queue's stored plan member, D-73, or a daily-briefing plan's owner, D-93) as the
+ * audit-only actor (ctx.auditUserId, never ctx.userId), so the organ row names that member outside a request too;
+ * a plan id of another business, or of no plan, names nobody. action-dispatcher.service.ts is unchanged (the
+ * dispatcher reads the plan's member). SEC-W9KCA-4 holds: no acting user for the organ, the ledger records the AI.
+ *
  * W10-CORTEX-CHAT-SCOPE review repairs: the chat's memory block keeps only the reader's own cognition
  * memory (SEC-W10CCS-R2; buildMemoryContext's same gap stays an it.todo, outside the write set), and the
  * model's tool calls on the chat are held to the plan queue's member rule before the registry runs them
@@ -167,6 +174,18 @@ const ID = {
    * ID.owner, who holds its OWNER membership (D-104); ID.member is a STAFF member with revenue none).
    */
   toolBiz: `${P}biz_tools`,
+  /**
+   * W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3): a business whose bridged organ calls run on dispatcher
+   * surfaces with no principal, outside any request (owned by ID.owner, who holds its OWNER membership, D-104;
+   * ID.member is a STAFF member).
+   */
+  auditBiz: `${P}biz_audit_member`,
+  /** W11-BRIDGED-ORGAN-AUDIT-MEMBER: ID.auditBiz's plan stored for ID.member (D-73: a KEY plan runs as its member). */
+  memberPlan: `${P}plan_audit_member`,
+  /** W11-BRIDGED-ORGAN-AUDIT-MEMBER: ID.auditBiz's daily-briefing plan the system stored with no member (D-93: the owner). */
+  briefingPlan: `${P}plan_audit_briefing`,
+  /** W11-BRIDGED-ORGAN-AUDIT-MEMBER: a plan of ID.biz2 stored for ID.member; a dispatch for ID.auditBiz that names it names nobody. */
+  otherBizPlan: `${P}plan_audit_other_biz`,
 };
 
 const TOOL_OK = 'v19c.create_ticket';
@@ -229,6 +248,8 @@ async function cleanup() {
     `DELETE FROM cognitive_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tool_outcome_scores WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-BRIDGED-ORGAN-AUDIT-MEMBER: the plans the plan-queue cases dispatch.
+    `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -424,6 +445,29 @@ beforeAll(async () => {
   // W10-OWNER-MEMBERSHIP (owner ruling D-104), trial-Z3 seam: the owner holds the OWNER Membership the
   // operator backfill writes; an owner recorded only as Business.ownerId is no member (fixture change).
   await db.membership.create({ data: { userId: ID.owner, businessId: ID.toolBiz, role: 'OWNER' } });
+
+  // W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3; D-73, D-93): the plans the plan queue dispatches with no
+  // principal. A member's plan, a daily-briefing plan the system stored with no member (its markers as
+  // MorningBriefingService writes them), and a member's plan of another business.
+  const { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } = await import('../src/modules/ai/morning-briefing.service');
+  await db.business.create({ data: { id: ID.auditBiz, name: 'V19C Audit Member Biz', ownerId: ID.owner } });
+  await db.membership.create({ data: { userId: ID.owner, businessId: ID.auditBiz, role: 'OWNER' } });
+  await db.membership.create({ data: { userId: ID.member, businessId: ID.auditBiz, role: 'STAFF' } });
+  await db.aiPlan.createMany({
+    data: [
+      { id: ID.memberPlan, businessId: ID.auditBiz, userId: ID.member, status: 'executing', objective: 'v19c: the member reads the inbox' },
+      {
+        id: ID.briefingPlan,
+        businessId: ID.auditBiz,
+        userId: null,
+        status: 'executing',
+        objective: `${BRIEFING_OBJECTIVE_PREFIX}v19c`,
+        rawInput: BRIEFING_RAW_INPUT,
+        scope: [BRIEFING_SCOPE],
+      },
+      { id: ID.otherBizPlan, businessId: ID.biz2, userId: ID.member, status: 'executing', objective: 'v19c: another business plan' },
+    ],
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -1076,16 +1120,69 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     expect(innerRow).toMatchObject({ actionType: TOOL_ORGAN_THREAD, userId: null, commandId: inner.commandId });
   });
 
-  it.todo(
-    'W9-KEY-CORTEX-AUDIT residual (review SEC-W9KCA-3, CR-W9KCA-2; follow-up packet, outside the W10-CORTEX-CHAT-SCOPE ' +
-      'write set): a bridged organ call a dispatcher surface with no principal makes outside any registry call names ' +
-      'the member it runs for on its CortexActionLog row (audit-only): the plan queue (action-dispatcher.service.ts ' +
-      "dispatches { surface: 'PLAN_QUEUE', planId, planStepId } with no member, though contactBindMember resolves the " +
-      "plan's), the Pro Auto monitor, an approved proposal and a custom-logic call from the chat carry onBehalfOfUserId, " +
-      'but flow-orchestrator.service.ts executeBridgedCortexTool hands the registry no actor for them, so the row names ' +
-      "nobody outside a request. The registry's audit-only actor (KeyCortexToolContext.auditUserId) is in place: " +
-      'executeBridgedCortexTool passing action.onBehalfOfUserId to it (never as ctx.userId, SEC-W9KCA-4) closes it.',
-  );
+  // W11-BRIDGED-ORGAN-AUDIT-MEMBER: was an it.todo (W9-KEY-CORTEX-AUDIT residual, review SEC-W9KCA-3, CR-W9KCA-2).
+  // A bridged organ call a dispatcher surface with no principal makes outside any registry call and outside any
+  // request named nobody on its CortexActionLog row: flow-orchestrator.service.ts executeBridgedCortexTool handed the
+  // registry no actor for it. It now hands the registry the member the call runs for (contactBindMember: the
+  // surface's onBehalfOfUserId; on the plan queue, whose dispatch names no member, the stored plan's member, D-73, or
+  // for a daily-briefing plan stored with no member the owner, D-93) as the audit-only actor
+  // (KeyCortexToolContext.auditUserId), never as ctx.userId. SEC-W9KCA-4 holds on every case: the organ handler gets
+  // no acting user and the business-event ledger records the AI. Through `chain`: the real dispatcher
+  // (executeToolAction, executeBridgedCortexTool, contactBindMember over the real database) in front of the audited
+  // registry; no runWithTenant (the plan queue worker, the monitor's job and the proposal executor run outside any
+  // request).
+  const bridgedReadOutsideRequest = async (action: Record<string, unknown>) => {
+    const label = String(action.surface);
+    organCalls.length = 0;
+    await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1 AND action = $2', ID.auditBiz, TOOL_ORGAN_THREAD);
+    await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', ID.auditBiz, TOOL_ORGAN_THREAD);
+    await chain.executeToolAction(ID.auditBiz, 'inbox_read_thread', { threadId: `${P}thread_audit_member` }, action);
+    expect(organCalls, label).toHaveLength(1);
+    const rows = await db.cortexActionLog.findMany({ where: { businessId: ID.auditBiz, actionType: TOOL_ORGAN_THREAD } });
+    expect(rows, label).toHaveLength(1);
+    const ledger = await db.businessEvent.findMany({
+      where: { businessId: ID.auditBiz, eventType: 'ACTION_EXECUTED', action: TOOL_ORGAN_THREAD },
+    });
+    expect(ledger, label).toHaveLength(1);
+    // SEC-W9KCA-4: the member is no acting user of the organ, and the ledger records the call as KEY's own.
+    expect(organCalls[0].userId, label).toBeUndefined();
+    expect(ledger[0], label).toMatchObject({ actorType: 'ai', actorId: 'key_ai' });
+    return rows[0];
+  };
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, was it.todo): outside any request, a bridged organ call on the Pro Auto monitor names the member it runs for (onBehalfOfUserId, the owner) on its CortexActionLog row as an audit-only actor; the organ handler gets no acting user and the ledger records the AI (SEC-W9KCA-4)", async () => {
+    const row = await bridgedReadOutsideRequest({ surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: ID.owner });
+    expect(row).toMatchObject({ userId: ID.owner, status: 'success' });
+  });
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, was it.todo): outside any request, an inner execute_custom_logic call (CUSTOM_LOGIC) names the member whose call ran the snippet (onBehalfOfUserId) on the organ's CortexActionLog row as an audit-only actor (SEC-W9KCA-4)", async () => {
+    const row = await bridgedReadOutsideRequest({ surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.member });
+    expect(row).toMatchObject({ userId: ID.member, status: 'success' });
+  });
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, was it.todo): outside any request, an approved proposal's bridged organ call names the member it runs for (onBehalfOfUserId) and the proposal it executes on its CortexActionLog row (SEC-W9KCA-4)", async () => {
+    const proposalId = `${P}proposal_audit_member_${++seq}`;
+    const row = await bridgedReadOutsideRequest({ surface: 'PROPOSAL', actionId: proposalId, onBehalfOfUserId: ID.member });
+    expect(row).toMatchObject({ userId: ID.member, proposalId, status: 'success' });
+  });
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, D-73, was it.todo): outside any request, the plan queue's bridged organ call (no principal, no member on the dispatch) names the stored plan's member on its CortexActionLog row (SEC-W9KCA-4)", async () => {
+    const row = await bridgedReadOutsideRequest({ surface: 'PLAN_QUEUE', planId: ID.memberPlan, planStepId: `${ID.memberPlan}_step` });
+    expect(row).toMatchObject({ userId: ID.member, status: 'success' });
+  });
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, D-93, was it.todo): outside any request, the plan queue's bridged organ call for a daily-briefing plan stored with no member names the business owner on its CortexActionLog row (SEC-W9KCA-4)", async () => {
+    const row = await bridgedReadOutsideRequest({ surface: 'PLAN_QUEUE', planId: ID.briefingPlan, planStepId: `${ID.briefingPlan}_step` });
+    expect(row).toMatchObject({ userId: ID.owner, status: 'success' });
+  });
+
+  it("W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, D-73): outside any request, a plan-queue dispatch whose plan id names a plan of another business, or no plan, names nobody on the organ's CortexActionLog row (SEC-W9KCA-4)", async () => {
+    const otherBusiness = await bridgedReadOutsideRequest({ surface: 'PLAN_QUEUE', planId: ID.otherBizPlan, planStepId: `${ID.otherBizPlan}_step` });
+    expect(otherBusiness).toMatchObject({ userId: null, status: 'success' });
+    const missingPlan = `${P}plan_audit_missing`;
+    const noPlan = await bridgedReadOutsideRequest({ surface: 'PLAN_QUEUE', planId: missingPlan, planStepId: `${missingPlan}_step` });
+    expect(noPlan).toMatchObject({ userId: null, status: 'success' });
+  });
 
   it('the callers name their actor and command thread: key-cortex-actions.service.ts handleExecuteTool (cortex.execute_tool), outside any request, passes its own call\'s actor and thread to the tool it runs (W9-KEY-CORTEX-AUDIT, was it.todo)', async () => {
     const t = thread('exectool');
