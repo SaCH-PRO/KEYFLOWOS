@@ -4437,10 +4437,30 @@ export class CommerceService {
    * refund posting of that amount, or, when it refunds what is left, the
    * reversal of the recording and its partials (onPaymentRefunded). Omitted,
    * the refund is all that is left, as before.
+   *
+   * W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, D-121): `once` names a partial
+   * refund so that a replay of it (a client retry, a double submit) is not
+   * recorded twice. Its refund row is written with `once.providerPaymentId`
+   * (built by the caller from the payment and what identifies the refund,
+   * never a client value as such), and a refund already holding that
+   * identifier is refused 409 with `once.refusal`, checked under the invoice
+   * lock, so of identical refunds racing one is recorded; nothing else is
+   * written. The unique index on providerPaymentId backs it (P2002 is the
+   * same 409). A full refund needs none: a second one finds nothing left.
    */
-  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null, amount?: number) {
+  async markPaymentRefunded(
+    paymentId: string,
+    businessId: string,
+    reason?: string,
+    actorId?: string | null,
+    amount?: number,
+    once?: { providerPaymentId: string; refusal: string },
+  ) {
     if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
       throw new BadRequestException('A refund amount is a number above 0 in whole cents');
+    }
+    if (once !== undefined && !(typeof once.providerPaymentId === 'string' && once.providerPaymentId.startsWith(`manual_refund_${paymentId}_`))) {
+      throw new BadRequestException('A refund identifier names the payment it refunds');
     }
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
@@ -4471,6 +4491,11 @@ export class CommerceService {
       const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
       if (!current) throw new NotFoundException('Payment not found');
       if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      // W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, D-121): this refund, already recorded (read under the lock), is
+      // not recorded again; it is the more specific answer than what is left, so it is given first.
+      if (once && (await tx.payment.findFirst({ where: { providerPaymentId: once.providerPaymentId, businessId }, select: { id: true } }))) {
+        throw new ConflictException(once.refusal);
+      }
       // What is left of the payment after its earlier refunds, linked or not,
       // capped at the invoice's net received (V1-29 review SEC-V29-1 / CR-V29-5).
       const invoiceRows = await tx.payment.findMany({
@@ -4493,8 +4518,9 @@ export class CommerceService {
           status: 'REFUNDED',
           provider: current.provider,
           method: current.method,
-          // Unique and server-built; the link to the original is `reference`.
-          providerPaymentId: `manual_refund_${current.id}_${randomBytes(8).toString('hex')}`,
+          // Unique and server-built; the link to the original is `reference`. A named partial refund's (SEC-PRD-1)
+          // identifies it, so the unique index refuses its replay.
+          providerPaymentId: once?.providerPaymentId ?? `manual_refund_${current.id}_${randomBytes(8).toString('hex')}`,
           reference: current.providerPaymentId,
           notes: reason ? `Refunded: ${reason}` : null,
           recordedBy: actorId ?? null,
@@ -4526,6 +4552,10 @@ export class CommerceService {
         onIllegalTransition: 'keep',
       });
       return { refund: created, reconciled: r };
+    }).catch((err: unknown) => {
+      // SEC-PRD-1: the named refund's identifier taken (the transaction has rolled back): the same 409.
+      if (once && CommerceService.isProviderPaymentIdConflict(err)) throw new ConflictException(once.refusal);
+      throw err;
     });
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);

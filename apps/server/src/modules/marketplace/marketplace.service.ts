@@ -2003,7 +2003,12 @@ export class MarketplaceService {
    * (a refundAmount other than the order total was 400); since W11-PARTIAL-
    * REFUND-DOOR (owner ruling D-121) a refundAmount below what is left of what
    * was paid is a partial refund through the same door (refundPartThroughDoor),
-   * one above it is 400, and one that is what is left is this full refund.
+   * one above it is 400, and one that is what is left is this full refund. So
+   * is one that is the order total (W11-PARTIAL-REFUND-DOOR review CRR-PRD-1):
+   * the W10 contract's full refund, and what the store fulfillment panel sends
+   * by default, refunds what is left after earlier refunds (a D-121 partial,
+   * a provider refund linked to the payment). A partial refund already
+   * recorded is not recorded again (SEC-PRD-1, partialRefundOf).
    * This action used to set paymentStatus REFUNDED
    * for any member, with no refund recorded, also on an UNPAID order, and its
    * store_order.refunded booked the client's refundAmount as an Expense.
@@ -2024,9 +2029,9 @@ export class MarketplaceService {
     // through the same door (refundPartThroughDoor); one that is all that is left, or none, is the full refund below.
     const paid = (order.paymentStatus ?? '').toUpperCase() === 'PAID';
     const door = paid ? await this.doorRefundState(businessId, order.orderNumber) : null;
-    const partCents = paid ? this.partialRefundCents(order, data, door) : null;
-    if (partCents !== null && door?.paymentId) {
-      return this.refundPartThroughDoor(businessId, order, door.paymentId, fromCents(partCents), data, actorId);
+    const part = paid ? await this.partialRefundOf(businessId, order, data, door) : null;
+    if (part) {
+      return this.refundPartThroughDoor(businessId, order, part.paymentId, fromCents(part.cents), part.once, data, actorId);
     }
 
     await storeOrders.refundOrder(order.id, businessId, actorId);
@@ -2079,18 +2084,28 @@ export class MarketplaceService {
   }
 
   /**
-   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): the cents of the partial refund the fulfil 'refund' of a paid door
-   * order asks for, or null for the full refund (no refundAmount, or one that is all that is left). The amount is a
-   * number (or plain decimal text) above 0 with at most two decimals, in the order's currency (a currency other than
-   * the order's is refused), and at most what is left of what was paid after earlier refunds; anything else is 400
-   * with nothing written. The door checks it again under its invoice lock (CommerceService.markPaymentRefunded), so
-   * refunds racing on one order never refund more than was paid. W10 refused every amount but the order total (400).
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): the partial refund the fulfil 'refund' of a paid door order asks
+   * for (its cents, the door payment and what identifies it), or null for the full refund (no refundAmount, one that
+   * is all that is left, or one that is the order total). The amount is a number (or plain decimal text) above 0 with
+   * at most two decimals, in the order's currency (a currency other than the order's is refused), and at most what is
+   * left of what was paid after earlier refunds; anything else is 400 with nothing written. The door checks it again
+   * under its invoice lock (CommerceService.markPaymentRefunded), so refunds racing on one order never refund more
+   * than was paid. W10 refused every amount but the order total (400).
+   *
+   * Review repairs (D-121): CRR-PRD-1, the order total is the full refund of what is left, as W10's contract had it
+   * and as the store fulfillment panel sends by default (fulfillment-panel.tsx posts refundAmount: order.total); at
+   * d3937867 it refunded what was left after a linked provider refund, and the D-121 check against what is left
+   * answered it 400 once anything was refunded. SEC-PRD-1, a partial refund already recorded on this order (the same
+   * amount and reason, partialRefundOnce) is 409 with nothing written, before what is left is weighed: a replay of
+   * it (a client retry, a double submit) was recorded twice, and a replay that matched what was left would have been
+   * taken as the full refund. The door refuses it again under its lock, so identical refunds racing record one.
    */
-  private partialRefundCents(
+  private async partialRefundOf(
+    businessId: string,
     order: { total: number; currency: string },
-    data: { refundAmount?: unknown; currency?: unknown } | undefined,
+    data: { refundAmount?: unknown; currency?: unknown; reason?: unknown } | undefined,
     door: { paymentId: string | null; leftCents: number } | null,
-  ): number | null {
+  ): Promise<{ cents: number; paymentId: string; once: { providerPaymentId: string; refusal: string } } | null> {
     const requested = data?.refundAmount;
     if (requested === undefined || requested === null || requested === '') return null;
     const text = typeof requested === 'string' ? requested.trim() : null;
@@ -2107,7 +2122,16 @@ export class MarketplaceService {
         throw new BadRequestException(`This order is refunded in its own currency (${order.currency}); got ${JSON.stringify(currency)}`);
       }
     }
+    // CRR-PRD-1 (D-121): the order total asks for the full refund, of what is left.
+    if (cents === toCents(Number(order.total))) return null;
     if (!door?.paymentId) throw new ConflictException('This order has no recorded payment to refund');
+    // SEC-PRD-1 (D-121): this partial refund, already recorded, is not recorded again (the door re-checks under its lock).
+    const once = MarketplaceService.partialRefundOnce(door.paymentId, cents, data?.reason, order.currency);
+    const recorded = await this.prisma.client.payment.findFirst({
+      where: { businessId, providerPaymentId: once.providerPaymentId },
+      select: { id: true },
+    });
+    if (recorded) throw new ConflictException(once.refusal);
     const left = Math.max(door.leftCents, 0);
     if (cents > left) {
       throw new BadRequestException(
@@ -2115,7 +2139,32 @@ export class MarketplaceService {
           `${Number(order.total).toFixed(2)}); got ${fromCents(cents).toFixed(2)}`,
       );
     }
-    return cents === left ? null : cents;
+    return cents === left ? null : { cents, paymentId: door.paymentId, once };
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, owner ruling D-121): what identifies a partial refund of the order's
+   * door payment, so that its replay (a client retry, a double submit, the same refund sent by two members) is refused
+   * rather than recorded twice: the payment, the amount in cents and the reason (trimmed, inner spaces collapsed, case
+   * ignored; none is the empty reason). Its refund row's providerPaymentId is built from them (manual_refund_<payment>_
+   * part_<sha256>, the manual refund prefix kept), so the row is the record and the unique index backs the door's check
+   * under its invoice lock (CommerceService.markPaymentRefunded `once`). A second refund of the same amount is told to
+   * carry its own reason. No schema change (D-121): no key column is added, and the fulfil body takes no new field.
+   */
+  private static partialRefundOnce(
+    paymentId: string,
+    cents: number,
+    reason: unknown,
+    currency: string,
+  ): { providerPaymentId: string; refusal: string } {
+    const said = typeof reason === 'string' ? reason.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+    const digest = createHash('sha256').update(`${cents}\n${said}`, 'utf8').digest('hex').slice(0, 32);
+    return {
+      providerPaymentId: `manual_refund_${paymentId}_part_${digest}`,
+      refusal:
+        `A refund of ${fromCents(cents).toFixed(2)} ${currency} with this reason is already recorded on this order, so it is ` +
+        'not recorded again (nothing was written); to refund the same amount again, give that refund its own reason',
+    };
   }
 
   /**
@@ -2133,12 +2182,16 @@ export class MarketplaceService {
    * (StoreOrderService.refundOrder: the order REFUNDED once, one store_order.refunded naming the invoice; the door
    * reversed the posting and the partials when what was left was refunded). A concurrent full refund that flipped the
    * order first answered for the flip; this refund, recorded, is not refused for it.
+   *
+   * Review SEC-PRD-1: the refund is named (`once`, partialRefundOnce), so the door records it once: a replay that
+   * reaches the door after it committed, or races it, is 409 under the invoice lock with nothing written.
    */
   private async refundPartThroughDoor(
     businessId: string,
     order: { id: string; orderNumber: string; total: number; currency: string },
     paymentId: string,
     amount: number,
+    once: { providerPaymentId: string; refusal: string },
     data: { reason?: unknown; note?: unknown } | undefined,
     actorId: string | null,
   ) {
@@ -2149,6 +2202,7 @@ export class MarketplaceService {
       `Order ${order.orderNumber} partly refunded (${amount.toFixed(2)} ${order.currency})${reason}`,
       actorId,
       amount,
+      once,
     );
     const refundedTotal = fromCents(toCents(refund.balance.refunded));
     const allRefunded = !(toCents(refund.balance.net) > 0);
