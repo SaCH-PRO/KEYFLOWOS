@@ -18,8 +18,11 @@ import { BlueprintService } from '../blueprint/blueprint.service';
  * W11-AI-SIMULATE-VIEWER (owner rulings D-63, D-100; timeline-scope TS-13g): the modules an OWNER on
  * role defaults reads, i.e. every canonical module but connect, which is 'none' for every role by
  * decision (module-vocabulary.ts). A viewer who reads at least these, reads the rows of unmapped modules
- * and whom visibilityClause does not restrict (the OWNER, a SUPER_ADMIN) is withheld no part of
- * getBusinessContext, so their simulation keeps the business's whole context (viewerBusinessContext).
+ * and whom visibilityClause does not restrict (the OWNER, a SUPER_ADMIN) is withheld no figure and no
+ * contact of getBusinessContext, so their simulation keeps those parts whole (viewerBusinessContext).
+ * The timeline rule still withholds Activity rows from such a viewer: from the OWNER, a connect row and a
+ * D-115 withheld row filed from connect (review SEC-W11SV-1, D-63, D-115), so their recentActivities are
+ * the rows the rule serves them (visibleActivityPage), not getBusinessContext's raw rows.
  */
 const OWNER_DEFAULT_READS: readonly CanonicalModule[] = CANONICAL_MODULES.filter(
   (module) => rankOf(ROLE_DEFAULT_SCOPES.OWNER[module]) >= LEVEL_RANK.read,
@@ -484,26 +487,49 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
    * W7-BRIEFINGS-REST (D-63): the titles of the business's Activity rows (since `since`, when given)
    * that the timeline rule serves `viewer`, newest first, up to the ten the briefing and the chat name
    * (as GET ai/briefing and POST ai/chat named the ten newest rows before; W10-ADVISOR-TIMELINE reads
-   * the chat's through here with no `since`): the database prefilter first, then each row judged by
-   * filterVisibleActivity, the page filled past rows the viewer may not read (readVisibleActivityPage).
+   * the chat's through here with no `since`): the rows of visibleActivityPage.
    */
   private async visibleActivityTitles(viewer: TimelineViewer, since?: Date): Promise<string[]> {
+    const rows = await this.visibleActivityPage(viewer, since);
+    return rows.map((row) => row.title);
+  }
+
+  /**
+   * W7-BRIEFINGS-REST (D-63), the rows themselves since W11-AI-SIMULATE-VIEWER review SEC-W11SV-1 (D-63,
+   * D-115): the business's Activity rows (since `since`, when given) that the timeline rule serves
+   * `viewer`, newest first, up to ten: the database prefilter first, then each row judged by
+   * filterVisibleActivity, the page filled past rows the viewer may not read (readVisibleActivityPage).
+   * Each row carries the fields the rule reads and getBusinessContext's recentActivities fields (module,
+   * action, title, createdAt).
+   */
+  private async visibleActivityPage(viewer: TimelineViewer, since?: Date) {
     const prefilter = activityPrefilter(viewer);
     const where = {
       businessId: viewer.businessId,
       ...(since ? { createdAt: { gte: since } } : {}),
       ...(prefilter.length ? { AND: prefilter } : {}),
     };
-    const rows = await readVisibleActivityPage(this.prisma, viewer, 10, (skip, take) =>
+    return readVisibleActivityPage(this.prisma, viewer, 10, (skip, take) =>
       this.prisma.client.activity.findMany({
         where,
-        select: { title: true, module: true, category: true, contactId: true, entityType: true, entityId: true, revenueImpact: true, action: true, type: true, data: true },
+        select: {
+          title: true,
+          module: true,
+          category: true,
+          contactId: true,
+          entityType: true,
+          entityId: true,
+          revenueImpact: true,
+          action: true,
+          type: true,
+          data: true,
+          createdAt: true,
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
         take,
       }),
     );
-    return rows.map((row) => row.title);
   }
 
   /**
@@ -542,19 +568,31 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
    *   - momentumScore: revenue, crm and bookings read, as the chat's;
    *   - recentActivities: the titles of the ten newest rows the timeline rule serves the viewer
    *     (visibleActivityTitles), as the chat names them.
-   * A viewer the rule withholds nothing from (OWNER_DEFAULT_READS read, unmapped rows read, no
-   * visibilityClause: the OWNER, a SUPER_ADMIN) gets getBusinessContext unchanged, so the OWNER's prompt
-   * is the business's whole prompt, as before.
+   * A viewer the rule withholds no figure and no contact from (OWNER_DEFAULT_READS read, unmapped rows
+   * read, no visibilityClause: the OWNER, a SUPER_ADMIN) gets getBusinessContext's parts unchanged but
+   * recentActivities. Review SEC-W11SV-1 (D-63, D-115): the timeline rule, and so the OWNER's own feed
+   * and chat, still withholds from the OWNER a connect row (connect is 'none' for every role) and a D-115
+   * withheld row filed from connect (data.d115.module), which getBusinessContext's raw ten newest rows
+   * carry. So recentActivities are the ten newest rows the rule serves the viewer (visibleActivityPage,
+   * filled past the withheld ones) with getBusinessContext's fields: the OWNER's prompt is the business's
+   * whole prompt, as before, whenever none of the ten newest rows is withheld from the OWNER (rows that
+   * share a createdAt are ordered by id, where getBusinessContext leaves their order open).
    */
   private async viewerBusinessContext(businessId: string, viewer: TimelineViewer) {
-    const context = await this.getBusinessContext(businessId);
-    const read = this.advisorReads(viewer);
     const unrestricted =
       viewer.readsUnmapped &&
       OWNER_DEFAULT_READS.every((module) => viewer.readable.has(module)) &&
       visibilityClause(viewer.crmAccess, viewer.userId) === null;
-    if (unrestricted) return context;
+    if (unrestricted) {
+      const [whole, served] = await Promise.all([this.getBusinessContext(businessId), this.visibleActivityPage(viewer)]);
+      return {
+        ...whole,
+        recentActivities: served.map(({ module, action, title, createdAt }) => ({ module, action, title, createdAt })),
+      };
+    }
 
+    const context = await this.getBusinessContext(businessId);
+    const read = this.advisorReads(viewer);
     const clause = read.contactClause;
     const [contacts, recentActivities] = await Promise.all([
       !read.readsCrm
@@ -687,7 +725,9 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
    * their visibility, every figure, the ten newest Activity titles unfiltered). With a `viewer` (the
    * member who asks) it carries only what they read (viewerBusinessContext, the chat's rule): filtered,
    * not refused. With no viewer the context is the business's whole context, as before; the OWNER's is
-   * the same. The 'simulation' feature, its cost accounting and the answer's shape are unchanged.
+   * the same but for the Activity rows the timeline rule withholds from the OWNER (a connect row, a D-115
+   * row filed from connect; review SEC-W11SV-1, D-63, D-115), as the OWNER's chat and feed leave them out.
+   * The 'simulation' feature, its cost accounting and the answer's shape are unchanged.
    */
   async simulateScenario(businessId: string, scenario: string, variables?: Record<string, any>, viewer?: TimelineViewer) {
     const context = viewer ? await this.viewerBusinessContext(businessId, viewer) : await this.getBusinessContext(businessId);

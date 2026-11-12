@@ -105,6 +105,9 @@
  *   live. The simulation (POST ai/simulate, AiAdvisorService.simulateScenario)
  *   builds its prompt's business context from what the member who asks reads,
  *   as the chat does (TS-13e); the OWNER's prompt is the whole one, as before.
+ *   TS-13h (review SEC-W11SV-1, D-63, D-115): the OWNER's simulation leaves
+ *   out the Activity rows the timeline rule withholds from the OWNER (a
+ *   connect row, a D-115 row filed from connect), as the OWNER's feed does.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -1562,6 +1565,84 @@ describe('W11-AI-SIMULATE-VIEWER (D-63, D-100): the AI simulation reads only wha
       await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}sim_`)}`);
       // Raw SQL: Invoice is a soft-deleted model (fixture-cleanup-integrity.spec.ts).
       await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_sim_`)}`);
+    }
+  });
+
+  /**
+   * W11-AI-SIMULATE-VIEWER review SEC-W11SV-1 (owner rulings D-63, D-115): the OWNER's shortcut (a viewer
+   * the rule restricts by no module of the OWNER's defaults, no contact) kept getBusinessContext's raw ten
+   * newest Activity rows, so the OWNER's prompt named rows the timeline rule, and so the OWNER's own feed
+   * and chat, withhold from the OWNER: a connect row (connect is 'none' for every role, D-63) and a D-115
+   * withheld row filed from connect (data.d115.module, withheldSourceScope). No writer stores either at
+   * head; the case writes them as the newest rows of business A and removes them when it ends.
+   */
+  it("TS-13h (W11-AI-SIMULATE-VIEWER review SEC-W11SV-1, D-63, D-115): the OWNER's simulation names no Activity row the timeline rule withholds from the OWNER: a connect row and a D-115 withheld row filed from connect are absent from the OWNER's feed and from the OWNER's prompt, whose recentActivities are the ten newest rows the rule serves the OWNER (filled past the withheld ones, with getBusinessContext's fields) and whose other parts are getBusinessContext's; a D-115 withheld row filed from a module the OWNER reads stays in both; a view-all ADMIN's prompt carries neither withheld row", async () => {
+    const CONNECT = 'v84a sim connect row title';
+    const D115_CONNECT = 'v84a sim d115 connect-source row';
+    const D115_CRM = 'v84a sim d115 communications-source row';
+    const ROWS = [
+      { id: `${P}sim_connect`, module: 'connect', title: CONNECT },
+      { id: `${P}sim_d115_connect`, module: 'd115_withheld', data: { d115: { module: 'connect' } }, title: D115_CONNECT },
+      { id: `${P}sim_d115_crm`, module: 'd115_withheld', data: { d115: { module: 'communications' } }, title: D115_CRM },
+    ];
+    const WITHHELD = [`${P}sim_connect`, `${P}sim_d115_connect`];
+    // Newer than every other row of the business (the main rows sit on DAY at local noon).
+    const newest = Math.max(Date.now(), DAY.getTime()) + 3 * 86_400_000;
+    try {
+      await db.activity.createMany({
+        data: ROWS.map((r, i) => ({
+          id: r.id,
+          businessId: ID.bizA,
+          module: r.module,
+          action: `${P}sim_action_${i}`,
+          entityType: 'v84a_entity',
+          title: r.title,
+          ...(r.data ? { data: r.data } : {}),
+          occurredAt: new Date(newest - i * 1000),
+          createdAt: new Date(newest - i * 1000),
+        })),
+      });
+
+      // The OWNER's feed withholds the connect row and the D-115 row filed from connect, and serves the other.
+      const feed = await ids(events(ID.owner));
+      for (const id of WITHHELD) expect(feed, `OWNER feed: ${id}`).not.toContain(id);
+      expect(feed).toContain(`${P}sim_d115_crm`);
+
+      // The OWNER's prompt: neither withheld title; the served one is its newest row.
+      const owner = await simulate(ID.owner);
+      expect(owner.status, JSON.stringify(owner.body).slice(0, 300)).toBe(201);
+      expect(owner.prompt, 'OWNER prompt: connect row').not.toContain(CONNECT);
+      expect(owner.prompt, 'OWNER prompt: D-115 row filed from connect').not.toContain(D115_CONNECT);
+      const ownerCtx = promptContext(owner.prompt);
+      // The ten newest rows of the business the rule serves the OWNER, filled past the two withheld rows,
+      // with getBusinessContext's fields in its order.
+      const newestRows = await db.activity.findMany({
+        where: { businessId: ID.bizA },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 12,
+        select: { id: true, module: true, action: true, title: true, createdAt: true },
+      });
+      const served = newestRows
+        .filter((r: { id: string }) => !WITHHELD.includes(r.id))
+        .slice(0, 10)
+        .map((r: { module: string; action: string; title: string; createdAt: Date }) => ({ module: r.module, action: r.action, title: r.title, createdAt: r.createdAt.toISOString() }));
+      expect(served).toHaveLength(10);
+      expect(ownerCtx.recentActivities, 'OWNER: the ten newest rows the rule serves').toEqual(served);
+      expect(ownerCtx.recentActivities[0].title).toBe(D115_CRM);
+      // Every other part is getBusinessContext's, unchanged.
+      const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+      const whole = JSON.parse(JSON.stringify(await (await simModule()).get(AiAdvisorService).getBusinessContext(ID.bizA)));
+      expect(Object.keys(ownerCtx)).toEqual(Object.keys(whole));
+      expect({ ...ownerCtx, recentActivities: null }).toEqual({ ...whole, recentActivities: null });
+
+      // Control: a view-all ADMIN (reads unmapped rows, not connect) is served neither withheld row.
+      const admin = await simulate(ID.admin);
+      expect(admin.status, JSON.stringify(admin.body).slice(0, 300)).toBe(201);
+      expect(admin.prompt).not.toContain(CONNECT);
+      expect(admin.prompt).not.toContain(D115_CONNECT);
+      expect(promptContext(admin.prompt).recentActivities[0]).toBe(D115_CRM);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}sim_`)}`);
     }
   });
 });
