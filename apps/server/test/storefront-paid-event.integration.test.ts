@@ -187,6 +187,14 @@
  *           mark_paid keeps every timeline step and the contact link: each
  *           writer changes only its own part of the order's metadata, in one
  *           statement
+ *
+ *           W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1), each red at 53fb2438:
+ *   V18-T2n an order is routed once however many routers reach it: the
+ *   ..T2n4  routing engine claims the order before it reads its routes. With
+ *           both routers held where they create routes, one mark_paid (a
+ *           DROPSHIP line) and an order created paid (a DROPSHIP line; a
+ *           tracked line) each get one route set (one supplier PO; one unit
+ *           reserved), and three routing calls at once make one route
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -271,8 +279,13 @@ async function cleanup() {
     `DELETE FROM webhooks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V18-T2n: the supplier POs its DROPSHIP line raises, its listing, its warehouse and its tracked stock.
+    `DELETE FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_listings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -598,6 +611,30 @@ async function trackRouting() {
     inflight.push(work);
     return work;
   });
+}
+
+/**
+ * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1): the routing engine's route creation for one strategy
+ * (FulfillmentRoutingService's routeDropship or routeLocalStock, real) held until `parties` routers have reached it,
+ * or `windowMs` has passed. Only a router that read the order with no routes reaches it. At 53fb2438 every router of
+ * the order read none, so they were all held here together and each created its own routes (a DROPSHIP line: its own
+ * supplier PO): the race the review reproduced, made certain. A router that claims the order before it reads it
+ * keeps the others out, and the window lets the claimant through alone.
+ */
+async function holdRouteCreation(method: 'routeDropship' | 'routeLocalStock', parties: number, windowMs = 500) {
+  const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+  const routing = app.get(FulfillmentRoutingService) as Record<string, any>;
+  const real = routing[method].bind(routing);
+  let arrived = 0;
+  let allIn!: () => void;
+  const gathered = new Promise<void>((resolve) => (allIn = resolve));
+  const spy = vi.spyOn(routing, method).mockImplementation(async (...args: unknown[]) => {
+    arrived += 1;
+    if (arrived >= parties) allIn();
+    await Promise.race([gathered, new Promise((resolve) => setTimeout(resolve, windowMs))]);
+    return real(...args);
+  });
+  return { arrivals: () => arrived, restore: () => spy.mockRestore() };
 }
 
 /** settle(), until no routing or listener work has started for a few quiet windows (autoRouteOrder runs un-awaited). */
@@ -2075,6 +2112,143 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       events.off('store_order.paid', onPaid);
       routeOrder.mockRestore();
       await drain();
+    }
+  });
+
+  /**
+   * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): an order is routed once however many routers reach it. The
+   * routing engine claims the order before it reads its routes, so a router that meets an order being routed waits
+   * and then takes the routes already made. Production wiring: StoreOrderRoutingListener on the suite's bus (as T2f
+   * and T2m wire it) beside the real un-awaited autoRouteOrder, and every router that read no routes held where it
+   * creates them (holdRouteCreation). At 53fb2438 every router read none, and each made its own routes.
+   */
+  const T2N = { drop: `${P}t2n_drop`, tracked: `${P}t2n_tracked`, warehouse: `${P}t2n_wh`, stock: `${P}t2n_stock` };
+  let t2nFixtures: Promise<void> | undefined;
+  /** A product with a DROPSHIP listing, and a tracked product with 10 in stock in a warehouse (made once). */
+  const routingFixtures = () =>
+    (t2nFixtures ??= (async () => {
+      const { market } = await marketRoutes();
+      await db.product.create({ data: { id: T2N.drop, businessId: ID.biz, name: 'V18A Dropship', price: 25, currency: 'TTD', category: 'PRODUCT', isActive: true } });
+      await market.createListing(ID.biz, { productId: T2N.drop, fulfillmentStrategy: 'DROPSHIP', supplierName: 'V18A Supplier', supplierEmail: `${P}supplier@test.local` });
+      await db.product.create({
+        data: { id: T2N.tracked, businessId: ID.biz, name: 'V18A Tracked', price: 10, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
+      });
+      await db.warehouse.create({ data: { id: T2N.warehouse, businessId: ID.biz, name: 'V18A Warehouse' } });
+      await db.inventoryStock.create({ data: { id: T2N.stock, businessId: ID.biz, productId: T2N.tracked, warehouseId: T2N.warehouse, quantity: 10, reserved: 0 } });
+    })());
+  /** Both routers on: the routing listener on the suite's bus, routeOrder tracked (counted, drained). */
+  async function bothRouters() {
+    await routingFixtures();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const routeOrder = await trackRouting();
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    const onPaid = (payload: unknown) => {
+      inflight.push(new Promise((resolve) => setImmediate(() => resolve(listener.onStoreOrderPaid(payload)))));
+    };
+    events.on('store_order.paid', onPaid);
+    return {
+      routeOrder,
+      off: async () => {
+        events.off('store_order.paid', onPaid);
+        routeOrder.mockRestore();
+        await drain();
+      },
+    };
+  }
+  const supplierPOs = (orderNumber: string) => db.purchaseOrder.findMany({ where: { businessId: ID.biz, notes: `Auto-generated for order ${orderNumber}` } });
+  const routesOf = async (orderId: string) =>
+    (await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId } })).map((r: any) => `${r.strategy}:${r.status}`);
+  const stepsOf = async (orderId: string) =>
+    ((((await db.marketplaceOrder.findUnique({ where: { id: orderId } })).metadata as any)?.statusTimeline ?? []) as any[]).map((t) => t.status);
+  const createdPaid = async (productId: string) => {
+    const { market } = await marketRoutes();
+    return market.createOrder(
+      ID.biz,
+      { paymentOnCreation: true, paymentMethod: 'CASH', customerName: 'Vee Eighteen', customerEmail: CUSTOMER_EMAIL, items: [{ productId, quantity: 1 }] },
+      ID.owner,
+    );
+  };
+
+  it('V18-T2n (W10-SOP-FIX review SOPFIX-SEC-1, SOPFIX-R1; D-112) one mark_paid of an UNPAID STANDARD order with a DROPSHIP line, both routers reaching the routing engine (the door\'s store_order.paid listener and mark_paid\'s autoRouteOrder) and each held where it would create routes: one router creates them, so one supplier PurchaseOrder, one DROPSHIP PO_RAISED route, the order supplier_ordered and routes_created once', async () => {
+    const { controller } = await marketRoutes();
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeDropship', 2);
+    try {
+      const order = await standardOrderOfA('t2n_mark', {
+        subtotal: 25,
+        total: 25,
+        items: { create: [{ productId: T2N.drop, name: 'V18A Dropship', quantity: 1, unitPrice: 25, total: 25 }] },
+      });
+      routers.routeOrder.mockClear();
+      const marked = await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH', note: 't2n' }, signedIn(ID.owner));
+      expect(marked.paymentStatus).toBe('PAID');
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      // At 53fb2438 both read no routes, and each raised a supplier PO and a DROPSHIP route (review: 1 of 20 and 1 of 40
+      // orders unheld).
+      expect((await supplierPOs(order.orderNumber)).length, 'one supplier PO').toBe(1);
+      expect(await routesOf(order.id), 'one DROPSHIP route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+      expect((await stepsOf(order.id)).filter((s) => s === 'routes_created'), 'routes_created once').toHaveLength(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n2 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) an order created paid (paymentOnCreation) with a DROPSHIP line, both routers held where they would create routes: one supplier PurchaseOrder of the line\'s cost and one DROPSHIP route (the review saw 5 of 5 such orders raise two POs at 53fb2438)', async () => {
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeDropship', 2);
+    try {
+      routers.routeOrder.mockClear();
+      const order = await createdPaid(T2N.drop);
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      expect((await supplierPOs(order.orderNumber)).map((po: any) => po.total), 'one supplier PO').toEqual([25]);
+      expect(await routesOf(order.id), 'one DROPSHIP route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n3 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) an order created paid with a tracked line (10 in stock), both routers held where they would create routes: one LOCAL_STOCK RESERVED route in the stock\'s warehouse and one unit reserved (at 53fb2438 two routes each reserved the unit, the second writing reserved 1 over the first)', async () => {
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeLocalStock', 2);
+    try {
+      routers.routeOrder.mockClear();
+      const order = await createdPaid(T2N.tracked);
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      const routes = await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+      expect(routes.map((r: any) => `${r.strategy}:${r.status}:${r.warehouseId}`), 'one route').toEqual([`LOCAL_STOCK:RESERVED:${T2N.warehouse}`]);
+      const stock = await db.inventoryStock.findUnique({ where: { id: T2N.stock } });
+      expect(`${stock.quantity}/${stock.reserved}`, 'one unit reserved').toBe('10/1');
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n4 (W10-SOP-FIX review SOPFIX-SEC-1, SOPFIX-R1; D-112) any router: three routing calls at once on one placed order (the POST .../route handler\'s service), each held where it would create routes: one route, routes_created once, and each call answered with that route', async () => {
+    const { market } = await marketRoutes();
+    const held = await holdRouteCreation('routeLocalStock', 3);
+    try {
+      const order = await standardOrderOfA('t2n_route');
+      const answers = await Promise.all([1, 2, 3].map(() => market.routeOrder(ID.biz, order.id)));
+      await drain();
+      const routeIds = (await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } })).map((r: any) => r.id);
+      expect(routeIds, 'one route').toHaveLength(1);
+      expect(answers.map((routes: any[]) => routes.map((r) => r.id)), 'each call is answered with that route').toEqual([routeIds, routeIds, routeIds]);
+      expect((await stepsOf(order.id)).filter((s) => s === 'routes_created'), 'routes_created once').toHaveLength(1);
+      expect(held.arrivals(), 'one call created routes').toBe(1);
+    } finally {
+      held.restore();
     }
   });
 
