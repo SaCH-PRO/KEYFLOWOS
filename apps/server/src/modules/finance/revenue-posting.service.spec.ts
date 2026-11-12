@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RevenuePostingService } from './revenue-posting.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 describe('RevenuePostingService.depositSystemKey', () => {
   it('routes cash provider/method to CASH', () => {
@@ -384,6 +385,67 @@ describe('RevenuePostingService recipe semantics', () => {
     );
     const audit = prisma.client.activity.create.mock.calls[0]![0].data;
     expect(audit.data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: 'r-manual', ledgerReversed: true, ledgerPartialRefundsReversed: 1, refundedBy: 'u1' });
+  });
+
+  it('W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): a refund KEY records (createdById KEY_SYSTEM_ACTOR_ID) keeps the member who asked as data.initiatedBy on its payment_refunded row, KEY staying the refunder (SYSTEM) on the posting and the row', async () => {
+    // The refund door's shape (PaymentsService.createRefundWithPosting for refundCharge): the row, in the transaction.
+    const inTx = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+    await inTx.svc.onPaymentRefunded('p1', {
+      refund: { paymentId: 'r1', amount: 40 },
+      auditInTransaction: true,
+      createdById: KEY_SYSTEM_ACTOR_ID,
+      initiatedBy: 'member-m',
+    });
+    expect(inTx.posting.post).toHaveBeenCalledTimes(1);
+    expect(inTx.posting.post.mock.calls[0]![0]).toMatchObject({ type: 'REFUND', createdById: KEY_SYSTEM_ACTOR_ID });
+    expect(inTx.prisma.client.activity.create).toHaveBeenCalledTimes(1);
+    const row = inTx.prisma.client.activity.create.mock.calls[0]![0].data;
+    expect(row).toMatchObject({ module: 'FINANCE', action: 'payment_refunded', actorType: 'SYSTEM', actorId: KEY_SYSTEM_ACTOR_ID });
+    expect(row.data).toMatchObject({ amount: 40, refundedBy: KEY_SYSTEM_ACTOR_ID, initiatedBy: 'member-m' });
+
+    // The best-effort row (no auditInTransaction): the same, on the reversal of what is left.
+    const best = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+    await best.svc.onPaymentRefunded('p1', { createdById: KEY_SYSTEM_ACTOR_ID, initiatedBy: 'member-m' });
+    expect(best.reversed).toEqual([{ businessId: 'b1', transactionId: 'txn-orig' }]);
+    const entry = best.timeline.recordEvent.mock.calls[0]![0];
+    expect(entry).toMatchObject({ actorType: 'SYSTEM', actorId: KEY_SYSTEM_ACTOR_ID });
+    expect(entry.data).toMatchObject({ refundedBy: KEY_SYSTEM_ACTOR_ID, initiatedBy: 'member-m' });
+  });
+
+  it('W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): initiatedBy is ignored beside a person refunder, and dropped when empty or a system actor itself', async () => {
+    // A person (the owner's refund): USER, and initiatedBy is never kept beside a person.
+    const person = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+    await person.svc.onPaymentRefunded('p1', {
+      refund: { paymentId: 'r1', amount: 40 },
+      auditInTransaction: true,
+      createdById: 'u1',
+      initiatedBy: 'member-m',
+    });
+    const personRow = person.prisma.client.activity.create.mock.calls[0]![0].data;
+    expect(personRow).toMatchObject({ actorType: 'USER', actorId: 'u1' });
+    expect(personRow.data).toMatchObject({ refundedBy: 'u1' });
+    expect(personRow.data).not.toHaveProperty('initiatedBy');
+
+    // KEY with no member, an empty one, or a system actor id (KEY itself or its aliases) as initiatedBy: none kept.
+    for (const initiatedBy of [undefined, null, '', KEY_SYSTEM_ACTOR_ID, 'key_cortex', 'key-cortex']) {
+      const key = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+      await key.svc.onPaymentRefunded('p1', {
+        refund: { paymentId: 'r1', amount: 40 },
+        auditInTransaction: true,
+        createdById: KEY_SYSTEM_ACTOR_ID,
+        initiatedBy,
+      });
+      const row = key.prisma.client.activity.create.mock.calls[0]![0].data;
+      expect(row, String(initiatedBy)).toMatchObject({ actorType: 'SYSTEM', actorId: KEY_SYSTEM_ACTOR_ID });
+      expect(row.data, String(initiatedBy)).not.toHaveProperty('initiatedBy');
+    }
+
+    // No refunder at all (a provider event): nobody is named, initiatedBy included.
+    const provider = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+    await provider.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r1', amount: 40 }, initiatedBy: 'member-m' });
+    const providerEntry = provider.timeline.recordEvent.mock.calls[0]![0];
+    expect(providerEntry.actorId).toBeUndefined();
+    expect(providerEntry.data).not.toHaveProperty('initiatedBy');
   });
 
   describe('V1-82 (FOLLOW3-B3): accrual recognition splits revenue by category; a net discount is apportioned, never a negative leg', () => {

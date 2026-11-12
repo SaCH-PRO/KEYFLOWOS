@@ -76,6 +76,12 @@
  *           actor, on the reversal or refund posting (createdById), the refund
  *           row (recordedBy) and one FINANCE payment_refunded feed row written
  *           in the refund transaction; Stripe's refund.created adds none
+ *   SOT-10e W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): KEY's refund for
+ *           a member keeps that member beside KEY as data.initiatedBy on the
+ *           one payment_refunded feed row (audit data, never the refunder:
+ *           createdById, recordedBy and the feed actor stay KEY, SYSTEM); the
+ *           owner's refund carries none, and an initiatedBy that is a system
+ *           actor id, or beside a person refunder, is dropped
  *   SOT-11  FORGED CLAIM: a row of B that names A's charge (a reference B could
  *           sign for itself with its own webhook secret) does not make A's
  *           charge B's: B's refund is 404 with no write (the one call is the
@@ -197,6 +203,12 @@ const ID = {
   invA12: `${P}invA12`,
   invA13: `${P}invA13`,
   invA14: `${P}invA14`,
+  // W11-KEY-REFUND-INITIATED-BY (SOT-10e; D-90, SEC-W7KMP-1): the member of A who asks KEY for a refund, and A's
+  // invoices whose refunds name (or do not name) that member beside the refunder.
+  memberM: `${P}memberM`,
+  invA15: `${P}invA15`,
+  invA16: `${P}invA16`,
+  invA17: `${P}invA17`,
 };
 
 /** Stripe-shaped ids (the prefix inside, so every globally unique value carries it). */
@@ -219,6 +231,9 @@ const S = {
   chA12: `ch_${P}A12`, piA12: `pi_${P}A12`,
   chA13: `ch_${P}A13`, piA13: `pi_${P}A13`,
   chA14: `ch_${P}A14`, piA14: `pi_${P}A14`,
+  chA15: `ch_${P}A15`, piA15: `pi_${P}A15`,
+  chA16: `ch_${P}A16`, piA16: `pi_${P}A16`,
+  chA17: `ch_${P}A17`, piA17: `pi_${P}A17`,
 };
 
 const A_EMAIL = `alice.of.a.${P}@example.test`;
@@ -588,6 +603,22 @@ async function refundFeedOf(businessId: string, paymentId: string): Promise<stri
     orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
   });
   return rows.map((r: any) => `${r.actorType}:${r.actorId}:${r.data?.refundedBy}:${r.data?.amount}`);
+}
+
+/**
+ * W11-KEY-REFUND-INITIATED-BY (SOT-10e; D-90, SEC-W7KMP-1): the FINANCE payment_refunded feed rows of one payment, as
+ * `actorType:actorId:refundedBy:initiatedBy:amount`, `-` where the row's data carries no initiatedBy key.
+ */
+async function refundInitiatorsOf(businessId: string, paymentId: string): Promise<string[]> {
+  const rows = await db.activity.findMany({
+    where: { businessId, module: 'FINANCE', action: 'payment_refunded', entityType: 'payment', entityId: paymentId },
+    orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+  });
+  return rows.map((r: any) => {
+    const data = (r.data ?? {}) as Record<string, unknown>;
+    const initiatedBy = Object.prototype.hasOwnProperty.call(data, 'initiatedBy') ? String(data.initiatedBy) : '-';
+    return `${r.actorType}:${r.actorId}:${data.refundedBy}:${initiatedBy}:${data.amount}`;
+  });
 }
 
 /** SEC-RCD-1: the refund rows of an invoice (negative REFUNDED), as `providerPaymentId:recordedBy`. */
@@ -1090,6 +1121,54 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
     await keyNamed('after refund.created');
     expect((await invoiceRow(ID.invA13)).status).toBe('PARTIALLY_PAID');
     await expectLedgerAgrees(ID.invA13, 75);
+  }, 60_000);
+
+  it('SOT-10e (W11-KEY-REFUND-INITIATED-BY; D-90, SEC-W7KMP-1, SEC-RCD-1): KEY\'s refund for a member names that member beside KEY: refundCharge with initiatedBy writes KEY (SYSTEM) to the refund posting (createdById) and the refund row (recordedBy), and exactly one FINANCE payment_refunded feed row of KEY whose data.initiatedBy is the member; the owner\'s refund names no initiatedBy, an initiatedBy beside a person or equal to a system actor id is dropped; Stripe\'s refund.created adds none', async () => {
+    // The member of A who asked KEY for the refund (a chat principal, the plan's member, a proposal's executor).
+    await db.user.create({ data: { id: ID.memberM, email: `${P}member_m_a@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${ID.memberM}_m`, userId: ID.memberM, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'write' } },
+    });
+
+    // KEY's partial refund for the member, as payments_refund_charge calls it (KEY the actor, the member beside it).
+    const part = await paidUnderChargeId(ID.invA15, 15, S.chA15, S.piA15, 10000);
+    const refund = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA15, amount: 40 }, KEY_SYSTEM_ACTOR_ID, { initiatedBy: ID.memberM });
+    expect(refund).toMatchObject({ chargeId: S.chA15, amount: 40, provider: 'stripe' });
+    const memberBesideKey = async (when: string) => {
+      // KEY stays the refunder (SEC-RCD-1): never the member.
+      expect(await postingActorsOf(part.id), when).toEqual(['INCOME:POSTED:null', `REFUND:POSTED:${KEY_SYSTEM_ACTOR_ID}`]);
+      expect(await refundRecordersOf(ID.invA15), when).toEqual([`${refund.id}:${KEY_SYSTEM_ACTOR_ID}`]);
+      // RED-BEFORE: SYSTEM:key_ai:key_ai:-:40 (the member recorded nowhere).
+      expect(await refundInitiatorsOf(ID.bizA, part.id), when).toEqual([`SYSTEM:${KEY_SYSTEM_ACTOR_ID}:${KEY_SYSTEM_ACTOR_ID}:${ID.memberM}:40`]);
+    };
+    await memberBesideKey('after refundCharge');
+    await deliverRefundEvents();
+    await memberBesideKey('after refund.created');
+    expect((await invoiceRow(ID.invA15)).status).toBe('PARTIALLY_PAID');
+    await expectLedgerAgrees(ID.invA15, 60);
+
+    // Control: the owner's refund over HTTP names the owner (USER) and no initiatedBy.
+    const own = await paidUnderChargeId(ID.invA16, 16, S.chA16, S.piA16, 5000);
+    const res = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA16, amount: 20 });
+    expect(res.status, flat(res.body)).toBe(201);
+    await deliverRefundEvents();
+    expect(await refundRecordersOf(ID.invA16)).toEqual([`${res.body.id}:${ID.ownerA}`]);
+    expect(await refundInitiatorsOf(ID.bizA, own.id)).toEqual([`USER:${ID.ownerA}:${ID.ownerA}:-:20`]);
+
+    // Control: an initiatedBy that is a system actor id (KEY itself, its cortex alias) is dropped, and one beside a
+    // person refunder is ignored: the refunder alone is named.
+    const sys = await paidUnderChargeId(ID.invA17, 17, S.chA17, S.piA17, 5000);
+    const r1 = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA17, amount: 10 }, KEY_SYSTEM_ACTOR_ID, { initiatedBy: KEY_SYSTEM_ACTOR_ID });
+    const r2 = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA17, amount: 5 }, KEY_SYSTEM_ACTOR_ID, { initiatedBy: 'key_cortex' });
+    const r3 = await opsSvc.refundCharge(ID.bizA, 'stripe', { chargeId: S.chA17, amount: 15 }, ID.ownerA, { initiatedBy: ID.memberM });
+    await deliverRefundEvents();
+    expect(await refundRecordersOf(ID.invA17)).toEqual([`${r1.id}:${KEY_SYSTEM_ACTOR_ID}`, `${r2.id}:${KEY_SYSTEM_ACTOR_ID}`, `${r3.id}:${ID.ownerA}`]);
+    expect(await refundInitiatorsOf(ID.bizA, sys.id)).toEqual([
+      `SYSTEM:${KEY_SYSTEM_ACTOR_ID}:${KEY_SYSTEM_ACTOR_ID}:-:10`,
+      `SYSTEM:${KEY_SYSTEM_ACTOR_ID}:${KEY_SYSTEM_ACTOR_ID}:-:5`,
+      `USER:${ID.ownerA}:${ID.ownerA}:-:15`,
+    ]);
+    await expectLedgerAgrees(ID.invA17, 20);
   }, 60_000);
 });
 
