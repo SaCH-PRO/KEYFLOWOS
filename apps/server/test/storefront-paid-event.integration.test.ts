@@ -172,6 +172,32 @@
  *           D-14 refund door (in full; a partial amount is 400)
  *   V18-T2i / V18-T2j (it.todo, outside this packet's write set): a partial
  *           refund through the door; COGS posted in the door's transaction
+ *
+ *           W10-SOP-FIX (D-112; findings SOP-V1, SOP-V2, SOP-V4), each red at
+ *           6470942a:
+ *   V18-T2k three mark_paid calls racing on one UNPAID STANDARD order: one
+ *           payment, and only the marking that recorded it runs the work after
+ *           the door (routing, the order_confirmed email); the others answer
+ *           200 with the order as stored and take their own timeline step back
+ *   V18-T2l a PATCH .../status carrying paymentStatus PAID that loses the door
+ *           announces nothing (no store_order.shipped for a 'shipped' it did
+ *           not write)
+ *   V18-T2m with production wiring (routing listener on the bus, the real
+ *           autoRouteOrder, the paid listener's contact link) a single
+ *           mark_paid keeps every timeline step and the contact link: each
+ *           writer changes only its own part of the order's metadata, in one
+ *           statement
+ *
+ *           W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1), each red at 53fb2438:
+ *   V18-T2n an order is routed once however many routers reach it: the
+ *   ..T2n4  routing engine claims the order before it reads its routes. With
+ *           both routers held where they create routes, one mark_paid (a
+ *           DROPSHIP line) and an order created paid (a DROPSHIP line; a
+ *           tracked line) each get one route set (one supplier PO; one unit
+ *           reserved), and three routing calls at once make one route
+ *   V18-T2n5 the router that comes second meets the order routed and is
+ *           answered with its routes: the listener emits fulfillment_routed,
+ *           not routing_failed, for a routed DROPSHIP order (supplier_ordered)
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -256,8 +282,13 @@ async function cleanup() {
     `DELETE FROM webhooks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V18-T2n: the supplier POs its DROPSHIP line raises, its listing, its warehouse and its tracked stock.
+    `DELETE FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_listings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -552,6 +583,85 @@ async function memberOfA(suffix: string, role = 'STAFF') {
   });
   return id;
 }
+/**
+ * W10-SOP-FIX (SOP-V1, SOP-V2): the paid door (StoreOrderService.completeCheckout, real) held until `parties`
+ * markings have reached it, so each has read the order UNPAID and passed its own already-paid check: the race the
+ * review reproduced. `go` then decides when each held marking goes through the real door (all at once by default).
+ */
+function holdPaidDoor(parties: number, go?: (input: any, real: (input: any) => Promise<any>) => Promise<any>) {
+  const real = storeOrders.completeCheckout.bind(storeOrders);
+  let arrived = 0;
+  let allIn!: () => void;
+  const gathered = new Promise<void>((resolve) => (allIn = resolve));
+  return vi.spyOn(storeOrders, 'completeCheckout').mockImplementation(async (input: any) => {
+    arrived += 1;
+    if (arrived === parties) allIn();
+    await gathered;
+    return go ? go(input, real) : real(input);
+  });
+}
+
+/**
+ * W10-SOP-FIX (SOP-V1, SOP-V4): fulfilment routing (FulfillmentRoutingService.routeOrder, real) tracked, so a case
+ * can count it and await the routing that mark_paid's un-awaited autoRouteOrder starts (drain).
+ */
+async function trackRouting() {
+  const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+  const routing = app.get(FulfillmentRoutingService);
+  const real = routing.routeOrder.bind(routing);
+  return vi.spyOn(routing, 'routeOrder').mockImplementation((...args: any[]) => {
+    const work = (real as (...a: any[]) => Promise<any>)(...args);
+    inflight.push(work);
+    return work;
+  });
+}
+
+/**
+ * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1): the routing engine's route creation for one strategy
+ * (FulfillmentRoutingService's routeDropship or routeLocalStock, real) held until `parties` routers have reached it,
+ * or `windowMs` has passed. Only a router that read the order with no routes reaches it. At 53fb2438 every router of
+ * the order read none, so they were all held here together and each created its own routes (a DROPSHIP line: its own
+ * supplier PO): the race the review reproduced, made certain. A router that claims the order before it reads it
+ * keeps the others out, and the window lets the claimant through alone.
+ */
+async function holdRouteCreation(method: 'routeDropship' | 'routeLocalStock', parties: number, windowMs = 500) {
+  const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+  const routing = app.get(FulfillmentRoutingService) as Record<string, any>;
+  const real = routing[method].bind(routing);
+  let arrived = 0;
+  let allIn!: () => void;
+  const gathered = new Promise<void>((resolve) => (allIn = resolve));
+  const spy = vi.spyOn(routing, method).mockImplementation(async (...args: unknown[]) => {
+    arrived += 1;
+    if (arrived >= parties) allIn();
+    await Promise.race([gathered, new Promise((resolve) => setTimeout(resolve, windowMs))]);
+    return real(...args);
+  });
+  return { arrivals: () => arrived, restore: () => spy.mockRestore() };
+}
+
+/** settle(), until no routing or listener work has started for a few quiet windows (autoRouteOrder runs un-awaited). */
+async function drain() {
+  for (let quiet = 0; quiet < 4; ) {
+    const busy = inflight.length > 0;
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    quiet = busy || inflight.length > 0 ? 0 : quiet + 1;
+  }
+}
+
+/** W10-SOP-FIX (SOP-V1): the customer emails MarketplaceService sends (its TransactionalEmailService is a stand-in). */
+async function captureEmails() {
+  const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+  const email = app.get(TransactionalEmailService) as Record<string, unknown>;
+  const sent: Array<{ type: string; dedupeKey?: string; templateData?: Record<string, any> }> = [];
+  email.send = async (message: any) => {
+    sent.push(message);
+    return null;
+  };
+  return { sent, restore: () => delete email.send };
+}
+
 /** The order as stored: status/paymentStatus/paymentMethod/paymentRef/customerEmail, and its timeline steps. */
 async function orderShape(id: string) {
   const o = await db.marketplaceOrder.findUnique({ where: { id } });
@@ -1819,6 +1929,360 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
     } finally {
       routing.mockRestore();
+    }
+  });
+
+  it('V18-T2k (W10-SOP-FIX, SOP-V1; D-112) three mark_paid calls racing on one UNPAID STANDARD order record one payment and run the work after the paid door once: each is answered 200 with the order PAID (a concurrent double click is not an error), and the order has one PAID invoice, one SUCCESSFUL payment, one posting and one store_order.paid; only the marking that recorded the payment routes the order (routeOrder once: one LOCAL_STOCK RESERVED fulfillment route, one routing step) and tells the customer (one order_confirmed email), and the markings that recorded nothing take their own timeline step back', async () => {
+    const { controller } = await marketRoutes();
+    const routeOrder = await trackRouting();
+    const email = await captureEmails();
+    // All three reach the paid door having read the order UNPAID; the door records the payment for one of them.
+    const door = holdPaidDoor(3);
+    try {
+      const order = await standardOrderOfA('t2k');
+      seen = [];
+      const answers = await Promise.allSettled(
+        [1, 2, 3].map((n) =>
+          controller.fulfillOrder(
+            ID.biz,
+            order.id,
+            { action: 'mark_paid', paymentMethod: 'CASH', paymentRef: `${P}click_${n}`, note: `click ${n}` },
+            signedIn(ID.owner),
+          ),
+        ),
+      );
+      await drain();
+      expect(
+        answers.map((a) => (a.status === 'fulfilled' ? `200:${a.value.paymentStatus}` : `${a.reason?.getStatus?.() ?? a.reason}`)),
+        'each marking is answered with the paid order',
+      ).toEqual(['200:PAID', '200:PAID', '200:PAID']);
+
+      await expectOnePaidInvoice(order);
+      expect(
+        seen.filter((e) => e.name === 'store_order.paid' && e.payload?.order?.id === order.id),
+        'one store_order.paid',
+      ).toHaveLength(1);
+      expect((await paidTraces(ID.biz, order.id)).notifications, 'one "Order Payment Received" notification').toBe(1);
+
+      // At 6470942a each marking ran autoRouteOrder: routeOrder once per call, one LOCAL_STOCK RESERVED route each
+      // (stock and reserved then drop once per route at ship; a DROPSHIP listing raises one supplier PO per route).
+      expect(routeOrder, 'the order is routed by the marking that recorded the payment only').toHaveBeenCalledTimes(1);
+      const routes = await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+      expect(routes.map((r: any) => `${r.strategy}:${r.status}`), 'one fulfillment route').toEqual(['LOCAL_STOCK:RESERVED']);
+      // ... and each sent the paid notification: duplicate order_confirmed emails to the customer.
+      const confirmed = email.sent.filter((m) => m.type === 'order_confirmed' && m.templateData?.orderNumber === order.orderNumber);
+      expect(confirmed, 'one order_confirmed email').toHaveLength(1);
+
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      const steps = ((stored.metadata as any)?.statusTimeline ?? []) as any[];
+      const markingSteps = steps.filter((t) => t.status === 'paid' && /^click \d$/.test(t.note ?? ''));
+      expect(markingSteps.map((t) => t.reference), "the recorder's marking step only").toEqual([stored.paymentRef]);
+      expect(stored.paymentRef, "the recorder's own reference").toMatch(new RegExp(`^${P}click_\\d$`));
+      expect(steps.filter((t) => t.note === 'Order paid — routing fulfillment'), 'one routing step').toHaveLength(1);
+    } finally {
+      door.mockRestore();
+      routeOrder.mockRestore();
+      email.restore();
+      await drain();
+    }
+  });
+
+  it('V18-T2l (W10-SOP-FIX, SOP-V2; D-112) a PATCH .../status carrying paymentStatus PAID that loses the paid door to a concurrent one announces nothing: in the race {status:"paid",paymentStatus:"PAID"} vs {status:"shipped",paymentStatus:"PAID"} where the paid one records the payment (the shipped one meeting its invoice, or reading the order already PAID), the shipped one is answered with the order as stored (paid/PAID) and emits no store_order.shipped (no shipped notification, contact event or shipping Expense); control: where the shipped one records the payment, one store_order.shipped and one shipping Expense', async () => {
+    const { controller } = await marketRoutes();
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const crm = app.get(CrmService) as Record<string, any>;
+    const patch = (orderId: string, status: string) =>
+      controller.updateOrderStatus(ID.biz, orderId, { status, paymentStatus: 'PAID', paymentMethod: 'CASH' }, signedIn(ID.owner));
+    /**
+     * Both PATCHes reach the paid door having read the order UNPAID. `winner` records the payment. Path 'invoice':
+     * the loser goes through the door first and reads the order UNPAID, its contact resolution held until the winner
+     * has recorded the payment, so its own INV-<orderNumber> meets the winner's (P2002). Path 'paid-read': the loser
+     * goes through the door after the winner and reads the order PAID.
+     */
+    const race = async (orderId: string, winner: 'paid' | 'shipped', path: 'invoice' | 'paid-read') => {
+      const realResolve = crm.findOrCreateContact;
+      let loserRead!: () => void;
+      const loserIn = new Promise<void>((resolve) => (loserRead = resolve));
+      let winnerDone!: () => void;
+      const recorded = new Promise<void>((resolve) => (winnerDone = resolve));
+      let held = false;
+      crm.findOrCreateContact = async (...args: unknown[]) => {
+        if (path === 'invoice' && !held) {
+          held = true;
+          loserRead();
+          await recorded;
+        }
+        return realResolve(...args);
+      };
+      const door = holdPaidDoor(2, async (input, real) => {
+        if (input.paidStatus === winner) {
+          if (path === 'invoice') await loserIn;
+          try {
+            return await real(input);
+          } finally {
+            winnerDone();
+          }
+        }
+        if (path === 'paid-read') await recorded;
+        return real(input);
+      });
+      try {
+        const [paid, shipped] = await Promise.all([patch(orderId, 'paid'), patch(orderId, 'shipped')]);
+        await settle();
+        return { paid: `${paid.status}/${paid.paymentStatus}`, shipped: `${shipped.status}/${shipped.paymentStatus}` };
+      } finally {
+        door.mockRestore();
+        crm.findOrCreateContact = realResolve;
+      }
+    };
+    const shippedTraces = async (orderId: string) => ({
+      events: seen.filter((e) => e.name === 'store_order.shipped' && e.payload?.order?.id === orderId).length,
+      notifications: (await db.notification.findMany({ where: { businessId: ID.biz, type: 'store_order.shipped' }, select: { data: true } }))
+        .filter((n: any) => n.data?.orderId === orderId).length,
+      contactEvents: contactEvents.filter((e) => e.orderId === orderId && e.type === 'store_order.shipped').length,
+      expenses: expenses.filter((e) => e.notes === `order:${orderId}`).length,
+    });
+    for (const path of ['invoice', 'paid-read'] as const) {
+      // At 6470942a the shipped PATCH lost the door, its 'shipped' was not written, and it still emitted
+      // store_order.shipped with the order as stored: CommerceIntegrationService.handleOrderShipped wrote its
+      // notification and contact event and booked the shipping fee as a PAID Expense, for an order not shipped.
+      const order = await standardOrderOfA(`t2l_${path}`, { shippingFee: 15 });
+      seen = [];
+      const answered = await race(order.id, 'paid', path);
+      expect(answered, `${path}: the losing PATCH answers the order as stored`).toEqual({ paid: 'paid/PAID', shipped: 'paid/PAID' });
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`, `${path}: stored`).toBe('paid/PAID');
+      await expectOnePaidInvoice(order);
+      expect(seen.filter((e) => e.name === 'store_order.paid' && e.payload?.order?.id === order.id), `${path}: one store_order.paid`).toHaveLength(1);
+      expect(await shippedTraces(order.id), `${path}: nothing announced for the PATCH that recorded nothing`).toEqual({
+        events: 0,
+        notifications: 0,
+        contactEvents: 0,
+        expenses: 0,
+      });
+    }
+
+    // Control: the shipped PATCH records the payment; the paid one loses (and has no lifecycle event of its own).
+    const order = await standardOrderOfA('t2l_control', { shippingFee: 15 });
+    seen = [];
+    const answered = await race(order.id, 'shipped', 'invoice');
+    expect(answered, 'control: both answer the order as stored').toEqual({ paid: 'shipped/PAID', shipped: 'shipped/PAID' });
+    await expectOnePaidInvoice(order);
+    expect(await shippedTraces(order.id), 'control: one store_order.shipped, from the PATCH that recorded the payment').toEqual({
+      events: 1,
+      notifications: 1,
+      contactEvents: 1,
+      expenses: 1,
+    });
+  });
+
+  it('V18-T2m (W10-SOP-FIX, SOP-V4; D-112) with production wiring (StoreOrderRoutingListener on the bus, the real un-awaited autoRouteOrder, CommerceIntegrationService linking the contact) a single mark_paid keeps every timeline step: placed, the marking\'s paid step, mark_paid\'s routing step, the routing engine\'s routes_created and routed steps once each, the order routed with one fulfillment route, and the paid listener\'s contact link', async () => {
+    const { controller } = await marketRoutes();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const routeOrder = await trackRouting();
+    // The routing listener ({ async: true }: it starts on a later tick) on the suite's bus, as T2f wires it.
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    const onPaid = (payload: unknown) => {
+      inflight.push(new Promise((resolve) => setImmediate(() => resolve(listener.onStoreOrderPaid(payload)))));
+    };
+    events.on('store_order.paid', onPaid);
+    try {
+      // At 6470942a writeMarking, autoRouteOrder, routeOrder (from both routers) and the paid listener's contact link
+      // each read the order's metadata and wrote their copy back: the review lost steps in 4 of 5 single calls.
+      for (const n of [1, 2, 3, 4, 5]) {
+        const order = await standardOrderOfA(`t2m_${n}`);
+        const marked = await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH', note: `cash ${n}` }, signedIn(ID.owner));
+        expect(marked.paymentStatus).toBe('PAID');
+        await drain();
+        const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+        const steps = ((stored.metadata as any)?.statusTimeline ?? []) as any[];
+        const described = steps.map((t) => `${t.status}:${t.note}`);
+        expect(described.slice(0, 2), `order ${n}: placed, then its marking's step`).toEqual(['placed:Order placed', `paid:cash ${n}`]);
+        expect(steps.filter((t) => t.note === 'Order paid — routing fulfillment'), `order ${n}: mark_paid's routing step (${described.join(' | ')})`).toHaveLength(1);
+        expect(steps.filter((t) => t.status === 'routes_created'), `order ${n}: routes_created once (${described.join(' | ')})`).toHaveLength(1);
+        expect(
+          steps.filter((t) => t.status === 'routed' && t.note === 'Order routed — awaiting processing'),
+          `order ${n}: routed once (${described.join(' | ')})`,
+        ).toHaveLength(1);
+        expect(stored.status, `order ${n}: routed`).toBe('routed');
+        expect(await db.fulfillmentRoute.count({ where: { businessId: ID.biz, orderId: order.id } }), `order ${n}: one route`).toBe(1);
+        expect((stored.metadata as any)?.links?.contactId, `order ${n}: the paid listener's contact link`).toBe(ID.contact);
+      }
+      expect(routeOrder, 'both routers ran (listener and mark_paid) for each order').toHaveBeenCalledTimes(10);
+    } finally {
+      events.off('store_order.paid', onPaid);
+      routeOrder.mockRestore();
+      await drain();
+    }
+  });
+
+  /**
+   * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): an order is routed once however many routers reach it. The
+   * routing engine claims the order before it reads its routes, so a router that meets an order being routed waits
+   * and then takes the routes already made. Production wiring: StoreOrderRoutingListener on the suite's bus (as T2f
+   * and T2m wire it) beside the real un-awaited autoRouteOrder, and every router that read no routes held where it
+   * creates them (holdRouteCreation). At 53fb2438 every router read none, and each made its own routes.
+   */
+  const T2N = { drop: `${P}t2n_drop`, tracked: `${P}t2n_tracked`, warehouse: `${P}t2n_wh`, stock: `${P}t2n_stock` };
+  let t2nFixtures: Promise<void> | undefined;
+  /** A product with a DROPSHIP listing, and a tracked product with 10 in stock in a warehouse (made once). */
+  const routingFixtures = () =>
+    (t2nFixtures ??= (async () => {
+      const { market } = await marketRoutes();
+      await db.product.create({ data: { id: T2N.drop, businessId: ID.biz, name: 'V18A Dropship', price: 25, currency: 'TTD', category: 'PRODUCT', isActive: true } });
+      await market.createListing(ID.biz, { productId: T2N.drop, fulfillmentStrategy: 'DROPSHIP', supplierName: 'V18A Supplier', supplierEmail: `${P}supplier@test.local` });
+      await db.product.create({
+        data: { id: T2N.tracked, businessId: ID.biz, name: 'V18A Tracked', price: 10, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
+      });
+      await db.warehouse.create({ data: { id: T2N.warehouse, businessId: ID.biz, name: 'V18A Warehouse' } });
+      await db.inventoryStock.create({ data: { id: T2N.stock, businessId: ID.biz, productId: T2N.tracked, warehouseId: T2N.warehouse, quantity: 10, reserved: 0 } });
+    })());
+  /** Both routers on: the routing listener on the suite's bus, routeOrder tracked (counted, drained). */
+  async function bothRouters() {
+    await routingFixtures();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const routeOrder = await trackRouting();
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    const onPaid = (payload: unknown) => {
+      inflight.push(new Promise((resolve) => setImmediate(() => resolve(listener.onStoreOrderPaid(payload)))));
+    };
+    events.on('store_order.paid', onPaid);
+    return {
+      routeOrder,
+      off: async () => {
+        events.off('store_order.paid', onPaid);
+        routeOrder.mockRestore();
+        await drain();
+      },
+    };
+  }
+  const supplierPOs = (orderNumber: string) => db.purchaseOrder.findMany({ where: { businessId: ID.biz, notes: `Auto-generated for order ${orderNumber}` } });
+  const routesOf = async (orderId: string) =>
+    (await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId } })).map((r: any) => `${r.strategy}:${r.status}`);
+  const stepsOf = async (orderId: string) =>
+    ((((await db.marketplaceOrder.findUnique({ where: { id: orderId } })).metadata as any)?.statusTimeline ?? []) as any[]).map((t) => t.status);
+  const createdPaid = async (productId: string) => {
+    const { market } = await marketRoutes();
+    return market.createOrder(
+      ID.biz,
+      { paymentOnCreation: true, paymentMethod: 'CASH', customerName: 'Vee Eighteen', customerEmail: CUSTOMER_EMAIL, items: [{ productId, quantity: 1 }] },
+      ID.owner,
+    );
+  };
+
+  it('V18-T2n (W10-SOP-FIX review SOPFIX-SEC-1, SOPFIX-R1; D-112) one mark_paid of an UNPAID STANDARD order with a DROPSHIP line, both routers reaching the routing engine (the door\'s store_order.paid listener and mark_paid\'s autoRouteOrder) and each held where it would create routes: one router creates them, so one supplier PurchaseOrder, one DROPSHIP PO_RAISED route, the order supplier_ordered and routes_created once', async () => {
+    const { controller } = await marketRoutes();
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeDropship', 2);
+    try {
+      const order = await standardOrderOfA('t2n_mark', {
+        subtotal: 25,
+        total: 25,
+        items: { create: [{ productId: T2N.drop, name: 'V18A Dropship', quantity: 1, unitPrice: 25, total: 25 }] },
+      });
+      routers.routeOrder.mockClear();
+      const marked = await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH', note: 't2n' }, signedIn(ID.owner));
+      expect(marked.paymentStatus).toBe('PAID');
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      // At 53fb2438 both read no routes, and each raised a supplier PO and a DROPSHIP route (review: 1 of 20 and 1 of 40
+      // orders unheld).
+      expect((await supplierPOs(order.orderNumber)).length, 'one supplier PO').toBe(1);
+      expect(await routesOf(order.id), 'one DROPSHIP route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+      expect((await stepsOf(order.id)).filter((s) => s === 'routes_created'), 'routes_created once').toHaveLength(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n2 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) an order created paid (paymentOnCreation) with a DROPSHIP line, both routers held where they would create routes: one supplier PurchaseOrder of the line\'s cost and one DROPSHIP route (the review saw 5 of 5 such orders raise two POs at 53fb2438)', async () => {
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeDropship', 2);
+    try {
+      routers.routeOrder.mockClear();
+      const order = await createdPaid(T2N.drop);
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      expect((await supplierPOs(order.orderNumber)).map((po: any) => po.total), 'one supplier PO').toEqual([25]);
+      expect(await routesOf(order.id), 'one DROPSHIP route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n3 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) an order created paid with a tracked line (10 in stock), both routers held where they would create routes: one LOCAL_STOCK RESERVED route in the stock\'s warehouse and one unit reserved (at 53fb2438 two routes each reserved the unit, the second writing reserved 1 over the first)', async () => {
+    const routers = await bothRouters();
+    const held = await holdRouteCreation('routeLocalStock', 2);
+    try {
+      routers.routeOrder.mockClear();
+      const order = await createdPaid(T2N.tracked);
+      await drain();
+      expect(routers.routeOrder, 'both routers reached the routing engine').toHaveBeenCalledTimes(2);
+      const routes = await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } });
+      expect(routes.map((r: any) => `${r.strategy}:${r.status}:${r.warehouseId}`), 'one route').toEqual([`LOCAL_STOCK:RESERVED:${T2N.warehouse}`]);
+      const stock = await db.inventoryStock.findUnique({ where: { id: T2N.stock } });
+      expect(`${stock.quantity}/${stock.reserved}`, 'one unit reserved').toBe('10/1');
+      expect(held.arrivals(), 'one router created routes').toBe(1);
+    } finally {
+      held.restore();
+      await routers.off();
+    }
+  });
+
+  it('V18-T2n4 (W10-SOP-FIX review SOPFIX-SEC-1, SOPFIX-R1; D-112) any router: three routing calls at once on one placed order (the POST .../route handler\'s service), each held where it would create routes: one route, routes_created once, and each call answered with that route', async () => {
+    const { market } = await marketRoutes();
+    const held = await holdRouteCreation('routeLocalStock', 3);
+    try {
+      const order = await standardOrderOfA('t2n_route');
+      const answers = await Promise.all([1, 2, 3].map(() => market.routeOrder(ID.biz, order.id)));
+      await drain();
+      const routeIds = (await db.fulfillmentRoute.findMany({ where: { businessId: ID.biz, orderId: order.id } })).map((r: any) => r.id);
+      expect(routeIds, 'one route').toHaveLength(1);
+      expect(answers.map((routes: any[]) => routes.map((r) => r.id)), 'each call is answered with that route').toEqual([routeIds, routeIds, routeIds]);
+      expect((await stepsOf(order.id)).filter((s) => s === 'routes_created'), 'routes_created once').toHaveLength(1);
+      expect(held.arrivals(), 'one call created routes').toBe(1);
+    } finally {
+      held.restore();
+    }
+  });
+
+  it('V18-T2n5 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) the router that comes second meets the order already routed, and is answered with its routes: for an order created paid with a DROPSHIP line, routed by createOrder (supplier_ordered, one PO), StoreOrderRoutingListener on the door\'s store_order.paid emits store_order.fulfillment_routed naming the one DROPSHIP route and no store_order.routing_failed (which raises an operator "routing failed" action and a failed contact event for an order that is routed), and nothing more is created', async () => {
+    await routingFixtures();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const routeOrder = await trackRouting();
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    try {
+      // createOrder's own autoRouteOrder routes it (the listener is not on the bus yet): the first router.
+      const order = await createdPaid(T2N.drop);
+      await drain();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+      expect((await supplierPOs(order.orderNumber)).length).toBe(1);
+      // The listener on the same store_order.paid comes second. At 53fb2438 routeOrder refused the order's status
+      // (supplier_ordered is not routable) before it looked for its routes, and the listener reported a failure.
+      seen = [];
+      await listener.onStoreOrderPaid({ order: { id: order.id }, businessId: ID.biz });
+      await drain();
+      const announced = seen
+        .filter((e) => e.payload?.orderId === order.id)
+        .map((e) => `${e.name}:${(e.payload.strategies ?? []).join(',')}:${e.payload.routeCount ?? e.payload.error}`);
+      expect(announced, 'the second router announces the routes made, and no failure').toEqual(['store_order.fulfillment_routed:DROPSHIP:1']);
+      expect((await supplierPOs(order.orderNumber)).length, 'no second supplier PO').toBe(1);
+      expect(await routesOf(order.id), 'no second route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+    } finally {
+      routeOrder.mockRestore();
+      await drain();
     }
   });
 

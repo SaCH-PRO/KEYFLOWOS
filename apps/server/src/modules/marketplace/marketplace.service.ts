@@ -10,6 +10,7 @@ import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { appendOrderTimeline, takeBackOrderTimelineStep } from './order-metadata';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -83,18 +84,6 @@ function namedMarkingCustomer(body: Record<string, unknown> | null | undefined):
     named.customerPhone = phoneText;
   }
   return named;
-}
-
-/** JSON with sorted object keys (a jsonb column does not keep key order), to find a timeline entry written earlier. */
-function sortedJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(sortedJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${sortedJson(v)}`).join(',')}}`;
-  }
-  return JSON.stringify(value ?? null);
 }
 
 @Injectable()
@@ -614,32 +603,20 @@ export class MarketplaceService {
 
   private autoRouteOrder(businessId: string, orderId: string, isPaid: boolean): void {
     const doRoute = async () => {
-      const now = new Date().toISOString();
-      const existing = await this.prisma.client.marketplaceOrder.findUnique({
-        where: { id: orderId },
-        select: { metadata: true, status: true },
-      });
-      const existingMeta = (existing?.metadata as Record<string, unknown>) ?? {};
-      const existingTimeline = Array.isArray(existingMeta.statusTimeline)
-        ? (existingMeta.statusTimeline as unknown[])
-        : [];
-
       const routingNote = isPaid
         ? 'Order paid — routing fulfillment'
         : 'Order placed — routing fulfillment and reserving inventory';
 
-      await this.prisma.client.marketplaceOrder.update({
-        where: { id: orderId },
-        data: {
-          metadata: {
-            ...existingMeta,
-            statusTimeline: [
-              ...existingTimeline,
-              { status: existing?.status ?? 'placed', timestamp: now, note: routingNote },
-            ],
-          },
-        },
-      });
+      // W10-SOP-FIX (SOP-V4): the step is appended in one statement (order-metadata.ts), noting the order's status as
+      // stored then. It read the metadata and wrote its copy back while the paid door's listeners and routeOrder wrote
+      // the same metadata, and one of them lost its step or the contact link.
+      await appendOrderTimeline(
+        this.prisma.client,
+        businessId,
+        orderId,
+        [{ timestamp: new Date().toISOString(), note: routingNote }],
+        { stampRowStatus: true },
+      );
 
       await this.fulfillmentRoutingService.routeOrder(businessId, orderId);
     };
@@ -848,6 +825,16 @@ export class MarketplaceService {
    *
    * Returns the status the door wrote (null where a concurrent marking that
    * committed first recorded the payment, not this one).
+   *
+   * W10-SOP-FIX (SOP-V1, SOP-V2; D-112): a marking that recorded nothing
+   * (doorStatus null) takes back its own timeline step here, and its caller
+   * runs nothing that follows a payment (no routing, no paid notification, no
+   * lifecycle event): the marking that recorded the payment does that once.
+   * Concurrent markings all answered 200 and each ran the post-door work, so
+   * an order was routed once per marking (one LOCAL_STOCK RESERVED route each)
+   * and its customer was sent one order_confirmed email per marking. The
+   * customer a losing marking named is kept: the recorder's invoice may have
+   * been made out to it.
    */
   private async recordPaymentThroughDoor(
     order: {
@@ -914,6 +901,13 @@ export class MarketplaceService {
     // The door answers an order a concurrent marking has just paid with that order as it is (its own reference): only
     // the marking whose reference the door wrote recorded the payment, and only it writes the method and reference.
     const recordedHere = door?.paymentRef === paymentRef;
+    if (!recordedHere && input.timelineEntry) {
+      // SOP-V1: recorded nothing, so its step (written before the door, CR-W10SOP-1) is taken back: the recorder's is
+      // the order's paid step.
+      await this.takeBackMarking(order, {}, input.timelineEntry).catch((undoErr) =>
+        this.logger.error(`Could not take back the paid marking step of order ${order.id}: ${(undoErr as Error).message}`),
+      );
+    }
     const cogsShape = { id: true, businessId: true, currency: true, items: { select: { productId: true, quantity: true } } } as const;
     const paid = recordedHere
       ? await this.prisma.client.marketplaceOrder.update({
@@ -932,27 +926,27 @@ export class MarketplaceService {
     return { doorStatus: recordedHere && door ? door.status : null };
   }
 
-  /** CR-W10SOP-1 / CR-W10SOP-5: the marking's own writes on the order, before the paid door (recordPaymentThroughDoor). */
+  /**
+   * CR-W10SOP-1 / CR-W10SOP-5: the marking's own writes on the order, before the paid door (recordPaymentThroughDoor).
+   * W10-SOP-FIX (SOP-V4): its timeline step is appended in one statement (order-metadata.ts), not read and written back.
+   */
   private async writeMarking(
     order: { id: string; businessId: string },
     named: { customerEmail?: string; customerPhone?: string },
     timelineEntry?: Record<string, unknown>,
   ): Promise<void> {
-    const data: Prisma.MarketplaceOrderUpdateInput = { ...named };
-    if (timelineEntry) {
-      const current = await this.prisma.client.marketplaceOrder.findFirst({
-        where: { id: order.id, businessId: order.businessId },
-        select: { metadata: true },
-      });
-      const meta = (current?.metadata as Record<string, unknown> | null) ?? {};
-      const timeline: unknown[] = Array.isArray(meta.statusTimeline) ? meta.statusTimeline : [];
-      data.metadata = { ...meta, statusTimeline: [...timeline, timelineEntry] } as Prisma.InputJsonValue;
+    if (Object.keys(named).length > 0) {
+      const data: Prisma.MarketplaceOrderUpdateInput = { ...named };
+      await this.prisma.client.marketplaceOrder.update({ where: { id: order.id }, data, select: { id: true } });
     }
-    if (Object.keys(data).length === 0) return;
-    await this.prisma.client.marketplaceOrder.update({ where: { id: order.id }, data, select: { id: true } });
+    if (timelineEntry) await appendOrderTimeline(this.prisma.client, order.businessId, order.id, [timelineEntry]);
   }
 
-  /** A refused marking: its customer and its timeline step (the last entry equal to it) are taken off the order again. */
+  /**
+   * A refused marking: its customer and its timeline step are taken off the order again; a marking that recorded
+   * nothing (SOP-V1): its timeline step. The step is the last entry equal to it, taken off in one statement
+   * (W10-SOP-FIX, SOP-V4).
+   */
   private async takeBackMarking(
     order: { id: string; businessId: string },
     named: { customerEmail?: string; customerPhone?: string },
@@ -962,21 +956,10 @@ export class MarketplaceService {
       ...(named.customerEmail ? { customerEmail: null } : {}),
       ...(named.customerPhone ? { customerPhone: null } : {}),
     };
-    if (timelineEntry) {
-      const current = await this.prisma.client.marketplaceOrder.findFirst({
-        where: { id: order.id, businessId: order.businessId },
-        select: { metadata: true },
-      });
-      const meta = (current?.metadata as Record<string, unknown> | null) ?? {};
-      const timeline: unknown[] = Array.isArray(meta.statusTimeline) ? [...meta.statusTimeline] : [];
-      const at = timeline.map((entry) => sortedJson(entry)).lastIndexOf(sortedJson(timelineEntry));
-      if (at >= 0) {
-        timeline.splice(at, 1);
-        data.metadata = { ...meta, statusTimeline: timeline } as Prisma.InputJsonValue;
-      }
+    if (Object.keys(data).length > 0) {
+      await this.prisma.client.marketplaceOrder.update({ where: { id: order.id }, data, select: { id: true } });
     }
-    if (Object.keys(data).length === 0) return;
-    await this.prisma.client.marketplaceOrder.update({ where: { id: order.id }, data, select: { id: true } });
+    if (timelineEntry) await takeBackOrderTimelineStep(this.prisma.client, order.businessId, order.id, timelineEntry);
   }
 
   /**
@@ -1033,11 +1016,19 @@ export class MarketplaceService {
         customer: paymentData,
         paidStatus: status,
       });
+      if (doorStatus === null) {
+        // W10-SOP-FIX (SOP-V2; D-112): a concurrent marking recorded the payment and this one recorded nothing. Its
+        // status was not written, so it announces nothing: it emitted its lifecycle event for the status it asked
+        // for, e.g. store_order.shipped for an order stored paid (CommerceIntegrationService.handleOrderShipped's
+        // notification, contact event, outbound webhook and PAID shipping Expense). Answered with the order as stored,
+        // as the door answers a marking that met a paid order (200: a double submit is not an error).
+        return this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
+      }
       // The status asked for, where the door kept a fulfilment status already past it (completeCheckout does not
       // rewind one). Read from the door's own row (review CR-W10SOP-1): a read after its store_order.paid can already
       // show the routing listener's status, which is not undone here.
       const paid =
-        doorStatus !== null && doorStatus !== status
+        doorStatus !== status
           ? await this.prisma.client.marketplaceOrder.update({ where: { id: orderId }, data: { status }, include })
           : await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
       // The door has emitted store_order.paid with its invoice; any other status keeps its own lifecycle event.
@@ -1585,8 +1576,10 @@ export class MarketplaceService {
       expenseRefundAmount = this.expenseRefundAmount(order, data?.refundAmount);
     }
 
-    const meta = (order.metadata as Record<string, any>) ?? {};
-    const timeline: any[] = meta.statusTimeline ?? [];
+    // W10-SOP-FIX (SOP-V4): the timeline steps this action adds, appended to the order's statusTimeline in one statement
+    // (order-metadata.ts). The timeline read with the order above was written back whole with them, over the steps the
+    // routing listener, autoRouteOrder and routeOrder appended in between.
+    const steps: Array<Record<string, unknown>> = [];
     const now = new Date().toISOString();
 
     let newStatus = order.status;
@@ -1598,7 +1591,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot confirm order from ${order.status} status`);
         }
         newStatus = 'awaiting_payment';
-        timeline.push({ status: 'awaiting_payment', timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
+        steps.push({ status: 'awaiting_payment', timestamp: now, note: data?.note ?? 'Order confirmed, awaiting payment' });
         break;
       }
 
@@ -1607,7 +1600,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot transition order from ${order.status} to awaiting_payment`);
         }
         newStatus = 'awaiting_payment';
-        timeline.push({ status: 'awaiting_payment', timestamp: now, note: data?.note });
+        steps.push({ status: 'awaiting_payment', timestamp: now, note: data?.note });
         break;
       }
 
@@ -1630,7 +1623,7 @@ export class MarketplaceService {
         // timeline step (not money state; the member's own reference noted) is written before it, so the listeners its
         // event starts read it (review CR-W10SOP-1), and is taken back if the door refuses.
         const reference = typeof data?.paymentRef === 'string' && data.paymentRef.trim() ? data.paymentRef.trim() : null;
-        await this.recordPaymentThroughDoor(order, {
+        const { doorStatus } = await this.recordPaymentThroughDoor(order, {
           actorId,
           paymentMethod: data?.paymentMethod,
           paymentRef: data?.paymentRef,
@@ -1642,6 +1635,16 @@ export class MarketplaceService {
           where: { id: orderId, businessId },
           include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
         });
+        if (doorStatus === null) {
+          // W10-SOP-FIX (SOP-V1; D-112): a concurrent marking recorded the payment; this one recorded nothing and has
+          // taken its timeline step back (recordPaymentThroughDoor). It runs nothing that follows a payment: each
+          // marking routed the order (one LOCAL_STOCK RESERVED route per call, so stock and reserved dropped once per
+          // route at ship, and a DROPSHIP listing raised one supplier PO per route) and sent the customer another
+          // order_confirmed email. Answered 200 with the order as stored, paid, as the door answers a marking that met a
+          // paid order: a double click on mark paid is not an error (a later click, once the order is read PAID, is
+          // still 400 above).
+          return paidOrder;
+        }
         this.autoRouteOrder(businessId, orderId, true);
         this.sendFulfillmentNotification(businessId, paidOrder, 'paid', data).catch((err) =>
           this.logger.error(`Failed to send paid notification: ${(err as Error).message}`),
@@ -1654,13 +1657,14 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot route order from ${order.status} status`);
         }
         newStatus = 'awaiting_fulfillment';
-        timeline.push({ status: 'awaiting_fulfillment', timestamp: now, note: data?.note });
-        updateData.status = newStatus;
-        updateData.metadata = { ...meta, statusTimeline: timeline };
-        await this.prisma.client.marketplaceOrder.update({
-          where: { id: orderId },
-          data: updateData,
-        });
+        // W10-SOP-FIX (SOP-V4): status and step in one statement.
+        await appendOrderTimeline(
+          this.prisma.client,
+          businessId,
+          orderId,
+          [{ status: 'awaiting_fulfillment', timestamp: now, note: data?.note }],
+          { status: newStatus },
+        );
         await this.fulfillmentRoutingService.routeOrder(businessId, orderId);
         const routedOrder = await this.prisma.client.marketplaceOrder.findFirst({
           where: { id: orderId },
@@ -1675,7 +1679,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot process order in ${order.status} status`);
         }
         newStatus = target;
-        timeline.push({ status: target, timestamp: now, note: data?.note });
+        steps.push({ status: target, timestamp: now, note: data?.note });
         await this.fulfillmentRoutingService.createPickPackTasks(businessId, orderId, order.items);
         break;
       }
@@ -1685,7 +1689,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot ship order in ${order.status} status`);
         }
         newStatus = 'shipped';
-        timeline.push({
+        steps.push({
           status: 'shipped',
           timestamp: now,
           carrier: data?.carrier,
@@ -1751,7 +1755,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot deliver order in ${order.status} status`);
         }
         newStatus = 'delivered';
-        timeline.push({ status: 'delivered', timestamp: now, note: data?.note });
+        steps.push({ status: 'delivered', timestamp: now, note: data?.note });
 
         if (order.shipments?.length > 0) {
           for (const shipment of order.shipments) {
@@ -1776,7 +1780,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot complete order in ${order.status} status`);
         }
         newStatus = 'completed';
-        timeline.push({ status: 'completed', timestamp: now, note: data?.note });
+        steps.push({ status: 'completed', timestamp: now, note: data?.note });
 
         await this.prisma.client.fulfillmentRoute.updateMany({
           where: { businessId, orderId, status: 'DELIVERED' },
@@ -1790,7 +1794,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
         }
         newStatus = 'cancelled';
-        timeline.push({ status: 'cancelled', timestamp: now, reason: data?.reason, note: data?.note });
+        steps.push({ status: 'cancelled', timestamp: now, reason: data?.reason, note: data?.note });
 
         await this.fulfillmentRoutingService.releaseInventoryReservation(businessId, orderId);
 
@@ -1806,7 +1810,7 @@ export class MarketplaceService {
           throw new BadRequestException(`Cannot refund order in ${order.status} status`);
         }
         newStatus = 'refunded';
-        timeline.push({
+        steps.push({
           status: 'refunded',
           timestamp: now,
           refundAmount: expenseRefundAmount,
@@ -1818,7 +1822,7 @@ export class MarketplaceService {
       }
 
       case 'add_tracking': {
-        timeline.push({
+        steps.push({
           status: 'TRACKING_UPDATED',
           timestamp: now,
           carrier: data?.carrier,
@@ -1857,12 +1861,16 @@ export class MarketplaceService {
     }
 
     updateData.status = newStatus;
-    updateData.metadata = { ...meta, statusTimeline: timeline };
 
-    const updated = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: updateData,
-      include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+    // W10-SOP-FIX (SOP-V4): the steps are appended in one statement, committed with the status (and, for a refund, the
+    // payment status) in one transaction; the rest of the metadata is the row's own.
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      await appendOrderTimeline(tx, businessId, orderId, steps);
+      return tx.marketplaceOrder.update({
+        where: { id: orderId },
+        data: updateData,
+        include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+      });
     });
 
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
@@ -1934,22 +1942,11 @@ export class MarketplaceService {
 
     await storeOrders.refundOrder(order.id, businessId, actorId);
 
-    // The fulfilment timeline (not money state): what the other fulfil actions record, on the metadata as it is now.
-    const current = await this.prisma.client.marketplaceOrder.findFirst({ where: { id: order.id, businessId }, select: { metadata: true } });
-    const meta = (current?.metadata as Record<string, unknown> | null) ?? {};
-    const timeline: unknown[] = Array.isArray(meta.statusTimeline) ? meta.statusTimeline : [];
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: order.id },
-      data: {
-        metadata: {
-          ...meta,
-          statusTimeline: [
-            ...timeline,
-            { status: 'refunded', timestamp: new Date().toISOString(), refundAmount: order.total, reason: data?.reason, note: data?.note },
-          ],
-        } as import('@prisma/client').Prisma.InputJsonValue,
-      },
-    });
+    // The fulfilment timeline (not money state): what the other fulfil actions record, appended in one statement
+    // (W10-SOP-FIX, SOP-V4: it was read and written back whole).
+    await appendOrderTimeline(this.prisma.client, businessId, order.id, [
+      { status: 'refunded', timestamp: new Date().toISOString(), refundAmount: order.total, reason: data?.reason, note: data?.note },
+    ]);
     const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
       where: { id: order.id, businessId },
       include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },

@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { mergeOrderMetadataObject } from './order-metadata';
 import { CrmService } from '../crm/crm.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -70,10 +71,10 @@ export class CommerceIntegrationService {
     const links = (meta.links as Record<string, unknown>) ?? {};
     if (links.contactId === contactId) return;
 
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { metadata: { ...meta, links: { ...links, contactId } } },
-    });
+    // W10-SOP-FIX (SOP-V4): links.contactId is written in one statement (order-metadata.ts). This listener runs on the
+    // paid door's store_order.paid beside the routing listener and mark_paid's autoRouteOrder, and its copy of the
+    // metadata, written back whole, undid the routing steps they appended meanwhile (and theirs undid this link).
+    await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, 'links', { contactId });
   }
 
   private async linkProjectToOrder(businessId: string, orderId: string, projectId: string): Promise<void> {
@@ -87,10 +88,8 @@ export class CommerceIntegrationService {
     const links = (meta.links as Record<string, unknown>) ?? {};
     if (links.projectId === projectId) return;
 
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { metadata: { ...meta, links: { ...links, projectId } } },
-    });
+    // W10-SOP-FIX (SOP-V4): links.projectId in one statement, as linkContactToOrder writes links.contactId.
+    await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, 'links', { projectId });
   }
 
   private async createNotification(input: {
