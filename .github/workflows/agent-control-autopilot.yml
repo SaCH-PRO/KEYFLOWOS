@@ -75,7 +75,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v4
@@ -101,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
       - uses: actions/setup-node@v4
@@ -197,7 +197,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
       - uses: actions/setup-node@v4
@@ -289,7 +289,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
       - uses: actions/setup-node@v4
