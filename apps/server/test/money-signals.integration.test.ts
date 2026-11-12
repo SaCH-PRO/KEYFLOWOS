@@ -66,6 +66,12 @@
  * so an event of another type whose data carries an amount (payment.completed,
  * store_order.paid / refunded, autopilot.payment_recovery) is left out too.
  *
+ * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100, on biz3): GET
+ * .../segments counts only the contacts the member may open, as the highlights
+ * already do, worked out per request with no cache read or write; the owner's
+ * counts stay business-wide and cached, and the unpaid projection (SEC-W8MS-3)
+ * is kept.
+ *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
  * 4 to ai-search; the ai-search matrix is also run on the service directly.
@@ -1203,6 +1209,103 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
       const full: Highlights = await ok3(user, 'highlights');
       expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestTen);
     }
+  });
+
+  // ---- W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100) -------------------------------
+  type SegmentCounts = Record<'lead' | 'prospect' | 'client' | 'lost' | 'unpaid' | 'stale' | 'newThisWeek' | 'atRisk' | 'dormant', number>;
+
+  /** The member's visibility clause, by the rule GET contacts/:c applies (resolveCrmAccess + visibilityClause); null for the owner. */
+  const clauseOf = async (user: string) => {
+    const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
+    return visibilityClause(await resolveCrmAccess({ client: db } as any, ID3.biz, user), user) as Record<string, unknown> | null;
+  };
+
+  /** GET .../segments' nine counts, read straight from the database over the live contacts of biz3 that `clause` admits (null: all of them). */
+  const directSegmentCounts = async (clause: Record<string, unknown> | null): Promise<SegmentCounts> => {
+    const base = clause ? { businessId: ID3.biz, deletedAt: null, AND: [clause] } : { businessId: ID3.biz, deletedAt: null };
+    const startOfWeek = new Date();
+    startOfWeek.setHours(0, 0, 0, 0);
+    const day = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - day + (day === 0 ? -6 : 1));
+    const staleCutoff = new Date();
+    staleCutoff.setDate(staleCutoff.getDate() - 30);
+    const count = (where: Record<string, unknown>) => db.contact.count({ where: { ...base, ...where } }) as Promise<number>;
+    const [lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant] = await Promise.all([
+      count({ status: 'LEAD' }),
+      count({ status: 'PROSPECT' }),
+      count({ status: 'CLIENT' }),
+      count({ status: 'LOST' }),
+      count({ invoices: { some: { status: { in: ['SENT', 'OVERDUE'] }, deletedAt: null } } }),
+      count({ createdAt: { lte: staleCutoff }, bookings: { none: { startTime: { gte: staleCutoff }, deletedAt: null } } }),
+      count({ createdAt: { gte: startOfWeek } }),
+      count({ relationshipHealth: 'AT_RISK' }),
+      count({ relationshipHealth: 'DORMANT' }),
+    ]);
+    return { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
+  };
+
+  it("F-10: GET .../segments counts only the contacts the member may open (W11-CRM-SEGMENTS-VISIBLE, D-63, D-100): each count is worked out from the contacts the member's visibility clause admits (visibilityClause, the rule GET contacts/:c and GET .../highlights apply), so another member's PRIVATE contact (c3Priv) is not counted, for a member with revenue read too; a member without revenue read is also served unpaid 0 (D-100, SEC-W8MS-3); the owner's counts stay business-wide", async () => {
+    // Control: the owner's counts name c3Priv (CLIENT, an overdue SENT invoice) and equal the business-wide counts.
+    const owner: SegmentCounts = await ok3(ID.owner, 'segments');
+    expect([owner.lead, owner.client, owner.unpaid]).toEqual([1, 1, 2]);
+    expect(await clauseOf(ID.owner)).toBeNull();
+    expect(owner).toEqual(await directSegmentCounts(null));
+
+    for (const user of [ID.rev, ID.noRev]) {
+      // The member cannot open c3Priv and GET contacts lists only c3Team.
+      expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+      expect(((await ok3(user, 'contacts')).contacts as Array<{ id: string }>).map((c) => c.id), user).toEqual([ID3.cTeam]);
+      expect(await clauseOf(user), user).not.toBeNull();
+    }
+
+    const rev: SegmentCounts = await ok3(ID.rev, 'segments');
+    expect([rev.lead, rev.client, rev.unpaid], 'revenue read').toEqual([1, 0, 1]);
+    expect(rev, 'revenue read: every key a direct count over the contacts the member may open').toEqual(await directSegmentCounts(await clauseOf(ID.rev)));
+
+    const withheld: SegmentCounts = await ok3(ID.noRev, 'segments');
+    expect([withheld.lead, withheld.client, withheld.unpaid], "revenue 'none'").toEqual([1, 0, 0]);
+    expect(withheld, "revenue 'none': every key a direct count over the contacts the member may open, unpaid 0").toEqual({
+      ...(await directSegmentCounts(await clauseOf(ID.noRev))),
+      unpaid: 0,
+    });
+
+    // The two CRM surfaces agree for each viewer: the highlights' new-this-week segment counts what segments' newThisWeek counts.
+    for (const [user, served] of [[ID.owner, owner], [ID.rev, rev], [ID.noRev, withheld]] as const) {
+      const highlights: Highlights = await ok3(user, 'highlights');
+      expect(segmentsByKey(highlights).get('new-this-week')!.count, user).toBe(served.newThisWeek);
+    }
+  });
+
+  it("F-10: CrmStatsService.segmentSummary named a member works out the counts per request (W11-CRM-SEGMENTS-VISIBLE, D-63): with the owner's payload primed in the business cache under `${businessId}:segmentSummary`, a member is served the member's own counts and the cache is neither read nor written; the owner, and a call naming no viewer, are still served the cached business-wide payload", async () => {
+    const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+    const key = `${ID3.biz}:segmentSummary`;
+    const ownerPayload: SegmentCounts = await ok3(ID.owner, 'segments');
+    expect(ownerPayload.client).toBe(1);
+    const store = new Map<string, unknown>([[key, ownerPayload]]);
+    const reads: string[] = [];
+    const writes: string[] = [];
+    const recordingCache = {
+      get: async (k: string) => { reads.push(k); return store.get(k) ?? null; },
+      set: async (k: string, v: unknown) => { writes.push(k); store.set(k, v); },
+      invalidate: async () => undefined,
+    };
+    // segmentSummary reads no timeline.
+    const stats = new CrmStatsService({ client: db } as any, {} as any, recordingCache as any);
+
+    for (const user of [ID.rev, ID.noRev]) {
+      const served = (await stats.segmentSummary({ businessId: ID3.biz, viewerUserId: user } as any)) as SegmentCounts;
+      expect(served, user).toEqual(await directSegmentCounts(await clauseOf(user)));
+      expect([served.client, served.unpaid], user).toEqual([0, 1]);
+    }
+    expect(reads, 'a member call reads no cache entry').toEqual([]);
+    expect(writes, 'a member call writes no cache entry').toEqual([]);
+    expect(store.get(key)).toEqual(ownerPayload);
+
+    expect(await stats.segmentSummary({ businessId: ID3.biz, viewerUserId: ID.owner } as any), 'owner').toEqual(ownerPayload);
+    expect(reads, 'the owner call reads the business cache entry').toEqual([key]);
+    expect(await stats.segmentSummary({ businessId: ID3.biz }), 'no viewer').toEqual(ownerPayload);
+    expect(reads).toEqual([key, key]);
+    expect(writes, 'served from the cache, nothing rewritten').toEqual([]);
   });
 });
 
