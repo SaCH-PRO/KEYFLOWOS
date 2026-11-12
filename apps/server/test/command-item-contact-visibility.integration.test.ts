@@ -308,10 +308,13 @@ beforeAll(async () => {
   await seedItem('user', { id: ID.iUser, sourceModule: READ_MODULE });
 }, 120_000);
 
+// The cleanup removes every row the file wrote, the CI-05 scale fixture's 33,000 command items
+// included; on CI's container Postgres that outlasts vitest's 10s default hook timeout. Same
+// budget as the seeding hook above.
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
-});
+}, 120_000);
 
 describe('fixture', () => {
   it('[CI-00] one OWNER and four STAFF members of bizA, a PRIVATE contact of the OWNER shared with one member only, a TEAM contact, and four read items: CONTACT -> PRIVATE, CONTACT -> TEAM, no owner, USER', async () => {

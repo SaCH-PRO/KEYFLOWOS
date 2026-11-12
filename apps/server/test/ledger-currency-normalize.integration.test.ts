@@ -338,7 +338,9 @@ afterAll(async () => {
 describe('V1-37c fixture sanity (real rows)', () => {
   it('the legacy rows hold their raw codes; the door wrote upper-case codes', async () => {
     const codes: Array<{ currency: string }> = await db.$queryRawUnsafe(
-      `SELECT DISTINCT currency FROM ledger_entries WHERE business_id = $1 ORDER BY currency`,
+      // COLLATE "C": byte order, so the expected list holds on any database collation (CI's
+      // en_US.utf8 sorts 'ttd' before 'TTD'; a C.UTF-8 database sorts upper case first).
+      `SELECT currency FROM (SELECT DISTINCT currency FROM ledger_entries WHERE business_id = $1) d ORDER BY currency COLLATE "C"`,
       ID.bizT,
     );
     expect(codes.map((c) => c.currency)).toEqual(['TTD', 'USD', 'ttd', 'usd']);
