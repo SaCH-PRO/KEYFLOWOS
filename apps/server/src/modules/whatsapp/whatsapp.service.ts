@@ -331,7 +331,10 @@ export class WhatsAppService {
    *
    * The owner is the OWNER membership or the distinguished owner
    * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
-   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard admit an owner by; since owner rulings D-116 and D-125 the
+   * distinguished owner counts only while it holds an OWNER membership (holding
+   * ADMIN or STAFF it is that role, and WhatsAppOperationsScopeGuard leaves it
+   * to ModuleScopeGuard). A SUPER_ADMIN keeps the platform bypass
    * BusinessGuard already grants. The actor is the authenticated user
    * AuthMiddleware attached (req.user); none is not the owner (fails closed).
    * Only the route's businessId is consulted. The rule is restated rather than
@@ -348,8 +351,10 @@ export class WhatsAppService {
     });
     if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+      // ADMIN or STAFF, the recorded owner is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
       select: { id: true },
     });
     return !!owned;
