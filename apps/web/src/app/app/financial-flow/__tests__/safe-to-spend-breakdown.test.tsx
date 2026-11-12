@@ -75,8 +75,11 @@ describe("Financial Flow: Safe-to-Spend breakdown (PR195-PORT)", () => {
     apiGetMock.mockImplementation(async (path: string) => answer(path, { data: SAFE, error: null }));
     const { default: FinancialFlowPage } = await import("../page");
     render(<FinancialFlowPage />);
-    const card = await waitFor(() => screen.getByText("Safe-to-Spend Breakdown").closest("section, div") as HTMLElement);
-    const scope = within(card.parentElement ?? card);
+    await waitFor(() => expect(screen.getByText("Safe-to-Spend Breakdown")).toBeTruthy());
+    // The breakdown card's grid: "Committed Payroll" is its own label (cash also has a metric card).
+    const grid = screen.getByText("Committed Payroll").closest(".grid") as HTMLElement;
+    expect(grid).toBeTruthy();
+    const scope = within(grid);
     expect(scope.getByText("Committed Payroll")).toBeTruthy();
     expect(scope.getByText(/USD\s*8,500\.5/)).toBeTruthy();
     expect(scope.getByText("Cash Balance")).toBeTruthy();

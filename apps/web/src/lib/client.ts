@@ -13777,7 +13777,6 @@ export interface JournalEntryRow {
   entries: Array<{
     id: string;
     accountId: string;
-    financialAccountId?: string | null;
     currency?: string;
     account: { id: string; name: string; type: string; code?: string };
     debit: number;
@@ -13802,31 +13801,11 @@ export async function createJournalEntry(businessId: string, body: {
   description: string;
   reference?: string;
   notes?: string;
+  /** Optional; the posting door posts the business currency and refuses another (D-13). */
   currency?: string;
-  entries: Array<{
-    accountId: string;
-    financialAccountId?: string | null;
-    debit?: number;
-    credit?: number;
-    memo?: string;
-  }>;
+  entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
 }) {
   return apiPost<JournalEntryRow>({ path: `${finBase(businessId)}/journal-entries`, body });
-}
-
-export interface ExchangeRateItem {
-  id: string;
-  fromCurrency: string;
-  toCurrency: string;
-  rate: number;
-  date: string;
-  source?: string | null;
-  createdAt: string;
-}
-
-export async function fetchExchangeRates(businessId: string, fromCurrency?: string, toCurrency?: string) {
-  const qs = fromCurrency && toCurrency ? `?from=${encodeURIComponent(fromCurrency)}&to=${encodeURIComponent(toCurrency)}` : '';
-  return apiGetSimple<{ items: ExchangeRateItem[] } | ExchangeRateItem[]>(`${finBase(businessId)}/exchange-rates${qs}`);
 }
 
 export async function extractReceipt(businessId: string, body: { url: string; filename?: string }) {
