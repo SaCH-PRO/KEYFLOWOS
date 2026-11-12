@@ -1,7 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { mergeOrderMetadataObject } from './order-metadata';
+import { mergeOrderMetadataObject, removeOrderMetadataKeyIf, setOrderMetadataKeyOnce } from './order-metadata';
+import { memberMayRecordPayments } from '../site/store-order.service';
 import { CrmService } from '../crm/crm.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -20,6 +22,12 @@ import {
 
 /** MarketplaceOrder.type of an order placed through the public storefront (StoreOrderService.createOrder). */
 const STOREFRONT_ORDER_TYPE = 'STOREFRONT';
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the order metadata key that claims its shipping Expense, once per
+ * order: { claim, at } while it is booked, then { claim, at, expenseId }.
+ */
+export const SHIPPING_EXPENSE_METADATA_KEY = 'shippingExpense';
 
 @Injectable()
 export class CommerceIntegrationService {
@@ -377,18 +385,11 @@ export class CommerceIntegrationService {
         });
       }
 
-      if (order.shippingFee && order.shippingFee > 0) {
-        await this.expenses.createExpense({
-          businessId: payload.businessId,
-          description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
-          amount: order.shippingFee,
-          currency: order.currency ?? 'TTD',
-          date: new Date(),
-          vendor: order.carrier ?? 'Shipping Carrier',
-          tags: ['shipping', 'order-expense'],
-          notes: `order:${order.id}`,
-        });
-      }
+      // W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): no Expense is booked here. store_order.shipped follows
+      // every shipped marking by any member (PATCH .../status 'shipped' has no transition check), and booked the
+      // payload's shippingFee as a PAID Expense, posted to the ledger, each time: a revenue:none STAFF member's three
+      // PATCHes booked three. The order routes book it once per order, for a member with revenue write, after their
+      // status write (bookShippingExpenseOnce).
 
       await this.createNotification({
         businessId: payload.businessId,
@@ -400,6 +401,77 @@ export class CommerceIntegrationService {
     } catch (e) {
       this.logger.error(`[CommerceIntegration] store_order.shipped handler failed: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): books the order's shipping fee as a PAID shipping Expense
+   * (Dr expense / Cr cash, ExpensesService.createExpense), once per order, for the first shipped marking made by a
+   * member with revenue write on any order route (MarketplaceService.updateOrderStatus and fulfillOrder 'ship',
+   * StoreOrderService.updateOrderStatus SHIPPED), called by the route after its status write has committed.
+   *
+   * - `actorId` must be a member of the business with revenue write (memberMayRecordPayments: no SUPER_ADMIN bypass,
+   *   D-46). Anyone else's ship books nothing and is not refused: the status change stays open to every member
+   *   (D-112).
+   * - The fee, currency and number are the order as stored in the business, never an event payload. A fee of 0 or
+   *   less books nothing.
+   * - The order is claimed in one statement (setOrderMetadataKeyOnce on metadata.shippingExpense), so repeated and
+   *   concurrent markings, on any route, book once.
+   * - An Expense booked for the order before D-126 (notes `order:<id>`, tag 'shipping', not deleted) is recorded in
+   *   the claim and nothing more is booked.
+   * - If the booking fails the claim is taken back (only while it is still this call's), so the next qualifying ship
+   *   books it; an Expense that committed before the failure is found there by the check above. The failure is
+   *   logged, never thrown: the status change has committed.
+   */
+  async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null | undefined): Promise<void> {
+    if (!(await memberMayRecordPayments(this.prisma, businessId, actorId))) return;
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { id: true, orderNumber: true, shippingFee: true, currency: true },
+    });
+    const fee = Number(order?.shippingFee ?? 0);
+    if (!order || !Number.isFinite(fee) || fee <= 0) return;
+
+    const claim = randomBytes(16).toString('hex');
+    const claimed = await setOrderMetadataKeyOnce(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, {
+      claim,
+      at: new Date().toISOString(),
+    });
+    if (!claimed) return;
+
+    // getOrderCrossLinks reads an order's Expenses by these notes.
+    const notes = `order:${order.id}`;
+    const booked = await this.prisma.client.expense.findFirst({
+      where: { businessId, deletedAt: null, notes, tags: { has: 'shipping' } },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (booked) {
+      await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, { expenseId: booked.id });
+      return;
+    }
+
+    let expense: { id: string } | null;
+    try {
+      expense = await this.expenses.createExpense({
+        businessId,
+        description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
+        amount: fee,
+        currency: order.currency ?? 'TTD',
+        date: new Date(),
+        vendor: 'Shipping Carrier',
+        tags: ['shipping', 'order-expense'],
+        notes,
+      });
+    } catch (e) {
+      await removeOrderMetadataKeyIf(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim).catch((undoErr) =>
+        this.logger.error(`[CommerceIntegration] Could not release the shipping Expense claim of order ${orderId}: ${(undoErr as Error).message}`),
+      );
+      this.logger.error(`[CommerceIntegration] Shipping Expense for order ${orderId} not booked: ${(e as Error).message}`);
+      return;
+    }
+    await mergeOrderMetadataObject(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, {
+      expenseId: expense?.id ?? null,
+    });
   }
 
   @OnEvent('store_order.delivered')

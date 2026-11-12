@@ -344,6 +344,8 @@ export class SiteController {
    * W11-ORDER-PAID-VALUES (owner ruling D-117): the whole body goes to the service, which refuses (400) one that
    * carries paymentStatus, paymentMethod or paymentRef. Only body.status was passed, so a payment field was answered
    * 200 and silently dropped. A status-only body is unchanged.
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the authenticated member is the actor, never a body field; a
+   * SHIPPED by a member with revenue write books the order's shipping fee once per order.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/orders/:orderId/status')
@@ -351,8 +353,9 @@ export class SiteController {
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: { status: string; paymentStatus?: unknown; paymentMethod?: unknown; paymentRef?: unknown },
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId, body);
+    return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId, body, req?.user?.id ?? null);
   }
 
   /**

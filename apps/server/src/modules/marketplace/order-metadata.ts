@@ -137,6 +137,53 @@ export async function setOrderPublicTokenOnce(
 }
 
 /**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): writes `value` under
+ * metadata[key] in one statement, only where the key is absent, null or empty
+ * (a JSON null, '{}', '[]' or ''), the rest of the metadata as stored. Returns
+ * whether this call wrote it: false where another call stored a value first
+ * (read under the row lock, after any wait for its writer, so two calls at once
+ * cannot both write) or where there is no such order in the business. The
+ * shape of setOrderPublicTokenOnce, for a claim made once per order.
+ */
+export async function setOrderMetadataKeyOnce(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  value: unknown,
+): Promise<boolean> {
+  const written = await client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND COALESCE(${METADATA} -> ${key}::text, 'null'::jsonb) IN ('null'::jsonb, '{}'::jsonb, '[]'::jsonb, '""'::jsonb)`;
+  return written > 0;
+}
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (D-126): removes metadata[key] in one statement,
+ * only while it still holds the claim `claimToken` (metadata[key].claim), so a
+ * claim taken back after its work failed never removes a value another call has
+ * written since. Returns the count written (0 when the key holds anything
+ * else, or there is no such order in the business).
+ */
+export function removeOrderMetadataKeyIf(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  claimToken: string,
+): Promise<number> {
+  return client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} - ${key}::text,
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND ${METADATA} -> ${key}::text ->> 'claim' = ${claimToken}`;
+}
+
+/**
  * Takes the last statusTimeline step equal to `step` (jsonb equality: the same
  * keys and values, in any key order) off the order: a marking that recorded
  * nothing takes back its own step. Nothing is written when there is none.

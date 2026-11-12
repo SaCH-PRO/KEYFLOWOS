@@ -13,6 +13,7 @@ import { TransactionalEmailService, NotificationType } from '../notifications/tr
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
+import { CommerceIntegrationService } from './commerce-integration.service';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -134,6 +135,25 @@ export class MarketplaceService {
    */
   private storeOrders(): StoreOrderService {
     return this.moduleRef.get(StoreOrderService, { strict: false });
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): after a shipped status written by this service has
+   * committed, CommerceIntegrationService.bookShippingExpenseOnce books the order's shipping fee once per order, for a
+   * member with revenue write (anyone else's ship books nothing). Resolved from the application as storeOrders() is;
+   * a failure (or no such service in a harness) is logged and never fails the status change.
+   */
+  private async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null): Promise<void> {
+    let integration: CommerceIntegrationService;
+    try {
+      integration = this.moduleRef.get(CommerceIntegrationService, { strict: false });
+    } catch (err) {
+      this.logger.warn(`Order ${orderId} shipped: CommerceIntegrationService unavailable, no shipping Expense booked (${(err as Error).message})`);
+      return;
+    }
+    await integration
+      .bookShippingExpenseOnce(businessId, orderId, actorId)
+      .catch((err) => this.logger.error(`Shipping Expense for order ${orderId} not booked: ${(err as Error).message}`));
   }
 
   /**
@@ -1106,6 +1126,9 @@ export class MarketplaceService {
           : await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
       // The door has emitted store_order.paid with its invoice; any other status keeps its own lifecycle event.
       this.emitOrderLifecycleEvent(businessId, paid, status);
+      // W11-SHIPPING-EXPENSE-ONCE (D-126): this marking recorded the payment and wrote shipped (V18-T2l: the losing
+      // marking above returned with nothing booked).
+      if (status.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
       return paid;
     }
 
@@ -1148,6 +1171,8 @@ export class MarketplaceService {
     }
 
     this.emitOrderLifecycleEvent(businessId, updated, status);
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): after the shipped write has committed; store_order.shipped books nothing.
+    if (status.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     return updated;
   }
@@ -1971,6 +1996,8 @@ export class MarketplaceService {
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
       refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
     });
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): the 'ship', after its transaction has committed.
+    if (action === 'ship') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
       this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
