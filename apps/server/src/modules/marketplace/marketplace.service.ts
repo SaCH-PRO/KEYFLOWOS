@@ -12,7 +12,10 @@ import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { appendOrderTimeline, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
+import { appendOrderTimeline, recordOrderRefundedTotal, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
+import { CommerceService } from '../commerce/commerce.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
+import { fromCents, toCents } from '../commerce/money';
 import { CommerceIntegrationService } from './commerce-integration.service';
 import {
   PreorderDelayedPayload,
@@ -1996,9 +1999,12 @@ export class MarketplaceService {
    * row each, naming the refunder, the posting reversed, the invoice back to
    * SENT), the order REFUNDED and one store_order.refunded naming the invoice,
    * so no Expense is booked. An order nothing was paid on is 409, one already
-   * refunded 400, and nothing is written. The door refunds the order in full:
-   * a refundAmount other than the order total is refused (400) rather than
-   * recorded as the full amount. This action used to set paymentStatus REFUNDED
+   * refunded 400, and nothing is written. W10 refunded the order in full only
+   * (a refundAmount other than the order total was 400); since W11-PARTIAL-
+   * REFUND-DOOR (owner ruling D-121) a refundAmount below what is left of what
+   * was paid is a partial refund through the same door (refundPartThroughDoor),
+   * one above it is 400, and one that is what is left is this full refund.
+   * This action used to set paymentStatus REFUNDED
    * for any member, with no refund recorded, also on an UNPAID order, and its
    * store_order.refunded booked the client's refundAmount as an Expense.
    * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1): also a STANDARD order
@@ -2007,39 +2013,177 @@ export class MarketplaceService {
    */
   private async refundThroughDoor(
     businessId: string,
-    order: { id: string; total: number; currency: string; paymentStatus: string },
-    data: { refundAmount?: unknown; reason?: unknown; note?: unknown } | undefined,
+    order: { id: string; orderNumber: string; total: number; currency: string; paymentStatus: string },
+    data: { refundAmount?: unknown; currency?: unknown; reason?: unknown; note?: unknown } | undefined,
     actorId: string | null,
   ) {
     const storeOrders = this.storeOrders();
     await storeOrders.assertMemberMayRecordPayments(businessId, actorId);
     // The amount is checked on a paid order; any other is answered by the door (409 nothing paid, 400 already refunded).
-    const requested = (order.paymentStatus ?? '').toUpperCase() === 'PAID' ? data?.refundAmount : undefined;
-    if (requested !== undefined && requested !== null && requested !== '') {
-      const amount = Number(requested);
-      if (!Number.isFinite(amount) || amount.toFixed(2) !== Number(order.total).toFixed(2)) {
-        throw new BadRequestException(
-          `This order is refunded in full (${Number(order.total).toFixed(2)} ${order.currency}) on its checkout invoice; ` +
-            'this refund amount is not the order total',
-        );
-      }
+    // W11-PARTIAL-REFUND-DOOR (owner ruling D-121): an amount below what is left of what was paid is a partial refund
+    // through the same door (refundPartThroughDoor); one that is all that is left, or none, is the full refund below.
+    const paid = (order.paymentStatus ?? '').toUpperCase() === 'PAID';
+    const door = paid ? await this.doorRefundState(businessId, order.orderNumber) : null;
+    const partCents = paid ? this.partialRefundCents(order, data, door) : null;
+    if (partCents !== null && door?.paymentId) {
+      return this.refundPartThroughDoor(businessId, order, door.paymentId, fromCents(partCents), data, actorId);
     }
 
     await storeOrders.refundOrder(order.id, businessId, actorId);
 
     // The fulfilment timeline (not money state): what the other fulfil actions record, appended in one statement
-    // (W10-SOP-FIX, SOP-V4: it was read and written back whole).
-    await appendOrderTimeline(this.prisma.client, businessId, order.id, [
-      { status: 'refunded', timestamp: new Date().toISOString(), refundAmount: order.total, reason: data?.reason, note: data?.note },
+    // (W10-SOP-FIX, SOP-V4: it was read and written back whole). D-121: the amount is what this refund took (what was
+    // left after any partial refunds), and the order's refunded total is recorded with it (recordOrderRefundedTotal).
+    const refundAmount = door ? fromCents(Math.max(door.leftCents, 0)) : Number(order.total);
+    const after = await this.doorRefundState(businessId, order.orderNumber);
+    await recordOrderRefundedTotal(this.prisma.client, businessId, order.id, after ? fromCents(after.refundedCents) : refundAmount, [
+      { status: 'refunded', timestamp: new Date().toISOString(), refundAmount, reason: data?.reason, note: data?.note },
     ]);
     const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
       where: { id: order.id, businessId },
       include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
     });
-    this.sendFulfillmentNotification(businessId, updated, 'refunded', data).catch((err) =>
+    this.sendFulfillmentNotification(businessId, updated, 'refunded', { ...data, refundAmount }).catch((err) =>
       this.logger.error(`Failed to send refund notification: ${(err as Error).message}`),
     );
     return updated;
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): what the order's checkout invoice (INV-<orderNumber>, written only by
+   * the paid door) holds: its first SUCCESSFUL payment (the door records one per order), and, in integer cents, what
+   * is refunded and what is left of what was paid (the balance read contract, balanceOfStoredRows). Null without the
+   * invoice.
+   */
+  private async doorRefundState(
+    businessId: string,
+    orderNumber: string,
+  ): Promise<{ paymentId: string | null; refundedCents: number; leftCents: number } | null> {
+    if (!orderNumber) return null;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { businessId, invoiceNumber: `INV-${orderNumber}` },
+      select: { id: true, total: true, currency: true },
+    });
+    if (!invoice) return null;
+    const rows = await this.prisma.client.payment.findMany({
+      where: { businessId, invoiceId: invoice.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, amount: true, status: true },
+    });
+    const balance = balanceOfStoredRows(Number(invoice.total), rows, invoice.currency);
+    return {
+      paymentId: rows.find((r) => r.status === 'SUCCESSFUL')?.id ?? null,
+      refundedCents: toCents(balance.refunded),
+      leftCents: toCents(balance.net),
+    };
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): the cents of the partial refund the fulfil 'refund' of a paid door
+   * order asks for, or null for the full refund (no refundAmount, or one that is all that is left). The amount is a
+   * number (or plain decimal text) above 0 with at most two decimals, in the order's currency (a currency other than
+   * the order's is refused), and at most what is left of what was paid after earlier refunds; anything else is 400
+   * with nothing written. The door checks it again under its invoice lock (CommerceService.markPaymentRefunded), so
+   * refunds racing on one order never refund more than was paid. W10 refused every amount but the order total (400).
+   */
+  private partialRefundCents(
+    order: { total: number; currency: string },
+    data: { refundAmount?: unknown; currency?: unknown } | undefined,
+    door: { paymentId: string | null; leftCents: number } | null,
+  ): number | null {
+    const requested = data?.refundAmount;
+    if (requested === undefined || requested === null || requested === '') return null;
+    const text = typeof requested === 'string' ? requested.trim() : null;
+    const amount = typeof requested === 'number' ? requested : text !== null && /^\d+(\.\d+)?$/.test(text) ? Number(text) : Number.NaN;
+    const cents = Number.isFinite(amount) ? toCents(amount) : Number.NaN;
+    if (!(cents > 0) || fromCents(cents) !== amount) {
+      throw new BadRequestException(
+        `A refund amount is a number above 0 with at most two decimals, in the order's currency (${order.currency}); got ${JSON.stringify(requested)}`,
+      );
+    }
+    const currency = data?.currency;
+    if (currency !== undefined && currency !== null && currency !== '') {
+      if (typeof currency !== 'string' || currency.trim().toUpperCase() !== String(order.currency ?? '').toUpperCase()) {
+        throw new BadRequestException(`This order is refunded in its own currency (${order.currency}); got ${JSON.stringify(currency)}`);
+      }
+    }
+    if (!door?.paymentId) throw new ConflictException('This order has no recorded payment to refund');
+    const left = Math.max(door.leftCents, 0);
+    if (cents > left) {
+      throw new BadRequestException(
+        `A refund of this order is at most what is left of what was paid (${fromCents(left).toFixed(2)} ${order.currency} of ` +
+          `${Number(order.total).toFixed(2)}); got ${fromCents(cents).toFixed(2)}`,
+      );
+    }
+    return cents === left ? null : cents;
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2): a partial refund of an order paid through the paid door
+   * (D-112), through the same audited door as its full refund, the member (revenue write, checked by the caller) the
+   * refunder. One negative REFUNDED row of `amount` is recorded against the order's door payment and its books are
+   * reversed by that amount (CommerceService.markPaymentRefunded with the amount: the partial refund posting, the
+   * invoice reconciled to PARTIALLY_PAID, the FINANCE audit row naming the refunder, in one transaction under the
+   * invoice lock). The order keeps its status and its paymentStatus PAID: the order vocabulary has no partly refunded
+   * value and D-121 makes no schema change, so metadata.refundedTotal (recordOrderRefundedTotal, one statement) and a
+   * 'partially_refunded' timeline step show it. No store_order.refunded and no customer email: the order is not
+   * refunded, and the email's dedupe key is the full refund's.
+   *
+   * A partial refund that leaves nothing received (refunds racing it took the rest) ends as the full refund
+   * (StoreOrderService.refundOrder: the order REFUNDED once, one store_order.refunded naming the invoice; the door
+   * reversed the posting and the partials when what was left was refunded). A concurrent full refund that flipped the
+   * order first answered for the flip; this refund, recorded, is not refused for it.
+   */
+  private async refundPartThroughDoor(
+    businessId: string,
+    order: { id: string; orderNumber: string; total: number; currency: string },
+    paymentId: string,
+    amount: number,
+    data: { reason?: unknown; note?: unknown } | undefined,
+    actorId: string | null,
+  ) {
+    const reason = typeof data?.reason === 'string' && data.reason.trim() ? `: ${data.reason.trim()}` : '';
+    const refund = await this.commerceRefundDoor().markPaymentRefunded(
+      paymentId,
+      businessId,
+      `Order ${order.orderNumber} partly refunded (${amount.toFixed(2)} ${order.currency})${reason}`,
+      actorId,
+      amount,
+    );
+    const refundedTotal = fromCents(toCents(refund.balance.refunded));
+    const allRefunded = !(toCents(refund.balance.net) > 0);
+    if (allRefunded) {
+      await this.storeOrders()
+        .refundOrder(order.id, businessId, actorId)
+        .catch((err) => {
+          // 400: a concurrent full refund flipped the order REFUNDED first, and answered for it.
+          if (!(err instanceof BadRequestException)) throw err;
+        });
+    }
+    const timestamp = new Date().toISOString();
+    const step = allRefunded
+      ? { status: 'refunded', timestamp, refundAmount: amount, reason: data?.reason, note: data?.note }
+      : { status: 'partially_refunded', timestamp, refundAmount: amount, refundedTotal, reason: data?.reason, note: data?.note };
+    await recordOrderRefundedTotal(this.prisma.client, businessId, order.id, refundedTotal, [step]);
+    const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
+      where: { id: order.id, businessId },
+      include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+    });
+    if (allRefunded) {
+      this.sendFulfillmentNotification(businessId, updated, 'refunded', { ...data, refundAmount: amount }).catch((err) =>
+        this.logger.error(`Failed to send refund notification: ${(err as Error).message}`),
+      );
+    }
+    return updated;
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (D-121): the D-14 refund door (CommerceService.markPaymentRefunded), which records a
+   * refund against one payment. It lives in CommerceModule, which this module does not import, so it is resolved
+   * from the application when a refund is made, as storeOrders() is.
+   */
+  private commerceRefundDoor(): CommerceService {
+    return this.moduleRef.get(CommerceService, { strict: false });
   }
 
   /**

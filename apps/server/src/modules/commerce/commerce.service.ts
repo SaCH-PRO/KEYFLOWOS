@@ -4428,8 +4428,20 @@ export class CommerceService {
    * SEC-CMF2-1 / CR-CMF2-1): a committed refund always has it, a refund that
    * rolls back leaves none, and a failed insert fails the refund rather than
    * committing a refund that names nobody.
+   *
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): `amount` (currency units,
+   * whole cents) refunds that much of the payment instead of all that is
+   * left: checked under the invoice lock against what is left (refundableOf),
+   * so of refunds racing on one payment none takes more than was paid; one
+   * above what is left is 400 and writes nothing. Its posting is the partial
+   * refund posting of that amount, or, when it refunds what is left, the
+   * reversal of the recording and its partials (onPaymentRefunded). Omitted,
+   * the refund is all that is left, as before.
    */
-  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
+  async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null, amount?: number) {
+    if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
+      throw new BadRequestException('A refund amount is a number above 0 in whole cents');
+    }
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
@@ -4467,7 +4479,13 @@ export class CommerceService {
       });
       const left = CommerceService.refundableOf(current, invoiceRows);
       if (left.refusal) throw new ConflictException(left.refusal);
-      const refundable = left.amount;
+      // W11-PARTIAL-REFUND-DOOR (D-121): a partial refund, never more than is left (read under the lock).
+      if (amount !== undefined && toCents(amount) > toCents(left.amount)) {
+        throw new BadRequestException(
+          `A refund of this payment is at most what is left of it (${fromCents(toCents(left.amount)).toFixed(2)} ${current.currency}); got ${amount.toFixed(2)}`,
+        );
+      }
+      const refundable = amount ?? left.amount;
       const created = await tx.payment.create({
         data: {
           amount: subtractMoney(0, refundable),
@@ -4490,6 +4508,10 @@ export class CommerceService {
         // The refund's audit row (posted or not) names the refunder and
         // commits or rolls back with the refund.
         auditInTransaction: true,
+        // W11-PARTIAL-REFUND-DOOR (D-121): the row this refund wrote and its amount, named rather than read back as the
+        // newest linked row: a refund that waited on the lock has a createdAt (its transaction's start) older than the
+        // refund committed before it, so the newest row was that one and this refund would be posted as its replay.
+        refund: { paymentId: created.id, amount: refundable },
       });
       const r = await this.invoiceWorkflow.reconcileFromPayments(current.invoiceId, {
         tx: txClient,
