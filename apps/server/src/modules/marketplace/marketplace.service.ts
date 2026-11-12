@@ -455,6 +455,19 @@ export class MarketplaceService {
    * warehouse), and updates only the fields sent, or creates the row, where a
    * row of another record holding the pair (planted by the old cross-business
    * receipt; D-137, an operator repairs it) answers 409, not a 500.
+   *
+   * W11-INV-UPSERT-SCOPE review (SEC-UPS-1; D-137): the pair lock locks
+   * nothing while the pair has no row, so two requests creating the same new
+   * pair at once (a double submit, a retry; or a receipt or a transfer
+   * creating it meanwhile) both read no row and both insert: the second waits
+   * on the unique pair, then fails on it (P2002) once the first commits. That
+   * was answered 409 'held by another record', sending an operator to repair a
+   * planted row that does not exist (the row holding the pair is the
+   * business's own). So a create that fails on the pair runs the transaction
+   * once more: it then locks and reads the row just committed and updates it
+   * with the fields sent; only a pair still held by a row the business does
+   * not read (a planted row) answers the 409. No advisory lock: the retry
+   * covers every creator of the pair and adds no lock to the stock lock order.
    */
   async upsertInventory(businessId: string, data: any) {
     const fields = readInventoryUpsert(data);
@@ -463,40 +476,51 @@ export class MarketplaceService {
     if (!owned.products.has(productId)) throw new NotFoundException('Product not found');
     if (!owned.warehouses.has(warehouseId)) throw new NotFoundException('Warehouse not found');
 
-    return this.prisma.client.$transaction(async (tx) => {
-      await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
-      const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+    // SEC-UPS-1: 'again' rethrows a create's unique violation so the caller runs the transaction once more; 'refuse'
+    // (that second run) answers it as a pair held by another record (409).
+    const upsertOnce = (onPairTaken: 'again' | 'refuse') =>
+      this.prisma.client.$transaction(async (tx) => {
+        await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+        const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
 
-      if (existing) {
-        return tx.inventoryStock.update({
-          where: { id: existing.id },
-          data: {
-            quantity: fields.quantity ?? existing.quantity,
-            reserved: fields.reserved ?? existing.reserved,
-            reorderAt: fields.reorderAt ?? existing.reorderAt,
-            costPerUnit: fields.costPerUnit ?? existing.costPerUnit,
-            currency: fields.currency ?? existing.currency,
-          },
-          include: { product: true, warehouse: true },
-        });
-      }
+        if (existing) {
+          return tx.inventoryStock.update({
+            where: { id: existing.id },
+            data: {
+              quantity: fields.quantity ?? existing.quantity,
+              reserved: fields.reserved ?? existing.reserved,
+              reorderAt: fields.reorderAt ?? existing.reorderAt,
+              costPerUnit: fields.costPerUnit ?? existing.costPerUnit,
+              currency: fields.currency ?? existing.currency,
+            },
+            include: { product: true, warehouse: true },
+          });
+        }
 
-      return createStockRowOrConflict(() =>
-        tx.inventoryStock.create({
-          data: {
-            businessId,
-            productId,
-            warehouseId,
-            quantity: fields.quantity ?? 0,
-            reserved: fields.reserved ?? 0,
-            reorderAt: fields.reorderAt,
-            costPerUnit: fields.costPerUnit,
-            currency: fields.currency ?? 'TTD',
-          },
-          include: { product: true, warehouse: true },
-        }),
-      );
-    }, STOCK_LOCK_TX_OPTIONS);
+        const create = () =>
+          tx.inventoryStock.create({
+            data: {
+              businessId,
+              productId,
+              warehouseId,
+              quantity: fields.quantity ?? 0,
+              reserved: fields.reserved ?? 0,
+              reorderAt: fields.reorderAt,
+              costPerUnit: fields.costPerUnit,
+              currency: fields.currency ?? 'TTD',
+            },
+            include: { product: true, warehouse: true },
+          });
+        return onPairTaken === 'refuse' ? createStockRowOrConflict(create) : create();
+      }, STOCK_LOCK_TX_OPTIONS);
+
+    try {
+      return await upsertOnce('again');
+    } catch (err) {
+      // Only the create writes a unique column (the update writes none), so a P2002 here is the pair taken meanwhile.
+      if ((err as { code?: unknown } | null)?.code !== 'P2002') throw err;
+      return upsertOnce('refuse');
+    }
   }
 
   async getInventory(businessId: string, warehouseId?: string) {

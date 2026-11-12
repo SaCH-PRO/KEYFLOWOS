@@ -154,6 +154,17 @@
  *   RC-23 the business's own rows keep today's partial update (only the fields
  *         sent; digit text from the web form is that number, D-136) and create;
  *         a pair a planted row holds answers 409 (D-137: the operator repairs).
+ *         Its movementsWritten 0 records today's behaviour (the route writes
+ *         no stock movement and names no actor), not a rule: that is the
+ *         review's SEC-UPS-2 follow-up (the it.todo at the end).
+ *   RC-24 (review SEC-UPS-1) two requests creating the same new own pair at
+ *         once (a double submit, a retry) both read no row (the pair lock
+ *         locks nothing while no row exists) and both inserted: the loser's
+ *         unique violation answered 409 'held by another record' though the
+ *         only row holding the pair was the business's own, just committed.
+ *         Now the loser runs its transaction once more, reads that row and
+ *         updates it; the 409 is left for a pair a row the business does not
+ *         read holds (a planted row, D-137; RC-23).
  *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
@@ -1689,7 +1700,9 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
       await resetBusinessStock();
     }
     // At fb00af1c the first answered 500 (quantity '7' and reserved '' reached Prisma as text) and the third rewrote the
-    // planted row (read by its pair alone) and answered success.
+    // planted row (read by its pair alone) and answered success. movementsWritten 0 is today's behaviour (POST
+    // .../inventory writes no stock movement and names no actor), pinned so a change shows, not endorsed: the review's
+    // SEC-UPS-2 follow-up (the it.todo below) decides it.
     expect(outcomes).toEqual({
       'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
       'own new pair': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
@@ -1710,6 +1723,56 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     expect(planted, 'the planted row untouched').toEqual([ID.biz, IN_STOCK, 0, 5]);
   });
 
+  it("RC-24 (W11-INV-UPSERT-SCOPE review SEC-UPS-1; D-137 keeps the 409 for planted rows only) two POST .../inventory requests creating the same new own pair at once (a double submit or a retry, then two requests sending different fields), each held after reading no row until the other has read too: both commit, one row of the business holding both requests' fields, and neither answers 409 'held by another record' (no planted row exists)", async () => {
+    const pair = { productId: ID.productU, warehouseId: ID.warehouse2 };
+    const probes: Array<[name: string, first: Record<string, unknown>, second: Record<string, unknown>]> = [
+      ['the same body twice (a double submit, a retry)', { ...pair, quantity: 3 }, { ...pair, quantity: 3 }],
+      ['two bodies sending different fields', { ...pair, quantity: 3 }, { ...pair, costPerUnit: '2.5', reorderAt: '1' }],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    try {
+      for (const [name, first, second] of probes) {
+        await resetBusinessStock();
+        const reads = new Set<number>();
+        let allIn!: () => void;
+        const gathered = new Promise<void>((resolve) => (allIn = resolve));
+        // Each transaction is held after its stock row read until both have read (neither sees a row), or the window
+        // passes: a request that waits on a lock before its read never reaches the hold while the other waits.
+        const hook = hookStockWrites(async (no) => {
+          if (reads.has(no)) return;
+          reads.add(no);
+          if (reads.size >= 2) allIn();
+          await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+        }, 'findFirst');
+        try {
+          outcomes[name] = await answerAndWrites(() =>
+            Promise.all([upsertAnswer(upsertByRoute(ID.biz, first)), upsertAnswer(upsertByRoute(ID.biz, second))]),
+          );
+        } finally {
+          hook.restore();
+        }
+        const held = await db.inventoryStock.findMany({ where: { productId: ID.productU, warehouseId: ID.warehouse2 } });
+        rows[name] = held.map((r: any) => [r.businessId, r.quantity, r.reserved, r.reorderAt, r.costPerUnit, r.currency]);
+      }
+    } finally {
+      await resetBusinessStock();
+    }
+    // Before this repair the second insert waited on the unique pair behind the first, then failed on it (P2002), which
+    // createStockRowOrConflict answered as a planted row: ['committed', '409: A stock row ... held by another record'].
+    expect(outcomes).toEqual({
+      'the same body twice (a double submit, a retry)': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
+      'two bodies sending different fields': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
+    });
+    expect(rows, "one row of this business; the later request's fields applied over the earlier's row").toEqual({
+      'the same body twice (a double submit, a retry)': [[ID.biz, 3, 0, null, null, 'TTD']],
+      'two bodies sending different fields': [[ID.biz, 3, 0, 1, 2.5, 'TTD']],
+    });
+  });
+
+  it.todo(
+    "SEC-UPS-2 follow-up (W11-INV-UPSERT-SCOPE review; pre-existing, not this packet; needs an owner ruling): POST .../inventory sets quantity and reserved on the business's own row with no stock movement and no actor (the controller passes no req.user), unlike POST .../inventory/adjust (reasonCode, a note for MANUAL, createdBy); it accepts a quantity below reserved and clears reserved while routes hold reservations. To decide: the movement's type and reason code for a set (importInventoryExcel writes its own EXCEL_IMPORT movement after calling the upsert), whether a member may set reserved by hand, and whether a quantity below reserved is refused",
+  );
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
   );
