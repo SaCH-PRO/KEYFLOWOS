@@ -40,12 +40,16 @@
  *      the row's business, no entityId, or a source whose contact belongs to
  *      another business), and an invoice row whose title names someone other
  *      than its invoice's contact (renamed, or re-pointed since), cannot be
- *      tied to a contact, so it is served only to OWNER and ADMIN: its module
- *      becomes WITHHELD_MODULE, a module the
+ *      tied to a contact. A source_gone row is served only to OWNER and ADMIN
+ *      (D-115); a name_mismatch row, whose title may name a PRIVATE contact,
+ *      only to the OWNER and SUPER_ADMIN (owner ruling D-118,
+ *      W11-D118-NAME-MISMATCH-OWNER-ONLY; the OWNER is an OWNER-role
+ *      membership, D-116 as read by D-125). Its module becomes
+ *      WITHHELD_MODULE, a module the
  *      timeline table (ACTIVITY_MODULE_SCOPES) deliberately does not map, and
  *      the rule serves a row of an unmapped module to OWNER and ADMIN only
  *      (and SUPER_ADMIN; D-63, canReadActivityRow's readsUnmapped), with the
- *      one D-115 term described below. An invoice row is filed under category COMMERCE (unless it
+ *      two terms described below. An invoice row is filed under category COMMERCE (unless it
  *      already carries a revenue category), so it still needs revenue read, as
  *      its module 'commerce' required. The original module and category are
  *      kept under data.d115 ({ withheld, module, category }; withheld is
@@ -58,7 +62,12 @@
  *      withheld intake row (module 'communications' before, read on crm) is
  *      not served to an ADMIN whose crm access is explicitly 'none' (review
  *      SEC-W10DCS-1 / CR-W10DCS-1; timeline-visibility.ts
- *      D115_WITHHELD_MODULE; data-cleanup-scripts DCS-T07).
+ *      D115_WITHHELD_MODULE; data-cleanup-scripts DCS-T07). It also reads
+ *      data.d115.withheld: a row whose reason is not 'source_gone'
+ *      (name_mismatch, or none or an unknown one: fail closed) is served only
+ *      to a viewer with readsOwnerWithheld, the OWNER and SUPER_ADMIN (D-118;
+ *      timeline-visibility.spec.ts TV-10, data-cleanup-scripts DCS-T08 and
+ *      DCS-T09). The script writes the same SQL and counts either way.
  *   3. Left as is: an approved intake whose intake names no contact (the
  *      sender is no contact of the business, or the contact was deleted and
  *      the intake's link set null). The W9 writer stores exactly that row
@@ -95,7 +104,8 @@ type Db = Pick<typeof db, '$queryRawUnsafe' | '$executeRawUnsafe'>;
 /**
  * D-115: the module a withheld row is moved to. The timeline table
  * (ACTIVITY_MODULE_SCOPES) must never map it: an unmapped module is served to
- * OWNER and ADMIN only (D-63). data-cleanup-scripts [DCS-T05] pins that.
+ * OWNER and ADMIN only (D-63), and a name_mismatch row to the OWNER and
+ * SUPER_ADMIN only (D-118). data-cleanup-scripts [DCS-T05] pins that.
  */
 export const WITHHELD_MODULE = 'd115_withheld';
 

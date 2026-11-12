@@ -641,3 +641,101 @@ describe('V1-84: every Activity.module written at head is mapped (D-63 census)',
     expect(activityModuleScope(null)).toBeNull();
   });
 });
+
+/**
+ * W11-D118-NAME-MISMATCH-OWNER-ONLY (owner ruling D-118, narrowing D-115; review
+ * SEC-W10DCS-2, ruling R-1). The D-115 backfill (scripts/backfill-timeline-contact-links.ts)
+ * files a row it cannot tie to a contact under module 'd115_withheld' (unmapped, D-63) with
+ * data.d115.withheld = 'source_gone' or 'name_mismatch'. A name_mismatch row is an invoice
+ * row whose invoice is there but names another contact: its title may name a PRIVATE
+ * contact, so D-118 serves it to the OWNER and SUPER_ADMIN only (TimelineViewer
+ * readsOwnerWithheld). A source_gone row keeps D-115 (OWNER and ADMIN). A withheld row
+ * whose reason is absent or unknown is read as owner-only (fail closed). "The OWNER" is an
+ * OWNER-role Membership of the business: D-116 as read by D-125 (a recorded owner holding
+ * only ADMIN or STAFF is that role; a co-owner holding OWNER is the owner).
+ */
+describe('W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): name_mismatch withheld rows are served to the OWNER and SUPER_ADMIN only', () => {
+  const crmAccess = { isOwner: false, isSuperAdmin: false, viewAll: true, editScope: 'any', reassign: false, deleteScope: 'none', level: 'admin' } as any;
+  const viewer = (readable: string[], extra: { readsUnmapped?: boolean; readsOwnerWithheld?: boolean } = {}) => ({
+    businessId: 'b', userId: 'u', readsUnmapped: true, readable: new Set(readable) as any, crmAccess, ...extra,
+  });
+  const nameMismatch = {
+    module: 'd115_withheld',
+    category: 'COMMERCE',
+    entityType: 'invoice',
+    data: { d115: { withheld: 'name_mismatch', module: 'commerce', category: null } } as unknown,
+  };
+  const sourceGone = { ...nameMismatch, data: { d115: { withheld: 'source_gone', module: 'commerce', category: null } } };
+
+  it("TV-10 (D-118): a d115_withheld row with reason name_mismatch is not served to an ADMIN reading revenue (readsUnmapped, no readsOwnerWithheld), is served with readsOwnerWithheld, and still needs revenue read (the money term binds the owner too); the same row with reason source_gone stays served to that ADMIN (D-115); a d115_withheld row with no or an unknown d115.withheld is owner-only (fail closed); another unmapped module keeps D-63's OWNER and ADMIN branch", async () => {
+    const { canReadActivityRow } = await visibility();
+    const admin = viewer(['crm', 'revenue', 'ai']);
+    const owner = viewer(['crm', 'revenue', 'ai'], { readsOwnerWithheld: true });
+    const ownerNoRevenue = viewer(['crm', 'ai'], { readsOwnerWithheld: true });
+
+    expect(canReadActivityRow(admin, nameMismatch), 'ADMIN reading revenue, name_mismatch').toBe(false);
+    expect(canReadActivityRow({ ...admin, readsOwnerWithheld: false }, nameMismatch), 'readsOwnerWithheld false').toBe(false);
+    expect(canReadActivityRow(owner, nameMismatch), 'readsOwnerWithheld').toBe(true);
+    expect(canReadActivityRow(ownerNoRevenue, nameMismatch), 'owner without revenue read: the money term binds').toBe(false);
+    // readsOwnerWithheld never replaces the D-63 unmapped term: a viewer without readsUnmapped is refused all the same.
+    expect(canReadActivityRow({ ...owner, readsUnmapped: false }, nameMismatch), 'no readsUnmapped').toBe(false);
+    // Nor the SEC-W10DCS-1 source-scope term (data.d115.module 'commerce' -> revenue).
+    expect(canReadActivityRow(owner, { ...nameMismatch, category: null }), 'owner reading revenue, no category').toBe(true);
+    expect(canReadActivityRow(ownerNoRevenue, { ...nameMismatch, category: null }), 'source scope revenue not read').toBe(false);
+
+    // D-115 unchanged for source_gone rows: OWNER and ADMIN (revenue read for an invoice row).
+    expect(canReadActivityRow(admin, sourceGone), 'ADMIN reading revenue, source_gone').toBe(true);
+    expect(canReadActivityRow(owner, sourceGone), 'owner, source_gone').toBe(true);
+    expect(canReadActivityRow(viewer(['crm', 'ai']), sourceGone), 'ADMIN without revenue read, source_gone').toBe(false);
+    expect(canReadActivityRow(viewer(['crm', 'revenue'], { readsUnmapped: false }), sourceGone), 'STAFF, source_gone').toBe(false);
+
+    // Case-folded module, as withheldSourceScope reads it.
+    expect(canReadActivityRow(admin, { ...nameMismatch, module: ' D115_Withheld ' }), 'case-folded module').toBe(false);
+    expect(canReadActivityRow(owner, { ...nameMismatch, module: ' D115_Withheld ' }), 'case-folded module, owner').toBe(true);
+
+    // Fail closed: no data, no d115, no or an unknown reason, or data that is not an object.
+    const unclear: Array<Record<string, unknown>> = [
+      { ...nameMismatch, data: undefined },
+      { ...nameMismatch, data: null },
+      { ...nameMismatch, data: {} },
+      { ...nameMismatch, data: { d115: null } },
+      { ...nameMismatch, data: { d115: { module: 'commerce', category: null } } },
+      { ...nameMismatch, data: { d115: { withheld: 'other', module: 'commerce', category: null } } },
+      { ...nameMismatch, data: { d115: { withheld: 'SOURCE_GONE', module: 'commerce', category: null } } },
+      { ...nameMismatch, data: { d115: { withheld: null, module: 'commerce', category: null } } },
+      { ...nameMismatch, data: JSON.stringify({ d115: { withheld: 'source_gone', module: 'commerce', category: null } }) },
+      { module: 'd115_withheld', category: 'COMMERCE', entityType: 'invoice', entityId: 'i1' },
+    ];
+    for (const row of unclear) {
+      expect(canReadActivityRow(admin, row), `ADMIN: ${JSON.stringify(row.data)}`).toBe(false);
+      expect(canReadActivityRow(owner, row), `owner: ${JSON.stringify(row.data)}`).toBe(true);
+    }
+
+    // D-63's unmapped branch for any other unmapped module: OWNER and ADMIN, whatever its data says.
+    const otherUnmapped = { module: 'v118_unmapped', category: null, entityType: 'job', data: { d115: { withheld: 'name_mismatch' } } };
+    expect(canReadActivityRow(admin, otherUnmapped), 'another unmapped module, ADMIN').toBe(true);
+    expect(canReadActivityRow(viewer(['crm', 'revenue'], { readsUnmapped: false }), otherUnmapped), 'another unmapped module, STAFF').toBe(false);
+    // A mapped row that carries a d115 marker in its data is judged by its module only.
+    expect(canReadActivityRow(viewer(['revenue'], { readsUnmapped: false }), { ...nameMismatch, module: 'commerce' }), 'a mapped row').toBe(true);
+  });
+
+  it('TV-10b (D-118 with D-116 / D-125): resolveTimelineViewer sets readsOwnerWithheld for a SUPER_ADMIN and for an OWNER membership, and not for an ADMIN or STAFF membership (a recorded owner holding only ADMIN included, D-116); readsUnmapped is unchanged (OWNER, ADMIN, SUPER_ADMIN)', async () => {
+    const { resolveTimelineViewer } = await visibility();
+    const prismaFor = (userRole: string, membership: Record<string, unknown> | null) =>
+      ({
+        client: {
+          user: { findUnique: async () => ({ id: 'u', role: userRole }) },
+          membership: { findUnique: async () => membership },
+        },
+      }) as any;
+
+    const superAdmin = await resolveTimelineViewer(prismaFor('SUPER_ADMIN', null), 'b', 'u');
+    expect([superAdmin.readsOwnerWithheld, superAdmin.readsUnmapped], 'SUPER_ADMIN').toEqual([true, true]);
+    const owner = await resolveTimelineViewer(prismaFor('USER', { role: 'OWNER', permissionScopes: null }), 'b', 'u');
+    expect([owner.readsOwnerWithheld, owner.readsUnmapped], 'OWNER membership').toEqual([true, true]);
+    const admin = await resolveTimelineViewer(prismaFor('USER', { role: 'ADMIN', permissionScopes: null }), 'b', 'u');
+    expect([admin.readsOwnerWithheld, admin.readsUnmapped], 'ADMIN membership (a recorded owner holding ADMIN too, D-116)').toEqual([false, true]);
+    const staff = await resolveTimelineViewer(prismaFor('USER', { role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } }), 'b', 'u');
+    expect([staff.readsOwnerWithheld, staff.readsUnmapped], 'STAFF membership').toEqual([false, false]);
+  });
+});

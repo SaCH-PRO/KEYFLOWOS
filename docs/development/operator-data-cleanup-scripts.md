@@ -102,9 +102,15 @@ shapes and an empty `contactId`:
    the row's business, and rows whose source's contact belongs to another
    business. An invoice row whose title names someone other than its invoice's
    current contact (the invoice was re-pointed, or the contact renamed) is
-   withheld too: the script cannot tell which contact it names. D-115 says such
-   a row is served only to OWNER and ADMIN. The script
-   moves it to module `d115_withheld`. `ACTIVITY_MODULE_SCOPES` deliberately
+   withheld too: the script cannot tell which contact it names. D-115 says a
+   row whose source is gone (`source_gone`) is served only to OWNER and ADMIN.
+   D-118 narrows that for a `name_mismatch` row, whose title may name a PRIVATE
+   contact: it is served only to the OWNER and SUPER_ADMIN. The OWNER is a
+   member holding an OWNER-role membership of the business (D-116 as read by
+   D-125): a recorded owner (`Business.ownerId`) holding only an ADMIN or STAFF
+   membership is treated as that role, and a co-owner holding OWNER is the
+   owner. The script
+   moves the row to module `d115_withheld`. `ACTIVITY_MODULE_SCOPES` deliberately
    does not map that module, and the rule already serves a row of an unmapped
    module to OWNER and ADMIN only (and SUPER_ADMIN), under D-63
    (`canReadActivityRow`, `readsUnmapped`). An invoice row also gets category
@@ -121,15 +127,27 @@ shapes and an empty `contactId`:
    today (timeline-scope TS-13b), so the script only counts it.
 
 The timeline rule serves a `d115_withheld` row under D-63's unmapped branch
-plus one D-115 term (below). `test/data-cleanup-scripts.integration.test.ts`
+plus two terms (below). `test/data-cleanup-scripts.integration.test.ts`
 (DCS-T05) pins that `d115_withheld` stays unmapped. Never add it to
 `ACTIVITY_MODULE_SCOPES`: that would serve withheld rows to everyone who reads
 the mapped module.
 
-Limits of the withheld audience (D-63's unmapped branch and the D-115 term):
+Limits of the withheld audience (D-63's unmapped branch, the D-115 term and
+the D-118 term):
 
 - A withheld invoice row still needs `revenue` read, as before the backfill.
-  An ADMIN whose `revenue` access is `none` is not served it.
+  An ADMIN whose `revenue` access is `none` is not served it, and neither is
+  an OWNER whose `revenue` access is `none`.
+- A withheld row whose `data.d115.withheld` is `name_mismatch` is served only
+  to the OWNER (an OWNER-role membership, D-116 / D-125) and SUPER_ADMIN, not
+  to an ADMIN, whatever the ADMIN's scopes (D-118; `readsOwnerWithheld` in
+  `timeline-visibility.ts`). A withheld row with no reason, or a reason other
+  than `source_gone`, is treated the same way (fail closed). The script always
+  writes a reason, so this only matters for rows edited by hand. `source_gone`
+  rows keep D-115's OWNER and ADMIN audience. The end-of-day count
+  (`GET ai/businesses/:businessId/briefing/eod`) counts by module only for a
+  viewer who reads owner-withheld rows; everyone else's rows are judged one by
+  one, so the count matches `/events`.
 - A withheld row also needs read on the scope of the module it had before the
   backfill (`data.d115.module`). A withheld intake row (module
   `communications` before, read on `crm`) is not served to an ADMIN whose
@@ -177,4 +195,18 @@ runs both scripts' `main()` in process against Postgres. It covers:
   writer's `Customer` fallback still links;
 - DCS-T07 (review SEC-W10DCS-1 / CR-W10DCS-1): an ADMIN whose `crm` access is
   `none` is not served a withheld intake row, its sender or its subject; the
-  same ADMIN, reading `revenue`, is still served the withheld invoice rows.
+  same ADMIN, reading `revenue`, is still served the withheld invoice rows of
+  business A (all `source_gone`), but not a `name_mismatch` invoice row, even
+  with `crm` read (D-118);
+- DCS-T08 (D-118): after the backfill, the `name_mismatch` row of business C
+  is not served on `/events`, the day's summary or the legacy activity route
+  to an ADMIN with default scopes, nor is the PRIVATE name it carries; that
+  ADMIN still gets C's linked rows, the OWNER gets every row, and the ADMIN
+  whose `crm` access is `none` no longer gets the `name_mismatch` row;
+- DCS-T09 (D-118 with D-116 / D-125): a recorded owner holding only an ADMIN
+  membership is not served the `name_mismatch` row (its timeline viewer has
+  `readsOwnerWithheld` false) but is served the `source_gone` and linked rows;
+  the co-owner holding the OWNER membership is served every row.
+  `src/modules/timeline/timeline-visibility.spec.ts` (TV-10) pins the rule:
+  `name_mismatch`, a missing or an unknown reason are owner-only, and
+  `source_gone` stays OWNER and ADMIN.

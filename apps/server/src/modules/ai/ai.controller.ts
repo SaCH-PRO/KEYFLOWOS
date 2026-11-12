@@ -26,6 +26,7 @@ import { WorkspaceRecommendationsService } from './workspace-recommendations.ser
 import { ModelGatewayService, AiMode, BudgetCaps, AiProvider } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCommandService } from './key-command.service';
@@ -281,7 +282,15 @@ export class AiController {
     return this.advisor.generateDailyBriefing(businessId, viewer);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * W11-AI-CASHFLOW-REVENUE (review SEC-W10AT-2; owner rulings D-57, D-100, D-104): the forecast is the
+   * business's currentBalance, projectedBalance, daily revenue and expense rates and an alert naming the
+   * outstanding invoices' total, so it needs revenue read, as its commerce twin GET
+   * commerce/businesses/:businessId/cash-flow-forecast does (TS-20e). ModuleScopeGuard takes businessId from
+   * the path and refuses before any read; SUPER_ADMIN and the membership rule are its own (D-104).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/ai/cash-flow-forecast')
   async cashFlowForecast(
     @Param('businessId') businessId: string,
@@ -290,14 +299,22 @@ export class AiController {
     return this.advisor.predictCashFlow(businessId, days ? parseInt(days, 10) : 30);
   }
 
+  /**
+   * W11-AI-SIMULATE-VIEWER (review SEC-W10AT-3; owner rulings D-63, D-100; timeline-scope TS-13g): this put
+   * the business's whole context (contacts whatever their visibility, every figure, the ten newest Activity
+   * titles) in the model's prompt for any member. The member who asks is now the simulation's viewer
+   * (AiAdvisorService.simulateScenario), as the chat's is: filtered, not refused.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/simulate')
   async simulate(
     @Param('businessId') businessId: string,
     @Body() body: { scenario: string; variables?: Record<string, any> },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.advisor.simulateScenario(businessId, body.scenario, body.variables);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    return this.advisor.simulateScenario(businessId, body.scenario, body.variables, viewer);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1733,7 +1750,10 @@ export class AiController {
    *     need revenue and crm read, and hiddenContacts withholds no contact from them. Their count is one
    *     database count per stored module value (groupBy), each module judged by activityModuleScope, so
    *     it is exact for any number of rows (at base it was one COUNT of every row, every module
-   *     included; the packet's row scan stopped at 1000).
+   *     included; the packet's row scan stopped at 1000). Owner ruling D-118
+   *     (W11-D118-NAME-MISMATCH-OWNER-ONLY): only a viewer with readsOwnerWithheld (the D-116 / D-125
+   *     owner, SUPER_ADMIN) counts this way, as canReadActivityRow withholds a d115_withheld row whose
+   *     reason is not 'source_gone' from anyone else.
    *   - Any other member's rows are judged one by one: the day is read in batches of
    *     ACTIVITY_FIND_MANY_CAP (the most @keyflow/db's findMany returns; a larger take came back as 1000
    *     rows and read as the end of the day, CR-W6BS-1), the database prefilter first, up to the day's
@@ -1741,7 +1761,14 @@ export class AiController {
    */
   private async countVisibleDayActivity(viewer: TimelineViewer, start: Date): Promise<number> {
     const dayWhere = { businessId: viewer.businessId, occurredAt: { gte: start } };
-    if (viewer.readable.has('revenue') && viewer.readable.has('crm') && !visibilityClause(viewer.crmAccess, viewer.userId)) {
+    // Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY): the per-module count serves every row of
+    // module d115_withheld, so it is taken only for a viewer who reads owner-withheld rows too.
+    if (
+      viewer.readable.has('revenue') &&
+      viewer.readable.has('crm') &&
+      viewer.readsOwnerWithheld === true &&
+      !visibilityClause(viewer.crmAccess, viewer.userId)
+    ) {
       const byModule = await this.prisma.client.activity.groupBy({ by: ['module'], where: dayWhere, _count: { _all: true } });
       return byModule.reduce((sum, group) => {
         const scope = activityModuleScope(group.module);
