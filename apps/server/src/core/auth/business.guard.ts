@@ -37,10 +37,13 @@ export async function userCanAccessBusiness(prisma: PrismaService, userId: strin
  * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-6): the user
  * named by Business.ownerId, as a recipient of mail addressed to "the business
  * owner" (the weekly financial briefing, the public quote alerts, the AI usage
- * alerts), only while they hold a Membership in that business. A user D-104
- * refuses at every route (recorded only as ownerId, or removed by a co-owner)
- * receives none of the business's figures by mail either. Null when the
- * ownerId is empty, names no user, or names one who is no member.
+ * alerts), only while they hold an OWNER Membership in that business (owner
+ * ruling D-116, W11-D116-KEY-OWNER: a recorded owner holding only ADMIN or
+ * STAFF is that role, and gets none; the mail is not redirected to a
+ * co-owner). A user D-104 refuses at every route (recorded only as ownerId, or
+ * removed by a co-owner) receives none of the business's figures by mail
+ * either. Null when the ownerId is empty, names no user, or names one who
+ * holds no OWNER membership of the business.
  */
 export async function businessOwnerRecipient(
   prisma: PrismaService,
@@ -49,7 +52,7 @@ export async function businessOwnerRecipient(
 ): Promise<{ email: string | null; name: string | null } | null> {
   if (!ownerId) return null;
   return prisma.client.user.findFirst({
-    where: { id: ownerId, businesses: { some: { businessId } } },
+    where: { id: ownerId, businesses: { some: { businessId, role: 'OWNER' } } },
     select: { email: true, name: true },
   });
 }

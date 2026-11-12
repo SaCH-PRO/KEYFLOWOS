@@ -742,8 +742,10 @@ export class AutonomyProfileWriteGuard implements CanActivate {
         return membershipApprovalTier(membership);
       }
       const owned = await this.prisma.client.business.findFirst({
-        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-        where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id } } },
+        // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+        // D-116 (W11-D116-KEY-OWNER): only with an OWNER one, so a recorded owner holding STAFF is STAFF
+        // (refused) and one holding ADMIN writes at the ADMIN tier (above).
+        where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id, role: 'OWNER' } } },
         select: { id: true },
       });
       return owned ? DEFAULT_APPROVAL_TIERS.OWNER : null;
