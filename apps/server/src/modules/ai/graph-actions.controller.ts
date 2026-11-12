@@ -33,6 +33,7 @@ import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, isCanonicalModule, r
 import type { Prisma } from '@prisma/client';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { KEY_CONNECTOR_MODULES, KEY_PLAN_MODULE_SCOPES, planStepReadsContacts, planStepReadsMoneyReport } from '../key-cortex/key-cortex-plan-authority';
+import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import {
   CANONICAL_MODULE_TOOLS,
   CRM_ROW_VISIBILITY_TOOLS,
@@ -149,6 +150,10 @@ const CANONICAL_TOOL_SCOPES: ReadonlyMap<string, GraphActionScope> = new Map(
  * to GRAPH_ACTION_TOOL_MODULES.
  */
 export function graphActionModuleScope(toolName: string): GraphActionScope | null {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): a dotted KEY organ or legacy cortex tool takes its map
+  // entry: its twin's scope, or the first of its scopes. An unmapped one keeps none (owner-only, D-119).
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ) return 'twin' in organ ? graphActionModuleScope(organ.twin) : organ.scopes[0];
   const canonical = CANONICAL_TOOL_SCOPES.get(toolName);
   if (canonical) return canonical;
   const entry = GRAPH_ACTION_TOOL_MODULES.find(([key]) => (key.endsWith('_') ? toolName.startsWith(key) : toolName === key));
@@ -212,6 +217,9 @@ const GRAPH_ACTION_CONTACT_READING_WRITES: ReadonlySet<string> = new Set([
  * member at all runs none of them (D-73; plan-step-authority.ts).
  */
 export function graphActionReadsContacts(toolName: string): boolean {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119): a dotted twin reads contacts exactly when its FLOW tool does.
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return graphActionReadsContacts(organ.twin);
   if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName) || GRAPH_ACTION_CONTACT_READING_WRITES.has(toolName)) return true;
   const scope = graphActionModuleScope(toolName);
   return scope?.module === 'crm' && scope.minLevel === 'read';
@@ -249,6 +257,9 @@ const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set([
  * D-37). Run with no principal for a member, such a tool is the OWNER's only.
  */
 export function graphActionBoundByContactVisibility(toolName: string): boolean {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119): a dotted twin is bound as its FLOW tool is.
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return graphActionBoundByContactVisibility(organ.twin);
   return graphActionReadsContacts(toolName) || GRAPH_ACTION_VISIBILITY_BOUND_TOOLS.has(toolName);
 }
 
@@ -277,9 +288,18 @@ export interface GraphActionRequirement {
 /** The requirement for `toolName`, `{ refused }` when this route never runs it, or null when it is mapped to nothing. */
 export function graphActionRequirement(toolName: string): GraphActionRequirement | { refused: string } | null {
   if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_REFUSED, toolName)) return { refused: GRAPH_ACTION_REFUSED[toolName] };
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): a dotted tool twinned with a FLOW tool needs exactly what
+  // that tool needs; a scoped one needs every scope of its entry, the rest beside its module as
+  // GRAPH_ACTION_EXTRA_SCOPES are, and the branches below apply to it (a crm read: graphActionReadsContacts).
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return graphActionRequirement(organ.twin);
   const scope = graphActionModuleScope(toolName);
   if (!scope) return null;
-  const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName) ? GRAPH_ACTION_EXTRA_SCOPES[toolName] : [];
+  const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName)
+    ? GRAPH_ACTION_EXTRA_SCOPES[toolName]
+    : organ && 'scopes' in organ
+      ? organ.scopes.slice(1)
+      : [];
   const requirement: GraphActionRequirement = { scopes: [scope, ...extra] };
   if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
     requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
