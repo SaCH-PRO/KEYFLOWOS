@@ -151,7 +151,7 @@ jobs:
 
       - name: Run HawkScan
         if: steps.guard.outputs.run == 'true'
-        uses: stackhawk/hawkscan-action@v2
+        uses: stackhawk/hawkscan-action@v3
         # Soft gate: a manual run surfaces findings without failing. Flip to
         # false once the baseline is triaged. Either way this workflow is not
         # an admission gate; DAST (Native) is (V1-30).
