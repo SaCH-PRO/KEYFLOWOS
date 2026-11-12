@@ -1,7 +1,9 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { mergeOrderMetadataObject } from './order-metadata';
+import { mergeOrderMetadataObject, removeOrderMetadataKeyIf, replaceOrderMetadataKeyIf, setOrderMetadataKeyOnce } from './order-metadata';
+import { memberMayRecordPayments } from '../site/store-order.service';
 import { CrmService } from '../crm/crm.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -20,6 +22,23 @@ import {
 
 /** MarketplaceOrder.type of an order placed through the public storefront (StoreOrderService.createOrder). */
 const STOREFRONT_ORDER_TYPE = 'STOREFRONT';
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): the order metadata key that claims its shipping Expense, once per
+ * order: { claim, at } while it is booked, then { claim, at, expenseId }.
+ */
+export const SHIPPING_EXPENSE_METADATA_KEY = 'shippingExpense';
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (D-126; review SEC-SEO-1): a shipping Expense claim with no expenseId older than this was
+ * left by a call that never finished (it died, or its booking failed and the claim could not be taken back), and the
+ * next qualifying ship takes it over. A call that is alive is done well within it: its reads are single queries and
+ * createExpense posts in one interactive transaction (Prisma's default 2 s wait for a connection and 5 s timeout).
+ */
+export const SHIPPING_EXPENSE_CLAIM_STALE_MS = 10 * 60_000;
+
+/** The value of metadata.shippingExpense while a call books it; expenseId is added when it is recorded. */
+type ShippingExpenseClaim = { claim: string; at: string };
 
 @Injectable()
 export class CommerceIntegrationService {
@@ -377,18 +396,11 @@ export class CommerceIntegrationService {
         });
       }
 
-      if (order.shippingFee && order.shippingFee > 0) {
-        await this.expenses.createExpense({
-          businessId: payload.businessId,
-          description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
-          amount: order.shippingFee,
-          currency: order.currency ?? 'TTD',
-          date: new Date(),
-          vendor: order.carrier ?? 'Shipping Carrier',
-          tags: ['shipping', 'order-expense'],
-          notes: `order:${order.id}`,
-        });
-      }
+      // W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): no Expense is booked here. store_order.shipped follows
+      // every shipped marking by any member (PATCH .../status 'shipped' has no transition check), and booked the
+      // payload's shippingFee as a PAID Expense, posted to the ledger, each time: a revenue:none STAFF member's three
+      // PATCHes booked three. The order routes book it once per order, for a member with revenue write, after their
+      // status write (bookShippingExpenseOnce).
 
       await this.createNotification({
         businessId: payload.businessId,
@@ -400,6 +412,122 @@ export class CommerceIntegrationService {
     } catch (e) {
       this.logger.error(`[CommerceIntegration] store_order.shipped handler failed: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): books the order's shipping fee as a PAID shipping Expense
+   * (Dr expense / Cr cash, ExpensesService.createExpense), once per order, for the first shipped marking made by a
+   * member with revenue write on any order route (MarketplaceService.updateOrderStatus and fulfillOrder 'ship',
+   * StoreOrderService.updateOrderStatus SHIPPED), called by the route after its status write has committed.
+   *
+   * - `actorId` must be a member of the business with revenue write (memberMayRecordPayments: no SUPER_ADMIN bypass,
+   *   D-46). Anyone else's ship books nothing and is not refused: the status change stays open to every member
+   *   (D-112).
+   * - The fee, currency and number are the order as stored in the business, never an event payload. A fee of 0 or
+   *   less books nothing.
+   * - The order is claimed in one statement (setOrderMetadataKeyOnce on metadata.shippingExpense), so repeated and
+   *   concurrent markings, on any route, book once.
+   * - An Expense booked for the order before D-126 (notes `order:<id>`, tag 'shipping', not deleted) is recorded in
+   *   the claim and nothing more is booked.
+   * - Review CR-W11SE-1: if any step after the claim fails (that read, the booking, recording its id) the claim is
+   *   taken back (only while it is still this call's), so the next qualifying ship books it; an Expense that committed
+   *   before the failure is found there by the check above. The failure is logged, never thrown: the status change
+   *   has committed.
+   * - Review SEC-SEO-1: a claim that never got an expenseId (its call died, or failed and could not take it back) and
+   *   is older than SHIPPING_EXPENSE_CLAIM_STALE_MS is taken over by the next qualifying ship, logged, and that ship
+   *   goes through the check above, so an Expense the old call committed is recorded rather than booked again.
+   */
+  async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null | undefined): Promise<void> {
+    if (!(await memberMayRecordPayments(this.prisma, businessId, actorId))) return;
+    const order = await this.prisma.client.marketplaceOrder.findFirst({
+      where: { id: orderId, businessId },
+      select: { id: true, orderNumber: true, shippingFee: true, currency: true },
+    });
+    const fee = Number(order?.shippingFee ?? 0);
+    if (!order || !Number.isFinite(fee) || fee <= 0) return;
+
+    const claim: ShippingExpenseClaim = { claim: randomBytes(16).toString('hex'), at: new Date().toISOString() };
+    if (!(await this.claimShippingExpense(businessId, orderId, claim))) return;
+
+    try {
+      // getOrderCrossLinks reads an order's Expenses by these notes.
+      const notes = `order:${order.id}`;
+      const booked = await this.prisma.client.expense.findFirst({
+        where: { businessId, deletedAt: null, notes, tags: { has: 'shipping' } },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const expenseId =
+        booked?.id ??
+        (
+          await this.expenses.createExpense({
+            businessId,
+            description: `Shipping cost for order ${order.orderNumber ?? order.id}`,
+            amount: fee,
+            currency: order.currency ?? 'TTD',
+            date: new Date(),
+            vendor: 'Shipping Carrier',
+            tags: ['shipping', 'order-expense'],
+            notes,
+          })
+        )?.id ??
+        null;
+      // Recorded only while the claim is still this call's: one taken over meanwhile (SEC-SEO-1) is left to its taker.
+      const recorded = await replaceOrderMetadataKeyIf(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim, {
+        ...claim,
+        expenseId,
+      });
+      if (!recorded) {
+        this.logger.warn(
+          `[CommerceIntegration] Shipping Expense ${expenseId} of order ${orderId} not recorded on the order: its claim was taken over meanwhile`,
+        );
+      }
+    } catch (e) {
+      await removeOrderMetadataKeyIf(this.prisma.client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim.claim).catch((undoErr) =>
+        this.logger.error(
+          `[CommerceIntegration] Could not release the shipping Expense claim of order ${orderId}: ${(undoErr as Error).message}; ` +
+            `the first qualifying ship after ${SHIPPING_EXPENSE_CLAIM_STALE_MS / 60_000} minutes takes it over`,
+        ),
+      );
+      this.logger.error(`[CommerceIntegration] Shipping Expense for order ${orderId} not booked: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (D-126): takes the order's shipping Expense claim for `claim`. True when the key was
+   * empty (setOrderMetadataKeyOnce), or held a claim left without an expenseId and older than
+   * SHIPPING_EXPENSE_CLAIM_STALE_MS, replaced in one statement only while it is still the value read (review
+   * SEC-SEO-1), so of two ships meeting it one takes it. False when the order is booked (an expenseId), a younger
+   * claim may still be booking, or another call took it first.
+   */
+  private async claimShippingExpense(businessId: string, orderId: string, claim: ShippingExpenseClaim): Promise<boolean> {
+    const client = this.prisma.client;
+    if (await setOrderMetadataKeyOnce(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim)) return true;
+
+    const row = await client.marketplaceOrder.findFirst({ where: { id: orderId, businessId }, select: { metadata: true } });
+    const metadata = row?.metadata;
+    const held =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)[SHIPPING_EXPENSE_METADATA_KEY]
+        : undefined;
+    // Taken back since the claim above: claim it now (false again if another call is first).
+    if (held === undefined || held === null) {
+      return setOrderMetadataKeyOnce(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, claim);
+    }
+    const heldObject = typeof held === 'object' && !Array.isArray(held) ? (held as Record<string, unknown>) : null;
+    if (heldObject?.expenseId) return false;
+    const heldAt = typeof heldObject?.at === 'string' ? Date.parse(heldObject.at) : Number.NaN;
+    // A claim made within SHIPPING_EXPENSE_CLAIM_STALE_MS (either way: clocks of two instances differ) may still be booking.
+    if (Number.isFinite(heldAt) && Math.abs(Date.now() - heldAt) < SHIPPING_EXPENSE_CLAIM_STALE_MS) return false;
+
+    const taken = await replaceOrderMetadataKeyIf(client, businessId, orderId, SHIPPING_EXPENSE_METADATA_KEY, held, claim);
+    if (taken) {
+      this.logger.warn(
+        `[CommerceIntegration] Order ${orderId}: took over a shipping Expense claim left without an Expense ` +
+          `(made ${typeof heldObject?.at === 'string' ? heldObject.at : 'at an unknown time'}); booking it now`,
+      );
+    }
+    return taken;
   }
 
   @OnEvent('store_order.delivered')

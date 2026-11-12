@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import ExcelJS from 'exceljs';
 import { createHash, randomBytes } from 'crypto';
@@ -13,7 +13,11 @@ import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { appendOrderTimeline, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
+import { appendOrderTimeline, recordOrderRefundedTotal, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
+import { CommerceService } from '../commerce/commerce.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
+import { fromCents, toCents } from '../commerce/money';
+import { CommerceIntegrationService } from './commerce-integration.service';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -34,10 +38,34 @@ function offlinePaymentMethod(requested: unknown): string {
   return OFFLINE_RECORDED_METHODS.has(method) ? method : 'manual';
 }
 
-/** D-112: a payment status written on an order that marks it paid (any case, as assertNotPayingDoorOrder reads it). */
-function marksPaymentPaid(paymentStatus: unknown): boolean {
-  return typeof paymentStatus === 'string' && paymentStatus.toUpperCase() === 'PAID';
+/**
+ * W11-ORDER-PAID-VALUES (owner ruling D-117): the payment status PATCH .../status reads, compared and stored as
+ * trimmed and upper-cased (assertPlainStatusBody has refused a value that is not a string). ' PAID' was stored raw,
+ * and a lowercase 'paid' replaced an order's stored PAID.
+ */
+function normalisedPaymentStatus(paymentStatus: unknown): string | undefined {
+  return typeof paymentStatus === 'string' ? paymentStatus.trim().toUpperCase() : undefined;
 }
+
+/** D-112 / D-117: a payment status written on an order that marks it paid (any case, trimmed). */
+function marksPaymentPaid(paymentStatus: unknown): boolean {
+  return normalisedPaymentStatus(paymentStatus) === 'PAID';
+}
+
+/**
+ * W11-ORDER-PAID-VALUES (owner ruling D-117; SOP-V3, CR-W10SOP-6): the payment statuses PATCH .../status writes (upper-
+ * cased) on an order not on the doors, besides PAID, which goes through the paid door (D-112). Any other value is
+ * refused (400): COMPLETED (counted as paid by customer-referral.service.ts, site.service.ts and case-study.service.ts,
+ * and dropped from the open payables by payments-ops.service.ts), SETTLED, SUCCEEDED and every other synonym a reader
+ * may treat as paid were stored with no invoice, no payment and no books. An allow-list, as a deny-list cannot name
+ * every synonym.
+ * Review SEC-W11OPV-1 (D-117, D-14): REFUNDED is not on it. It took an UNPAID order off the open payables with nothing
+ * recorded (both paid doors then refused it, 409) and refunded a PAID one with no Expense and no store_order.refunded,
+ * as the status 'refunded' did (assertNotRefundingThroughStatus): an order is refunded through the fulfil 'refund'
+ * action or the D-14 refund door. REFUNDED on an order already stored REFUNDED records nothing new and is kept
+ * (assertWritablePaymentStatus), as PAID on an order stored PAID is.
+ */
+const PATCH_WRITABLE_PAYMENT_STATUSES = new Set(['UNPAID', 'PENDING', 'PARTIAL']);
 
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
@@ -183,31 +211,22 @@ export class MarketplaceService {
   }
 
   /**
-   * FIN3 — post the COGS leg (Dr COGS / Cr Inventory) for a storefront/
-   * marketplace order that just transitioned to PAID. Uses the same
-   * weighted-average-cost recipe as the invoice path. Idempotent on
-   * `MarketplaceOrder:{id}:cogs`. Wrapped in try/catch only because we
-   * fall back to the legacy emit path; the service-internal callers
-   * await this inside their own transaction below.
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): after a shipped status written by this service has
+   * committed, CommerceIntegrationService.bookShippingExpenseOnce books the order's shipping fee once per order, for a
+   * member with revenue write (anyone else's ship books nothing). Resolved from the application as storeOrders() is;
+   * a failure (or no such service in a harness) is logged and never fails the status change.
    */
-  private async postOrderCogs(order: {
-    id: string;
-    businessId: string;
-    currency: string;
-    items: Array<{ productId: string | null; quantity: number }>;
-  }): Promise<void> {
-    const items = (order.items ?? [])
-      .filter((i) => i.productId && i.quantity > 0)
-      .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
-    if (items.length === 0) return;
-    await this.expensePosting.onProductSold({
-      businessId: order.businessId,
-      sourceType: 'MarketplaceOrder',
-      sourceId: order.id,
-      date: new Date(),
-      currency: order.currency,
-      items,
-    });
+  private async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null): Promise<void> {
+    let integration: CommerceIntegrationService;
+    try {
+      integration = this.moduleRef.get(CommerceIntegrationService, { strict: false });
+    } catch (err) {
+      this.logger.warn(`Order ${orderId} shipped: CommerceIntegrationService unavailable, no shipping Expense booked (${(err as Error).message})`);
+      return;
+    }
+    await integration
+      .bookShippingExpenseOnce(businessId, orderId, actorId)
+      .catch((err) => this.logger.error(`Shipping Expense for order ${orderId} not booked: ${(err as Error).message}`));
   }
 
   private generateOrderNumber(): string {
@@ -698,10 +717,7 @@ export class MarketplaceService {
       paidStatus: 'paid',
       stockMovesOnFulfilment: true,
     });
-    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is paid.
-    await this.postOrderCogs(order).catch((err) =>
-      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
-    );
+    // W11-CHECKOUT-COGS-TX (owner ruling D-127): the door posted the COGS leg in its own transaction.
 
     this.autoRouteOrder(businessId, order.id, true);
 
@@ -907,6 +923,46 @@ export class MarketplaceService {
   }
 
   /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117; SOP-V3, CR-W10SOP-6): PATCH .../status writes a payment status only
+   * from the allow-list (PATCH_WRITABLE_PAYMENT_STATUSES), upper-cased; PAID is recorded through the paid door
+   * (D-112). Anything else is refused (400) with nothing written and no event: COMPLETED (in any case), SETTLED,
+   * SUCCEEDED and every other value a reader may count as paid was stored as sent, with no invoice, no payment and
+   * no books.
+   * Review SEC-W11OPV-1 (D-117, D-14): REFUNDED is refused (400 naming the refund routes) unless the order is already
+   * stored REFUNDED (any case), where it records nothing new.
+   */
+  private assertWritablePaymentStatus(paymentStatus: string | undefined, storedPaymentStatus: string | null | undefined): void {
+    if (paymentStatus === undefined || marksPaymentPaid(paymentStatus) || PATCH_WRITABLE_PAYMENT_STATUSES.has(paymentStatus)) return;
+    if (paymentStatus === 'REFUNDED') {
+      if (normalisedPaymentStatus(storedPaymentStatus) === 'REFUNDED') return;
+      throw new BadRequestException(
+        "An order is refunded with the fulfil 'refund' action (POST .../orders/:orderId/fulfill) or, for a storefront order or an " +
+          'order created paid, POST /site/businesses/:businessId/orders/:orderId/refund, which record the refund. Setting its payment ' +
+          'status to REFUNDED records no refund',
+      );
+    }
+    throw new BadRequestException(
+      "An order is marked paid only through the paid door, which records its invoice, its payment and its books: the fulfil 'mark_paid' " +
+        'action (POST .../orders/:orderId/fulfill) or PATCH .../status with paymentStatus PAID. The other payment statuses written here are ' +
+        `${[...PATCH_WRITABLE_PAYMENT_STATUSES].join(', ')}`,
+    );
+  }
+
+  /**
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): a paid marking (paymentStatus PAID) whose status is 'cancelled' is
+   * refused (400) before anything is read or written. completeCheckout's refuseClosedOrder checks only the stored
+   * status, so the door recorded the payment of an order it then stored cancelled, and the store_order.paid that
+   * followed made StoreOrderRoutingListener try to route it. ('refunded' is refused by assertNotRefundingThroughStatus.)
+   */
+  private assertNotPaidAndCancelled(status: string, paymentStatus: string | undefined): void {
+    if (!marksPaymentPaid(paymentStatus) || status.trim().toLowerCase() !== 'cancelled') return;
+    throw new BadRequestException(
+      'An order is not marked paid and cancelled at once: mark it paid (paymentStatus PAID with its fulfilment status), or cancel it ' +
+        'without a payment status',
+    );
+  }
+
+  /**
    * W10-STORE-ORDER-PAID (owner ruling D-112; V18-T2c, review STL-SEC-1): a
    * STANDARD order not created paid is marked PAID (PATCH .../status with
    * paymentStatus PAID, the fulfil 'mark_paid' action) only through the paid
@@ -1033,21 +1089,15 @@ export class MarketplaceService {
         this.logger.error(`Could not take back the paid marking step of order ${order.id}: ${(undoErr as Error).message}`),
       );
     }
-    const cogsShape = { id: true, businessId: true, currency: true, items: { select: { productId: true, quantity: true } } } as const;
-    const paid = recordedHere
-      ? await this.prisma.client.marketplaceOrder.update({
-          where: { id: order.id },
-          data: { paymentMethod: method.toUpperCase(), ...(memberRef ? { paymentRef: memberRef } : {}) },
-          select: cogsShape,
-        })
-      : await this.prisma.client.marketplaceOrder.findFirstOrThrow({
-          where: { id: order.id, businessId: order.businessId },
-          select: cogsShape,
-        });
-    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is recorded.
-    await this.postOrderCogs(paid).catch((err) =>
-      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
-    );
+    if (recordedHere) {
+      await this.prisma.client.marketplaceOrder.update({
+        where: { id: order.id },
+        data: { paymentMethod: method.toUpperCase(), ...(memberRef ? { paymentRef: memberRef } : {}) },
+        select: { id: true },
+      });
+    }
+    // W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18): the COGS leg was posted by the door, in its transaction, with
+    // the payment; it is no longer posted here after the door commits (a failure there left a paid order with no COGS).
     return { doorStatus: recordedHere && door ? door.status : null };
   }
 
@@ -1115,13 +1165,16 @@ export class MarketplaceService {
    */
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     this.assertPlainStatusBody(status, paymentData);
+    // W11-ORDER-PAID-VALUES (D-117): the payment status as it is compared and written, trimmed and upper-cased.
+    const paymentStatus = normalisedPaymentStatus(paymentData?.paymentStatus);
+    this.assertNotPaidAndCancelled(status, paymentStatus);
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
     this.assertNotRefundingThroughStatus(status);
     const onDoors = await this.moneyOnTheDoors(order);
-    this.assertNotPayingDoorOrder(onDoors, status, paymentData?.paymentStatus);
+    this.assertNotPayingDoorOrder(onDoors, status, paymentStatus);
     this.assertNoDoorPaymentFields(onDoors, paymentData);
 
     // W10-STORE-ORDER-PAID (D-112, V18-T2c): paymentStatus PAID takes a member with revenue write (403 otherwise,
@@ -1132,8 +1185,12 @@ export class MarketplaceService {
     // door refuse the owner, 409), and any method or reference.
     const writesPayment = ORDER_PAYMENT_FIELDS.some((field) => paymentData?.[field] !== undefined);
     if (writesPayment) await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+    // W11-ORDER-PAID-VALUES (D-117): after the 403 (a member without revenue write is refused whatever the value), a
+    // payment status outside PAID and the allow-list is refused with nothing written and no event (REFUNDED: review
+    // SEC-W11OPV-1).
+    this.assertWritablePaymentStatus(paymentStatus, order.paymentStatus);
     const include = { items: { include: { product: true } }, shipments: true } as const;
-    if (marksPaymentPaid(paymentData?.paymentStatus) && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+    if (marksPaymentPaid(paymentStatus) && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
       const { doorStatus } = await this.recordPaymentThroughDoor(order, {
         actorId,
         paymentMethod: paymentData?.paymentMethod,
@@ -1158,23 +1215,53 @@ export class MarketplaceService {
           : await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
       // The door has emitted store_order.paid with its invoice; any other status keeps its own lifecycle event.
       this.emitOrderLifecycleEvent(businessId, paid, status);
+      // W11-SHIPPING-EXPENSE-ONCE (D-126): this marking recorded the payment and wrote shipped (V18-T2l: the losing
+      // marking above returned with nothing booked).
+      if (status.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
       return paid;
     }
 
     const updateData: any = { status };
     if (paymentData) {
-      updateData.paymentStatus = paymentData.paymentStatus;
+      // W11-ORDER-PAID-VALUES (D-117): the value is written upper-cased. PAID reaches here only for an order already
+      // stored paid in any case (outside the door: the Shopify sync, a legacy row), REFUNDED only for one stored
+      // REFUNDED. Review CR-W11OPV-1: the canonical spelling is written over a stored 'paid' or 'Paid' (what the base's
+      // lowercase write left over a stored PAID), which the readers that filter paymentStatus 'PAID' do not count and
+      // no other route makes canonical; over a stored 'PAID' it changes nothing.
+      if (paymentStatus !== undefined) updateData.paymentStatus = paymentStatus;
       updateData.paymentMethod = paymentData.paymentMethod;
       updateData.paymentRef = paymentData.paymentRef;
     }
 
-    const updated = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: updateData,
-      include: { items: { include: { product: true } }, shipments: true },
-    });
+    let updated;
+    if (writesPayment) {
+      // W11-ORDER-PAID-VALUES review SEC-W11OPV-2 (D-117, D-112): a payment write is compare-and-set on the payment
+      // status read above, which decided it (the door checks, the value checks). An unconditioned update let a PATCH
+      // UNPAID that read the order before a concurrent marking committed through the paid door write UNPAID over the
+      // door's PAID: an open payable whose INV-<orderNumber> is PAID and whose payment is SUCCESSFUL, refused by both
+      // paid doors for good. A change in between is 409 with nothing written and no event.
+      const { count } = await this.prisma.client.marketplaceOrder.updateMany({
+        where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
+        data: updateData,
+      });
+      if (count === 0) {
+        throw new ConflictException(
+          "This order's payment status changed while it was being edited (it was marked paid or refunded meanwhile): nothing was " +
+            'written. Reload the order and edit it again',
+        );
+      }
+      updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
+    } else {
+      updated = await this.prisma.client.marketplaceOrder.update({
+        where: { id: orderId },
+        data: updateData,
+        include,
+      });
+    }
 
     this.emitOrderLifecycleEvent(businessId, updated, status);
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): after the shipped write has committed; store_order.shipped books nothing.
+    if (status.toLowerCase() === 'shipped') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     return updated;
   }
@@ -2044,6 +2131,8 @@ export class MarketplaceService {
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
       refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
     });
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): the 'ship', after its transaction has committed.
+    if (action === 'ship') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
       this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
@@ -2079,9 +2168,17 @@ export class MarketplaceService {
    * row each, naming the refunder, the posting reversed, the invoice back to
    * SENT), the order REFUNDED and one store_order.refunded naming the invoice,
    * so no Expense is booked. An order nothing was paid on is 409, one already
-   * refunded 400, and nothing is written. The door refunds the order in full:
-   * a refundAmount other than the order total is refused (400) rather than
-   * recorded as the full amount. This action used to set paymentStatus REFUNDED
+   * refunded 400, and nothing is written. W10 refunded the order in full only
+   * (a refundAmount other than the order total was 400); since W11-PARTIAL-
+   * REFUND-DOOR (owner ruling D-121) a refundAmount below what is left of what
+   * was paid is a partial refund through the same door (refundPartThroughDoor),
+   * one above it is 400, and one that is what is left is this full refund. So
+   * is one that is the order total (W11-PARTIAL-REFUND-DOOR review CRR-PRD-1):
+   * the W10 contract's full refund, and what the store fulfillment panel sends
+   * by default, refunds what is left after earlier refunds (a D-121 partial,
+   * a provider refund linked to the payment). A partial refund already
+   * recorded is not recorded again (SEC-PRD-1, partialRefundOf).
+   * This action used to set paymentStatus REFUNDED
    * for any member, with no refund recorded, also on an UNPAID order, and its
    * store_order.refunded booked the client's refundAmount as an Expense.
    * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1): also a STANDARD order
@@ -2090,39 +2187,226 @@ export class MarketplaceService {
    */
   private async refundThroughDoor(
     businessId: string,
-    order: { id: string; total: number; currency: string; paymentStatus: string },
-    data: { refundAmount?: unknown; reason?: unknown; note?: unknown } | undefined,
+    order: { id: string; orderNumber: string; total: number; currency: string; paymentStatus: string },
+    data: { refundAmount?: unknown; currency?: unknown; reason?: unknown; note?: unknown } | undefined,
     actorId: string | null,
   ) {
     const storeOrders = this.storeOrders();
     await storeOrders.assertMemberMayRecordPayments(businessId, actorId);
     // The amount is checked on a paid order; any other is answered by the door (409 nothing paid, 400 already refunded).
-    const requested = (order.paymentStatus ?? '').toUpperCase() === 'PAID' ? data?.refundAmount : undefined;
-    if (requested !== undefined && requested !== null && requested !== '') {
-      const amount = Number(requested);
-      if (!Number.isFinite(amount) || amount.toFixed(2) !== Number(order.total).toFixed(2)) {
-        throw new BadRequestException(
-          `This order is refunded in full (${Number(order.total).toFixed(2)} ${order.currency}) on its checkout invoice; ` +
-            'this refund amount is not the order total',
-        );
-      }
+    // W11-PARTIAL-REFUND-DOOR (owner ruling D-121): an amount below what is left of what was paid is a partial refund
+    // through the same door (refundPartThroughDoor); one that is all that is left, or none, is the full refund below.
+    const paid = (order.paymentStatus ?? '').toUpperCase() === 'PAID';
+    const door = paid ? await this.doorRefundState(businessId, order.orderNumber) : null;
+    const part = paid ? await this.partialRefundOf(businessId, order, data, door) : null;
+    if (part) {
+      return this.refundPartThroughDoor(businessId, order, part.paymentId, fromCents(part.cents), part.once, data, actorId);
     }
 
     await storeOrders.refundOrder(order.id, businessId, actorId);
 
     // The fulfilment timeline (not money state): what the other fulfil actions record, appended in one statement
-    // (W10-SOP-FIX, SOP-V4: it was read and written back whole).
-    await appendOrderTimeline(this.prisma.client, businessId, order.id, [
-      { status: 'refunded', timestamp: new Date().toISOString(), refundAmount: order.total, reason: data?.reason, note: data?.note },
+    // (W10-SOP-FIX, SOP-V4: it was read and written back whole). D-121: the amount is what this refund took (what was
+    // left after any partial refunds), and the order's refunded total is recorded with it (recordOrderRefundedTotal).
+    const refundAmount = door ? fromCents(Math.max(door.leftCents, 0)) : Number(order.total);
+    const after = await this.doorRefundState(businessId, order.orderNumber);
+    await recordOrderRefundedTotal(this.prisma.client, businessId, order.id, after ? fromCents(after.refundedCents) : refundAmount, [
+      { status: 'refunded', timestamp: new Date().toISOString(), refundAmount, reason: data?.reason, note: data?.note },
     ]);
     const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
       where: { id: order.id, businessId },
       include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
     });
-    this.sendFulfillmentNotification(businessId, updated, 'refunded', data).catch((err) =>
+    this.sendFulfillmentNotification(businessId, updated, 'refunded', { ...data, refundAmount }).catch((err) =>
       this.logger.error(`Failed to send refund notification: ${(err as Error).message}`),
     );
     return updated;
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): what the order's checkout invoice (INV-<orderNumber>, written only by
+   * the paid door) holds: its first SUCCESSFUL payment (the door records one per order), and, in integer cents, what
+   * is refunded and what is left of what was paid (the balance read contract, balanceOfStoredRows). Null without the
+   * invoice.
+   */
+  private async doorRefundState(
+    businessId: string,
+    orderNumber: string,
+  ): Promise<{ paymentId: string | null; refundedCents: number; leftCents: number } | null> {
+    if (!orderNumber) return null;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { businessId, invoiceNumber: `INV-${orderNumber}` },
+      select: { id: true, total: true, currency: true },
+    });
+    if (!invoice) return null;
+    const rows = await this.prisma.client.payment.findMany({
+      where: { businessId, invoiceId: invoice.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, amount: true, status: true },
+    });
+    const balance = balanceOfStoredRows(Number(invoice.total), rows, invoice.currency);
+    return {
+      paymentId: rows.find((r) => r.status === 'SUCCESSFUL')?.id ?? null,
+      refundedCents: toCents(balance.refunded),
+      leftCents: toCents(balance.net),
+    };
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): the partial refund the fulfil 'refund' of a paid door order asks
+   * for (its cents, the door payment and what identifies it), or null for the full refund (no refundAmount, one that
+   * is all that is left, or one that is the order total). The amount is a number (or plain decimal text) above 0 with
+   * at most two decimals, in the order's currency (a currency other than the order's is refused), and at most what is
+   * left of what was paid after earlier refunds; anything else is 400 with nothing written. The door checks it again
+   * under its invoice lock (CommerceService.markPaymentRefunded), so refunds racing on one order never refund more
+   * than was paid. W10 refused every amount but the order total (400).
+   *
+   * Review repairs (D-121): CRR-PRD-1, the order total is the full refund of what is left, as W10's contract had it
+   * and as the store fulfillment panel sends by default (fulfillment-panel.tsx posts refundAmount: order.total); at
+   * d3937867 it refunded what was left after a linked provider refund, and the D-121 check against what is left
+   * answered it 400 once anything was refunded. SEC-PRD-1, a partial refund already recorded on this order (the same
+   * amount and reason, partialRefundOnce) is 409 with nothing written, before what is left is weighed: a replay of
+   * it (a client retry, a double submit) was recorded twice, and a replay that matched what was left would have been
+   * taken as the full refund. The door refuses it again under its lock, so identical refunds racing record one.
+   */
+  private async partialRefundOf(
+    businessId: string,
+    order: { total: number; currency: string },
+    data: { refundAmount?: unknown; currency?: unknown; reason?: unknown } | undefined,
+    door: { paymentId: string | null; leftCents: number } | null,
+  ): Promise<{ cents: number; paymentId: string; once: { providerPaymentId: string; refusal: string } } | null> {
+    const requested = data?.refundAmount;
+    if (requested === undefined || requested === null || requested === '') return null;
+    const text = typeof requested === 'string' ? requested.trim() : null;
+    const amount = typeof requested === 'number' ? requested : text !== null && /^\d+(\.\d+)?$/.test(text) ? Number(text) : Number.NaN;
+    const cents = Number.isFinite(amount) ? toCents(amount) : Number.NaN;
+    if (!(cents > 0) || fromCents(cents) !== amount) {
+      throw new BadRequestException(
+        `A refund amount is a number above 0 with at most two decimals, in the order's currency (${order.currency}); got ${JSON.stringify(requested)}`,
+      );
+    }
+    const currency = data?.currency;
+    if (currency !== undefined && currency !== null && currency !== '') {
+      if (typeof currency !== 'string' || currency.trim().toUpperCase() !== String(order.currency ?? '').toUpperCase()) {
+        throw new BadRequestException(`This order is refunded in its own currency (${order.currency}); got ${JSON.stringify(currency)}`);
+      }
+    }
+    // CRR-PRD-1 (D-121): the order total asks for the full refund, of what is left.
+    if (cents === toCents(Number(order.total))) return null;
+    if (!door?.paymentId) throw new ConflictException('This order has no recorded payment to refund');
+    // SEC-PRD-1 (D-121): this partial refund, already recorded, is not recorded again (the door re-checks under its lock).
+    const once = MarketplaceService.partialRefundOnce(door.paymentId, cents, data?.reason, order.currency);
+    const recorded = await this.prisma.client.payment.findFirst({
+      where: { businessId, providerPaymentId: once.providerPaymentId },
+      select: { id: true },
+    });
+    if (recorded) throw new ConflictException(once.refusal);
+    const left = Math.max(door.leftCents, 0);
+    if (cents > left) {
+      throw new BadRequestException(
+        `A refund of this order is at most what is left of what was paid (${fromCents(left).toFixed(2)} ${order.currency} of ` +
+          `${Number(order.total).toFixed(2)}); got ${fromCents(cents).toFixed(2)}`,
+      );
+    }
+    return cents === left ? null : { cents, paymentId: door.paymentId, once };
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR review (SEC-PRD-1, owner ruling D-121): what identifies a partial refund of the order's
+   * door payment, so that its replay (a client retry, a double submit, the same refund sent by two members) is refused
+   * rather than recorded twice: the payment, the amount in cents and the reason (trimmed, inner spaces collapsed, case
+   * ignored; none is the empty reason). Its refund row's providerPaymentId is built from them (manual_refund_<payment>_
+   * part_<sha256>, the manual refund prefix kept), so the row is the record and the unique index backs the door's check
+   * under its invoice lock (CommerceService.markPaymentRefunded `once`). A second refund of the same amount is told to
+   * carry its own reason. No schema change (D-121): no key column is added, and the fulfil body takes no new field.
+   */
+  private static partialRefundOnce(
+    paymentId: string,
+    cents: number,
+    reason: unknown,
+    currency: string,
+  ): { providerPaymentId: string; refusal: string } {
+    const said = typeof reason === 'string' ? reason.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+    const digest = createHash('sha256').update(`${cents}\n${said}`, 'utf8').digest('hex').slice(0, 32);
+    return {
+      providerPaymentId: `manual_refund_${paymentId}_part_${digest}`,
+      refusal:
+        `A refund of ${fromCents(cents).toFixed(2)} ${currency} with this reason is already recorded on this order, so it is ` +
+        'not recorded again (nothing was written); to refund the same amount again, give that refund its own reason',
+    };
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2): a partial refund of an order paid through the paid door
+   * (D-112), through the same audited door as its full refund, the member (revenue write, checked by the caller) the
+   * refunder. One negative REFUNDED row of `amount` is recorded against the order's door payment and its books are
+   * reversed by that amount (CommerceService.markPaymentRefunded with the amount: the partial refund posting, the
+   * invoice reconciled to PARTIALLY_PAID, the FINANCE audit row naming the refunder, in one transaction under the
+   * invoice lock). The order keeps its status and its paymentStatus PAID: the order vocabulary has no partly refunded
+   * value and D-121 makes no schema change, so metadata.refundedTotal (recordOrderRefundedTotal, one statement) and a
+   * 'partially_refunded' timeline step show it. No store_order.refunded and no customer email: the order is not
+   * refunded, and the email's dedupe key is the full refund's.
+   *
+   * A partial refund that leaves nothing received (refunds racing it took the rest) ends as the full refund
+   * (StoreOrderService.refundOrder: the order REFUNDED once, one store_order.refunded naming the invoice; the door
+   * reversed the posting and the partials when what was left was refunded). A concurrent full refund that flipped the
+   * order first answered for the flip; this refund, recorded, is not refused for it.
+   *
+   * Review SEC-PRD-1: the refund is named (`once`, partialRefundOnce), so the door records it once: a replay that
+   * reaches the door after it committed, or races it, is 409 under the invoice lock with nothing written.
+   */
+  private async refundPartThroughDoor(
+    businessId: string,
+    order: { id: string; orderNumber: string; total: number; currency: string },
+    paymentId: string,
+    amount: number,
+    once: { providerPaymentId: string; refusal: string },
+    data: { reason?: unknown; note?: unknown } | undefined,
+    actorId: string | null,
+  ) {
+    const reason = typeof data?.reason === 'string' && data.reason.trim() ? `: ${data.reason.trim()}` : '';
+    const refund = await this.commerceRefundDoor().markPaymentRefunded(
+      paymentId,
+      businessId,
+      `Order ${order.orderNumber} partly refunded (${amount.toFixed(2)} ${order.currency})${reason}`,
+      actorId,
+      amount,
+      once,
+    );
+    const refundedTotal = fromCents(toCents(refund.balance.refunded));
+    const allRefunded = !(toCents(refund.balance.net) > 0);
+    if (allRefunded) {
+      await this.storeOrders()
+        .refundOrder(order.id, businessId, actorId)
+        .catch((err) => {
+          // 400: a concurrent full refund flipped the order REFUNDED first, and answered for it.
+          if (!(err instanceof BadRequestException)) throw err;
+        });
+    }
+    const timestamp = new Date().toISOString();
+    const step = allRefunded
+      ? { status: 'refunded', timestamp, refundAmount: amount, reason: data?.reason, note: data?.note }
+      : { status: 'partially_refunded', timestamp, refundAmount: amount, refundedTotal, reason: data?.reason, note: data?.note };
+    await recordOrderRefundedTotal(this.prisma.client, businessId, order.id, refundedTotal, [step]);
+    const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
+      where: { id: order.id, businessId },
+      include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+    });
+    if (allRefunded) {
+      this.sendFulfillmentNotification(businessId, updated, 'refunded', { ...data, refundAmount: amount }).catch((err) =>
+        this.logger.error(`Failed to send refund notification: ${(err as Error).message}`),
+      );
+    }
+    return updated;
+  }
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (D-121): the D-14 refund door (CommerceService.markPaymentRefunded), which records a
+   * refund against one payment. It lives in CommerceModule, which this module does not import, so it is resolved
+   * from the application when a refund is made, as storeOrders() is.
+   */
+  private commerceRefundDoor(): CommerceService {
+    return this.moduleRef.get(CommerceService, { strict: false });
   }
 
   /**

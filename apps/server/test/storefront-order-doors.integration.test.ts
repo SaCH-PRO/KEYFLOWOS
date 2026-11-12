@@ -51,6 +51,11 @@
  *           vocabulary: payment states and unknown strings are 400 and write
  *           nothing, so the refund door still opens afterwards; controls: a
  *           fulfilment status still moves (any case, stored upper-case)
+ *   V87-04b W11-ORDER-PAID-VALUES (D-117): the same route refuses (400) a body
+ *           carrying paymentStatus, paymentMethod or paymentRef before
+ *           anything is read, naming the checkout doors; at fb00af1c it moved
+ *           the status and dropped the payment fields silently (200). Control:
+ *           a status-only body still moves the order
  *   V87-05  a WiPay checkout for a business with no WiPay merchant pair is
  *           refused (400) before the order is written: no order, no
  *           store_order.created, no retry slot. Controls: the same cart in
@@ -761,6 +766,44 @@ describe('G6PUB-RC2-2: the site status route moves fulfilment only', () => {
     expect(refund.status, JSON.stringify(refund.body)).toBe(201);
     await expectD14Refund(order, ID.owner);
     expect(expenses).toEqual([]);
+  });
+
+  it('V87-04b (W11-ORDER-PAID-VALUES, D-117) PATCH /site/.../orders/:id/status takes a fulfilment status only: a body carrying paymentStatus, paymentMethod or paymentRef ({status:CONFIRMED, paymentStatus:PAID}, {status:SHIPPED, paymentStatus:COMPLETED}, {status:SHIPPED, paymentRef:x}, a null paymentMethod) is refused (400) naming the checkout doors, for the owner and a revenue:read member, with the order unchanged and no event; control: {status:SHIPPED} still moves the order', async () => {
+    const order = await placeOrder('CASH');
+    const state = await bookState(order);
+    const before = await counts();
+    seen = [];
+
+    // At fb00af1c each was 200: the status moved (store_order.confirmed / store_order.shipped emitted) and the payment
+    // fields were silently dropped (SiteController passed body.status only).
+    const bodies: Array<Record<string, unknown>> = [
+      { status: 'CONFIRMED', paymentStatus: 'PAID' },
+      { status: 'SHIPPED', paymentStatus: 'COMPLETED' },
+      { status: 'SHIPPED', paymentRef: 'x' },
+      { status: 'SHIPPED', paymentMethod: null },
+    ];
+    const answers: string[] = [];
+    const expected: string[] = [];
+    for (const actor of [ID.owner, ID.staffRead]) {
+      for (const body of bodies) {
+        const res = await as(agent().patch(`/site/businesses/${ID.bizA}/orders/${order.id}/status`).send(body), actor);
+        const namesDoors = /complete-offline/.test(JSON.stringify(res.body)) && /refund/.test(JSON.stringify(res.body));
+        answers.push(`${actor} ${JSON.stringify(body)}: ${res.status}${namesDoors ? ' naming the checkout doors' : ` ${JSON.stringify(res.body)}`}`);
+        expected.push(`${actor} ${JSON.stringify(body)}: 400 naming the checkout doors`);
+      }
+    }
+    expect(answers).toEqual(expected);
+    await settle();
+    expect(await bookState(order), 'the order as it was').toEqual(state);
+    expect(await counts(), 'nothing written').toEqual(before);
+    expect(storeEvents(), 'no lifecycle event').toEqual([]);
+
+    // Control: the fulfilment status alone still moves.
+    const shipped = await siteStatus(ID.owner, order.id, 'SHIPPED');
+    expect(shipped.status, JSON.stringify(shipped.body)).toBe(200);
+    expect(`${shipped.body.status}/${shipped.body.paymentStatus}`).toBe(`SHIPPED/${state.order.split('/')[1]}`);
+    await settle();
+    expect(storeEvents()).toEqual(['store_order.shipped']);
   });
 });
 

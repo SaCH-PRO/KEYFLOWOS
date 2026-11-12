@@ -1,4 +1,5 @@
 import { Injectable, Inject, Optional, forwardRef, BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
@@ -12,6 +13,7 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
@@ -23,6 +25,7 @@ import {
   wipayTakesCurrency,
 } from '../../core/connectors/implementations/wipay-merchant';
 import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
+import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -169,6 +172,48 @@ function canonicalJson(value: unknown): string {
 
 const sha256 = (material: string) => createHash('sha256').update(material, 'utf8').digest('hex');
 
+/**
+ * Trial-N review (G6PUB-SEC-1, D-46): why `actorId` may not record (or refund)
+ * a payment of the business, or null when it may: a member of the business
+ * whose revenue level is write or above, read as ModuleScopeGuard reads it (an
+ * explicit scope map, else the role's defaults), with no SUPER_ADMIN bypass.
+ */
+async function paymentRecorderRefusal(
+  prisma: PrismaService,
+  businessId: string,
+  actorId: string | null | undefined,
+): Promise<string | null> {
+  if (!actorId || isSystemActor(actorId)) return 'A member must record this payment';
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: actorId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return 'Not a member of this business';
+  const scopes: Record<string, string> =
+    membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+  const level = scopes.revenue || 'none';
+  if (rankOf(level) < LEVEL_RANK.write) return `Insufficient permissions: revenue requires write access (you have ${level})`;
+  return null;
+}
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126): whether `actorId` is a member
+ * of the business with revenue write (D-46, no SUPER_ADMIN bypass), the rule
+ * StoreOrderService.assertMemberMayRecordPayments enforces, as a boolean for a
+ * caller that must not refuse: an order's shipped marking stays open to every
+ * member (D-112) and only the member with revenue write books its shipping fee
+ * (CommerceIntegrationService.bookShippingExpenseOnce).
+ */
+export async function memberMayRecordPayments(
+  prisma: PrismaService,
+  businessId: string,
+  actorId: string | null | undefined,
+): Promise<boolean> {
+  return (await paymentRecorderRefusal(prisma, businessId, actorId)) === null;
+}
+
 @Injectable()
 export class StoreOrderService {
   private readonly logger = new Logger(StoreOrderService.name);
@@ -183,8 +228,19 @@ export class StoreOrderService {
     @Inject(InventoryRiskService) private readonly inventoryRisk: InventoryRiskService,
     @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
+    /**
+     * W11-CHECKOUT-COGS-TX (owner ruling D-127): the COGS leg (onProductSold) completeCheckout posts inside its
+     * transaction for every order it marks paid. FinanceModule exports it; SiteModule imports FinanceModule.
+     */
+    @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
     /** The D-14 refund door (refundOrder). Optional only so the unit harnesses that never refund need not build it. */
     @Optional() @Inject(forwardRef(() => CommerceService)) private readonly commerce?: CommerceService,
+    /**
+     * W11-SHIPPING-EXPENSE-ONCE (D-126): resolves CommerceIntegrationService (MarketplaceModule, which SiteModule does
+     * not import) when a SHIPPED marking books the order's shipping fee. Optional and last, so the positional unit
+     * constructions still build; without it nothing is booked and a warning is logged.
+     */
+    @Optional() @Inject(ModuleRef) private readonly moduleRef?: ModuleRef,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {
@@ -778,8 +834,31 @@ export class StoreOrderService {
    * status only (SITE_FULFILMENT_STATUSES, any case, stored upper-case).
    * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-2): a payment state or any
    * other string is refused (400) before anything is read or written.
+   * W11-ORDER-PAID-VALUES (owner ruling D-117): so is a body carrying
+   * paymentStatus, paymentMethod or paymentRef (`body`, the route's whole
+   * body): they were answered 200 and silently dropped. A status-only call is
+   * unchanged.
+   * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): `actorId` is the
+   * authenticated member (SiteController). A SHIPPED it writes books the
+   * order's shipping fee once per order, and only for a member with revenue
+   * write (CommerceIntegrationService.bookShippingExpenseOnce); the status
+   * change itself stays open to every member and never fails on the booking.
    */
-  async updateOrderStatus(orderId: string, status: string, businessId: string) {
+  async updateOrderStatus(
+    orderId: string,
+    status: string,
+    businessId: string,
+    body?: Record<string, unknown> | null,
+    actorId: string | null = null,
+  ) {
+    const paymentFields = ['paymentStatus', 'paymentMethod', 'paymentRef'].filter((field) => body?.[field] !== undefined);
+    if (paymentFields.length > 0) {
+      throw new BadRequestException(
+        `An order's payment fields (${paymentFields.join(', ')}) are not written here: this route moves its fulfilment status only. ` +
+          'It is paid through its checkout (its payment provider, or POST .../orders/:orderId/complete-offline) and refunded with ' +
+          'POST .../orders/:orderId/refund',
+      );
+    }
     const normalized = typeof status === 'string' ? status.trim().toUpperCase() : '';
     if (!SITE_FULFILMENT_STATUSES.has(normalized)) {
       throw new BadRequestException(
@@ -815,7 +894,26 @@ export class StoreOrderService {
       this.events.emit(eventName, { order, businessId: order.businessId });
     }
 
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): after the SHIPPED write has committed; store_order.shipped books nothing.
+    if (normalized === 'SHIPPED') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
+
     return order;
+  }
+
+  /**
+   * W11-SHIPPING-EXPENSE-ONCE (D-126): CommerceIntegrationService.bookShippingExpenseOnce for a SHIPPED this service
+   * wrote, resolved from the application. A failure is logged and never fails the status change.
+   */
+  private async bookShippingExpenseOnce(businessId: string, orderId: string, actorId: string | null): Promise<void> {
+    if (!this.moduleRef) {
+      this.logger.warn(`Order ${orderId} shipped: no ModuleRef to reach CommerceIntegrationService, so no shipping Expense is booked`);
+      return;
+    }
+    try {
+      await this.moduleRef.get(CommerceIntegrationService, { strict: false }).bookShippingExpenseOnce(businessId, orderId, actorId);
+    } catch (err) {
+      this.logger.error(`Shipping Expense for order ${orderId} not booked: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -938,20 +1036,9 @@ export class StoreOrderService {
    * D-77) check the same rule before they write anything.
    */
   async assertMemberMayRecordPayments(businessId: string, actorId: string | null | undefined): Promise<void> {
-    if (!actorId || isSystemActor(actorId)) throw new ForbiddenException('A member must record this payment');
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actorId, businessId } },
-      select: { role: true, permissionScopes: true },
-    });
-    if (!membership) throw new ForbiddenException('Not a member of this business');
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object'
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    const level = scopes.revenue || 'none';
-    if (rankOf(level) < LEVEL_RANK.write) {
-      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
-    }
+    // W11-SHIPPING-EXPENSE-ONCE (D-126): the rule is paymentRecorderRefusal, shared with memberMayRecordPayments.
+    const refusal = await paymentRecorderRefusal(this.prisma, businessId, actorId);
+    if (refusal !== null) throw new ForbiddenException(refusal);
   }
 
   /**
@@ -962,6 +1049,8 @@ export class StoreOrderService {
    *   2. Payment (status SUCCESSFUL) linked to invoice + business
    *   3. InventoryStock decrement + StockMovement audit row per item
    *   4. RevenueAttribution row (source='storefront', revenueType='ORDER')
+   *   4b. COGS posting (Dr COGS / Cr Inventory, MarketplaceOrder:<id>:cogs)
+   *      for the order's product lines (W11-CHECKOUT-COGS-TX, D-127)
    *   5. MarketplaceOrder updated to status CONFIRMED (a fulfilment status
    *      already past it is kept), paymentStatus PAID
    *
@@ -1285,6 +1374,31 @@ export class StoreOrderService {
         },
         tx as unknown as Prisma.TransactionClient,
       );
+
+      // 4b. W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18): the COGS leg (Dr COGS / Cr Inventory at the weighted
+      //     unit cost, ExpensePostingService.onProductSold, idempotent on MarketplaceOrder:<id>:cogs) for every order
+      //     this door marks paid, STOREFRONT and STANDARD, in this transaction: a COGS failure (no cost accounts) rolls
+      //     the settlement back as a failed revenue posting does, and the provider retries. MarketplaceService posted it
+      //     after this door had committed, a failure only logged, and a storefront settlement posted none. Read after
+      //     step 3, so a decremented line is costed from the stock rows as this transaction left them. The checkout
+      //     invoice's items carry no productId, so the PAID transition posts no second COGS under sourceType Invoice.
+      const soldItems = order.items
+        .filter((item) => item.productId && item.quantity > 0)
+        .map((item) => ({ productId: item.productId, quantity: item.quantity }));
+      if (soldItems.length > 0) {
+        await this.expensePosting.onProductSold(
+          {
+            businessId: order.businessId,
+            sourceType: 'MarketplaceOrder',
+            sourceId: order.id,
+            date: now,
+            currency: order.currency,
+            contactId,
+            items: soldItems,
+          },
+          txClient,
+        );
+      }
 
       // 5. Order — paid + confirmed. V1-33 review (V33-CR-3): fulfilment
       //    already past CONFIRMED (a cash-on-delivery order shipped or

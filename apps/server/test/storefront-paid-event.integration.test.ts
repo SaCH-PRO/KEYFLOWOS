@@ -169,9 +169,40 @@
  *           the marking) are marked PAID through the door; they were refused
  *           for good
  *   V18-T2h an order marked paid through the door is refunded through the
- *           D-14 refund door (in full; a partial amount is 400)
- *   V18-T2i / V18-T2j (it.todo, outside this packet's write set): a partial
- *           refund through the door; COGS posted in the door's transaction
+ *           D-14 refund door (in full; an amount above what was paid is 400;
+ *           W10 refused every partial amount, 400, until D-121)
+ *
+ *           W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2, ruling
+ *           R-8), the former it.todo V18-T2i, red at d3937867 (every partial
+ *           amount was 400):
+ *   V18-T2i a partial refund of a door-paid order goes through the same door:
+ *   ..T2i5  one negative REFUNDED row of the amount against the door payment,
+ *           a partial refund posting of that amount, the order still PAID with
+ *           metadata.refundedTotal and a partially_refunded step; an amount
+ *           over what is left (or not two decimals, or in another currency)
+ *           is 400; partials that reach what was paid end as the full refund
+ *           (REFUNDED, reversals once); racing partials never refund more than
+ *           was paid; a member without revenue write is 403
+ *
+ *           W11-PARTIAL-REFUND-DOOR review repairs (D-121), red at 0405cc78:
+ *   V18-T2i6 (SEC-PRD-1) a partial refund is recorded once: the same refund
+ *           (amount and reason) sent again, or racing, is 409 with nothing
+ *           written; a refund of the same amount with its own reason is
+ *           recorded. At 0405cc78 a replay was recorded twice
+ *   V18-T2i7 (CRR-PRD-1) a refundAmount that is the order total (the W10 full
+ *           refund, the store panel's default) refunds what is left after a
+ *           partial or a linked provider refund. At 0405cc78 it was 400 once
+ *           anything had been refunded (at d3937867 it refunded what was left)
+ *
+ *           W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3), red
+ *           at fb00af1c:
+ *   V18-T2j the paid door posts the order's COGS leg (Dr COGS / Cr Inventory,
+ *   ..T2j3  MarketplaceOrder:<id>:cogs) inside its own transaction for every
+ *           order it marks paid: a STANDARD order marked paid and a storefront
+ *           order settled by its provider each get one cogs posting with the
+ *           payment; a COGS failure rolls the marking back (the order UNPAID,
+ *           nothing recorded) and the next marking records it all; a replayed
+ *           settlement posts no second one
  *
  *           W10-SOP-FIX (D-112; findings SOP-V1, SOP-V2, SOP-V4), each red at
  *           6470942a:
@@ -198,6 +229,34 @@
  *   V18-T2n5 the router that comes second meets the order routed and is
  *           answered with its routes: the listener emits fulfillment_routed,
  *           not routing_failed, for a routed DROPSHIP order (supplier_ordered)
+ *
+ *           W11-ORDER-PAID-VALUES (owner ruling D-117; SOP-V3, CR-W10SOP-6),
+ *           red at fb00af1c:
+ *   V18-T2o PATCH .../status cannot mark an order paid with a paid-equivalent
+ *           value. The payment status is trimmed and upper-cased; PAID goes
+ *           through the paid door (D-112), UNPAID, PENDING and PARTIAL are
+ *           written upper-cased, and anything else (COMPLETED in any case,
+ *           SETTLED, SUCCEEDED, ...) is 400 naming the paid door, with nothing
+ *           written. At the base the owner's COMPLETED was stored as sent
+ *           (counted as paid by the COMPLETED readers, off the open payables)
+ *           with no invoice, payment or posting, ' PAID' was stored raw, a
+ *           lowercase 'paid' replaced an order's stored PAID, and
+ *           {status:'cancelled', paymentStatus:'PAID'} ran the paid door for a
+ *           cancelled order
+ *
+ *           W11-ORDER-PAID-VALUES review repairs (D-117), red at b98a5029:
+ *   V18-T2o2 (SEC-W11OPV-1) paymentStatus REFUNDED on an order not stored
+ *           REFUNDED is 400 naming the fulfil 'refund' action and the refund
+ *           door: it closed an UNPAID order (off the open payables, both paid
+ *           doors then 409) and refunded a PAID one with no Expense and no
+ *           store_order.refunded, with no refund recorded
+ *   V18-T2o3 (CR-W11OPV-1) PATCH PAID on an order stored 'paid' or 'Paid'
+ *           outside the door stores the canonical 'PAID' (b98a5029 kept the
+ *           lowercase spelling, which the 'PAID' readers do not count)
+ *   V18-T2o4 (SEC-W11OPV-2) a PATCH payment write is compare-and-set on the
+ *           payment status it read: a PATCH UNPAID that read the order before
+ *           a concurrent PATCH PAID committed through the paid door is 409,
+ *           not written over the door's PAID
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -1882,7 +1941,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     }
   });
 
-  it('V18-T2h (W10-STORE-ORDER-PAID review CR-W10SOP-2; D-112, D-14) an order marked paid through the paid door is refunded through the D-14 refund door: a partial refundAmount is 400 with nothing written (the door refunds in full; before D-112 it booked an Expense of the amount), and the full refund is a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, one store_order.refunded and no Expense', async () => {
+  it('V18-T2h (W10-STORE-ORDER-PAID review CR-W10SOP-2; D-112, D-14, D-121) an order marked paid through the paid door is refunded through the D-14 refund door: a refundAmount above what was paid is 400 with nothing written (before D-112 it booked an Expense of the amount; a partial amount is refunded in part since D-121, V18-T2i), and the full refund is a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, one store_order.refunded and no Expense', async () => {
     const { market, controller } = await marketRoutes();
     const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
     try {
@@ -1896,8 +1955,10 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expenses.length = 0;
 
       expect(
-        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
-        'a partial refund',
+        // W11-PARTIAL-REFUND-DOOR (D-121): a partial amount (30) is now refunded in part (V18-T2i); one above what was
+        // paid is still refused with nothing written.
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: ORDER_TOTAL + 10 }, signedIn(ID.owner))),
+        'a refund above what was paid',
       ).toBe(400);
       await settle();
       expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
@@ -2286,13 +2347,1008 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     }
   });
 
-  it.todo(
-    "V18-T2i (W10-STORE-ORDER-PAID review CR-W10SOP-2; needs an owner ruling and StoreOrderService.refundOrder, outside this packet's write set) a partial refund of an order paid through the paid door is recorded on its invoice (D-14): a negative REFUNDED row of the amount refunded and its posting reversed by that amount. Before D-112 a marked-paid order had no payment on the books and its partial refund booked an Expense of the amount; the D-14 refund door refunds in full only (V18-T2h)",
-  );
+  it('V18-T2o (W11-ORDER-PAID-VALUES, D-117; SOP-V3, CR-W10SOP-6) PATCH .../status cannot mark an order paid with a paid-equivalent value: the owner\'s paymentStatus COMPLETED (any case, padded), SETTLED, SUCCEEDED or any other value outside PAID, UNPAID, PENDING and PARTIAL (REFUNDED: V18-T2o2) is 400 naming the paid door, with the order unchanged, no INV-<orderNumber>, payment or posting, no store_order event, and the order still an open payable; \' paid \' goes through the paid door (one invoice, one payment, one posting); PATCH PAID on an order stored PAID outside the door keeps \'PAID\' stored; {status:\'cancelled\', paymentStatus:\'PAID\'} is 400 with nothing written; controls: \'unpaid\' and \'pending\' are stored UNPAID and PENDING, and a revenue:read STAFF member writing COMPLETED is still 403', async () => {
+    const { controller } = await marketRoutes();
+    const STAFF = await memberOfA('staff_t2o');
+    /** The answer to a call: 200, or the HTTP status, with "naming the paid door" when a 400 names it (D-117). */
+    const doorAnswer = (work: Promise<unknown>) =>
+      work.then(
+        () => '200',
+        (err: any) => {
+          if (typeof err?.getStatus !== 'function') return `${err?.name}: ${err?.message}`;
+          const names = /mark_paid/.test(String(err.message)) && /paymentStatus PAID/.test(String(err.message));
+          return `${err.getStatus()}${names ? ' naming the paid door' : `: ${err.message}`}`;
+        },
+      );
+    const openPayable = (id: string) =>
+      // PaymentsOpsService.listOpenPayables' order filter (payments-ops.service.ts), as in V18-T2d.
+      db.marketplaceOrder.count({ where: { id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] }, status: { not: 'CANCELLED' } } });
 
-  it.todo(
-    "V18-T2j (W10-STORE-ORDER-PAID review CR-W10SOP-3, FIN3; needs StoreOrderService.completeCheckout, outside this packet's write set) the COGS leg of an order marked paid is posted in the paid door's transaction, so a COGS posting failure leaves the order unpaid with nothing recorded, as the base mark_paid did. Today, as for an order created paid (D-77), COGS is posted after the door commits, idempotently, and a failure is logged with nothing to post it again",
-  );
+    // (1) Paid-equivalent values and any other value outside the allow-list: 400 naming the paid door, nothing written.
+    // At fb00af1c each was 200 and stored as sent (the REPRODUCED probe: {status:'placed', paymentStatus:'COMPLETED'} stored
+    // COMPLETED with no INV-<orderNumber>, no payment and no posting, and 'shipped' emitted store_order.shipped).
+    const order = await standardOrderOfA('t2o');
+    const shape = await orderShape(order.id);
+    const before = await counts();
+    seen = [];
+    const refused: Array<Record<string, unknown>> = [
+      { status: 'placed', paymentStatus: 'COMPLETED' },
+      { status: 'placed', paymentStatus: 'completed' },
+      { status: 'placed', paymentStatus: ' Completed ' },
+      { status: 'paid', paymentStatus: 'COMPLETED' },
+      { status: 'placed', paymentStatus: 'SETTLED' },
+      { status: 'shipped', paymentStatus: 'SUCCEEDED' },
+      { status: 'placed', paymentStatus: 'SUCCESSFUL' },
+      { status: 'placed', paymentStatus: 'CAPTURED' },
+      { status: 'placed', paymentStatus: 'FAILED' },
+      { status: 'placed', paymentStatus: `${P}anything` },
+    ];
+    const answers: Record<string, string> = {};
+    for (const body of refused) {
+      answers[JSON.stringify(body)] = await doorAnswer(controller.updateOrderStatus(ID.biz, order.id, body, signedIn(ID.owner)));
+    }
+    expect(answers, 'refused, naming the paid door (D-117)').toEqual(
+      Object.fromEntries(refused.map((body) => [JSON.stringify(body), '400 naming the paid door'])),
+    );
+    // Control: a revenue:read STAFF member writing COMPLETED is still refused 403 first (V18-T2d, SEC-SOP-4).
+    expect(
+      await answered(controller.updateOrderStatus(ID.biz, order.id, { status: 'placed', paymentStatus: 'COMPLETED' }, signedIn(STAFF))),
+      'COMPLETED as a revenue:read STAFF member',
+    ).toBe(403);
+    await settle();
+    expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
+    expect(await invoicesOf(order), 'no INV-<orderNumber>').toEqual([]);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(await paidTraces(ID.biz, order.id)).toMatchObject({ notifications: 0, timeline: 0 });
+    expect(await openPayable(order.id), 'still an open payable').toBe(1);
+
+    // (2) ' paid ' (trimmed, upper-cased) goes through the paid door: one invoice, one payment, one posting. At fb00af1c
+    // it was stored raw (' paid ') with none of them.
+    seen = [];
+    const paid = await controller.updateOrderStatus(ID.biz, order.id, { status: 'paid', paymentStatus: ' paid ' }, signedIn(ID.owner));
+    await settle();
+    expect(`${paid.status}/${paid.paymentStatus}`, "' paid ' through the paid door").toBe('paid/PAID');
+    const { invoice, payment } = await expectOnePaidInvoice(order);
+    expect(payment.recordedBy, 'the owner recorded the payment').toBe(ID.owner);
+    expect(seen.filter((e) => e.name === 'store_order.paid').map((e) => e.payload?.invoiceId), 'one store_order.paid naming the invoice').toEqual([
+      invoice.id,
+    ]);
+    expect(await openPayable(order.id), 'no longer an open payable').toBe(0);
+
+    // (3) PATCH PAID on an order stored PAID outside the door (the Shopify sync's shape, a legacy row) keeps 'PAID'
+    // stored. At fb00af1c the lowercase 'paid' replaced it, so the readers that filter paymentStatus 'PAID' stopped
+    // counting the order and the payables listed it as open.
+    const synced = await standardOrderOfA('t2o_synced', { paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+    const beforeSynced = await counts();
+    seen = [];
+    const keptPaid: string[] = [];
+    for (const paymentStatus of ['paid', ' Paid ', 'PAID']) {
+      const res = await controller.updateOrderStatus(ID.biz, synced.id, { status: 'paid', paymentStatus }, signedIn(ID.owner));
+      await settle();
+      keptPaid.push(`${JSON.stringify(paymentStatus)}: ${res.status}/${res.paymentStatus}`);
+    }
+    expect(keptPaid, "the stored 'PAID' is kept").toEqual(['"paid": paid/PAID', '" Paid ": paid/PAID', '"PAID": paid/PAID']);
+    expect(await db.marketplaceOrder.count({ where: { id: synced.id, paymentStatus: 'PAID' } }), "the 'PAID' readers still count it").toBe(1);
+    expect(await openPayable(synced.id), 'not an open payable').toBe(0);
+    expect(await invoicesOf(synced), 'no invoice written for it').toEqual([]);
+    expect(await counts()).toEqual(beforeSynced);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+
+    // (4) A paid marking for a cancelled status is 400 before anything is read or written. At fb00af1c the paid door
+    // ran with paidStatus 'cancelled' (completeCheckout checks only the stored status): an order paid AND cancelled,
+    // and the store_order.paid that followed made StoreOrderRoutingListener try to route it.
+    const cancelling = await standardOrderOfA('t2o_cancel');
+    const cancelShape = await orderShape(cancelling.id);
+    const beforeCancel = await counts();
+    seen = [];
+    const cancelAnswers: string[] = [];
+    for (const body of [
+      { status: 'cancelled', paymentStatus: 'PAID' },
+      { status: ' Cancelled ', paymentStatus: ' paid ' },
+    ]) {
+      cancelAnswers.push(`${JSON.stringify(body)}: ${await answered(controller.updateOrderStatus(ID.biz, cancelling.id, body, signedIn(ID.owner)))}`);
+    }
+    expect(cancelAnswers).toEqual([
+      '{"status":"cancelled","paymentStatus":"PAID"}: 400',
+      '{"status":" Cancelled ","paymentStatus":" paid "}: 400',
+    ]);
+    await settle();
+    expect(await orderShape(cancelling.id), 'the order as it was').toEqual(cancelShape);
+    expect(await invoicesOf(cancelling), 'no INV-<orderNumber>').toEqual([]);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(beforeCancel);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+
+    // (5) Controls: the allow-list is written upper-cased by a member with revenue write (SEC-SOP-4). At fb00af1c each
+    // was stored as sent ('pending', ' Partial ', 'unpaid'). REFUNDED is refused (review SEC-W11OPV-1, V18-T2o2).
+    const control = await standardOrderOfA('t2o_control');
+    const beforeControl = await counts();
+    seen = [];
+    const written: string[] = [];
+    for (const paymentStatus of ['pending', ' Partial ', 'unpaid']) {
+      const res = await controller.updateOrderStatus(ID.biz, control.id, { status: 'placed', paymentStatus }, signedIn(ID.owner));
+      written.push(`${JSON.stringify(paymentStatus)} -> ${res.paymentStatus}`);
+    }
+    await settle();
+    expect(written).toEqual(['"pending" -> PENDING', '" Partial " -> PARTIAL', '"unpaid" -> UNPAID']);
+    expect(await counts(), 'the allow-list writes no money').toEqual(beforeControl);
+    expect(storeEvents()).toEqual([]);
+  });
+
+  it('V18-T2o2 (W11-ORDER-PAID-VALUES review SEC-W11OPV-1; D-117, D-14) PATCH .../status cannot refund an order through its payment status: paymentStatus REFUNDED (any case, padded) on an order not stored REFUNDED is 400 naming the fulfil \'refund\' action and the refund door, with nothing written, no Expense and no store_order event: an UNPAID order stays an open payable and the owner then marks it paid through the paid door, and an order stored PAID outside the door (the Shopify sync\'s shape) stays PAID, counted by the \'PAID\' readers; controls: the fulfil \'refund\' of its twin books an Expense of the refund amount and emits store_order.refunded, REFUNDED on an order stored REFUNDED is kept, and a revenue:read STAFF member writing REFUNDED is still 403', async () => {
+    const { controller } = await marketRoutes();
+    const STAFF = await memberOfA('staff_t2o2');
+    /** The answer to a call: 200, or the HTTP status, with "naming the refund doors" when a 400 names them. */
+    const refundAnswer = (work: Promise<unknown>) =>
+      work.then(
+        () => '200',
+        (err: any) => {
+          if (typeof err?.getStatus !== 'function') return `${err?.name}: ${err?.message}`;
+          const names = /fulfil 'refund'/.test(String(err.message)) && /orders\/:orderId\/refund\b/.test(String(err.message));
+          return `${err.getStatus()}${names ? ' naming the refund doors' : `: ${err.message}`}`;
+        },
+      );
+    const openPayable = (id: string) =>
+      // PaymentsOpsService.listOpenPayables' order filter (payments-ops.service.ts), as in V18-T2d.
+      db.marketplaceOrder.count({ where: { id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] }, status: { not: 'CANCELLED' } } });
+
+    // (a) An UNPAID order. At b98a5029 the owner's REFUNDED was 200 and stored REFUNDED (the review's probe P1): off the
+    // open payables with nothing recorded, and both paid doors then refused it (409) until someone PATCHed UNPAID.
+    const unpaid = await standardOrderOfA('t2o2_unpaid');
+    const shape = await orderShape(unpaid.id);
+    const before = await counts();
+    seen = [];
+    expenses.length = 0;
+    const bodies: Array<Record<string, unknown>> = [
+      { status: 'placed', paymentStatus: 'REFUNDED' },
+      { status: 'placed', paymentStatus: 'refunded' },
+      { status: 'shipped', paymentStatus: ' Refunded ' },
+    ];
+    const answers: Record<string, string> = {};
+    for (const body of bodies) {
+      answers[JSON.stringify(body)] = await refundAnswer(controller.updateOrderStatus(ID.biz, unpaid.id, body, signedIn(ID.owner)));
+    }
+    expect(answers, 'refused, naming the refund doors').toEqual(
+      Object.fromEntries(bodies.map((body) => [JSON.stringify(body), '400 naming the refund doors'])),
+    );
+    expect(
+      await answered(controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'placed', paymentStatus: 'REFUNDED' }, signedIn(STAFF))),
+      'REFUNDED as a revenue:read STAFF member',
+    ).toBe(403);
+    await settle();
+    expect(await orderShape(unpaid.id), 'the order as it was').toEqual(shape);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(expenses, 'no Expense').toEqual([]);
+    expect(await openPayable(unpaid.id), 'still an open payable').toBe(1);
+    // The paid door still takes it (at b98a5029: 409, the order closed with nothing recorded).
+    const paid = await controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner));
+    await settle();
+    expect(`${paid.status}/${paid.paymentStatus}`, 'marked paid through the paid door').toBe('paid/PAID');
+    await expectOnePaidInvoice(unpaid);
+
+    // (b) An order stored PAID outside the door (the Shopify sync's shape). At b98a5029 REFUNDED was 200 (probe P2): a
+    // refund with no Expense and no store_order.refunded, and the 'PAID' readers stopped counting the order.
+    const synced = await standardOrderOfA('t2o2_synced', { status: 'paid', paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+    const twin = await standardOrderOfA('t2o2_twin', { status: 'paid', paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+    const syncedShape = await orderShape(synced.id);
+    const beforeSynced = await counts();
+    seen = [];
+    expenses.length = 0;
+    expect(
+      await refundAnswer(controller.updateOrderStatus(ID.biz, synced.id, { status: 'paid', paymentStatus: 'REFUNDED' }, signedIn(ID.owner))),
+      'REFUNDED on an order stored PAID',
+    ).toBe('400 naming the refund doors');
+    await settle();
+    expect(await orderShape(synced.id), 'the order as it was').toEqual(syncedShape);
+    expect(await db.marketplaceOrder.count({ where: { id: synced.id, paymentStatus: 'PAID' } }), "the 'PAID' readers still count it").toBe(1);
+    expect(await counts()).toEqual(beforeSynced);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(expenses, 'no Expense').toEqual([]);
+
+    // Control: the fulfil 'refund' of its twin records the refund: an Expense of the amount and one store_order.refunded.
+    const refunded = await controller.fulfillOrder(ID.biz, twin.id, { action: 'refund', refundAmount: ORDER_TOTAL }, signedIn(ID.owner));
+    await settle();
+    expect(`${refunded.status}/${refunded.paymentStatus}`).toBe('refunded/REFUNDED');
+    expect(expenses.map((e) => Number(e.amount)), 'an Expense of the refund').toEqual([ORDER_TOTAL]);
+    expect(storeEvents(), 'one store_order.refunded').toEqual(['store_order.refunded']);
+
+    // Control: REFUNDED on an order stored REFUNDED (any case) records nothing new and is kept, written canonical.
+    const legacy = await standardOrderOfA('t2o2_legacy', { status: 'refunded', paymentStatus: 'refunded', metadata: { source: 'shopify' } });
+    seen = [];
+    expenses.length = 0;
+    const resent: string[] = [];
+    for (const [id, paymentStatus] of [
+      [twin.id, 'REFUNDED'],
+      [legacy.id, ' Refunded '],
+    ] as const) {
+      const res = await controller.updateOrderStatus(ID.biz, id, { status: 'completed', paymentStatus }, signedIn(ID.owner));
+      resent.push(`${res.status}/${res.paymentStatus}`);
+    }
+    await settle();
+    expect(resent, 'kept').toEqual(['completed/REFUNDED', 'completed/REFUNDED']);
+    expect(storeEvents()).toEqual([]);
+    expect(expenses, 'no second Expense').toEqual([]);
+  });
+
+  it('V18-T2o3 (W11-ORDER-PAID-VALUES review CR-W11OPV-1; D-117) PATCH .../status with paymentStatus PAID (any case) on an order stored with a non-canonical paid spelling outside the door (\'paid\', \'Paid\': what the base\'s lowercase write left over a stored PAID) stores the canonical \'PAID\', so the readers that filter paymentStatus \'PAID\' count it and it is not an open payable, with no invoice, payment, posting or store_order event', async () => {
+    const { controller } = await marketRoutes();
+    const before = await counts();
+    seen = [];
+    const stored: string[] = [];
+    for (const [suffix, legacySpelling, sent] of [
+      ['t2o3_lower', 'paid', 'PAID'],
+      ['t2o3_title', 'Paid', 'paid'],
+      ['t2o3_shipped', 'paid', ' Paid '],
+    ] as const) {
+      const order = await standardOrderOfA(suffix, { status: 'paid', paymentStatus: legacySpelling, metadata: { source: 'shopify' } });
+      const status = suffix === 't2o3_shipped' ? 'picking_packing' : 'paid';
+      // At b98a5029 each answered 200 with the legacy spelling kept (stored paid/paid, paid/Paid): no route made it
+      // canonical, as the paid door and mark_paid both take it as paid already.
+      await controller.updateOrderStatus(ID.biz, order.id, { status, paymentStatus: sent }, signedIn(ID.owner));
+      const row = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      stored.push(`${legacySpelling} + ${JSON.stringify(sent)}: ${row.status}/${row.paymentStatus}`);
+      expect(await invoicesOf(order), `${suffix}: no invoice written for it`).toEqual([]);
+    }
+    await settle();
+    expect(stored, "the canonical 'PAID' stored").toEqual([
+      'paid + "PAID": paid/PAID',
+      'Paid + "paid": paid/PAID',
+      'paid + " Paid ": picking_packing/PAID',
+    ]);
+    const ids = (await db.marketplaceOrder.findMany({ where: { businessId: ID.biz, orderNumber: { startsWith: `${P}rp_t2o3_` } }, select: { id: true } })).map(
+      (o: any) => o.id,
+    );
+    expect(await db.marketplaceOrder.count({ where: { id: { in: ids }, paymentStatus: 'PAID' } }), "the 'PAID' readers count them").toBe(3);
+    expect(
+      await db.marketplaceOrder.count({ where: { id: { in: ids }, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] } } }),
+      'none an open payable',
+    ).toBe(0);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+  });
+
+  it('V18-T2o4 (W11-ORDER-PAID-VALUES review SEC-W11OPV-2; D-117, D-112) a PATCH .../status payment write is compare-and-set on the payment status the PATCH read: an owner\'s paymentStatus UNPAID (or PENDING) that read the order before a concurrent PATCH PAID committed through the paid door is 409 with nothing written, so the order stays PAID with its one invoice, payment and posting and is not an open payable; control: with no concurrent marking the same PATCH is 200', async () => {
+    const { controller } = await marketRoutes();
+    const realCheck = storeOrders.assertMemberMayRecordPayments.bind(storeOrders);
+    for (const paymentStatus of ['UNPAID', 'PENDING']) {
+      const order = await standardOrderOfA(`t2o4_${paymentStatus.toLowerCase()}`);
+      seen = [];
+      // The stale PATCH is held after its order read and its door read (at the revenue write check), while the marking
+      // runs through the paid door to completion: the review's probe P3.
+      let heldIn!: () => void;
+      const reached = new Promise<void>((resolve) => (heldIn = resolve));
+      let release!: () => void;
+      const go = new Promise<void>((resolve) => (release = resolve));
+      let calls = 0;
+      const spy = vi.spyOn(storeOrders, 'assertMemberMayRecordPayments').mockImplementation(async (...args: any[]) => {
+        calls += 1;
+        if (calls === 1) {
+          heldIn();
+          await go;
+        }
+        return realCheck(...args);
+      });
+      let staleAnswer: unknown;
+      try {
+        const stale = answered(controller.updateOrderStatus(ID.biz, order.id, { status: 'placed', paymentStatus }, signedIn(ID.owner)));
+        await reached;
+        const paid = await controller.updateOrderStatus(ID.biz, order.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner));
+        await settle();
+        expect(`${paid.status}/${paid.paymentStatus}`, `${paymentStatus}: the marking through the paid door`).toBe('paid/PAID');
+        release();
+        staleAnswer = await stale;
+      } finally {
+        release();
+        spy.mockRestore();
+      }
+      await settle();
+      // At b98a5029 both were 200 and the stale PATCH wrote placed/UNPAID over the door's PAID: an open payable whose
+      // INV-<orderNumber> is PAID and whose payment is SUCCESSFUL, refused by both paid doors for good (400).
+      expect(staleAnswer, `${paymentStatus}: the stale PATCH`).toBe(409);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`, `${paymentStatus}: stored`).toBe('paid/PAID');
+      await expectOnePaidInvoice(order);
+      expect(
+        await db.marketplaceOrder.count({ where: { id: order.id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] } } }),
+        `${paymentStatus}: not an open payable`,
+      ).toBe(0);
+      expect(storeEvents().filter((n) => n !== 'store_order.paid'), `${paymentStatus}: no event from the stale PATCH`).toEqual([]);
+    }
+
+    // Control: with no concurrent marking, the same PATCH writes its value.
+    const order = await standardOrderOfA('t2o4_control');
+    const res = await controller.updateOrderStatus(ID.biz, order.id, { status: 'placed', paymentStatus: 'PENDING' }, signedIn(ID.owner));
+    expect(`${res.status}/${res.paymentStatus}`).toBe('placed/PENDING');
+  });
+
+  /**
+   * W11-PARTIAL-REFUND-DOOR (owner ruling D-121; CR-W10SOP-2, ruling R-8), the former it.todo V18-T2i: a store order
+   * paid through the audited paid door (D-112) is refunded in part through the same door, the fulfil 'refund' with a
+   * refundAmount below what is left of its payment. The member needs revenue write (D-46, as D-112). One negative
+   * REFUNDED row of the amount is recorded against the order's door payment (CommerceService.markPaymentRefunded, the
+   * D-14 refund door, under its invoice lock), its books are reversed by that amount (RevenuePostingService's partial
+   * refund posting, Payment:<id>:payment_refunded:<n>), and the order keeps its status and its payment status PAID (the
+   * order vocabulary has no partly refunded value, and no schema change is made): metadata.refundedTotal holds what is
+   * refunded and a 'partially_refunded' timeline step names the amount. Partial refunds that reach what was paid end as
+   * the full refund does (V18-T2h): the order REFUNDED, the posting and the partials reversed once, the invoice
+   * reopened, one store_order.refunded naming the invoice. At the base every refundAmount other than the order total
+   * was 400 (V18-T2h).
+   */
+  /** An order of A marked paid through the paid door by the owner (routing stubbed by the caller), with its books. */
+  async function doorPaidOrderOfA(controller: any, suffix: string) {
+    const order = await standardOrderOfA(suffix);
+    await controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner));
+    await settle();
+    const { invoice, payment } = await expectOnePaidInvoice(order);
+    return { order, invoice, payment };
+  }
+  /** The payment rows of an invoice as `status:amount`, in order. */
+  const rowsOf = async (invoiceId: string) =>
+    (await paymentsOf([invoiceId])).map((p: any) => `${p.status}:${Number(p.amount)}`);
+  /** The payment's postings (recording, partial refunds, reversals) as `externalRef:status:amount`, sorted. */
+  const paymentPostings = async (paymentId: string) =>
+    (await postingsOf([paymentId])).map((t: any) => `${t.externalRef}:${t.status}:${Number(t.amount)}`).sort();
+  /** The deposit-account net of the payment's postings: what the ledger says is still held. */
+  const depositNetOf = async (paymentId: string) =>
+    money(
+      (await postingsOf([paymentId]))
+        .flatMap((t: any) => t.entries)
+        .filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+        .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+    );
+  const expectTrialBalance = async () => {
+    const totals = await db.ledgerEntry.aggregate({ where: { businessId: ID.biz }, _sum: { debit: true, credit: true } });
+    expect(money(Number(totals._sum.debit ?? 0)), 'tenant trial balance').toBe(money(Number(totals._sum.credit ?? 0)));
+  };
+  /** What the order shows of its refunds: status/paymentStatus, metadata.refundedTotal and its refund steps. */
+  async function refundShape(orderId: string) {
+    const o = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+    const meta = (o.metadata ?? {}) as Record<string, any>;
+    return {
+      row: `${o.status}/${o.paymentStatus}`,
+      refundedTotal: meta.refundedTotal ?? null,
+      steps: ((meta.statusTimeline ?? []) as any[])
+        .filter((t) => String(t.status).includes('refund'))
+        .map((t) => `${t.status}:${t.refundAmount}`),
+    };
+  }
+  /** The FINANCE payment_refunded audit rows of a payment: who refunded what. */
+  const refundAudit = async (paymentId: string) =>
+    (
+      await db.activity.findMany({
+        where: { businessId: ID.biz, action: 'payment_refunded', entityId: paymentId },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      })
+    ).map((a: any) => `${a.actorId}:${Number((a.data as any)?.amount)}`);
+  /**
+   * The D-14 refund door (CommerceService.markPaymentRefunded, real) held until `parties` refunds have reached it (or
+   * `windowMs` has passed), so each has read the order and its payment before any refund commits: the race made
+   * certain. The door's own invoice lock then serializes them.
+   */
+  async function holdRefundDoor(parties: number, windowMs = 2_000) {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const commerce = app.get(CommerceService) as Record<string, any>;
+    const real = commerce.markPaymentRefunded.bind(commerce);
+    let arrived = 0;
+    let allIn!: () => void;
+    const gathered = new Promise<void>((resolve) => (allIn = resolve));
+    const spy = vi.spyOn(commerce, 'markPaymentRefunded').mockImplementation(async (...args: unknown[]) => {
+      arrived += 1;
+      if (arrived >= parties) allIn();
+      await Promise.race([gathered, new Promise((resolve) => setTimeout(resolve, windowMs))]);
+      return real(...args);
+    });
+    return { arrivals: () => arrived, restore: () => spy.mockRestore() };
+  }
+  /** invoice.reopened emissions (the D-14 reopen whose listeners undo the money effects, D-102), while `work` runs. */
+  async function reopenedDuring(work: () => Promise<void>): Promise<string[]> {
+    const reopened: string[] = [];
+    const listener = (payload: any) => reopened.push(String(payload?.invoice?.id));
+    events.on('invoice.reopened', listener);
+    try {
+      await work();
+    } finally {
+      events.off('invoice.reopened', listener);
+    }
+    return reopened;
+  }
+
+  it('V18-T2i (W11-PARTIAL-REFUND-DOOR, D-121, was it.todo; W10-STORE-ORDER-PAID review CR-W10SOP-2, D-112, D-14) a partial refund of an order marked paid through the paid door is refunded through the same door: the owner\'s fulfil refund of 30 of 80 records one negative REFUNDED row of 30 against the door payment naming the refunder (and one payment_refunded audit row of 30), posts one partial refund of 30 (Payment:<id>:payment_refunded:1, the recording still POSTED, the deposit net 50, the trial balance balanced), leaves the invoice PARTIALLY_PAID, and the order keeps its status and paymentStatus PAID with metadata.refundedTotal 30 and a partially_refunded step of 30; no store_order.refunded and no Expense', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i');
+      const statusBefore = (await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status;
+      seen = [];
+      expenses.length = 0;
+
+      const answer = await answered(
+        controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30, reason: 'one item returned' }, signedIn(ID.owner)),
+      );
+      await settle();
+      expect(answer, 'the partial refund is answered').toBe(200);
+
+      const rows = await paymentsOf([invoice.id]);
+      expect(rows.map((p) => `${p.status}:${Number(p.amount)}:${p.recordedBy}`), 'the original kept, one negative refund row of the amount').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}:${ID.owner}`,
+        `REFUNDED:-30:${ID.owner}`,
+      ]);
+      expect(rows[1].reference, 'the refund links to the door payment').toBe(payment.providerPaymentId);
+      expect(await refundAudit(payment.id), 'the refunder named on the audit row, with the amount').toEqual([`${ID.owner}:30`]);
+
+      expect(await paymentPostings(payment.id), 'the recording kept, one partial refund posting of the amount').toEqual(
+        [`Payment:${payment.id}:payment_recorded:POSTED:${ORDER_TOTAL}`, `Payment:${payment.id}:payment_refunded:1:POSTED:30`].sort(),
+      );
+      expect(await depositNetOf(payment.id), 'the ledger holds what is left').toBe(ORDER_TOTAL - 30);
+      const balance = storedBalanceFn(Number(invoice.total), rows.map((p) => ({ amount: Number(p.amount), status: p.status })), invoice.currency);
+      expect(balance.net, 'the balance read contract agrees').toBe(ORDER_TOTAL - 30);
+      await expectTrialBalance();
+      const reopened = await db.invoice.findUnique({ where: { id: invoice.id } });
+      expect(reopened.status, 'part of the money is still received (D-14)').toBe('PARTIALLY_PAID');
+
+      expect(await refundShape(order.id), 'the order shows it is partly refunded').toEqual({
+        row: `${statusBefore}/PAID`,
+        refundedTotal: 30,
+        steps: ['partially_refunded:30'],
+      });
+      expect(storeEvents(), 'the order is not refunded: no store_order event').toEqual([]);
+      expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i2 (W11-PARTIAL-REFUND-DOOR, D-121) a refund amount the door cannot take is 400 with nothing written: after a partial refund of 30 of 80, a refundAmount of 60 (more than the 50 left), 0, -5, 10.005 (not two decimals), "12abc", an object, or one in another currency than the order\'s; the order, its payment rows, its postings and its refunded total are as they were, with no store_order event and no Expense (the order total, 80, is the full refund of what is left: V18-T2i7, review CRR-PRD-1)', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i2');
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'the first partial refund',
+      ).toBe(200);
+      await settle();
+      const before = { counts: await counts(), rows: await rowsOf(invoice.id), postings: await paymentPostings(payment.id), shape: await refundShape(order.id) };
+      expect(before.shape.refundedTotal).toBe(30);
+      seen = [];
+      expenses.length = 0;
+
+      for (const body of [
+        { refundAmount: 60 },
+        { refundAmount: 0 },
+        { refundAmount: -5 },
+        { refundAmount: 10.005 },
+        { refundAmount: '12abc' },
+        { refundAmount: { set: 10 } },
+        { refundAmount: 10, currency: 'USD' },
+      ]) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', ...body }, signedIn(ID.owner))),
+          `refund ${JSON.stringify(body)}`,
+        ).toBe(400);
+      }
+      await settle();
+      expect(await counts(), 'no invoice, payment or posting').toEqual(before.counts);
+      expect(await rowsOf(invoice.id), 'the payment rows as they were').toEqual(before.rows);
+      expect(await paymentPostings(payment.id), 'the postings as they were').toEqual(before.postings);
+      expect(await refundShape(order.id), 'the order as it was').toEqual(before.shape);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i3 (W11-PARTIAL-REFUND-DOOR, D-121, D-14, D-102) two partial refunds summing to what was paid end as the full refund: 30 then 50 of 80 leave the original kept and two negative rows (-30, -50), the recording and the first partial posting each reversed once (deposit net 0, trial balance balanced), the invoice reopened to SENT with paidAt cleared (one invoice.reopened), the order REFUNDED/REFUNDED with refundedTotal 80, one store_order.refunded naming the invoice and no Expense; a further refund is 400 with nothing written', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i3');
+      seen = [];
+      expenses.length = 0;
+
+      const reopened = await reopenedDuring(async () => {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+          'the first partial refund',
+        ).toBe(200);
+        await settle();
+        expect((await refundShape(order.id)).row.toUpperCase(), 'partly refunded: still PAID').toMatch(/\/PAID$/);
+        expect(storeEvents(), 'no store_order.refunded for the first part').toEqual([]);
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: '50.00' }, signedIn(ID.owner))),
+          'the partial refund of what is left',
+        ).toBe(200);
+        await settle();
+      });
+
+      expect(await rowsOf(invoice.id), 'the original kept, one negative row per refund').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}`,
+        'REFUNDED:-30',
+        'REFUNDED:-50',
+      ]);
+      expect(await refundAudit(payment.id), 'each refund names the refunder').toEqual([`${ID.owner}:30`, `${ID.owner}:50`]);
+      expect(await paymentPostings(payment.id), 'the recording and the partial reversed, each once').toEqual(
+        [
+          `Payment:${payment.id}:payment_recorded:REVERSED:${ORDER_TOTAL}`,
+          `Payment:${payment.id}:payment_recorded:reversal:POSTED:${ORDER_TOTAL}`,
+          `Payment:${payment.id}:payment_refunded:1:REVERSED:30`,
+          `Payment:${payment.id}:payment_refunded:1:reversal:POSTED:30`,
+        ].sort(),
+      );
+      expect(await depositNetOf(payment.id), 'the cash taken is given back on the ledger').toBe(0);
+      await expectTrialBalance();
+      const inv = await db.invoice.findUnique({ where: { id: invoice.id } });
+      expect(`${inv.status}/${inv.paidAt}`, 'a full refund reopens the invoice to SENT, paidAt cleared (D-14)').toBe('SENT/null');
+      expect(reopened, 'one invoice.reopened, whose listeners undo the money effects (D-102)').toEqual([invoice.id]);
+
+      const shape = await refundShape(order.id);
+      expect(shape.row.toUpperCase(), 'the order refunded').toBe('REFUNDED/REFUNDED');
+      expect(shape.refundedTotal, 'all of it refunded').toBe(ORDER_TOTAL);
+      expect(shape.steps, 'the part, then the refund of what was left').toEqual(['partially_refunded:30', 'refunded:50']);
+      const refundedEvents = seen.filter((e) => e.name === 'store_order.refunded');
+      expect(refundedEvents.map((e) => e.payload?.invoiceId), 'one store_order.refunded naming the invoice').toEqual([invoice.id]);
+      expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+
+      // A further refund, in part or in full, is refused and writes nothing.
+      const before = await counts();
+      seen = [];
+      for (const body of [{ refundAmount: 10 }, {}]) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', ...body }, signedIn(ID.owner))),
+          `again ${JSON.stringify(body)}`,
+        ).toBe(400);
+      }
+      await settle();
+      expect(await counts()).toEqual(before);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i4 (W11-PARTIAL-REFUND-DOOR, D-121) partial refunds racing on one order never refund more than was paid: three refunds of 30 of 80, each with its own reason (three refunds, not a replay: SEC-PRD-1, V18-T2i6) and each past its own checks before any commits, record two (-30, -30: two partial postings, the deposit net 20) and the third is 400, the order PAID with refundedTotal 60; two refunds of 40 of 80, each with its own reason, racing both record and end as the full refund once: the order REFUNDED with refundedTotal 80, the recording and the first partial reversed once, the deposit net 0 and one store_order.refunded', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      // Three refunds of 30: what was paid holds two. Each has its own reason: identical refunds are one refund
+      // recorded once (review SEC-PRD-1, V18-T2i6).
+      const three = await doorPaidOrderOfA(controller, 't2i4_three');
+      seen = [];
+      expenses.length = 0;
+      let held = await holdRefundDoor(3);
+      const answers = await Promise.all(
+        [1, 2, 3].map((n) =>
+          answered(
+            controller.fulfillOrder(ID.biz, three.order.id, { action: 'refund', refundAmount: 30, reason: `item ${n} returned` }, signedIn(ID.owner)),
+          ),
+        ),
+      );
+      held.restore();
+      await settle();
+      expect(held.arrivals(), 'each refund reached the door').toBe(3);
+      expect(answers.slice().sort(), 'two recorded, the one over what was paid refused').toEqual([200, 200, 400]);
+      expect(await rowsOf(three.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30', 'REFUNDED:-30']);
+      expect(await paymentPostings(three.payment.id)).toEqual(
+        [
+          `Payment:${three.payment.id}:payment_recorded:POSTED:${ORDER_TOTAL}`,
+          `Payment:${three.payment.id}:payment_refunded:1:POSTED:30`,
+          `Payment:${three.payment.id}:payment_refunded:2:POSTED:30`,
+        ].sort(),
+      );
+      expect(await depositNetOf(three.payment.id)).toBe(ORDER_TOTAL - 60);
+      const threeShape = await refundShape(three.order.id);
+      expect(threeShape.row.toUpperCase()).toMatch(/\/PAID$/);
+      expect(threeShape.refundedTotal).toBe(60);
+      expect(threeShape.steps).toEqual(['partially_refunded:30', 'partially_refunded:30']);
+      expect(storeEvents()).toEqual([]);
+
+      // Two refunds of 40: together they are what was paid.
+      const two = await doorPaidOrderOfA(controller, 't2i4_two');
+      seen = [];
+      held = await holdRefundDoor(2);
+      const pair = await Promise.all(
+        [1, 2].map((n) =>
+          answered(
+            controller.fulfillOrder(ID.biz, two.order.id, { action: 'refund', refundAmount: 40, reason: `item ${n} returned` }, signedIn(ID.owner)),
+          ),
+        ),
+      );
+      held.restore();
+      await settle();
+      expect(pair, 'both recorded').toEqual([200, 200]);
+      expect(await rowsOf(two.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-40', 'REFUNDED:-40']);
+      expect(await paymentPostings(two.payment.id), 'the recording and the first partial reversed once').toEqual(
+        [
+          `Payment:${two.payment.id}:payment_recorded:REVERSED:${ORDER_TOTAL}`,
+          `Payment:${two.payment.id}:payment_recorded:reversal:POSTED:${ORDER_TOTAL}`,
+          `Payment:${two.payment.id}:payment_refunded:1:REVERSED:40`,
+          `Payment:${two.payment.id}:payment_refunded:1:reversal:POSTED:40`,
+        ].sort(),
+      );
+      expect(await depositNetOf(two.payment.id)).toBe(0);
+      await expectTrialBalance();
+      const twoShape = await refundShape(two.order.id);
+      expect(twoShape.row.toUpperCase()).toBe('REFUNDED/REFUNDED');
+      expect(twoShape.refundedTotal).toBe(ORDER_TOTAL);
+      expect(storeEvents().filter((n) => n === 'store_order.refunded'), 'refunded once').toHaveLength(1);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i5 (W11-PARTIAL-REFUND-DOOR, D-121, D-112, D-46) a partial refund takes revenue write: a revenue:read STAFF member and a call with no member are 403 with nothing written (no refund row, no posting, the order as it was, no store_order event, no Expense); control: the owner\'s partial refund of the same order is recorded', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      const staff = await memberOfA('t2i5_staff');
+      const { order, invoice, payment } = await doorPaidOrderOfA(controller, 't2i5');
+      const before = { counts: await counts(), rows: await rowsOf(invoice.id), postings: await paymentPostings(payment.id), shape: await refundShape(order.id) };
+      seen = [];
+      expenses.length = 0;
+
+      for (const [who, actor] of [['a revenue:read STAFF member', staff], ['no member', null]] as const) {
+        expect(
+          await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(actor))),
+          who,
+        ).toBe(403);
+      }
+      await settle();
+      expect(await counts()).toEqual(before.counts);
+      expect(await rowsOf(invoice.id)).toEqual(before.rows);
+      expect(await paymentPostings(payment.id)).toEqual(before.postings);
+      expect(await refundShape(order.id)).toEqual(before.shape);
+      expect(await refundAudit(payment.id)).toEqual([]);
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+
+      // Control: the owner's partial refund of the same order.
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'the owner',
+      ).toBe(200);
+      await settle();
+      expect(await rowsOf(invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30']);
+      expect((await refundShape(order.id)).refundedTotal).toBe(30);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i6 (W11-PARTIAL-REFUND-DOOR review SEC-PRD-1, D-121) a partial refund is recorded once: the owner\'s refund of 30 "one item returned" sent again (a client retry or a double submit), or with that reason in other case and spacing, is 409 with nothing written (one REFUNDED row of -30, one audit row, one partial posting, refundedTotal 30, no store_order event, no Expense), and a refund of 30 with its own reason is recorded; a replay that matches what is left is 409, not taken as the full refund; two identical refunds racing record one (200, 409)', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const refund = (orderId: string, body: Record<string, unknown>) =>
+      answered(controller.fulfillOrder(ID.biz, orderId, { action: 'refund', ...body }, signedIn(ID.owner)));
+    try {
+      // The review's repro: the same refund sent twice in sequence. At 0405cc78 both were 200 and recorded.
+      const one = await doorPaidOrderOfA(controller, 't2i6');
+      seen = [];
+      expenses.length = 0;
+      expect(await refund(one.order.id, { refundAmount: 30, reason: 'one item returned' }), 'the refund').toBe(200);
+      await settle();
+      const before = {
+        counts: await counts(),
+        rows: await rowsOf(one.invoice.id),
+        postings: await paymentPostings(one.payment.id),
+        shape: await refundShape(one.order.id),
+      };
+      for (const body of [
+        { refundAmount: 30, reason: 'one item returned' },
+        { refundAmount: '30.00', reason: '  One item   RETURNED ' },
+      ]) {
+        expect(await refund(one.order.id, body), `again ${JSON.stringify(body)}`).toBe(409);
+      }
+      await settle();
+      expect(await counts(), 'no payment or posting written').toEqual(before.counts);
+      expect(await rowsOf(one.invoice.id), 'one refund row').toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30']);
+      expect(await refundAudit(one.payment.id), 'one audit row').toEqual([`${ID.owner}:30`]);
+      expect(await paymentPostings(one.payment.id), 'one partial posting').toEqual(before.postings);
+      expect(await refundShape(one.order.id), 'the order as it was').toEqual({
+        row: before.shape.row,
+        refundedTotal: 30,
+        steps: ['partially_refunded:30'],
+      });
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+
+      // Control: a second refund of the same amount, with its own reason, is recorded.
+      expect(await refund(one.order.id, { refundAmount: 30, reason: 'second item returned' }), 'its own reason').toBe(200);
+      await settle();
+      expect(await rowsOf(one.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30', 'REFUNDED:-30']);
+      expect(await refundAudit(one.payment.id)).toEqual([`${ID.owner}:30`, `${ID.owner}:30`]);
+      expect((await refundShape(one.order.id)).refundedTotal).toBe(60);
+
+      // A replay of a refund that is what is left (40 of the 40 left) is the replay, not the full refund of the rest.
+      const half = await doorPaidOrderOfA(controller, 't2i6_half');
+      seen = [];
+      expect(await refund(half.order.id, { refundAmount: 40, reason: 'damaged' }), 'half').toBe(200);
+      await settle();
+      expect(await refund(half.order.id, { refundAmount: 40, reason: 'damaged' }), 'half again').toBe(409);
+      await settle();
+      expect(await rowsOf(half.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-40']);
+      const halfShape = await refundShape(half.order.id);
+      expect(halfShape.row.toUpperCase(), 'still paid').toMatch(/\/PAID$/);
+      expect(halfShape.refundedTotal).toBe(40);
+      expect(storeEvents(), 'not refunded').toEqual([]);
+
+      // A double submit racing: both past their own checks before either commits; the door records one.
+      const pair = await doorPaidOrderOfA(controller, 't2i6_pair');
+      seen = [];
+      const held = await holdRefundDoor(2);
+      const answers = await Promise.all([1, 2].map(() => refund(pair.order.id, { refundAmount: 30, reason: 'one item returned' })));
+      held.restore();
+      await settle();
+      expect(held.arrivals(), 'each reached the door').toBe(2);
+      expect(answers.slice().sort(), 'one recorded, the replay refused').toEqual([200, 409]);
+      expect(await rowsOf(pair.invoice.id)).toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30']);
+      expect(await refundAudit(pair.payment.id)).toEqual([`${ID.owner}:30`]);
+      expect(await paymentPostings(pair.payment.id)).toEqual(
+        [`Payment:${pair.payment.id}:payment_recorded:POSTED:${ORDER_TOTAL}`, `Payment:${pair.payment.id}:payment_refunded:1:POSTED:30`].sort(),
+      );
+      expect(await depositNetOf(pair.payment.id)).toBe(ORDER_TOTAL - 30);
+      expect(await refundShape(pair.order.id)).toMatchObject({ refundedTotal: 30, steps: ['partially_refunded:30'] });
+      await expectTrialBalance();
+      expect(storeEvents()).toEqual([]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2i7 (W11-PARTIAL-REFUND-DOOR review CRR-PRD-1, D-121, D-14) a refundAmount that is the order total (the W10 full refund, and what the store fulfillment panel sends by default) refunds what is left: after a D-121 partial of 30 it refunds the 50 left (rows -30, -50, the order REFUNDED/REFUNDED with refundedTotal 80, the recording and the partial reversed once, the invoice SENT, one store_order.refunded naming the invoice, no Expense); after a linked refund of 20 written outside the door (a provider refund, refundCharge) it refunds the 60 left, as at d3937867', async () => {
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    try {
+      // After a D-121 partial: the panel's default amount (parseFloat(String(order.total))). At 0405cc78 it was 400.
+      const part = await doorPaidOrderOfA(controller, 't2i7');
+      seen = [];
+      expenses.length = 0;
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, part.order.id, { action: 'refund', refundAmount: 30 }, signedIn(ID.owner))),
+        'the partial',
+      ).toBe(200);
+      await settle();
+      expect(
+        await answered(
+          controller.fulfillOrder(ID.biz, part.order.id, { action: 'refund', refundAmount: ORDER_TOTAL, reason: 'order returned' }, signedIn(ID.owner)),
+        ),
+        'the order total',
+      ).toBe(200);
+      await settle();
+      expect(await rowsOf(part.invoice.id), 'what was left refunded').toEqual([`SUCCESSFUL:${ORDER_TOTAL}`, 'REFUNDED:-30', 'REFUNDED:-50']);
+      expect(await refundAudit(part.payment.id)).toEqual([`${ID.owner}:30`, `${ID.owner}:50`]);
+      expect(await paymentPostings(part.payment.id), 'the recording and the partial reversed, each once').toEqual(
+        [
+          `Payment:${part.payment.id}:payment_recorded:REVERSED:${ORDER_TOTAL}`,
+          `Payment:${part.payment.id}:payment_recorded:reversal:POSTED:${ORDER_TOTAL}`,
+          `Payment:${part.payment.id}:payment_refunded:1:REVERSED:30`,
+          `Payment:${part.payment.id}:payment_refunded:1:reversal:POSTED:30`,
+        ].sort(),
+      );
+      expect(await depositNetOf(part.payment.id)).toBe(0);
+      await expectTrialBalance();
+      expect((await db.invoice.findUnique({ where: { id: part.invoice.id } })).status).toBe('SENT');
+      expect(await refundShape(part.order.id)).toEqual({
+        row: 'REFUNDED/REFUNDED',
+        refundedTotal: ORDER_TOTAL,
+        steps: ['partially_refunded:30', 'refunded:50'],
+      });
+      expect(seen.filter((e) => e.name === 'store_order.refunded').map((e) => e.payload?.invoiceId)).toEqual([part.invoice.id]);
+      expect(expenses).toEqual([]);
+
+      // After a refund linked to the door payment but written outside this door (as the provider refund door and
+      // payments-ops refundCharge write one), the invoice reconciled to PARTIALLY_PAID.
+      const linked = await doorPaidOrderOfA(controller, 't2i7_linked');
+      await db.payment.create({
+        data: {
+          businessId: ID.biz,
+          invoiceId: linked.invoice.id,
+          amount: -20,
+          currency: 'TTD',
+          status: 'REFUNDED',
+          provider: 'manual',
+          method: 'CASH',
+          providerPaymentId: `${P}t2i7_linked_refund`,
+          reference: linked.payment.providerPaymentId,
+        },
+      });
+      const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+      await app.get(InvoiceWorkflowService).reconcileFromPayments(linked.invoice.id);
+      expect((await db.invoice.findUnique({ where: { id: linked.invoice.id } })).status).toBe('PARTIALLY_PAID');
+      seen = [];
+      expect(
+        await answered(
+          controller.fulfillOrder(ID.biz, linked.order.id, { action: 'refund', refundAmount: `${ORDER_TOTAL}.00` }, signedIn(ID.owner)),
+        ),
+        'the order total, as text',
+      ).toBe(200);
+      await settle();
+      expect(await rowsOf(linked.invoice.id), 'what was left refunded').toEqual([
+        `SUCCESSFUL:${ORDER_TOTAL}`,
+        'REFUNDED:-20',
+        'REFUNDED:-60',
+      ]);
+      expect(await refundShape(linked.order.id)).toEqual({ row: 'REFUNDED/REFUNDED', refundedTotal: ORDER_TOTAL, steps: ['refunded:60'] });
+      expect(seen.filter((e) => e.name === 'store_order.refunded').map((e) => e.payload?.invoiceId)).toEqual([linked.invoice.id]);
+      expect(expenses).toEqual([]);
+    } finally {
+      routing.mockRestore();
+    }
+  });
+
+  /**
+   * W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3, FIN3): the paid door
+   * (StoreOrderService.completeCheckout) posts the order's COGS leg (ExpensePostingService.onProductSold: Dr COGS /
+   * Cr Inventory at the weighted unit cost, idempotent on MarketplaceOrder:<id>:cogs) inside its own transaction, for
+   * every order it marks paid, STANDARD and STOREFRONT. At fb00af1c MarketplaceService posted it after the door had
+   * committed (createOrder, recordPaymentThroughDoor), a failure logged with nothing to post it again, and a storefront
+   * settlement posted none.
+   *
+   * The fixture: a tracked product priced as the suite's widget (so the order totals ORDER_TOTAL), with one stock row
+   * at T2J_UNIT_COST in the business's default warehouse (the first active one, where completeCheckout decrements).
+   */
+  const T2J = { product: `${P}t2j_costed`, stock: `${P}t2j_stock`, warehouse: `${P}t2j_wh` };
+  const T2J_UNIT_COST = 12.5;
+  const T2J_COGS = T2J_UNIT_COST * QUANTITY;
+  let t2jFixtures: Promise<void> | undefined;
+  const costedFixtures = () =>
+    (t2jFixtures ??= (async () => {
+      const found = await db.warehouse.findFirst({ where: { businessId: ID.biz, isActive: true }, orderBy: { createdAt: 'asc' } });
+      const warehouseId = found?.id ?? (await db.warehouse.create({ data: { id: T2J.warehouse, businessId: ID.biz, name: 'V18A T2j Warehouse' } })).id;
+      await db.product.create({
+        data: { id: T2J.product, businessId: ID.biz, name: 'V18A Costed', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
+      });
+      await db.inventoryStock.create({
+        data: { id: T2J.stock, businessId: ID.biz, productId: T2J.product, warehouseId, quantity: 50, reserved: 0, costPerUnit: T2J_UNIT_COST },
+      });
+    })());
+  /** The order's cogs postings (sourced by the order itself), with their entries' accounts. */
+  const cogsOf = (orderId: string) =>
+    db.financialTransaction.findMany({
+      where: { businessId: ID.biz, sourceType: 'MarketplaceOrder', sourceId: orderId },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  /** One cogs posting of the order: Dr COGS / Cr INVENTORY_ASSET of unit cost x quantity. */
+  async function expectOneCogsPosting(orderId: string) {
+    const cogs = await cogsOf(orderId);
+    expect(cogs.map((t: any) => `${t.externalRef}:${t.status}:${Number(t.amount)}`), 'one cogs posting').toEqual([
+      `MarketplaceOrder:${orderId}:cogs:POSTED:${T2J_COGS}`,
+    ]);
+    const legs = cogs[0].entries
+      .map((e: any) => `${e.account?.systemKey}:${money(Number(e.debit))}:${money(Number(e.credit))}`)
+      .sort();
+    expect(legs, 'Dr COGS / Cr Inventory').toEqual([`COGS:${T2J_COGS}:0`, `INVENTORY_ASSET:0:${T2J_COGS}`].sort());
+  }
+  /**
+   * onProductSold (real) observed as it is called: whether it was handed the door's transaction client, and what a
+   * reader outside that transaction sees of the order at that moment (its payment status, its payments).
+   */
+  async function observeCogsPosting() {
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    const expensePosting = app.get(ExpensePostingService);
+    const calls: Array<{ sourceId: string; inTx: boolean; outside: string }> = [];
+    const real = expensePosting.onProductSold.bind(expensePosting);
+    const spy = vi.spyOn(expensePosting, 'onProductSold').mockImplementation(async (sale: any, tx?: any) => {
+      const order = await db.marketplaceOrder.findUnique({ where: { id: sale.sourceId }, select: { paymentStatus: true, orderNumber: true } });
+      const payments = await db.payment.count({ where: { businessId: ID.biz, invoice: { invoiceNumber: `INV-${order?.orderNumber}` } } });
+      calls.push({ sourceId: sale.sourceId, inTx: tx !== undefined, outside: `${order?.paymentStatus}/payments:${payments}` });
+      return real(sale, tx);
+    });
+    return { calls, spy, expensePosting };
+  }
+
+  it('V18-T2j (W11-CHECKOUT-COGS-TX, D-127; F-18, CR-W10SOP-3, FIN3) a STANDARD order marked paid (mark_paid) with a costed tracked line has exactly one cogs FinancialTransaction, Dr COGS / Cr Inventory of unit cost x quantity, committed with the payment: it is posted inside the paid door\'s transaction (handed the transaction client, the order still UNPAID with no payment to a reader outside it), beside one PAID invoice, one SUCCESSFUL payment and one payment_recorded posting', async () => {
+    await costedFixtures();
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const observed = await observeCogsPosting();
+    try {
+      const order = await standardOrderOfA('t2j_mark', {
+        items: { create: [{ productId: T2J.product, name: 'V18A Costed', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      });
+      expect(await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner)))).toBe(200);
+      await settle();
+      await expectOnePaidInvoice(order);
+      await expectOneCogsPosting(order.id);
+      // At fb00af1c onProductSold ran after the door had committed: no transaction client, the order already PAID.
+      expect(observed.calls, 'posted in the door\'s transaction').toEqual([{ sourceId: order.id, inTx: true, outside: 'UNPAID/payments:0' }]);
+      // STANDARD stock moves at fulfilment (stockMovesOnFulfilment): the door does not decrement it.
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity).toBe(50);
+    } finally {
+      observed.spy.mockRestore();
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2j2 (W11-CHECKOUT-COGS-TX, D-127; F-18) a COGS posting failure rolls the marking back: with onProductSold throwing once (cost accounts missing), mark_paid answers the error (400) and the order stays UNPAID with no INV-<orderNumber>, payment or posting (cogs included) and no store_order.paid; the next marking records the invoice, the payment, its posting and the one cogs posting', async () => {
+    await costedFixtures();
+    const { BadRequestException } = await import('@nestjs/common');
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const observed = await observeCogsPosting();
+    try {
+      const order = await standardOrderOfA('t2j_fail', {
+        items: { create: [{ productId: T2J.product, name: 'V18A Costed', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      });
+      const shape = await orderShape(order.id);
+      const before = await counts();
+      seen = [];
+      observed.spy.mockRejectedValueOnce(new BadRequestException(`No COGS COA for business ${ID.biz} - chart of accounts not seeded`));
+
+      // At fb00af1c: 200 and the order PAID with its invoice, payment and posting, the COGS failure only logged.
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner))),
+        'the COGS failure is the marking\'s answer',
+      ).toBe(400);
+      await settle();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).paymentStatus, 'the order stays unpaid').toBe('UNPAID');
+      expect(await orderShape(order.id), 'the marking taken back').toEqual(shape);
+      expect(await invoicesOf(order), 'no INV-<orderNumber>').toEqual([]);
+      expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+      expect(await cogsOf(order.id), 'no cogs posting').toEqual([]);
+      expect(storeEvents(), 'no store_order.paid').not.toContain('store_order.paid');
+
+      expect(await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner))), 'the next marking').toBe(200);
+      await settle();
+      await expectOnePaidInvoice(order);
+      await expectOneCogsPosting(order.id);
+      expect(storeEvents().filter((n) => n === 'store_order.paid'), 'one store_order.paid').toHaveLength(1);
+    } finally {
+      observed.spy.mockRestore();
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2j3 (W11-CHECKOUT-COGS-TX, D-127; F-18) a storefront order settled by its provider (completeCheckout through updatePaymentStatus) with a costed tracked line posts one cogs FinancialTransaction in the paid door\'s transaction, beside its invoice, payment, posting and stock decrement; a replayed settlement (and a replayed completeCheckout) posts no second one, and the posting is idempotent on MarketplaceOrder:<id>:cogs', async () => {
+    await costedFixtures();
+    const observed = await observeCogsPosting();
+    try {
+      const order = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: T2J.product, quantity: QUANTITY }],
+        customerInfo: { name: 'Vee Eighteen', email: CUSTOMER_EMAIL },
+        paymentMethod: 'WIPAY',
+      });
+      await settle();
+      expect(`${order.type}/${order.paymentStatus}/${order.total}`).toBe(`STOREFRONT/UNPAID/${ORDER_TOTAL}`);
+      const stockBefore = (await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity;
+
+      await storeOrders.updatePaymentStatus(order.id, 'PAID', `${P}wtx_t2j3`, 'wipay');
+      await settle();
+      await expectOnePaidInvoice(order);
+      // At fb00af1c a storefront settlement posted no COGS at all.
+      await expectOneCogsPosting(order.id);
+      expect(observed.calls, 'posted in the door\'s transaction').toEqual([{ sourceId: order.id, inTx: true, outside: 'UNPAID/payments:0' }]);
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity, 'the stock decremented').toBe(stockBefore - QUANTITY);
+
+      // Replays: the provider's callback again, and completeCheckout itself. The door returns the PAID order as stored.
+      const before = await counts();
+      await storeOrders.updatePaymentStatus(order.id, 'PAID', `${P}wtx_t2j3`, 'wipay');
+      await storeOrders.completeCheckout({ orderId: order.id, paymentRef: `${P}wtx_t2j3_again`, provider: 'wipay', method: 'wipay' });
+      await settle();
+      expect(await counts(), 'nothing written by a replay').toEqual(before);
+      await expectOneCogsPosting(order.id);
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity, 'no second decrement').toBe(stockBefore - QUANTITY);
+      // The posting itself is idempotent on its externalRef.
+      const again = await observed.expensePosting.onProductSold({
+        businessId: ID.biz,
+        sourceType: 'MarketplaceOrder',
+        sourceId: order.id,
+        date: new Date(),
+        currency: 'TTD',
+        items: [{ productId: T2J.product, quantity: QUANTITY }],
+      });
+      expect(again?.alreadyPosted, 'MarketplaceOrder:<id>:cogs posted once').toBe(true);
+      await expectOneCogsPosting(order.id);
+    } finally {
+      observed.spy.mockRestore();
+    }
+  });
 
   it('V18-T3 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, V1-33) live pin: CASH and MANUAL storefront orders reach PAID through POST /site/businesses/:businessId/orders/:orderId/complete-offline (revenue write, the signed-in member records it) with one invoice, one payment and one posting, a second completion writes nothing, and the store fulfillment panel\'s Complete offline action posts to that route (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04)', async () => {
     const fs = await import('fs');

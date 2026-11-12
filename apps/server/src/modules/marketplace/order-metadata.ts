@@ -137,6 +137,104 @@ export async function setOrderPublicTokenOnce(
 }
 
 /**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; F-24): writes `value` under
+ * metadata[key] in one statement, only where the key is absent, null or empty
+ * (a JSON null, '{}', '[]' or ''), the rest of the metadata as stored. Returns
+ * whether this call wrote it: false where another call stored a value first
+ * (read under the row lock, after any wait for its writer, so two calls at once
+ * cannot both write) or where there is no such order in the business. The
+ * shape of setOrderPublicTokenOnce, for a claim made once per order.
+ */
+export async function setOrderMetadataKeyOnce(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  value: unknown,
+): Promise<boolean> {
+  const written = await client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND COALESCE(${METADATA} -> ${key}::text, 'null'::jsonb) IN ('null'::jsonb, '{}'::jsonb, '[]'::jsonb, '""'::jsonb)`;
+  return written > 0;
+}
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; review SEC-SEO-1): writes
+ * `value` under metadata[key] in one statement, only while metadata[key] is
+ * still `expected` (jsonb equality), the rest of the metadata as stored.
+ * Returns whether this call wrote it: false where another call changed the key
+ * since `expected` was read (the WHERE is read again under the row lock, after
+ * any wait for that writer, so of two calls replacing the same value one
+ * writes), or where there is no such order in the business.
+ */
+export async function replaceOrderMetadataKeyIf(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  expected: unknown,
+  value: unknown,
+): Promise<boolean> {
+  const written = await client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND ${METADATA} -> ${key}::text = ${JSON.stringify(expected)}::jsonb`;
+  return written > 0;
+}
+
+/**
+ * W11-SHIPPING-EXPENSE-ONCE (D-126): removes metadata[key] in one statement,
+ * only while it still holds the claim `claimToken` (metadata[key].claim), so a
+ * claim taken back after its work failed never removes a value another call has
+ * written since. Returns the count written (0 when the key holds anything
+ * else, or there is no such order in the business).
+ */
+export function removeOrderMetadataKeyIf(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  claimToken: string,
+): Promise<number> {
+  return client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} - ${key}::text,
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND ${METADATA} -> ${key}::text ->> 'claim' = ${claimToken}`;
+}
+
+/**
+ * W11-PARTIAL-REFUND-DOOR (owner ruling D-121): records what the refund door has refunded of the order, in one
+ * statement: metadata.refundedTotal becomes the larger of the stored total and `refundedTotal` (currency units, read
+ * from the order's refund rows by the caller), and `steps` are appended to its statusTimeline, the rest of the
+ * metadata as stored. The total only grows, so refunds that finish in any order leave the largest (the newest) one;
+ * a stored value that is not a number counts as 0. The order's paymentStatus vocabulary has no partly refunded value
+ * (no schema change, D-121), so this is where a partly refunded order shows it.
+ */
+export function recordOrderRefundedTotal(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  refundedTotal: number,
+  steps: readonly OrderTimelineStep[],
+): Promise<number> {
+  const stored = Prisma.sql`(CASE WHEN jsonb_typeof(metadata -> 'refundedTotal') = 'number' THEN (metadata ->> 'refundedTotal')::numeric ELSE 0 END)`;
+  return client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object(
+             'refundedTotal', to_jsonb(GREATEST(${stored}, ${refundedTotal.toFixed(2)}::numeric)),
+             'statusTimeline', ${TIMELINE} || ${JSON.stringify(steps)}::jsonb),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}`;
+}
+
+/**
  * Takes the last statusTimeline step equal to `step` (jsonb equality: the same
  * keys and values, in any key order) off the order: a marking that recorded
  * nothing takes back its own step. Nothing is written when there is none.
