@@ -1179,16 +1179,161 @@ describe('W10-ADVISOR-TIMELINE (D-63): the AI advisor chat reads only the timeli
 });
 
 /**
+ * W11-AI-CASHFLOW-REVENUE (W10-ADVISOR-TIMELINE review SEC-W10AT-2; owner rulings D-57, D-100, with
+ * D-104 for membership): TS-13f, live (it was it.todo). GET /ai/businesses/:businessId/ai/cash-flow-forecast
+ * (AiController.cashFlowForecast -> AiAdvisorService.predictCashFlow, which the web's reports cash-flow view
+ * and revenue projection chart call through client.ts fetchCashFlowForecast) ran AuthGuard + BusinessGuard
+ * only and answered every member the business's currentBalance, projectedBalance, dailyRevenueRate,
+ * dailyExpenseRate and, past five outstanding invoices, an alert naming their total. A read carrying revenue
+ * and cash figures needs revenue read (D-57, D-100), as its commerce twin GET
+ * commerce/businesses/:businessId/cash-flow-forecast already does (TS-20e): the route now runs
+ * ModuleScopeGuard with @RequireModuleScope('revenue', 'read'), which refuses before any read.
+ *
+ * The real AiController and AiAdvisorService run on their own app over this suite's PrismaService and
+ * identity header, with the real AuthGuard, BusinessGuard, ModuleScopeGuard and CrmRateLimitGuard. No
+ * provider traffic: AiUsageService is a stand-in that throws if called; every other collaborator is an
+ * empty stand-in the route never calls. The case writes one PAID invoice of 7777 (and, for the
+ * alert, six SENT invoices) in business A and removes them when it ends.
+ */
+describe('W11-AI-CASHFLOW-REVENUE (D-57, D-100): the AI cash-flow forecast needs revenue read (TS-13f)', () => {
+  let forecastApp: any;
+  afterAll(async () => {
+    if (forecastApp) await forecastApp.close();
+  });
+
+  async function forecastModule(): Promise<any> {
+    if (!forecastApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const { AiAdvisorService } = await import('../src/modules/ai/ai-advisor.service');
+      const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+      const { StrategicIntelligenceService } = await import('../src/modules/ai/strategic-intelligence.service');
+      const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+          AiAdvisorService,
+          {
+            provide: AiUsageService,
+            useValue: {
+              callAi: async (opts: { feature: string }) => {
+                throw new Error(`v84a: the cash-flow forecast made an AI call (${opts.feature})`);
+              },
+            },
+          },
+          { provide: StrategicIntelligenceService, useValue: {} },
+          { provide: BlueprintService, useValue: {} },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      forecastApp = ref.createNestApplication();
+      // Identity attachment only, as the suite's app does. No guard is overridden.
+      forecastApp.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers[HEADER];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      forecastApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await forecastApp.init();
+    }
+    return forecastApp;
+  }
+
+  async function forecast(user: string, query = '', biz = ID.bizA): Promise<request.Response> {
+    const server = (await forecastModule()).getHttpServer();
+    return request(server).get(`/ai/businesses/${biz}/ai/cash-flow-forecast${query}`).set(HEADER, user);
+  }
+
+  it("TS-13f (W11-AI-CASHFLOW-REVENUE, D-57, D-100, D-104; was it.todo, review SEC-W10AT-2): GET /ai/businesses/:businessId/ai/cash-flow-forecast refuses a member without revenue read (403: no currentBalance, dailyRevenueRate, no figure, no outstanding-invoice alert) as its commerce twin does (TS-20e), and a non-member; a revenue-read STAFF member and the OWNER keep the forecast unchanged (one PAID invoice of 7777: currentBalance 7777, projectedBalance 10369.33 over the default 30 days, dailyRevenueRate 86.41, the days parameter honoured, the alert naming the outstanding total)", async () => {
+    const PAID = `${P}inv_cf_paid`;
+    const DUE = Array.from({ length: 6 }, (_, i) => `${P}inv_cf_due${i}`);
+    try {
+      // The forecast reads every PAID invoice and expense of the last 90 days: business A holds none
+      // here (each case above removes its own), so the figures are this case's invoice alone.
+      const since = new Date(Date.now() - 90 * 86_400_000);
+      expect(await db.invoice.count({ where: { businessId: ID.bizA, deletedAt: null, status: 'PAID', paidAt: { gte: since } } })).toBe(0);
+      expect(await db.expense.count({ where: { businessId: ID.bizA, deletedAt: null, date: { gte: since } } })).toBe(0);
+      const outstandingBefore = await db.invoice.count({ where: { businessId: ID.bizA, deletedAt: null, status: { in: ['SENT', 'DRAFT'] } } });
+      await db.invoice.createMany({
+        data: [
+          { id: PAID, invoiceNumber: 'v84a-INV-CF1', status: 'PAID', subtotal: 7777, total: 7777, currency: 'TTD', paidAt: new Date(), businessId: ID.bizA, contactId: ID.cTeam },
+          // Six outstanding invoices of 1111: past five, the forecast's alert names their total.
+          ...DUE.map((id, i) => ({ id, invoiceNumber: `v84a-INV-CF-D${i}`, status: 'SENT', subtotal: 1111, total: 1111, currency: 'TTD', businessId: ID.bizA, contactId: ID.cTeam })),
+        ],
+      });
+      const outstanding = await db.invoice.aggregate({ where: { businessId: ID.bizA, deletedAt: null, status: { in: ['SENT', 'DRAFT'] } }, _sum: { total: true }, _count: true });
+      expect(outstanding._count).toBe(outstandingBefore + 6);
+      const ALERT = `${outstanding._count} outstanding invoices totaling $${(outstanding._sum.total ?? 0).toLocaleString()} TTD.`;
+
+      // The OWNER: the forecast as before (default days 30).
+      const owner = await forecast(ID.owner);
+      expect(owner.status, JSON.stringify(owner.body).slice(0, 300)).toBe(200);
+      expect(owner.body.currentBalance).toBe(7777);
+      expect(owner.body.projectedBalance).toBe(10369.33);
+      expect(owner.body.dailyRevenueRate).toBe(86.41);
+      expect(owner.body.dailyExpenseRate).toBe(0);
+      expect(owner.body.projectionDays).toBe(30);
+      expect(owner.body.trend).toBe('growing');
+      expect(owner.body.alerts).toContain(ALERT);
+      // The days parameter is honoured (the web asks for 90).
+      const owner90 = await forecast(ID.owner, '?days=90');
+      expect(owner90.status).toBe(200);
+      expect(owner90.body.projectionDays).toBe(90);
+      expect(owner90.body.projectedBalance).toBe(15554);
+
+      // A STAFF member with revenue read (staffCrmNone: crm none, revenue read): the same forecast.
+      const reader = await forecast(ID.staffCrmNone);
+      expect(reader.status, JSON.stringify(reader.body).slice(0, 300)).toBe(200);
+      expect(reader.body).toEqual(owner.body);
+
+      // The revenue 'none' STAFF member: 403, no figure.
+      const revNone = await forecast(ID.staffRevNone);
+      expect(revNone.status, JSON.stringify(revNone.body).slice(0, 300)).toBe(403);
+      const refused = JSON.stringify(revNone.body);
+      for (const withheld of ['7777', '7,777', '10369', '86.41', 'currentBalance', 'projectedBalance', 'dailyRevenueRate', 'dailyExpenseRate', 'outstanding invoices', '1,111']) {
+        expect(refused, `staffRevNone: ${withheld}`).not.toContain(withheld);
+      }
+      expect(JSON.stringify((await forecast(ID.staffRevNone, '?days=90')).body)).not.toContain('7777');
+
+      // A non-member (business B's owner): 403, no figure.
+      const outsider = await forecast(ID.ownerB);
+      expect(outsider.status).toBe(403);
+      expect(JSON.stringify(outsider.body)).not.toContain('7777');
+      expect(JSON.stringify(outsider.body)).not.toContain('currentBalance');
+    } finally {
+      // Raw SQL: Invoice is a soft-deleted model (fixture-cleanup-integrity.spec.ts).
+      await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_cf_`)}`);
+    }
+  });
+});
+
+/**
  * W10-ADVISOR-TIMELINE review (SEC-W10AT-2, SEC-W10AT-3; owner rulings D-63, D-100): two other
  * AiController routes beside the chat serve a member the business's figures, contacts or rows whatever
  * they read. Both were reproduced on the real database before they were recorded here (a temporary
  * case in the W10-ADVISOR-TIMELINE describe, through its chat app, removed). The packet's write set is
- * the chat (AiController.chat, AiAdvisorService.chat), so each is a follow-up outside it.
+ * the chat (AiController.chat, AiAdvisorService.chat), so each is a follow-up outside it. TS-13f (GET
+ * ai/cash-flow-forecast) is live since W11-AI-CASHFLOW-REVENUE (D-57, D-100), in the describe above.
  */
 describe('W10-ADVISOR-TIMELINE review follow-ups outside the write set (TS-13f, TS-13g)', () => {
-  it.todo(
-    "TS-13f (W10-ADVISOR-TIMELINE review SEC-W10AT-2, D-100, D-63, D-57): GET /ai/businesses/:businessId/ai/cash-flow-forecast (AiController.cashFlowForecast, AuthGuard + BusinessGuard only -> AiAdvisorService.predictCashFlow), which the web's reports cash-flow view and revenue projection chart call (client.ts fetchCashFlowForecast), answers a member without revenue read 200 with currentBalance, projectedBalance, dailyRevenueRate and dailyExpenseRate (reproduced as the revenue 'none' member with one PAID invoice of 7777: currentBalance 7777, projectedBalance 10369.33, dailyRevenueRate 86.41) and, past five outstanding invoices, an alert naming their total; it should refuse that member (403, no figure) as GET commerce/businesses/:businessId/cash-flow-forecast does (TS-20e), a revenue reader and the OWNER keeping the forecast; the route and the web views' answer to a 403 are outside the packet's write set",
-  );
   it.todo(
     "TS-13g (W10-ADVISOR-TIMELINE review SEC-W10AT-3, D-63, D-100): POST /ai/businesses/:businessId/ai/simulate (AiController.simulate, AuthGuard + BusinessGuard only -> AiAdvisorService.simulateScenario) puts JSON.stringify(getBusinessContext) in the model's prompt for any member and returns the model's simulation to them: the first and last names of the business's five newest contacts whatever their visibility (the owner's PRIVATE contacts included), the revenue collected, outstanding and overdue figures, expenses, bookings, the momentum score and the business's ten newest Activity titles unfiltered (reproduced as the revenue 'none' member: the prompt carried '\"firstName\": \"Priv\"', '\"totalRevenue\": 7777' and an 'Invoice <n> sent to <hidden contact>' row); it should build that prompt only from what the member reads, as POST ai/chat does since W10-ADVISOR-TIMELINE (TS-13e: the rows the timeline rule serves them, the figures of the modules they read, only contacts they may open), the OWNER's prompt staying whole; simulateScenario and the route are outside the packet's write set",
   );
