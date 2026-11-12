@@ -1750,7 +1750,10 @@ export class AiController {
    *     need revenue and crm read, and hiddenContacts withholds no contact from them. Their count is one
    *     database count per stored module value (groupBy), each module judged by activityModuleScope, so
    *     it is exact for any number of rows (at base it was one COUNT of every row, every module
-   *     included; the packet's row scan stopped at 1000).
+   *     included; the packet's row scan stopped at 1000). Owner ruling D-118
+   *     (W11-D118-NAME-MISMATCH-OWNER-ONLY): only a viewer with readsOwnerWithheld (the D-116 / D-125
+   *     owner, SUPER_ADMIN) counts this way, as canReadActivityRow withholds a d115_withheld row whose
+   *     reason is not 'source_gone' from anyone else.
    *   - Any other member's rows are judged one by one: the day is read in batches of
    *     ACTIVITY_FIND_MANY_CAP (the most @keyflow/db's findMany returns; a larger take came back as 1000
    *     rows and read as the end of the day, CR-W6BS-1), the database prefilter first, up to the day's
@@ -1758,7 +1761,14 @@ export class AiController {
    */
   private async countVisibleDayActivity(viewer: TimelineViewer, start: Date): Promise<number> {
     const dayWhere = { businessId: viewer.businessId, occurredAt: { gte: start } };
-    if (viewer.readable.has('revenue') && viewer.readable.has('crm') && !visibilityClause(viewer.crmAccess, viewer.userId)) {
+    // Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY): the per-module count serves every row of
+    // module d115_withheld, so it is taken only for a viewer who reads owner-withheld rows too.
+    if (
+      viewer.readable.has('revenue') &&
+      viewer.readable.has('crm') &&
+      viewer.readsOwnerWithheld === true &&
+      !visibilityClause(viewer.crmAccess, viewer.userId)
+    ) {
       const byModule = await this.prisma.client.activity.groupBy({ by: ['module'], where: dayWhere, _count: { _all: true } });
       return byModule.reduce((sum, group) => {
         const scope = activityModuleScope(group.module);

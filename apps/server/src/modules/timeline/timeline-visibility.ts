@@ -28,7 +28,11 @@ import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-p
  *     membership's explicit scope map, else its role's defaults);
  *   - a module the table does not map is read by OWNER and ADMIN only (and
  *     SUPER_ADMIN). Owner ruling D-63; timeline-visibility.spec.ts keeps that
- *     set empty for every module written at head;
+ *     set empty for every module written at head. The D-115 backfill's
+ *     withheld module is the one deliberate exception: such a row also needs
+ *     its original module's scope (SEC-W10DCS-1), and one whose reason is not
+ *     'source_gone' is read by OWNER and SUPER_ADMIN only (owner ruling D-118,
+ *     W11-D118-NAME-MISMATCH-OWNER-ONLY; readsOwnerWithheld);
  *   - a row whose category is a revenue category (COMMERCE, PAYMENT, FINANCE)
  *     or that carries a revenueImpact also needs revenue read: it carries an
  *     amount; so does a crm-scope row whose data carries an amount
@@ -189,9 +193,34 @@ export function activityModuleScope(module: string | null | undefined): Canonica
  * The module the D-115 operator backfill (scripts/backfill-timeline-contact-links.ts,
  * WITHHELD_MODULE) files a withheld row under. It is unmapped, so only OWNER and
  * ADMIN read such a row (D-63), and the row keeps its original module under
- * data.d115.module.
+ * data.d115.module. Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY) narrows
+ * that for a row whose reason (data.d115.withheld) is not 'source_gone': OWNER and
+ * SUPER_ADMIN only (d115WithheldOwnerOnly).
  */
 export const D115_WITHHELD_MODULE = 'd115_withheld';
+
+/** Whether a row is filed under D115_WITHHELD_MODULE (case-folded, as Activity.module is free text). */
+function isD115Withheld(row: ActivityRowLike): boolean {
+  return typeof row.module === 'string' && row.module.trim().toLowerCase() === D115_WITHHELD_MODULE;
+}
+
+/**
+ * Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY; review SEC-W10DCS-2, ruling R-1),
+ * narrowing D-115: whether a D-115 withheld row is served to the OWNER and SUPER_ADMIN only
+ * (TimelineViewer.readsOwnerWithheld) rather than to OWNER and ADMIN. The backfill records
+ * why it withheld the row in data.d115.withheld: 'source_gone' (no source in the row's
+ * business, or a source whose contact is another business's) keeps D-115; 'name_mismatch'
+ * (an invoice row whose invoice is there but names another contact, so its title may name a
+ * PRIVATE contact) is owner-only. Any other reason, or none (no data, data not an object, no
+ * d115 marker), is read as owner-only too: fail closed. False for a row of any other module.
+ */
+function d115WithheldOwnerOnly(row: ActivityRowLike): boolean {
+  if (!isD115Withheld(row)) return false;
+  const data = row.data;
+  const d115 = data && typeof data === 'object' ? (data as Record<string, unknown>).d115 : undefined;
+  const reason = d115 && typeof d115 === 'object' ? (d115 as Record<string, unknown>).withheld : undefined;
+  return reason !== 'source_gone';
+}
 
 /**
  * The scope of the module a D-115 withheld row had before the backfill; null for
@@ -202,7 +231,7 @@ export const D115_WITHHELD_MODULE = 'd115_withheld';
  * crm access is 'none'.
  */
 function withheldSourceScope(row: ActivityRowLike): CanonicalModule | null {
-  if (typeof row.module !== 'string' || row.module.trim().toLowerCase() !== D115_WITHHELD_MODULE) return null;
+  if (!isD115Withheld(row)) return null;
   const data = row.data;
   if (!data || typeof data !== 'object') return null;
   const d115 = (data as Record<string, unknown>).d115;
@@ -249,6 +278,14 @@ export interface TimelineViewer {
   readonly userId: string;
   /** SUPER_ADMIN, OWNER or ADMIN: may read rows of a module the table does not map (D-63). */
   readonly readsUnmapped: boolean;
+  /**
+   * Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY): SUPER_ADMIN, or the D-116 owner
+   * (an OWNER-role Membership of the business; D-125: a co-owner holding OWNER is the owner,
+   * a recorded Business.ownerId holding only ADMIN or STAFF is not). May read a D-115 withheld
+   * row whose reason is not 'source_gone' (d115WithheldOwnerOnly). Absent reads as false
+   * (fail closed).
+   */
+  readonly readsOwnerWithheld?: boolean;
   /** The canonical modules this member reads. */
   readonly readable: ReadonlySet<CanonicalModule>;
   /** The member's CRM access, for contact visibility (visibilityClause). */
@@ -273,12 +310,24 @@ const FULL_CRM_ACCESS: CrmAccess = {
  * ModuleScopeGuard and BusinessGuard refuse them: owner ruling D-104
  * (W10-OWNER-MEMBERSHIP) makes the Membership the one access rule, so a
  * Business.ownerId with no Membership row is refused too, not read as OWNER.
+ *
+ * Owner ruling D-118 (W11-D118-NAME-MISMATCH-OWNER-ONLY): readsOwnerWithheld is set for a
+ * SUPER_ADMIN and for an OWNER-role Membership, the owner rule of D-116 as D-125 reads it
+ * ("holds an OWNER membership of this business"; Business.ownerId grants nothing on its own,
+ * so a recorded owner holding only an ADMIN or STAFF membership is that role).
  */
 export async function resolveTimelineViewer(prisma: PrismaService, businessId: string, userId: string): Promise<TimelineViewer> {
   const user = await prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
   if (!user) throw new ForbiddenException('User not found');
   if (user.role === 'SUPER_ADMIN') {
-    return { businessId, userId, readsUnmapped: true, readable: new Set(CANONICAL_MODULES), crmAccess: { ...FULL_CRM_ACCESS, isSuperAdmin: true } };
+    return {
+      businessId,
+      userId,
+      readsUnmapped: true,
+      readsOwnerWithheld: true,
+      readable: new Set(CANONICAL_MODULES),
+      crmAccess: { ...FULL_CRM_ACCESS, isSuperAdmin: true },
+    };
   }
 
   const membership = await prisma.client.membership.findUnique({
@@ -296,7 +345,15 @@ export async function resolveTimelineViewer(prisma: PrismaService, businessId: s
       : defaultScopesForRole(role);
   const readable = new Set(CANONICAL_MODULES.filter((m) => rankOf(scopes[m] || 'none') >= LEVEL_RANK.read));
   const crmAccess = membership && role !== 'OWNER' ? await resolveCrmAccess(prisma, businessId, userId) : FULL_CRM_ACCESS;
-  return { businessId, userId, readsUnmapped: role === 'OWNER' || role === 'ADMIN', readable, crmAccess };
+  return {
+    businessId,
+    userId,
+    readsUnmapped: role === 'OWNER' || role === 'ADMIN',
+    // D-118 with D-116 / D-125: the owner is the OWNER-role Membership.
+    readsOwnerWithheld: role === 'OWNER',
+    readable,
+    crmAccess,
+  };
 }
 
 /**
@@ -310,6 +367,12 @@ export async function resolveTimelineViewer(prisma: PrismaService, businessId: s
  * copy stored as CONTACT before V55-13 / D-90 is not served, its amount
  * included, to a member without revenue read. Rows of other modules keep
  * D-63's binding (review SEC-W5FC-2 / CR-W5FC-1: EXPENSE rows on expenses).
+ *
+ * A row of an unmapped module needs readsUnmapped (D-63); a D-115 withheld row also needs
+ * read on its original module's scope (SEC-W10DCS-1) and, owner ruling D-118
+ * (W11-D118-NAME-MISMATCH-OWNER-ONLY), readsOwnerWithheld unless its reason is
+ * 'source_gone' (d115WithheldOwnerOnly: name_mismatch, absent or unknown reasons are
+ * OWNER and SUPER_ADMIN only). The money and contact terms below bind every viewer.
  */
 export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike): boolean {
   const scope = activityModuleScope(row.module);
@@ -317,6 +380,7 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
     if (!viewer.readsUnmapped) return false;
     const source = withheldSourceScope(row);
     if (source !== null && !viewer.readable.has(source)) return false;
+    if (d115WithheldOwnerOnly(row) && viewer.readsOwnerWithheld !== true) return false;
   } else if (!viewer.readable.has(scope)) {
     return false;
   }

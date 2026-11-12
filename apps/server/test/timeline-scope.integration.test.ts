@@ -1580,10 +1580,12 @@ describe('W11-AI-SIMULATE-VIEWER (D-63, D-100): the AI simulation reads only wha
     const CONNECT = 'v84a sim connect row title';
     const D115_CONNECT = 'v84a sim d115 connect-source row';
     const D115_CRM = 'v84a sim d115 communications-source row';
+    // The D-115 rows carry a reason, as the backfill writes every withheld row: source_gone keeps D-115's
+    // OWNER and ADMIN audience (W11-D118-NAME-MISMATCH-OWNER-ONLY, D-118: a row with no reason is OWNER-only).
     const ROWS = [
       { id: `${P}sim_connect`, module: 'connect', title: CONNECT },
-      { id: `${P}sim_d115_connect`, module: 'd115_withheld', data: { d115: { module: 'connect' } }, title: D115_CONNECT },
-      { id: `${P}sim_d115_crm`, module: 'd115_withheld', data: { d115: { module: 'communications' } }, title: D115_CRM },
+      { id: `${P}sim_d115_connect`, module: 'd115_withheld', data: { d115: { withheld: 'source_gone', module: 'connect' } }, title: D115_CONNECT },
+      { id: `${P}sim_d115_crm`, module: 'd115_withheld', data: { d115: { withheld: 'source_gone', module: 'communications' } }, title: D115_CRM },
     ];
     const WITHHELD = [`${P}sim_connect`, `${P}sim_d115_connect`];
     // Newer than every other row of the business (the main rows sit on DAY at local noon).
