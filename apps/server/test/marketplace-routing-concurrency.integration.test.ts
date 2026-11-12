@@ -1329,7 +1329,7 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     );
   });
 
-  it('RC-16 (Z5SEC-1) a well-formed transfer keeps its refusals, their texts and their order (quantity, the same warehouse, the source row, the stock available, the destination warehouse), writes nothing when refused, and commits when it can', async () => {
+  it('RC-16 (Z5SEC-1) a well-formed transfer keeps its refusals, their texts and their order (quantity, the same warehouse, the source row, the stock available, the destination warehouse), writes nothing when refused, and commits when it can (a soft-deleted product of the business too)', async () => {
     const body = { productId: ID.productM, fromWarehouseId: ID.warehouse2, toWarehouseId: ID.warehouse, quantity: 2, note: 'rc16' };
     const probes: Record<string, Record<string, unknown>> = {
       'quantity 0 and the same warehouse': { ...body, quantity: 0, toWarehouseId: ID.warehouse2 },
@@ -1350,7 +1350,12 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
       await resetBusinessStock();
       outcomes['a transfer it can make'] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, body)));
       expect([await stockOf(ID.stockMHi), await stockOf(ID.stockMLo)], 'S_HI 2 out, S_LO 2 in').toEqual([`${IN_STOCK - 2}/0`, `${IN_STOCK + 2}/0`]);
+      // A soft-deleted product of the business is still the business's (the purchase order receipt's rule): it moves.
+      await resetBusinessStock();
+      await db.$executeRaw`UPDATE products SET deleted_at = now() WHERE id = ${ID.productM}`;
+      outcomes['a soft-deleted product of the business'] = await answerAndWrites(() => routeAnswer(transferByRoute(ID.biz, body)));
     } finally {
+      await db.$executeRaw`UPDATE products SET deleted_at = NULL WHERE id = ${ID.productM}`;
       await resetBusinessStock();
     }
     const refused = (answer: string) => ({ answer, stockRowsWritten: 0, movementsWritten: 0 });
@@ -1364,6 +1369,7 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
       "into a warehouse that is not the business's": refused('404: Destination warehouse not found'),
       'into a warehouse that does not exist': refused('404: Destination warehouse not found'),
       'a transfer it can make': { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 },
+      'a soft-deleted product of the business': { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 },
     });
   });
 

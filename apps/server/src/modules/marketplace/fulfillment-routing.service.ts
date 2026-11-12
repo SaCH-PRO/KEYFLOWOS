@@ -9,6 +9,7 @@ import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order-metadata';
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
 import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
+import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
 
 /**
  * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
@@ -1166,17 +1167,14 @@ export class FulfillmentRoutingService {
     });
     if (lines.length === 0) return lines;
 
-    // Read with no soft-delete or tenant filter (raw SQL), by the business's own id.
-    const productIds = [...new Set(lines.map((l) => String(l.productId)))];
-    const warehouseIds = [...new Set(lines.map((l) => String(l.warehouseId)))];
-    const [products, warehouses] = await Promise.all([
-      this.prisma.client.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join(productIds)})`,
-      this.prisma.client.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM warehouses WHERE business_id = ${businessId} AND id IN (${Prisma.join(warehouseIds)})`,
-    ]);
-    const ownProducts = new Set(products.map((row) => row.id));
-    const ownWarehouses = new Set(warehouses.map((row) => row.id));
+    // Read with no soft-delete or tenant filter (raw SQL), by the business's own id (core/inventory/stock-ownership.ts,
+    // the check a transfer makes too, W10-Z5-TRANSFER-FIX Z5SEC-2).
+    const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
+      this.prisma.client,
+      businessId,
+      lines.map((l) => String(l.productId)),
+      lines.map((l) => String(l.warehouseId)),
+    );
     const foreign = lines.find(
       (l) => !ownProducts.has(String(l.productId)) || !ownWarehouses.has(String(l.warehouseId)),
     );
@@ -1290,17 +1288,22 @@ export class FulfillmentRoutingService {
               },
             });
           } else {
-            await tx.inventoryStock.create({
-              data: {
-                businessId,
-                productId,
-                warehouseId,
-                quantity: qty,
-                reserved: 0,
-                currency: updated.currency ?? 'TTD',
-                ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
-              },
-            });
+            // W10-Z5-TRANSFER-FIX (Z5SEC-2): a row of another business_id holding this (product, warehouse), planted by
+            // the old cross-business receipt, is a 409 naming no ids (the purchase order stays as it was), not an
+            // unhandled P2002 (a 500). The row is left for an operator to repair.
+            await createStockRowOrConflict(() =>
+              tx.inventoryStock.create({
+                data: {
+                  businessId,
+                  productId,
+                  warehouseId,
+                  quantity: qty,
+                  reserved: 0,
+                  currency: updated.currency ?? 'TTD',
+                  ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
+                },
+              }),
+            );
           }
 
           await tx.stockMovement.create({

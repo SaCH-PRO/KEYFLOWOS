@@ -7,6 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
+import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
@@ -2175,10 +2176,54 @@ export class MarketplaceService {
    * lock, so the quantity written counts every write committed before it (it
    * was read before the transaction and written back as read, less the
    * transfer).
+   *
+   * W10-Z5-TRANSFER-FIX (Z5SEC-1 / Z5-CR-1): `data` is the route's body as sent
+   * (POST .../inventory/transfer, body: any, no DTO) or a KEY tool's arguments.
+   * The rows are read by findFirst, which reads a missing (undefined) field as
+   * no filter, and the lock skips a pair with a missing id: a body with no
+   * fromWarehouseId read the to row as the from row (stock made from nothing),
+   * one with no toWarehouseId took any warehouse and any row of the product,
+   * one with no productId moved stock between rows of different products, none
+   * of them locked, and each answered success. So the ids must be non-empty
+   * strings and the quantity a positive whole number (400 otherwise), before
+   * any transaction, and the from row and the to row must be two rows.
+   *
+   * W10-Z5-TRANSFER-FIX (Z5SEC-2): the product and both warehouses must be the
+   * business's (core/inventory/stock-ownership.ts, the check the purchase
+   * order receipt makes): a row whose business_id is this business's on
+   * another business's product or warehouse (planted by the old cross-business
+   * receipt) is not moved out of (404 'Source inventory not found'), and no row
+   * of this business is made for another business's product. A to row it
+   * would create where such a row holds the pair is a 409, not a 500.
+   *
+   * The refusals of a well-formed transfer keep their texts and their order:
+   * the quantity, the same warehouse, the source (its product and warehouse,
+   * then its row), the stock available, the destination warehouse.
    */
   async transferInventory(businessId: string, data: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note?: string; userId?: string }) {
-    if (data.quantity <= 0) throw new BadRequestException('Transfer quantity must be positive');
+    const quantity: unknown = data.quantity;
+    if (typeof quantity !== 'number' || !Number.isInteger(quantity)) {
+      throw new BadRequestException('Transfer quantity must be a positive whole number');
+    }
+    if (quantity <= 0) throw new BadRequestException('Transfer quantity must be positive');
+    const ids: Record<'productId' | 'fromWarehouseId' | 'toWarehouseId', unknown> = {
+      productId: data.productId,
+      fromWarehouseId: data.fromWarehouseId,
+      toWarehouseId: data.toWarehouseId,
+    };
+    const malformed = Object.entries(ids).find(([, id]) => typeof id !== 'string' || id.length === 0);
+    if (malformed) throw new BadRequestException(`Transfer ${malformed[0]} is required (a non-empty string)`);
     if (data.fromWarehouseId === data.toWarehouseId) throw new BadRequestException('Source and destination warehouses must be different');
+
+    const owned = await ownedProductsAndWarehouses(
+      this.prisma.client,
+      businessId,
+      [data.productId],
+      [data.fromWarehouseId, data.toWarehouseId],
+    );
+    if (!owned.products.has(data.productId) || !owned.warehouses.has(data.fromWarehouseId)) {
+      throw new NotFoundException('Source inventory not found');
+    }
 
     const refId = `TRF-${Date.now()}`;
 
@@ -2196,12 +2241,16 @@ export class MarketplaceService {
       const available = fromStock.quantity - fromStock.reserved;
       if (available < data.quantity) throw new BadRequestException(`Insufficient available stock. Available: ${available}`);
 
-      const toWarehouse = await tx.warehouse.findFirst({ where: { id: data.toWarehouseId, businessId } });
-      if (!toWarehouse) throw new NotFoundException('Destination warehouse not found');
+      // Z5SEC-2: the business's own warehouse (read above, by its id: a missing one is not the business's either).
+      if (!owned.warehouses.has(data.toWarehouseId)) throw new NotFoundException('Destination warehouse not found');
 
       const toStock = await tx.inventoryStock.findFirst({
         where: { businessId, productId: data.productId, warehouseId: data.toWarehouseId },
       });
+      // Z5SEC-1: two rows, or the from row would be written twice (less, then more) and stock made from nothing.
+      if (toStock && toStock.id === fromStock.id) {
+        throw new BadRequestException('Source and destination warehouses must be different');
+      }
 
       await tx.inventoryStock.update({
         where: { id: fromStock.id },
@@ -2213,18 +2262,21 @@ export class MarketplaceService {
           data: { quantity: toStock.quantity + data.quantity },
         });
       } else {
-        await tx.inventoryStock.create({
-          data: {
-            businessId,
-            productId: data.productId,
-            warehouseId: data.toWarehouseId,
-            quantity: data.quantity,
-            reserved: 0,
-            currency: fromStock.currency,
-            costPerUnit: fromStock.costPerUnit,
-            reorderAt: fromStock.reorderAt,
-          },
-        });
+        // Z5SEC-2: a row of another business_id holding this (product, warehouse) is a 409, not a 500 (P2002).
+        await createStockRowOrConflict(() =>
+          tx.inventoryStock.create({
+            data: {
+              businessId,
+              productId: data.productId,
+              warehouseId: data.toWarehouseId,
+              quantity: data.quantity,
+              reserved: 0,
+              currency: fromStock.currency,
+              costPerUnit: fromStock.costPerUnit,
+              reorderAt: fromStock.reorderAt,
+            },
+          }),
+        );
       }
       await tx.stockMovement.create({
         data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
