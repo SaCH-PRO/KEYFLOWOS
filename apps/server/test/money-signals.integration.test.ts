@@ -75,6 +75,10 @@
  * recent growth, top tags) and GET .../contacts/poll (count, newest edit) are
  * worked out the same way, so the member cannot compare them with segments to
  * learn of a hidden contact; the owner's figures stay business-wide.
+ * W11-CRM-COUNTS-RULING (owner ruling D-133, option (a), on biz3) pins the
+ * ruling's figures for each STAFF member: contact-stats totalCount 1 and CLIENT
+ * 0 (the owner's 2 and 1), and a member's contacts poll that the owner's edit
+ * of c3Priv through PATCH contacts/:c does not move (the owner's poll moves).
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -193,6 +197,8 @@ async function cleanup() {
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-CRM-COUNTS-RULING: the owner's PATCH contacts/:c leaves a TeamAuditInterceptor row.
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -1415,6 +1421,70 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
       for (const user of [ID.rev, ID.noRev]) {
         expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
         expect(await ok3(user, 'contacts/poll'), user).toEqual({ lastUpdatedAt: teamAt.toISOString(), totalCount: 1 });
+      }
+    });
+  });
+
+  // ---- W11-CRM-COUNTS-RULING (owner ruling D-133, option (a): the CRM count widgets are per viewer) ----
+  describe("W11-CRM-COUNTS-RULING: the contact stats and the contacts poll follow the viewer's contact visibility (owner ruling D-133, option (a))", () => {
+    /** contact-stats' totalCount and countByStatus, read straight from the database over the live contacts of biz3 that `clause` admits (null: all of them). */
+    const directStatusCounts = async (clause: Record<string, unknown> | null) => {
+      const where = clause ? { businessId: ID3.biz, deletedAt: null, AND: [clause] } : { businessId: ID3.biz, deletedAt: null };
+      const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
+      for (const status of Object.keys(countByStatus)) countByStatus[status] = await db.contact.count({ where: { ...where, status } });
+      return { totalCount: (await db.contact.count({ where })) as number, countByStatus };
+    };
+    const updatedAtOf = async (id: string) => ((await db.contact.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } })).updatedAt as Date);
+    const EDITED_JOB_TITLE = 'V94E edited by the owner';
+
+    afterAll(async () => {
+      // The owner's edit below (PATCH contacts/:c) is undone; its event and audit rows go with the suite's cleanup.
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { jobTitle: null } });
+    });
+
+    it("W11-CRM-COUNTS-RULING (D-133): GET .../contact-stats as each STAFF member (crm read; revenue read and revenue 'none') counts only the contacts that member may open: totalCount 1 and countByStatus.CLIENT 0, c3Priv (CLIENT, another member's PRIVATE contact) left out, each equal to a direct count under the member's visibility clause, in the owner's response shape; the owner's stats stay business-wide: totalCount 2 and countByStatus.CLIENT 1", async () => {
+      // Control: the owner (no visibility clause) is served the business-wide figures, c3Priv counted.
+      const owner = await ok3(ID.owner, 'contact-stats');
+      expect([owner.totalCount, owner.countByStatus.CLIENT], 'owner').toEqual([2, 1]);
+      expect(await clauseOf(ID.owner)).toBeNull();
+      expect({ totalCount: owner.totalCount, countByStatus: owner.countByStatus }, 'owner').toEqual(await directStatusCounts(null));
+
+      for (const user of [ID.rev, ID.noRev]) {
+        // The member cannot open c3Priv.
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = await ok3(user, 'contact-stats');
+        expect([served.totalCount, served.countByStatus.CLIENT], user).toEqual([1, 0]);
+        expect({ totalCount: served.totalCount, countByStatus: served.countByStatus }, user).toEqual(await directStatusCounts(await clauseOf(user)));
+        // D-133 changes the figures, not the response shape.
+        expect(Object.keys(served).sort(), user).toEqual(Object.keys(owner).sort());
+        expect(served.recentGrowth, user).toHaveLength(owner.recentGrowth.length);
+      }
+    });
+
+    it("W11-CRM-COUNTS-RULING (D-133): GET .../contacts/poll as a STAFF member stays at totalCount 1 and the same lastUpdatedAt after the owner edits c3Priv through PATCH contacts/:c, so the poll never wakes the member on a contact they cannot open; the owner's poll moves to that edit (totalCount 2, c3Priv's new updatedAt)", async () => {
+      const ownerBefore = await ok3(ID.owner, 'contacts/poll');
+      expect(ownerBefore.totalCount, 'owner before').toBe(2);
+      const memberBefore = new Map<string, unknown>();
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = await ok3(user, 'contacts/poll');
+        // The member's poll dates c3Team, the one contact they may open.
+        expect(served, user).toEqual({ lastUpdatedAt: (await updatedAtOf(ID3.cTeam)).toISOString(), totalCount: 1 });
+        memberBefore.set(user, served);
+      }
+
+      // The owner edits c3Priv through the real route (crm write, the contact's owner).
+      const edit = await request(app.getHttpServer())
+        .patch(`/crm/businesses/${ID3.biz}/contacts/${ID3.cPriv}`)
+        .set('x-test-user', ID.owner)
+        .send({ jobTitle: EDITED_JOB_TITLE });
+      expect(edit.status, `owner PATCH c3Priv: ${JSON.stringify(edit.body).slice(0, 300)}`).toBe(200);
+      const privEditedAt = await updatedAtOf(ID3.cPriv);
+      expect(privEditedAt.getTime(), 'the edit moved c3Priv').toBeGreaterThan(new Date(ownerBefore.lastUpdatedAt).getTime());
+
+      // The owner's poll moves to the edit; each member's poll is exactly what it was.
+      expect(await ok3(ID.owner, 'contacts/poll'), 'owner after').toEqual({ lastUpdatedAt: privEditedAt.toISOString(), totalCount: 2 });
+      for (const user of [ID.rev, ID.noRev]) {
+        expect(await ok3(user, 'contacts/poll'), `${user} after the owner's edit`).toEqual(memberBefore.get(user));
       }
     });
   });
