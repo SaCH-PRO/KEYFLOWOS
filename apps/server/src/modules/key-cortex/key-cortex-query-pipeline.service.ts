@@ -59,7 +59,11 @@ import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
-import { KeyCortexPromptContextService, isToolCallRecord } from './key-cortex-prompt-context.service';
+import {
+  KeyCortexPromptContextService,
+  isToolCallRecord,
+  readersOwnCognitionMemory,
+} from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
 import type { CortexMemberAuthority } from './key-cortex.controller';
@@ -2020,7 +2024,8 @@ export class KeyCortexQueryPipelineService {
    * by the retrieval service: processQuery writes one row on every turn (recordObservation: what the
    * member typed, verbatim, and KEY's whole answer to them, which can carry P&L figures another member
    * may not see under D-57). A cognition fragment is kept only when its row is the reader's own
-   * (readersCognitionMemory); a requester who is no member reads none.
+   * (readersOwnCognitionMemory, shared with buildMemoryContext since W11-CORTEX-MEMORY-COGNITION); a
+   * requester who is no member reads none.
    *
    * Review CR-W10CCS-1: by buildMemoryContext's whole rule, its headroom included: it asks for
    * CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM and keeps the first CHAT_MEMORY_FRAGMENTS of what it may
@@ -2036,38 +2041,11 @@ export class KeyCortexQueryPipelineService {
         ...(reader ? { userId: reader } : { includeEpisodic: false }),
       })
     ).filter((fragment) => !isToolCallRecord(fragment));
-    const own = await this.readersCognitionMemory(query.businessId, reader, fragments);
+    // W11-CORTEX-MEMORY-COGNITION (D-130): the shared rule, which buildMemoryContext applies to the same prompt.
+    const own = await readersOwnCognitionMemory(this.prisma, query.businessId, reader, fragments, this.logger, 'chatMemory');
     return fragments
       .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
       .slice(0, CHAT_MEMORY_FRAGMENTS);
-  }
-
-  /**
-   * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R2: which of the cognition-memory fragments among
-   * `fragments` are the reader's own rows (CognitionMemory.userId, in this business). A fragment does not
-   * carry its row's member, so the rows are read by id. No reader, or no cognition fragment: none, and
-   * nothing is read. A row with no member (KEY's own tool-outcome and action-outcome learning rows, a
-   * record of someone's tool call) is nobody's own. A read that fails: none (fail closed).
-   */
-  private async readersCognitionMemory(
-    businessId: string,
-    reader: string | null,
-    fragments: MemoryFragment[],
-  ): Promise<Set<string>> {
-    const ids = fragments.filter((fragment) => fragment.sourceType === 'cognition_memory').map((fragment) => fragment.id);
-    if (!reader || ids.length === 0) return new Set();
-    try {
-      const rows = await this.prisma.client.cognitionMemory.findMany({
-        where: { id: { in: ids }, businessId, userId: reader },
-        select: { id: true },
-      });
-      return new Set(rows.map((row) => row.id));
-    } catch (err: unknown) {
-      this.logger.warn(
-        `[chatMemory][${businessId}] cognition memory owner check failed, none of it read: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return new Set();
-    }
   }
 
   /**

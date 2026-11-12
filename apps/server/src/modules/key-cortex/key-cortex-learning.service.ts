@@ -220,10 +220,16 @@ export class KeyCortexLearningService {
   // D.3 — Retrieve relevant past lessons
   // ═══════════════════════════════════════════════════════════
 
+  /**
+   * W11-CORTEX-MEMORY-COGNITION, owner ruling D-130 option (A): `userId` reads only that member's own
+   * rows (CognitionMemory.userId), so a member-less row is never among them. The KEY chat's lessons block
+   * (KeyCortexPromptContextService.buildMemoryContext) passes its reader; a caller that names no userId
+   * reads as before.
+   */
   async retrieveLessons(
     businessId: string,
     query: string,
-    options: { roleId?: string; functionId?: string; limit?: number } = {},
+    options: { roleId?: string; functionId?: string; limit?: number; userId?: string } = {},
   ): Promise<string[]> {
     try {
       const limit = options.limit ?? 5;
@@ -233,6 +239,7 @@ export class KeyCortexLearningService {
           businessId,
           ...(options.roleId ? { roleId: options.roleId } : {}),
           ...(options.functionId ? { functionId: options.functionId } : {}),
+          ...(options.userId ? { userId: options.userId } : {}),
           lessonsLearned: { isEmpty: false },
         },
         orderBy: { createdAt: 'desc' },
