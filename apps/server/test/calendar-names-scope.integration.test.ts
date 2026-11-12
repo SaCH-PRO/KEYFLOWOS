@@ -10,7 +10,9 @@
  * business: the recorded owner (Business.ownerId) holding it, or a co-owner
  * holding it without being the recorded owner. The recorded-owner field grants
  * nothing on its own (D-116), so a recorded owner who holds only a STAFF
- * membership is STAFF here. A platform SUPER_ADMIN follows the guard
+ * membership is STAFF here. The role is the one held in the route's own
+ * business: a member who is ADMIN or OWNER of another business and STAFF of
+ * this one is STAFF here ([V97V-A06], SEC-W11CNS-1 review repair). A platform SUPER_ADMIN follows the guard
  * behaviour these controllers already have (BusinessGuard admits them, as the
  * D-99 owner doors do).
  *
@@ -67,12 +69,16 @@ const ID = {
   otherOwner: `${P}otherowner`, // Business.ownerId of bizOther with its OWNER membership; no membership of biz
   superAdmin: `${P}super`, // SUPER_ADMIN, no membership
   stranger: `${P}stranger`, // no membership anywhere
+  // SEC-W11CNS-1: a member whose role differs per business, so a reader check
+  // that took the role from any business but the route's own would admit them.
+  crossAdmin: `${P}crossadmin`, // ADMIN of bizOther, STAFF of biz
+  crossOwner: `${P}crossowner`, // OWNER of bizOther (not its Business.ownerId), STAFF of biz
   biz: `${P}biz`,
   bizRec: `${P}bizrec`,
   bizOther: `${P}bizother`,
 };
 
-const USERS = [ID.owner, ID.coOwner, ID.admin, ID.staff, ID.recOwner, ID.otherOwner, ID.superAdmin, ID.stranger];
+const USERS = [ID.owner, ID.coOwner, ID.admin, ID.staff, ID.recOwner, ID.otherOwner, ID.superAdmin, ID.stranger, ID.crossAdmin, ID.crossOwner];
 
 const NAMES_CODE = 'CALENDAR_NAMES_OWNER_OR_ADMIN';
 const CALENDAR_LIST_URL = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
@@ -229,6 +235,11 @@ beforeAll(async () => {
     [ID.recOwner, ID.bizRec, 'STAFF', { bookings: 'write' }],
     [ID.coOwner, ID.bizRec, 'OWNER', null],
     [ID.otherOwner, ID.bizOther, 'OWNER', null],
+    // SEC-W11CNS-1: ADMIN / OWNER of bizOther, and STAFF of biz.
+    [ID.crossAdmin, ID.bizOther, 'ADMIN', null],
+    [ID.crossAdmin, ID.biz, 'STAFF', { bookings: 'write' }],
+    [ID.crossOwner, ID.bizOther, 'OWNER', null],
+    [ID.crossOwner, ID.biz, 'STAFF', { bookings: 'write' }],
   ];
   for (const [userId, businessId, role, permissionScopes] of memberships) {
     await db.membership.create({
@@ -363,6 +374,31 @@ describe('W11-CALENDAR-NAMES-SCOPE: the names of the owner\'s Google calendars a
       const anonymous = await listNames(route, ID.biz, undefined);
       expect(anonymous.status, `anonymous ${label}`).toBe(401);
       expect(googleCalls, label).toEqual([]);
+    }
+  });
+
+  // SEC-W11CNS-1 (review repair): every other actor above holds one role, or
+  // OWNER wherever they are a member, so a reader check that admitted anyone
+  // holding OWNER or ADMIN in ANY business passed every case. These two hold
+  // ADMIN / OWNER of bizOther and STAFF of biz; both pass BusinessGuard on biz.
+  it('[V97V-A06] (W11-CALENDAR-NAMES-SCOPE, D-120, D-125, SEC-W11CNS-1) the role is read from the route\'s own business: a member who is ADMIN of another business and STAFF of this one, and a member who is OWNER of another business and STAFF of this one, are answered 403 CALENDAR_NAMES_OWNER_OR_ADMIN at both routes here with no calendar name and the Google Calendar client never called, and read the names of the business they administer or own (200, that business\'s calendars, the client called once with its stored token)', async () => {
+    for (const [actor, who] of [
+      [ID.crossAdmin, 'ADMIN of bizOther, STAFF of biz'],
+      [ID.crossOwner, 'OWNER of bizOther, STAFF of biz'],
+    ] as const) {
+      for (const [label, route] of NAME_ROUTES) {
+        googleCalls.length = 0;
+        expectNamesRefused(await listNames(route, ID.biz, actor), ID.biz, `${who} on biz ${label}`);
+        expect(googleCalls, `${who} on biz ${label}`).toEqual([]);
+
+        googleCalls.length = 0;
+        const own = await listNames(route, ID.bizOther, actor);
+        expect(own.status, `${who} on bizOther ${label} ${JSON.stringify(own.body)}`).toBe(200);
+        expect(own.body, `${who} on bizOther ${label}`).toEqual(listedCalendarsOf(ID.bizOther));
+        expect(googleCalls, `${who} on bizOther ${label}`).toHaveLength(1);
+        expect(googleCalls[0].url.startsWith(CALENDAR_LIST_URL), `${who} on bizOther ${label}`).toBe(true);
+        expect(googleCalls[0].token, `${who} on bizOther ${label}`).toBe(accessTokenOf(ID.bizOther));
+      }
     }
   });
 });
