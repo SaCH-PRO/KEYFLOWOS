@@ -347,18 +347,153 @@ describe('W11-KEY-ORGAN-AUTHORITY-MAP review repairs (D-37, D-119): a dotted con
     );
   });
 
-  // Review SEC-W11KOAM-2 (pre-existing, outside this packet's write set): KeyCortexActionExecutorPlugin.runAuthority
-  // answers refusal null for every dotted tool on a proposal with no stored plan (MANUAL, KEY_CORTEX, ...), so a
-  // member who files POST key-autonomy/.../actions/proposals with EXECUTE_TOOL and a dotted toolName (a contact read,
-  // or an unmapped owner-only tool such as cortex.query_database) runs it preApproved once approved. Holding that
-  // branch to memberToolRunAuthority with no principal (the organ map now judges every dotted name) is a follow-up
-  // packet's change to key-cortex-action-executor.plugin.ts.
-  it.todo('SEC-W11KOAM-2 (D-119, D-37): an approved proposal with no stored plan runs a dotted tool only if its executing member may run it with no principal (memberToolRunAuthority); follow-up packet, outside the W11-KEY-ORGAN-AUTHORITY-MAP write set');
-
   // Review CR-W11KOA-1, the other FLOW-dispatch surfaces: the plan queue (QueueService.processPlanStep ->
   // planStepRunRefusal) and the Pro Auto monitor (noMemberToolRefusal) share memberToolRunAuthority with the KEY
   // chat, so telling them apart needs plan-step-authority.ts (outside this write set). A mapped dotted step there
   // now reaches the FLOW dispatcher, which answers 'Unknown tool': the step or monitor action still fails with
   // nothing run (the owner's already did at base), but it fails at dispatch rather than with a refusal.
   it.todo('CR-W11KOA-1 (GA-06, D-119): the plan queue and the Pro Auto monitor refuse a mapped dotted tool before FLOW dispatch (flowDispatch); follow-up packet, outside the W11-KEY-ORGAN-AUTHORITY-MAP write set');
+});
+
+/**
+ * Review SEC-W11KOAM-2 / W11A-SEAM-REPAIR review SEC-SR-1 (owner rulings D-119, D-131, D-37, D-73): the rows
+ * the plugin's run authority reads for business 'b1', one membership per user id (null or absent: no
+ * membership). No plan is stored for any proposal here.
+ */
+function membersPrisma(members: Record<string, { role: string; permissionScopes?: Record<string, string> | null } | null>) {
+  return {
+    client: {
+      business: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => ({ ownerId: 'owner_u' })) },
+      membership: {
+        findUnique: vi.fn(async ({ where }: { where: { userId_businessId: { userId: string } } }) => {
+          const member = members[where.userId_businessId.userId];
+          return member ? { id: `m_${where.userId_businessId.userId}`, role: member.role, permissionScopes: member.permissionScopes ?? null } : null;
+        }),
+      },
+      user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
+      aiPlan: { findFirst: vi.fn(async () => null) },
+    },
+  };
+}
+
+/** owner_u holds the OWNER membership (no scope map); staff_u and admin_u are on their role defaults (connect none; STAFF settings none). */
+const MEMBERS = {
+  owner_u: { role: 'OWNER' },
+  staff_u: { role: 'STAFF' },
+  admin_u: { role: 'ADMIN' },
+};
+
+/** A proposal POST key-autonomy/businesses/:b/actions/proposals files: the client's sourceType and payload, no stored plan. */
+function filedProposal(toolName: string, fields: { sourceType?: string; userId?: string | null; approvedBy?: string | null } = {}) {
+  return {
+    id: 'proposal_sr1',
+    sourceType: fields.sourceType ?? 'MANUAL',
+    userId: fields.userId === undefined ? 'staff_u' : fields.userId,
+    approvedBy: fields.approvedBy ?? null,
+    planId: null,
+    planStepId: null,
+    payload: { toolName, inputPayload: {} },
+  };
+}
+
+const CONNECTOR_READS = ['key_connector.list_providers', 'key_connector.list_connections', 'key_connector.check_health'];
+
+describe('W11A-SEAM-REPAIR review SEC-SR-1 (closes SEC-W11KOAM-2; D-119, D-131, D-37, D-73): an approved proposal with no stored plan runs a dotted tool only if the member it runs for may run it with no principal', () => {
+  it('SEC-SR-1 RED-BEFORE (D-131, D-119, D-37): a STAFF member on role defaults who files and executes a MANUAL or KEY_CORTEX proposal is refused the KEY connector reads, the unmapped cortex.query_database and the contact read storelink.list_intakes, with memberToolRunAuthority\'s own answer; a plan-less AI_PLAN one is held to D-73 first, then to the same answer; the cortex registry runs nothing', async () => {
+    const prisma = membersPrisma(MEMBERS);
+    const { plugin, cortex } = pluginOver(prisma);
+    for (const sourceType of ['MANUAL', 'KEY_CORTEX', 'AI_PLAN']) {
+      for (const tool of [...CONNECTOR_READS, 'cortex.query_database', 'storelink.list_intakes']) {
+        const memberRefusal = (await memberToolRunAuthority(prisma as never, 'b1', 'staff_u', tool)).refusal;
+        expect(memberRefusal, tool).not.toBeNull();
+        // A plan step with no stored plan has no member (D-73), and it runs only for a member who may run it.
+        const refusal = sourceType === 'AI_PLAN' ? (noMemberToolRefusal(tool) ?? memberRefusal) : memberRefusal;
+        const outcome = await plugin.execute('b1', filedProposal(tool, { sourceType }) as never, 'staff_u');
+        expect(outcome, `${sourceType} ${tool}`).toEqual({ success: false, error: `Refused: ${refusal}` });
+      }
+      for (const tool of CONNECTOR_READS) {
+        expect((await plugin.execute('b1', filedProposal(tool, { sourceType }) as never, 'staff_u')).error, `${sourceType} ${tool}`).toBe(
+          'Refused: Insufficient permissions: connect requires read access (you have none)',
+        );
+      }
+    }
+    for (const sourceType of ['MANUAL', 'KEY_CORTEX']) {
+      expect((await plugin.execute('b1', filedProposal('cortex.query_database', { sourceType }) as never, 'staff_u')).error, sourceType).toBe(
+        'Refused: Tool "cortex.query_database" is mapped to no module scope, so it is not executed from this route',
+      );
+      expect((await plugin.execute('b1', filedProposal('storelink.list_intakes', { sourceType }) as never, 'staff_u')).error, sourceType).toMatch(
+        /^Refused: Tool "storelink.list_intakes" is executed from here only for the business owner: it reads contacts in the KEY cortex registry/,
+      );
+    }
+    expect(cortex.execute).not.toHaveBeenCalled();
+  });
+
+  it('SEC-SR-1 RED-BEFORE (D-131, D-119): an ADMIN on role defaults executing a MANUAL proposal is refused the connector reads (connect none) and cortex.query_database (owner-only), and still runs key_genome.get_blueprint (settings read)', async () => {
+    const { plugin, cortex } = pluginOver(membersPrisma(MEMBERS));
+    for (const tool of CONNECTOR_READS) {
+      expect((await plugin.execute('b1', filedProposal(tool, { userId: 'admin_u' }) as never, 'admin_u')).error, tool).toBe(
+        'Refused: Insufficient permissions: connect requires read access (you have none)',
+      );
+    }
+    expect((await plugin.execute('b1', filedProposal('cortex.query_database', { userId: 'admin_u' }) as never, 'admin_u')).error).toMatch(
+      /^Refused: Tool "cortex.query_database" is mapped to no module scope/,
+    );
+    expect(cortex.execute).not.toHaveBeenCalled();
+    const ran = await plugin.execute('b1', filedProposal('key_genome.get_blueprint', { userId: 'admin_u' }) as never, 'admin_u');
+    expect(ran).toEqual({ success: true, result: { ran: true }, error: undefined });
+    expect(cortex.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('SEC-SR-1 RED-BEFORE (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2): the member judged is who executes it, else who approved it, else who filed it, skipping KEY\'s own ids', async () => {
+    const run = async (fields: { userId?: string | null; approvedBy?: string | null }, executedBy?: string) => {
+      const { plugin, cortex } = pluginOver(membersPrisma(MEMBERS));
+      const outcome = await plugin.execute('b1', filedProposal('key_connector.list_connections', fields) as never, executedBy);
+      return { outcome, ran: cortex.execute.mock.calls.length };
+    };
+    const refused = 'Refused: Insufficient permissions: connect requires read access (you have none)';
+    // The executor wins over the approver: a STAFF executor of the owner's approval is refused.
+    expect((await run({ userId: 'owner_u', approvedBy: 'owner_u' }, 'staff_u')).outcome.error).toBe(refused);
+    // KEY's own id executing (executeApproved with no user runs as 'key_ai') is skipped: the approver is judged.
+    expect((await run({ userId: 'owner_u', approvedBy: 'staff_u' }, 'key_ai')).outcome.error).toBe(refused);
+    // No executor and no approver: who filed it.
+    expect((await run({ userId: 'staff_u' })).outcome.error).toBe(refused);
+    // Controls: the owner judged on each of the three positions runs it.
+    for (const [fields, executedBy] of [
+      [{ userId: 'staff_u', approvedBy: 'staff_u' }, 'owner_u'],
+      [{ userId: 'staff_u', approvedBy: 'owner_u' }, 'key_ai'],
+      [{ userId: 'owner_u' }, undefined],
+    ] as const) {
+      const { outcome, ran } = await run(fields, executedBy);
+      expect(outcome, JSON.stringify([fields, executedBy])).toEqual({ success: true, result: { ran: true }, error: undefined });
+      expect(ran).toBe(1);
+    }
+  });
+
+  it('SEC-SR-1 RED-BEFORE (D-73): a proposal no member runs for (filed, approved and executed by KEY\'s own ids, or by nobody) is held to noMemberToolRefusal: no unmapped tool and no contact read; a mapped tool that reads no contact and writes no money still runs', async () => {
+    for (const [fields, executedBy] of [
+      [{ userId: 'key_ai', approvedBy: 'key_cortex' }, 'key_ai'],
+      [{ userId: null }, undefined],
+    ] as const) {
+      const { plugin, cortex } = pluginOver(membersPrisma(MEMBERS));
+      for (const tool of ['cortex.query_database', 'key_connector.execute_internal', 'storelink.list_intakes']) {
+        const outcome = await plugin.execute('b1', filedProposal(tool, fields) as never, executedBy);
+        expect(outcome, tool).toEqual({ success: false, error: `Refused: ${noMemberToolRefusal(tool)}` });
+      }
+      expect(cortex.execute).not.toHaveBeenCalled();
+      const ran = await plugin.execute('b1', filedProposal('cortex.create_task', fields) as never, executedBy);
+      expect(ran.success).toBe(true);
+      expect(cortex.execute).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('regression control (D-116, D-125, D-119, W11A-SEAM-REPAIR D1): the owner (OWNER membership, no scope map) executing a MANUAL proposal runs the connector reads, cortex.query_database, key_connector.execute_internal and storelink.list_intakes in the cortex registry, as the executor', async () => {
+    const { plugin, cortex } = pluginOver(membersPrisma(MEMBERS));
+    const tools = [...CONNECTOR_READS, 'cortex.query_database', 'key_connector.execute_internal', 'storelink.list_intakes'];
+    for (const tool of tools) {
+      const outcome = await plugin.execute('b1', filedProposal(tool, { userId: 'staff_u', approvedBy: 'owner_u' }) as never, 'owner_u');
+      expect(outcome, tool).toEqual({ success: true, result: { ran: true }, error: undefined });
+    }
+    expect(cortex.execute).toHaveBeenCalledTimes(tools.length);
+    expect(cortex.execute).toHaveBeenCalledWith('cortex.query_database', expect.objectContaining({ businessId: 'b1', userId: 'owner_u', preApproved: true }), {});
+  });
 });
