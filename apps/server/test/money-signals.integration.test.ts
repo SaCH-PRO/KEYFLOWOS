@@ -70,7 +70,11 @@
  * .../segments counts only the contacts the member may open, as the highlights
  * already do, worked out per request with no cache read or write; the owner's
  * counts stay business-wide and cached, and the unpaid projection (SEC-W8MS-3)
- * is kept.
+ * is kept. Its review repair SEC-W11SV-1 (owner ruling D-133, the CRM count
+ * widgets, on biz3): GET .../contact-stats (totalCount, by status, by source,
+ * recent growth, top tags) and GET .../contacts/poll (count, newest edit) are
+ * worked out the same way, so the member cannot compare them with segments to
+ * learn of a hidden contact; the owner's figures stay business-wide.
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -1307,6 +1311,112 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
     expect(await stats.segmentSummary({ businessId: ID3.biz }), 'no viewer').toEqual(ownerPayload);
     expect(reads).toEqual([key, key]);
     expect(writes, 'served from the cache, nothing rewritten').toEqual([]);
+  });
+
+  // ---- W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133: the CRM count widgets) ----
+  describe('W11-CRM-SEGMENTS-VISIBLE review repair: the contact stats and the contacts poll count only the contacts the member may open (D-133)', () => {
+    /** A source and a tag only c3Priv carries, a source only c3Team carries, and a tag both carry (set for these cases, cleared after them). */
+    const D133 = { privSource: 'v94e-source-priv', teamSource: 'v94e-source-team', privTag: 'v94e-tag-priv', sharedTag: 'v94e-tag-shared' };
+    type ContactStats = {
+      totalCount: number;
+      countByStatus: Record<string, number>;
+      countBySource: Array<{ source: string; count: number }>;
+      recentGrowth: Array<{ week: string; count: number }>;
+      topTags: Array<{ tag: string; count: number }>;
+    };
+    const bySource = (stats: ContactStats) => stats.countBySource.map((row) => [row.source, row.count]).sort();
+    const grown = (stats: ContactStats) => stats.recentGrowth.reduce((sum, week) => sum + week.count, 0);
+
+    beforeAll(async () => {
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { source: D133.teamSource, tags: [D133.sharedTag] } });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { source: D133.privSource, tags: [D133.privTag, D133.sharedTag] } });
+    });
+    afterAll(async () => {
+      for (const id of [ID3.cTeam, ID3.cPriv]) await db.contact.update({ where: { id }, data: { source: null, tags: [] } });
+    });
+
+    it("SEC-W11SV-1 (D-133) (W11-CRM-SEGMENTS-VISIBLE review): GET .../contact-stats counts only the contacts the member may open: a member with crm read (revenue read or 'none') is served totalCount, countByStatus, countBySource, recentGrowth and topTags without another member's PRIVATE contact (c3Priv: CLIENT, a source and a tag of its own), so its status counts agree with GET .../segments; the owner's stats stay business-wide and name it", async () => {
+      // Control: the owner's stats count c3Priv everywhere.
+      const owner: ContactStats = await ok3(ID.owner, 'contact-stats');
+      expect(owner.totalCount).toBe(2);
+      expect(owner.countByStatus).toEqual({ LEAD: 1, PROSPECT: 0, CLIENT: 1, LOST: 0 });
+      expect(bySource(owner)).toEqual([[D133.privSource, 1], [D133.teamSource, 1]]);
+      expect(owner.topTags).toEqual([{ tag: D133.sharedTag, count: 2 }, { tag: D133.privTag, count: 1 }]);
+      expect(grown(owner)).toBe(2);
+      expect(owner.recentGrowth).toHaveLength(6);
+
+      const privCreatedAt = (await db.contact.findUniqueOrThrow({ where: { id: ID3.cPriv }, select: { createdAt: true } })).createdAt.getTime();
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served: ContactStats = await ok3(user, 'contact-stats');
+        expect(served.totalCount, user).toBe(1);
+        expect(served.countByStatus, user).toEqual({ LEAD: 1, PROSPECT: 0, CLIENT: 0, LOST: 0 });
+        expect(bySource(served), user).toEqual([[D133.teamSource, 1]]);
+        expect(served.topTags, user).toEqual([{ tag: D133.sharedTag, count: 1 }]);
+        // The owner's six weeks, each without c3Priv in the week it was created.
+        expect(served.recentGrowth.map((week) => week.week), user).toEqual(owner.recentGrowth.map((week) => week.week));
+        for (const [k, week] of served.recentGrowth.entries()) {
+          const start = new Date(week.week);
+          const end = new Date(start);
+          end.setDate(end.getDate() + 7);
+          const holdsPriv = privCreatedAt >= start.getTime() && privCreatedAt < end.getTime();
+          expect(week.count, `${user} ${week.week}`).toBe(owner.recentGrowth[k].count - (holdsPriv ? 1 : 0));
+        }
+        expect(grown(served), user).toBe(1);
+        // The finding's comparison: the two CRM count routes agree for the member.
+        const segments = await ok3(user, 'segments');
+        expect([served.countByStatus.LEAD, served.countByStatus.PROSPECT, served.countByStatus.CLIENT, served.countByStatus.LOST], user)
+          .toEqual([segments.lead, segments.prospect, segments.client, segments.lost]);
+        expect(JSON.stringify(served), user).not.toContain(D133.privSource);
+        expect(JSON.stringify(served), user).not.toContain(D133.privTag);
+      }
+    });
+
+    it("SEC-W11SV-1 (D-133): CrmStatsService.getContactStats named a member works out the stats per request: with the owner's payload primed in the business cache under `${businessId}:getContactStats`, a member is served the member's own stats and the cache is neither read nor written; the owner, and a call naming no viewer, are still served the cached business-wide payload", async () => {
+      const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+      const key = `${ID3.biz}:getContactStats`;
+      const ownerPayload: ContactStats = await ok3(ID.owner, 'contact-stats');
+      expect([ownerPayload.totalCount, ownerPayload.countByStatus.CLIENT]).toEqual([2, 1]);
+      const store = new Map<string, unknown>([[key, ownerPayload]]);
+      const reads: string[] = [];
+      const writes: string[] = [];
+      const recordingCache = {
+        get: async (k: string) => { reads.push(k); return store.get(k) ?? null; },
+        set: async (k: string, v: unknown) => { writes.push(k); store.set(k, v); },
+        invalidate: async () => undefined,
+      };
+      // getContactStats reads no timeline.
+      const stats = new CrmStatsService({ client: db } as any, {} as any, recordingCache as any);
+
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = (await stats.getContactStats(ID3.biz, user)) as ContactStats;
+        expect([served.totalCount, served.countByStatus.LEAD, served.countByStatus.CLIENT], user).toEqual([1, 1, 0]);
+        expect(bySource(served), user).toEqual([[D133.teamSource, 1]]);
+        expect(served.topTags, user).toEqual([{ tag: D133.sharedTag, count: 1 }]);
+      }
+      expect(reads, 'a member call reads no cache entry').toEqual([]);
+      expect(writes, 'a member call writes no cache entry').toEqual([]);
+      expect(store.get(key)).toEqual(ownerPayload);
+
+      expect(await stats.getContactStats(ID3.biz, ID.owner), 'owner').toEqual(ownerPayload);
+      expect(reads, 'the owner call reads the business cache entry').toEqual([key]);
+      expect(await stats.getContactStats(ID3.biz), 'no viewer').toEqual(ownerPayload);
+      expect(reads).toEqual([key, key]);
+      expect(writes, 'served from the cache, nothing rewritten').toEqual([]);
+    });
+
+    it("SEC-W11SV-1 (D-133): GET .../contacts/poll counts and dates only the contacts the member may open: a member's totalCount leaves c3Priv out and its lastUpdatedAt is c3Team's edit, not c3Priv's later one (which would tell the member a hidden contact changed); the owner's poll stays business-wide (both contacts, c3Priv's edit)", async () => {
+      const teamAt = new Date(Date.now() - 10 * 60_000);
+      const privAt = new Date(Date.now() - 60_000);
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { updatedAt: teamAt } });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { updatedAt: privAt } });
+
+      expect(await ok3(ID.owner, 'contacts/poll')).toEqual({ lastUpdatedAt: privAt.toISOString(), totalCount: 2 });
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        expect(await ok3(user, 'contacts/poll'), user).toEqual({ lastUpdatedAt: teamAt.toISOString(), totalCount: 1 });
+      }
+    });
   });
 });
 

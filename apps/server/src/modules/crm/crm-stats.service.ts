@@ -93,6 +93,15 @@ const HIGHLIGHTS_TIMELINE_ENTRIES = 20;
 const NO_CONTACT: Prisma.ContactWhereInput = { id: { in: [] } };
 
 /**
+ * W11-CRM-SEGMENTS-VISIBLE (F-10, D-63) and its review repair SEC-W11SV-1
+ * (D-133): the live contacts of the business a CRM count reads: all of them
+ * with no visibility clause, else the base AND the clause.
+ */
+function viewerContactWhere(businessId: string, visibility: Prisma.ContactWhereInput | null): Prisma.ContactWhereInput {
+  return visibility ? { ...contactWhereBase(businessId), AND: [visibility] } : contactWhereBase(businessId);
+}
+
+/**
  * W8-MONEY-SIGNALS review repair SEC-W8MS-3 / W9-MONEY-RANKING review repair
  * SEC-W9MR-2 (owner ruling D-100): whether a highlights timeline entry carries
  * money: an invoice row ('Total <amount> <currency>') or a ContactEvent row of
@@ -246,18 +255,54 @@ export class CrmStatsService {
     return contact;
   }
 
-  async getContactStats(businessId: string) {
+  /**
+   * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100) and its
+   * review repair SEC-W11SV-1 (owner ruling D-133, the CRM count widgets): the
+   * visibility clause a CRM count read for `viewerUserId` ANDs onto its
+   * contact where (resolveCrmAccess + visibilityClause, the rule GET
+   * contacts/:contactId and GET .../highlights apply). Null when no rule hides
+   * a contact from that viewer (the OWNER, SUPER_ADMIN) or the call names no
+   * viewer (a system caller): the counts are then the whole business's.
+   * resolveCrmAccess refuses a non-member (ForbiddenException).
+   */
+  private async viewerContactVisibility(businessId: string, viewerUserId?: string): Promise<Prisma.ContactWhereInput | null> {
+    if (!viewerUserId) return null;
+    return visibilityClause(await resolveCrmAccess(this.prisma, businessId, viewerUserId), viewerUserId) as Prisma.ContactWhereInput | null;
+  }
+
+  /**
+   * The contact stats (GET .../contact-stats): totalCount, countByStatus,
+   * countBySource, recentGrowth (six weeks) and topTags. A viewer no
+   * visibility rule hides a contact from (the OWNER, SUPER_ADMIN), or a call
+   * that names no viewer, gets the business-wide stats, cached for it under
+   * `${businessId}:getContactStats`, as before.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133:
+   * CRM count widgets count only the contacts the member may open; the owner
+   * sees business-wide figures): any other viewer gets every figure over the
+   * contacts they may open, as GET .../segments counts them, so another
+   * member's PRIVATE contact is neither counted nor named by its source or
+   * tags. Not cached (neither read nor written): the visibility is that
+   * viewer's and is read at each request.
+   */
+  async getContactStats(businessId: string, viewerUserId?: string) {
+    const visibility = await this.viewerContactVisibility(businessId, viewerUserId);
     const cacheKey = `${businessId}:getContactStats`;
-    const cached = await this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (!visibility) {
+      const cached = await this.cache.get(cacheKey);
+      if (cached) return cached;
+    }
+
+    // SEC-W11SV-1 (D-133): with a visibility clause every figure's where is the base AND the clause.
+    const base = viewerContactWhere(businessId, visibility);
 
     const totalCount = await this.prisma.client.contact.count({
-      where: contactWhereBase(businessId),
+      where: base,
     });
 
     const statusGroups = await this.prisma.client.contact.groupBy({
       by: ['status'],
-      where: contactWhereBase(businessId),
+      where: base,
       _count: { id: true },
     });
     const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
@@ -267,7 +312,7 @@ export class CrmStatsService {
 
     const sourceGroups = await this.prisma.client.contact.groupBy({
       by: ['source'],
-      where: contactWhereBase(businessId),
+      where: base,
       _count: { id: true },
     });
     const countBySource = sourceGroups.map((g) => ({
@@ -288,7 +333,7 @@ export class CrmStatsService {
       weekEnd.setDate(weekEnd.getDate() + 7);
       const count = await this.prisma.client.contact.count({
         where: {
-          ...contactWhereBase(businessId),
+          ...base,
           createdAt: { gte: weekStart, lt: weekEnd },
         },
       });
@@ -296,7 +341,7 @@ export class CrmStatsService {
     }
 
     const allContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: base,
       select: { tags: true },
     });
     const tagCounts = new Map<string, number>();
@@ -311,7 +356,8 @@ export class CrmStatsService {
       .slice(0, 10);
 
     const result = { totalCount, countByStatus, countBySource, recentGrowth, topTags };
-    await this.cache.set(cacheKey, result);
+    // SEC-W11SV-1 (D-133): a viewer's stats are never written to the business cache.
+    if (!visibility) await this.cache.set(cacheKey, result);
     return result;
   }
 
@@ -847,9 +893,7 @@ export class CrmStatsService {
    * member without revenue read (D-100, SEC-W8MS-3).
    */
   async segmentSummary(input: { businessId: string; viewerUserId?: string }) {
-    const visibility = input.viewerUserId
-      ? (visibilityClause(await resolveCrmAccess(this.prisma, input.businessId, input.viewerUserId), input.viewerUserId) as Prisma.ContactWhereInput | null)
-      : null;
+    const visibility = await this.viewerContactVisibility(input.businessId, input.viewerUserId);
     const cacheKey = `${input.businessId}:segmentSummary`;
     if (!visibility) {
       const cached = await this.cache.get(cacheKey);
@@ -857,9 +901,7 @@ export class CrmStatsService {
     }
 
     // W11-CRM-SEGMENTS-VISIBLE (F-10; D-63): with a visibility clause every count's where is the base AND the clause.
-    const base: Prisma.ContactWhereInput = visibility
-      ? { ...contactWhereBase(input.businessId), AND: [visibility] }
-      : contactWhereBase(input.businessId);
+    const base = viewerContactWhere(input.businessId, visibility);
     const now = new Date();
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -1013,14 +1055,25 @@ export class CrmStatsService {
     return entries.filter((entry) => !timelineEntryCarriesMoney(entry)).slice(0, HIGHLIGHTS_TIMELINE_ENTRIES);
   }
 
-  async getContactsPollState(businessId: string) {
+  /**
+   * The contacts poll (GET .../contacts/poll): the newest contact edit and the
+   * contact count, which the contacts list polls to refetch on a change.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133,
+   * "the contacts poll"): named a viewer a visibility rule hides contacts
+   * from, both are worked out over the contacts that viewer may open, so a
+   * hidden contact's existence or edit time is not told; the OWNER,
+   * SUPER_ADMIN and a call naming no viewer keep the business-wide figures.
+   */
+  async getContactsPollState(businessId: string, viewerUserId?: string) {
+    const where = viewerContactWhere(businessId, await this.viewerContactVisibility(businessId, viewerUserId));
     const [result, totalCount] = await Promise.all([
       this.prisma.client.contact.aggregate({
-        where: contactWhereBase(businessId),
+        where,
         _max: { updatedAt: true },
       }),
       this.prisma.client.contact.count({
-        where: contactWhereBase(businessId),
+        where,
       }),
     ]);
     return {

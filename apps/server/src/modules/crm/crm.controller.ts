@@ -597,8 +597,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/poll')
-  getContactsPollState(@Param('businessId') businessId: string) {
-    return this.crmStats.getContactsPollState(businessId);
+  getContactsPollState(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133,
+    // "the contacts poll"): the count and the newest edit of the contacts the
+    // session member may open; the OWNER and SUPER_ADMIN keep the
+    // business-wide figures.
+    return this.crmStats.getContactsPollState(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1009,8 +1013,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contact-stats')
-  getContactStats(@Param('businessId') businessId: string) {
-    return this.crmStats.getContactStats(businessId);
+  getContactStats(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling
+    // D-133): the stats are the session member's, over the contacts they may
+    // open (as GET .../segments counts them); the OWNER and SUPER_ADMIN keep
+    // the cached business-wide stats.
+    return this.crmStats.getContactStats(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
