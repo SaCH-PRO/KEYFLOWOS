@@ -899,6 +899,10 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
     {
       // W11A-SEAM-REPAIR control (review SEC-W11D116K-1 stays closed; D-125, D-71): an explicit scope map on an OWNER
       // membership binds it on every mapped tool, organ tools included; only an unmapped tool is the owner arm's (D-119).
+      // Open, awaiting an owner ruling (review SEC-SR-3): the `runs` half pins D-119/D-125/D-131 as written (an OWNER
+      // membership runs every unmapped tool, cortex.query_database and key_connector.execute_internal included, whatever
+      // its explicit map says). Refusing an unmapped tool to an OWNER membership that holds an explicit map would narrow
+      // those rulings, so it waits for the owner; if so ruled, key_connector.execute_internal moves to `refused` here.
       title: 'W11A-SEAM-REPAIR control (SEC-W11D116K-1): an OWNER membership whose explicit map leaves out connect and sets revenue none is refused the three KEY connector reads and temporal_flow.list_events, and still runs the unmapped key_connector.execute_internal and cortex.create_task (ai write in its map)',
       member: { membership: { role: 'OWNER', permissionScopes: { ai: 'write', revenue: 'none' } } },
       runs: ['key_connector.execute_internal', 'cortex.create_task'],
