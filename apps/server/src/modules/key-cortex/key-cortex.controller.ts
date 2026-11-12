@@ -3140,9 +3140,17 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/report
    * Generate a comprehensive business report.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1 / CRR-1, owner ruling
+   * D-57): the report carries the insights/revenue analysis, the
+   * insights/profit opportunities, and keyMetrics / topPriorities with the
+   * outstanding and overdue invoice totals from the full context, so it is a
+   * money report: revenue:read, as insights/revenue and insights/profit.
    */
   @Get('report')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async getBusinessReport(
     @GuardedBusinessId() businessId: string,
     @Query('scope') scope: 'daily' | 'weekly' | 'monthly' = 'daily',
@@ -3167,9 +3175,16 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/recommendations
    * AI-generated recommendations based on full business context.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1 / CRR-1, owner ruling
+   * D-57): the recommendations are built from the revenue analysis, the profit
+   * opportunities and the overdue invoice total ("Collect $X in overdue
+   * invoices", estimatedImpact = that total), so they need revenue:read.
    */
   @Get('recommendations')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async getRecommendations(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
@@ -3201,9 +3216,18 @@ export class KeyCortexController {
    * Find profit opportunities for the business.
    *
    * @deprecated Use GET /api/v1/cortex/insights/profit instead.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-2 / CRR-1, owner ruling
+   * D-57): this alias reaches the same KeyCortexInsightService
+   * findProfitOpportunities as insights/profit (through the reasoning engine
+   * and the legacy insight service), so it carries the same revenue:read gate.
+   * ModuleScopeGuard resolves the tenant from the body first, the field the
+   * handler reads (resolveRequestBusinessId).
    */
   @Post('profit-opportunities')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async findProfitOpportunities(
     @Body() dto: ProfitOpportunitiesQueryDto,
   ): Promise<{ opportunities: CortexProfitOpportunity[] }> {

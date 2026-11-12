@@ -20,6 +20,21 @@
  * collect, by amount and contact) are money reads with no revenue scope. D-57
  * puts every money report behind revenue:read (ModuleScopeGuard).
  *
+ * REVIEW (SEC-W11CRR-1, SEC-W11CRR-2, CRR-1, owner ruling D-57). Three sibling
+ * routes served the same money figures with AuthGuard and BusinessGuard only:
+ * GET report (KeyCortexInsightService.generateBusinessReport: the revenue
+ * analysis, the profit opportunities, and keyMetrics / topPriorities with the
+ * outstanding and overdue invoice totals), GET recommendations
+ * (generateRecommendations: "Collect $X in overdue invoices", estimatedImpact =
+ * the overdue total) and POST profit-opportunities (the deprecated alias of
+ * insights/profit, through the reasoning engine to the same
+ * findProfitOpportunities). A STAFF member holding revenue none read all three.
+ * Each now needs revenue:read as well.
+ *
+ * REVIEW (SEC-W11CRR-3, owner ruling D-129). The owner predicate is bound to
+ * the guarded tenant: a user who is OWNER of bizC and only STAFF of bizA is
+ * refused bizA's full context (and still gets bizC's).
+ *
  * WHAT IS REAL: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, the
  * route guard the fix adds, the production GlobalHttpExceptionFilter and
  * ValidationPipe, Nest's routing, and KeyCortexController, against
@@ -57,16 +72,22 @@ const ID = {
   staffNoRevenue: `${P}staff_norev`, // STAFF of bizA, explicit map: crm none, revenue none
   staffRevenueRead: `${P}staff_revread`, // STAFF of bizA, explicit map: revenue read
   recordedAdmin: `${P}recorded_admin`, // Business.ownerId of bizB, holds only an ADMIN membership (D-116)
+  ownerElsewhere: `${P}owner_elsewhere`, // OWNER of bizC, STAFF of bizA with crm none and revenue none (SEC-W11CRR-3)
   superAdmin: `${P}super`, // platform SUPER_ADMIN, no membership
   nonMember: `${P}nonmember`, // no membership anywhere
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
+  bizC: `${P}bizC`,
 };
 
 const CONTEXT_MARKER = 'v97o-context-marker';
 const FORMATTED_MARKER = 'v97o formatted context marker';
 const REVENUE_MARKER = 'v97o-revenue-marker';
 const PROFIT_MARKER = 'v97o-profit-marker';
+const REPORT_MARKER = 'v97o-report-marker';
+const RECOMMENDATION_MARKER = 'v97o-recommendation-marker';
+/** The overdue invoice total the report and recommendation stubs carry, as the real methods take it from the full context. */
+const OVERDUE_TOTAL = 98765;
 
 /** The controller's collaborators for its other routes; the routes under test reach none of them. */
 const OFF_BOUNDARY = new Set([
@@ -170,8 +191,33 @@ beforeAll(async () => {
       calls.push({ method: 'insight.findProfitOpportunities', businessId });
       return [{ id: `${P}opp`, title: PROFIT_MARKER }];
     },
+    // Shaped like the real methods (key-cortex-insight.service.ts generateBusinessReport and
+    // generateRecommendations): the revenue analysis, the profit opportunities and the
+    // context-derived overdue total.
+    generateBusinessReport: async (businessId: unknown, scope: unknown) => {
+      calls.push({ method: 'insight.generateBusinessReport', businessId });
+      return {
+        scope,
+        marker: REPORT_MARKER,
+        revenue: { marker: REVENUE_MARKER, totalRevenue: 4321 },
+        opportunities: [{ id: `${P}opp`, title: PROFIT_MARKER }],
+        keyMetrics: { outstandingInvoices: OVERDUE_TOTAL, overdueInvoices: OVERDUE_TOTAL },
+        topPriorities: [`Collect $${OVERDUE_TOTAL.toLocaleString()} in overdue invoices (1 invoices)`],
+      };
+    },
+    generateRecommendations: async (businessId: unknown) => {
+      calls.push({ method: 'insight.generateRecommendations', businessId });
+      return [{
+        id: 'rec-rev-2',
+        title: `Collect $${OVERDUE_TOTAL.toLocaleString()} in overdue invoices`,
+        description: RECOMMENDATION_MARKER,
+        category: 'revenue',
+        estimatedImpact: OVERDUE_TOTAL,
+      }];
+    },
   };
-  // insights/profit's legacy fallback: never reached here (the insight stub answers), recorded if it is.
+  // insights/profit's legacy fallback (never reached here: the insight stub answers) and the
+  // engine behind POST profit-opportunities, the deprecated alias of insights/profit.
   const reasoning = {
     findProfitOpportunities: async (businessId: unknown) => {
       calls.push({ method: 'reasoning.findProfitOpportunities', businessId });
@@ -223,6 +269,7 @@ beforeAll(async () => {
     [ID.staffNoRevenue, 'USER'],
     [ID.staffRevenueRead, 'USER'],
     [ID.recordedAdmin, 'USER'],
+    [ID.ownerElsewhere, 'USER'],
     [ID.superAdmin, 'SUPER_ADMIN'],
     [ID.nonMember, 'USER'],
   ] as const) {
@@ -230,6 +277,7 @@ beforeAll(async () => {
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V97O Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V97O Biz B', ownerId: ID.recordedAdmin } });
+  await db.business.create({ data: { id: ID.bizC, name: 'V97O Biz C', ownerId: ID.ownerElsewhere } });
   const memberships: Array<{ userId: string; businessId: string; role: string; permissionScopes?: Record<string, string> }> = [
     { userId: ID.owner, businessId: ID.bizA, role: 'OWNER' },
     { userId: ID.coOwner, businessId: ID.bizA, role: 'OWNER' },
@@ -238,6 +286,8 @@ beforeAll(async () => {
     { userId: ID.staffNoRevenue, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none' } },
     { userId: ID.staffRevenueRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'read' } },
     { userId: ID.recordedAdmin, businessId: ID.bizB, role: 'ADMIN' },
+    { userId: ID.ownerElsewhere, businessId: ID.bizC, role: 'OWNER' },
+    { userId: ID.ownerElsewhere, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'none', revenue: 'none' } },
   ];
   for (const m of memberships) {
     await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}_${m.businessId.slice(P.length)}`, ...m } });
@@ -250,10 +300,12 @@ afterAll(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it('bizA has its recorded owner and a co-owner as OWNER members, an ADMIN and three STAFF; bizB is recorded to a user who holds only ADMIN', async () => {
+  it('bizA has its recorded owner and a co-owner as OWNER members, an ADMIN and four STAFF (one of them the OWNER of bizC); bizB is recorded to a user who holds only ADMIN', async () => {
     const a = await db.membership.findMany({ where: { businessId: ID.bizA }, select: { userId: true, role: true } });
     expect(a.filter((m: any) => m.role === 'OWNER').map((m: any) => m.userId).sort()).toEqual([ID.coOwner, ID.owner].sort());
-    expect(a.filter((m: any) => m.role === 'STAFF')).toHaveLength(3);
+    expect(a.filter((m: any) => m.role === 'STAFF')).toHaveLength(4);
+    expect(await db.membership.findMany({ where: { userId: ID.ownerElsewhere }, select: { businessId: true, role: true }, orderBy: { businessId: 'asc' } }))
+      .toEqual([{ businessId: ID.bizA, role: 'STAFF' }, { businessId: ID.bizC, role: 'OWNER' }]);
     expect(await db.business.count({ where: { id: ID.bizA, ownerId: ID.owner } })).toBe(1);
     expect(await db.business.count({ where: { id: ID.bizA, ownerId: ID.coOwner } })).toBe(0);
     expect(await db.business.count({ where: { id: ID.bizB, ownerId: ID.recordedAdmin } })).toBe(1);
@@ -310,6 +362,22 @@ describe('W11-CORTEX-READ-ROUTES-SCOPE D-129: GET cortex/context is served to th
     expect(res.status, JSON.stringify(res.body)).toBe(401);
     expect(callsSince(from)).toEqual([]);
   });
+
+  it('SEC-W11CRR-3 (D-129): the OWNER of another business who is only STAFF here is refused 403, and the full context is never read', async () => {
+    const res = await get('context', ID.ownerElsewhere, ID.bizA);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain(CONTEXT_MARKER);
+    expect(text).not.toContain(FORMATTED_MARKER);
+    expect(callsSince(from)).toEqual([]);
+  });
+
+  it('SEC-W11CRR-3 (D-129) control: the same user gets 200 with the context of the business they own', async () => {
+    const res = await get('context', ID.ownerElsewhere, ID.bizC);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.context).toEqual({ businessId: ID.bizC, marker: CONTEXT_MARKER });
+    expect(callsSince(from).map((c) => c.businessId)).toEqual([ID.bizC, ID.bizC]);
+  });
 });
 
 describe('W11-CORTEX-READ-ROUTES-SCOPE D-57: GET cortex/insights/revenue and insights/profit need revenue read', () => {
@@ -342,6 +410,65 @@ describe('W11-CORTEX-READ-ROUTES-SCOPE D-57: GET cortex/insights/revenue and ins
 
     it(`D-57: GET ${route} refuses a user with no membership 403`, async () => {
       const res = await get(route, ID.nonMember, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(callsSince(from)).toEqual([]);
+    });
+  }
+});
+
+describe('W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1, SEC-W11CRR-2, CRR-1) D-57: GET cortex/report, GET cortex/recommendations and POST cortex/profit-opportunities need revenue read', () => {
+  let from = 0;
+  beforeEach(() => { from = calls.length; });
+
+  const ROUTES = [
+    {
+      name: 'GET report',
+      send: (user: string, businessId: string) => get('report', user, businessId).query({ scope: 'weekly' }),
+      method: 'insight.generateBusinessReport',
+      marker: REPORT_MARKER,
+    },
+    {
+      name: 'GET recommendations',
+      send: (user: string, businessId: string) => get('recommendations', user, businessId),
+      method: 'insight.generateRecommendations',
+      marker: RECOMMENDATION_MARKER,
+    },
+    {
+      name: 'POST profit-opportunities',
+      send: (user: string, businessId: string) =>
+        request(app.getHttpServer()).post('/api/v1/cortex/profit-opportunities').set(HEADER, user).send({ businessId }),
+      method: 'reasoning.findProfitOpportunities',
+      marker: PROFIT_MARKER,
+    },
+  ] as const;
+
+  for (const { name, send, method, marker } of ROUTES) {
+    it.each([
+      ['a STAFF member holding revenue none', ID.staffNoRevenue],
+      ['the OWNER of another business who is STAFF holding revenue none here', ID.ownerElsewhere],
+    ])(`D-57: ${name} refuses %s 403, and no money figure is computed or returned`, async (_label, user) => {
+      const res = await send(user, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(marker);
+      expect(text).not.toContain(String(OVERDUE_TOTAL));
+      expect(text).not.toContain(OVERDUE_TOTAL.toLocaleString());
+      expect(callsSince(from)).toEqual([]);
+    });
+
+    it.each([
+      ['a STAFF member holding revenue read (explicit map)', ID.staffRevenueRead],
+      ['a STAFF member with the role-default scopes (revenue read)', ID.staffDefault],
+      ['the OWNER', ID.owner],
+    ])(`D-57: ${name} answers %s 200 with the figures of the business`, async (_label, user) => {
+      const res = await send(user, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(JSON.stringify(res.body)).toContain(marker);
+      expect(callsSince(from)).toEqual([{ method, businessId: ID.bizA }]);
+    });
+
+    it(`D-57: ${name} refuses a user with no membership 403`, async () => {
+      const res = await send(ID.nonMember, ID.bizA);
       expect(res.status, JSON.stringify(res.body)).toBe(403);
       expect(callsSince(from)).toEqual([]);
     });
