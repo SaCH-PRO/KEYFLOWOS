@@ -8,7 +8,7 @@ import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload 
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order-metadata';
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
-import { isLostTransactionConflict, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
+import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 
 /**
  * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
@@ -60,6 +60,15 @@ const ROUTING_ADVANCES_FROM: ReadonlySet<string> = new Set(['placed', 'awaiting_
  */
 export async function claimOrderRouting(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ROUTING_LOCK_NAMESPACE}${businessId}:${orderId}`}))`;
+}
+
+/** A purchase order line as stored in its items JSON (the fields a receipt reads). */
+interface PurchaseOrderLineJson {
+  productId?: string | null;
+  warehouseId?: string | null;
+  quantity?: number;
+  receivedQuantity?: number;
+  unitCost?: number | null;
 }
 
 export interface OrderStatusTimelineEntry {
@@ -1029,8 +1038,9 @@ export class FulfillmentRoutingService {
    * its RESERVED routes, their reserved stock and 'routed' over the cancelled
    * status. Under the claim the cancel waits for a router to commit, then
    * re-reads the order's status (400 when it can no longer be cancelled), locks
-   * the stock rows its LOCAL_STOCK routes reserved from in the global order
-   * (core/inventory/stock-lock-order.ts), gives back what each reserved and
+   * the stock rows its LOCAL_STOCK routes reserved from (each route's product in
+   * its warehouse, and no other row of the product: review Z4RV-CR-1) in the
+   * global order (core/inventory/stock-lock-order.ts), gives back what each reserved and
    * cancels every route not COMPLETED or CANCELLED. A router that comes after
    * it meets the order cancelled and creates nothing.
    */
@@ -1057,8 +1067,15 @@ export class FulfillmentRoutingService {
       return !route.warehouseId || untracked || !item ? [] : [{ warehouseId: route.warehouseId, item }];
     });
 
-    // Every stock row these routes reserved from, locked at once in the global order before the first is written.
-    await lockStockRowsInOrder(tx, businessId, releases.map((release) => release.item.productId));
+    // Every stock row these routes reserved from, locked at once in the global order before the first is written:
+    // only those rows (W10-Z4-ROUTE-FIX review Z4RV-CR-1). Locking the product's rows in every warehouse, a cancel of
+    // one line held two rows of its product, and a transfer writing them in the other order (from row, then to row)
+    // deadlocked with it: the cancel was rolled back, its route RESERVED and its unit reserved.
+    await lockStockRowPairsInOrder(
+      tx,
+      businessId,
+      releases.map(({ warehouseId, item }) => ({ productId: item.productId, warehouseId })),
+    );
     for (const { warehouseId, item } of releases) {
       // Read under the lock: what is reserved now, every reservation committed before it counted.
       const stock = await tx.inventoryStock.findFirst({ where: { businessId, productId: item.productId, warehouseId } });
@@ -1119,6 +1136,52 @@ export class FulfillmentRoutingService {
     }
   }
 
+  /**
+   * W10-Z4-ROUTE-FIX review (Z4RV-SEC-1): the stock a purchase order received
+   * adds, one entry per line that adds any (a product, a warehouse, a quantity
+   * above 0): the line's product, its warehouse or else the business's default
+   * one, and its quantity (received, else ordered).
+   *
+   * Each line's product and warehouse must be the business's (a soft-deleted
+   * product of the business counts), or the receipt is refused (400) before
+   * anything is written. A purchase order's items are stored as its creator
+   * sent them (createPurchaseOrder, body: any), and the receipt wrote the stock
+   * row of whatever (productId, warehouseId) a line named: another business's
+   * row (its quantity, and its weighted-average cost), or a new row of this
+   * business for another business's product, which makes that product read as
+   * stock-tracked (resolveInventoryMode) and its storefront refuse to sell it.
+   */
+  private async receivedStockLines(
+    businessId: string,
+    items: Prisma.JsonValue,
+    defaultWarehouseId: string | undefined,
+  ): Promise<Array<{ productId: string; warehouseId: string; quantity: number; item: PurchaseOrderLineJson }>> {
+    const lines = (Array.isArray(items) ? (items as Array<PurchaseOrderLineJson | null>) : []).flatMap((item) => {
+      const productId = item?.productId;
+      const quantity = item?.receivedQuantity ?? item?.quantity ?? 0;
+      const warehouseId = item?.warehouseId || defaultWarehouseId;
+      return item && productId && warehouseId && quantity > 0 ? [{ productId, warehouseId, quantity, item }] : [];
+    });
+    if (lines.length === 0) return lines;
+
+    // Read with no soft-delete or tenant filter (raw SQL), by the business's own id.
+    const [products, warehouses] = await Promise.all([
+      this.prisma.client.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join([...new Set(lines.map((l) => String(l.productId)))])})`,
+      this.prisma.client.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM warehouses WHERE business_id = ${businessId} AND id IN (${Prisma.join([...new Set(lines.map((l) => String(l.warehouseId)))])})`,
+    ]);
+    const ownProducts = new Set(products.map((row) => row.id));
+    const ownWarehouses = new Set(warehouses.map((row) => row.id));
+    const foreign = lines.findIndex((line) => !ownProducts.has(String(line.productId)) || !ownWarehouses.has(String(line.warehouseId)));
+    if (foreign >= 0) {
+      throw new BadRequestException(
+        `Purchase order line ${foreign + 1} names a product or a warehouse that is not this business's; nothing was received`,
+      );
+    }
+    return lines;
+  }
+
   async advancePurchaseOrderStatus(
     businessId: string,
     poId: string,
@@ -1166,18 +1229,19 @@ export class FulfillmentRoutingService {
         orderBy: { createdAt: 'asc' },
       });
       const defaultWarehouseId = warehouses[0]?.id;
+      // W10-Z4-ROUTE-FIX review (Z4RV-SEC-1): the stock each line adds, every line's product and warehouse checked to
+      // be the business's first (400 otherwise, nothing written).
+      const receipts = await this.receivedStockLines(businessId, po.items, defaultWarehouseId);
 
       updatedPO = await this.prisma.client.$transaction(async (rawTx) => {
         const tx = rawTx as unknown as Prisma.TransactionClient;
-        // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): the stock rows of every line (each line's product, in every warehouse), locked
-        // first, at once, in the global order (core/inventory/stock-lock-order.ts), then the purchase order, its routes
-        // and the stock written. Updated line by line in line order and held to commit, a receipt with lines [B, A]
-        // and a routing reserving [A, B] each held one row and waited for the other's (40P01), and one was rolled back.
-        await lockStockRowsInOrder(
-          rawTx,
-          businessId,
-          ((po.items as Array<{ productId?: string | null }> | null) ?? []).map((item) => item?.productId),
-        );
+        // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): the stock rows the lines add to, locked first, at once, in the global order
+        // (core/inventory/stock-lock-order.ts), then the purchase order, its routes and the stock written. Updated line
+        // by line in line order and held to commit, a receipt with lines [B, A] and a routing reserving [A, B] each
+        // held one row and waited for the other's (40P01), and one was rolled back. Review Z4RV-CR-1: only the
+        // (product, warehouse) rows the lines write; every warehouse's row of a line's product made a receipt hold two
+        // rows of it, which a transfer writing them in the other order deadlocked with, and the receipt was rolled back.
+        await lockStockRowPairsInOrder(rawTx, businessId, receipts);
         const updated = await tx.purchaseOrder.update({
           where: { id: poId },
           data: updateData,
@@ -1188,16 +1252,13 @@ export class FulfillmentRoutingService {
           data: { status: 'PICKING_PACKING' },
         });
 
-        const poItems = (updated.items as any[]) ?? [];
-        for (const item of poItems) {
-          const productId = item.productId;
-          const qty = item.receivedQuantity ?? item.quantity ?? 0;
-          const warehouseId = item.warehouseId || defaultWarehouseId;
-
-          if (!productId || !warehouseId || qty <= 0) continue;
-
-          const existing = await tx.inventoryStock.findUnique({
-            where: { productId_warehouseId: { productId, warehouseId } },
+        // The purchase order's lines as read above (no writer changes a purchase order's items after it is created).
+        for (const { productId, warehouseId, quantity: qty, item } of receipts) {
+          // Review Z4RV-SEC-1: the business's own row, read under the lock above. This read the row of the line's
+          // (productId, warehouseId) with no business filter, so a line naming another business's product and
+          // warehouse added to that business's stock and rewrote its weighted-average cost.
+          const existing = await tx.inventoryStock.findFirst({
+            where: { businessId, productId, warehouseId },
           });
 
           if (existing) {

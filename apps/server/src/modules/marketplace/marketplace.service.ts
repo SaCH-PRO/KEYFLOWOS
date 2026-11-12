@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
+import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
@@ -2163,56 +2164,75 @@ export class MarketplaceService {
     return updated;
   }
 
+  /**
+   * W10-Z4-ROUTE-FIX review (Z4RV-CR-1): one interactive transaction that
+   * locks its two stock rows (the from row and the to row) first, at once, in
+   * the global order (core/inventory/stock-lock-order.ts), then reads them and
+   * writes them. It was a batch transaction writing the from row, then the to
+   * row, out of that order: a fulfil cancel, a purchase order received or a
+   * routing holding the to row and waiting for the from row deadlocked with it
+   * (40P01), and the other side was rolled back. The from row is read under the
+   * lock, so the quantity written counts every write committed before it (it
+   * was read before the transaction and written back as read, less the
+   * transfer).
+   */
   async transferInventory(businessId: string, data: { productId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; note?: string; userId?: string }) {
     if (data.quantity <= 0) throw new BadRequestException('Transfer quantity must be positive');
     if (data.fromWarehouseId === data.toWarehouseId) throw new BadRequestException('Source and destination warehouses must be different');
 
-    const fromStock = await this.prisma.client.inventoryStock.findUnique({
-      where: { productId_warehouseId: { productId: data.productId, warehouseId: data.fromWarehouseId } },
-    });
-    if (!fromStock || fromStock.businessId !== businessId) throw new NotFoundException('Source inventory not found');
-
-    const available = fromStock.quantity - fromStock.reserved;
-    if (available < data.quantity) throw new BadRequestException(`Insufficient available stock. Available: ${available}`);
-
-    const toWarehouse = await this.prisma.client.warehouse.findFirst({ where: { id: data.toWarehouseId, businessId } });
-    if (!toWarehouse) throw new NotFoundException('Destination warehouse not found');
-
-    const toStock = await this.prisma.client.inventoryStock.findUnique({
-      where: { productId_warehouseId: { productId: data.productId, warehouseId: data.toWarehouseId } },
-    });
-
     const refId = `TRF-${Date.now()}`;
 
-    await this.prisma.client.$transaction([
-      this.prisma.client.inventoryStock.update({
+    await this.prisma.client.$transaction(async (tx) => {
+      await lockStockRowPairsInOrder(tx, businessId, [
+        { productId: data.productId, warehouseId: data.fromWarehouseId },
+        { productId: data.productId, warehouseId: data.toWarehouseId },
+      ]);
+
+      const fromStock = await tx.inventoryStock.findFirst({
+        where: { businessId, productId: data.productId, warehouseId: data.fromWarehouseId },
+      });
+      if (!fromStock) throw new NotFoundException('Source inventory not found');
+
+      const available = fromStock.quantity - fromStock.reserved;
+      if (available < data.quantity) throw new BadRequestException(`Insufficient available stock. Available: ${available}`);
+
+      const toWarehouse = await tx.warehouse.findFirst({ where: { id: data.toWarehouseId, businessId } });
+      if (!toWarehouse) throw new NotFoundException('Destination warehouse not found');
+
+      const toStock = await tx.inventoryStock.findFirst({
+        where: { businessId, productId: data.productId, warehouseId: data.toWarehouseId },
+      });
+
+      await tx.inventoryStock.update({
         where: { id: fromStock.id },
         data: { quantity: fromStock.quantity - data.quantity },
-      }),
-      toStock
-        ? this.prisma.client.inventoryStock.update({
-            where: { id: toStock.id },
-            data: { quantity: toStock.quantity + data.quantity },
-          })
-        : this.prisma.client.inventoryStock.create({
-            data: {
-              businessId,
-              productId: data.productId,
-              warehouseId: data.toWarehouseId,
-              quantity: data.quantity,
-              reserved: 0,
-              currency: fromStock.currency,
-              costPerUnit: fromStock.costPerUnit,
-              reorderAt: fromStock.reorderAt,
-            },
-          }),
-      this.prisma.client.stockMovement.create({
+      });
+      if (toStock) {
+        await tx.inventoryStock.update({
+          where: { id: toStock.id },
+          data: { quantity: toStock.quantity + data.quantity },
+        });
+      } else {
+        await tx.inventoryStock.create({
+          data: {
+            businessId,
+            productId: data.productId,
+            warehouseId: data.toWarehouseId,
+            quantity: data.quantity,
+            reserved: 0,
+            currency: fromStock.currency,
+            costPerUnit: fromStock.costPerUnit,
+            reorderAt: fromStock.reorderAt,
+          },
+        });
+      }
+      await tx.stockMovement.create({
         data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
-      }),
-      this.prisma.client.stockMovement.create({
+      });
+      await tx.stockMovement.create({
         data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
-      }),
-    ]);
+      });
+    }, STOCK_LOCK_TX_OPTIONS);
 
     return { success: true, transferRef: refId };
   }

@@ -29,6 +29,37 @@ import type { BusinessMetaTx } from '../prisma/business-meta';
  * COMMITTED: the read after the lock is a new snapshot), so a read-modify-write
  * of `reserved` or `quantity` under it loses no concurrent write.
  *
+ * W10-Z4-ROUTE-FIX review (Z4RV-CR-1): a transaction locks only the rows it
+ * may write. Locking more (every warehouse's row of a product, written or
+ * not) made a single-product cancel or receipt hold two rows of the product,
+ * which a writer outside the rule (a transfer writing its from row, then its
+ * to row) then met in the other order: 40P01, and the cancel or the receipt
+ * was rolled back. The writers and what each locks:
+ *
+ *   - routing (FulfillmentRoutingService.routeOrder): every row of each
+ *     line's product (lockStockRowsInOrder), since it reserves from the row
+ *     with the most stock, chosen under the lock; its claim is run again once
+ *     when it loses a deadlock anyway;
+ *   - the paid door (StoreOrderService.completeCheckout): each tracked line's
+ *     row in the default warehouse;
+ *   - the fulfil cancel (cancelOrderFulfilment): the (product, warehouse) row
+ *     each reserved route took from (lockStockRowPairsInOrder);
+ *   - a purchase order received (advancePurchaseOrderStatus RECEIVED): each
+ *     line's (product, warehouse) row;
+ *   - a transfer (MarketplaceService.transferInventory): its from row and its
+ *     to row;
+ *   - a delivery note fulfilled, a goods receipt posted, a stock count
+ *     adjusted (continental-ops): every row of each line's product, all of
+ *     which their updateMany writes.
+ *
+ * Writers of one row in a transaction of their own (adjustInventory,
+ * upsertInventory, the ship decrement) hold one stock row and wait for no
+ * other. Not covered: a row that does not exist yet. A receipt or a transfer
+ * creates the (product, warehouse) row it adds to when there is none, after
+ * its locking statement; two of them creating the same two new rows in
+ * opposite orders wait for each other's insert (the unique key), as before
+ * this order existed.
+ *
  * Postgres locks the rows of SELECT ... ORDER BY ... FOR UPDATE as the sorted
  * rows are returned (the LockRows step runs above the sort), so the locks are
  * taken in id order. Ids never change, so the order is the same for every
@@ -43,7 +74,7 @@ export type StockLockClient = Pick<BusinessMetaTx, '$queryRaw'> | Pick<Prisma.Tr
  * business, in every warehouse or, with `warehouseId`, in that warehouse
  * only, in id order, on the caller's transaction. Returns the ids locked, in
  * that order (none for no products). A row created after the statement is not
- * locked, so a caller writes only the rows returned.
+ * locked by it.
  */
 export async function lockStockRowsInOrder(
   client: StockLockClient,
@@ -61,6 +92,46 @@ export async function lockStockRowsInOrder(
        FOR UPDATE`;
   return rows.map((row) => row.id);
 }
+
+/** A (product, warehouse) stock row a transaction writes. */
+export interface StockRowKey {
+  productId: string | null | undefined;
+  warehouseId: string | null | undefined;
+}
+
+/**
+ * W10-Z4-ROUTE-FIX review (Z4RV-CR-1): locks (FOR UPDATE) the business's
+ * inventory_stocks rows of exactly these (product, warehouse) pairs, in id
+ * order, on the caller's transaction; for a transaction that writes only
+ * these rows (the fulfil cancel, a purchase order received, a transfer).
+ * Returns the ids locked, in that order (none for no pairs). A pair with no
+ * row locks nothing; a row created after the statement is not locked.
+ */
+export async function lockStockRowPairsInOrder(
+  client: StockLockClient,
+  businessId: string,
+  keys: readonly StockRowKey[],
+): Promise<string[]> {
+  const pairs = new Map<string, { productId: string; warehouseId: string }>();
+  for (const { productId, warehouseId } of keys) {
+    if (productId && warehouseId) pairs.set(`${productId}\u0000${warehouseId}`, { productId, warehouseId });
+  }
+  if (pairs.size === 0) return [];
+  const tuples = [...pairs.values()].map(({ productId, warehouseId }) => Prisma.sql`(${productId}, ${warehouseId})`);
+  const rows = await (client as Pick<BusinessMetaTx, '$queryRaw'>).$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM inventory_stocks
+     WHERE business_id = ${businessId} AND (product_id, warehouse_id) IN (${Prisma.join(tuples)})
+     ORDER BY id
+       FOR UPDATE`;
+  return rows.map((row) => row.id);
+}
+
+/**
+ * The options of an interactive transaction that waits for stock row locks
+ * (a transfer): longer than Prisma's 5s default, as the routing claim's, so a
+ * wait behind a routing or a receipt does not end it.
+ */
+export const STOCK_LOCK_TX_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
 
 /**
  * A transaction lost to a deadlock or a serialization failure, which running
