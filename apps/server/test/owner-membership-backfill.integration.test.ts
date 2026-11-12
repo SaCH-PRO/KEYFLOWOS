@@ -46,7 +46,10 @@
  *           (both also through a wrapping skipTenantIsolation(...); reviews
  *           OMV3-R1, OMV-R1), and no ownerId (on any receiver but a contact,
  *           indexed or parenthesised ones included, or destructured) compared
- *           to the caller (userId, actorId, user.id, ...).
+ *           to the caller (userId, actorId, user.id, ...), nor a
+ *           business-named receiver's ownerId (business, biz,
+ *           existingBusiness, rows.business, any *Business) compared with any
+ *           value but null/undefined or under typeof (review SEAMZ4-SEC-1).
  *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
  *           no Membership on a business it did not create: the ownerId-only
  *           owner is refused 403 OWNER_MEMBERSHIP_REQUIRED and stays refused.
@@ -77,7 +80,16 @@
  *           ownerId-as-authority shape is flagged on synthetic source, and each
  *           membership-carrying or non-business shape is not; reviews OMV3-R1,
  *           OMV-R1 add the skipTenantIsolation-wrapped reads and the indexed
- *           and parenthesised receivers.
+ *           and parenthesised receivers; review SEAMZ4-SEC-1 restores the
+ *           39e9be12 census's 'business ownerId compared' (a business-named
+ *           receiver's ownerId compared, === or !==, with any value) and adds
+ *           to that rule the loose operators (==, !=), more business-named
+ *           receivers (*Business, getBusiness(id), parenthesised) on either
+ *           side, and the exclusion of null, undefined and typeof checks
+ *           (which the 39e9be12 rule flagged); reviews Z4-RV-CENSUS-SEC-1,
+ *           Z4RV-CENSUS-1 read a receiver chain of any shape (optional or
+ *           nested index and call, a chain broken over lines), as the
+ *           39e9be12 rule's segment match did; one label per comparison.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -288,25 +300,148 @@ async function bootstrapError(userId: string) {
  *   'ownerId compared to the caller': `<receiver>.ownerId` or a bare
  *     (destructured, handed-in) `ownerId` compared (===, !==, ==, !=) with the
  *     caller (userId, actorId, user.id, req.user?.id, rows.userId, ...), either
- *     side. The receiver may index or call (rows[0], load(id)) or be
- *     parenthesised ((await load(id))). A receiver named
- *     `contact`/`contacts`/`...Contact` is a Contact's owner, not
- *     Business.ownerId, and is not counted.
+ *     side. The receiver is any member chain (chainBefore): it may index or
+ *     call at any depth (rows[0], rows?.[0], byId[ids[0]], load(id),
+ *     resolve?.(id), get(toId(String(id)))), be parenthesised
+ *     ((await load(id))), and break over lines (a space before a dot). A
+ *     receiver named `contact`/`contacts`/`...Contact` is a Contact's owner,
+ *     not Business.ownerId, and is not counted.
+ *   'business ownerId compared' (review SEAMZ4-SEC-1; the 39e9be12 census's
+ *     receiver arm, kept beside the caller one): a business-named receiver's
+ *     ownerId compared (===, !==, ==, !=) with any value but null, undefined
+ *     or under a typeof check, either side: whoever the other side names
+ *     (authUser.id, uid, sub, principal.id, session.sub, input.ownerUserId,
+ *     id, ...), the comparison decides on ownerId. Business-named: the
+ *     receiver's last name is `biz` (or ends in `$biz`) or ends in `Biz`,
+ *     `business`, `Business` or `businesses`/`Businesses` (business,
+ *     existingBusiness, rows.business, this.business, businesses[0],
+ *     getBusiness(id)), whatever the chain before it (reviews
+ *     Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: memberships?.[0]?.business,
+ *     byId[ids[0]].business, (await load(String(id))).business, as the
+ *     39e9be12 census's segment match read them); a wholly parenthesised
+ *     receiver is named by its inside, with `await`, a trailing `!` and an
+ *     `as T` / `satisfies T` dropped ((await loadBusiness(id)),
+ *     (business as Business)), and a read on a business delegate counts
+ *     ((await tx.business.findUnique(...))).
+ *   One label per comparison (the operator's offset): a comparison the caller
+ *   rule labels is not labelled again, and two business owners compared with
+ *   each other are one site.
  */
 const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
-const DOT = String.raw`(?:\?\.|!\.|\.)`;
-/** `[...]` and `(...)` segments (one nested paren level): rows[0], load(id), (await load(id)). */
-const INDEX = String.raw`\[[^\[\]]*\]`;
-const PARENS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
-const RECEIVER = String.raw`(?:[\w$]+|${PARENS})(?:${DOT}[\w$]+|${INDEX}|${PARENS})*`;
-const EQ = String.raw`\s*[!=]==?\s*`;
-const COMPARED: RegExp[] = [
-  new RegExp(String.raw`(?<![\w$.])(${RECEIVER})${DOT}ownerId${EQ}${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}(${RECEIVER})${DOT}ownerId\b`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])()ownerId${EQ}${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}()ownerId(?![\w$])`, 'g'),
+const OP = String.raw`[!=]==?`;
+/** Null or undefined as a whole operand (not nullOwner, undefinedId). */
+const NULLISH = String.raw`(?:null|undefined)(?![\w$])`;
+/** `.ownerId` (or `?.`, `!.`; a space before the dot allowed): its receiver ends where the match begins. */
+const MEMBER_OWNER_ID = /\s?(?:\?\.|!\.|\.)ownerId(?![\w$])/g;
+/** How far either side of a comparison the operand checks read. */
+const OPERAND_WINDOW = 256;
+/** After `ownerId`: the operator (offset = ws length), then the caller, or any non-nullish value. */
+const CALLER_AFTER = new RegExp(String.raw`^(?<ws>\s*)${OP}\s*${CALLER}`);
+const VALUE_AFTER = new RegExp(String.raw`^(?<ws>\s*)${OP}(?!=)(?!\s*${NULLISH})`);
+/** Before a receiver chain: the operator, then (before it) the caller, or a nullish operand. */
+const OPERATOR_BEFORE = new RegExp(String.raw`(?<![!=])${OP}\s*$`);
+const CALLER_BEFORE = new RegExp(String.raw`(?<![\w$.])${CALLER}\s*$`);
+const NULLISH_BEFORE = new RegExp(String.raw`(?<![\w$])${NULLISH}\s*$`);
+/** A bare (destructured, handed-in) ownerId against the caller, either side; `lhs` ends at the operator. */
+const BARE_COMPARED: RegExp[] = [
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>ownerId\s*)${OP}\s*${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*ownerId(?![\w$])`, 'g'),
 ];
 const READS = String.raw`(?:findUnique|findUniqueOrThrow|findFirst|findFirstOrThrow|findMany|count|aggregate|groupBy)`;
+const READ_NAME = new RegExp(String.raw`^${READS}$`);
+const BUSINESS_NAME = /^(?:(?:[\w$]*\$)?biz|[\w$]*(?:Biz|[bB]usiness(?:es)?))$/;
+
+/**
+ * The member chain that ends at text[end - 1] (a receiver), read backwards
+ * (reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1): names joined by `.`, `?.` or
+ * `!.` (a space before the dot allowed: a chain prettier broke over lines),
+ * index and call groups at any depth (`?.[..]` and `?.(..)` too), postfix `!`,
+ * and a parenthesised head. Its elements, last first: where each starts and
+ * its name ('' for the parenthesised head). Empty when no chain ends there.
+ */
+function chainBefore(text: string, end: number): Array<{ start: number; name: string }> {
+  const elements: Array<{ start: number; name: string }> = [];
+  let i = end;
+  for (;;) {
+    const elementEnd = i;
+    let name = '';
+    for (;;) {
+      const c = text[i - 1] ?? '';
+      if (c === '!' && /[\w$)\]]/.test(text[i - 2] ?? '')) {
+        i--; // a postfix (non-null) `!`, not a negation
+      } else if (c === ')' || c === ']') {
+        const open = openerOf(text, i - 1);
+        if (open < 0) break;
+        i = open;
+        if (text.slice(i - 2, i) === '?.') i -= 2; // an optional call or index
+        else if (!/[\w$)\]!]/.test(text[i - 1] ?? '')) break; // the parenthesised head
+      } else {
+        const nameEnd = i;
+        while (/[\w$]/.test(text[i - 1] ?? '')) i--;
+        name = text.slice(i, nameEnd);
+        break;
+      }
+    }
+    if (i === elementEnd) break;
+    elements.push({ start: i, name });
+    // The dot joining this element to the one before it.
+    let k = i;
+    if (!name || text[k - 1] !== '.') break;
+    k--;
+    if (text[k - 1] === '?') k--;
+    if (text[k - 1] === ' ') k--;
+    if (!/[\w$)\]!]/.test(text[k - 1] ?? '')) break;
+    i = k;
+  }
+  return elements;
+}
+
+/** The '(', '[' or '{' that the bracket at text[close] closes, brackets balanced; -1 if none. */
+function openerOf(text: string, close: number): number {
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    const c = text[i];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if ((c === '(' || c === '[' || c === '{') && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Whether a comparison's receiver chain names a business (reviews
+ * SEAMZ4-SEC-1, Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1): its last element's name
+ * (index and call groups dropped), or a read on a business delegate; a wholly
+ * parenthesised receiver by its inside (await, a trailing `!` and `as T` /
+ * `satisfies T` dropped).
+ */
+function businessReceiver(recv: string): boolean {
+  const elements = chainBefore(recv, recv.length);
+  if (!elements.length || elements[elements.length - 1].start !== 0) return false;
+  const [last, previous] = elements;
+  if (last.name) return BUSINESS_NAME.test(last.name) || (READ_NAME.test(last.name) && BUSINESS_NAME.test(previous?.name ?? ''));
+  const inner = bracketGroup(recv, last.start)
+    .slice(1, -1)
+    .trim()
+    .replace(/^await\s+/, '')
+    // A trailing `as T` / `satisfies T` (unions and generics included; T holds no parens).
+    .replace(/\s+(?:as|satisfies)\s+[^()]*$/, '')
+    .replace(/!$/, '');
+  return businessReceiver(inner);
+}
+
+/** The comparison operator just before text[start] (a receiver chain's head), and the operand text before it. */
+function operatorBefore(text: string, start: number): { op: number; operand: string } | null {
+  const from = Math.max(0, start - OPERAND_WINDOW);
+  const before = text.slice(from, start);
+  const m = OPERATOR_BEFORE.exec(before);
+  return m ? { op: from + m.index, operand: before.slice(0, m.index) } : null;
+}
+
+/** The offset of the operator that `re` (CALLER_AFTER or VALUE_AFTER) finds right after text[at], or -1. */
+function operatorAfter(text: string, at: number, re: RegExp): number {
+  const m = re.exec(text.slice(at, at + OPERAND_WINDOW));
+  return m ? at + (m.groups?.ws ?? '').length : -1;
+}
 
 /** The bracket group ('{', '[' or '(') that opens at text[start], brackets balanced. */
 function bracketGroup(text: string, start: number): string {
@@ -363,13 +498,36 @@ function censusHits(source: string): string[] {
       if (/\bownerId\b/.test(filter) && !/\bmembers\b/.test(filter)) hits.push('business relation on ownerId without membership');
     }
   }
-  for (const re of COMPARED) {
-    for (const m of text.matchAll(re)) {
-      // The receiver's last name, its index and call segments dropped (contacts[0] -> contacts).
-      const tail = (m[1] ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
-      const receiver = tail.split(/\?\.|!\.|\./).pop() ?? '';
-      if (!/contacts?$/i.test(receiver)) hits.push('ownerId compared to the caller');
+  // One label per comparison, keyed by the operator's offset.
+  const compared = new Set<number>();
+  const label = (op: number, name: string) => {
+    if (op < 0 || compared.has(op)) return;
+    compared.add(op);
+    hits.push(name);
+  };
+  // Each `<receiver>.ownerId`, its receiver read as a whole member chain.
+  const members = [...text.matchAll(MEMBER_OWNER_ID)].flatMap((m) => {
+    const elements = chainBefore(text, m.index!);
+    if (!elements.length) return [];
+    return [{ elements, start: elements[elements.length - 1].start, end: m.index!, after: m.index! + m[0].length }];
+  });
+  for (const { elements, start, after } of members) {
+    // contacts[0], rows?.[0].contact: a Contact's owner.
+    if (/contacts?$/i.test(elements[0].name)) continue;
+    label(operatorAfter(text, after, CALLER_AFTER), 'ownerId compared to the caller');
+    const before = operatorBefore(text, start);
+    if (before && CALLER_BEFORE.test(before.operand)) label(before.op, 'ownerId compared to the caller');
+  }
+  for (const re of BARE_COMPARED) {
+    for (const m of text.matchAll(re)) label(m.index! + (m.groups?.lhs ?? '').length, 'ownerId compared to the caller');
+  }
+  for (const { start, end, after } of members) {
+    if (!businessReceiver(text.slice(start, end))) continue;
+    if (!/(?<![\w$])typeof\s*$/.test(text.slice(Math.max(0, start - OPERAND_WINDOW), start))) {
+      label(operatorAfter(text, after, VALUE_AFTER), 'business ownerId compared');
     }
+    const before = operatorBefore(text, start);
+    if (before && !NULLISH_BEFORE.test(before.operand)) label(before.op, 'business ownerId compared');
   }
   return hits.sort();
 }
@@ -873,6 +1031,51 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['indexed receiver, optional chain, caller on the left', 'if (userId !== rows[0]?.ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
       ['parenthesised receiver compared', 'if ((await this.load(id)).ownerId === userId) return;', 'ownerId compared to the caller'],
       ['parenthesised read result compared (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId !== user.id) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      // Review SEAMZ4-SEC-1: a business-named receiver's ownerId compared with
+      // anything (not only a caller-named value), as the census at 39e9be12
+      // flagged it; one label per comparison.
+      ['business row against an auth user', 'if (business.ownerId !== authUser.id) throw new ForbiddenException();', 'business ownerId compared'],
+      ['business row against a uid', 'if (business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['existingBusiness against a requesting user', 'if (existingBusiness.ownerId !== requestingUserId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['biz against a token subject', 'if (biz.ownerId === sub) return biz;', 'business ownerId compared'],
+      ['business row against a principal', 'if (business.ownerId === principal.id) return true;', 'business ownerId compared'],
+      ['business row against an input field', 'const same = business.ownerId === input.ownerUserId;', 'business ownerId compared'],
+      ['business row against a session subject', 'if (business.ownerId === session.sub) return business;', 'business ownerId compared'],
+      ['business row against a bare id', 'return business.ownerId === id;', 'business ownerId compared'],
+      ['business row against claims', 'if (business.ownerId === claims.sub) return;', 'business ownerId compared'],
+      ['rows.business, loose equality', 'if (rows.business.ownerId == uid) return true;', 'business ownerId compared'],
+      ['a *Business receiver, value on the left, loose inequality', 'if (uid != targetBusiness.ownerId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['this.business, optional chain, value on the left', 'if (sub === this.business?.ownerId) return true;', 'business ownerId compared'],
+      ['indexed business receiver', 'if (businesses[0]?.ownerId === sub) return businesses[0];', 'business ownerId compared'],
+      ['business returned by a call', 'if (this.getBusiness(id).ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised business load', 'if ((await this.loadBusiness(id)).ownerId !== principal.id) throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised business read result (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId === session.sub) return;', 'business ownerId compared'],
+      ['parenthesised business type assertion', 'if ((business as Business).ownerId === uid) return true;', 'business ownerId compared'],
+      ['two business owners compared (one site)', 'if (business.ownerId === parentBusiness.ownerId) return true;', 'business ownerId compared'],
+      ['parenthesised business, union type assertion, non-null assertion', 'if ((rows.business as Business | null)!.ownerId === uid) return true;', 'business ownerId compared'],
+      // Reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: the 39e9be12 census matched
+      // the business-named segment wherever its chain began, so a receiver
+      // chain of any shape counts: optional index and call (?.[..], ?.(..)),
+      // nested index and call groups, a `!` before an index, a space before a
+      // dot (a chain prettier broke over lines), and an identifier with `$`.
+      ['optional index chain to a business', 'if (memberships?.[0]?.business?.ownerId !== user.sub) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional index chain to a business, against the caller', 'if (ctx.rows?.[0].business.ownerId === userId) return true;', 'ownerId compared to the caller'],
+      ['nested index to a business', 'if (byId[ids[0]].business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional call to a business', 'if (this.svc.resolve?.(id).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested call to a business, against the caller', 'if (this.repo.get(toId(String(id))).business.ownerId === userId) return true;', 'ownerId compared to the caller'],
+      ['a $-prefixed biz', 'if ($biz.ownerId === uid) return true;', 'business ownerId compared'],
+      ['prettier-printed long condition (a space before .business)', 'if (\n    (await this.prisma.client.membership.findFirst({ where: { userId: actor.id, businessId } }))!\n      .business.ownerId !== authUser.id\n  )\n    throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised load, two paren levels, to a business', 'if ((await this.load(String(id))).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested index on rows to a business', 'if (rows[ids[0]].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['optional index on rows to a business', 'if (rows?.[0].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['non-null index on rows to a business', 'if (rows![0].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['optional call on ctx to a business', 'if (ctx.load?.(id).business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['chain broken over lines to a business', 'if (this.tenant\n  .current(req).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested index chain to a business, value on the left', 'if (uid !== byId[ids[0]]?.business.ownerId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['prettier member chain, .ownerId on its own line', 'if (\n  this.repo\n    .scoped(ctx)\n    .withTx(tx)\n    .getBusiness(id)\n    .ownerId !== uid\n)\n  throw new ForbiddenException();', 'business ownerId compared'],
+      ['business returned by a nested call', 'if (this.getBusiness(toId(String(id))).ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional index receiver against the caller', 'if (rows?.[0].ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['nested call receiver, caller on the left', 'if (userId !== this.repo.get(toId(String(id))).ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
     ];
     const PASSED: Array<[string, string]> = [
       ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
@@ -888,6 +1091,18 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ["the bootstrap's oldest-Membership read, wrapped", 'tx.membership.findFirst(skipTenantIsolation({ where: { userId, business: { deletedAt: null } }, select: { business: true } }))'],
       ['ownerId selected under a wrapped read', 'this.prisma.client.business.findUnique(skipTenantIsolation({ where: { id: businessId }, select: { ownerId: true } }))'],
       ["an indexed contact's owner", 'if (contacts[0].ownerId !== actorId) throw new ForbiddenException();'],
+      // Review SEAMZ4-SEC-1: a business-named receiver's ownerId checked for
+      // presence (null, undefined) or type decides nothing about the caller.
+      ["a business's ownerId against null and undefined", 'if (business.ownerId === null || biz.ownerId !== undefined) return;'],
+      ["a business's ownerId, loose null checks", 'if (existingBusiness.ownerId != null && rows.business.ownerId == undefined) return;'],
+      ['null and undefined on the left', 'if (null !== business.ownerId && undefined === targetBusiness?.ownerId) return;'],
+      ["a business's ownerId under typeof", "if (typeof business.ownerId === 'string' && 'string' === typeof this.business.ownerId) return;"],
+      // Reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: typeof, null, undefined and
+      // a contact's owner at the end of any receiver chain.
+      ['a chained business ownerId under typeof', "if (typeof a?.[0].business.ownerId === 'string' && typeof rows[0].business.ownerId === 'string') return;"],
+      ['a chain broken over lines under typeof', "if (typeof this.tenant\n  .current(req).business.ownerId === 'string') return;"],
+      ['a chained business ownerId against null and undefined', 'if (rows?.[0].business.ownerId === null || undefined !== byId[ids[0]].business?.ownerId) return;'],
+      ["a chained contact's owner", 'if (rows?.[0].contact.ownerId !== actorId) throw new ForbiddenException();'],
     ];
     expect(FLAGGED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(FLAGGED.map(([shape, , label]) => [shape, [label]]));
     expect(PASSED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(PASSED.map(([shape]) => [shape, []]));
