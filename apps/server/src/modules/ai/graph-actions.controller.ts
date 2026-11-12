@@ -33,6 +33,7 @@ import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, isCanonicalModule, r
 import type { Prisma } from '@prisma/client';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { KEY_CONNECTOR_MODULES, KEY_PLAN_MODULE_SCOPES, planStepReadsContacts, planStepReadsMoneyReport } from '../key-cortex/key-cortex-plan-authority';
+import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import {
   CANONICAL_MODULE_TOOLS,
   CRM_ROW_VISIBILITY_TOOLS,
@@ -149,6 +150,10 @@ const CANONICAL_TOOL_SCOPES: ReadonlyMap<string, GraphActionScope> = new Map(
  * to GRAPH_ACTION_TOOL_MODULES.
  */
 export function graphActionModuleScope(toolName: string): GraphActionScope | null {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): a dotted KEY organ or legacy cortex tool takes its map
+  // entry: its twin's scope, or the first of its scopes. An unmapped one keeps none (owner-only, D-119).
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ) return 'twin' in organ ? graphActionModuleScope(organ.twin) : organ.scopes[0];
   const canonical = CANONICAL_TOOL_SCOPES.get(toolName);
   if (canonical) return canonical;
   const entry = GRAPH_ACTION_TOOL_MODULES.find(([key]) => (key.endsWith('_') ? toolName.startsWith(key) : toolName === key));
@@ -167,6 +172,24 @@ export const GRAPH_ACTION_REFUSED: Readonly<Record<string, string>> = {
 /** A second module some tools need beside their own (GOVERNED_UNGRANTED: "needs crm AND revenue"). */
 const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActionScope>>> = {
   update_status_with_confirmation: [{ module: 'revenue', minLevel: 'write' }],
+};
+
+/**
+ * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's, an OWNER
+ * membership of the business): tools that are the business owner's whatever module scope a member holds.
+ * reconcile_connect_statement_source stores a Drive folder or a free-form Gmail search on a bank account,
+ * and reconcile_sweep_statements reads the business's Gmail or Drive with it and imports what it finds into
+ * the account (StatementSourceService), so a member could choose which of the owner's mail KEY reads into
+ * the books. As ownerOnly they are refused to everyone but the owner (and a SUPER_ADMIN who is a member;
+ * one who is not is refused by the D-46 revenue-write rule, review SEC-W11GSS-1) before dispatch on
+ * every surface that reads this map: the plan queue, an approved proposal, POST .../graph-actions, the
+ * cortex chat and the Pro Auto monitor (memberToolRunAuthority, assertMayRunGraphAction); the dispatcher's
+ * own two cases hold the driving member to the same rule (FlowOrchestratorService.assertStatementSourceOwner).
+ * Reading the source configuration (reconcile_list_statement_sources) stays with the revenue readers.
+ */
+const GRAPH_ACTION_OWNER_ONLY: Readonly<Record<string, string>> = {
+  reconcile_connect_statement_source: "D-99: it configures or runs a read of the business's Google mailbox or Drive",
+  reconcile_sweep_statements: "D-99: it configures or runs a read of the business's Google mailbox or Drive",
 };
 
 /**
@@ -212,6 +235,9 @@ const GRAPH_ACTION_CONTACT_READING_WRITES: ReadonlySet<string> = new Set([
  * member at all runs none of them (D-73; plan-step-authority.ts).
  */
 export function graphActionReadsContacts(toolName: string): boolean {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119): a dotted twin reads contacts exactly when its FLOW tool does.
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return graphActionReadsContacts(organ.twin);
   if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName) || GRAPH_ACTION_CONTACT_READING_WRITES.has(toolName)) return true;
   const scope = graphActionModuleScope(toolName);
   return scope?.module === 'crm' && scope.minLevel === 'read';
@@ -249,6 +275,9 @@ const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set([
  * D-37). Run with no principal for a member, such a tool is the OWNER's only.
  */
 export function graphActionBoundByContactVisibility(toolName: string): boolean {
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119): a dotted twin is bound as its FLOW tool is.
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return graphActionBoundByContactVisibility(organ.twin);
   return graphActionReadsContacts(toolName) || GRAPH_ACTION_VISIBILITY_BOUND_TOOLS.has(toolName);
 }
 
@@ -277,9 +306,18 @@ export interface GraphActionRequirement {
 /** The requirement for `toolName`, `{ refused }` when this route never runs it, or null when it is mapped to nothing. */
 export function graphActionRequirement(toolName: string): GraphActionRequirement | { refused: string } | null {
   if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_REFUSED, toolName)) return { refused: GRAPH_ACTION_REFUSED[toolName] };
+  // W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): a dotted tool twinned with a FLOW tool needs exactly what
+  // that tool needs; a scoped one needs every scope of its entry, the rest beside its module as
+  // GRAPH_ACTION_EXTRA_SCOPES are, and the branches below apply to it (a crm read: graphActionReadsContacts).
+  const organ = keyOrganToolAuthority(toolName);
+  if (organ && 'twin' in organ) return keyOrganRequirement(graphActionRequirement(organ.twin));
   const scope = graphActionModuleScope(toolName);
   if (!scope) return null;
-  const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName) ? GRAPH_ACTION_EXTRA_SCOPES[toolName] : [];
+  const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName)
+    ? GRAPH_ACTION_EXTRA_SCOPES[toolName]
+    : organ && 'scopes' in organ
+      ? organ.scopes.slice(1)
+      : [];
   const requirement: GraphActionRequirement = { scopes: [scope, ...extra] };
   if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
     requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
@@ -292,9 +330,30 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   }
+  // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the statement-source tools are the owner's.
+  if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_OWNER_ONLY, toolName)) requirement.ownerOnly = GRAPH_ACTION_OWNER_ONLY[toolName];
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
   else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
-  return requirement;
+  return organ ? keyOrganRequirement(requirement) : requirement;
+}
+
+const KEY_ORGAN_CONTACT_READ =
+  "it reads contacts in the KEY cortex registry, whose handlers bind no principal on any surface, so no visibility clause keeps another member's PRIVATE contact out";
+
+/**
+ * W11-KEY-ORGAN-AUTHORITY-MAP review SEC-W11KOAM-1 / CR-W11KOA-2 (D-37, D-119): the requirement of a
+ * dotted KEY organ or legacy cortex tool. ownerOnlyWithoutPrincipal assumes a dispatcher that applies
+ * the principal's visibility clause when it has one (the FLOW dispatcher's contactReadAccess). The KEY
+ * cortex registry has none: no dotted handler takes an actor (PortalContentService.getDashboard reads
+ * any contact by id), so a principal-run surface (an approved plan step's proposal,
+ * KeyCortexActionExecutorPlugin with memberIsPrincipal) would run the contact read for a member with
+ * no bound at all. Such a tool is the OWNER's only on every surface.
+ */
+function keyOrganRequirement(
+  requirement: GraphActionRequirement | { refused: string } | null,
+): GraphActionRequirement | { refused: string } | null {
+  if (!requirement || 'refused' in requirement || requirement.ownerOnly || !requirement.ownerOnlyWithoutPrincipal) return requirement;
+  return { ...requirement, ownerOnly: KEY_ORGAN_CONTACT_READ };
 }
 
 /** Who besides a plan's proposer runs one of its steps from POST .../execute: the business OWNER (trial-N review NEW-2). */
@@ -316,6 +375,13 @@ export interface GraphActionAuthorityOptions {
    * contact reads the dispatcher bounds by its principal are the OWNER's only.
    */
   noPrincipal?: boolean;
+  /**
+   * W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1 (GA-06, D-119): the tool will be dispatched by the
+   * FLOW dispatcher (FlowOrchestratorService.executeToolDirect), which runs no KEY cortex (dotted) tool
+   * (it answers one 'Unknown tool'). A dotted tool the organ map gives a scope is then refused before
+   * anything is claimed, to everyone, as an unmapped tool is (POST .../execute passes it).
+   */
+  flowDispatch?: boolean;
 }
 
 /**
@@ -350,6 +416,12 @@ export async function assertMayRunGraphAction(
   }
   if ('refused' in requirement) {
     throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
+  }
+  // W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1 (GA-06, D-119): the organ map judges the surfaces that
+  // run a dotted tool in the KEY cortex registry (the KEY chat, an approved plan step's proposal); the FLOW
+  // dispatcher runs none, so its route keeps refusing one, the OWNER and a SUPER_ADMIN included.
+  if (options.flowDispatch && keyOrganToolAuthority(toolName)) {
+    throw new ForbiddenException(`Tool "${toolName}" is a KEY cortex tool, which this route's dispatcher does not run, so it is not executed from this route`);
   }
   const membership = await prisma.client.membership.findUnique({
     where: { userId_businessId: { userId: user.id, businessId } },
@@ -870,7 +942,8 @@ export class GraphActionsController {
     if (!OPEN_PLAN_STATUS_SET.has(step.plan.status)) {
       throw new ConflictException(`This plan is ${step.plan.status}; its steps are executed by the plan, not from here`);
     }
-    await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: user.role }, toolName, step.plan.userId);
+    // W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1: executeToolDirect below is the FLOW dispatcher.
+    await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: user.role }, toolName, step.plan.userId, { flowDispatch: true });
 
     const spent = () => new ConflictException('This plan step was already executed or is being executed');
     if (step.status !== 'pending') throw spent();
@@ -1211,7 +1284,8 @@ export class GraphActionsController {
       const step = item.planStepId ? byId.get(item.planStepId) : undefined;
       if (!step || !step.toolName || seen.has(step.id) || (item.planId && item.planId !== step.planId)) continue;
       try {
-        await assertMayRunGraphAction(this.prisma, businessId, viewer, step.toolName, step.plan.userId);
+        // CR-W11KOA-1: the rule POST .../execute applies, its FLOW dispatch included.
+        await assertMayRunGraphAction(this.prisma, businessId, viewer, step.toolName, step.plan.userId, { flowDispatch: true });
       } catch (err: unknown) {
         if (err instanceof ForbiddenException) continue;
         throw err;

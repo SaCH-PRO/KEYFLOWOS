@@ -147,7 +147,7 @@ import {
   rankOf,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
-import type { ModuleScopeRequirement } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireModuleScope, type ModuleScopeRequirement } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
@@ -515,6 +515,39 @@ export class CortexMemberAuthorityGuard implements CanActivate {
         : defaultScopesForRole(membership.role);
     req.cortexMemberAuthority = { userId: user.id, businessId, role: membership.role, superAdmin: false, scopes, member: true };
     return true;
+  }
+}
+
+/**
+ * W11-CORTEX-READ-ROUTES-SCOPE (F-13b, owner ruling D-129): admits only the
+ * business owner and a platform SUPER_ADMIN, in the tenant BusinessGuard
+ * checked, and refuses everyone else 403 before the handler runs. The owner is
+ * the member holding an OWNER-role Membership of the business (D-116 as read
+ * by D-125): a co-owner (OWNER membership, not Business.ownerId) is the owner,
+ * Business.ownerId grants nothing on its own, and a recorded owner holding only
+ * an ADMIN or STAFF membership is that role. It runs as a route guard after the
+ * class guards, as CortexMemberAuthorityGuard does.
+ */
+@Injectable()
+export class CortexBusinessOwnerGuard implements CanActivate {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<CortexMemberRequest>();
+    const user = req?.user;
+    if (typeof user?.id !== 'string' || user.id.length === 0) {
+      throw new UnauthorizedException('Authenticated user required');
+    }
+    const guarded = req.guardedBusinessId;
+    const businessId = typeof guarded === 'string' && guarded.length > 0 ? guarded : resolveRequestBusinessId(req);
+    if (!businessId) throw new BadRequestException('businessId is required');
+    if (user.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: user.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    throw new ForbiddenException('Only the business owner can read the full KEY context (D-129)');
   }
 }
 
@@ -2592,9 +2625,16 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/context
    * Return full business context assembled from all modules.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE (F-13b, owner ruling D-129): the full
+   * context carries every module's figures and names (outstanding invoices by
+   * contact, revenue, hot leads, payments, inbox previews), so it is served to
+   * the business owner (D-125: an OWNER membership) and a platform SUPER_ADMIN
+   * only; CortexBusinessOwnerGuard refuses everyone else before it is read.
    */
   @Get('context')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexBusinessOwnerGuard)
   async getContext(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
@@ -2666,9 +2706,14 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/insights/profit
    * Profit opportunities across all modules.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE (F-13c, owner ruling D-57): overdue invoices
+   * to collect, by amount and contact, are a money report: revenue:read.
    */
   @Get('insights/profit')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async getProfitOpportunities(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
@@ -2696,9 +2741,14 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/insights/revenue
    * Revenue analysis for a given period.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE (F-13c, owner ruling D-57): revenue totals,
+   * growth, revenue by day and top customers are a money report: revenue:read.
    */
   @Get('insights/revenue')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async analyzeRevenue(
     @GuardedBusinessId() businessId: string,
     @Query('period') period?: string,
@@ -3092,9 +3142,17 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/report
    * Generate a comprehensive business report.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1 / CRR-1, owner ruling
+   * D-57): the report carries the insights/revenue analysis, the
+   * insights/profit opportunities, and keyMetrics / topPriorities with the
+   * outstanding and overdue invoice totals from the full context, so it is a
+   * money report: revenue:read, as insights/revenue and insights/profit.
    */
   @Get('report')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async getBusinessReport(
     @GuardedBusinessId() businessId: string,
     @Query('scope') scope: 'daily' | 'weekly' | 'monthly' = 'daily',
@@ -3119,9 +3177,16 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/recommendations
    * AI-generated recommendations based on full business context.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1 / CRR-1, owner ruling
+   * D-57): the recommendations are built from the revenue analysis, the profit
+   * opportunities and the overdue invoice total ("Collect $X in overdue
+   * invoices", estimatedImpact = that total), so they need revenue:read.
    */
   @Get('recommendations')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async getRecommendations(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
@@ -3153,9 +3218,18 @@ export class KeyCortexController {
    * Find profit opportunities for the business.
    *
    * @deprecated Use GET /api/v1/cortex/insights/profit instead.
+   *
+   * W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-2 / CRR-1, owner ruling
+   * D-57): this alias reaches the same KeyCortexInsightService
+   * findProfitOpportunities as insights/profit (through the reasoning engine
+   * and the legacy insight service), so it carries the same revenue:read gate.
+   * ModuleScopeGuard resolves the tenant from the body first, the field the
+   * handler reads (resolveRequestBusinessId).
    */
   @Post('profit-opportunities')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async findProfitOpportunities(
     @Body() dto: ProfitOpportunitiesQueryDto,
   ): Promise<{ opportunities: CortexProfitOpportunity[] }> {

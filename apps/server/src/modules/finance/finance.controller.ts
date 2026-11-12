@@ -42,6 +42,7 @@ import { FixedAssetService, type CreateFixedAssetInput, type UpdateFixedAssetInp
 import { SystemEmailSendError } from '../notifications/system-email.service';
 import { redactAddresses } from '../../core/security/redaction';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -732,6 +733,11 @@ export class FinanceController {
    * `gmailQuery`    — Gmail search syntax, e.g. `from:republicbank.com`.
    *
    * Both are swept nightly. Either can be run on demand below.
+   *
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's): a
+   * source names which of the business's mail or Drive files are read into the books, so setting one
+   * up is the business owner's (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY before anything
+   * is stored), as running a sweep is below.
    */
   @Post('accounts/:accountId/statement-sources')
   async setStatementSources(
@@ -741,10 +747,16 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.statementSources.setSources(businessId, accountId, body);
   }
 
-  /** Run a configured source now rather than waiting for the nightly sweep. */
+  /**
+   * Run a configured source now rather than waiting for the nightly sweep.
+   *
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): it reads the business Gmail or Drive, so it is the
+   * business owner's (403 GOOGLE_CONNECT_OWNER_ONLY before either is read).
+   */
   @Post('accounts/:accountId/statement-sources/:source/sweep')
   async sweepStatementSource(
     @Param('businessId') businessId: string,
@@ -753,6 +765,7 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     if (source === 'drive') return this.statementSources.sweepDrive(businessId, accountId);
     if (source === 'gmail') return this.statementSources.sweepGmail(businessId, accountId);
     throw new BadRequestException('source must be "drive" or "gmail"');

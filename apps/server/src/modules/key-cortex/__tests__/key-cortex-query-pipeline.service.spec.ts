@@ -5,6 +5,7 @@ import { KeyCortexQueryPipelineService } from '../key-cortex-query-pipeline.serv
 import { AdaptiveRouterService } from '../adaptive-router.service';
 import { KeyCortexMemoryRetrievalService } from '../key-cortex-memory-retrieval.service';
 import { UnifiedMemoryRetrievalService } from '../unified-memory-retrieval.service';
+import { defaultScopesForRole } from '../../../core/authority/module-vocabulary';
 
 const mockPrisma = {
   client: {
@@ -593,6 +594,44 @@ describe('W10-CORTEX-CHAT-SCOPE review: the chat memory block holds only the rea
   );
 });
 
+// W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 (owner ruling D-130): buildMemoryContext's memory and lessons are
+// read for the requester (query.userId), as chatMemoryFragments reads the same prompt's, never for the member the
+// session names (the WS key:chat handler hands the pipeline the client's session id unchecked). The real-database
+// proof is in test/key-cortex-action-audit.integration.test.ts.
+describe('W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1: buildMemoryContext is read for the requester, not the session\'s member', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockModelGateway.complete.mockResolvedValue({
+      content: 'Hello',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { totalTokens: 10, estimatedCost: 0.001 },
+      fallbackUsed: false,
+    });
+    mockModelGateway.streamComplete.mockImplementation(async function* () {
+      yield { content: 'Done.', provider: 'openai', model: 'gpt-4o' };
+    });
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+  });
+
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'W11-CORTEX-MEMORY-COGNITION SEC-W11MC-1 (D-130) %s: a turn on another member\'s session hands buildMemoryContext the requester, not session.userId',
+    async (path) => {
+      const ownersSession = { ...mockSession, userId: 'owner-of-the-session' };
+      mockSessionService.getOrCreateSession.mockResolvedValueOnce(ownersSession);
+      const pipeline = createPipeline();
+      const query = { text: 'hi', businessId: 'biz-1', userId: 'member-u', sessionId: ownersSession.id } as any;
+      const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+      if (path === 'processQuery') await pipeline.processQuery(query, flags);
+      else for await (const _chunk of pipeline.streamQuery(query, flags)) void _chunk;
+
+      expect(mockPromptContextService.buildMemoryContext).toHaveBeenCalledTimes(1);
+      expect(mockPromptContextService.buildMemoryContext).toHaveBeenCalledWith('biz-1', ownersSession, 'member-u');
+    },
+  );
+});
+
 // W10-CORTEX-CHAT-SCOPE review repair SEC-W10CCS-R1 (owner rulings D-71, D-57, D-73): the model's tool calls on
 // POST cortex/chat and the chat stream run through KeyCortexToolLoopService (registry.execute), which reads no
 // membership. Each call is now held, for the member the chat runs for, to the rule the plan queue holds a plan's
@@ -769,6 +808,119 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
     await owner.stream([call('tc_1', PNL), call('tc_2', CONTACTS), call('tc_3', 'expenses_list')]);
     expect(owner.looped()).toEqual([[PNL, CONTACTS, 'expenses_list']]);
   });
+
+  // W11-KEY-ORGAN-AUTHORITY-MAP (owner rulings D-119, D-131): the dotted organ and legacy cortex tools now have
+  // entries in the member authority map (key-cortex-organ-tool-authority.ts), so a member holding a tool's
+  // scopes runs it and one who does not is refused with the scope it lacks; a tool still unmapped stays the
+  // owner's only (D-119). Each case runs through the tool loop and the blocked actions on both chat paths.
+  const ADMIN_DEFAULTS = defaultScopesForRole('ADMIN');
+  const NOT_MAPPED = (name: string) => `Tool "${name}" is mapped to no module scope, so it is not executed from this route`;
+  const W11_ORGAN_CASES: Array<{
+    title: string;
+    member: Parameters<typeof setup>[0];
+    runs: string[];
+    refused: Array<[string, string | RegExp]>;
+  }> = [
+    {
+      title: 'a STAFF member with {operations: read} runs key_inbox.list_threads and key_inbox.get_thread (twins of the operations routes) and is refused key_inbox.send_reply (operations requires write)',
+      member: { membership: { role: 'STAFF', permissionScopes: { operations: 'read' } } },
+      runs: ['key_inbox.list_threads', 'key_inbox.get_thread'],
+      refused: [['key_inbox.send_reply', 'Insufficient permissions: operations requires write access (you have read)']],
+    },
+    {
+      title: 'a STAFF member on role defaults (ai and settings none) is refused temporal_flow.create_event and key_genome.get_blueprint',
+      member: { membership: { role: 'STAFF', permissionScopes: null } },
+      runs: [],
+      refused: [
+        ['temporal_flow.create_event', 'Insufficient permissions: ai requires write access (you have none)'],
+        ['key_genome.get_blueprint', 'Insufficient permissions: settings requires read access (you have none)'],
+      ],
+    },
+    {
+      title: 'an ADMIN on role defaults runs temporal_flow.create_event, key_genome.get_blueprint, storelink.get_analytics and cortex.create_task, and is refused key_connector.list_connections (connect none, D-131)',
+      member: { membership: { role: 'ADMIN', permissionScopes: null } },
+      runs: ['temporal_flow.create_event', 'key_genome.get_blueprint', 'storelink.get_analytics', 'cortex.create_task'],
+      refused: [['key_connector.list_connections', 'Insufficient permissions: connect requires read access (you have none)']],
+    },
+    {
+      title: 'an ADMIN whose explicit map includes connect read runs key_connector.list_connections (D-131)',
+      member: { membership: { role: 'ADMIN', permissionScopes: { ...ADMIN_DEFAULTS, connect: 'read' } } },
+      runs: ['key_connector.list_connections'],
+      refused: [],
+    },
+    {
+      title: 'an ADMIN whose explicit map sets revenue none is refused storelink.get_analytics and temporal_flow.analyze_timeline (D-114, D-100) and still runs storelink.get_conversion_funnel',
+      member: { membership: { role: 'ADMIN', permissionScopes: { ...ADMIN_DEFAULTS, revenue: 'none' } } },
+      runs: ['storelink.get_conversion_funnel'],
+      refused: [
+        ['storelink.get_analytics', 'Insufficient permissions: revenue requires read access (you have none)'],
+        ['temporal_flow.analyze_timeline', 'Insufficient permissions: revenue requires read access (you have none)'],
+      ],
+    },
+    {
+      title: 'an ADMIN is refused cortex.execute_tool, key_connector.execute_internal and key_genome.update_dna_section (unmapped, D-119) and storelink.list_intakes (a contact read with no principal)',
+      member: { membership: { role: 'ADMIN', permissionScopes: null } },
+      runs: [],
+      refused: [
+        ['cortex.execute_tool', NOT_MAPPED('cortex.execute_tool')],
+        ['key_connector.execute_internal', NOT_MAPPED('key_connector.execute_internal')],
+        ['key_genome.update_dna_section', NOT_MAPPED('key_genome.update_dna_section')],
+        ['storelink.list_intakes', /^Tool "storelink\.list_intakes" is executed from here only for the business owner: /],
+      ],
+    },
+    {
+      title: 'a SUPER_ADMIN with no membership runs storelink.get_conversion_funnel and is refused cortex.query_business_data (unmapped, D-119)',
+      member: { membership: null, role: 'SUPER_ADMIN' },
+      runs: ['storelink.get_conversion_funnel'],
+      refused: [['cortex.query_business_data', NOT_MAPPED('cortex.query_business_data')]],
+    },
+    {
+      title: 'control: the business owner (Business.ownerId) runs every one of them',
+      member: { owner: true },
+      runs: [
+        'key_inbox.list_threads', 'key_inbox.get_thread', 'key_inbox.send_reply', 'temporal_flow.create_event', 'key_genome.get_blueprint',
+        'storelink.get_analytics', 'cortex.create_task', 'key_connector.list_connections', 'temporal_flow.analyze_timeline',
+        'storelink.get_conversion_funnel', 'cortex.execute_tool', 'key_connector.execute_internal', 'key_genome.update_dna_section',
+        'storelink.list_intakes', 'cortex.query_business_data',
+      ],
+      refused: [],
+    },
+  ];
+  const organActionType = (name: string) => name.toUpperCase().replace(/\./g, '_');
+
+  for (const c of W11_ORGAN_CASES) {
+    it.each(['processQuery', 'streamQuery'] as const)(`W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131) %s: ${c.title}`, async (path) => {
+      const t = setup(c.member);
+      const calls = [...c.runs, ...c.refused.map(([name]) => name)].map((name, i) => call(`tc_${i + 1}`, name));
+
+      if (path === 'processQuery') {
+        const response = await t.chat(calls);
+        expect(t.looped()).toEqual(c.runs.length > 0 ? [c.runs] : []);
+        expect(response.actions).toEqual([
+          ...c.runs.map((name) => expect.objectContaining({ actionType: organActionType(name), status: 'success' })),
+          ...c.refused.map(([name, refusal]) => blocked(organActionType(name), refusal)),
+        ]);
+        for (const [name, refusal] of c.refused) {
+          if (typeof refusal === 'string') expect(response.message.content).toContain(`I did not run ${name}: ${refusal}`);
+          else expect(response.message.content).toContain(`I did not run ${name}: Tool "${name}" is executed from here only for the business owner: `);
+        }
+        if (c.refused.length === 0) expect(response.message.content).not.toContain('I did not run');
+      } else {
+        const chunks = await t.stream(calls);
+        expect(t.looped()).toEqual(c.runs.length > 0 ? [c.runs] : []);
+        expect(chunks.filter((ch) => ch.type === 'action_delta').map((ch) => ch.action)).toEqual([
+          ...c.runs.map((name) => expect.objectContaining({ actionType: organActionType(name), status: 'success' })),
+          ...c.refused.map(([name]) => expect.objectContaining({ actionType: organActionType(name), status: 'blocked' })),
+        ]);
+        const text = chunks.filter((ch) => ch.type === 'text_delta').map((ch) => ch.content).join('');
+        for (const [name, refusal] of c.refused) {
+          if (typeof refusal === 'string') expect(text).toContain(`I did not run ${name}: ${refusal}`);
+          else expect(text).toContain(`I did not run ${name}: Tool "${name}" is executed from here only for the business owner: `);
+        }
+        if (c.refused.length === 0) expect(text).not.toContain('I did not run');
+      }
+    });
+  }
 });
 
 // KF-EXEC-AUTH-FAIL-CLOSED-001. Authority uncertainty may only narrow what can
