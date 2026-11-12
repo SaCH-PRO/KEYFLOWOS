@@ -8,9 +8,9 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
-import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
+import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { appendOrderTimeline, takeBackOrderTimelineStep } from './order-metadata';
+import { appendOrderTimeline, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
 import {
   PreorderDelayedPayload,
   StoreOrderCreatedPayload,
@@ -1528,21 +1528,17 @@ export class MarketplaceService {
     throw new NotFoundException('Order not found');
   }
 
+  /**
+   * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-4): the token is written in one
+   * statement, only where none is stored (order-metadata.ts
+   * setOrderPublicTokenOnce), the rest of the metadata as stored. This read
+   * the whole metadata and wrote its copy back with the token, undoing a
+   * routing step or link committed in between, and replacing a token another
+   * call had just stored and handed out. The token stored first is returned.
+   */
   async getOrderToken(businessId: string, orderId: string): Promise<string> {
-    const order = await this.prisma.client.marketplaceOrder.findFirst({
-      where: { id: orderId, businessId },
-      select: { id: true, metadata: true },
-    });
-    if (!order) throw new NotFoundException('Order not found');
-
-    const meta = (order.metadata as Record<string, any>) ?? {};
-    if (meta.publicToken) return meta.publicToken;
-
-    const token = this.generateOrderToken(orderId);
-    await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { metadata: { ...meta, publicToken: token } },
-    });
+    const token = await setOrderPublicTokenOnce(this.prisma.client, businessId, orderId, this.generateOrderToken(orderId));
+    if (!token) throw new NotFoundException('Order not found');
     return token;
   }
 
@@ -1795,13 +1791,8 @@ export class MarketplaceService {
         }
         newStatus = 'cancelled';
         steps.push({ status: 'cancelled', timestamp: now, reason: data?.reason, note: data?.note });
-
-        await this.fulfillmentRoutingService.releaseInventoryReservation(businessId, orderId);
-
-        await this.prisma.client.fulfillmentRoute.updateMany({
-          where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-          data: { status: 'CANCELLED' },
-        });
+        // W10-Z4-ROUTE-FIX (SEAMZ4-CR-2): the reservations are released and the routes cancelled in the transaction
+        // below, under the order's routing claim (FulfillmentRoutingService.cancelOrderFulfilment), with the status.
         break;
       }
 
@@ -1864,14 +1855,20 @@ export class MarketplaceService {
 
     // W10-SOP-FIX (SOP-V4): the steps are appended in one statement, committed with the status (and, for a refund, the
     // payment status) in one transaction; the rest of the metadata is the row's own.
+    // W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-2): a cancel takes the order's routing claim first, and releases its
+    // reservations and cancels its routes in the same transaction as the cancelled status. It released what had
+    // committed with no claim, so an order being routed kept the RESERVED routes and reserved stock its router then
+    // committed, with 'routed' written over the cancel. A cancel now waits for the router, and the order's status is
+    // checked again under the claim (400 when it can no longer be cancelled).
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      if (action === 'cancel') await this.fulfillmentRoutingService.cancelOrderFulfilment(tx, businessId, orderId);
       await appendOrderTimeline(tx, businessId, orderId, steps);
       return tx.marketplaceOrder.update({
         where: { id: orderId },
         data: updateData,
         include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
       });
-    });
+    }, action === 'cancel' ? ROUTING_CLAIM_TX_OPTIONS : undefined);
 
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
       refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
