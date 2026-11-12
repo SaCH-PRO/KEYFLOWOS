@@ -907,3 +907,126 @@ describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128 read clause, D-100, SEC
     expect(JSON.stringify(control.body)).toContain(ID.outOps);
   }, 30_000);
 });
+
+/**
+ * W11A-SEAM-REPAIR (seam B1 W11-KEY-ORGAN-AUTHORITY-MAP x B2 W11-GENOME-FINANCE-SCOPE; owner rulings D-128,
+ * D-100, D-131). B1 maps the KEY organ tools key_genome.list_signals and key_genome.list_recommendations to
+ * settings read (D-131), so KEY chat and an approved proposal run them for a member holding settings read;
+ * their handlers (KeyGenomeAdapterService) answered every row, the finance ones included. B2 holds the same
+ * rows to revenue read on REST (GFS-15, GFS-16). At 8109839a a member with settings read and revenue none
+ * (an ADMIN whose explicit map is the ADMIN defaults with revenue none, the D-114 population; a STAFF member
+ * with settings read) was served on KEY the finance signal and the FINANCIAL recommendation the REST routes
+ * withhold from them. The organ path now applies B2's own projection (genome-finance-scope.ts) for the member
+ * the call runs for (ctx.userId), so both paths serve that member the same rows.
+ *
+ * The adapter is the production class, built here over the suite's live GenomeSignalService,
+ * GenomeRecommendationService and PrismaService (the services REST uses); memberToolRunAuthority is the
+ * production rule KEY chat, the plan queue and approved proposals apply before the organ runs.
+ */
+describe('W11A-SEAM-REPAIR (D-128, D-100, D-131): the KEY genome organ tools serve a member the signals and recommendations the REST routes serve them', () => {
+  const KEY = {
+    adminNoRev: `${P}adminNoRev`, // ADMIN, explicit map: ADMIN defaults with revenue none (D-114)
+    staffSettings: `${P}staffSettings`, // STAFF, explicit map: settings read, revenue none
+    staffSettingsRev: `${P}staffSetRev`, // STAFF, explicit map: settings read, revenue read (control)
+  };
+  const TOOLS = { signals: 'key_genome.list_signals', recommendations: 'key_genome.list_recommendations' } as const;
+  let adapter: any;
+  let prismaSvc: any;
+  let memberToolRunAuthority: any;
+
+  beforeAll(async () => {
+    const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+    for (const [id, role, permissionScopes] of [
+      [KEY.adminNoRev, 'ADMIN', { ...defaultScopesForRole('ADMIN'), revenue: 'none' }],
+      [KEY.staffSettings, 'STAFF', { settings: 'read', revenue: 'none' }],
+      [KEY.staffSettingsRev, 'STAFF', { settings: 'read', revenue: 'read' }],
+    ] as const) {
+      await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.biz, role, permissionScopes } });
+    }
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GenomeSignalService } = await import('../src/modules/business-genome/key-genome/genome-signal.service');
+    const { GenomeRecommendationService } = await import('../src/modules/business-genome/key-genome/genome-recommendation.service');
+    const { KeyGenomeAdapterService } = await import('../src/modules/key-cortex/organs/key-genome-adapter.service');
+    ({ memberToolRunAuthority } = await import('../src/modules/ai/plan-step-authority'));
+    prismaSvc = app.get(PrismaService);
+    const offRoute = (name: string) => new Proxy({}, {
+      get: (_t, prop) => () => { throw new Error(`${name}.${String(prop)} is off the organ tools under test`); },
+    });
+    adapter = new KeyGenomeAdapterService(
+      offRoute('BlueprintService') as any,
+      app.get(GenomeSignalService),
+      app.get(GenomeRecommendationService),
+      offRoute('GenomeFactService') as any,
+      offRoute('GenomeModuleReadinessService') as any,
+      offRoute('GenomeScoringService') as any,
+      { publish: () => undefined, subscribe: () => undefined } as any,
+      prismaSvc,
+    );
+  }, 60_000);
+
+  /** The ids the KEY organ tool answers the member `userId` (ctx.userId: the member the call runs for). */
+  async function keyIds(tool: string, userId: string | undefined, input: Record<string, unknown> = {}) {
+    const result = await adapter.executeTool(tool, { businessId: ID.biz, ...(userId ? { userId } : {}) }, input);
+    expect(result.success, JSON.stringify(result)).toBe(true);
+    const rows: any[] = tool === TOOLS.signals ? result.data.signals : result.data.recommendations;
+    expect(result.data.count, tool).toBe(rows.length);
+    return { ids: rows.map((r) => r.id), text: JSON.stringify(result.data) };
+  }
+
+  /** The ids GET signals / GET recommendations answers the same member. */
+  async function restIds(route: 'signals' | 'recommendations', userId: string, query = '') {
+    const res = await get(`${route}${query}`, userId);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return (res.body as any[]).map((r) => r.id);
+  }
+
+  it('[GFS-21] RED-BEFORE (D-128 x D-131): an ADMIN whose explicit map sets revenue none and a STAFF member with settings read and revenue none may run both organ tools on KEY (settings read), and are served exactly the rows GET signals and GET recommendations serve them: no finance signal, no FINANCIAL recommendation, the limit counting the rows they are served', async () => {
+    for (const member of [KEY.adminNoRev, KEY.staffSettings]) {
+      for (const tool of Object.values(TOOLS)) {
+        expect(await memberToolRunAuthority(prismaSvc, ID.biz, member, tool), `${member} ${tool}`).toEqual({ refusal: null, principal: false });
+      }
+
+      const rest = await restIds('signals', member);
+      const key = await keyIds(TOOLS.signals, member);
+      expect(key.ids, `${member} signals`).toEqual(rest);
+      expect(key.ids, member).toContain(ID.sigOps);
+      expect(key.ids, member).not.toContain(ID.sigFin);
+      expect(key.text, member).not.toMatch(MONEY_TEXT);
+      expect((await keyIds(TOOLS.signals, member, { limit: 1 })).ids, `${member} signals limit 1`).toEqual(await restIds('signals', member, '?limit=1'));
+
+      const restRecs = await restIds('recommendations', member);
+      const keyRecs = await keyIds(TOOLS.recommendations, member);
+      expect(keyRecs.ids, `${member} recommendations`).toEqual(restRecs);
+      expect(keyRecs.ids, member).toContain(ID.recOps);
+      expect(keyRecs.ids, member).not.toContain(ID.recFin);
+      expect(keyRecs.text, member).not.toMatch(MONEY_TEXT);
+      expect((await keyIds(TOOLS.recommendations, member, { limit: 1 })).ids, `${member} recommendations limit 1`).toEqual(
+        await restIds('recommendations', member, '?limit=1'),
+      );
+    }
+  }, 60_000);
+
+  it('[GFS-22] RED-BEFORE (D-128, D-73: fail closed): a KEY organ call that runs for no member (no ctx.userId) is served no finance signal and no FINANCIAL recommendation', async () => {
+    const signals = await keyIds(TOOLS.signals, undefined);
+    expect(signals.ids).toContain(ID.sigOps);
+    expect(signals.ids).not.toContain(ID.sigFin);
+    const recommendations = await keyIds(TOOLS.recommendations, undefined);
+    expect(recommendations.ids).toContain(ID.recOps);
+    expect(recommendations.ids).not.toContain(ID.recFin);
+  }, 30_000);
+
+  it('[GFS-23] control (D-128, D-125): the owner (OWNER membership) and a STAFF member with settings read and revenue read are served the finance rows on KEY, exactly as GET signals and GET recommendations serve them', async () => {
+    for (const member of [ID.owner, KEY.staffSettingsRev]) {
+      for (const tool of Object.values(TOOLS)) {
+        expect(await memberToolRunAuthority(prismaSvc, ID.biz, member, tool), `${member} ${tool}`).toEqual({ refusal: null, principal: false });
+      }
+      const key = await keyIds(TOOLS.signals, member);
+      expect(key.ids, member).toEqual(await restIds('signals', member));
+      expect(key.ids, member).toContain(ID.sigFin);
+      const keyRecs = await keyIds(TOOLS.recommendations, member);
+      expect(keyRecs.ids, member).toEqual(await restIds('recommendations', member));
+      expect(keyRecs.ids, member).toContain(ID.recFin);
+    }
+  }, 30_000);
+});

@@ -875,7 +875,9 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
       refused: [['cortex.query_business_data', NOT_MAPPED('cortex.query_business_data')]],
     },
     {
-      title: 'control: the business owner (Business.ownerId) runs every one of them',
+      // W11A-SEAM-REPAIR (owner rulings D-116, D-125): the fixture's owner is an OWNER membership with no explicit
+      // scope map (setup({ owner: true })); Business.ownerId grants nothing on its own.
+      title: 'control: the business owner (an OWNER membership with no explicit scope map, D-116/D-125) runs every one of them',
       member: { owner: true },
       runs: [
         'key_inbox.list_threads', 'key_inbox.get_thread', 'key_inbox.send_reply', 'temporal_flow.create_event', 'key_genome.get_blueprint',
@@ -884,6 +886,28 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
         'storelink.list_intakes', 'cortex.query_business_data',
       ],
       refused: [],
+    },
+    {
+      // W11A-SEAM-REPAIR (seam C0 W11-D116-KEY-OWNER x B1 W11-KEY-ORGAN-AUTHORITY-MAP; D-119, D-125, D-131): D-131's
+      // connect read binds members; the business owner keeps every organ tool, the three connector reads included,
+      // although no role default (the OWNER's included) holds connect. RED at 8109839a: refused 'connect requires read'.
+      title: 'W11A-SEAM-REPAIR the business owner (an OWNER membership with no explicit scope map) runs the three KEY connector reads (D-131 binds members to connect read, not the owner)',
+      member: { owner: true },
+      runs: ['key_connector.list_providers', 'key_connector.list_connections', 'key_connector.check_health'],
+      refused: [],
+    },
+    {
+      // W11A-SEAM-REPAIR control (review SEC-W11D116K-1 stays closed; D-125, D-71): an explicit scope map on an OWNER
+      // membership binds it on every mapped tool, organ tools included; only an unmapped tool is the owner arm's (D-119).
+      title: 'W11A-SEAM-REPAIR control (SEC-W11D116K-1): an OWNER membership whose explicit map leaves out connect and sets revenue none is refused the three KEY connector reads and temporal_flow.list_events, and still runs the unmapped key_connector.execute_internal and cortex.create_task (ai write in its map)',
+      member: { membership: { role: 'OWNER', permissionScopes: { ai: 'write', revenue: 'none' } } },
+      runs: ['key_connector.execute_internal', 'cortex.create_task'],
+      refused: [
+        ['key_connector.list_providers', 'Insufficient permissions: connect requires read access (you have none)'],
+        ['key_connector.list_connections', 'Insufficient permissions: connect requires read access (you have none)'],
+        ['key_connector.check_health', 'Insufficient permissions: connect requires read access (you have none)'],
+        ['temporal_flow.list_events', 'Insufficient permissions: revenue requires read access (you have none)'],
+      ],
     },
   ];
   const organActionType = (name: string) => name.toUpperCase().replace(/\./g, '_');
