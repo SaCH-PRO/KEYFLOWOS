@@ -132,6 +132,114 @@
  *         order stayed SHIPPED). Now 409 naming no other business's id;
  *         nothing is written, and the planted row is left for an operator.
  *
+ * W11-INV-UPSERT-SCOPE (the Z4RV-SEC-1 sibling): POST .../inventory
+ * (MarketplaceService.upsertInventory, body: any, no DTO) read the stock row by
+ * (productId, warehouseId) alone, updated it by id, else created a row of the
+ * caller's business for whatever pair the body named. Each case below was red
+ * at fb00af1c:
+ *
+ *   RC-20 with no ambient tenant (the service called directly, as here and as
+ *         any non-HTTP caller): a body naming B's stocked pair rewrote B's row
+ *         (999 at 0.01), and bodies naming B's product or warehouse created
+ *         rows of this business. Now the product and the warehouse must be the
+ *         business's (raw SQL by its own id): 404, nothing written.
+ *   RC-21 the same with the ambient tenant armed as main.ts arms it: the scoped
+ *         read missed B's row and the create hit the unique pair (500, P2002),
+ *         and the others planted rows of this business (B's XB2 then read as
+ *         stock-tracked). Now the same 404s.
+ *   RC-22 malformed ids and fields answered 500 (PrismaClientValidationError)
+ *         or stored fractions and negatives. Now 400 naming the field, before
+ *         any read (an id filter object would match any row once the read is
+ *         by business, the Z5SEC-1 lesson).
+ *   RC-23 the business's own rows keep today's partial update (only the fields
+ *         sent; digit text from the web form is that number, D-136) and create;
+ *         a pair a planted row holds answers 409 (D-137: the operator repairs).
+ *         Its movementsWritten 0 records today's behaviour (the route writes
+ *         no stock movement and names no actor), not a rule: that is the
+ *         review's SEC-UPS-2 follow-up (the it.todo at the end).
+ *   RC-24 (review SEC-UPS-1) two requests creating the same new own pair at
+ *         once (a double submit, a retry) both read no row (the pair lock
+ *         locks nothing while no row exists) and both inserted: the loser's
+ *         unique violation answered 409 'held by another record' though the
+ *         only row holding the pair was the business's own, just committed.
+ *         Now the loser runs its transaction once more, reads that row and
+ *         updates it; the 409 is left for a pair a row the business does not
+ *         read holds (a planted row, D-137; RC-23).
+ *
+ * W11-PO-LINES (owner ruling D-136; F-33, F-40): a purchase order's lines were
+ * stored as sent (MarketplaceService.createPurchaseOrder, body: any; the route
+ * and the KEY tool inventory_create_purchase_order) and read at receipt with
+ * their ids coerced by String() for the ownership check, then passed raw to
+ * the lock and to Prisma. Each case below was red at 00532f2f:
+ *
+ *   RC-25 (F-33) lines naming another business's product or warehouse were
+ *         stored on a DRAFT purchase order, refused only at receipt (RC-10).
+ *         Now refused at create with 400 naming the line (the receipt's
+ *         wording), nothing saved.
+ *   RC-26 (F-33) malformed bodies (items not a list, a line not an object, an
+ *         id not a non-empty string, a quantity that is not a number, a
+ *         product line whose quantity is not a positive whole number, D-136,
+ *         a price or cost that is not a number of 0 or more) were stored, or
+ *         answered 500. Now 400 naming the line, nothing saved; free-text
+ *         lines, own products and a body with no items keep today's totals.
+ *   RC-27 (F-40) legacy stored lines answered 500 at receipt (an id that is a
+ *         one-element array passes String(); digit text added to an integer;
+ *         a text cost on a new row), stored a fraction truncated, or skipped a
+ *         word as quantity. Now a malformed id or stock quantity is 400 with
+ *         nothing received, and digit text is received as that number (D-136).
+ *
+ * W11-PO-RECEIPT-CLAIM (the packet's cases RC-27..RC-30 are RC-30..RC-33 here:
+ * RC-27..RC-29 were taken by W11-PO-LINES): advancePurchaseOrderStatus reads
+ * the purchase order before its transaction and checks the transition on that
+ * read; its write is a compare-and-set on the status read. Each caller is held
+ * after that read until the other has read too:
+ *
+ *   RC-30, RC-31 two RECEIVED calls at once (a line into an existing stock row;
+ *         a line into a pair with no row, serialized by the purchase order's
+ *         row alone). At fb00af1c both committed (stock 10 -> 16, two RECEIPT
+ *         movements, two purchaseOrder.received); at 92468080 (SEC-POL-4, RC-29)
+ *         the other was refused 400 'Cannot transition PO from RECEIVED to
+ *         RECEIVED'. Now 409 'changed by another request', nothing written,
+ *         one ledger posting and one event.
+ *   RC-32 two non-RECEIVED changes at once from SUBMITTED: both committed (the
+ *         last write won). Now one wins and the other is 409.
+ *   RC-33 (green before and after) a RECEIVED made after the first committed
+ *         keeps the transition table's 400 and writes nothing.
+ *
+ * W11-STOCK-ROW-RACE (the packet's cases RC-31..RC-34 are RC-34..RC-37 here;
+ * D-137 keeps the 'ask an operator' 409 for planted rows only): a stock writer
+ * creating a (product, warehouse) row that does not exist yet takes no lock on
+ * it (the pair lock locks existing rows only), and createStockRowOrConflict
+ * answered every unique violation with 409 'held by another record; ask an
+ * operator to repair it', also when the row was the business's own, created a
+ * moment earlier by a concurrent writer. Each case below was red at 488b35d5
+ * (RC-36 by its upsert's run count alone, since the review pin):
+ *
+ *   RC-34 transfers of M from the first and from the second warehouse into a
+ *         third where M has no row, each held after its first stock write
+ *         until both have made it: ['committed', 409 'ask an operator']. Now
+ *         the loser runs its transaction once more and adds to the new row.
+ *   RC-35 the same between a transfer into a new pair and a purchase order
+ *         received with a line into an existing row, then a line into that
+ *         pair, each held once it has read no row of the pair until the other
+ *         has (the receipt reads it after its first stock write): both
+ *         commit, the purchase order received once.
+ *   RC-36 (its answers the same before and after) a pair a planted row
+ *         holds still answers the 409 for a transfer, a receipt and POST
+ *         .../inventory, writing nothing. Review SRR-CR-1: each transaction is
+ *         run exactly once (the holder read finds another business_id; at
+ *         488b35d5 the upsert ran twice); 'at most twice' let a run again of
+ *         every 409 pass.
+ *   RC-37 a transfer note that is not text (42, an object, an array, true)
+ *         answered 500 (PrismaClientValidationError). Now 400 'Transfer note
+ *         must be text', nothing written; a text note is stored as sent.
+ *   RC-38 (review SRR-CR-2) the receipt as the loser: a purchase order
+ *         received, held at its read of a new pair while POST .../inventory
+ *         creates the business's own row there and commits, runs its
+ *         transaction once more and is received once. RC-35 always has the
+ *         transfer lose, so the receipt's run again was taken by no case:
+ *         without it this answers the 'ask an operator' 409, PO SHIPPED.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -195,6 +303,8 @@ const ID = {
   plantedXBInA: `${P}planted_xb_wh`,
   plantedAInB: `${P}planted_a_whb`,
   plantedXBInB2: `${P}planted_xb_whb2`,
+  /** W11-STOCK-ROW-RACE: a third warehouse of the business, created by its describe block (no stock row of its own). */
+  warehouse3: `${P}wh_3`,
 };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const PRICE = 10;
@@ -213,8 +323,11 @@ let prismaService: any;
 let deliveryNotes: any;
 let goodsReceipts: any;
 let stockCounts: any;
-/** MarketplaceController, as POST .../inventory/transfer calls it (body: any, no DTO). */
+/** MarketplaceController, as POST .../inventory/transfer and POST .../inventory call it (body: any, no DTO). */
 let controller: any;
+/** @keyflow/db (its setTenantContextProvider) and src/core/tenant/tenant-context, for the cases that arm the ambient tenant. */
+let dbModule: any;
+let tenantContext: any;
 
 /** store_order.* events in emit order. */
 let seen: Array<{ name: string; payload: any }> = [];
@@ -264,6 +377,8 @@ async function cleanup() {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  dbModule = dbMod;
+  tenantContext = await import('../src/core/tenant/tenant-context');
 
   const { Test } = await import('@nestjs/testing');
   const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -393,6 +508,8 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  // RC-21 restores it in its own finally; this keeps a failed run from leaving the ambient tenant armed.
+  dbModule?.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
   await drain();
   await cleanup();
   await app?.close();
@@ -711,6 +828,41 @@ async function plantRows(rows: Array<[id: string, productId: string, warehouseId
   }
 }
 const removeRows = (ids: string[]) => db.$executeRaw`DELETE FROM inventory_stocks WHERE id = ANY(${ids}::text[])`;
+
+/** POST .../inventory as the route runs it: its handler (MarketplaceController.upsertInventory), with the body as sent. */
+const upsertByRoute = (businessId: string, body: Record<string, unknown>) =>
+  Promise.resolve().then(() => controller.upsertInventory(businessId, body));
+/** An upsert's answer as the route gives it: 'committed' when it returned a stock row, else as routeAnswer reads it. */
+const upsertAnswer = (work: Promise<unknown>) => routeAnswer(work.then((row: any) => ({ success: typeof row?.id === 'string' })));
+
+/** The other business's own stock row (XB in WB) as the suite seeds it, read with no tenant: [businessId, quantity, reserved, cost]. */
+const otherBusinessRow = async () => {
+  const [row]: any[] = await db.$queryRaw`
+    SELECT business_id, quantity, reserved, cost_per_unit FROM inventory_stocks WHERE id = ${ID.stockXB}`;
+  return [row.business_id, row.quantity, row.reserved, row.cost_per_unit];
+};
+const restoreOtherBusinessRow = () =>
+  db.$executeRaw`UPDATE inventory_stocks SET business_id = ${ID.bizB}, quantity = ${IN_STOCK}, reserved = 0, cost_per_unit = 5 WHERE id = ${ID.stockXB}`;
+/** How many stock rows hold a product, whatever their business (raw SQL: no tenant filter). */
+const stockRowsOfProduct = async (productId: string) => {
+  const [{ n }]: any[] = await db.$queryRaw`SELECT COUNT(*)::int AS n FROM inventory_stocks WHERE product_id = ${productId}`;
+  return n as number;
+};
+
+/**
+ * W11-INV-UPSERT-SCOPE: the four bodies a member of this business (ID.biz) sent naming the other business's product or
+ * warehouse, measured at fb00af1c, each with the answer it gets now.
+ */
+const foreignUpserts = (): Array<[name: string, body: Record<string, unknown>, answer: string]> => [
+  [
+    "B's stocked pair (XB in WB), 999 at cost 0.01",
+    { productId: ID.productXB, warehouseId: ID.warehouseB, quantity: 999, costPerUnit: 0.01 },
+    '404: Product not found',
+  ],
+  ["B's unstocked product in B's warehouse (XB2 in WB)", { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 5 }, '404: Product not found'],
+  ["this business's own product into B's warehouse", { productId: ID.productA, warehouseId: ID.warehouseB, quantity: 5 }, '404: Warehouse not found'],
+  ["B's product into this business's warehouse", { productId: ID.productXB, warehouseId: ID.warehouse, quantity: 5 }, '404: Product not found'],
+];
 
 describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real database)', () => {
   it('RC-01 (SEAMZ4-CR-1) two paid orders with the same tracked products in opposite line order, routed at once and each held after its first reservation: no deadlock, both routed once (2 LOCAL_STOCK RESERVED routes each), 2 reserved of each product, and no store_order.routing_failed', async () => {
@@ -1483,13 +1635,1075 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     expect(JSON.stringify(outcome), "the answer names no id of the suite's").not.toContain(P);
   });
 
+  it("RC-20 (W11-INV-UPSERT-SCOPE, Z4RV-SEC-1 sibling) POST .../inventory with no ambient tenant, naming the other business's product or warehouse (its stocked pair at 999 / 0.01, its unstocked product in its warehouse, this business's product into its warehouse, its product into this business's warehouse), is refused with 404 'Product not found' or 'Warehouse not found' naming no id: B's own row unchanged, no stock row created, no stock movement", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    try {
+      for (const [name, body, answer] of foreignUpserts()) {
+        outcomes[name] = await answerAndWrites(() => upsertAnswer(upsertByRoute(ID.biz, body)));
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+      expect(await otherBusinessRow(), "B's own stock row as it was [business, quantity, reserved, cost]").toEqual([ID.bizB, IN_STOCK, 0, 5]);
+      expect(await stockRowsOfProduct(ID.productXB2), "B's unstocked product has no stock row (it does not read as tracked)").toBe(0);
+    } finally {
+      await restoreOtherBusinessRow();
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first rewrote B's row to 999 at 0.01 and the other three created rows of this business for B's
+    // product or in B's warehouse (B's XB2 then read as stock-tracked).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-21 (W11-INV-UPSERT-SCOPE, Z4RV-SEC-1 sibling) the same four bodies with the ambient tenant armed as main.ts arms it (setTenantContextProvider, the call run in runWithTenant for this business) are refused with the same 404s: no 500, no stock row planted, B's own row unchanged", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    dbModule.setTenantContextProvider({ getCurrentBusinessId: tenantContext.getCurrentBusinessId });
+    try {
+      for (const [name, body, answer] of foreignUpserts()) {
+        outcomes[name] = await answerAndWrites(() =>
+          upsertAnswer(tenantContext.runWithTenant(ID.biz, ID.owner, () => upsertByRoute(ID.biz, body))),
+        );
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+    } finally {
+      // Every other case runs with no ambient tenant.
+      dbModule.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+    }
+    let otherRow: unknown;
+    let xb2Rows: unknown;
+    try {
+      otherRow = await otherBusinessRow();
+      xb2Rows = await stockRowsOfProduct(ID.productXB2);
+    } finally {
+      await restoreOtherBusinessRow();
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first answered 500 (the tenant-scoped read missed B's row; the create hit the unique pair, P2002)
+    // and the other three planted rows of this business: (XB2, WB), (A, WB), (XB, this business's warehouse).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(otherRow, "B's own stock row as it was [business, quantity, reserved, cost]").toEqual([ID.bizB, IN_STOCK, 0, 5]);
+    expect(xb2Rows, "B's unstocked product has no stock row (at fb00af1c: 1, so B's checkout refused it)").toBe(0);
+  });
+
+  it('RC-22 (W11-INV-UPSERT-SCOPE; D-136 whole stock quantities) POST .../inventory with productId or warehouseId missing, empty, null, a number, an array or a filter object, or with a quantity, reserved, reorderAt, costPerUnit or currency of the wrong shape (a fraction, a negative, a word, an object), is refused with 400 naming the field before anything is read or written', async () => {
+    const body = { productId: ID.productA, warehouseId: ID.warehouse, quantity: 3 };
+    const without = (key: keyof typeof body) => Object.fromEntries(Object.entries(body).filter(([k]) => k !== key));
+    const productId = '400: Inventory productId is required (a non-empty string)';
+    const warehouseId = '400: Inventory warehouseId is required (a non-empty string)';
+    const whole = (field: string) => `400: Inventory ${field} must be a whole number of 0 or more`;
+    const probes: Array<[string, Record<string, unknown>, string]> = [
+      ['no productId', without('productId'), productId],
+      ['productId an empty string', { ...body, productId: '' }, productId],
+      ['productId null', { ...body, productId: null }, productId],
+      ['productId a number', { ...body, productId: 42 }, productId],
+      ['productId a filter object', { ...body, productId: { not: '' } }, productId],
+      ['no warehouseId', without('warehouseId'), warehouseId],
+      ['warehouseId an array', { ...body, warehouseId: [ID.warehouse] }, warehouseId],
+      ['warehouseId a filter object', { ...body, warehouseId: { not: '' } }, warehouseId],
+      ['quantity a fraction', { ...body, quantity: 1.5 }, whole('quantity')],
+      ['quantity negative', { ...body, quantity: -5 }, whole('quantity')],
+      ['quantity a word', { ...body, quantity: 'abc' }, whole('quantity')],
+      ['quantity a fraction as text', { ...body, quantity: '1.5' }, whole('quantity')],
+      ['quantity an object', { ...body, quantity: {} }, whole('quantity')],
+      ['quantity above the largest stored whole number', { ...body, quantity: 2_147_483_648 }, whole('quantity')],
+      ['reserved negative', { ...body, reserved: -1 }, whole('reserved')],
+      ['reorderAt a fraction', { ...body, reorderAt: 2.5 }, whole('reorderAt')],
+      ['costPerUnit a word', { ...body, costPerUnit: 'x' }, '400: Inventory costPerUnit must be a number of 0 or more'],
+      ['costPerUnit negative', { ...body, costPerUnit: -1 }, '400: Inventory costPerUnit must be a number of 0 or more'],
+      ['currency a number', { ...body, currency: 42 }, '400: Inventory currency must be a non-empty string'],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    const ownRow = async () => {
+      const a = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      return [a.businessId, a.quantity, a.reserved, a.reorderAt, a.costPerUnit, a.currency];
+    };
+    let before: unknown;
+    let after: unknown;
+    try {
+      await resetBusinessStock();
+      before = await ownRow();
+      for (const [name, sent, answer] of probes) {
+        await resetBusinessStock();
+        outcomes[name] = await answerAndWrites(() => upsertAnswer(upsertByRoute(ID.biz, sent)));
+        expected[name] = { answer, stockRowsWritten: 0, movementsWritten: 0 };
+      }
+      after = await ownRow();
+    } finally {
+      await resetBusinessStock();
+    }
+    // At fb00af1c a missing or filter-object id, a quantity as a word or an object, and a costPerUnit word answered 500
+    // (PrismaClientValidationError), and a fraction or a negative quantity was stored.
+    expect(outcomes).toEqual(expected);
+    expect(after, "this business's row (A) as it was, reorderAt and currency too").toEqual(before);
+  });
+
+  it("RC-23 (W11-INV-UPSERT-SCOPE; D-137 planted rows left for an operator) on the business's own rows: an existing pair updates only the fields sent (quantity '7' from the web form stored as 7, reorderAt and cost kept, the row returned with its product and warehouse), a new own pair is created for the business, and a pair a planted row holds is refused with 409 naming no id, writing nothing", async () => {
+    const outcomes: Record<string, unknown> = {};
+    let returned: any;
+    let updated: unknown;
+    let created: unknown;
+    let planted: unknown;
+    const seeded = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    try {
+      await resetBusinessStock();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reorderAt: 4, costPerUnit: 3 } });
+      outcomes['own existing pair, quantity as the web form sends it'] = await answerAndWrites(() =>
+        upsertAnswer(
+          upsertByRoute(ID.biz, { productId: ID.productA, warehouseId: ID.warehouse, quantity: '7', reserved: '' }).then((row: any) => (returned = row)),
+        ),
+      );
+      const a = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      updated = [a.businessId, a.quantity, a.reserved, a.reorderAt, a.costPerUnit, a.currency];
+
+      outcomes['own new pair'] = await answerAndWrites(() =>
+        upsertAnswer(upsertByRoute(ID.biz, { productId: ID.productU, warehouseId: ID.warehouse2, quantity: 3, costPerUnit: '2.5', reorderAt: '1' })),
+      );
+      const rows = await db.inventoryStock.findMany({ where: { productId: ID.productU, warehouseId: ID.warehouse2 } });
+      created = rows.map((r: any) => [r.businessId, r.quantity, r.reserved, r.reorderAt, r.costPerUnit, r.currency]);
+
+      await plantRows([[ID.plantedXB2InB, ID.productXB2, ID.warehouseB]]);
+      outcomes["B's own pair, held by a planted row of this business"] = await answerAndWrites(() =>
+        upsertAnswer(upsertByRoute(ID.bizB, { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 3 })),
+      );
+      const p = await db.inventoryStock.findUnique({ where: { id: ID.plantedXB2InB } });
+      planted = [p.businessId, p.quantity, p.reserved, p.costPerUnit];
+    } finally {
+      await removeRows([ID.plantedXB2InB]);
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reorderAt: seeded.reorderAt, costPerUnit: seeded.costPerUnit, currency: seeded.currency } });
+      await resetBusinessStock();
+    }
+    // At fb00af1c the first answered 500 (quantity '7' and reserved '' reached Prisma as text) and the third rewrote the
+    // planted row (read by its pair alone) and answered success. movementsWritten 0 is today's behaviour (POST
+    // .../inventory writes no stock movement and names no actor), pinned so a change shows, not endorsed: the review's
+    // SEC-UPS-2 follow-up (the it.todo below) decides it.
+    expect(outcomes).toEqual({
+      'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
+      'own new pair': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
+      "B's own pair, held by a planted row of this business": {
+        answer: '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it',
+        stockRowsWritten: 0,
+        movementsWritten: 0,
+      },
+    });
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(updated, 'quantity 7; reserved, reorderAt, cost and currency kept').toEqual([ID.biz, 7, 0, 4, 3, 'TTD']);
+    expect([returned?.id, returned?.product?.id, returned?.warehouse?.id], 'the row returned with its product and warehouse').toEqual([
+      ID.stockA,
+      ID.productA,
+      ID.warehouse,
+    ]);
+    expect(created, 'one row, of this business').toEqual([[ID.biz, 3, 0, 1, 2.5, 'TTD']]);
+    expect(planted, 'the planted row untouched').toEqual([ID.biz, IN_STOCK, 0, 5]);
+  });
+
+  it("RC-24 (W11-INV-UPSERT-SCOPE review SEC-UPS-1; D-137 keeps the 409 for planted rows only) two POST .../inventory requests creating the same new own pair at once (a double submit or a retry, then two requests sending different fields), each held after reading no row until the other has read too: both commit, one row of the business holding both requests' fields, and neither answers 409 'held by another record' (no planted row exists)", async () => {
+    const pair = { productId: ID.productU, warehouseId: ID.warehouse2 };
+    const probes: Array<[name: string, first: Record<string, unknown>, second: Record<string, unknown>]> = [
+      ['the same body twice (a double submit, a retry)', { ...pair, quantity: 3 }, { ...pair, quantity: 3 }],
+      ['two bodies sending different fields', { ...pair, quantity: 3 }, { ...pair, costPerUnit: '2.5', reorderAt: '1' }],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    try {
+      for (const [name, first, second] of probes) {
+        await resetBusinessStock();
+        const reads = new Set<number>();
+        let allIn!: () => void;
+        const gathered = new Promise<void>((resolve) => (allIn = resolve));
+        // Each transaction is held after its stock row read until both have read (neither sees a row), or the window
+        // passes: a request that waits on a lock before its read never reaches the hold while the other waits.
+        const hook = hookStockWrites(async (no) => {
+          if (reads.has(no)) return;
+          reads.add(no);
+          if (reads.size >= 2) allIn();
+          await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+        }, 'findFirst');
+        try {
+          outcomes[name] = await answerAndWrites(() =>
+            Promise.all([upsertAnswer(upsertByRoute(ID.biz, first)), upsertAnswer(upsertByRoute(ID.biz, second))]),
+          );
+        } finally {
+          hook.restore();
+        }
+        const held = await db.inventoryStock.findMany({ where: { productId: ID.productU, warehouseId: ID.warehouse2 } });
+        rows[name] = held.map((r: any) => [r.businessId, r.quantity, r.reserved, r.reorderAt, r.costPerUnit, r.currency]);
+      }
+    } finally {
+      await resetBusinessStock();
+    }
+    // Before this repair the second insert waited on the unique pair behind the first, then failed on it (P2002), which
+    // createStockRowOrConflict answered as a planted row: ['committed', '409: A stock row ... held by another record'].
+    expect(outcomes).toEqual({
+      'the same body twice (a double submit, a retry)': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
+      'two bodies sending different fields': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
+    });
+    expect(rows, "one row of this business; the later request's fields applied over the earlier's row").toEqual({
+      'the same body twice (a double submit, a retry)': [[ID.biz, 3, 0, null, null, 'TTD']],
+      'two bodies sending different fields': [[ID.biz, 3, 0, 1, 2.5, 'TTD']],
+    });
+  });
+
+  it.todo(
+    "SEC-UPS-2 follow-up (W11-INV-UPSERT-SCOPE review; pre-existing, not this packet; needs an owner ruling): POST .../inventory sets quantity and reserved on the business's own row with no stock movement and no actor (the controller passes no req.user), unlike POST .../inventory/adjust (reasonCode, a note for MANUAL, createdBy); it accepts a quantity below reserved and clears reserved while routes hold reservations. To decide: the movement's type and reason code for a set (importInventoryExcel writes its own EXCEL_IMPORT movement after calling the upsert), whether a member may set reserved by hand, and whether a quantity below reserved is refused",
+  );
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
   );
-  it.todo(
-    'Z4RV-SEC-1 follow-up (not this packet): POST .../purchase-orders (MarketplaceService.createPurchaseOrder, body: any) stores lines naming another business\'s product or warehouse as sent; they are refused only when the purchase order is received (RC-10)',
+});
+
+/** POST .../purchase-orders as the route runs it: its handler (MarketplaceController.createPurchaseOrder), with the body as sent. */
+const createPurchaseOrderByRoute = (body: unknown) => Promise.resolve().then(() => controller.createPurchaseOrder(ID.biz, body));
+/** The suite's purchase orders, whatever their business. */
+const purchaseOrderCount = async () => {
+  const [{ n }]: any[] = await db.$queryRawUnsafe(`SELECT COUNT(*)::int AS n FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  return n as number;
+};
+/**
+ * A purchase order create's answer as the route gives it ('created <status> <subtotal>/<total>', else the HTTP status
+ * and message as routeAnswer reads it), how many purchase orders it wrote, and the lines it stored.
+ */
+async function purchaseOrderCreate(body: unknown) {
+  const before = await purchaseOrderCount();
+  let stored: unknown;
+  const answer = await routeAnswer(
+    createPurchaseOrderByRoute(body).then((po: any) => {
+      stored = po?.items;
+      return `created ${po?.status} ${po?.subtotal}/${po?.total}`;
+    }),
   );
-  it.todo(
-    'Z4RV-SEC-1 sibling (by reading, not reproduced; not this packet): POST .../inventory (MarketplaceService.upsertInventory) finds the stock row by (productId, warehouseId) with no business filter and updates it, so a member of one business could rewrite another business\'s stock row named by its product and warehouse ids',
+  return { answer, purchaseOrdersWritten: (await purchaseOrderCount()) - before, stored };
+}
+
+describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-136; real database)', () => {
+  const supplier = { supplierName: 'V18R Supplier' };
+  const ownLine = { productId: ID.productA, name: 'A', quantity: 3, unitPrice: 4, unitCost: 4, total: 12, warehouseId: ID.warehouse };
+
+  it("RC-25 (W11-PO-LINES; F-33, Z4RV-SEC-1 at create) POST .../purchase-orders with a line naming another business's product (with no warehouse, in its warehouse, or in this business's), a line into its warehouse (a free-text line, or this business's product), or this business's line then another business's product, is refused with 400 naming the line and no id, and no purchase order is saved", async () => {
+    const foreign = (n: number) => `400: Purchase order line ${n} names a product or a warehouse that is not this business's; nothing was saved`;
+    const probes: Array<[name: string, items: unknown[], answer: string]> = [
+      ["B's product, no warehouse", [{ productId: ID.productXB, name: 'XB', quantity: 2, unitPrice: 1, unitCost: 1, total: 2 }], foreign(1)],
+      [
+        "B's product in B's warehouse (the review's probe)",
+        [{ productId: ID.productXB, name: 'XB', quantity: 1000, unitPrice: 0.01, unitCost: 0.01, total: 10, warehouseId: ID.warehouseB }],
+        foreign(1),
+      ],
+      ["B's unstocked product in this business's warehouse", [{ productId: ID.productXB2, name: 'XB2', quantity: 1, unitPrice: 1, warehouseId: ID.warehouse }], foreign(1)],
+      ["a free-text line into B's warehouse", [{ name: 'Freight', quantity: 1, unitPrice: 5, warehouseId: ID.warehouseB }], foreign(1)],
+      ["this business's product into B's warehouse", [{ ...ownLine, warehouseId: ID.warehouseB }], foreign(1)],
+      [
+        "this business's line first, then B's product",
+        [ownLine, { productId: ID.productXB, name: 'XB', quantity: 5, unitPrice: 1, unitCost: 1, total: 5, warehouseId: ID.warehouseB }],
+        foreign(2),
+      ],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, items, answer] of probes) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate({ ...supplier, items });
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: 0 };
+    }
+    // At 00532f2f each was saved: 'created DRAFT ...', 1 purchase order written (refused only at receipt, RC-10).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-26 (W11-PO-LINES; F-33, D-136 whole stock quantities) POST .../purchase-orders with items not a list, a line not an object, a productId or warehouseId that is not a non-empty string, a quantity that is not a number, a product line whose quantity is not a positive whole number, or a price or cost that is not a number of 0 or more, is refused with 400 naming the line and nothing is saved; a free-text line, this business's product with and without a warehouse, and a body with no items are created with today's subtotal and total", async () => {
+    const list = '400: Purchase order items must be a list of lines';
+    const line = (n: number, what: string) => `400: Purchase order line ${n} ${what}`;
+    const object = (n: number) => line(n, 'must be an object');
+    const productId = (n: number) => line(n, 'productId must be a non-empty string');
+    const warehouseId = (n: number) => line(n, 'warehouseId must be a non-empty string');
+    const numeric = (n: number, field = 'quantity') => line(n, `${field} must be a number`);
+    const whole = (n: number, field = 'quantity') => line(n, `${field} must be a whole number above 0 on a product line`);
+    const money = (n: number, field: string) => line(n, `${field} must be a number of 0 or more`);
+    const refusals: Array<[name: string, body: Record<string, unknown>, answer: string]> = [
+      ['items an object', { ...supplier, items: { productId: ID.productA, quantity: 1 } }, list],
+      ['items a string', { ...supplier, items: 'abc' }, list],
+      ['a line null', { ...supplier, items: [null] }, object(1)],
+      ['a line a number (after a good line)', { ...supplier, items: [ownLine, 5] }, object(2)],
+      ['a line an array', { ...supplier, items: [[ownLine]] }, object(1)],
+      ['productId a number', { ...supplier, items: [{ ...ownLine, productId: 42 }] }, productId(1)],
+      ["productId an array of this business's product", { ...supplier, items: [{ ...ownLine, productId: [ID.productA] }] }, productId(1)],
+      ['productId a filter object', { ...supplier, items: [{ ...ownLine, productId: { not: '' } }] }, productId(1)],
+      ["warehouseId an array of this business's warehouse", { ...supplier, items: [{ ...ownLine, warehouseId: [ID.warehouse] }] }, warehouseId(1)],
+      ["a product line's quantity as text", { ...supplier, items: [{ ...ownLine, quantity: '5' }] }, numeric(1)],
+      ["a product line's quantity a fraction", { ...supplier, items: [{ ...ownLine, quantity: 1.5 }] }, whole(1)],
+      ["a product line's quantity 0", { ...supplier, items: [{ ...ownLine, quantity: 0 }] }, whole(1)],
+      ["a product line's quantity negative", { ...supplier, items: [{ ...ownLine, quantity: -1 }] }, whole(1)],
+      ["a product line's quantity an object", { ...supplier, items: [{ ...ownLine, quantity: {} }] }, numeric(1)],
+      ["a product line with no quantity", { ...supplier, items: [{ productId: ID.productA, name: 'A', unitPrice: 4 }] }, whole(1)],
+      ["a product line's receivedQuantity a fraction", { ...supplier, items: [{ ...ownLine, receivedQuantity: 2.5 }] }, whole(1, 'receivedQuantity')],
+      ['a free-text line quantity as a word', { ...supplier, items: [{ name: 'Freight', quantity: 'two', unitPrice: 5 }] }, numeric(1)],
+      ['unitCost a word', { ...supplier, items: [{ ...ownLine, unitCost: 'x' }] }, money(1, 'unitCost')],
+      ['unitPrice negative', { ...supplier, items: [{ ...ownLine, unitPrice: -4 }] }, money(1, 'unitPrice')],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, body, answer] of refusals) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate(body);
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: 0 };
+    }
+    const freeText = [{ name: 'Freight', quantity: 2, unitPrice: 7.5, total: 15 }];
+    const ownNoWarehouse = [{ productId: ID.productA, name: 'A', quantity: 2, unitPrice: 2.5, total: 5 }];
+    const controls: Array<[name: string, body: Record<string, unknown>, answer: string, stored: unknown]> = [
+      ['a free-text line with no productId, shipping and tax', { ...supplier, items: freeText, shippingCost: 5, taxAmount: 1 }, 'created DRAFT 15/21', freeText],
+      ['a free-text line with no quantity (counted as 1)', { ...supplier, items: [{ name: 'Setup', unitPrice: 9 }] }, 'created DRAFT 9/9', [{ name: 'Setup', unitPrice: 9 }]],
+      ["this business's product into its warehouse", { ...supplier, items: [ownLine] }, 'created DRAFT 12/12', [ownLine]],
+      ["this business's product with no warehouse", { ...supplier, items: ownNoWarehouse }, 'created DRAFT 5/5', ownNoWarehouse],
+      ["this business's product and a free-text line", { ...supplier, items: [ownLine, ...freeText] }, 'created DRAFT 27/27', [ownLine, ...freeText]],
+      ['a body with no items', { ...supplier }, 'created DRAFT 0/0', []],
+    ];
+    for (const [name, body, answer, stored] of controls) {
+      outcomes[name] = await purchaseOrderCreate(body);
+      expected[name] = { answer, purchaseOrdersWritten: 1, stored };
+    }
+    // At 00532f2f items an object and a null line answered 500 (TypeError), a quantity that is a word or an object 500 (a
+    // NaN subtotal, PrismaClientValidationError), and every other refusal was saved as DRAFT (a negative unitPrice with a
+    // negative total). The controls were created as they are now.
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(Object.fromEntries(refusals.map(([name]) => [name, outcomes[name]]))), "no refusal names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-27 (W11-PO-LINES; F-40, D-136 digit text received as that number) a legacy SHIPPED purchase order received with a line whose productId or warehouseId is an array, or whose quantity is a word or a fraction, is refused with 400 naming the line and stays SHIPPED with nothing written; a quantity or receivedQuantity stored as digit text is received as that number, and a cost stored as digit text on a new stock row is its cost; never a 500", async () => {
+    const malformed = (n: number) => `400: Purchase order line ${n} is malformed; nothing was received`;
+    const probes: Array<[name: string, items: unknown[], answer: string]> = [
+      ["productId an array of this business's product", [{ ...ownLine, productId: [ID.productA] }], malformed(1)],
+      ["warehouseId an array of this business's warehouse (after a good line)", [ownLine, { ...ownLine, productId: ID.productB, warehouseId: [ID.warehouse] }], malformed(2)],
+      ['quantity a word', [{ ...ownLine, quantity: 'abc' }], malformed(1)],
+      ['quantity a fraction', [{ ...ownLine, quantity: 1.5 }], malformed(1)],
+      ['quantity a fraction as text', [{ ...ownLine, quantity: '1.5' }], malformed(1)],
+      ["quantity '5' (digit text)", [{ productId: ID.productA, name: 'A', quantity: '5', unitPrice: 0, warehouseId: ID.warehouse }], 'committed'],
+      ["receivedQuantity '2' (digit text) of 5 ordered", [{ productId: ID.productA, name: 'A', quantity: 5, receivedQuantity: '2', warehouseId: ID.warehouse }], 'committed'],
+      ["unitCost '3' (digit text) on a new stock row", [{ productId: ID.productU, name: 'U', quantity: 4, unitPrice: 3, unitCost: '3', warehouseId: ID.warehouse2 }], 'committed'],
+      // Green before and after: lines that add no stock (not an object, or naming no product) are passed over, as before.
+      [
+        "lines that add no stock (null, 5, a free-text line with quantity 'abc') beside a good line",
+        [null, 5, { name: 'Freight', quantity: 'abc', unitPrice: 'x' }, { productId: ID.productA, name: 'A', quantity: 3, warehouseId: ID.warehouse }],
+        'committed',
+      ],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    const statuses: Record<string, string> = {};
+    const stockAfter: Record<string, unknown> = {};
+    // The costs as earlier cases left them (a receipt with a cost rewrites them): none of these probes changes a cost.
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const seededB = await db.inventoryStock.findUnique({ where: { id: ID.stockB } });
+    try {
+      for (const [name, items, answer] of probes) {
+        await resetBusinessStock();
+        const po = await shippedPurchaseOrder(items);
+        outcomes[name] = await answerAndWrites(() =>
+          routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+        );
+        expected[name] = answer === 'committed' ? { answer, stockRowsWritten: 1, movementsWritten: 1 } : { answer, stockRowsWritten: 0, movementsWritten: 0 };
+        statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+        const rows = await db.inventoryStock.findMany({
+          where: { businessId: ID.biz, productId: { in: [ID.productA, ID.productB, ID.productU] }, warehouseId: { in: [ID.warehouse, ID.warehouse2] } },
+        });
+        stockAfter[name] = rows.map((r: any) => `${r.productId}@${r.warehouseId}:${r.quantity}/${r.reserved}/${r.costPerUnit}`).sort();
+      }
+    } finally {
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+    // At 00532f2f the arrays, quantity '1.5' and '5', receivedQuantity '2' and unitCost '3' answered 500
+    // (PrismaClientValidationError; each rolled back, the purchase order left SHIPPED), quantity 'abc' was skipped (the
+    // purchase order RECEIVED with nothing added), and quantity 1.5 was received (one row and one movement written).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), 'never a 500').not.toContain('500');
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(statuses).toEqual(Object.fromEntries(probes.map(([name, , answer]) => [name, answer === 'committed' ? 'RECEIVED' : 'SHIPPED'])));
+    const seeded = [`${ID.productA}@${ID.warehouse}:${IN_STOCK}/0/${seededA.costPerUnit}`, `${ID.productB}@${ID.warehouse}:${IN_STOCK}/0/${seededB.costPerUnit}`];
+    const withA = (quantity: number) => [`${ID.productA}@${ID.warehouse}:${quantity}/0/${seededA.costPerUnit}`, seeded[1]];
+    expect(stockAfter).toEqual({
+      "productId an array of this business's product": seeded,
+      "warehouseId an array of this business's warehouse (after a good line)": seeded,
+      'quantity a word': seeded,
+      'quantity a fraction': seeded,
+      'quantity a fraction as text': seeded,
+      "quantity '5' (digit text)": withA(IN_STOCK + 5),
+      "receivedQuantity '2' (digit text) of 5 ordered": withA(IN_STOCK + 2),
+      "unitCost '3' (digit text) on a new stock row": [...seeded, `${ID.productU}@${ID.warehouse2}:4/0/3`],
+      "lines that add no stock (null, 5, a free-text line with quantity 'abc') beside a good line": withA(IN_STOCK + 3),
+    });
+  });
+
+  it("RC-28 (W11-PO-LINES review SEC-POL-1, POL-CR-1, SEC-POL-2; D-136) POST .../purchase-orders with a product line whose stock quantity is above 2147483647 (the most an integer stock column holds), a shippingCost or taxAmount that is not a number, or a subtotal or total that is not finite, is refused with 400 and nothing is saved; a legacy SHIPPED purchase order received with a stock quantity above 2147483647 (a number or digit text), or one that would take its stock row above it, is refused with 400 naming the line, stays SHIPPED and writes nothing; never a 500", async () => {
+    const line = (n: number, what: string) => `400: Purchase order line ${n} ${what}`;
+    const tooMany = (n: number, field = 'quantity') => line(n, `${field} must be at most 2147483647 on a product line`);
+    const creates: Array<[name: string, body: Record<string, unknown>, answer: string, written: number]> = [
+      ["a product line's quantity 3e9", { ...supplier, items: [{ ...ownLine, quantity: 3e9, unitPrice: 0 }] }, tooMany(1), 0],
+      ["a product line's quantity 1e300", { ...supplier, items: [{ ...ownLine, quantity: 1e300, unitPrice: 0 }] }, tooMany(1), 0],
+      ["a product line's receivedQuantity 2147483648", { ...supplier, items: [{ ...ownLine, receivedQuantity: 2147483648 }] }, tooMany(1, 'receivedQuantity'), 0],
+      [
+        'a free-text line whose quantity times price is not finite',
+        { ...supplier, items: [{ name: 'X', quantity: 1e200, unitPrice: 1e200 }] },
+        '400: Purchase order subtotal must be a finite number; nothing was saved',
+        0,
+      ],
+      [
+        'a shippingCost and a taxAmount whose sum is not finite',
+        { ...supplier, items: [], shippingCost: 1e308, taxAmount: 1e308 },
+        '400: Purchase order total must be a finite number; nothing was saved',
+        0,
+      ],
+      ['a shippingCost as text', { ...supplier, items: [ownLine], shippingCost: '5' }, '400: Purchase order shippingCost must be a number; nothing was saved', 0],
+      ['a taxAmount an object', { ...supplier, items: [ownLine], taxAmount: {} }, '400: Purchase order taxAmount must be a number; nothing was saved', 0],
+      // Green before and after: the most a stock row holds is a stock quantity a product line may carry.
+      ["a product line's quantity 2147483647", { ...supplier, items: [{ ...ownLine, quantity: 2147483647, unitPrice: 0 }] }, 'created DRAFT 0/0', 1],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, body, answer, written] of creates) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate(body);
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: written };
+    }
+
+    const malformed = (n: number) => `400: Purchase order line ${n} is malformed; nothing was received`;
+    const aboveRow = (n: number) => `400: Purchase order line ${n} would take its stock row above 2147483647; nothing was received`;
+    const a = (quantity: unknown) => ({ productId: ID.productA, name: 'A', quantity, warehouseId: ID.warehouse });
+    const u = (quantity: unknown) => ({ productId: ID.productU, name: 'U', quantity, warehouseId: ID.warehouse2 });
+    const receipts: Array<[name: string, items: unknown[], answer: string]> = [
+      ['quantity 3e9', [a(3e9)], malformed(1)],
+      ['quantity 1e300', [a(1e300)], malformed(1)],
+      ["quantity '3000000000' (digit text)", [a('3000000000')], malformed(1)],
+      ["receivedQuantity '9999999999' (digit text) of 5 ordered", [{ ...a(5), receivedQuantity: '9999999999' }], malformed(1)],
+      ['quantity 2147483647 onto the stock row holding 10', [a(2147483647)], aboveRow(1)],
+      ['two lines of 2000000000 onto one new stock row', [u(2_000_000_000), u(2_000_000_000)], aboveRow(2)],
+      // Found reproducing SEC-POL-2: the average overflowed to Infinity, which Prisma wrote as a NULL cost (committed).
+      [
+        'unitCost 1e308 on 2 units onto the stock row holding 10 (an average that overflows)',
+        [{ ...a(2), unitCost: 1e308 }],
+        '400: Purchase order line 1 has a cost too large to average into its stock row; nothing was received',
+      ],
+      // Green before and after: the most a stock row holds, onto a new row.
+      ['quantity 2147483647 onto a new stock row', [u(2147483647)], 'committed'],
+    ];
+    const statuses: Record<string, string> = {};
+    const expectedStatuses: Record<string, string> = {};
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    try {
+      for (const [name, items, answer] of receipts) {
+        await resetBusinessStock();
+        const po = await shippedPurchaseOrder(items);
+        outcomes[`receipt: ${name}`] = await answerAndWrites(() =>
+          routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+        );
+        expected[`receipt: ${name}`] =
+          answer === 'committed' ? { answer, stockRowsWritten: 1, movementsWritten: 1 } : { answer, stockRowsWritten: 0, movementsWritten: 0 };
+        statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+        expectedStatuses[name] = answer === 'committed' ? 'RECEIVED' : 'SHIPPED';
+      }
+    } finally {
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+    // At f3e7740a quantity 3e9, 1e300 and 2147483648 were created as DRAFT, the non-finite subtotal and total and the
+    // text shippingCost and object taxAmount answered 500 (PrismaClientValidationError), and every receipt refusal
+    // answered 500 (P2020 for an integer out of range, PrismaClientValidationError for 1e300), each rolled back; the
+    // overflowing average was received with the row's cost written as NULL.
+    expect(outcomes).toEqual(expected);
+    expect((await db.inventoryStock.findUnique({ where: { id: ID.stockA } })).costPerUnit, "stock A's cost as it was").toBe(seededA.costPerUnit);
+    expect(JSON.stringify(outcomes), 'never a 500').not.toContain('500');
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(statuses).toEqual(expectedStatuses);
+  });
+
+  it('RC-29 (W11-PO-LINES review SEC-POL-4) two receipts of one SHIPPED purchase order at once, each having read it SHIPPED and waiting behind a lock on its stock row, receive it once: one commits, adding its stock with one movement, and the other is refused with 409 (W11-PO-RECEIPT-CLAIM: the purchase order was changed by another request) and writes nothing', async () => {
+    await resetBusinessStock();
+    const po = await shippedPurchaseOrder([{ productId: ID.productA, name: 'A', quantity: 3, warehouseId: ID.warehouse }]);
+    const receive = () =>
+      routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' })));
+    try {
+      const before = await stockState();
+      const { firstWaited, answers } = await behindHolder(ID.stockA, receive, receive);
+      const after = await stockState();
+      const status = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+      // At f3e7740a both committed: stock A went from 10 to 16 with two RECEIPT movements (the status was read before
+      // the transaction and the update did not compare it). W11-PO-RECEIPT-CLAIM: the loser of the compare-and-set
+      // answered 400 'Cannot transition PO from RECEIVED to RECEIVED' at 92468080 (a sequential refusal's text); it is
+      // the 409 a lost claim gets (RC-30), and a receipt made after the first committed keeps the 400 (RC-33).
+      expect({ firstWaited, answers: [...answers].sort(), stockA: await stockOf(ID.stockA), movementsWritten: after.movements - before.movements, status }).toEqual({
+        firstWaited: true,
+        answers: ['409: The purchase order was changed by another request; reload it and try again', 'committed'],
+        stockA: `${IN_STOCK + 3}/0`,
+        movementsWritten: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      await resetBusinessStock();
+    }
+  });
+});
+
+/**
+ * W11-PO-RECEIPT-CLAIM: every read of a purchase order on PrismaService.client (purchaseOrder.findFirst, the read
+ * advancePurchaseOrderStatus makes before its transaction; a read on a transaction client is not one) is held once it
+ * has run until `parties` reads have run, or HOLD_WINDOW_MS has passed, so every caller has read the status before any
+ * writes it. Records the status each read returned. Restored by the returned function.
+ */
+function holdPurchaseOrderReads(parties: number) {
+  const real = prismaService.client;
+  const statuses: string[] = [];
+  let allIn!: () => void;
+  const gathered = new Promise<void>((resolve) => (allIn = resolve));
+  const bound = (target: any, prop: PropertyKey) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === 'function' ? value.bind(target) : value;
+  };
+  prismaService.client = new Proxy(real, {
+    get(target, prop) {
+      if (prop !== 'purchaseOrder') return bound(target, prop);
+      return new Proxy(Reflect.get(target, prop), {
+        get(delegate, p) {
+          if (p !== 'findFirst') return bound(delegate, p);
+          return async (args: any) => {
+            const po = await delegate.findFirst(args);
+            statuses.push(po?.status ?? 'none');
+            if (statuses.length >= parties) allIn();
+            await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+            return po;
+          };
+        },
+      });
+    },
+  });
+  return {
+    statusesRead: () => [...statuses],
+    restore: () => {
+      prismaService.client = real;
+    },
+  };
+}
+
+/** purchaseOrder.received events emitted on the suite's bus, counted by purchase order. Stopped by the returned function. */
+function countReceivedEvents() {
+  const ids: string[] = [];
+  const onAny = (name: string | string[], payload: any) => {
+    if ((Array.isArray(name) ? name.join('.') : String(name)) === 'purchaseOrder.received') ids.push(payload?.purchaseOrderId);
+  };
+  events.onAny(onAny);
+  return { of: (poId: string) => ids.filter((id) => id === poId).length, stop: () => events.offAny(onAny) };
+}
+
+/** The ledger postings of a purchase order (financial_transactions whose source is it). */
+const ledgerPostingsOf = async (poId: string) => {
+  const [{ n }]: any[] = await db.$queryRaw`SELECT COUNT(*)::int AS n FROM financial_transactions WHERE source_id = ${poId}`;
+  return n as number;
+};
+/** The RECEIPT stock movements a purchase order wrote. */
+const receiptMovementsOf = (poId: string) => db.stockMovement.count({ where: { referenceId: poId, type: 'RECEIPT' } });
+
+/** A purchase order of the business in `status` with one line of 3 units at cost 2 (total 6, so its receipt is posted). */
+const claimPurchaseOrder = (status: string, line: { productId: string; warehouseId: string }) =>
+  db.purchaseOrder.create({
+    data: {
+      businessId: ID.biz,
+      poNumber: `${P}po_${++orderSeq}_${Date.now()}`,
+      status,
+      supplierName: 'V18R Supplier',
+      items: [{ ...line, name: 'Claimed', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 }],
+      subtotal: 6,
+      shippingCost: 0,
+      taxAmount: 0,
+      total: 6,
+      currency: 'TTD',
+    },
+  });
+
+/** advancePurchaseOrderStatus(RECEIVED) as the route answers it: 'committed' when it returned the PO RECEIVED. */
+const receiveAnswer = (poId: string) =>
+  routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, poId, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' })));
+
+/** The refusal a status change gets when the status it read was changed by another request first (W11-PO-RECEIPT-CLAIM). */
+const CLAIM_LOST = '409: The purchase order was changed by another request; reload it and try again';
+
+describe('W11-PO-RECEIPT-CLAIM a purchase order status change is a compare-and-set on the status it read (real database)', () => {
+  it('RC-30 (W11-PO-RECEIPT-CLAIM; packet case RC-27) two RECEIVED calls at once on one SHIPPED purchase order whose line goes into an existing stock row, each having read it SHIPPED before either writes: exactly one answers RECEIVED and the other 409 with nothing written; the stock is received once (+3, its weighted-average cost recomputed once) with one RECEIPT movement, one ledger posting and one purchaseOrder.received', async () => {
+    await resetBusinessStock();
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: 4 } });
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const received = countReceivedEvents();
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = await Promise.all([receiveAnswer(po.id), receiveAnswer(po.id)]);
+      gate.restore();
+      const rowA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+      // At 92468080 (W11-PO-LINES review SEC-POL-4 compared the status already) the other was refused with
+      // '400: Cannot transition PO from RECEIVED to RECEIVED', a sequential refusal's text; at fb00af1c both answered
+      // RECEIVED: stock 10 -> 16, two RECEIPT movements, the cost averaged twice, two purchaseOrder.received.
+      expect({
+        statusesRead: gate.statusesRead(),
+        answers: [...answers].sort(),
+        stockA: `${rowA.quantity}/${rowA.reserved}`,
+        // To 9 places (the stored double comes back a last digit off): averaged twice it was 3.25.
+        costA: Number(rowA.costPerUnit.toFixed(9)),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+      }).toEqual({
+        statusesRead: ['SHIPPED', 'SHIPPED'],
+        answers: [CLAIM_LOST, 'committed'],
+        stockA: `${IN_STOCK + 3}/0`,
+        costA: Number(((IN_STOCK * 4 + 3 * 2) / (IN_STOCK + 3)).toFixed(9)),
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      gate.restore();
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-31 (W11-PO-RECEIPT-CLAIM; packet case RC-28) the same with the line into a (product, warehouse) that has no stock row yet (no stock row to lock; the purchase order's row serializes the two): one row is created holding 3 at cost 2, and the other answers 409 that the purchase order changed (not a second receipt, not the 'held by another record' 409), with one RECEIPT movement, one ledger posting and one purchaseOrder.received", async () => {
+    await resetBusinessStock();
+    const pair = { businessId: ID.biz, productId: ID.productA, warehouseId: ID.warehouse2 };
+    expect(await db.inventoryStock.count({ where: pair }), 'product A has no stock row in the second warehouse').toBe(0);
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse2 });
+    const received = countReceivedEvents();
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = await Promise.all([receiveAnswer(po.id), receiveAnswer(po.id)]);
+      gate.restore();
+      const rows = await db.inventoryStock.findMany({ where: pair });
+      // At 92468080 the other was refused with '400: Cannot transition PO from RECEIVED to RECEIVED'.
+      expect({
+        statusesRead: gate.statusesRead(),
+        answers: [...answers].sort(),
+        rows: rows.map((r: any) => `${r.quantity}/${r.reserved}/${r.costPerUnit}`),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+      }).toEqual({
+        statusesRead: ['SHIPPED', 'SHIPPED'],
+        answers: [CLAIM_LOST, 'committed'],
+        rows: ['3/0/2'],
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      gate.restore();
+      received.stop();
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-32 (W11-PO-RECEIPT-CLAIM; packet case RC-29) two status changes at once from SUBMITTED, one to ACKNOWLEDGED and one to DRAFT, each having read it SUBMITTED before either writes: exactly one wins and the purchase order ends in the winner's status (acknowledgedAt set only if ACKNOWLEDGED won); the other answers 409", async () => {
+    const po = await claimPurchaseOrder('SUBMITTED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const move = (to: string) =>
+      routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, to as any).then((r: any) => `moved to ${r?.status}`));
+    const gate = holdPurchaseOrderReads(2);
+    try {
+      const answers = (await Promise.all([move('ACKNOWLEDGED'), move('DRAFT')])) as string[];
+      gate.restore();
+      const winners = answers.filter((a) => a.startsWith('moved to ')).map((a) => a.slice('moved to '.length));
+      const after = await db.purchaseOrder.findUnique({ where: { id: po.id } });
+      // At 92468080 both answered (the non-RECEIVED update did not compare the status it read): the purchase order ended
+      // in whichever wrote last.
+      expect({ statusesRead: gate.statusesRead(), winners: winners.length, losers: answers.filter((a) => !a.startsWith('moved to ')) }).toEqual({
+        statusesRead: ['SUBMITTED', 'SUBMITTED'],
+        winners: 1,
+        losers: [CLAIM_LOST],
+      });
+      expect(['ACKNOWLEDGED', 'DRAFT']).toContain(winners[0]);
+      expect({ status: after.status, acknowledgedAt: after.acknowledgedAt !== null }).toEqual({
+        status: winners[0],
+        acknowledgedAt: winners[0] === 'ACKNOWLEDGED',
+      });
+    } finally {
+      gate.restore();
+    }
+  });
+
+  it("RC-33 (W11-PO-RECEIPT-CLAIM; packet case RC-30, a characterization) a second RECEIVED made after the first committed still answers 400 'Cannot transition PO from RECEIVED to RECEIVED' and writes nothing: no stock row, movement, ledger posting or purchaseOrder.received, and the purchase order unchanged", async () => {
+    await resetBusinessStock();
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productA, warehouseId: ID.warehouse });
+    const received = countReceivedEvents();
+    try {
+      expect(await receiveAnswer(po.id)).toBe('committed');
+      const poAfterFirst = JSON.stringify(await db.purchaseOrder.findUnique({ where: { id: po.id } }));
+      const second = await answerAndWrites(() => receiveAnswer(po.id));
+      expect({
+        second,
+        purchaseOrderUnchanged: JSON.stringify(await db.purchaseOrder.findUnique({ where: { id: po.id } })) === poAfterFirst,
+        stockA: await stockOf(ID.stockA),
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+      }).toEqual({
+        second: { answer: '400: Cannot transition PO from RECEIVED to RECEIVED', stockRowsWritten: 0, movementsWritten: 0 },
+        purchaseOrderUnchanged: true,
+        stockA: `${IN_STOCK + 3}/0`,
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+      });
+    } finally {
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+  });
+});
+
+/** A transfer of product M as POST .../inventory/transfer runs it, as the route answers it ('committed', or the status and message). */
+const transferMAnswer = (fromWarehouseId: string, toWarehouseId: string, quantity: number, note?: unknown) =>
+  routeAnswer(
+    transferByRoute(ID.biz, { productId: ID.productM, fromWarehouseId, toWarehouseId, quantity, ...(note === undefined ? {} : { note }) }),
   );
+/** Every stock row of a (product, warehouse), whatever its business (raw SQL: no tenant filter): [businessId, quantity, reserved]. */
+const rowsOfPair = async (productId: string, warehouseId: string) =>
+  ((await db.$queryRaw`
+    SELECT business_id, quantity, reserved FROM inventory_stocks WHERE product_id = ${productId} AND warehouse_id = ${warehouseId}`) as any[]).map(
+    (r) => [r.business_id, r.quantity, r.reserved],
+  );
+/** The 409 a stock row create gets where a row the business does not read holds its (product, warehouse) (D-137). */
+const HELD_ELSEWHERE = '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it';
+
+describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the same business is retried once, not sent to an operator (D-137; real database)', () => {
+  beforeAll(async () => {
+    // Created after the suite's two warehouses, so the first stays the business's default (the receipt's fallback).
+    await db.warehouse.create({ data: { id: ID.warehouse3, businessId: ID.biz, name: 'V18R Warehouse 3' } });
+  });
+  afterAll(async () => {
+    await db.$executeRaw`DELETE FROM stock_movements WHERE warehouse_id = ${ID.warehouse3}`;
+    await db.$executeRaw`DELETE FROM inventory_stocks WHERE warehouse_id = ${ID.warehouse3}`;
+    await db.$executeRaw`DELETE FROM warehouses WHERE id = ${ID.warehouse3}`;
+  });
+
+  it("RC-34 (W11-STOCK-ROW-RACE; packet case RC-31; D-137 keeps the 409 for planted rows only) transfers of product M from the first and from the second warehouse into a third where M has no stock row yet, each held after its first stock write until both have made it: both commit, one row of the business in the third warehouse holding 2, each source row 1 lower, 4 movements, and neither answers 409 'ask an operator' (the row holding the pair is the business's own)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const hold = holdAfterFirstStockWrite(2, ['update']);
+    try {
+      const before = await stockState();
+      const answers = await Promise.all([
+        transferMAnswer(ID.warehouse, ID.warehouse3, 1, 'rc34 from the first'),
+        transferMAnswer(ID.warehouse2, ID.warehouse3, 1, 'rc34 from the second'),
+      ]);
+      hold.restore();
+      const after = await stockState();
+      // Measured at fb00af1c and at 488b35d5: ['committed', '409: ... ask an operator to repair it'], the third
+      // warehouse's row the business's own; retrying the refused transfer committed.
+      expect({
+        heldAfterFirstWrites: hold.firstWrites().slice(0, 2).sort(),
+        answers: [...answers].sort(),
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        sources: [await stockOf(ID.stockMLo), await stockOf(ID.stockMHi)],
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        heldAfterFirstWrites: [ID.stockMLo, ID.stockMHi].sort(),
+        answers: ['committed', 'committed'],
+        newRows: [[ID.biz, 2, 0]],
+        sources: [`${IN_STOCK - 1}/0`, `${IN_STOCK - 1}/0`],
+        movementsWritten: 4,
+      });
+    } finally {
+      hold.restore();
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-35 (W11-STOCK-ROW-RACE; packet case RC-32; D-137) a transfer of M into the third warehouse (no row yet) and a purchase order received with lines [A into its existing row, then M into the third warehouse], each held after reading no row of the new pair until the other has read too (the receipt after its first stock write): both commit, the new row holds the transferred plus the received quantity, and the purchase order is received once (RECEIVED, two RECEIPT movements, one ledger posting, one purchaseOrder.received)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const po = await db.purchaseOrder.create({
+      data: {
+        businessId: ID.biz,
+        poNumber: `${P}po_${++orderSeq}_${Date.now()}`,
+        status: 'SHIPPED',
+        supplierName: 'V18R Supplier',
+        items: [
+          { productId: ID.productA, warehouseId: ID.warehouse, name: 'A', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 },
+          { productId: ID.productM, warehouseId: ID.warehouse3, name: 'M', quantity: 3, unitPrice: 2, unitCost: 2, total: 6 },
+        ],
+        subtotal: 12,
+        shippingCost: 0,
+        taxAmount: 0,
+        total: 12,
+        currency: 'TTD',
+      },
+    });
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const received = countReceivedEvents();
+    // Each transaction is held once it has read the new pair's row (none) until the other has read it too, so both
+    // create it: the transfer reads it before its first stock write, the receipt after its first (line A's update). A
+    // hold after each one's first stock write alone leaves the race to timing: the receipt reads its second line's row
+    // after that hold, and saw the transfer's row when the transfer had committed first (measured: green once in two
+    // runs at 488b35d5). A retried transaction (the third) passes the hold.
+    const reads = new Map<number, string>();
+    let allIn!: () => void;
+    const gathered = new Promise<void>((resolve) => (allIn = resolve));
+    const firstWrites = new Map<number, string>();
+    const writes = hookStockWrites(async (no, args) => {
+      if (!firstWrites.has(no)) firstWrites.set(no, String(args?.where?.id));
+    });
+    const hook = hookStockWrites(async (no, args) => {
+      if (args?.where?.warehouseId !== ID.warehouse3 || reads.has(no)) return;
+      reads.set(no, String(args?.where?.productId));
+      if (reads.size >= 2) allIn();
+      await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+    }, 'findFirst');
+    try {
+      const before = await stockState();
+      const answers = await Promise.all([transferMAnswer(ID.warehouse, ID.warehouse3, 1, 'rc35'), receiveAnswer(po.id)]);
+      hook.restore();
+      writes.restore();
+      const after = await stockState();
+      // At 488b35d5 whichever created the third warehouse's row second answered '409: ... ask an operator to repair it'
+      // (the transfer, or the receipt with the purchase order left SHIPPED).
+      expect({
+        bothReadTheNewPair: [...reads.values()].slice(0, 2),
+        firstWrites: [...firstWrites.values()].slice(0, 2).sort(),
+        answers,
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        stockA: await stockOf(ID.stockA),
+        transferSource: await stockOf(ID.stockMLo),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        bothReadTheNewPair: [ID.productM, ID.productM],
+        firstWrites: [ID.stockA, ID.stockMLo].sort(),
+        answers: ['committed', 'committed'],
+        newRows: [[ID.biz, 1 + 3, 0]],
+        stockA: `${IN_STOCK + 3}/0`,
+        transferSource: `${IN_STOCK - 1}/0`,
+        status: 'RECEIVED',
+        receiptMovements: 2,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        movementsWritten: 4,
+      });
+    } finally {
+      hook.restore();
+      writes.restore();
+      received.stop();
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+  });
+
+  it("RC-36 (W11-STOCK-ROW-RACE; packet case RC-33, a characterization; D-137 planted rows left for an operator) a pair a planted row holds (this business's id on the other business's product or warehouse) still answers 409 'ask an operator' for B's transfer, B's purchase order received and B's POST .../inventory, writes nothing, names no id, and runs each call's transaction once (the pair's holder is read and is not B's own row, so no run again)", async () => {
+    await plantRows([
+      [ID.plantedXBInB2, ID.productXB, ID.warehouseB2],
+      [ID.plantedXB2InB, ID.productXB2, ID.warehouseB],
+    ]);
+    const outcomes: Record<string, unknown> = {};
+    const runs: Record<string, number> = {};
+    let poStatus: unknown;
+    let planted: unknown;
+    // Every interactive transaction the call runs on PrismaService.client ($transaction), counted; nothing held.
+    const counted = async (name: string, call: () => Promise<unknown>) => {
+      const hook = hookStockWrites(async () => undefined);
+      try {
+        outcomes[name] = await answerAndWrites(call);
+      } finally {
+        hook.restore();
+      }
+      runs[name] = hook.transactions();
+    };
+    try {
+      await counted("B's transfer into B's second warehouse, where a planted row holds XB", () =>
+        routeAnswer(
+          transferByRoute(ID.bizB, { productId: ID.productXB, fromWarehouseId: ID.warehouseB, toWarehouseId: ID.warehouseB2, quantity: 2, note: 'rc36' }),
+        ),
+      );
+      const po = await db.purchaseOrder.create({
+        data: {
+          businessId: ID.bizB,
+          poNumber: `${P}po_b_${++orderSeq}_${Date.now()}`,
+          status: 'SHIPPED',
+          supplierName: 'V18R Supplier',
+          items: [{ productId: ID.productXB2, name: 'XB2', quantity: 3, unitPrice: 1, unitCost: 1, total: 3, warehouseId: ID.warehouseB }],
+          subtotal: 0,
+          shippingCost: 0,
+          taxAmount: 0,
+          total: 0,
+          currency: 'TTD',
+        },
+      });
+      await counted("B's purchase order received into XB2 in B's warehouse, where a planted row holds it", () =>
+        routeAnswer(routing.advancePurchaseOrderStatus(ID.bizB, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+      );
+      poStatus = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+      await counted("B's POST .../inventory for XB2 in B's warehouse, where a planted row holds it", () =>
+        upsertAnswer(upsertByRoute(ID.bizB, { productId: ID.productXB2, warehouseId: ID.warehouseB, quantity: 3 })),
+      );
+      planted = Object.fromEntries(
+        (await db.inventoryStock.findMany({ where: { id: { in: [ID.plantedXBInB2, ID.plantedXB2InB] } } })).map((p: any) => [
+          p.id,
+          [p.businessId, p.quantity, p.reserved, p.costPerUnit],
+        ]),
+      );
+    } finally {
+      await removeRows([ID.plantedXBInB2, ID.plantedXB2InB]);
+      await restoreOtherBusinessRow();
+    }
+    const refused = { answer: HELD_ELSEWHERE, stockRowsWritten: 0, movementsWritten: 0 };
+    expect(outcomes).toEqual({
+      "B's transfer into B's second warehouse, where a planted row holds XB": refused,
+      "B's purchase order received into XB2 in B's warehouse, where a planted row holds it": refused,
+      "B's POST .../inventory for XB2 in B's warehouse, where a planted row holds it": refused,
+    });
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(poStatus, 'the purchase order stays SHIPPED').toBe('SHIPPED');
+    expect(planted, 'the planted rows untouched').toEqual({
+      [ID.plantedXBInB2]: [ID.biz, IN_STOCK, 0, 5],
+      [ID.plantedXB2InB]: [ID.biz, IN_STOCK, 0, 5],
+    });
+    // W11-STOCK-ROW-RACE review (SRR-CR-1; D-137): each call's transaction runs exactly once. retryOnOwnStockRowRace
+    // reads the pair's holder after the 409 and finds another business_id (the planted row's), so the 409 is answered
+    // straight away; only a pair the business's own row holds is run again (RC-34, RC-35, RC-38). Pinned at once, not
+    // 'at most twice': with the holder read removed (every 409 run again), each call ran twice and still answered the
+    // planted row's 409, which the earlier bound let pass. At 488b35d5 the upsert ran twice (SEC-UPS-1 ran every P2002
+    // again).
+    expect(runs).toEqual(Object.fromEntries(Object.keys(outcomes).map((name) => [name, 1])));
+  });
+
+  it("RC-37 (W11-STOCK-ROW-RACE; packet case RC-34) a transfer note that is not text (42, an object, an array, true), as the route's body or a KEY tool's arguments send it, is refused with 400 'Transfer note must be text' before anything is written; a text note is stored on both movements exactly as sent (not trimmed), and a transfer with no note or a null note commits with none", async () => {
+    const probes: Array<[name: string, note: unknown]> = [
+      ['note 42', 42],
+      ['note {a: 1}', { a: 1 }],
+      ["note ['x']", ['x']],
+      ['note true', true],
+      ['a text note, spaces kept', '  rc37 text  '],
+      ['no note', undefined],
+      ['a null note', null],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const notes: Record<string, unknown> = {};
+    try {
+      for (const [name, note] of probes) {
+        await resetBusinessStock();
+        let ref: string | undefined;
+        outcomes[name] = await answerAndWrites(() =>
+          routeAnswer(
+            transferByRoute(ID.biz, {
+              productId: ID.productM,
+              fromWarehouseId: ID.warehouse2,
+              toWarehouseId: ID.warehouse,
+              quantity: 2,
+              ...(note === undefined ? {} : { note }),
+            }).then((r: any) => {
+              ref = r?.transferRef;
+              return r;
+            }),
+          ),
+        );
+        if (ref) {
+          notes[name] = (await db.stockMovement.findMany({ where: { businessId: ID.biz, referenceId: ref }, orderBy: { type: 'asc' } })).map(
+            (m: any) => `${m.type}:${JSON.stringify(m.note)}`,
+          );
+        }
+      }
+    } finally {
+      await resetBusinessStock();
+    }
+    const refused = { answer: '400: Transfer note must be text', stockRowsWritten: 0, movementsWritten: 0 };
+    const committed = { answer: 'committed', stockRowsWritten: 2, movementsWritten: 2 };
+    // At 488b35d5 the four answered 500 (PrismaClientValidationError on the movement's note), nothing written.
+    expect(outcomes).toEqual({
+      'note 42': refused,
+      'note {a: 1}': refused,
+      "note ['x']": refused,
+      'note true': refused,
+      'a text note, spaces kept': committed,
+      'no note': committed,
+      'a null note': committed,
+    });
+    expect(notes).toEqual({
+      'a text note, spaces kept': ['TRANSFER_IN:"  rc37 text  "', 'TRANSFER_OUT:"  rc37 text  "'],
+      'no note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
+      'a null note': ['TRANSFER_IN:null', 'TRANSFER_OUT:null'],
+    });
+  });
+
+  it("RC-38 (W11-STOCK-ROW-RACE review SRR-CR-2; D-137 keeps the 409 for planted rows only) a purchase order received with a line of M into the third warehouse (no row yet), held once it has read no row of that pair while POST .../inventory creates the business's own row there (5) and commits: the receipt loses the create, its transaction runs once more and adds to that row: it answers RECEIVED (not 409 'ask an operator'), the row holds 5 + 3, and the purchase order is received once (one RECEIPT movement, one ledger posting, one purchaseOrder.received)", async () => {
+    await resetBusinessStock();
+    expect(await rowsOfPair(ID.productM, ID.warehouse3), 'M has no stock row in the third warehouse').toEqual([]);
+    const po = await claimPurchaseOrder('SHIPPED', { productId: ID.productM, warehouseId: ID.warehouse3 });
+    const received = countReceivedEvents();
+    // RC-35 always has the transfer lose (the receipt creates the row as soon as it is let go, while the transfer first
+    // updates its source row), so the receipt's run again was never taken there. Here the receipt is the loser by
+    // construction: it is held at its first read of the new pair (it has locked nothing of that pair: no row exists)
+    // until the upsert, started only then, has created the row and committed. The receipt's run again (the third
+    // transaction) passes the hold and repeats the W11-PO-RECEIPT-CLAIM status compare-and-set: its first run rolled
+    // back, so the purchase order is still SHIPPED and is received once.
+    let readByReceipt!: () => void;
+    const receiptRead = new Promise<void>((resolve) => (readByReceipt = resolve));
+    let letGo!: () => void;
+    const upsertDone = new Promise<void>((resolve) => (letGo = resolve));
+    let heldTransaction: number | undefined;
+    let releasedBy: 'the upsert' | 'the window' | undefined;
+    const hook = hookStockWrites(async (no, args) => {
+      if (heldTransaction !== undefined || args?.where?.warehouseId !== ID.warehouse3) return;
+      heldTransaction = no;
+      readByReceipt();
+      releasedBy = await Promise.race([upsertDone.then(() => 'the upsert' as const), sleep(HOLD_WINDOW_MS).then(() => 'the window' as const)]);
+    }, 'findFirst');
+    try {
+      const before = await stockState();
+      const receipt = receiveAnswer(po.id);
+      const receiptHeldFirst = await Promise.race([receiptRead.then(() => true), sleep(HOLD_WINDOW_MS).then(() => false)]);
+      const upsert = await upsertAnswer(upsertByRoute(ID.biz, { productId: ID.productM, warehouseId: ID.warehouse3, quantity: 5 }));
+      letGo();
+      const answer = await receipt;
+      const transactions = hook.transactions();
+      hook.restore();
+      const after = await stockState();
+      // With the receipt's retryOnOwnStockRowRace removed (its transaction run once): '409: ... ask an operator to
+      // repair it', the purchase order SHIPPED, no RECEIPT movement, no ledger posting, no purchaseOrder.received.
+      expect({
+        receiptHeldFirst,
+        releasedBy,
+        upsert,
+        receipt: answer,
+        transactions,
+        newRows: await rowsOfPair(ID.productM, ID.warehouse3),
+        status: (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status,
+        receiptMovements: await receiptMovementsOf(po.id),
+        ledgerPostings: await ledgerPostingsOf(po.id),
+        receivedEvents: received.of(po.id),
+        movementsWritten: after.movements - before.movements,
+      }).toEqual({
+        receiptHeldFirst: true,
+        releasedBy: 'the upsert',
+        upsert: 'committed',
+        receipt: 'committed',
+        // The receipt's first run, the upsert, the receipt's run again.
+        transactions: 3,
+        newRows: [[ID.biz, 5 + 3, 0]],
+        status: 'RECEIVED',
+        receiptMovements: 1,
+        ledgerPostings: 1,
+        receivedEvents: 1,
+        movementsWritten: 1,
+      });
+    } finally {
+      letGo();
+      hook.restore();
+      received.stop();
+      await resetBusinessStock();
+    }
+  });
 });

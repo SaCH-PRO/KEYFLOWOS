@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, Inject, NotFoundException } from '@nestjs/common';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -9,7 +9,8 @@ import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order-metadata';
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
 import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
+import { readPurchaseOrderLine, STOCK_QUANTITY_MAX } from '../../core/inventory/purchase-order-lines';
 
 /**
  * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
@@ -26,6 +27,15 @@ type RoutingTx = BusinessMetaTx;
  */
 const ROUTING_LOCK_NAMESPACE = 'marketplace-order-routing:';
 export const ROUTING_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
+
+/**
+ * W11-PO-RECEIPT-CLAIM: the 409 a purchase order status change answers when
+ * the status it read before its write was changed by another request first
+ * (advancePurchaseOrderStatus compares and sets that status). Not marked
+ * retryable: D-134 rules such a 409 final for a KEY plan step
+ * (inventory_advance_purchase_order); the caller reloads the purchase order.
+ */
+export const PURCHASE_ORDER_CHANGED = 'The purchase order was changed by another request; reload it and try again';
 
 /**
  * W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): how many times routeOrder runs
@@ -61,15 +71,6 @@ const ROUTING_ADVANCES_FROM: ReadonlySet<string> = new Set(['placed', 'awaiting_
  */
 export async function claimOrderRouting(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ROUTING_LOCK_NAMESPACE}${businessId}:${orderId}`}))`;
-}
-
-/** A purchase order line as stored in its items JSON (the fields a receipt reads). */
-interface PurchaseOrderLineJson {
-  productId?: string | null;
-  warehouseId?: string | null;
-  quantity?: number;
-  receivedQuantity?: number;
-  unitCost?: number | null;
 }
 
 export interface OrderStatusTimelineEntry {
@@ -1151,19 +1152,37 @@ export class FulfillmentRoutingService {
    * row (its quantity, and its weighted-average cost), or a new row of this
    * business for another business's product, which makes that product read as
    * stock-tracked (resolveInventoryMode) and its storefront refuse to sell it.
+   *
+   * W11-PO-LINES (owner ruling D-136; F-40): each stored line is read first by
+   * core/inventory/purchase-order-lines.ts, the reader createPurchaseOrder
+   * checks a line with. A line naming a product whose ids are not non-empty
+   * strings, or whose stock quantity is not a whole number of 0 or more, is
+   * refused (400 'Purchase order line N is malformed; nothing was received')
+   * before any stock is read or written; only the strings and numbers read are
+   * passed on (the ownership check, the stock locks and the writes). The ids
+   * were coerced with String() for the check and passed raw after it, so a
+   * one-element array (String(['x']) is 'x') reached Prisma (500), digit text
+   * was added to an integer column (500) and a fraction was stored truncated.
+   * A legacy quantity stored as digit text ('5') is received as that number
+   * (D-136), and the line's cost is Number(unitCost) when finite and above 0,
+   * on an updated and a created stock row alike (a text cost on a new row was
+   * a 500). A line that is not an object, or names no product, adds no stock
+   * and is passed over, as before.
    */
   private async receivedStockLines(
     businessId: string,
     items: Prisma.JsonValue,
     defaultWarehouseId: string | undefined,
-  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; item: PurchaseOrderLineJson }>> {
-    const lines = (Array.isArray(items) ? (items as Array<PurchaseOrderLineJson | null>) : []).flatMap((item, index) => {
-      const productId = item?.productId;
-      const quantity = item?.receivedQuantity ?? item?.quantity ?? 0;
-      const warehouseId = item?.warehouseId || defaultWarehouseId;
-      return item && productId && warehouseId && quantity > 0
-        ? [{ line: index + 1, productId, warehouseId, quantity, item }]
-        : [];
+  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; unitCost: number | undefined }>> {
+    const lines = (Array.isArray(items) ? items : []).flatMap((item, index) => {
+      const read = readPurchaseOrderLine(item, 'receipt');
+      if (read.problem) {
+        if (read.problem.field === 'line') return [];
+        throw new BadRequestException(`Purchase order line ${index + 1} is malformed; nothing was received`);
+      }
+      const { productId, stockQuantity: quantity = 0, unitCost } = read.line;
+      const warehouseId = read.line.warehouseId ?? defaultWarehouseId;
+      return productId && warehouseId && quantity > 0 ? [{ line: index + 1, productId, warehouseId, quantity, unitCost }] : [];
     });
     if (lines.length === 0) return lines;
 
@@ -1172,12 +1191,10 @@ export class FulfillmentRoutingService {
     const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
       this.prisma.client,
       businessId,
-      lines.map((l) => String(l.productId)),
-      lines.map((l) => String(l.warehouseId)),
+      lines.map((l) => l.productId),
+      lines.map((l) => l.warehouseId),
     );
-    const foreign = lines.find(
-      (l) => !ownProducts.has(String(l.productId)) || !ownWarehouses.has(String(l.warehouseId)),
-    );
+    const foreign = lines.find((l) => !ownProducts.has(l.productId) || !ownWarehouses.has(l.warehouseId));
     if (foreign) {
       throw new BadRequestException(
         `Purchase order line ${foreign.line} names a product or a warehouse that is not this business's; nothing was received`,
@@ -1237,7 +1254,12 @@ export class FulfillmentRoutingService {
       // be the business's first (400 otherwise, nothing written).
       const receipts = await this.receivedStockLines(businessId, po.items, defaultWarehouseId);
 
-      updatedPO = await this.prisma.client.$transaction(async (rawTx) => {
+      // W11-STOCK-ROW-RACE (D-137): a line's stock row created meanwhile by another writer of the business (a transfer or
+      // an inventory set into the same new pair) runs the transaction once more, which then adds to that row; a row of
+      // another business_id (a planted row) keeps the 409 (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts).
+      // The run again repeats the status compare-and-set below (W11-PO-RECEIPT-CLAIM): the first run rolled back, so the
+      // purchase order is received once, or the run again answers 409 when another request moved it meanwhile.
+      updatedPO = await retryOnOwnStockRowRace(this.prisma.client, businessId, () => this.prisma.client.$transaction(async (rawTx) => {
         const tx = rawTx as unknown as Prisma.TransactionClient;
         // W10-Z4-ROUTE-FIX (SEAMZ4-CR-1): the stock rows the lines add to, locked first, at once, in the global order
         // (core/inventory/stock-lock-order.ts), then the purchase order, its routes and the stock written. Updated line
@@ -1246,10 +1268,22 @@ export class FulfillmentRoutingService {
         // (product, warehouse) rows the lines write; every warehouse's row of a line's product made a receipt hold two
         // rows of it, which a transfer writing them in the other order deadlocked with, and the receipt was rolled back.
         await lockStockRowPairsInOrder(rawTx, businessId, receipts);
-        const updated = await tx.purchaseOrder.update({
-          where: { id: poId },
+        // W11-PO-LINES review (SEC-POL-4): the purchase order moves from the status read above, compared and set here.
+        // The status was read before this transaction and the update did not compare it, so two receipts of one SHIPPED
+        // purchase order at once both committed and added its stock twice (two RECEIPT movements). The second now waits
+        // for the first's row lock (behind the stock locks above, as before), reads RECEIVED and updates nothing.
+        // W11-PO-RECEIPT-CLAIM: this is the transaction's first purchase order write, and a lost claim is a 409 (the
+        // purchase order was changed by another request after it was read), no longer the transition table's 400 (that
+        // stays for a RECEIVED made after the first committed: it reads RECEIVED above). Thrown before any route, stock
+        // row, movement or posting is written, the transaction rolls back and purchaseOrder.received is not emitted. A
+        // line into a pair with no stock row takes no stock lock: this update's row lock serializes the two receipts,
+        // and the loser's update matches nothing once the winner commits.
+        const moved = await tx.purchaseOrder.updateMany({
+          where: { id: poId, businessId, status: po.status },
           data: updateData,
         });
+        if (moved.count !== 1) throw new ConflictException(PURCHASE_ORDER_CHANGED);
+        const updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: poId } });
 
         await tx.fulfillmentRoute.updateMany({
           where: { businessId, purchaseOrderId: poId },
@@ -1257,7 +1291,7 @@ export class FulfillmentRoutingService {
         });
 
         // The purchase order's lines as read above (no writer changes a purchase order's items after it is created).
-        for (const { productId, warehouseId, quantity: qty, item } of receipts) {
+        for (const { line, productId, warehouseId, quantity: qty, unitCost } of receipts) {
           // Review Z4RV-SEC-1: the business's own row, read under the lock above. This read the row of the line's
           // (productId, warehouseId) with no business filter, so a line naming another business's product and
           // warehouse added to that business's stock and rewrote its weighted-average cost.
@@ -1266,19 +1300,35 @@ export class FulfillmentRoutingService {
           });
 
           if (existing) {
+            // W11-PO-LINES review (POL-CR-1): the row holds at most STOCK_QUANTITY_MAX (int4); a line taking it above
+            // that answered 500 (P2020). Read under the lock, after any earlier line of this receipt into the same row.
+            if (existing.quantity + qty > STOCK_QUANTITY_MAX) {
+              throw new BadRequestException(
+                `Purchase order line ${line} would take its stock row above ${STOCK_QUANTITY_MAX}; nothing was received`,
+              );
+            }
             // FIN3 — Weighted-average cost recompute on receipt:
             //   newAvg = (oldQty*oldCost + recvQty*recvCost) / (oldQty + recvQty)
             // Falls back to the existing cost if the PO line carries no
             // unitCost (treats freight-only or zero-cost receipts as
             // not-priced rather than blowing away an established cost).
+            // W11-PO-LINES: unitCost is the line's Number(unitCost) when finite and above 0, read once
+            // (receivedStockLines), else undefined.
             let nextCostPerUnit = existing.costPerUnit ?? null;
-            if (item.unitCost != null && item.unitCost > 0) {
+            if (unitCost !== undefined) {
               const oldQty = Math.max(existing.quantity, 0);
               const oldCost = existing.costPerUnit ?? 0;
               const denom = oldQty + qty;
               nextCostPerUnit = denom > 0
-                ? (oldQty * oldCost + qty * Number(item.unitCost)) / denom
-                : Number(item.unitCost);
+                ? (oldQty * oldCost + qty * unitCost) / denom
+                : unitCost;
+              // W11-PO-LINES review (found reproducing SEC-POL-2): a cost so large the average overflows to Infinity was
+              // written as NULL (Prisma sends Infinity as null), erasing the row's cost. Refused instead.
+              if (!Number.isFinite(nextCostPerUnit)) {
+                throw new BadRequestException(
+                  `Purchase order line ${line} has a cost too large to average into its stock row; nothing was received`,
+                );
+              }
             }
             await tx.inventoryStock.update({
               where: { id: existing.id },
@@ -1290,8 +1340,9 @@ export class FulfillmentRoutingService {
           } else {
             // W10-Z5-TRANSFER-FIX (Z5SEC-2): a row of another business_id holding this (product, warehouse), planted by
             // the old cross-business receipt, is a 409 naming no ids (the purchase order stays as it was), not an
-            // unhandled P2002 (a 500). The row is left for an operator to repair.
-            await createStockRowOrConflict(() =>
+            // unhandled P2002 (a 500). The row is left for an operator to repair. W11-STOCK-ROW-RACE: the pair is carried
+            // on the 409 so the run again above can tell such a row from the business's own, created meanwhile.
+            await createStockRowOrConflict({ productId, warehouseId }, () =>
               tx.inventoryStock.create({
                 data: {
                   businessId,
@@ -1300,7 +1351,8 @@ export class FulfillmentRoutingService {
                   quantity: qty,
                   reserved: 0,
                   currency: updated.currency ?? 'TTD',
-                  ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
+                  // W11-PO-LINES: the same cost as the update path (item.unitCost passed raw: a text cost was a 500).
+                  ...(unitCost !== undefined ? { costPerUnit: unitCost } : {}),
                 },
               }),
             );
@@ -1344,12 +1396,20 @@ export class FulfillmentRoutingService {
         }
 
         return updated;
-      });
+      }));
     } else {
-      updatedPO = await this.prisma.client.purchaseOrder.update({
-        where: { id: poId },
-        data: updateData,
-      });
+      // W11-PO-RECEIPT-CLAIM: compared and set on the status read above, as the receipt is. Written unconditionally, two
+      // changes from SUBMITTED at once (to ACKNOWLEDGED and to DRAFT) both answered and the last write won. One update
+      // (the row and its status checked together, Prisma P2025 when it no longer matches): the loser answers 409.
+      updatedPO = await this.prisma.client.purchaseOrder
+        .update({
+          where: { id: poId, businessId, status: po.status },
+          data: updateData,
+        })
+        .catch((err: unknown) => {
+          if ((err as { code?: unknown } | null)?.code === 'P2025') throw new ConflictException(PURCHASE_ORDER_CHANGED);
+          throw err;
+        });
     }
 
     if (targetStatus === 'RECEIVED') {

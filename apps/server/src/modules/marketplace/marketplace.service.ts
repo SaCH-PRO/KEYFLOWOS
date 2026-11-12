@@ -7,7 +7,8 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
+import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
@@ -40,6 +41,75 @@ function marksPaymentPaid(paymentStatus: unknown): boolean {
 
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
+
+/** inventory_stocks.quantity, reserved and reorder_at are Postgres integers: the largest whole number they hold. */
+const STOCK_INT_MAX = 2_147_483_647;
+
+/** W11-INV-UPSERT-SCOPE: a POST .../inventory body once read (ids, then each field absent or of its shape). */
+interface InventoryUpsertFields {
+  productId: string;
+  warehouseId: string;
+  quantity?: number;
+  reserved?: number;
+  reorderAt?: number;
+  costPerUnit?: number;
+  currency?: string;
+}
+
+/**
+ * W11-INV-UPSERT-SCOPE (D-136 whole stock quantities): reads a POST
+ * .../inventory body (body: any, no DTO; or the Excel import's row), 400
+ * naming the field otherwise, before anything is read. productId and
+ * warehouseId are non-empty strings: the row is read by findFirst, where a
+ * filter object such as {not:''} would match any row of the business and a
+ * missing id would be no filter at all (W10-Z5 Z5SEC-1). Every other field is
+ * absent (undefined, null or '', kept as it is on an update) or of its shape:
+ * quantity, reserved and reorderAt a whole number of 0 or more, as a number
+ * or as digit text (the web form sends its number inputs as text: '7' is 7);
+ * costPerUnit a finite number of 0 or more, as a number or as decimal text;
+ * currency a non-empty string.
+ */
+function readInventoryUpsert(data: unknown): InventoryUpsertFields {
+  const body = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const id = (field: 'productId' | 'warehouseId'): string => {
+    const value = body[field];
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new BadRequestException(`Inventory ${field} is required (a non-empty string)`);
+    }
+    return value;
+  };
+  const absent = (value: unknown) => value === undefined || value === null || value === '';
+  const whole = (field: 'quantity' | 'reserved' | 'reorderAt'): number | undefined => {
+    const value = body[field];
+    if (absent(value)) return undefined;
+    const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+    if (!Number.isInteger(n) || n < 0 || n > STOCK_INT_MAX) {
+      throw new BadRequestException(`Inventory ${field} must be a whole number of 0 or more`);
+    }
+    return n;
+  };
+  const productId = id('productId');
+  const warehouseId = id('warehouseId');
+  const quantity = whole('quantity');
+  const reserved = whole('reserved');
+  const reorderAt = whole('reorderAt');
+
+  let costPerUnit: number | undefined;
+  const cost = body.costPerUnit;
+  if (!absent(cost)) {
+    const n = typeof cost === 'number' ? cost : typeof cost === 'string' && /^\d+(\.\d+)?$/.test(cost) ? Number(cost) : NaN;
+    if (!Number.isFinite(n) || n < 0) throw new BadRequestException('Inventory costPerUnit must be a number of 0 or more');
+    costPerUnit = n;
+  }
+  let currency: string | undefined;
+  if (!absent(body.currency)) {
+    if (typeof body.currency !== 'string' || body.currency.trim().length === 0) {
+      throw new BadRequestException('Inventory currency must be a non-empty string');
+    }
+    currency = body.currency;
+  }
+  return { productId, warehouseId, quantity, reserved, reorderAt, costPerUnit, currency };
+}
 
 /**
  * W10-STORE-ORDER-PAID review (SEC-SOP-1, D-112): a field the order routes
@@ -360,43 +430,96 @@ export class MarketplaceService {
     return { success: true };
   }
 
+  /**
+   * W11-INV-UPSERT-SCOPE (the Z4RV-SEC-1 sibling; D-136, D-137): POST
+   * .../inventory (body: any, no DTO) and importInventoryExcel write only the
+   * business's own stock row of the pair named.
+   *
+   * It read the row by (productId, warehouseId) alone (findUnique, unique
+   * across every business), updated it by id, else created a row of the
+   * business for whatever pair the body named, neither id checked. With no
+   * ambient tenant (a direct call, as any non-HTTP caller makes) a member of
+   * one business rewrote another business's row named by its ids; with the
+   * TenantInterceptor's ambient tenant the read was scoped, so the create hit
+   * the other business's row on the unique pair (500, P2002), and a pair with
+   * no row planted a row of this business for another business's product or
+   * warehouse (which then read as stock-tracked, and held the pair against
+   * the other business's own receipts and transfers).
+   *
+   * Now, as the transfer does (core/inventory/stock-ownership.ts): the body is
+   * read first (readInventoryUpsert, 400 naming the field); the product and
+   * the warehouse must be the business's (raw SQL by its own id; a soft-deleted
+   * product of the business counts), 404 'Product not found' / 'Warehouse not
+   * found' otherwise, the same for a missing and another business's id, naming
+   * no id; then one transaction locks the business's row of the pair
+   * (core/inventory/stock-lock-order.ts), reads it by (business, product,
+   * warehouse), and updates only the fields sent, or creates the row, where a
+   * row of another record holding the pair (planted by the old cross-business
+   * receipt; D-137, an operator repairs it) answers 409, not a 500.
+   *
+   * W11-INV-UPSERT-SCOPE review (SEC-UPS-1; D-137): the pair lock locks
+   * nothing while the pair has no row, so two requests creating the same new
+   * pair at once (a double submit, a retry; or a receipt or a transfer
+   * creating it meanwhile) both read no row and both insert: the second waits
+   * on the unique pair, then fails on it (P2002) once the first commits. That
+   * was answered 409 'held by another record', sending an operator to repair a
+   * planted row that does not exist (the row holding the pair is the
+   * business's own). So a create that fails on the pair runs the transaction
+   * once more: it then locks and reads the row just committed and updates it
+   * with the fields sent; only a pair still held by a row the business does
+   * not read (a planted row) answers the 409. No advisory lock: the retry
+   * covers every creator of the pair and adds no lock to the stock lock order.
+   *
+   * W11-STOCK-ROW-RACE: that retry is now the one every stock row creator
+   * shares (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts): the
+   * transaction is run once more only when the row holding the pair is the
+   * business's own (or gone), read outside the rolled-back transaction; a
+   * planted row's 409 (D-137) is answered after one run, not two.
+   */
   async upsertInventory(businessId: string, data: any) {
-    const existing = await this.prisma.client.inventoryStock.findUnique({
-      where: {
-        productId_warehouseId: {
-          productId: data.productId,
-          warehouseId: data.warehouseId,
-        },
-      },
-    });
+    const fields = readInventoryUpsert(data);
+    const { productId, warehouseId } = fields;
+    const owned = await ownedProductsAndWarehouses(this.prisma.client, businessId, [productId], [warehouseId]);
+    if (!owned.products.has(productId)) throw new NotFoundException('Product not found');
+    if (!owned.warehouses.has(warehouseId)) throw new NotFoundException('Warehouse not found');
 
-    if (existing) {
-      return this.prisma.client.inventoryStock.update({
-        where: { id: existing.id },
-        data: {
-          quantity: data.quantity ?? existing.quantity,
-          reserved: data.reserved ?? existing.reserved,
-          reorderAt: data.reorderAt ?? existing.reorderAt,
-          costPerUnit: data.costPerUnit ?? existing.costPerUnit,
-          currency: data.currency ?? existing.currency,
-        },
-        include: { product: true, warehouse: true },
-      });
-    }
+    // SEC-UPS-1 / W11-STOCK-ROW-RACE: a create that loses the pair to the business's own row is run again once.
+    return retryOnOwnStockRowRace(this.prisma.client, businessId, () =>
+      this.prisma.client.$transaction(async (tx) => {
+        await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+        const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
 
-    return this.prisma.client.inventoryStock.create({
-      data: {
-        businessId,
-        productId: data.productId,
-        warehouseId: data.warehouseId,
-        quantity: data.quantity || 0,
-        reserved: data.reserved || 0,
-        reorderAt: data.reorderAt,
-        costPerUnit: data.costPerUnit,
-        currency: data.currency || 'TTD',
-      },
-      include: { product: true, warehouse: true },
-    });
+        if (existing) {
+          return tx.inventoryStock.update({
+            where: { id: existing.id },
+            data: {
+              quantity: fields.quantity ?? existing.quantity,
+              reserved: fields.reserved ?? existing.reserved,
+              reorderAt: fields.reorderAt ?? existing.reorderAt,
+              costPerUnit: fields.costPerUnit ?? existing.costPerUnit,
+              currency: fields.currency ?? existing.currency,
+            },
+            include: { product: true, warehouse: true },
+          });
+        }
+
+        const create = () =>
+          tx.inventoryStock.create({
+            data: {
+              businessId,
+              productId,
+              warehouseId,
+              quantity: fields.quantity ?? 0,
+              reserved: fields.reserved ?? 0,
+              reorderAt: fields.reorderAt,
+              costPerUnit: fields.costPerUnit,
+              currency: fields.currency ?? 'TTD',
+            },
+            include: { product: true, warehouse: true },
+          });
+        return createStockRowOrConflict({ productId, warehouseId }, create);
+      }, STOCK_LOCK_TX_OPTIONS),
+    );
   }
 
   async getInventory(businessId: string, warehouseId?: string) {
@@ -1311,18 +1434,64 @@ export class MarketplaceService {
     return updated;
   }
 
+  /**
+   * POST .../purchase-orders (body: any) and the KEY tool inventory_create_purchase_order.
+   *
+   * W11-PO-LINES (owner ruling D-136; F-33): the lines are checked before anything is written. items is absent or a
+   * list; every line is read by core/inventory/purchase-order-lines.ts (400 'Purchase order line N ...', naming the
+   * line, never an id); then every product and warehouse the lines name must be the business's, read as the receipt
+   * reads them (ownedProductsAndWarehouses, raw SQL by the business's own id; a soft-deleted product of the business
+   * counts), or 400 in the receipt's wording. These were stored as sent and refused only when the purchase order was
+   * received (FulfillmentRoutingService.receivedStockLines, Z4RV-SEC-1). The lines are stored as sent once accepted;
+   * lines naming no product (free text, a service, freight) stay accepted, and the totals are computed as before.
+   * Review SEC-POL-1, POL-CR-1, SEC-POL-2: a product line's stock quantity is at most STOCK_QUANTITY_MAX, and the
+   * shippingCost, taxAmount, subtotal and total are finite numbers (400 otherwise, nothing saved).
+   */
   async createPurchaseOrder(businessId: string, data: any) {
+    const items: unknown[] = data.items ?? [];
+    if (!Array.isArray(items)) throw new BadRequestException('Purchase order items must be a list of lines');
+    const lines = items.map((item, index) => {
+      const read = readPurchaseOrderLine(item, 'create');
+      if (read.problem) throw new BadRequestException(purchaseOrderLineRefusal(index + 1, read.problem));
+      return read.line;
+    });
+    const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
+      this.prisma.client,
+      businessId,
+      lines.map((line) => line.productId),
+      lines.map((line) => line.warehouseId),
+    );
+    const foreign = lines.findIndex(
+      (line) =>
+        (line.productId !== undefined && !ownProducts.has(line.productId)) ||
+        (line.warehouseId !== undefined && !ownWarehouses.has(line.warehouseId)),
+    );
+    if (foreign >= 0) {
+      throw new BadRequestException(
+        `Purchase order line ${foreign + 1} names a product or a warehouse that is not this business's; nothing was saved`,
+      );
+    }
+
     const poNumber = this.generatePONumber();
 
-    const items = data.items || [];
     let subtotal = 0;
-    for (const item of items) {
-      subtotal += (item.unitPrice || 0) * (item.quantity || 1);
+    for (const line of lines) {
+      subtotal += (line.unitPrice || 0) * (line.quantity || 1);
     }
 
     const shippingCost = data.shippingCost || 0;
     const taxAmount = data.taxAmount || 0;
+    // W11-PO-LINES review (SEC-POL-2; D-136): every amount stored is a finite number, or 400 with nothing saved. Each line
+    // is finite, but quantity * unitPrice can overflow to Infinity (Prisma writes it as null: a 500 on these required
+    // columns), and a shippingCost or taxAmount that is text or an object made the total text (a 500 too).
+    for (const [field, amount] of [['shippingCost', shippingCost], ['taxAmount', taxAmount]] as const) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+        throw new BadRequestException(`Purchase order ${field} must be a number; nothing was saved`);
+      }
+    }
+    if (!Number.isFinite(subtotal)) throw new BadRequestException('Purchase order subtotal must be a finite number; nothing was saved');
     const total = subtotal + shippingCost + taxAmount;
+    if (!Number.isFinite(total)) throw new BadRequestException('Purchase order total must be a finite number; nothing was saved');
 
     return this.prisma.client.purchaseOrder.create({
       data: {
@@ -1332,7 +1501,7 @@ export class MarketplaceService {
         supplierEmail: data.supplierEmail,
         supplierPhone: data.supplierPhone,
         supplierCountry: data.supplierCountry,
-        items,
+        items: items as Prisma.InputJsonValue,
         subtotal,
         shippingCost,
         taxAmount,
@@ -2214,6 +2383,11 @@ export class MarketplaceService {
     const malformed = Object.entries(ids).find(([, id]) => typeof id !== 'string' || id.length === 0);
     if (malformed) throw new BadRequestException(`Transfer ${malformed[0]} is required (a non-empty string)`);
     if (data.fromWarehouseId === data.toWarehouseId) throw new BadRequestException('Source and destination warehouses must be different');
+    // W11-STOCK-ROW-RACE: the note is written into both movements as sent; one that is not text (the route's body is
+    // any, and a KEY tool's arguments reach here unchecked) was a 500 (PrismaClientValidationError). Absent or null is
+    // no note; a string is kept exactly as sent.
+    const note: unknown = data.note;
+    if (note !== undefined && note !== null && typeof note !== 'string') throw new BadRequestException('Transfer note must be text');
 
     const owned = await ownedProductsAndWarehouses(
       this.prisma.client,
@@ -2227,7 +2401,10 @@ export class MarketplaceService {
 
     const refId = `TRF-${Date.now()}`;
 
-    await this.prisma.client.$transaction(async (tx) => {
+    // W11-STOCK-ROW-RACE (D-137): a to row created meanwhile by another writer of the business (a transfer into the same
+    // new pair, a purchase order received) runs the transaction once more, which then adds to that row; a to row of
+    // another business_id (a planted row) keeps the 409 (retryOnOwnStockRowRace, core/inventory/stock-ownership.ts).
+    const transferOnce = () => this.prisma.client.$transaction(async (tx) => {
       await lockStockRowPairsInOrder(tx, businessId, [
         { productId: data.productId, warehouseId: data.fromWarehouseId },
         { productId: data.productId, warehouseId: data.toWarehouseId },
@@ -2263,7 +2440,7 @@ export class MarketplaceService {
         });
       } else {
         // Z5SEC-2: a row of another business_id holding this (product, warehouse) is a 409, not a 500 (P2002).
-        await createStockRowOrConflict(() =>
+        await createStockRowOrConflict({ productId: data.productId, warehouseId: data.toWarehouseId }, () =>
           tx.inventoryStock.create({
             data: {
               businessId,
@@ -2279,12 +2456,13 @@ export class MarketplaceService {
         );
       }
       await tx.stockMovement.create({
-        data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+        data: { businessId, warehouseId: data.fromWarehouseId, productId: data.productId, type: 'TRANSFER_OUT', quantityChange: -data.quantity, reasonCode: 'TRANSFER', note, createdBy: data.userId, referenceId: refId },
       });
       await tx.stockMovement.create({
-        data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note: data.note, createdBy: data.userId, referenceId: refId },
+        data: { businessId, warehouseId: data.toWarehouseId, productId: data.productId, type: 'TRANSFER_IN', quantityChange: data.quantity, reasonCode: 'TRANSFER', note, createdBy: data.userId, referenceId: refId },
       });
     }, STOCK_LOCK_TX_OPTIONS);
+    await retryOnOwnStockRowRace(this.prisma.client, businessId, transferOnce);
 
     return { success: true, transferRef: refId };
   }
@@ -2396,8 +2574,10 @@ export class MarketplaceService {
         const warehouse = warehouseName ? whByName[warehouseName.toLowerCase()] : warehouses[0];
         if (!warehouse) { results.errors.push(`Warehouse not found: ${warehouseName}`); results.skipped++; continue; }
 
-        const existingStock = await this.prisma.client.inventoryStock.findUnique({
-          where: { productId_warehouseId: { productId: product.id, warehouseId: warehouse.id } },
+        // W11-INV-UPSERT-SCOPE: the business's own row of the pair (a row of another record holding it is not this
+        // business's stock; upsertInventory then answers 409, recorded as this row's error).
+        const existingStock = await this.prisma.client.inventoryStock.findFirst({
+          where: { businessId, productId: product.id, warehouseId: warehouse.id },
         });
         const previousQty = existingStock?.quantity ?? null;
 

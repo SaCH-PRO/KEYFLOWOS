@@ -65,17 +65,83 @@ export async function ownedProductsAndWarehouses(
 export const STOCK_ROW_HELD_ELSEWHERE =
   'A stock row for this product and warehouse is held by another record; ask an operator to repair it';
 
+/** The (product, warehouse) pair of a stock row a writer creates. */
+export interface StockRowPair {
+  productId: string;
+  warehouseId: string;
+}
+
 /**
- * Runs a stock row create. A unique violation (Prisma P2002: the pair's row
- * exists but was not read, as it carries another business_id) is answered
- * with a 409 naming no ids; any other error as it is. In an interactive
- * transaction the 409 rolls the transaction back, as the violation did.
+ * W11-STOCK-ROW-RACE: the 409 a stock row create gets when its pair is held
+ * (STOCK_ROW_HELD_ELSEWHERE, a ConflictException as before). It carries the
+ * pair so retryOnOwnStockRowRace can read who holds it; the pair is never in
+ * the message or the response body (a non-enumerable field, not part of
+ * getResponse()), which names no ids (Z5SEC-2).
  */
-export async function createStockRowOrConflict<T>(create: () => Promise<T>): Promise<T> {
+export class StockRowHeldConflict extends ConflictException {
+  declare readonly pair: StockRowPair;
+
+  constructor(pair: StockRowPair) {
+    super(STOCK_ROW_HELD_ELSEWHERE);
+    Object.defineProperty(this, 'pair', { value: { productId: pair.productId, warehouseId: pair.warehouseId }, enumerable: false });
+  }
+}
+
+/**
+ * Runs the create of the stock row of `pair`. A unique violation (Prisma
+ * P2002: the pair's row exists but was not read, as it carries another
+ * business_id, or was committed by a concurrent writer after this transaction
+ * read no row) is answered with a 409 naming no ids (StockRowHeldConflict);
+ * any other error as it is. In an interactive transaction the 409 rolls the
+ * transaction back, as the violation did.
+ */
+export async function createStockRowOrConflict<T>(pair: StockRowPair, create: () => Promise<T>): Promise<T> {
   try {
     return await create();
   } catch (err) {
-    if ((err as { code?: unknown } | null)?.code === 'P2002') throw new ConflictException(STOCK_ROW_HELD_ELSEWHERE);
+    if ((err as { code?: unknown } | null)?.code === 'P2002') throw new StockRowHeldConflict(pair);
     throw err;
+  }
+}
+
+/**
+ * W11-STOCK-ROW-RACE (D-137 keeps the 'ask an operator' 409 for planted rows
+ * only): runs a stock writer's whole transaction (`run`), and once more when
+ * it lost a stock row create to a row of its own business.
+ *
+ * A writer that creates a (product, warehouse) row that does not exist yet
+ * takes no lock on it (lockStockRowPairsInOrder locks existing rows only), so
+ * two writers of one business creating the same new pair at once (two
+ * transfers into a warehouse, a transfer and a purchase order received) both
+ * read no row and both insert: the second waits on the unique pair, then
+ * fails on it once the first commits. That was answered 409 'held by another
+ * record; ask an operator to repair it', though the row holding the pair was
+ * the business's own and running the call again committed.
+ *
+ * So on a StockRowHeldConflict the pair's holder is read on `client`
+ * (PrismaService.client, raw SQL by the pair alone, outside the transaction
+ * that rolled back): when the row is this business's, or no longer exists,
+ * `run` is run once more (its reads under the stock locks then see the row,
+ * and it adds to it); when another business_id holds it (a row planted by the
+ * old cross-business receipt, D-137) the 409 stands, unchanged. One retry
+ * only: a second StockRowHeldConflict is answered as it is. No other error is
+ * retried. The run again repeats every read and check of the transaction (a
+ * purchase order receipt's status compare-and-set, W11-PO-RECEIPT-CLAIM, so a
+ * retried receipt never receives twice), and takes its stock locks in the
+ * global order as the first run did (stock-lock-order.ts).
+ */
+export async function retryOnOwnStockRowRace<T>(
+  client: Pick<PrismaService['client'], '$queryRaw'>,
+  businessId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (!(err instanceof StockRowHeldConflict)) throw err;
+    const holders = await client.$queryRaw<Array<{ business_id: string | null }>>`
+      SELECT business_id FROM inventory_stocks WHERE product_id = ${err.pair.productId} AND warehouse_id = ${err.pair.warehouseId}`;
+    if (holders.some((row) => row.business_id !== businessId)) throw err;
+    return run();
   }
 }
