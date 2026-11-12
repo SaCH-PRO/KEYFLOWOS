@@ -107,6 +107,7 @@ let foreignAccountId: string;
 let expenses: any;
 let cashPosition: any;
 let ledgerBalance: any;
+let accountingPeriodLockKey: (businessId: string, year: number, month: number) => string;
 
 const eventStub = {
   emit: () => true,
@@ -185,45 +186,85 @@ function restoreExpense(expenseId: string) {
   return agent().post(`/api/businesses/${ID.biz}/trash/expense/${expenseId}/restore`).set(HEADER, ID.owner).send({});
 }
 
-/** The backend pid of a session waiting on a lock that `blockerPid` holds (null while none waits). */
-async function waiterOn(blockerPid: number): Promise<number | null> {
+/**
+ * Backends of this database queued, not granted, on the advisory lock `key`
+ * (hashtext of it, as AccountingPeriodService takes the period lock) behind
+ * `holderPid`. Scoped to the key (W11A-STALL-FIX): "any backend the holder
+ * blocks, LIMIT 1" could answer another suite's work on the shared database.
+ */
+async function waitersOnKey(key: string, holderPid: number): Promise<number[]> {
   const rows: Array<{ pid: number }> = await db.$queryRawUnsafe(
-    `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid)) LIMIT 1`,
-    blockerPid,
+    `SELECT l.pid FROM pg_locks l
+      WHERE l.locktype = 'advisory' AND NOT l.granted AND l.objsubid = 1
+        AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+        AND ((l.classid::bigint << 32) | l.objid::bigint) = hashtext($1)::bigint
+        AND $2::int = ANY(pg_blocking_pids(l.pid))
+      ORDER BY l.pid`,
+    key,
+    holderPid,
   );
-  return rows[0]?.pid ?? null;
-}
-
-async function untilWaiterOn(blockerPid: number): Promise<number> {
-  return vi.waitFor(
-    async () => {
-      const pid = await waiterOn(blockerPid);
-      if (pid === null) throw new Error(`nothing waits on ${blockerPid} yet`);
-      return pid;
-    },
-    { timeout: 8000, interval: 25 },
-  );
+  return rows.map((r) => r.pid);
 }
 
 /**
- * EE-08's hold: from a test transaction, hold back the postings of `businessId`
- * dated in the month of `date` until release(), letting reads through, so a
- * PATCH that posts sits inside its transaction, the row held FOR UPDATE and its
- * posting not yet committed. `pid` resolves to the holder's backend once the
- * hold is taken. As of 73a190fa (EE-08 since b1af4ade) it is a table lock, so it
- * holds every ledger write in the database whatever its business and month
- * (EE-12 is red on it).
+ * Backends queued, not granted, on the transaction of backend `pid`: on a row
+ * that transaction locked or wrote (for EE-08, the expense the PATCH holds FOR
+ * UPDATE).
+ */
+async function waitersOnTransactionOf(pid: number): Promise<number[]> {
+  const rows: Array<{ pid: number }> = await db.$queryRawUnsafe(
+    `SELECT DISTINCT w.pid FROM pg_locks w
+       JOIN pg_locks h ON h.locktype = 'transactionid' AND h.granted AND h.pid = $1::int
+                      AND h.transactionid = w.transactionid
+      WHERE w.locktype = 'transactionid' AND NOT w.granted
+      ORDER BY w.pid`,
+    pid,
+  );
+  return rows.map((r) => r.pid);
+}
+
+/** Polls `find` until it names a backend `what` (it must name exactly one) and answers its pid. */
+async function untilOne(what: string, find: () => Promise<number[]>): Promise<number> {
+  const pids = await vi.waitFor(
+    async () => {
+      const found = await find();
+      if (found.length === 0) throw new Error(`nothing is ${what} yet`);
+      return found;
+    },
+    { timeout: 8000, interval: 25 },
+  );
+  expect(pids, `exactly one backend is ${what}`).toHaveLength(1);
+  return pids[0];
+}
+
+/**
+ * EE-08's hold (W11A-STALL-FIX): from a test transaction, the period lock of
+ * `businessId` for the UTC month of `date` (accountingPeriodLockKey), held
+ * exclusively until release(). PostingService.post takes that lock shared
+ * (AccountingPeriodService.assertOpenForPosting) inside the posting
+ * transaction, after updateExpense has the expense row FOR UPDATE and before
+ * the posting is inserted, so a PATCH that posts sits inside its transaction,
+ * the row held and its posting not yet committed; reads pass. `pid` resolves to
+ * the holder's backend once the lock is held, `key` is the lock's key.
+ *
+ * Only a posting of `businessId` dated in that month (or a close of that
+ * month) contends for the key, and `businessId` is this suite's own fixture:
+ * nothing another suite runs on the shared test database waits on the hold.
+ * From b1af4ade to 73a190fa it was LOCK TABLE financial_transactions IN SHARE
+ * ROW EXCLUSIVE MODE, which held every ledger write of every suite: one
+ * queued in EE-08's window was taken for the PATCH, and its 5 s posting
+ * transaction expired while EE-08 waited 8 s for a DELETE to queue behind it
+ * (CI at 73a190fa: money-reports MR-01, "Transaction already closed"). EE-12.
  */
 function holdPostingsOf(businessId: string, date: Date) {
-  void businessId;
-  void date;
+  const key = accountingPeriodLockKey(businessId, date.getUTCFullYear(), date.getUTCMonth() + 1);
   let release!: () => void;
   const released = new Promise<void>((resolve) => { release = resolve; });
   let holderReady!: (pid: number) => void;
   const ready = new Promise<number>((resolve) => { holderReady = resolve; });
   const done: Promise<void> = db.$transaction(
     async (tx: any) => {
-      await tx.$executeRawUnsafe('LOCK TABLE financial_transactions IN SHARE ROW EXCLUSIVE MODE');
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
       const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid()::int AS pid');
       holderReady(pid);
       await released;
@@ -234,7 +275,7 @@ function holdPostingsOf(businessId: string, date: Date) {
     ready,
     done.then(() => { throw new Error('holdPostingsOf: the transaction ended before it held its lock'); }),
   ]);
-  return { pid, done, release };
+  return { key, pid, done, release };
 }
 
 /**
@@ -368,7 +409,9 @@ beforeAll(async () => {
   const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { PostingService } = await import('../src/modules/finance/posting.service');
-  const { AccountingPeriodService } = await import('../src/modules/finance/accounting-period.service');
+  const periodModule = await import('../src/modules/finance/accounting-period.service');
+  const { AccountingPeriodService } = periodModule;
+  accountingPeriodLockKey = periodModule.accountingPeriodLockKey;
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
   const { CashPositionService } = await import('../src/modules/finance/cash-position.service');
@@ -633,8 +676,8 @@ describe('review repairs: the delete and edit doors agree on the posted row (SEC
     const id = zero.body.id;
     expect(await txnsOf(id)).toEqual([]);
 
-    // Hold back the posting, so the PATCH sits inside its transaction, the row held
-    // FOR UPDATE and its posting not yet committed.
+    // Hold back the posting at its period lock (this suite's business and month only), so the
+    // PATCH sits inside its transaction, the row held FOR UPDATE and its posting not yet committed.
     const { date } = await db.expense.findUnique({ where: { id }, select: { date: true } });
     const hold = holdPostingsOf(ID.biz, date);
     let patching: Promise<any> | null = null;
@@ -642,13 +685,14 @@ describe('review repairs: the delete and edit doors agree on the posted row (SEC
     try {
       const holderPid = await hold.pid;
       patching = patchExpense(id, { amount: 15 }).then((r) => r);
-      const patchPid = await untilWaiterOn(holderPid);
+      const patchPid = await untilOne(`waiting on ${hold.key} (the PATCH)`, () => waitersOnKey(hold.key, holderPid));
       deleting = deleteExpense(id).then((r) => r);
       // The delete queues behind the PATCH's hold on the row.
-      await untilWaiterOn(patchPid);
+      await untilOne("waiting on the PATCH's transaction (the DELETE)", () => waitersOnTransactionOf(patchPid));
     } finally {
       hold.release();
       await hold.done;
+      await Promise.allSettled([patching, deleting].filter(Boolean) as Array<Promise<any>>);
     }
     const [patched, deleted] = await Promise.all([patching!, deleting!]);
 
@@ -779,7 +823,7 @@ describe("W11A-STALL-FIX: EE-08's hold is this suite's own (the other suites sha
     try {
       const holderPid = await hold.pid;
       patching = patchExpense(id, { amount: 15 }).then((r) => r);
-      const patchPid = await untilWaiterOn(holderPid);
+      const patchPid = await untilOne(`waiting on ${hold.key} (the PATCH)`, () => waitersOnKey(hold.key, holderPid));
       // Another tenant's ledger write while the PATCH waits: an expense of business B posted in
       // createExpense's interactive transaction (the default 5 s timeout, as PostingService's
       // payment and expense postings everywhere else in the test database).
