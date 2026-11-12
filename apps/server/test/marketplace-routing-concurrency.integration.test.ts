@@ -63,6 +63,42 @@
  *         wrote, and the second wrote 0 + 1 over the first's 1. Now the claim
  *         locks the row before the read: 2 reserved.
  *
+ * The review of that fix (head 9645c474) found two more; each case below was
+ * red at 9645c474:
+ *
+ *   RC-10 (Z4RV-SEC-1, pre-existing) a purchase order received
+ *         (advancePurchaseOrderStatus RECEIVED) read and wrote the stock row of
+ *         each line's (productId, warehouseId) as the purchase order's JSON
+ *         named them, with no business filter, and created a row where none
+ *         existed: a purchase order of business A naming B's product and
+ *         warehouse added to B's stock and rewrote B's weighted-average cost,
+ *         and one naming a product of B with no stock row planted a row of A
+ *         for it (which makes B's product read as tracked). Those rows were
+ *         also outside the receipt's stock locks. Now a line naming a product
+ *         or a warehouse that is not the business's is refused (400) before
+ *         anything is written, and the receipt reads and writes only the
+ *         business's rows.
+ *   RC-11..RC-13 (Z4RV-CR-1, introduced at 9645c474) one tracked product kept
+ *         in two warehouses (S_LO, the lower id, with 10; S_HI with 5), and a
+ *         transfer of it from S_HI's warehouse to S_LO's: the transfer was a
+ *         batch transaction writing its from row, then its to row (S_HI, then
+ *         S_LO, not the id order), while the fulfil cancel, a purchase order
+ *         received and routing each locked the product's rows in every
+ *         warehouse, written or not. With a holder transaction on S_HI (the
+ *         transfer queued behind it, the other party started until it waits
+ *         too, then the holder let go), the transfer took S_HI and asked for
+ *         S_LO while the other held S_LO and asked for S_HI: 40P01, and the
+ *         cancel (RC-11) or the receipt (RC-12) was rolled back, or routing
+ *         (RC-13) lost its first claim. Now the transfer locks its two rows in
+ *         the global order first, and the cancel and the receipt lock only
+ *         the rows they write: each pair commits, routing claims once.
+ *   RC-14 (Z4RV-CR-1) the continental-ops stock writers (a delivery note
+ *         fulfilled, a goods receipt posted, a stock count adjusted) updated
+ *         each line's stock in line order, outside the global order: with
+ *         lines [B, A] beside routing [A, B], each held after its first stock
+ *         write, they deadlocked. Now each locks its products' rows in the
+ *         global order first: both commit, routing claims once.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -101,6 +137,20 @@ const ID = {
   stockB: `${P}stock_b`,
   /** An untracked product (no stock kept). */
   productU: `${P}prod_u`,
+  /**
+   * A tracked product kept in two warehouses: S_LO (the lower id) in the first warehouse, S_HI in the second. The cases
+   * using it give S_LO 10 and S_HI 5, so routing reserves from S_LO.
+   */
+  productM: `${P}prod_m`,
+  warehouse2: `${P}wh_2`,
+  stockMLo: `${P}stock_m1`,
+  stockMHi: `${P}stock_m2`,
+  /** Another business: a product with a stock row (10 at cost 5) in its warehouse, and a product with no stock row. */
+  bizB: `${P}biz_b`,
+  warehouseB: `${P}wh_b`,
+  productXB: `${P}prod_xb`,
+  stockXB: `${P}stock_xb`,
+  productXB2: `${P}prod_xb2`,
 };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const PRICE = 10;
@@ -116,6 +166,9 @@ let market: any;
 let routing: any;
 let listener: any;
 let prismaService: any;
+let deliveryNotes: any;
+let goodsReceipts: any;
+let stockCounts: any;
 
 /** store_order.* events in emit order. */
 let seen: Array<{ name: string; payload: any }> = [];
@@ -127,6 +180,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM delivery_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM goods_receipts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM stock_counts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -182,6 +238,9 @@ beforeAll(async () => {
   const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
   const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
   const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+  const { DeliveryNoteService } = await import('../src/modules/continental-ops/delivery-note.service');
+  const { GoodsReceiptService } = await import('../src/modules/continental-ops/goods-receipt.service');
+  const { StockCountService } = await import('../src/modules/continental-ops/stock-count.service');
 
   const crmStub = {
     findOrCreateContact: async (businessId: string, input: { email?: string | null }) =>
@@ -213,6 +272,9 @@ beforeAll(async () => {
       { provide: TransactionalEmailService, useValue: { send: async () => null } },
       MarketplaceService,
       FulfillmentRoutingService,
+      DeliveryNoteService,
+      GoodsReceiptService,
+      StockCountService,
     ],
   }).compile();
 
@@ -223,6 +285,9 @@ beforeAll(async () => {
   market = app.get(MarketplaceService);
   routing = app.get(FulfillmentRoutingService);
   prismaService = app.get(PrismaService);
+  deliveryNotes = app.get(DeliveryNoteService);
+  goodsReceipts = app.get(GoodsReceiptService);
+  stockCounts = app.get(StockCountService);
   // The routing listener as production builds it, called by a case (or put on the bus by one).
   listener = new (StoreOrderRoutingListener as any)(prismaService, routing, events);
 
@@ -254,6 +319,27 @@ beforeAll(async () => {
   });
   await db.inventoryStock.create({ data: { id: ID.stockA, businessId: ID.biz, productId: ID.productA, warehouseId: ID.warehouse, quantity: IN_STOCK, reserved: 0 } });
   await db.inventoryStock.create({ data: { id: ID.stockB, businessId: ID.biz, productId: ID.productB, warehouseId: ID.warehouse, quantity: IN_STOCK, reserved: 0 } });
+
+  // A tracked product kept in two warehouses (the second created after the first, so the first stays the default).
+  await db.warehouse.create({ data: { id: ID.warehouse2, businessId: ID.biz, name: 'V18R Warehouse 2' } });
+  await db.product.create({
+    data: { id: ID.productM, businessId: ID.biz, name: 'V18R Two Warehouses', price: PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
+  });
+  await db.inventoryStock.create({ data: { id: ID.stockMLo, businessId: ID.biz, productId: ID.productM, warehouseId: ID.warehouse, quantity: IN_STOCK, reserved: 0 } });
+  await db.inventoryStock.create({ data: { id: ID.stockMHi, businessId: ID.biz, productId: ID.productM, warehouseId: ID.warehouse2, quantity: IN_STOCK, reserved: 0 } });
+
+  // Another business (inventoryMode not set: tracked only while it keeps a stock row, resolveInventoryMode).
+  await db.business.create({ data: { id: ID.bizB, name: 'V18R Other Business', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
+  await db.warehouse.create({ data: { id: ID.warehouseB, businessId: ID.bizB, name: 'V18R Other Warehouse' } });
+  for (const [id, name] of [
+    [ID.productXB, 'V18R Other Stocked'],
+    [ID.productXB2, 'V18R Other Unstocked'],
+  ]) {
+    await db.product.create({ data: { id, businessId: ID.bizB, name, price: PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true } });
+  }
+  await db.inventoryStock.create({
+    data: { id: ID.stockXB, businessId: ID.bizB, productId: ID.productXB, warehouseId: ID.warehouseB, quantity: IN_STOCK, reserved: 0, costPerUnit: 5 },
+  });
 }, 60_000);
 
 afterAll(async () => {
@@ -358,10 +444,15 @@ const announcedFor = (orderId: string) =>
 /**
  * Every interactive transaction run through PrismaService.client (the routing claim, the paid door, a purchase order
  * received) has its inventory_stocks row writes (tx.inventoryStock.update) passed to `afterWrite` once each has run,
- * inside the transaction, with that transaction's number; with `method` 'findFirst', its stock row reads instead.
- * Restored by the returned function.
+ * inside the transaction, with that transaction's number; with `method` 'findFirst', its stock row reads instead, and
+ * with a list, each of those (e.g. update and updateMany, the continental-ops writers' form). Restored by the returned
+ * function.
  */
-function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>, method: 'update' | 'findFirst' = 'update') {
+function hookStockWrites(
+  afterWrite: (txNo: number, args: any) => Promise<void>,
+  method: 'update' | 'findFirst' | Array<'update' | 'updateMany'> = 'update',
+) {
+  const methods: PropertyKey[] = Array.isArray(method) ? method : [method];
   const real = prismaService.client;
   let txNo = 0;
   const bound = (target: any, prop: PropertyKey) => {
@@ -375,9 +466,9 @@ function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>,
         const delegate = Reflect.get(target, prop);
         return new Proxy(delegate, {
           get(d, p) {
-            if (p !== method) return bound(d, p);
+            if (!methods.includes(p)) return bound(d, p);
             return async (args: any) => {
-              const result = await d[method](args);
+              const result = await d[p as string](args);
               await afterWrite(no, args);
               return result;
             };
@@ -405,23 +496,105 @@ function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>,
 /**
  * The review's probe: each of `parties` transactions is held right after its first stock row write until every party
  * has made its own first write (each then holds one stock row), or HOLD_WINDOW_MS has passed. Records which row each
- * party wrote first.
+ * party wrote first (its id, or `product:<id>` for an updateMany by product).
  */
-function holdAfterFirstStockWrite(parties: number) {
+function holdAfterFirstStockWrite(parties: number, methods: Array<'update' | 'updateMany'> = ['update']) {
   const first = new Map<number, string>();
   let allIn!: () => void;
   const gathered = new Promise<void>((resolve) => (allIn = resolve));
   const hook = hookStockWrites(async (no, args) => {
     if (first.has(no)) return;
-    first.set(no, String(args?.where?.id));
+    first.set(no, args?.where?.id ? String(args.where.id) : `product:${args?.where?.productId}`);
     if (first.size >= parties) allIn();
     await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
-  });
+  }, methods);
   return { firstWrites: () => [...first.values()], transactions: hook.transactions, restore: hook.restore };
 }
 
 /** The routing claim's own body (routeClaimedOrder), counted: one call per claim transaction run. */
 const countClaims = () => vi.spyOn(routing as any, 'routeClaimedOrder');
+
+const setStock = (id: string, quantity: number, reserved = 0) => db.inventoryStock.update({ where: { id }, data: { quantity, reserved } });
+
+/** Sessions of this database waiting for a lock now. */
+async function waitingSessions(): Promise<number> {
+  const [{ waiting }] = await db.$queryRawUnsafe(
+    'SELECT COUNT(*)::int AS waiting FROM pg_stat_activity WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0',
+  );
+  return waiting;
+}
+
+/** Polls `holds` until it is true or `windowMs` has passed; says which. */
+async function within(windowMs: number, holds: () => Promise<boolean>): Promise<boolean> {
+  for (const end = Date.now() + windowMs; Date.now() < end; await sleep(25)) {
+    if (await holds()) return true;
+  }
+  return false;
+}
+
+/** A party's answer: what it returned, or `error: <code>: <message>`. */
+const answerOf = (work: Promise<unknown>) =>
+  work.then(
+    (value) => value,
+    (err: any) => `error: ${err?.code ?? err?.getStatus?.() ?? err?.name}: ${err?.message}`,
+  );
+
+/**
+ * The review's interleave (Z4RV-CR-1): a holder transaction locks the stock row `heldRow`; `first` is started and runs
+ * until it waits behind the holder; `second` is started and runs until it waits too, or HOLD_WINDOW_MS passes (a party
+ * that never waits); then the holder lets go. Returns both answers, and whether `first` waited behind the holder.
+ */
+async function behindHolder(heldRow: string, first: () => Promise<unknown>, second: () => Promise<unknown>) {
+  let letGo!: () => void;
+  const go = new Promise<void>((resolve) => (letGo = resolve));
+  let holding!: () => void;
+  const held = new Promise<void>((resolve) => (holding = resolve));
+  const holder = db.$transaction(
+    async (tx: any) => {
+      await tx.$queryRawUnsafe('SELECT id FROM inventory_stocks WHERE id = $1 FOR UPDATE', heldRow);
+      holding();
+      await go;
+    },
+    { timeout: 20_000, maxWait: 5_000 },
+  );
+  await held;
+  let firstAnswer: Promise<unknown> = Promise.resolve();
+  let secondAnswer: Promise<unknown> = Promise.resolve();
+  let firstWaited = false;
+  try {
+    firstAnswer = answerOf(first());
+    firstWaited = await within(5_000, async () => (await waitingSessions()) >= 1);
+    secondAnswer = answerOf(second());
+    await within(HOLD_WINDOW_MS, async () => (await waitingSessions()) >= 2);
+  } finally {
+    letGo();
+    await holder;
+  }
+  return { firstWaited, answers: await Promise.all([firstAnswer, secondAnswer]) };
+}
+
+/** A transfer of 2 of product M from S_HI's warehouse to S_LO's (its from row has the higher id). */
+const transferHiToLo = () =>
+  market
+    .transferInventory(ID.biz, { productId: ID.productM, fromWarehouseId: ID.warehouse2, toWarehouseId: ID.warehouse, quantity: 2, note: 'v18r' })
+    .then((r: any) => (r?.success ? 'transferred' : r));
+
+/** A purchase order of the business in status SHIPPED with these lines. */
+const shippedPurchaseOrder = (items: any[]) =>
+  db.purchaseOrder.create({
+    data: {
+      businessId: ID.biz,
+      poNumber: `${P}po_${++orderSeq}_${Date.now()}`,
+      status: 'SHIPPED',
+      supplierName: 'V18R Supplier',
+      items,
+      subtotal: 0,
+      shippingCost: 0,
+      taxAmount: 0,
+      total: 0,
+      currency: 'TTD',
+    },
+  });
 
 describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real database)', () => {
   it('RC-01 (SEAMZ4-CR-1) two paid orders with the same tracked products in opposite line order, routed at once and each held after its first reservation: no deadlock, both routed once (2 LOCAL_STOCK RESERVED routes each), 2 reserved of each product, and no store_order.routing_failed', async () => {
@@ -808,4 +981,207 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     // At f38185ce both read reserved 0 before either wrote, and the second wrote 0 + 1 over the first's 1.
     expect(await stockOf(ID.stockA), 'two units reserved, one per order').toBe(`${IN_STOCK}/2`);
   });
+
+  it('RC-10 (Z4RV-SEC-1) a purchase order received adds stock only to its own business: a line naming another business\'s product (in its warehouse, or with none) or another business\'s warehouse is refused with 400 before anything is written; the other business\'s stock and cost are untouched, no row is planted for its product, and the purchase order stays SHIPPED', async () => {
+    const pos: Record<string, any[]> = {
+      // The review's probe: B's stocked product in B's warehouse at a dumping cost, and B's unstocked product.
+      "the review's purchase order (B's product in B's warehouse; B's unstocked product, default warehouse)": [
+        { productId: ID.productXB, name: 'XB', quantity: 1000, unitPrice: 0.01, unitCost: 0.01, total: 10, warehouseId: ID.warehouseB },
+        { productId: ID.productXB2, name: 'XB2', quantity: 1, unitPrice: 1, unitCost: 1, total: 1 },
+      ],
+      "B's unstocked product only (default warehouse)": [{ productId: ID.productXB2, name: 'XB2', quantity: 1, unitPrice: 1, unitCost: 1, total: 1 }],
+      "its own product into B's warehouse": [{ productId: ID.productA, name: 'A', quantity: 3, unitPrice: 1, unitCost: 1, total: 3, warehouseId: ID.warehouseB }],
+      "its own line first, then B's product": [
+        { productId: ID.productA, name: 'A', quantity: 3, unitPrice: 1, unitCost: 1, total: 3, warehouseId: ID.warehouse },
+        { productId: ID.productXB, name: 'XB', quantity: 5, unitPrice: 1, unitCost: 1, total: 5, warehouseId: ID.warehouseB },
+      ],
+    };
+    const answers: Record<string, unknown> = {};
+    const statuses: Record<string, string> = {};
+    const poIds: string[] = [];
+    for (const [name, items] of Object.entries(pos)) {
+      const po = await shippedPurchaseOrder(items);
+      poIds.push(po.id);
+      answers[name] = await routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then(
+        (r: any) => r.status,
+        (err: any) => err?.getStatus?.() ?? `${err?.name}: ${err?.message}`,
+      );
+      statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+    }
+    // At 9645c474 each was RECEIVED: B's stock went to 1010 at cost 0.0594 and rows were planted.
+    expect(answers, 'each receipt refused').toEqual(Object.fromEntries(Object.keys(pos).map((name) => [name, 400])));
+    expect(statuses, 'each purchase order stays SHIPPED').toEqual(Object.fromEntries(Object.keys(pos).map((name) => [name, 'SHIPPED'])));
+    const otherStock = await db.inventoryStock.findUnique({ where: { id: ID.stockXB } });
+    expect([otherStock.businessId, otherStock.quantity, otherStock.reserved, otherStock.costPerUnit], "B's stock row as it was").toEqual([ID.bizB, IN_STOCK, 0, 5]);
+    const planted = await db.inventoryStock.findMany({
+      where: { OR: [{ productId: { in: [ID.productXB, ID.productXB2] } }, { warehouseId: ID.warehouseB }] },
+      select: { id: true },
+    });
+    expect(planted.map((r: any) => r.id), "no stock row for B's products or in B's warehouse but B's own").toEqual([ID.stockXB]);
+    const unstocked = await db.product.findUnique({ where: { id: ID.productXB2 }, select: { _count: { select: { inventoryStocks: true } } } });
+    expect(unstocked._count.inventoryStocks, "B's unstocked product keeps no stock row (it still reads as untracked)").toBe(0);
+    expect(await stockOf(ID.stockA), "the refused purchase order's own line is not received either").toBe(`${IN_STOCK}/0`);
+    expect(await db.stockMovement.count({ where: { referenceId: { in: poIds } } }), 'no stock movement').toBe(0);
+  });
+
+  it('RC-11 (Z4RV-CR-1) a transfer of product M from S_HI\'s warehouse to S_LO\'s, queued behind a holder on S_HI, while the fulfil cancel of an order reserved from S_LO runs: no deadlock, the cancel commits (cancelled, its route CANCELLED, nothing reserved) and the transfer commits (2 moved)', async () => {
+    await setStock(ID.stockMHi, 5);
+    const order = await paidOrder([ID.productM]);
+    expect((await routing.routeOrder(ID.biz, order.id)).length).toBe(1);
+    expect(await stockOf(ID.stockMLo), 'routing reserved from S_LO (the row with the most stock)').toBe(`${IN_STOCK}/1`);
+    const { firstWaited, answers } = await behindHolder(ID.stockMHi, transferHiToLo, () =>
+      market.fulfillOrder(ID.biz, order.id, 'cancel', { reason: 'rc11' }, ID.owner).then((o: any) => o.status),
+    );
+    expect(firstWaited, 'the transfer queued behind the holder').toBe(true);
+    // At 9645c474 the cancel locked S_LO and waited for S_HI, the transfer took S_HI and waited for S_LO: 40P01, the
+    // cancel rolled back and the order stayed routed with its route RESERVED.
+    expect(answers, '[transfer, cancel]').toEqual(['transferred', 'cancelled']);
+    expect(await statusOf(order.id)).toBe('cancelled/PAID');
+    expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:CANCELLED']);
+    expect(await stockOf(ID.stockMLo), 'S_LO: 2 transferred in, nothing reserved').toBe(`${IN_STOCK + 2}/0`);
+    expect(await stockOf(ID.stockMHi), 'S_HI: 2 transferred out').toBe('3/0');
+  });
+
+  it('RC-12 (Z4RV-CR-1) the same transfer, queued behind a holder on S_HI, while a purchase order with a line of M into S_LO\'s warehouse is received: no deadlock, both commit (2 moved, 5 received)', async () => {
+    await setStock(ID.stockMHi, 5);
+    const po = await shippedPurchaseOrder([
+      { productId: ID.productM, name: 'M', quantity: 5, unitPrice: 4, unitCost: 4, total: 20, warehouseId: ID.warehouse },
+    ]);
+    const { firstWaited, answers } = await behindHolder(ID.stockMHi, transferHiToLo, () =>
+      routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => r.status),
+    );
+    expect(firstWaited, 'the transfer queued behind the holder').toBe(true);
+    // At 9645c474 the receipt locked every row of M (S_LO, then S_HI) and lost the deadlock with the transfer.
+    expect(answers, '[transfer, receipt]').toEqual(['transferred', 'RECEIVED']);
+    expect(await stockOf(ID.stockMLo), 'S_LO: 2 transferred in, 5 received').toBe(`${IN_STOCK + 2 + 5}/0`);
+    expect(await stockOf(ID.stockMHi), 'S_HI: 2 transferred out').toBe('3/0');
+  });
+
+  it('RC-13 (Z4RV-CR-1) the same transfer, queued behind a holder on S_HI, while a paid order with a line of M is routed: no deadlock, the transfer commits and the order is routed on its first claim (reserved from S_LO)', async () => {
+    await setStock(ID.stockMHi, 5);
+    const order = await paidOrder([ID.productM]);
+    const claims = countClaims();
+    const { firstWaited, answers } = await behindHolder(ID.stockMHi, transferHiToLo, () =>
+      listener.onStoreOrderPaid({ order: { id: order.id }, businessId: ID.biz }).then(() => 'routed'),
+    );
+    expect(firstWaited, 'the transfer queued behind the holder').toBe(true);
+    expect(answers, '[transfer, routing]').toEqual(['transferred', 'routed']);
+    expect(announcedFor(order.id), 'routed, no routing failure').toEqual(['fulfillment_routed:1']);
+    expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+    expect(await stockOf(ID.stockMLo), 'S_LO: 2 transferred in, 1 reserved').toBe(`${IN_STOCK + 2}/1`);
+    expect(await stockOf(ID.stockMHi), 'S_HI: 2 transferred out').toBe('3/0');
+    // At 9645c474 routing lost its first claim to the deadlock and was routed on the retry.
+    expect(claims, 'one routing claim').toHaveBeenCalledTimes(1);
+  });
+
+  it('RC-14 (Z4RV-CR-1) a delivery note fulfilled, a goods receipt posted and a stock count adjusted, each with lines [B, A], beside routing a paid order [A, B], each held after its first stock write: no deadlock, both commit, the order routed on its first claim with stock exact', async () => {
+    let docSeq = 0;
+    const writers: Array<[string, () => Promise<() => Promise<unknown>>, string, number]> = [
+      [
+        'delivery note fulfilled',
+        async () => {
+          const invoice = await db.invoice.create({
+            data: { businessId: ID.biz, contactId: ID.contact, invoiceNumber: `${P}inv_${++docSeq}_${Date.now()}`, total: 0 },
+          });
+          const dn = await db.deliveryNote.create({
+            data: {
+              businessId: ID.biz,
+              invoiceId: invoice.id,
+              dnNumber: `${P}dn_${docSeq}_${Date.now()}`,
+              items: [
+                { productId: ID.productB, description: 'B', quantity: 2 },
+                { productId: ID.productA, description: 'A', quantity: 2 },
+              ],
+            },
+          });
+          return () => deliveryNotes.fulfill(ID.biz, dn.id, {}).then((d: any) => d.status);
+        },
+        'DELIVERED',
+        IN_STOCK - 2,
+      ],
+      [
+        'goods receipt posted',
+        async () => {
+          const gr = await db.goodsReceipt.create({
+            data: {
+              businessId: ID.biz,
+              grNumber: `${P}gr_${++docSeq}_${Date.now()}`,
+              items: [
+                { productId: ID.productB, description: 'B', qtyOrdered: 3, qtyReceived: 3, qtyAccepted: 3, qtyRejected: 0 },
+                { productId: ID.productA, description: 'A', qtyOrdered: 3, qtyReceived: 3, qtyAccepted: 3, qtyRejected: 0 },
+              ],
+            },
+          });
+          return () => goodsReceipts.post(ID.biz, gr.id).then((g: any) => g.status);
+        },
+        'POSTED',
+        IN_STOCK + 3,
+      ],
+      [
+        'stock count adjusted',
+        async () => {
+          const sc = await db.stockCount.create({
+            data: {
+              businessId: ID.biz,
+              countNumber: `${P}sc_${++docSeq}_${Date.now()}`,
+              status: 'COMPLETED',
+              items: [
+                { productId: ID.productB, description: 'B', systemQty: IN_STOCK, countedQty: 12, variance: 2 },
+                { productId: ID.productA, description: 'A', systemQty: IN_STOCK, countedQty: 12, variance: 2 },
+              ],
+            },
+          });
+          return () => stockCounts.adjust(ID.biz, sc.id).then((s: any) => s.status);
+        },
+        'ADJUSTED',
+        12,
+      ],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, prepare, done, quantity] of writers) {
+      await db.inventoryStock.updateMany({ where: { businessId: ID.biz }, data: { quantity: IN_STOCK, reserved: 0 } });
+      seen = [];
+      const order = await paidOrder([ID.productA, ID.productB]);
+      const write = await prepare();
+      const claims = countClaims();
+      const held = holdAfterFirstStockWrite(2, ['update', 'updateMany']);
+      let answer: unknown;
+      try {
+        // The writer first (it writes B first), then the router (it reserves A first).
+        const writing = answerOf(write());
+        await sleep(300);
+        const route = listener.onStoreOrderPaid({ order: { id: order.id }, businessId: ID.biz });
+        [answer] = await Promise.all([writing, route]);
+      } finally {
+        held.restore();
+      }
+      outcomes[name] = {
+        answer,
+        routing: announcedFor(order.id),
+        routes: await routesOf(order.id),
+        stockA: await stockOf(ID.stockA),
+        stockB: await stockOf(ID.stockB),
+        claims: claims.mock.calls.length,
+      };
+      claims.mockRestore();
+      expected[name] = {
+        answer: done,
+        routing: ['fulfillment_routed:2'],
+        routes: ['LOCAL_STOCK:RESERVED', 'LOCAL_STOCK:RESERVED'],
+        stockA: `${quantity}/1`,
+        stockB: `${quantity}/1`,
+        claims: 1,
+      };
+    }
+    // At 9645c474 each writer and the routing deadlocked: the writer rolled back, or routing lost its first claim.
+    expect(outcomes).toEqual(expected);
+  }, 30_000);
+
+  it.todo(
+    'Z4RV-SEC-1 follow-up (not this packet): POST .../purchase-orders (MarketplaceService.createPurchaseOrder, body: any) stores lines naming another business\'s product or warehouse as sent; they are refused only when the purchase order is received (RC-10)',
+  );
+  it.todo(
+    'Z4RV-SEC-1 sibling (by reading, not reproduced; not this packet): POST .../inventory (MarketplaceService.upsertInventory) finds the stock row by (productId, warehouseId) with no business filter and updates it, so a member of one business could rewrite another business\'s stock row named by its product and warehouse ids',
+  );
 });
