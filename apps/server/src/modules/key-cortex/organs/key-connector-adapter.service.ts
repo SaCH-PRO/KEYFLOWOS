@@ -7,6 +7,7 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { KeyConnectorService } from '../../key-connector/key-connector.service';
+import { connectionView } from '../../key-connector/connection-view';
 import { KeyCortexConnectorService } from '../key-cortex-connector.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
 import {
@@ -59,7 +60,14 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
           category: { type: 'string' },
         },
         async (ctx, input) => {
-          const providers = await this.keyConnector.listProviders(ctx.businessId, input.category as string);
+          const entries = await this.keyConnector.listProviders(ctx.businessId, input.category as string);
+          // W11-KEY-ORGAN-OUTPUT-REDACT: each entry's connection is mapped with
+          // its stored credentials (authData); answer it as connectionView, the
+          // shape GET key-connector/providers answers (SEC-W7KC-1).
+          const providers = entries.map((entry) => ({
+            provider: entry.provider,
+            connection: entry.connection ? connectionView(entry.connection) : undefined,
+          }));
           return { success: true, data: { providers, count: providers.length } };
         },
       ),
@@ -71,7 +79,13 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
-          const connections = await this.keyConnector.listConnections(ctx.businessId);
+          // W11-KEY-ORGAN-OUTPUT-REDACT: listConnections maps every row with its
+          // stored provider credentials (authData), and this answer goes to the
+          // LLM provider and into CortexActionLog.result. Answer each one as
+          // connectionView, as GET key-connector/connections does (SEC-W7KC-1).
+          const connections = (await this.keyConnector.listConnections(ctx.businessId)).map((connection) =>
+            connectionView(connection),
+          );
           return { success: true, data: { connections, count: connections.length } };
         },
       ),

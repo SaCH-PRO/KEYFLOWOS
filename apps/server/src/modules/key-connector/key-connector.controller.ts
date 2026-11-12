@@ -20,10 +20,12 @@ import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyConnectorService } from './key-connector.service';
 import { ConnectProviderDto, AiCommandDto } from './dto';
-import {
-  AiGatewayCommand,
-  KeyConnectorConnection,
-} from './key-connector.types';
+import { AiGatewayCommand } from './key-connector.types';
+// W7-KEY-CONNECTOR-TENANT review SEC-W7KC-1: a connection leaves this
+// controller through connectionView only, an allow-list without the stored
+// credentials (authData). Moved to ./connection-view by
+// W11-KEY-ORGAN-OUTPUT-REDACT so the KEY organ tools answer the same projection.
+import { connectionView } from './connection-view';
 
 /**
  * W7-KEY-CONNECTOR-TENANT review SEC-W7KC-2: the membership roles that may
@@ -34,34 +36,6 @@ import {
  * packages/api/src/routers/key-connector.ts), so the two doors agree.
  */
 const CONNECTOR_WRITER_ROLES: ReadonlySet<string> = new Set(['OWNER', 'ADMIN']);
-
-/** A connection as this API answers it: everything but its stored credentials. */
-export type ConnectionView = Omit<KeyConnectorConnection, 'authData'>;
-
-/**
- * W7-KEY-CONNECTOR-TENANT review SEC-W7KC-1 (the R0-SEC2 class):
- * KeyConnectorService maps each IntegrationConnection row with its stored
- * provider credentials (`authData`, which its sync and health engines read),
- * and the routes answered them to every member of the tenant. A connection
- * leaves this controller through this projection only, an allow-list, so a
- * column added later is not answered by default either. The tRPC router never
- * selects authData.
- */
-function connectionView(connection: KeyConnectorConnection): ConnectionView {
-  return {
-    id: connection.id,
-    businessId: connection.businessId,
-    providerKey: connection.providerKey,
-    status: connection.status,
-    displayName: connection.displayName,
-    settings: connection.settings,
-    lastSyncAt: connection.lastSyncAt,
-    lastError: connection.lastError,
-    healthScore: connection.healthScore,
-    createdAt: connection.createdAt,
-    updatedAt: connection.updatedAt,
-  };
-}
 
 /**
  * ── Key Connector Controller ───────────────────────────────────────────
