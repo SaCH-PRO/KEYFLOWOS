@@ -1018,11 +1018,15 @@ export class CrmController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/segments')
   async segmentSummary(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
-    const summary = await this.crmStats.segmentSummary({ businessId });
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100): the
+    // counts are the session member's, over the contacts they may open (as
+    // GET .../highlights counts its segments); the OWNER and SUPER_ADMIN keep
+    // the cached business-wide counts.
+    const summary = await this.crmStats.segmentSummary({ businessId, viewerUserId: this.requireActorUserId(req) });
     // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): the
     // unpaid count (contacts with a SENT or OVERDUE invoice) is a money
     // signal; a member without revenue read is served it as 0, the shape and
-    // every other count kept. Projected after the business-wide cache.
+    // every other count kept. Projected after the counts.
     return (await this.readsRevenue(businessId, req)) ? summary : { ...summary, unpaid: 0 };
   }
 

@@ -99,7 +99,8 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
-vi.setConfig({ testTimeout: 60_000 });
+// hookTimeout as the other real-DB suites set it: the top-level beforeAll (Nest compile + seed) passes 10 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });

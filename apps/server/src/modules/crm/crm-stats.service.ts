@@ -830,12 +830,36 @@ export class CrmStatsService {
     return { contact: servedContact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 
-  async segmentSummary(input: { businessId: string }) {
+  /**
+   * The CRM segment counts. A viewer no visibility rule hides a contact from
+   * (the OWNER, SUPER_ADMIN), or a call that names no viewer, gets the counts
+   * of the whole business, cached for it under `${businessId}:segmentSummary`,
+   * as before.
+   *
+   * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63, the contact rule, and
+   * D-100): any other viewer gets every count over the contacts they may open
+   * (resolveCrmAccess + visibilityClause, as flowHighlights and GET
+   * contacts/:contactId apply it), so another member's PRIVATE contact is not
+   * counted, for a member with revenue read too; the invoice and booking terms
+   * are unchanged. Not cached (neither read nor written): the visibility is
+   * that viewer's and is read at each request. resolveCrmAccess refuses a
+   * non-member (ForbiddenException). The controller still serves unpaid 0 to a
+   * member without revenue read (D-100, SEC-W8MS-3).
+   */
+  async segmentSummary(input: { businessId: string; viewerUserId?: string }) {
+    const visibility = input.viewerUserId
+      ? (visibilityClause(await resolveCrmAccess(this.prisma, input.businessId, input.viewerUserId), input.viewerUserId) as Prisma.ContactWhereInput | null)
+      : null;
     const cacheKey = `${input.businessId}:segmentSummary`;
-    const cached = await this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (!visibility) {
+      const cached = await this.cache.get(cacheKey);
+      if (cached) return cached;
+    }
 
-    const base = contactWhereBase(input.businessId);
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; D-63): with a visibility clause every count's where is the base AND the clause.
+    const base: Prisma.ContactWhereInput = visibility
+      ? { ...contactWhereBase(input.businessId), AND: [visibility] }
+      : contactWhereBase(input.businessId);
     const now = new Date();
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -865,7 +889,8 @@ export class CrmStatsService {
       this.prisma.client.contact.count({ where: { ...base, relationshipHealth: 'DORMANT' } }),
     ]);
     const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
-    await this.cache.set(cacheKey, segResult);
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; D-63): a viewer's counts are never written to the business cache.
+    if (!visibility) await this.cache.set(cacheKey, segResult);
     return segResult;
   }
 
