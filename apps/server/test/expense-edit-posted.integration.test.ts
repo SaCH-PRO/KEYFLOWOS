@@ -50,6 +50,14 @@
  *         200 carrying the foreign category, or a 400 naming the foreign account id)
  *   EE-11 RED-BEFORE (SEC-B4B7-3) POST expense / POST bill naming another business's category
  *         (on the expense or a split item) -> 400, no row and no posting written
+ *   W11A-STALL-FIX (RED-BEFORE marks a case failing at 73a190fa):
+ *   EE-12 RED-BEFORE while EE-08's hold keeps this suite's PATCH waiting before its posting, another
+ *         business's expense posting (a 5 s interactive transaction, like every ledger write of the
+ *         other suites sharing the test database) commits without waiting on the hold, and the PATCH
+ *         then posts once (before: the hold was LOCK TABLE financial_transactions, so every ledger
+ *         write in the database waited behind it; when EE-08 took such a waiter for its PATCH it held
+ *         the lock for its whole 8 s waitFor, and the waiting payment posting of money-reports failed
+ *         with "Transaction already closed", CI at 73a190fa)
  *   After every case: each booked (PAID/BILL) expense's ledger net on its expense accounts
  *   equals its stored amount, and the cash position equals the independent ledger cash net.
  *
@@ -195,6 +203,64 @@ async function untilWaiterOn(blockerPid: number): Promise<number> {
     },
     { timeout: 8000, interval: 25 },
   );
+}
+
+/**
+ * EE-08's hold: from a test transaction, hold back the postings of `businessId`
+ * dated in the month of `date` until release(), letting reads through, so a
+ * PATCH that posts sits inside its transaction, the row held FOR UPDATE and its
+ * posting not yet committed. `pid` resolves to the holder's backend once the
+ * hold is taken. As of 73a190fa (EE-08 since b1af4ade) it is a table lock, so it
+ * holds every ledger write in the database whatever its business and month
+ * (EE-12 is red on it).
+ */
+function holdPostingsOf(businessId: string, date: Date) {
+  void businessId;
+  void date;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let holderReady!: (pid: number) => void;
+  const ready = new Promise<number>((resolve) => { holderReady = resolve; });
+  const done: Promise<void> = db.$transaction(
+    async (tx: any) => {
+      await tx.$executeRawUnsafe('LOCK TABLE financial_transactions IN SHARE ROW EXCLUSIVE MODE');
+      const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid()::int AS pid');
+      holderReady(pid);
+      await released;
+    },
+    { timeout: 30_000, maxWait: 10_000 },
+  );
+  const pid = Promise.race([
+    ready,
+    done.then(() => { throw new Error('holdPostingsOf: the transaction ended before it held its lock'); }),
+  ]);
+  return { pid, done, release };
+}
+
+/**
+ * Watches, every 25 ms until stop(), for a backend of this database other than
+ * `patchPid` that waits on a lock `holderPid` or `patchPid` holds (anything
+ * but this suite's PATCH queued behind EE-08's hold); `seen` resolves to the
+ * first such backends found (null once stopped).
+ */
+function watchForOthersBehind(holderPid: number, patchPid: number) {
+  let stopped = false;
+  const seen = (async (): Promise<Array<{ pid: number; query: string }> | null> => {
+    while (!stopped) {
+      const rows: Array<{ pid: number; query: string }> = await db.$queryRawUnsafe(
+        `SELECT pid, left(regexp_replace(query, '\\s+', ' ', 'g'), 160) AS query
+           FROM pg_stat_activity
+          WHERE datname = current_database() AND pid <> $2::int
+            AND ($1::int = ANY(pg_blocking_pids(pid)) OR $2::int = ANY(pg_blocking_pids(pid)))`,
+        holderPid,
+        patchPid,
+      );
+      if (rows.length > 0) return rows;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return null;
+  })();
+  return { seen, stop: () => { stopped = true; } };
 }
 
 async function txnsOf(expenseId: string): Promise<any[]> {
@@ -567,33 +633,22 @@ describe('review repairs: the delete and edit doors agree on the posted row (SEC
     const id = zero.body.id;
     expect(await txnsOf(id)).toEqual([]);
 
-    // A table lock that lets reads through but holds back the posting's INSERT, so the PATCH
-    // sits inside its transaction, the row held FOR UPDATE and its posting not yet committed.
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => { release = resolve; });
-    let holderReady!: (pid: number) => void;
-    const ready = new Promise<number>((resolve) => { holderReady = resolve; });
-    const holder = db.$transaction(
-      async (tx: any) => {
-        await tx.$executeRawUnsafe('LOCK TABLE financial_transactions IN SHARE ROW EXCLUSIVE MODE');
-        const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid()::int AS pid');
-        holderReady(pid);
-        await released;
-      },
-      { timeout: 30_000, maxWait: 10_000 },
-    );
+    // Hold back the posting, so the PATCH sits inside its transaction, the row held
+    // FOR UPDATE and its posting not yet committed.
+    const { date } = await db.expense.findUnique({ where: { id }, select: { date: true } });
+    const hold = holdPostingsOf(ID.biz, date);
     let patching: Promise<any> | null = null;
     let deleting: Promise<any> | null = null;
     try {
-      const holderPid = await ready;
+      const holderPid = await hold.pid;
       patching = patchExpense(id, { amount: 15 }).then((r) => r);
       const patchPid = await untilWaiterOn(holderPid);
       deleting = deleteExpense(id).then((r) => r);
       // The delete queues behind the PATCH's hold on the row.
       await untilWaiterOn(patchPid);
     } finally {
-      release();
-      await holder;
+      hold.release();
+      await hold.done;
     }
     const [patched, deleted] = await Promise.all([patching!, deleting!]);
 
@@ -708,4 +763,53 @@ describe("review repairs: an expense's categories belong to its business (SEC-B4
     expect(own.status, JSON.stringify(own.body)).toBe(201);
     expect(own.body.category?.id).toBe(ID.category);
   });
+});
+
+describe("W11A-STALL-FIX: EE-08's hold is this suite's own (the other suites sharing the test database never wait on it)", () => {
+  it("EE-12: while EE-08's hold keeps the PATCH waiting before its posting, another business's expense posting commits without waiting on it; the PATCH then posts once", async () => {
+    const zero = await postExpense({ description: `${P}ee12 zero`, amount: 0, paymentMethod: 'cash' });
+    expect(zero.status, JSON.stringify(zero.body)).toBe(201);
+    const id = zero.body.id;
+    const { date } = await db.expense.findUnique({ where: { id }, select: { date: true } });
+
+    const hold = holdPostingsOf(ID.biz, date);
+    let patching: Promise<any> | null = null;
+    let foreign: Promise<any> | null = null;
+    let watch: ReturnType<typeof watchForOthersBehind> | null = null;
+    try {
+      const holderPid = await hold.pid;
+      patching = patchExpense(id, { amount: 15 }).then((r) => r);
+      const patchPid = await untilWaiterOn(holderPid);
+      // Another tenant's ledger write while the PATCH waits: an expense of business B posted in
+      // createExpense's interactive transaction (the default 5 s timeout, as PostingService's
+      // payment and expense postings everywhere else in the test database).
+      watch = watchForOthersBehind(holderPid, patchPid);
+      foreign = agent()
+        .post(`/expenses/businesses/${ID.bizB}/expenses`)
+        .set(HEADER, ID.ownerB)
+        .send({ description: `${P}ee12 business B cash 5`, amount: 5, paymentMethod: 'cash' })
+        .then((r) => r);
+      const first = await Promise.race([
+        foreign.then(() => 'committed'),
+        watch.seen.then((rows) => `waited behind the hold: ${JSON.stringify(rows)}`),
+      ]);
+      expect(first, "another business's posting waits on nothing EE-08's hold holds").toBe('committed');
+      // The PATCH still waits on the hold: its posting is not written yet.
+      expect(await txnsOf(id)).toEqual([]);
+    } finally {
+      watch?.stop();
+      hold.release();
+      await hold.done;
+      await Promise.allSettled([patching, foreign].filter(Boolean) as Array<Promise<any>>);
+    }
+    const [patched, foreignRes] = await Promise.all([patching!, foreign!]);
+
+    expect(foreignRes.status, JSON.stringify(foreignRes.body)).toBe(201);
+    const foreignTxns = await db.financialTransaction.findMany({ where: { businessId: ID.bizB, sourceType: 'Expense', sourceId: foreignRes.body.id } });
+    expect(foreignTxns.map((t: any) => t.externalRef)).toEqual([`Expense:${foreignRes.body.id}:paid`]);
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    const txns = await txnsOf(id);
+    expect(txns.map((t) => [t.externalRef, t.status])).toEqual([[`Expense:${id}:paid`, 'POSTED']]);
+    expect(legs(txns[0])).toEqual([['CASH', 'Cr', 15], ['EXPENSE_OTHER', 'Dr', 15]]);
+  }, 60_000);
 });
