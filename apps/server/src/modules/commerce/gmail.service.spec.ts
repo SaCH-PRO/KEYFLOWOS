@@ -17,7 +17,9 @@
  * confirmPendingConnection checks the owner rule first, then that the pending
  * row is this business's, this user's and inside its window, claims it (single
  * use), and only then writes Business.gmail*. assertConnectAuthority is the
- * owner rule (OWNER membership, Business.ownerId, SUPER_ADMIN).
+ * owner rule (an OWNER membership and SUPER_ADMIN; the recorded owner,
+ * Business.ownerId, only while it holds that OWNER membership: owner rulings
+ * D-104, D-116).
  *
  * Review repairs (U10-U14): the confirmation names the previewed mailbox
  * (ST-CMF5-2); staging refuses a request whose tenant is not the state's
@@ -59,7 +61,9 @@ interface Call { model: string; method: string; args: any }
 
 /**
  * A Prisma client that records every model call. membership.findUnique and
- * business.findFirst answer the owner rule from `state`; connectorAccount keeps
+ * business.findFirst answer the owner rule from `state` (business.findFirst
+ * honours a members.some { userId, role } filter against state.memberships, as
+ * Postgres would); connectorAccount keeps
  * the rows it was given in memory, so a staged row can be confirmed.
  */
 function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: string; claimLoses?: boolean; currentEmail?: string; currentRefresh?: string } = {}) {
@@ -88,7 +92,16 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
     business: {
       findFirst: async (args: any) => {
         calls.push({ model: 'business', method: 'findFirst', args });
-        return args.where.ownerId === state.ownerId && args.where.id === BIZ ? { id: BIZ } : null;
+        if (args.where.ownerId !== state.ownerId || args.where.id !== BIZ) return null;
+        // Owner rulings D-104, D-116: the recorded-owner arm names a Membership
+        // (members.some), and its role when it gives one; answered from
+        // state.memberships as Postgres would answer the relation filter.
+        const some = args.where.members?.some;
+        if (some) {
+          const role = state.memberships?.[some.userId];
+          if (!role || (some.role !== undefined && some.role !== role)) return null;
+        }
+        return { id: BIZ };
       },
       findUnique: async (args: any) => {
         calls.push({ model: 'business', method: 'findUnique', args });
@@ -265,18 +278,27 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
     ]);
   });
 
-  it('[R0-CMF5-U05] RED-BEFORE: assertConnectAuthority admits the OWNER membership, the distinguished owner and SUPER_ADMIN; it refuses STAFF and ADMIN with 403 GMAIL_OWNER_ONLY and no actor with 401', async () => {
-    const { prisma } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF', [ADMIN.id]: 'ADMIN' }, ownerId: DIST_OWNER.id });
+  it('[R0-CMF5-U05] RED-BEFORE: assertConnectAuthority admits an OWNER membership and SUPER_ADMIN; it refuses STAFF, ADMIN and the recorded owner (Business.ownerId) holding only ADMIN or no membership (owner rulings D-104, D-116) with 403 GMAIL_OWNER_ONLY, and no actor with 401', async () => {
+    const expectOwnerOnly = async (gmail: any, actor: any, label: string) => {
+      const err = await gmail.assertConnectAuthority(BIZ, actor).catch((e: unknown) => e);
+      expect(err, label).toBeInstanceOf(ForbiddenException);
+      expect((err as ForbiddenException).getResponse(), label).toMatchObject({ code: 'GMAIL_OWNER_ONLY' });
+    };
+    // Owner ruling D-116 (W11-D116-CONNECTION-OWNER): the recorded owner holding an ADMIN membership is an ADMIN.
+    const { prisma } = fakePrisma({
+      memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF', [ADMIN.id]: 'ADMIN', [DIST_OWNER.id]: 'ADMIN' },
+      ownerId: DIST_OWNER.id,
+    });
     const gmail = new GmailService(prisma) as any;
     expect(typeof gmail.assertConnectAuthority).toBe('function');
     await expect(gmail.assertConnectAuthority(BIZ, OWNER)).resolves.toBeUndefined();
-    await expect(gmail.assertConnectAuthority(BIZ, DIST_OWNER)).resolves.toBeUndefined();
     await expect(gmail.assertConnectAuthority(BIZ, SUPER)).resolves.toBeUndefined();
-    for (const actor of [STAFF, ADMIN]) {
-      const err = await gmail.assertConnectAuthority(BIZ, actor).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ForbiddenException);
-      expect((err as ForbiddenException).getResponse()).toMatchObject({ code: 'GMAIL_OWNER_ONLY' });
+    for (const [actor, label] of [[STAFF, 'STAFF'], [ADMIN, 'ADMIN'], [DIST_OWNER, 'recorded owner holding ADMIN']] as const) {
+      await expectOwnerOnly(gmail, actor, label);
     }
+    // Owner ruling D-104: the recorded owner with no membership row is refused too.
+    const { prisma: noMembership } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' }, ownerId: DIST_OWNER.id });
+    await expectOwnerOnly(new GmailService(noMembership), DIST_OWNER, 'recorded owner with no membership');
     await expect(gmail.assertConnectAuthority(BIZ, undefined)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
