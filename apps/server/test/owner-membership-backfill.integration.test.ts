@@ -963,6 +963,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['parenthesised business read result (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId === session.sub) return;', 'business ownerId compared'],
       ['parenthesised business type assertion', 'if ((business as Business).ownerId === uid) return true;', 'business ownerId compared'],
       ['two business owners compared (one site)', 'if (business.ownerId === parentBusiness.ownerId) return true;', 'business ownerId compared'],
+      ['parenthesised business, union type assertion, non-null assertion', 'if ((rows.business as Business | null)!.ownerId === uid) return true;', 'business ownerId compared'],
     ];
     const PASSED: Array<[string, string]> = [
       ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
