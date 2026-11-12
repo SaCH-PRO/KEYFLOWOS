@@ -292,7 +292,7 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
   // that tool needs; a scoped one needs every scope of its entry, the rest beside its module as
   // GRAPH_ACTION_EXTRA_SCOPES are, and the branches below apply to it (a crm read: graphActionReadsContacts).
   const organ = keyOrganToolAuthority(toolName);
-  if (organ && 'twin' in organ) return graphActionRequirement(organ.twin);
+  if (organ && 'twin' in organ) return keyOrganRequirement(graphActionRequirement(organ.twin));
   const scope = graphActionModuleScope(toolName);
   if (!scope) return null;
   const extra = Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName)
@@ -314,7 +314,26 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
   }
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
   else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
-  return requirement;
+  return organ ? keyOrganRequirement(requirement) : requirement;
+}
+
+const KEY_ORGAN_CONTACT_READ =
+  "it reads contacts in the KEY cortex registry, whose handlers bind no principal on any surface, so no visibility clause keeps another member's PRIVATE contact out";
+
+/**
+ * W11-KEY-ORGAN-AUTHORITY-MAP review SEC-W11KOAM-1 / CR-W11KOA-2 (D-37, D-119): the requirement of a
+ * dotted KEY organ or legacy cortex tool. ownerOnlyWithoutPrincipal assumes a dispatcher that applies
+ * the principal's visibility clause when it has one (the FLOW dispatcher's contactReadAccess). The KEY
+ * cortex registry has none: no dotted handler takes an actor (PortalContentService.getDashboard reads
+ * any contact by id), so a principal-run surface (an approved plan step's proposal,
+ * KeyCortexActionExecutorPlugin with memberIsPrincipal) would run the contact read for a member with
+ * no bound at all. Such a tool is the OWNER's only on every surface.
+ */
+function keyOrganRequirement(
+  requirement: GraphActionRequirement | { refused: string } | null,
+): GraphActionRequirement | { refused: string } | null {
+  if (!requirement || 'refused' in requirement || requirement.ownerOnly || !requirement.ownerOnlyWithoutPrincipal) return requirement;
+  return { ...requirement, ownerOnly: KEY_ORGAN_CONTACT_READ };
 }
 
 /** Who besides a plan's proposer runs one of its steps from POST .../execute: the business OWNER (trial-N review NEW-2). */
@@ -336,6 +355,13 @@ export interface GraphActionAuthorityOptions {
    * contact reads the dispatcher bounds by its principal are the OWNER's only.
    */
   noPrincipal?: boolean;
+  /**
+   * W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1 (GA-06, D-119): the tool will be dispatched by the
+   * FLOW dispatcher (FlowOrchestratorService.executeToolDirect), which runs no KEY cortex (dotted) tool
+   * (it answers one 'Unknown tool'). A dotted tool the organ map gives a scope is then refused before
+   * anything is claimed, to everyone, as an unmapped tool is (POST .../execute passes it).
+   */
+  flowDispatch?: boolean;
 }
 
 /**
@@ -370,6 +396,12 @@ export async function assertMayRunGraphAction(
   }
   if ('refused' in requirement) {
     throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
+  }
+  // W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1 (GA-06, D-119): the organ map judges the surfaces that
+  // run a dotted tool in the KEY cortex registry (the KEY chat, an approved plan step's proposal); the FLOW
+  // dispatcher runs none, so its route keeps refusing one, the OWNER and a SUPER_ADMIN included.
+  if (options.flowDispatch && keyOrganToolAuthority(toolName)) {
+    throw new ForbiddenException(`Tool "${toolName}" is a KEY cortex tool, which this route's dispatcher does not run, so it is not executed from this route`);
   }
   const membership = await prisma.client.membership.findUnique({
     where: { userId_businessId: { userId: user.id, businessId } },
@@ -890,7 +922,8 @@ export class GraphActionsController {
     if (!OPEN_PLAN_STATUS_SET.has(step.plan.status)) {
       throw new ConflictException(`This plan is ${step.plan.status}; its steps are executed by the plan, not from here`);
     }
-    await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: user.role }, toolName, step.plan.userId);
+    // W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1: executeToolDirect below is the FLOW dispatcher.
+    await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: user.role }, toolName, step.plan.userId, { flowDispatch: true });
 
     const spent = () => new ConflictException('This plan step was already executed or is being executed');
     if (step.status !== 'pending') throw spent();
@@ -1231,7 +1264,8 @@ export class GraphActionsController {
       const step = item.planStepId ? byId.get(item.planStepId) : undefined;
       if (!step || !step.toolName || seen.has(step.id) || (item.planId && item.planId !== step.planId)) continue;
       try {
-        await assertMayRunGraphAction(this.prisma, businessId, viewer, step.toolName, step.plan.userId);
+        // CR-W11KOA-1: the rule POST .../execute applies, its FLOW dispatch included.
+        await assertMayRunGraphAction(this.prisma, businessId, viewer, step.toolName, step.plan.userId, { flowDispatch: true });
       } catch (err: unknown) {
         if (err instanceof ForbiddenException) continue;
         throw err;

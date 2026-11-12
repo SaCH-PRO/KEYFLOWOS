@@ -19,7 +19,9 @@ import type { CanonicalModule } from '../../core/authority/module-vocabulary';
  *     governs takes that route's module and level); its requirement is taken unchanged;
  *   - `{ scopes }`: the module scopes, as ModuleScopeGuard reads them, the first being the tool's module
  *     and the rest required beside it (as GRAPH_ACTION_EXTRA_SCOPES are). A crm read is a contact read
- *     (graphActionReadsContacts), so with no principal it is the OWNER's only.
+ *     (graphActionReadsContacts). No dotted handler binds a principal (the KEY cortex registry applies no
+ *     visibility clause), so graphActionRequirement makes such a tool, twin or scoped, the OWNER's only on
+ *     every surface, a principal-run one included (review SEC-W11KOAM-1 / CR-W11KOA-2, D-37).
  * A name in KEY_ORGAN_TOOLS_UNMAPPED keeps no entry: graphActionRequirement answers null, so only the
  * business owner runs it (D-119), with the reason recorded beside it.
  *
@@ -27,7 +29,10 @@ import type { CanonicalModule } from '../../core/authority/module-vocabulary';
  * none is refused the revenue:read entries (D-114: assertMayRunGraphAction checks an explicit map); no
  * entry writes revenue, so D-46's SUPER_ADMIN refusal never applies to one; the owner keeps every tool.
  * A stored plan step naming a mapped dotted tool becomes readable to a member holding its scopes
- * (graphPlanReadScope); the flow dispatcher still answers it 'Unknown tool'.
+ * (graphPlanReadScope), and its approved proposal runs it in the KEY cortex registry as the plan's member
+ * (KeyCortexActionExecutorPlugin). The FLOW dispatcher runs no dotted tool (it answers 'Unknown tool'), so
+ * POST actions/.../execute still refuses one before claiming the step (assertMayRunGraphAction's
+ * flowDispatch, review CR-W11KOA-1).
  */
 
 /** A module scope a dotted tool needs, as ModuleScopeGuard reads it (the shape of graph-actions' GraphActionScope). */
@@ -74,7 +79,7 @@ export const KEY_ORGAN_TOOL_AUTHORITY: Readonly<Record<string, KeyOrganToolAutho
   'storelink.get_conversion_funnel': { scopes: [read('storefront')] },
   'storelink.get_product_health': { scopes: [read('storefront')] },
   'storelink.create_promo_code': { scopes: [write('storefront')] },
-  // A lead's name, email and phone: a contact read, so with no principal only the OWNER runs it.
+  // A lead's name, email and phone: a contact read, so only the OWNER runs it (no dotted handler binds a principal).
   'storelink.list_intakes': { scopes: [read('crm')] },
   // One contact's orders, bookings and open invoice total: a contact read, with money (D-100).
   'storelink.get_portal_dashboard': { scopes: [read('crm'), read('revenue')] },

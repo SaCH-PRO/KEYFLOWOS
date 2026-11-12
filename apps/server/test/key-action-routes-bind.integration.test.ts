@@ -1084,6 +1084,20 @@ describe('V1-31b GA: POST /actions/businesses/:businessId/execute executes only 
     expect(await stepStatus(ID.sUnmapped)).toBe('pending');
   });
 
+  it('GA-06b RED-BEFORE (W11-KEY-ORGAN-AUTHORITY-MAP review CR-W11KOA-1, D-119): a KEY cortex (dotted) tool the organ map gives a module scope is still denied here, even to the OWNER: this route\'s dispatcher runs no dotted tool, so it is refused 403 before the claim, nothing dispatched, the step still pending and not spent', async () => {
+    const stepId = `${P}sDotted`;
+    await seedStep(stepId, ID.planA, 90, 'key_genome.get_blueprint', {});
+    const before = executions.length;
+    const res = await executeGraph(ID.owner, { planId: ID.planA, planStepId: stepId });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).toMatch(/KEY cortex tool/);
+    expect(executions.length).toBe(before);
+    expect(await stepStatus(stepId)).toBe('pending');
+    // Asking again gets the same answer (the step was not spent), not 409.
+    expect((await executeGraph(ID.owner, { planId: ID.planA, planStepId: stepId })).status).toBe(403);
+    expect(executions.length).toBe(before);
+  });
+
   it('GA-07 a stored step that needs formal approval queues one approval item with the stored payload, requested by the real user', async () => {
     const before = executions.length;
     const res = await executeGraph(ID.owner, { planId: ID.planA, planStepId: ID.sApproval, args: CLIENT_ARGS });

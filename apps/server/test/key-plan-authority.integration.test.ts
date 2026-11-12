@@ -1513,10 +1513,23 @@ describe('W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): memberToolRunAuthority jud
   const KO = {
     staffOpsW: `${P}staff_opsw`, // STAFF, explicit scope map {operations: 'write'}
   };
-  let memberToolRunAuthority: (prisma: any, businessId: string, memberId: string, toolName: string) => Promise<{ refusal: string | null; principal: boolean }>;
+  let memberToolRunAuthority: (
+    prisma: any,
+    businessId: string,
+    memberId: string,
+    toolName: string,
+    options?: { asPrincipal?: boolean },
+  ) => Promise<{ refusal: string | null; principal: boolean }>;
+  let planStepRunAuthority: (
+    prisma: any,
+    businessId: string,
+    planId: string,
+    toolName: string,
+    options?: { memberIsPrincipal?: boolean },
+  ) => Promise<{ memberId: string | null; principalId: string | null; refusal: string | null }>;
 
   beforeAll(async () => {
-    ({ memberToolRunAuthority } = await import('../src/modules/ai/plan-step-authority') as any);
+    ({ memberToolRunAuthority, planStepRunAuthority } = await import('../src/modules/ai/plan-step-authority') as any);
     await db.user.create({ data: { id: KO.staffOpsW, email: `${P}staff_opsw@test.local`, role: 'USER' } });
     await db.membership.create({ data: { id: `${P}m_staff_opsw_biz`, userId: KO.staffOpsW, businessId: ID.biz, role: 'STAFF', permissionScopes: { operations: 'write' } } });
   });
@@ -1537,5 +1550,28 @@ describe('W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): memberToolRunAuthority jud
     for (const tool of ['key_genome.get_blueprint', 'cortex.query_business_data']) {
       expect((await memberToolRunAuthority(prisma, ID.biz, ID.owner, tool)).refusal, tool).toBeNull();
     }
+  });
+
+  it('KO-03 RED-BEFORE (W11-KEY-ORGAN-AUTHORITY-MAP review SEC-W11KOAM-1 / CR-W11KOA-2, D-37): a dotted contact read runs in the KEY cortex registry, which binds no principal, so run as the principal (an approved plan step\'s proposal) a STAFF member with crm and revenue read and an ADMIN are refused storelink.get_portal_dashboard and storelink.list_intakes, as with no principal; the owner runs them; a dotted tool reading no contact still runs as the ADMIN principal', async () => {
+    const ownerOnly = /is executed from here only for the business owner: it reads contacts in the KEY cortex registry, whose handlers bind no principal on any surface/;
+    for (const tool of ['storelink.get_portal_dashboard', 'storelink.list_intakes']) {
+      for (const member of [ID.staff, ID.admin]) {
+        for (const asPrincipal of [true, false]) {
+          const run = await memberToolRunAuthority(prisma, ID.biz, member, tool, { asPrincipal });
+          expect(run.refusal, `${member} ${tool} asPrincipal=${asPrincipal}`).toMatch(ownerOnly);
+          expect(run.principal).toBe(false);
+        }
+      }
+      expect((await memberToolRunAuthority(prisma, ID.biz, ID.owner, tool, { asPrincipal: true })).refusal, tool).toBeNull();
+    }
+    expect(await memberToolRunAuthority(prisma, ID.biz, ID.admin, 'key_genome.get_blueprint', { asPrincipal: true })).toEqual({ refusal: null, principal: true });
+
+    // The plan step's proposal rule (KeyCortexActionExecutorPlugin: memberIsPrincipal) over a real plan of the STAFF member.
+    const planId = `${P}plan_ko03`;
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.biz, userId: ID.staff, objective: 'v87b ko03', status: 'pending' } });
+    const step = await planStepRunAuthority(prisma, ID.biz, planId, 'storelink.get_portal_dashboard', { memberIsPrincipal: true });
+    expect(step.memberId).toBe(ID.staff);
+    expect(step.principalId).toBeNull();
+    expect(step.refusal).toMatch(ownerOnly);
   });
 });
