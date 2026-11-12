@@ -42,8 +42,10 @@
  *           exceptions, one per site (reviews CR-W10OM-2, OMV-3): no OR mixing
  *           an ownerId arm and a members arm (either order, any values), no
  *           business read whose where names ownerId anywhere without a members
- *           filter, no `business: { ownerId }` relation filter without one, and
- *           no ownerId (on any receiver but a contact, or destructured) compared
+ *           filter, no `business: { ownerId }` relation filter without one
+ *           (both also through a wrapping skipTenantIsolation(...); reviews
+ *           OMV3-R1, OMV-R1), and no ownerId (on any receiver but a contact,
+ *           indexed or parenthesised ones included, or destructured) compared
  *           to the caller (userId, actorId, user.id, ...).
  *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
  *           no Membership on a business it did not create: the ownerId-only
@@ -73,7 +75,9 @@
  *           business's Membership does not count) is still refused 403.
  *   OMB-17  review OMV-3: the OMB-09 census patterns are not vacuous: each
  *           ownerId-as-authority shape is flagged on synthetic source, and each
- *           membership-carrying or non-business shape is not.
+ *           membership-carrying or non-business shape is not; reviews OMV3-R1,
+ *           OMV-R1 add the skipTenantIsolation-wrapped reads and the indexed
+ *           and parenthesised receivers.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -278,15 +282,23 @@ async function bootstrapError(userId: string) {
  *     names ownerId anywhere and no `members` filter.
  *   'business relation on ownerId without membership': any read whose `where`
  *     filters a `business: { ... }` relation on ownerId without `members`.
+ *     For both read rules the `where` is the call argument's, or that of the
+ *     call wrapping it (`findFirst(skipTenantIsolation({ where }))`, the
+ *     cross-tenant idiom; reviews OMV3-R1, OMV-R1).
  *   'ownerId compared to the caller': `<receiver>.ownerId` or a bare
  *     (destructured, handed-in) `ownerId` compared (===, !==, ==, !=) with the
  *     caller (userId, actorId, user.id, req.user?.id, rows.userId, ...), either
- *     side. A receiver named `contact`/`...Contact` is a Contact's owner, not
+ *     side. The receiver may index or call (rows[0], load(id)) or be
+ *     parenthesised ((await load(id))). A receiver named
+ *     `contact`/`contacts`/`...Contact` is a Contact's owner, not
  *     Business.ownerId, and is not counted.
  */
 const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
-const RECEIVER = String.raw`[\w$]+(?:(?:\?\.|!\.|\.)[\w$]+)*`;
 const DOT = String.raw`(?:\?\.|!\.|\.)`;
+/** `[...]` and `(...)` segments (one nested paren level): rows[0], load(id), (await load(id)). */
+const INDEX = String.raw`\[[^\[\]]*\]`;
+const PARENS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+const RECEIVER = String.raw`(?:[\w$]+|${PARENS})(?:${DOT}[\w$]+|${INDEX}|${PARENS})*`;
 const EQ = String.raw`\s*[!=]==?\s*`;
 const COMPARED: RegExp[] = [
   new RegExp(String.raw`(?<![\w$.])(${RECEIVER})${DOT}ownerId${EQ}${CALLER}`, 'g'),
@@ -322,6 +334,17 @@ function topLevelObject(args: string, key: string): string | null {
   return null;
 }
 
+/**
+ * The call argument `args` ('(' ... ')') with any wrapping call unwrapped:
+ * `(skipTenantIsolation({ where }))` gives `({ where })`, so the where of a
+ * cross-tenant read sits where topLevelObject looks (reviews OMV3-R1, OMV-R1).
+ */
+function unwrapCall(args: string): string {
+  let inner = args;
+  for (let m; (m = /^\(\s*[\w$]+(?:\s*\.\s*[\w$]+)*\s*\(/.exec(inner)); ) inner = bracketGroup(inner, m[0].length - 1);
+  return inner;
+}
+
 function censusHits(source: string): string[] {
   const text = source.replace(/\s+/g, ' ');
   const hits: string[] = [];
@@ -330,7 +353,7 @@ function censusHits(source: string): string[] {
     if (/\bownerId\b/.test(arms) && /\bmembers\b/.test(arms)) hits.push('ownerId OR members');
   }
   for (const m of text.matchAll(new RegExp(String.raw`(?<![\w$])(\w+)\s*\.\s*${READS}\s*\(`, 'g'))) {
-    const where = topLevelObject(bracketGroup(text, m.index! + m[0].length - 1), 'where');
+    const where = topLevelObject(unwrapCall(bracketGroup(text, m.index! + m[0].length - 1)), 'where');
     if (!where) continue;
     if (m[1] === 'business' && /\bownerId\b/.test(where) && !/\bmembers\b/.test(where)) {
       hits.push('business read on ownerId without membership');
@@ -342,8 +365,10 @@ function censusHits(source: string): string[] {
   }
   for (const re of COMPARED) {
     for (const m of text.matchAll(re)) {
-      const receiver = (m[1] ?? '').split(/\?\.|!\.|\./).pop() ?? '';
-      if (!/contact$/i.test(receiver)) hits.push('ownerId compared to the caller');
+      // The receiver's last name, its index and call segments dropped (contacts[0] -> contacts).
+      const tail = (m[1] ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
+      const receiver = tail.split(/\?\.|!\.|\./).pop() ?? '';
+      if (!/contacts?$/i.test(receiver)) hits.push('ownerId compared to the caller');
     }
   }
   return hits.sort();
