@@ -80,10 +80,16 @@
  *           ownerId-as-authority shape is flagged on synthetic source, and each
  *           membership-carrying or non-business shape is not; reviews OMV3-R1,
  *           OMV-R1 add the skipTenantIsolation-wrapped reads and the indexed
- *           and parenthesised receivers; review SEAMZ4-SEC-1 adds a
- *           business-named receiver's ownerId compared with any value but
- *           null/undefined or a typeof check (the 39e9be12 census's
- *           'business ownerId compared'), one label per comparison.
+ *           and parenthesised receivers; review SEAMZ4-SEC-1 restores the
+ *           39e9be12 census's 'business ownerId compared' (a business-named
+ *           receiver's ownerId compared, === or !==, with any value) and adds
+ *           to that rule the loose operators (==, !=), more business-named
+ *           receivers (*Business, getBusiness(id), parenthesised) on either
+ *           side, and the exclusion of null, undefined and typeof checks
+ *           (which the 39e9be12 rule flagged); reviews Z4-RV-CENSUS-SEC-1,
+ *           Z4RV-CENSUS-1 read a receiver chain of any shape (optional or
+ *           nested index and call, a chain broken over lines), as the
+ *           39e9be12 rule's segment match did; one label per comparison.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -294,76 +300,147 @@ async function bootstrapError(userId: string) {
  *   'ownerId compared to the caller': `<receiver>.ownerId` or a bare
  *     (destructured, handed-in) `ownerId` compared (===, !==, ==, !=) with the
  *     caller (userId, actorId, user.id, req.user?.id, rows.userId, ...), either
- *     side. The receiver may index or call (rows[0], load(id)) or be
- *     parenthesised ((await load(id))). A receiver named
- *     `contact`/`contacts`/`...Contact` is a Contact's owner, not
- *     Business.ownerId, and is not counted.
+ *     side. The receiver is any member chain (chainBefore): it may index or
+ *     call at any depth (rows[0], rows?.[0], byId[ids[0]], load(id),
+ *     resolve?.(id), get(toId(String(id)))), be parenthesised
+ *     ((await load(id))), and break over lines (a space before a dot). A
+ *     receiver named `contact`/`contacts`/`...Contact` is a Contact's owner,
+ *     not Business.ownerId, and is not counted.
  *   'business ownerId compared' (review SEAMZ4-SEC-1; the 39e9be12 census's
  *     receiver arm, kept beside the caller one): a business-named receiver's
  *     ownerId compared (===, !==, ==, !=) with any value but null, undefined
  *     or under a typeof check, either side: whoever the other side names
  *     (authUser.id, uid, sub, principal.id, session.sub, input.ownerUserId,
  *     id, ...), the comparison decides on ownerId. Business-named: the
- *     receiver's last name is `biz` or ends in `Biz`, `business`, `Business`
- *     or `businesses`/`Businesses` (business, existingBusiness, rows.business,
- *     this.business, businesses[0], getBusiness(id)); a wholly parenthesised
+ *     receiver's last name is `biz` (or ends in `$biz`) or ends in `Biz`,
+ *     `business`, `Business` or `businesses`/`Businesses` (business,
+ *     existingBusiness, rows.business, this.business, businesses[0],
+ *     getBusiness(id)), whatever the chain before it (reviews
+ *     Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: memberships?.[0]?.business,
+ *     byId[ids[0]].business, (await load(String(id))).business, as the
+ *     39e9be12 census's segment match read them); a wholly parenthesised
  *     receiver is named by its inside, with `await`, a trailing `!` and an
- *     `as T` dropped ((await loadBusiness(id)), (business as Business)), and
- *     a read on a business delegate counts ((await tx.business.findUnique(...))).
+ *     `as T` / `satisfies T` dropped ((await loadBusiness(id)),
+ *     (business as Business)), and a read on a business delegate counts
+ *     ((await tx.business.findUnique(...))).
  *   One label per comparison (the operator's offset): a comparison the caller
  *   rule labels is not labelled again, and two business owners compared with
  *   each other are one site.
  */
 const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
-const DOT = String.raw`(?:\?\.|!\.|\.)`;
-/** `[...]` and `(...)` segments (one nested paren level): rows[0], load(id), (await load(id)). */
-const INDEX = String.raw`\[[^\[\]]*\]`;
-const PARENS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
-const RECEIVER = String.raw`(?:[\w$]+|${PARENS})(?:${DOT}[\w$]+|${INDEX}|${PARENS})*`;
 const OP = String.raw`[!=]==?`;
-/**
- * Each comparison regex names `recv` (the ownerId receiver, '' for a bare
- * ownerId) and `lhs` (everything the match holds before the operator), so the
- * operator's offset (m.index + lhs.length) identifies the site.
- */
-const COMPARED: RegExp[] = [
-  new RegExp(String.raw`(?<![\w$.])(?<lhs>(?<recv>${RECEIVER})${DOT}ownerId\s*)${OP}\s*${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*(?<recv>${RECEIVER})${DOT}ownerId\b`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])(?<lhs>(?<recv>)ownerId\s*)${OP}\s*${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*(?<recv>)ownerId(?![\w$])`, 'g'),
-];
 /** Null or undefined as a whole operand (not nullOwner, undefinedId). */
 const NULLISH = String.raw`(?:null|undefined)(?![\w$])`;
-/**
- * Review SEAMZ4-SEC-1: `<receiver>.ownerId` compared with any operand but a
- * nullish one, the receiver on either side and not under typeof; whether the
- * receiver is business-named is businessReceiver's call.
- */
-const BUSINESS_COMPARED: RegExp[] = [
-  new RegExp(String.raw`(?<![\w$.])(?<!\btypeof )(?<lhs>(?<recv>${RECEIVER})${DOT}ownerId\s*)${OP}(?!=)(?!\s*${NULLISH})`, 'g'),
-  new RegExp(String.raw`(?<![!=])(?<!(?<![\w$])${NULLISH}\s*)(?<lhs>)${OP}\s*(?<recv>${RECEIVER})${DOT}ownerId(?![\w$])`, 'g'),
+/** `.ownerId` (or `?.`, `!.`; a space before the dot allowed): its receiver ends where the match begins. */
+const MEMBER_OWNER_ID = /\s?(?:\?\.|!\.|\.)ownerId(?![\w$])/g;
+/** How far either side of a comparison the operand checks read. */
+const OPERAND_WINDOW = 256;
+/** After `ownerId`: the operator (offset = ws length), then the caller, or any non-nullish value. */
+const CALLER_AFTER = new RegExp(String.raw`^(?<ws>\s*)${OP}\s*${CALLER}`);
+const VALUE_AFTER = new RegExp(String.raw`^(?<ws>\s*)${OP}(?!=)(?!\s*${NULLISH})`);
+/** Before a receiver chain: the operator, then (before it) the caller, or a nullish operand. */
+const OPERATOR_BEFORE = new RegExp(String.raw`(?<![!=])${OP}\s*$`);
+const CALLER_BEFORE = new RegExp(String.raw`(?<![\w$.])${CALLER}\s*$`);
+const NULLISH_BEFORE = new RegExp(String.raw`(?<![\w$])${NULLISH}\s*$`);
+/** A bare (destructured, handed-in) ownerId against the caller, either side; `lhs` ends at the operator. */
+const BARE_COMPARED: RegExp[] = [
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>ownerId\s*)${OP}\s*${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*ownerId(?![\w$])`, 'g'),
 ];
 const READS = String.raw`(?:findUnique|findUniqueOrThrow|findFirst|findFirstOrThrow|findMany|count|aggregate|groupBy)`;
-const BUSINESS_NAME = /^(?:biz|[\w$]*(?:Biz|[bB]usiness(?:es)?))$/;
+const READ_NAME = new RegExp(String.raw`^${READS}$`);
+const BUSINESS_NAME = /^(?:(?:[\w$]*\$)?biz|[\w$]*(?:Biz|[bB]usiness(?:es)?))$/;
 
 /**
- * Whether a comparison's receiver names a business (review SEAMZ4-SEC-1): its
- * last name, index and call segments dropped, or a read on a business delegate;
- * a wholly parenthesised receiver by its inside (await, `!` and `as T` dropped).
+ * The member chain that ends at text[end - 1] (a receiver), read backwards
+ * (reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1): names joined by `.`, `?.` or
+ * `!.` (a space before the dot allowed: a chain prettier broke over lines),
+ * index and call groups at any depth (`?.[..]` and `?.(..)` too), postfix `!`,
+ * and a parenthesised head. Its elements, last first: where each starts and
+ * its name ('' for the parenthesised head). Empty when no chain ends there.
+ */
+function chainBefore(text: string, end: number): Array<{ start: number; name: string }> {
+  const elements: Array<{ start: number; name: string }> = [];
+  let i = end;
+  for (;;) {
+    const elementEnd = i;
+    let name = '';
+    for (;;) {
+      const c = text[i - 1] ?? '';
+      if (c === '!' && /[\w$)\]]/.test(text[i - 2] ?? '')) {
+        i--; // a postfix (non-null) `!`, not a negation
+      } else if (c === ')' || c === ']') {
+        const open = openerOf(text, i - 1);
+        if (open < 0) break;
+        i = open;
+        if (text.slice(i - 2, i) === '?.') i -= 2; // an optional call or index
+        else if (!/[\w$)\]!]/.test(text[i - 1] ?? '')) break; // the parenthesised head
+      } else {
+        const nameEnd = i;
+        while (/[\w$]/.test(text[i - 1] ?? '')) i--;
+        name = text.slice(i, nameEnd);
+        break;
+      }
+    }
+    if (i === elementEnd) break;
+    elements.push({ start: i, name });
+    // The dot joining this element to the one before it.
+    let k = i;
+    if (!name || text[k - 1] !== '.') break;
+    k--;
+    if (text[k - 1] === '?') k--;
+    if (text[k - 1] === ' ') k--;
+    if (!/[\w$)\]!]/.test(text[k - 1] ?? '')) break;
+    i = k;
+  }
+  return elements;
+}
+
+/** The '(', '[' or '{' that the bracket at text[close] closes, brackets balanced; -1 if none. */
+function openerOf(text: string, close: number): number {
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    const c = text[i];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if ((c === '(' || c === '[' || c === '{') && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Whether a comparison's receiver chain names a business (reviews
+ * SEAMZ4-SEC-1, Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1): its last element's name
+ * (index and call groups dropped), or a read on a business delegate; a wholly
+ * parenthesised receiver by its inside (await, a trailing `!` and `as T` /
+ * `satisfies T` dropped).
  */
 function businessReceiver(recv: string): boolean {
-  const tail = recv.replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
-  const names = tail.split(/\?\.|!\.|\./);
-  const name = names.pop() ?? '';
-  if (name) return BUSINESS_NAME.test(name) || (new RegExp(String.raw`^${READS}$`).test(name) && BUSINESS_NAME.test(names.pop() ?? ''));
-  const inner = bracketGroup(recv, 0)
+  const elements = chainBefore(recv, recv.length);
+  if (!elements.length || elements[elements.length - 1].start !== 0) return false;
+  const [last, previous] = elements;
+  if (last.name) return BUSINESS_NAME.test(last.name) || (READ_NAME.test(last.name) && BUSINESS_NAME.test(previous?.name ?? ''));
+  const inner = bracketGroup(recv, last.start)
     .slice(1, -1)
     .trim()
     .replace(/^await\s+/, '')
     // A trailing `as T` / `satisfies T` (unions and generics included; T holds no parens).
     .replace(/\s+(?:as|satisfies)\s+[^()]*$/, '')
     .replace(/!$/, '');
-  return new RegExp(String.raw`^${RECEIVER}$`).test(inner) && businessReceiver(inner);
+  return businessReceiver(inner);
+}
+
+/** The comparison operator just before text[start] (a receiver chain's head), and the operand text before it. */
+function operatorBefore(text: string, start: number): { op: number; operand: string } | null {
+  const from = Math.max(0, start - OPERAND_WINDOW);
+  const before = text.slice(from, start);
+  const m = OPERATOR_BEFORE.exec(before);
+  return m ? { op: from + m.index, operand: before.slice(0, m.index) } : null;
+}
+
+/** The offset of the operator that `re` (CALLER_AFTER or VALUE_AFTER) finds right after text[at], or -1. */
+function operatorAfter(text: string, at: number, re: RegExp): number {
+  const m = re.exec(text.slice(at, at + OPERAND_WINDOW));
+  return m ? at + (m.groups?.ws ?? '').length : -1;
 }
 
 /** The bracket group ('{', '[' or '(') that opens at text[start], brackets balanced. */
@@ -423,23 +500,34 @@ function censusHits(source: string): string[] {
   }
   // One label per comparison, keyed by the operator's offset.
   const compared = new Set<number>();
-  for (const re of COMPARED) {
-    for (const m of text.matchAll(re)) {
-      // The receiver's last name, its index and call segments dropped (contacts[0] -> contacts).
-      const tail = (m.groups?.recv ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
-      const receiver = tail.split(/\?\.|!\.|\./).pop() ?? '';
-      if (/contacts?$/i.test(receiver)) continue;
-      compared.add(m.index! + (m.groups?.lhs ?? '').length);
-      hits.push('ownerId compared to the caller');
-    }
+  const label = (op: number, name: string) => {
+    if (op < 0 || compared.has(op)) return;
+    compared.add(op);
+    hits.push(name);
+  };
+  // Each `<receiver>.ownerId`, its receiver read as a whole member chain.
+  const members = [...text.matchAll(MEMBER_OWNER_ID)].flatMap((m) => {
+    const elements = chainBefore(text, m.index!);
+    if (!elements.length) return [];
+    return [{ elements, start: elements[elements.length - 1].start, end: m.index!, after: m.index! + m[0].length }];
+  });
+  for (const { elements, start, after } of members) {
+    // contacts[0], rows?.[0].contact: a Contact's owner.
+    if (/contacts?$/i.test(elements[0].name)) continue;
+    label(operatorAfter(text, after, CALLER_AFTER), 'ownerId compared to the caller');
+    const before = operatorBefore(text, start);
+    if (before && CALLER_BEFORE.test(before.operand)) label(before.op, 'ownerId compared to the caller');
   }
-  for (const re of BUSINESS_COMPARED) {
-    for (const m of text.matchAll(re)) {
-      const op = m.index! + (m.groups?.lhs ?? '').length;
-      if (compared.has(op) || !businessReceiver(m.groups?.recv ?? '')) continue;
-      compared.add(op);
-      hits.push('business ownerId compared');
+  for (const re of BARE_COMPARED) {
+    for (const m of text.matchAll(re)) label(m.index! + (m.groups?.lhs ?? '').length, 'ownerId compared to the caller');
+  }
+  for (const { start, end, after } of members) {
+    if (!businessReceiver(text.slice(start, end))) continue;
+    if (!/(?<![\w$])typeof\s*$/.test(text.slice(Math.max(0, start - OPERAND_WINDOW), start))) {
+      label(operatorAfter(text, after, VALUE_AFTER), 'business ownerId compared');
     }
+    const before = operatorBefore(text, start);
+    if (before && !NULLISH_BEFORE.test(before.operand)) label(before.op, 'business ownerId compared');
   }
   return hits.sort();
 }
