@@ -170,8 +170,18 @@
  *           for good
  *   V18-T2h an order marked paid through the door is refunded through the
  *           D-14 refund door (in full; a partial amount is 400)
- *   V18-T2i / V18-T2j (it.todo, outside this packet's write set): a partial
- *           refund through the door; COGS posted in the door's transaction
+ *   V18-T2i (it.todo, outside this packet's write set): a partial refund
+ *           through the door
+ *
+ *           W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3), red
+ *           at fb00af1c:
+ *   V18-T2j the paid door posts the order's COGS leg (Dr COGS / Cr Inventory,
+ *   ..T2j3  MarketplaceOrder:<id>:cogs) inside its own transaction for every
+ *           order it marks paid: a STANDARD order marked paid and a storefront
+ *           order settled by its provider each get one cogs posting with the
+ *           payment; a COGS failure rolls the marking back (the order UNPAID,
+ *           nothing recorded) and the next marking records it all; a replayed
+ *           settlement posts no second one
  *
  *           W10-SOP-FIX (D-112; findings SOP-V1, SOP-V2, SOP-V4), each red at
  *           6470942a:
@@ -2633,9 +2643,175 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     "V18-T2i (W10-STORE-ORDER-PAID review CR-W10SOP-2; needs an owner ruling and StoreOrderService.refundOrder, outside this packet's write set) a partial refund of an order paid through the paid door is recorded on its invoice (D-14): a negative REFUNDED row of the amount refunded and its posting reversed by that amount. Before D-112 a marked-paid order had no payment on the books and its partial refund booked an Expense of the amount; the D-14 refund door refunds in full only (V18-T2h)",
   );
 
-  it.todo(
-    "V18-T2j (W10-STORE-ORDER-PAID review CR-W10SOP-3, FIN3; needs StoreOrderService.completeCheckout, outside this packet's write set) the COGS leg of an order marked paid is posted in the paid door's transaction, so a COGS posting failure leaves the order unpaid with nothing recorded, as the base mark_paid did. Today, as for an order created paid (D-77), COGS is posted after the door commits, idempotently, and a failure is logged with nothing to post it again",
-  );
+  /**
+   * W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18, CR-W10SOP-3, FIN3): the paid door
+   * (StoreOrderService.completeCheckout) posts the order's COGS leg (ExpensePostingService.onProductSold: Dr COGS /
+   * Cr Inventory at the weighted unit cost, idempotent on MarketplaceOrder:<id>:cogs) inside its own transaction, for
+   * every order it marks paid, STANDARD and STOREFRONT. At fb00af1c MarketplaceService posted it after the door had
+   * committed (createOrder, recordPaymentThroughDoor), a failure logged with nothing to post it again, and a storefront
+   * settlement posted none.
+   *
+   * The fixture: a tracked product priced as the suite's widget (so the order totals ORDER_TOTAL), with one stock row
+   * at T2J_UNIT_COST in the business's default warehouse (the first active one, where completeCheckout decrements).
+   */
+  const T2J = { product: `${P}t2j_costed`, stock: `${P}t2j_stock`, warehouse: `${P}t2j_wh` };
+  const T2J_UNIT_COST = 12.5;
+  const T2J_COGS = T2J_UNIT_COST * QUANTITY;
+  let t2jFixtures: Promise<void> | undefined;
+  const costedFixtures = () =>
+    (t2jFixtures ??= (async () => {
+      const found = await db.warehouse.findFirst({ where: { businessId: ID.biz, isActive: true }, orderBy: { createdAt: 'asc' } });
+      const warehouseId = found?.id ?? (await db.warehouse.create({ data: { id: T2J.warehouse, businessId: ID.biz, name: 'V18A T2j Warehouse' } })).id;
+      await db.product.create({
+        data: { id: T2J.product, businessId: ID.biz, name: 'V18A Costed', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
+      });
+      await db.inventoryStock.create({
+        data: { id: T2J.stock, businessId: ID.biz, productId: T2J.product, warehouseId, quantity: 50, reserved: 0, costPerUnit: T2J_UNIT_COST },
+      });
+    })());
+  /** The order's cogs postings (sourced by the order itself), with their entries' accounts. */
+  const cogsOf = (orderId: string) =>
+    db.financialTransaction.findMany({
+      where: { businessId: ID.biz, sourceType: 'MarketplaceOrder', sourceId: orderId },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  /** One cogs posting of the order: Dr COGS / Cr INVENTORY_ASSET of unit cost x quantity. */
+  async function expectOneCogsPosting(orderId: string) {
+    const cogs = await cogsOf(orderId);
+    expect(cogs.map((t: any) => `${t.externalRef}:${t.status}:${Number(t.amount)}`), 'one cogs posting').toEqual([
+      `MarketplaceOrder:${orderId}:cogs:POSTED:${T2J_COGS}`,
+    ]);
+    const legs = cogs[0].entries
+      .map((e: any) => `${e.account?.systemKey}:${money(Number(e.debit))}:${money(Number(e.credit))}`)
+      .sort();
+    expect(legs, 'Dr COGS / Cr Inventory').toEqual([`COGS:${T2J_COGS}:0`, `INVENTORY_ASSET:0:${T2J_COGS}`].sort());
+  }
+  /**
+   * onProductSold (real) observed as it is called: whether it was handed the door's transaction client, and what a
+   * reader outside that transaction sees of the order at that moment (its payment status, its payments).
+   */
+  async function observeCogsPosting() {
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    const expensePosting = app.get(ExpensePostingService);
+    const calls: Array<{ sourceId: string; inTx: boolean; outside: string }> = [];
+    const real = expensePosting.onProductSold.bind(expensePosting);
+    const spy = vi.spyOn(expensePosting, 'onProductSold').mockImplementation(async (sale: any, tx?: any) => {
+      const order = await db.marketplaceOrder.findUnique({ where: { id: sale.sourceId }, select: { paymentStatus: true, orderNumber: true } });
+      const payments = await db.payment.count({ where: { businessId: ID.biz, invoice: { invoiceNumber: `INV-${order?.orderNumber}` } } });
+      calls.push({ sourceId: sale.sourceId, inTx: tx !== undefined, outside: `${order?.paymentStatus}/payments:${payments}` });
+      return real(sale, tx);
+    });
+    return { calls, spy, expensePosting };
+  }
+
+  it('V18-T2j (W11-CHECKOUT-COGS-TX, D-127; F-18, CR-W10SOP-3, FIN3) a STANDARD order marked paid (mark_paid) with a costed tracked line has exactly one cogs FinancialTransaction, Dr COGS / Cr Inventory of unit cost x quantity, committed with the payment: it is posted inside the paid door\'s transaction (handed the transaction client, the order still UNPAID with no payment to a reader outside it), beside one PAID invoice, one SUCCESSFUL payment and one payment_recorded posting', async () => {
+    await costedFixtures();
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const observed = await observeCogsPosting();
+    try {
+      const order = await standardOrderOfA('t2j_mark', {
+        items: { create: [{ productId: T2J.product, name: 'V18A Costed', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      });
+      expect(await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner)))).toBe(200);
+      await settle();
+      await expectOnePaidInvoice(order);
+      await expectOneCogsPosting(order.id);
+      // At fb00af1c onProductSold ran after the door had committed: no transaction client, the order already PAID.
+      expect(observed.calls, 'posted in the door\'s transaction').toEqual([{ sourceId: order.id, inTx: true, outside: 'UNPAID/payments:0' }]);
+      // STANDARD stock moves at fulfilment (stockMovesOnFulfilment): the door does not decrement it.
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity).toBe(50);
+    } finally {
+      observed.spy.mockRestore();
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2j2 (W11-CHECKOUT-COGS-TX, D-127; F-18) a COGS posting failure rolls the marking back: with onProductSold throwing once (cost accounts missing), mark_paid answers the error (400) and the order stays UNPAID with no INV-<orderNumber>, payment or posting (cogs included) and no store_order.paid; the next marking records the invoice, the payment, its posting and the one cogs posting', async () => {
+    await costedFixtures();
+    const { BadRequestException } = await import('@nestjs/common');
+    const { market, controller } = await marketRoutes();
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    const observed = await observeCogsPosting();
+    try {
+      const order = await standardOrderOfA('t2j_fail', {
+        items: { create: [{ productId: T2J.product, name: 'V18A Costed', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      });
+      const shape = await orderShape(order.id);
+      const before = await counts();
+      seen = [];
+      observed.spy.mockRejectedValueOnce(new BadRequestException(`No COGS COA for business ${ID.biz} - chart of accounts not seeded`));
+
+      // At fb00af1c: 200 and the order PAID with its invoice, payment and posting, the COGS failure only logged.
+      expect(
+        await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner))),
+        'the COGS failure is the marking\'s answer',
+      ).toBe(400);
+      await settle();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).paymentStatus, 'the order stays unpaid').toBe('UNPAID');
+      expect(await orderShape(order.id), 'the marking taken back').toEqual(shape);
+      expect(await invoicesOf(order), 'no INV-<orderNumber>').toEqual([]);
+      expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+      expect(await cogsOf(order.id), 'no cogs posting').toEqual([]);
+      expect(storeEvents(), 'no store_order.paid').not.toContain('store_order.paid');
+
+      expect(await answered(controller.fulfillOrder(ID.biz, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, signedIn(ID.owner))), 'the next marking').toBe(200);
+      await settle();
+      await expectOnePaidInvoice(order);
+      await expectOneCogsPosting(order.id);
+      expect(storeEvents().filter((n) => n === 'store_order.paid'), 'one store_order.paid').toHaveLength(1);
+    } finally {
+      observed.spy.mockRestore();
+      routing.mockRestore();
+    }
+  });
+
+  it('V18-T2j3 (W11-CHECKOUT-COGS-TX, D-127; F-18) a storefront order settled by its provider (completeCheckout through updatePaymentStatus) with a costed tracked line posts one cogs FinancialTransaction in the paid door\'s transaction, beside its invoice, payment, posting and stock decrement; a replayed settlement (and a replayed completeCheckout) posts no second one, and the posting is idempotent on MarketplaceOrder:<id>:cogs', async () => {
+    await costedFixtures();
+    const observed = await observeCogsPosting();
+    try {
+      const order = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: T2J.product, quantity: QUANTITY }],
+        customerInfo: { name: 'Vee Eighteen', email: CUSTOMER_EMAIL },
+        paymentMethod: 'WIPAY',
+      });
+      await settle();
+      expect(`${order.type}/${order.paymentStatus}/${order.total}`).toBe(`STOREFRONT/UNPAID/${ORDER_TOTAL}`);
+      const stockBefore = (await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity;
+
+      await storeOrders.updatePaymentStatus(order.id, 'PAID', `${P}wtx_t2j3`, 'wipay');
+      await settle();
+      await expectOnePaidInvoice(order);
+      // At fb00af1c a storefront settlement posted no COGS at all.
+      await expectOneCogsPosting(order.id);
+      expect(observed.calls, 'posted in the door\'s transaction').toEqual([{ sourceId: order.id, inTx: true, outside: 'UNPAID/payments:0' }]);
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity, 'the stock decremented').toBe(stockBefore - QUANTITY);
+
+      // Replays: the provider's callback again, and completeCheckout itself. The door returns the PAID order as stored.
+      const before = await counts();
+      await storeOrders.updatePaymentStatus(order.id, 'PAID', `${P}wtx_t2j3`, 'wipay');
+      await storeOrders.completeCheckout({ orderId: order.id, paymentRef: `${P}wtx_t2j3_again`, provider: 'wipay', method: 'wipay' });
+      await settle();
+      expect(await counts(), 'nothing written by a replay').toEqual(before);
+      await expectOneCogsPosting(order.id);
+      expect((await db.inventoryStock.findUnique({ where: { id: T2J.stock } })).quantity, 'no second decrement').toBe(stockBefore - QUANTITY);
+      // The posting itself is idempotent on its externalRef.
+      const again = await observed.expensePosting.onProductSold({
+        businessId: ID.biz,
+        sourceType: 'MarketplaceOrder',
+        sourceId: order.id,
+        date: new Date(),
+        currency: 'TTD',
+        items: [{ productId: T2J.product, quantity: QUANTITY }],
+      });
+      expect(again?.alreadyPosted, 'MarketplaceOrder:<id>:cogs posted once').toBe(true);
+      await expectOneCogsPosting(order.id);
+    } finally {
+      observed.spy.mockRestore();
+    }
+  });
 
   it('V18-T3 (W9-STORE-PAID-LISTENERS, was it.todo; D-18, V1-33) live pin: CASH and MANUAL storefront orders reach PAID through POST /site/businesses/:businessId/orders/:orderId/complete-offline (revenue write, the signed-in member records it) with one invoice, one payment and one posting, a second completion writes nothing, and the store fulfillment panel\'s Complete offline action posts to that route (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04)', async () => {
     const fs = await import('fs');
