@@ -156,34 +156,6 @@ export class MarketplaceService {
       .catch((err) => this.logger.error(`Shipping Expense for order ${orderId} not booked: ${(err as Error).message}`));
   }
 
-  /**
-   * FIN3 — post the COGS leg (Dr COGS / Cr Inventory) for a storefront/
-   * marketplace order that just transitioned to PAID. Uses the same
-   * weighted-average-cost recipe as the invoice path. Idempotent on
-   * `MarketplaceOrder:{id}:cogs`. Wrapped in try/catch only because we
-   * fall back to the legacy emit path; the service-internal callers
-   * await this inside their own transaction below.
-   */
-  private async postOrderCogs(order: {
-    id: string;
-    businessId: string;
-    currency: string;
-    items: Array<{ productId: string | null; quantity: number }>;
-  }): Promise<void> {
-    const items = (order.items ?? [])
-      .filter((i) => i.productId && i.quantity > 0)
-      .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
-    if (items.length === 0) return;
-    await this.expensePosting.onProductSold({
-      businessId: order.businessId,
-      sourceType: 'MarketplaceOrder',
-      sourceId: order.id,
-      date: new Date(),
-      currency: order.currency,
-      items,
-    });
-  }
-
   private generateOrderNumber(): string {
     const prefix = 'MKT';
     const timestamp = Date.now().toString(36).toUpperCase();
@@ -619,10 +591,7 @@ export class MarketplaceService {
       paidStatus: 'paid',
       stockMovesOnFulfilment: true,
     });
-    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is paid.
-    await this.postOrderCogs(order).catch((err) =>
-      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
-    );
+    // W11-CHECKOUT-COGS-TX (owner ruling D-127): the door posted the COGS leg in its own transaction.
 
     this.autoRouteOrder(businessId, order.id, true);
 
@@ -994,21 +963,15 @@ export class MarketplaceService {
         this.logger.error(`Could not take back the paid marking step of order ${order.id}: ${(undoErr as Error).message}`),
       );
     }
-    const cogsShape = { id: true, businessId: true, currency: true, items: { select: { productId: true, quantity: true } } } as const;
-    const paid = recordedHere
-      ? await this.prisma.client.marketplaceOrder.update({
-          where: { id: order.id },
-          data: { paymentMethod: method.toUpperCase(), ...(memberRef ? { paymentRef: memberRef } : {}) },
-          select: cogsShape,
-        })
-      : await this.prisma.client.marketplaceOrder.findFirstOrThrow({
-          where: { id: order.id, businessId: order.businessId },
-          select: cogsShape,
-        });
-    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is recorded.
-    await this.postOrderCogs(paid).catch((err) =>
-      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
-    );
+    if (recordedHere) {
+      await this.prisma.client.marketplaceOrder.update({
+        where: { id: order.id },
+        data: { paymentMethod: method.toUpperCase(), ...(memberRef ? { paymentRef: memberRef } : {}) },
+        select: { id: true },
+      });
+    }
+    // W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18): the COGS leg was posted by the door, in its transaction, with
+    // the payment; it is no longer posted here after the door commits (a failure there left a paid order with no COGS).
     return { doorStatus: recordedHere && door ? door.status : null };
   }
 

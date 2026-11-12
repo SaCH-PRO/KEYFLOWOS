@@ -92,6 +92,8 @@ function build(stored: ReturnType<typeof order>) {
   const crm = { findOrCreateContact: vi.fn(async () => ({ id: 'contact_v18' })) };
   const publicEvents = { logStorefrontEvent: vi.fn(async () => undefined) };
   const inventoryRisk = { evaluateProduct: vi.fn(async () => null) };
+  // W11-CHECKOUT-COGS-TX (D-127): the COGS leg completeCheckout posts in its transaction.
+  const expensePosting = { onProductSold: vi.fn(async () => null) };
 
   const svc = new StoreOrderService(
     { client } as any,
@@ -103,8 +105,9 @@ function build(stored: ReturnType<typeof order>) {
     inventoryRisk as any,
     revenueAttribution as any,
     revenuePosting as any,
+    expensePosting as any,
   );
-  return { svc, emitted, writes, tx, client, revenuePosting };
+  return { svc, emitted, writes, tx, client, revenuePosting, expensePosting };
 }
 
 describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
@@ -154,6 +157,12 @@ describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
     expect(h.emitted.some((e) => e.name === 'store_order.confirmed')).toBe(false);
     expect(h.writes).toEqual(['invoice.create', 'payment.create', 'order.update']);
     expect(h.revenuePosting.onPaymentRecorded).toHaveBeenCalledWith('pay_v18_1', expect.objectContaining({ tx: h.tx }));
+    // W11-CHECKOUT-COGS-TX (D-127): the order's COGS leg is posted once, in the same transaction.
+    expect(h.expensePosting.onProductSold).toHaveBeenCalledTimes(1);
+    expect(h.expensePosting.onProductSold).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: BIZ, sourceType: 'MarketplaceOrder', sourceId: 'ord_v18_1', currency: 'TTD', contactId: 'contact_v18', items: [{ productId: 'prod_v18', quantity: 1 }] }),
+      h.tx,
+    );
     expect(out?.paymentStatus).toBe('PAID');
   });
 
@@ -163,5 +172,6 @@ describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
     expect(h.emitted).toEqual([]);
     expect(h.writes).toEqual([]);
     expect(h.client.$transaction).not.toHaveBeenCalled();
+    expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
   });
 });

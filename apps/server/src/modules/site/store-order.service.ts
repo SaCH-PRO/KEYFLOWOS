@@ -13,6 +13,7 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
@@ -227,6 +228,11 @@ export class StoreOrderService {
     @Inject(InventoryRiskService) private readonly inventoryRisk: InventoryRiskService,
     @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
+    /**
+     * W11-CHECKOUT-COGS-TX (owner ruling D-127): the COGS leg (onProductSold) completeCheckout posts inside its
+     * transaction for every order it marks paid. FinanceModule exports it; SiteModule imports FinanceModule.
+     */
+    @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
     /** The D-14 refund door (refundOrder). Optional only so the unit harnesses that never refund need not build it. */
     @Optional() @Inject(forwardRef(() => CommerceService)) private readonly commerce?: CommerceService,
     /**
@@ -1043,6 +1049,8 @@ export class StoreOrderService {
    *   2. Payment (status SUCCESSFUL) linked to invoice + business
    *   3. InventoryStock decrement + StockMovement audit row per item
    *   4. RevenueAttribution row (source='storefront', revenueType='ORDER')
+   *   4b. COGS posting (Dr COGS / Cr Inventory, MarketplaceOrder:<id>:cogs)
+   *      for the order's product lines (W11-CHECKOUT-COGS-TX, D-127)
    *   5. MarketplaceOrder updated to status CONFIRMED (a fulfilment status
    *      already past it is kept), paymentStatus PAID
    *
@@ -1366,6 +1374,31 @@ export class StoreOrderService {
         },
         tx as unknown as Prisma.TransactionClient,
       );
+
+      // 4b. W11-CHECKOUT-COGS-TX (owner ruling D-127; F-18): the COGS leg (Dr COGS / Cr Inventory at the weighted
+      //     unit cost, ExpensePostingService.onProductSold, idempotent on MarketplaceOrder:<id>:cogs) for every order
+      //     this door marks paid, STOREFRONT and STANDARD, in this transaction: a COGS failure (no cost accounts) rolls
+      //     the settlement back as a failed revenue posting does, and the provider retries. MarketplaceService posted it
+      //     after this door had committed, a failure only logged, and a storefront settlement posted none. Read after
+      //     step 3, so a decremented line is costed from the stock rows as this transaction left them. The checkout
+      //     invoice's items carry no productId, so the PAID transition posts no second COGS under sourceType Invoice.
+      const soldItems = order.items
+        .filter((item) => item.productId && item.quantity > 0)
+        .map((item) => ({ productId: item.productId, quantity: item.quantity }));
+      if (soldItems.length > 0) {
+        await this.expensePosting.onProductSold(
+          {
+            businessId: order.businessId,
+            sourceType: 'MarketplaceOrder',
+            sourceId: order.id,
+            date: now,
+            currency: order.currency,
+            contactId,
+            items: soldItems,
+          },
+          txClient,
+        );
+      }
 
       // 5. Order — paid + confirmed. V1-33 review (V33-CR-3): fulfilment
       //    already past CONFIRMED (a cash-on-delivery order shipped or

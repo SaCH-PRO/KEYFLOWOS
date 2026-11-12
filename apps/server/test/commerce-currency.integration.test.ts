@@ -2112,6 +2112,9 @@ describe('V1-37d review: only money that follows a legacy invoice keeps its curr
 
   it('LC-08 RED-BEFORE (ST-V37D-1 / CR-V37D-1): a NEW storefront order priced JMD or zzz, and the storefront recipe in EUR, are refused at the door (400) and write nothing', async () => {
     const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    // W11-CHECKOUT-COGS-TX (D-127): the paid door's COGS leg, real (untracked products here: nothing to cost).
+    const expensePosting = new ExpensePostingService(prismaRef, posting, coa);
     for (const cur of ['JMD', 'zzz']) {
       const product = await db.product.create({
         data: { id: `${P}prod_${cur}`, businessId: ID.bizNew, name: `v37d ${cur} widget`, price: 25, currency: cur, category: 'PRODUCT', inventoryMode: 'untracked' },
@@ -2126,6 +2129,7 @@ describe('V1-37d review: only money that follows a legacy invoice keeps its curr
         { evaluateProduct: async () => null } as any,
         { record: async () => null } as any,
         revenuePosting,
+        expensePosting,
       );
       const order = await store.createOrder({
         businessId: ID.bizNew,
