@@ -607,9 +607,11 @@ export class KeyCortexQueryPipelineService {
         ? systemPrompt
         : `${systemPrompt}\n\n${structuredInstructions}`;
 
+      // W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 (D-130): read for the requester, as chatMemoryFragments is.
       const memoryContext = await this.promptContextService.buildMemoryContext(
         query.businessId,
         session,
+        query.userId,
       );
       const messages = this.promptContextService.buildMessages(
         query,
@@ -1289,9 +1291,11 @@ export class KeyCortexQueryPipelineService {
         Math.min(2, baseTemperature + toneInfo.temperatureAdjustment),
       );
 
+      // W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 (D-130): read for the requester, as chatMemoryFragments is.
       const memoryContext = await this.promptContextService.buildMemoryContext(
         query.businessId,
         session,
+        query.userId,
       );
       const messages = this.promptContextService.buildMessages(
         query,

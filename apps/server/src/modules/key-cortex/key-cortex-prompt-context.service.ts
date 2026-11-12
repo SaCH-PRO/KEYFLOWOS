@@ -195,10 +195,16 @@ export class KeyCortexPromptContextService {
 
   /**
    * Build contextual memory block for the LLM prompt.
+   *
+   * W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 (owner ruling D-130): `requesterId` is the member the turn is
+   * read for (the pipeline's query.userId, the id chatMemoryFragments reads the same prompt's memory for), not the
+   * member the session names: the WS key:chat handler hands the pipeline the client's session id unchecked, and
+   * getOrCreateSession loads any session by id. No requester reads no per-member memory (fail closed).
    */
   async buildMemoryContext(
     businessId: string,
     session: CortexSession,
+    requesterId: string | undefined,
   ): Promise<{
     runningSummary?: string;
     aiMemory?: string;
@@ -222,11 +228,13 @@ export class KeyCortexPromptContextService {
         : '';
 
     // W11-CORTEX-MEMORY-COGNITION (owner ruling D-130): the member this prompt is read for, once, for both
-    // blocks below (the memory fragments and the learned lessons). Nobody when the session names no member
+    // blocks below (the memory fragments and the learned lessons). Nobody when the requester is no member
     // of the business (W9-KEY-CORTEX-AUDIT, D-104 membership-only).
+    // Review SEC-W11MC-1 (D-130): the requester, never session.userId: a turn on another member's session
+    // reads the requester's own memory and lessons, as chatMemoryFragments does for the same prompt.
     const reader =
       this.unifiedMemory || this.learningService
-        ? await this.episodicMemoryReader(businessId, session.userId)
+        ? await this.episodicMemoryReader(businessId, requesterId)
         : null;
 
     if (this.unifiedMemory) {
@@ -308,10 +316,10 @@ export class KeyCortexPromptContextService {
   }
 
   /**
-   * W9-KEY-CORTEX-AUDIT: the member whose episodic memory a prompt for this session may read: the
-   * session's user when they own the business or hold a membership in it (BusinessGuard's own
-   * predicate, userCanAccessBusiness), else nobody. No user, a user who is no member (a platform
-   * SUPER_ADMIN passes BusinessGuard without one; a removed member's session), or a check that cannot
+   * W9-KEY-CORTEX-AUDIT: the member whose episodic memory a prompt may read: the requester (review
+   * SEC-W11MC-1: not the session's user) when they own the business or hold a membership in it
+   * (BusinessGuard's own predicate, userCanAccessBusiness), else nobody. No user, a user who is no member
+   * (a platform SUPER_ADMIN passes BusinessGuard without one; a removed member), or a check that cannot
    * be made: nobody, so no episodic memory is read.
    */
   private async episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {

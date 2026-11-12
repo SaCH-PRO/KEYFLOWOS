@@ -593,6 +593,44 @@ describe('W10-CORTEX-CHAT-SCOPE review: the chat memory block holds only the rea
   );
 });
 
+// W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 (owner ruling D-130): buildMemoryContext's memory and lessons are
+// read for the requester (query.userId), as chatMemoryFragments reads the same prompt's, never for the member the
+// session names (the WS key:chat handler hands the pipeline the client's session id unchecked). The real-database
+// proof is in test/key-cortex-action-audit.integration.test.ts.
+describe('W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1: buildMemoryContext is read for the requester, not the session\'s member', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
+    mockModelGateway.complete.mockResolvedValue({
+      content: 'Hello',
+      provider: 'openai',
+      model: 'gpt-4o',
+      usage: { totalTokens: 10, estimatedCost: 0.001 },
+      fallbackUsed: false,
+    });
+    mockModelGateway.streamComplete.mockImplementation(async function* () {
+      yield { content: 'Done.', provider: 'openai', model: 'gpt-4o' };
+    });
+    mockActionDetectionService.detectActions.mockReturnValue([]);
+  });
+
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'W11-CORTEX-MEMORY-COGNITION SEC-W11MC-1 (D-130) %s: a turn on another member\'s session hands buildMemoryContext the requester, not session.userId',
+    async (path) => {
+      const ownersSession = { ...mockSession, userId: 'owner-of-the-session' };
+      mockSessionService.getOrCreateSession.mockResolvedValueOnce(ownersSession);
+      const pipeline = createPipeline();
+      const query = { text: 'hi', businessId: 'biz-1', userId: 'member-u', sessionId: ownersSession.id } as any;
+      const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+      if (path === 'processQuery') await pipeline.processQuery(query, flags);
+      else for await (const _chunk of pipeline.streamQuery(query, flags)) void _chunk;
+
+      expect(mockPromptContextService.buildMemoryContext).toHaveBeenCalledTimes(1);
+      expect(mockPromptContextService.buildMemoryContext).toHaveBeenCalledWith('biz-1', ownersSession, 'member-u');
+    },
+  );
+});
+
 // W10-CORTEX-CHAT-SCOPE review repair SEC-W10CCS-R1 (owner rulings D-71, D-57, D-73): the model's tool calls on
 // POST cortex/chat and the chat stream run through KeyCortexToolLoopService (registry.execute), which reads no
 // membership. Each call is now held, for the member the chat runs for, to the rule the plan queue holds a plan's
