@@ -1114,6 +1114,7 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-137 | Operator repair scripts (dry run by default, applied by an operator after a backup): delete cross-business planted stock rows with nothing reserved, keeping their movement history, and list reserved ones for manual repair; release storefront reservations held for stock the checkout already decremented. | W11 planted stock census, storefront reservations. |
 | D-138 | D-105 extended to PayPal and Stripe: a storefront offers PayPal or Stripe only when the business has saved its own complete credential set; the platform's PayPal and Stripe credentials never stand in for a store's, and a store's keys are never mixed with the platform's. | W11b storefront own payment keys (review SEC-W11SCM-1). |
 | D-139 | Setting a stock count directly (POST .../inventory) writes one ADJUSTMENT stock movement (reason SET, the difference, the acting member); a count below the row's reserved quantity is refused with 400; reserved is not hand-editable (only order reservations change it); the Excel import keeps its single EXCEL_IMPORT movement. | W11b inventory set movement (review SEC-UPS-2). |
+| D-140 | An OWNER membership that carries an explicit permissionScopes map is bound by it on KEY as on REST: it is refused every unmapped KEY tool (fail closed), as it already is any mapped tool outside its map; an OWNER membership with no explicit map keeps every tool. | W11b owner map on unmapped KEY tools (seam review SEC-SR-3). |
 
 ---
 
