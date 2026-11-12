@@ -102,9 +102,20 @@ const ID = {
   cCPriv: `${P}cCPriv`,         // C, PRIVATE, owned by the owner: the contact the invoice was sent to
   cCTeam: `${P}cCTeam`,         // C, TEAM: the invoice's contact now (re-pointed by updateInvoice)
   cCNameless: `${P}cCNameless`, // C, TEAM, no first or last name: the writer titles it 'Customer'
+  /**
+   * W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118 with D-116 / D-125): a business whose recorded owner
+   * (Business.ownerId) holds only an ADMIN membership, and whose OWNER membership is held by a co-owner.
+   */
+  bizD: `${P}bizD`,
+  recordedAdmin: `${P}recordedAdmin`, // D: Business.ownerId, ADMIN membership with default scopes (D-116: an ADMIN)
+  coOwner: `${P}coOwner`,             // D: OWNER membership, not Business.ownerId (D-125: the owner)
+  cDPriv: `${P}cDPriv`,               // D, PRIVATE, owned by the co-owner: the contact the invoice was sent to
+  cDTeam: `${P}cDTeam`,               // D, TEAM: the invoice's contact now (re-pointed by updateInvoice)
 };
 const C_PRIV_NAME = 'v96o Private Payee';
 const C_TEAM_NAME = 'v96o Current Payer';
+const D_PRIV_NAME = 'v96o Private Debtor';
+const D_TEAM_NAME = 'v96o Current Debtor';
 
 const HIDDEN_NAME = 'v96o Hidden Payer';
 const HIDDEN_EMAIL = `${P}hidden-payer@test.local`;
@@ -119,6 +130,8 @@ const INV = {
   gone: `${P}invGone`, // no row
   repointed: `${P}invRepointed`, // C: sent to cCPriv, now cCTeam's
   nameless: `${P}invNameless`,   // C: cCNameless's
+  dRepointed: `${P}invDRepointed`, // D: sent to cDPriv, now cDTeam's
+  dGone: `${P}invDGone`,           // D: no row
 };
 /** Message intakes: A's (PRIVATE contact, TEAM contact, no contact), B's, one that is gone, and A's intake whose contact is B's. */
 const INTAKE = {
@@ -206,6 +219,10 @@ const ROWS: Row[] = [
   invoiceRow('oldCInvRepointed', ID.bizC, INV.repointed, 'v96o-INV-C1', C_PRIV_NAME),
   invoiceRow('oldCInvCurrent', ID.bizC, INV.repointed, 'v96o-INV-C1', C_TEAM_NAME),
   invoiceRow('oldCInvCustomer', ID.bizC, INV.nameless, 'v96o-INV-C2', 'Customer'),
+  // D (D-118 with D-116 / D-125): a name_mismatch row, a linked row and a source_gone row of D
+  invoiceRow('oldDInvRepointed', ID.bizD, INV.dRepointed, 'v96o-INV-D1', D_PRIV_NAME),
+  invoiceRow('oldDInvCurrent', ID.bizD, INV.dRepointed, 'v96o-INV-D1', D_TEAM_NAME),
+  invoiceRow('oldDInvGone', ID.bizD, INV.dGone, 'v96o-INV-D9', 'v96o Gone Debtor'),
 ];
 const LINKED: Record<string, string> = {
   oldInvPriv: ID.cPriv,
@@ -217,6 +234,7 @@ const WITHHELD = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCross
 const UNTOUCHED = ['oldInNone', 'ctlW9Inv', 'ctlW9In', 'ctlInvPaid', 'ctlCrm'];
 const A_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizA).map((r) => act(r.key));
 const C_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizC).map((r) => act(r.key));
+const D_ROW_IDS = ROWS.filter((r) => r.businessId === ID.bizD).map((r) => act(r.key));
 
 /** Custom-field definitions and values. A and B both define `tier` (names are unique per business only). */
 const DEF = {
@@ -300,7 +318,7 @@ async function ids(res: request.Response | Promise<request.Response>): Promise<s
 }
 /** The fixture rows a member is served on /events, the day's summary and the legacy route, and the text of the three answers. */
 async function served(user: string, biz: string = ID.bizA): Promise<{ events: string[]; summary: string[]; legacy: string[]; text: string }> {
-  const rowIds = biz === ID.bizC ? C_ROW_IDS : A_ROW_IDS;
+  const rowIds = biz === ID.bizC ? C_ROW_IDS : biz === ID.bizD ? D_ROW_IDS : A_ROW_IDS;
   const ev = await agent().get(`/timeline/businesses/${biz}/events?limit=200`).set(HEADER, user);
   const day = await agent().get(`/timeline/businesses/${biz}/summary/${DAY_PARAM}`).set(HEADER, user);
   expect(day.status, `${user}: ${JSON.stringify(day.body).slice(0, 300)}`).toBe(200);
@@ -386,13 +404,15 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.admin, ID.staffOwned, ID.staffCrmNone, ID.staffFull, ID.adminCrmNone, ID.ownerB]) {
+  for (const id of [ID.owner, ID.admin, ID.staffOwned, ID.staffCrmNone, ID.staffFull, ID.adminCrmNone, ID.ownerB, ID.recordedAdmin, ID.coOwner]) {
     await db.user.create({ data: { id, email: `${P}u_${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V96O Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V96O Biz B', ownerId: ID.ownerB } });
   await db.business.create({ data: { id: ID.bizNone, name: 'V96O Biz None', ownerId: ID.ownerB } });
   await db.business.create({ data: { id: ID.bizC, name: 'V96O Biz C', ownerId: ID.owner } });
+  // D-116: the recorded owner of D holds only an ADMIN membership; the co-owner holds D's OWNER membership.
+  await db.business.create({ data: { id: ID.bizD, name: 'V96O Biz D', ownerId: ID.recordedAdmin } });
 
   const m = (user: string, biz: string, role: string, permissionScopes?: Record<string, string>) =>
     db.membership.create({ data: { id: `${P}m_${user.slice(P.length)}_${biz.slice(P.length)}`, userId: user, businessId: biz, role, permissionScopes: permissionScopes ?? undefined } });
@@ -406,6 +426,10 @@ beforeAll(async () => {
   await m(ID.owner, ID.bizC, 'OWNER');
   await m(ID.staffFull, ID.bizC, 'STAFF', { crm: 'read', revenue: 'read' });
   await m(ID.adminCrmNone, ID.bizC, 'ADMIN', { crm: 'none', revenue: 'read', ai: 'read' });
+  // W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): an ADMIN of C with default scopes (DCS-T08).
+  await m(ID.admin, ID.bizC, 'ADMIN');
+  await m(ID.recordedAdmin, ID.bizD, 'ADMIN');
+  await m(ID.coOwner, ID.bizD, 'OWNER');
 
   await db.contact.create({ data: { id: ID.cPriv, businessId: ID.bizA, firstName: 'v96o', lastName: 'Hidden Payer', email: HIDDEN_EMAIL, visibility: 'PRIVATE', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cTeam, businessId: ID.bizA, firstName: 'v96o', lastName: 'Team Payer', email: `${P}team-payer@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
@@ -413,6 +437,8 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.cCPriv, businessId: ID.bizC, firstName: 'v96o', lastName: 'Private Payee', email: `${P}c-private@test.local`, visibility: 'PRIVATE', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cCTeam, businessId: ID.bizC, firstName: 'v96o', lastName: 'Current Payer', email: `${P}c-current@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cCNameless, businessId: ID.bizC, email: `${P}c-nameless@test.local`, visibility: 'TEAM', ownerId: ID.owner } });
+  await db.contact.create({ data: { id: ID.cDPriv, businessId: ID.bizD, firstName: 'v96o', lastName: 'Private Debtor', email: `${P}d-private@test.local`, visibility: 'PRIVATE', ownerId: ID.coOwner } });
+  await db.contact.create({ data: { id: ID.cDTeam, businessId: ID.bizD, firstName: 'v96o', lastName: 'Current Debtor', email: `${P}d-current@test.local`, visibility: 'TEAM', ownerId: ID.coOwner } });
 
   await db.invoice.createMany({
     data: [
@@ -424,9 +450,12 @@ beforeAll(async () => {
       // C: sent to the PRIVATE contact, re-pointed below (updateInvoice re-points a SENT invoice's contactId).
       { id: INV.repointed, invoiceNumber: 'v96o-INV-C1', status: 'SENT', subtotal: 40, total: 40, currency: 'TTD', businessId: ID.bizC, contactId: ID.cCPriv },
       { id: INV.nameless, invoiceNumber: 'v96o-INV-C2', status: 'SENT', subtotal: 20, total: 20, currency: 'TTD', businessId: ID.bizC, contactId: ID.cCNameless },
+      // D: sent to the PRIVATE contact, re-pointed below, as C's.
+      { id: INV.dRepointed, invoiceNumber: 'v96o-INV-D1', status: 'SENT', subtotal: 50, total: 50, currency: 'TTD', businessId: ID.bizD, contactId: ID.cDPriv },
     ],
   });
   await db.invoice.update({ where: { id: INV.repointed }, data: { contactId: ID.cCTeam } });
+  await db.invoice.update({ where: { id: INV.dRepointed }, data: { contactId: ID.cDTeam } });
   const intake = (id: string, businessId: string, contactId: string | null) =>
     db.messageIntake.create({
       data: { id, businessId, connectorType: 'gmail', sourceChannel: 'email', from: `${id}@test.local`, subject: 'v96o', body: 'v96o', contactId, status: 'approved' },
@@ -684,11 +713,21 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     const everyModule = new Set(['crm', 'revenue', 'bookings', 'operations', 'expenses', 'projects', 'automations', 'content', 'storefront', 'analytics', 'settings', 'ai', 'connect', 'team'] as any);
     const crmAccess = { isOwner: false, isSuperAdmin: false, viewAll: true, editScope: 'any', reassign: false, deleteScope: 'none', level: 'read' } as any;
     const viewer = (readsUnmapped: boolean, readable: Set<any>) => ({ businessId: ID.bizA, userId: ID.admin, readsUnmapped, readable, crmAccess });
-    const row = { module: WITHHELD_MODULE, category: 'COMMERCE', contactId: null, entityType: 'invoice', entityId: INV.gone };
+    // The row as the backfill stores oldInvGone (DCS-T02): its reason is source_gone. W11-D118-NAME-MISMATCH-OWNER-ONLY
+    // (D-118): the rule reads the reason, so the row carries the marker the script writes.
+    const row = {
+      module: WITHHELD_MODULE, category: 'COMMERCE', contactId: null, entityType: 'invoice', entityId: INV.gone,
+      data: { d115: { withheld: 'source_gone', module: 'commerce', category: null } },
+    };
     expect(canReadActivityRow(viewer(false, everyModule), row), 'a STAFF member reading every module').toBe(false);
     expect(canReadActivityRow(viewer(true, everyModule), row), 'OWNER / ADMIN').toBe(true);
     const noRevenue = new Set([...everyModule].filter((m) => m !== 'revenue'));
     expect(canReadActivityRow(viewer(true, noRevenue), row), "an ADMIN whose revenue access is 'none'").toBe(false);
+    // D-118: the same row with reason name_mismatch, or with no reason (fail closed), is not served to an ADMIN.
+    const { data: _marker, ...unmarked } = row;
+    expect(canReadActivityRow(viewer(true, everyModule), unmarked), 'ADMIN, a withheld row without a reason (D-118)').toBe(false);
+    const nameMismatch = { ...row, data: { d115: { ...row.data.d115, withheld: 'name_mismatch' } } };
+    expect(canReadActivityRow(viewer(true, everyModule), nameMismatch), 'ADMIN, name_mismatch (D-118)').toBe(false);
   });
 
   it("[DCS-T06] (review SEC-W10DCS-2, D-115) a row is linked to its invoice's contact only when its title names that contact (the writer's 'first last', or 'Customer'): a row naming the PRIVATE contact the invoice was sent to before updateInvoice re-pointed it is withheld (data.d115 withheld 'name_mismatch'), not linked to the invoice's TEAM contact, so a view-all STAFF member reading crm and revenue is no longer served it or the PRIVATE name; an ADMIN with explicit crm 'none' is served no row it was not served before; a further dry run counts nothing left", async () => {
@@ -748,7 +787,7 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     }
   });
 
-  it("[DCS-T07] (review SEC-W10DCS-1 / CR-W10DCS-1, D-115 with D-114's principle) (trial-Z seam, was it.todo) an ADMIN whose crm access is explicitly 'none' is not served a withheld message_intake.approved row (nor its sender or subject), as it was not served the row before the backfill: a row of module d115_withheld also needs read on the scope of its data.d115.module; the withheld invoice rows (module 'commerce', revenue) are still served to that ADMIN, who reads revenue, and a STAFF member is served no withheld row", async () => {
+  it("[DCS-T07] (review SEC-W10DCS-1 / CR-W10DCS-1, D-115 with D-114's principle) (trial-Z seam, was it.todo) an ADMIN whose crm access is explicitly 'none' is not served a withheld message_intake.approved row (nor its sender or subject), as it was not served the row before the backfill: a row of module d115_withheld also needs read on the scope of its data.d115.module; the withheld invoice rows of A (module 'commerce', revenue; all source_gone) are still served to that ADMIN, who reads revenue, while a withheld invoice row whose reason is name_mismatch is not, even with crm read (W11-D118-NAME-MISMATCH-OWNER-ONLY, D-118); and a STAFF member is served no withheld row", async () => {
     const { WITHHELD_MODULE } = await import('../scripts/backfill-timeline-contact-links');
     const { canReadActivityRow, D115_WITHHELD_MODULE } = await import('../src/modules/timeline/timeline-visibility');
     expect(D115_WITHHELD_MODULE, 'the rule and the script name the same marker').toBe(WITHHELD_MODULE);
@@ -760,6 +799,8 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     const withheldInvoices = ['oldInvGone', 'oldInvNoEntity', 'oldInvOtherBiz', 'oldInvCrossContact'].map(act);
     const state: Record<string, any> = await timelineState();
     for (const id of [...withheldIntakes, ...withheldInvoices]) expect(state[id]?.module, `${id} is withheld`).toBe(WITHHELD_MODULE);
+    // D-118: every withheld row of A has its source gone (none names another contact of a present invoice).
+    for (const id of [...withheldIntakes, ...withheldInvoices]) expect(state[id]?.data?.d115?.withheld, `${id} reason`).toBe('source_gone');
     // The same ADMIN shape as C's, given a membership of A.
     await db.membership.create({
       data: { id: `${P}m_adminCrmNone_bizA`, userId: ID.adminCrmNone, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { crm: 'none', revenue: 'read', ai: 'read' } },
@@ -783,5 +824,75 @@ describe('W10-DATA-CLEANUP-SCRIPTS (D-115, SEC-W9TO-1): pre-W9 timeline rows tha
     expect(canReadActivityRow(adminCrmNone, withheldIntake), 'after the backfill: the same row, withheld').toBe(false);
     expect(canReadActivityRow(staffEvery, withheldIntake), 'a STAFF member reading crm').toBe(false);
     expect(canReadActivityRow({ ...adminCrmNone, readable: new Set(['crm', 'revenue', 'ai'] as any) }, withheldIntake), 'an ADMIN reading crm').toBe(true);
+
+    // W11-D118-NAME-MISMATCH-OWNER-ONLY (D-118): a withheld invoice row whose reason is name_mismatch (its title may
+    // name a PRIVATE contact) is served to the OWNER and SUPER_ADMIN only (readsOwnerWithheld), not to an ADMIN, even
+    // one reading crm and revenue; the same row with reason source_gone stays OWNER and ADMIN (D-115).
+    const adminCrmRead = { ...adminCrmNone, readable: new Set(['crm', 'revenue', 'ai'] as any) };
+    const mismatchInvoice = {
+      module: WITHHELD_MODULE, category: 'COMMERCE', contactId: null, entityType: 'invoice', entityId: INV.repointed,
+      data: { d115: { withheld: 'name_mismatch', module: 'commerce', category: null } },
+    };
+    expect(canReadActivityRow(adminCrmRead, mismatchInvoice), 'an ADMIN reading crm and revenue, name_mismatch').toBe(false);
+    expect(canReadActivityRow({ ...adminCrmRead, readsOwnerWithheld: true }, mismatchInvoice), 'readsOwnerWithheld, name_mismatch').toBe(true);
+    const goneInvoice = { ...mismatchInvoice, entityId: INV.gone, data: { d115: { withheld: 'source_gone', module: 'commerce', category: null } } };
+    expect(canReadActivityRow(adminCrmRead, goneInvoice), 'an ADMIN reading crm and revenue, source_gone').toBe(true);
+  });
+
+  it("[DCS-T08] (W11-D118-NAME-MISMATCH-OWNER-ONLY, D-118; review SEC-W10DCS-2) after --apply on C, the name_mismatch row (the invoice re-pointed from the PRIVATE contact) is not served on /events, the day's summary or the legacy route to an ADMIN of C with default scopes, nor is the PRIVATE name, while C's linked rows are; the OWNER is still served every C row; the ADMIN whose crm access is 'none' is no longer served the name_mismatch row", async () => {
+    // The backfill is idempotent, so this case runs it itself and stands alone (as DCS-T06 and TS-13d do).
+    const res = await run('timeline', ['--apply', `--business=${ID.bizC}`]);
+    expect(res.code, res.out).toBe(0);
+    const repointed = act('oldCInvRepointed');
+    const state: Record<string, any> = await timelineState();
+    expect(state[repointed]?.data?.d115?.withheld, 'the row is withheld as name_mismatch').toBe('name_mismatch');
+
+    const admin = await served(ID.admin, ID.bizC);
+    for (const key of READS) {
+      expect(admin[key], `admin ${key}`).not.toContain(repointed);
+      expect(admin[key], `admin ${key}`).toEqual([act('oldCInvCurrent'), act('oldCInvCustomer')].sort());
+    }
+    expect(admin.text).not.toContain(C_PRIV_NAME);
+
+    const owner = await served(ID.owner, ID.bizC);
+    for (const key of READS) expect(owner[key], `owner ${key}`).toEqual([...C_ROW_IDS].sort());
+    expect(owner.text).toContain(C_PRIV_NAME);
+
+    const adminCrmNone = await served(ID.adminCrmNone, ID.bizC);
+    for (const key of READS) expect(adminCrmNone[key], `adminCrmNone ${key}`).not.toContain(repointed);
+    expect(adminCrmNone.text).not.toContain(C_PRIV_NAME);
+  });
+
+  it("[DCS-T09] (W11-D118-NAME-MISMATCH-OWNER-ONLY, D-118 with D-116 / D-125) a recorded owner (Business.ownerId) holding only an ADMIN membership is an ADMIN: after --apply on D it is not served D's name_mismatch row (nor the PRIVATE name) on /events, the day's summary or the legacy route, is served D's source_gone and linked rows (D-115), and its resolveTimelineViewer has readsOwnerWithheld false; the co-owner holding D's OWNER membership is served every D row (D-125) and reads owner-withheld rows", async () => {
+    const res = await run('timeline', ['--apply', `--business=${ID.bizD}`]);
+    expect(res.code, res.out).toBe(0);
+    const mismatch = act('oldDInvRepointed');
+    const state: Record<string, any> = await timelineState();
+    expect(state[mismatch]?.data?.d115?.withheld, 'name_mismatch').toBe('name_mismatch');
+    expect(state[act('oldDInvGone')]?.data?.d115?.withheld, 'source_gone').toBe('source_gone');
+    expect(state[act('oldDInvCurrent')]?.contact_id, 'linked to the invoice contact').toBe(ID.cDTeam);
+
+    const recorded = await served(ID.recordedAdmin, ID.bizD);
+    for (const key of READS) {
+      expect(recorded[key], `recordedAdmin ${key}`).not.toContain(mismatch);
+      expect(recorded[key], `recordedAdmin ${key}`).toEqual([act('oldDInvCurrent'), act('oldDInvGone')].sort());
+    }
+    expect(recorded.text).not.toContain(D_PRIV_NAME);
+
+    const coOwner = await served(ID.coOwner, ID.bizD);
+    for (const key of READS) expect(coOwner[key], `coOwner ${key}`).toEqual([...D_ROW_IDS].sort());
+    expect(coOwner.text).toContain(D_PRIV_NAME);
+
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { resolveTimelineViewer } = await import('../src/modules/timeline/timeline-visibility');
+    const prisma = app.get(PrismaService);
+    const recordedViewer = await resolveTimelineViewer(prisma, ID.bizD, ID.recordedAdmin);
+    expect([recordedViewer.readsOwnerWithheld, recordedViewer.readsUnmapped], 'the recorded owner holding ADMIN (D-116)').toEqual([false, true]);
+    const coOwnerViewer = await resolveTimelineViewer(prisma, ID.bizD, ID.coOwner);
+    expect([coOwnerViewer.readsOwnerWithheld, coOwnerViewer.readsUnmapped], 'the co-owner holding OWNER (D-125)').toEqual([true, true]);
+    const ownerOfC = await resolveTimelineViewer(prisma, ID.bizC, ID.owner);
+    expect(ownerOfC.readsOwnerWithheld, 'the recorded owner holding OWNER').toBe(true);
+    const adminOfC = await resolveTimelineViewer(prisma, ID.bizC, ID.admin);
+    expect(adminOfC.readsOwnerWithheld, 'an ADMIN').toBe(false);
   });
 });
