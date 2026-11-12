@@ -1012,11 +1012,40 @@ describe('CL-06 KEY call_create_task answers the member it runs for as POST call
 });
 
 describe('CONTROLS: what a member may open behaves as before', () => {
+  /**
+   * W10-CALLLOG-LIST: by this case the cases above have left 48 more call logs in bizA (53 in all:
+   * 33 with a scheduledAt, 20 without), more than the 50 that one page of GET calls holds. The list
+   * orders by scheduledAt alone, nulls last, so which 17 of the 20 call logs with no scheduledAt
+   * reached the first page (clMine and clShared are two of the 20) followed the rows' physical
+   * order in call_logs, which the full run's concurrent writers and vacuums change: clMine fell off
+   * the page. limit and offset cannot be sent over HTTP here (this app has no ValidationPipe, so
+   * they reach Prisma as strings; ListCallsQueryDto has no @Type(() => Number)), so the OWNER's
+   * whole list is checked by its total against the business's call logs, and each call log on a
+   * list that holds all of it on one page: its contact's, and for the contactless one the call logs
+   * scheduled at its exact time.
+   */
   it('OWNER lists and opens every call log: PRIVATE, TEAM, shared, contactless', async () => {
+    // the OWNER's list leaves nothing out: its total is every call log of the business
     const res = await as(ID.owner).get(calls).expect(200);
-    const ids = res.body.items.map((c: any) => c.id);
-    for (const id of [ID.clPriv, ID.clTeam, ID.clNone, ID.clMine, ID.clShared]) {
-      expect(ids, id).toContain(id);
+    const inBiz = await db.callLog.count({ where: { businessId: ID.bizA } });
+    expect(res.body.total).toBe(inBiz);
+    expect(res.body.items).toHaveLength(Math.min(inBiz, 50));
+
+    const noneAt: Date = (await db.callLog.findUnique({ where: { id: ID.clNone } })).scheduledAt;
+    const at = encodeURIComponent(noneAt.toISOString());
+    const lists: Array<[string, string, Record<string, unknown>]> = [
+      [ID.clPriv, `contactId=${ID.cPriv}`, { contactId: ID.cPriv }],
+      [ID.clTeam, `contactId=${ID.cTeam}`, { contactId: ID.cTeam }],
+      [ID.clNone, `fromDate=${at}&toDate=${at}`, { scheduledAt: noneAt }],
+      [ID.clMine, `contactId=${ID.cMine}`, { contactId: ID.cMine }],
+      [ID.clShared, `contactId=${ID.cShared}`, { contactId: ID.cShared }],
+    ];
+    for (const [id, query, where] of lists) {
+      const list = await as(ID.owner).get(`${calls}?${query}`).expect(200);
+      // the whole list is on this page, and it is every call log of the business it selects
+      expect(list.body.total, query).toBe(list.body.items.length);
+      expect(list.body.total, query).toBe(await db.callLog.count({ where: { businessId: ID.bizA, ...where } }));
+      expect(list.body.items.map((c: any) => c.id), id).toContain(id);
       await as(ID.owner).get(`${calls}/${id}`).expect(200);
     }
     const day = await as(ID.owner).get(`${calls}/scheduled/today`).expect(200);
