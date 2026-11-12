@@ -169,10 +169,26 @@ export const GRAPH_ACTION_REFUSED: Readonly<Record<string, string>> = {
   execute_custom_logic: GOVERNED_UNGRANTED.execute_custom_logic,
 };
 
-/** A second module some tools need beside their own (GOVERNED_UNGRANTED: "needs crm AND revenue"). */
+/**
+ * A second module some tools need beside their own (GOVERNED_UNGRANTED: "needs crm AND revenue").
+ *
+ * PR195-PORT review SEC-P195-3 (the restrictive pick, an owner question): payroll_mark_paid posts the run to
+ * the ledger (Dr Payroll / Cr Bank or Cash) since the port, so beside its route's operations write it needs
+ * expenses write, the scope bills/:id/pay needs to post a disbursement; PayrollService.markRunPaid holds the
+ * REST route and every KEY surface to the same pair. Generating and approving a run stay operations write.
+ */
 const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActionScope>>> = {
   update_status_with_confirmation: [{ module: 'revenue', minLevel: 'write' }],
+  payroll_mark_paid: [{ module: 'expenses', minLevel: 'write' }],
 };
+
+/**
+ * PR195-PORT (D-73, D-46): tools that write the ledger though their own module scope is neither revenue nor
+ * expenses. A KEY plan or monitor with no member principal runs none of them (noMemberToolRefusal), and a
+ * platform SUPER_ADMIN who is not a member of the business runs none of them (assertMayRunGraphAction; review
+ * SEC-P195-1), as neither writes the business's invoices.
+ */
+export const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid']);
 
 /**
  * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's, an OWNER
@@ -430,6 +446,11 @@ export async function assertMayRunGraphAction(
   if (user.role === 'SUPER_ADMIN') {
     if (!membership && requirement.scopes.some((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
       throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices (D-46)');
+    }
+    // PR195-PORT review SEC-P195-1 (D-46; FinanceController.ensureAccess's Books-write rule): nor its ledger
+    // through a tool that posts money outside the revenue scope (payroll mark-paid).
+    if (!membership && NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName)) {
+      throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not post its money to the ledger (D-46)');
     }
     return;
   }

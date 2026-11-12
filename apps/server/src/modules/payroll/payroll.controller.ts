@@ -59,6 +59,10 @@ export class PayrollController {
    * (PayrollService.markRunPaid). The body names the account or method the money
    * left by; the posting's actor is the signed-in member, never a body field.
    * The guard is unchanged (operations write): the port widens no authority.
+   * Review repair: the service also refuses 403 a caller with no Membership of
+   * the business (a platform SUPER_ADMIN who is not a member included;
+   * SEC-P195-1, D-46) or without expenses write (SEC-P195-3, the restrictive
+   * pick pending an owner ruling), before anything is read or written.
    */
   @Post('runs/:runId/mark-paid')
   @RequireModuleScope('operations', 'write')

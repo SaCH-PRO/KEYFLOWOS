@@ -4,6 +4,7 @@ import type { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import {
+  NO_MEMBER_LEDGER_WRITE_TOOLS,
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
   graphActionReadsContacts,
@@ -43,9 +44,6 @@ import {
  * re-enters the dispatcher for any tool) or maps to no module scope (an MCP tool, an unknown name)
  * is refused, as assertMayRunGraphAction refuses it to every member.
  */
-/** PR195-PORT (D-73): tools that write the ledger though their module scope is neither revenue nor expenses. */
-const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid']);
-
 export function noMemberToolRefusal(toolName: string): string | null {
   const requirement = graphActionRequirement(toolName);
   if (!requirement) {

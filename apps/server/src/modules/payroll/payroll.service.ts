@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -9,6 +10,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpensePostingService, PAYROLL_DISBURSEMENT_METHODS } from '../finance/expense-posting.service';
 import { invalidateBusinessFinancialSnapshotCache } from '../finance/finance-accounting.util';
@@ -42,6 +45,9 @@ export interface MarkRunPaidInput {
   initiatedBy?: string | null;
 }
 
+/** The currency a business with none recorded keeps (the column default; CashPositionService reads it so too). */
+const DEFAULT_BUSINESS_CURRENCY = 'TTD';
+
 /** The FinancialAccount types money can leave by, and the chart rows they keep cash in (V1-34). */
 const DISBURSEMENT_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 const CASH_CLASS_SYSTEM_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
@@ -73,12 +79,16 @@ export class PayrollService {
     if (!assignment) throw new NotFoundException('Staff assignment not found');
     if (!(input.amount > 0)) throw new BadRequestException('amount must be positive');
 
+    // PR195-PORT review CR-P195-1 (D-13: one currency per business, defaulting to the business currency): a
+    // rate set with no currency is in the business currency, as payroll_set_rate says; it was the literal TTD,
+    // so a USD business's payroll was generated, reserved and (since the port) posted in TTD.
+    const currency = normalizeCurrency(input.currency) || (await this.businessCurrency(this.prisma.client, businessId));
     return this.prisma.client.payRate.create({
       data: {
         businessId,
         assignmentId: input.assignmentId,
         amount: input.amount,
-        currency: input.currency ?? 'TTD',
+        currency,
         periodType: input.periodType ?? 'hourly',
         effectiveFrom: new Date(),
       },
@@ -141,6 +151,20 @@ export class PayrollService {
       throw new BadRequestException('No pay rates configured — set staff rates first (payroll_set_rate)');
     }
 
+    // PR195-PORT review CR-P195-1 (D-13): a run is in one currency, the business's, since its gross is reserved
+    // in safe-to-spend and posted to the ledger in it. Rates in any other currency (one set before rates took
+    // the business currency, or set in another) are refused here, before anything is written, rather than
+    // summed across currencies or labelled with the first rate's; nothing is converted.
+    const businessCurrency = await this.businessCurrency(this.prisma.client, businessId);
+    const rateCurrencies = new Set(rates.map((r) => normalizeCurrency(r.currency) || businessCurrency));
+    const foreign = [...rateCurrencies].filter((code) => code !== businessCurrency).sort();
+    if (foreign.length > 0) {
+      const which = rateCurrencies.size > 1 ? `more than one currency (${[...rateCurrencies].sort().join(', ')})` : foreign[0];
+      throw new BadRequestException(
+        `Pay rates are in ${which}, not only the business currency ${businessCurrency}: a payroll run is in the business currency and nothing is converted or summed across currencies (D-13). Set those rates again in ${businessCurrency}.`,
+      );
+    }
+
     const items: Array<{ assignmentId: string; hoursWorked: number | null; grossPay: number; currency: string; notes?: string }> = [];
 
     for (const rate of rates) {
@@ -152,7 +176,7 @@ export class PayrollService {
           assignmentId: rate.assignmentId,
           hoursWorked: null,
           grossPay: rate.amount,
-          currency: rate.currency,
+          currency: businessCurrency,
           notes: 'Monthly salary',
         });
         continue;
@@ -177,13 +201,13 @@ export class PayrollService {
         assignmentId: rate.assignmentId,
         hoursWorked: Math.round(hoursWorked * 100) / 100,
         grossPay: Math.round(hoursWorked * rate.amount * 100) / 100,
-        currency: rate.currency,
+        currency: businessCurrency,
         notes: hoursWorked > 0 ? `${hoursWorked.toFixed(2)}h × ${rate.amount}` : 'No logged hours',
       });
     }
 
     const totalGross = Math.round(items.reduce((s, i) => s + i.grossPay, 0) * 100) / 100;
-    const currency = rates[0]?.currency ?? 'TTD';
+    const currency = businessCurrency;
 
     const created = await this.prisma.client.payrollRun.create({
       data: {
@@ -279,12 +303,18 @@ export class PayrollService {
    * businessId) (another business's account is "not found in this business");
    * its chart row must be this business's and cash-class. D-13: the account is
    * in the run's currency; nothing is converted.
+   *
+   * Review repair: who may post (assertMayPostPayroll: a member of this business
+   * with expenses write, refused 403 before anything is read or written;
+   * SEC-P195-1, SEC-P195-3), and in which currency (the business's: a run or
+   * item in any other is refused 400 before the claim; CR-P195-1, D-13).
    */
   async markRunPaid(businessId: string, runId: string, input: MarkRunPaidInput = {}) {
     if (!this.expensePosting) {
       throw new ServiceUnavailableException('Payroll posting is unavailable: a run is not marked paid without its books');
     }
     const expensePosting = this.expensePosting;
+    await this.assertMayPostPayroll(businessId, input);
     const paymentAccountId = (input.paymentAccountId ?? '').trim();
     const paymentMethod = (input.paymentMethod ?? '').trim().toLowerCase();
     if (!paymentAccountId && !paymentMethod) {
@@ -304,6 +334,7 @@ export class PayrollService {
       if (run.status !== 'APPROVED' && run.status !== 'PAID') {
         throw new BadRequestException(`Run is ${run.status} — it must be APPROVED before marking paid`);
       }
+      await this.assertRunInBusinessCurrency(tx as unknown as Prisma.TransactionClient, businessId, run);
 
       const paymentCoaId = paymentAccountId
         ? await this.disbursementChartRow(tx as unknown as Prisma.TransactionClient, businessId, paymentAccountId, run.currency)
@@ -344,6 +375,73 @@ export class PayrollService {
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
     return paid;
+  }
+
+  /**
+   * PR195-PORT review SEC-P195-1 and SEC-P195-3: who may mark a run paid, now that it posts the business's
+   * money. The people the posting is for are named by the server, never by a request body: on REST the
+   * signed-in member (actorId); on KEY the member KEY ran for (initiatedBy; actorId is then KEY's system
+   * actor, whose authority is that member's). At least one must be named (D-73: a run with no member pays no
+   * payroll), and each must hold a Membership of this business (FinanceController.ensureAccess's rule for a
+   * Books write, D-104; D-46: a platform SUPER_ADMIN who is not a member writes none of its money) with
+   * expenses write, read as ModuleScopeGuard reads a membership (memberModuleLevel); a SUPER_ADMIN who is a
+   * member passes that check as the guard lets one through. Expenses write beside the route's operations
+   * write is the restrictive pick pending an owner ruling (SEC-P195-3); KEY's authority map holds
+   * payroll_mark_paid to the same pair (GRAPH_ACTION_EXTRA_SCOPES). Refused 403 before anything is read or
+   * written.
+   */
+  private async assertMayPostPayroll(businessId: string, input: MarkRunPaidInput): Promise<void> {
+    const people = [input.actorId, input.initiatedBy]
+      .map((id) => (typeof id === 'string' ? id.trim() : ''))
+      .filter((id) => id !== '' && id !== KEY_SYSTEM_ACTOR_ID);
+    if (people.length === 0) {
+      throw new ForbiddenException('Marking a payroll run paid posts it to the books, and this call names no member it is for (D-73)');
+    }
+    for (const userId of new Set(people)) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      });
+      if (!membership) {
+        throw new ForbiddenException('Not a member of this business: its payroll is posted to its books only by a member (D-46)');
+      }
+      const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+      if (user?.role === 'SUPER_ADMIN') continue;
+      const level = memberModuleLevel(membership, 'expenses');
+      if (rankOf(level) < LEVEL_RANK.write) {
+        throw new ForbiddenException(
+          `Insufficient permissions: marking a payroll run paid posts it to the books; expenses requires write access (you have ${level})`,
+        );
+      }
+    }
+  }
+
+  /**
+   * PR195-PORT review CR-P195-1 (D-13: one currency per business): a run is posted, and reserved, only in the
+   * business currency. A run labelled in another currency, or holding an item in one (a run generated from
+   * rates stored in the old literal TTD default in a USD business), is refused 400 before the claim, so
+   * nothing changes, until the owner rules on payroll in a second currency. Nothing is converted.
+   */
+  private async assertRunInBusinessCurrency(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    run: { id: string; currency: string | null },
+  ): Promise<void> {
+    const businessCurrency = await this.businessCurrency(tx, businessId);
+    const items = await tx.payrollItem.findMany({ where: { runId: run.id, businessId }, select: { currency: true } });
+    const codes = new Set([run.currency, ...items.map((i) => i.currency)].map((code) => normalizeCurrency(code) || businessCurrency));
+    const foreign = [...codes].filter((code) => code !== businessCurrency).sort();
+    if (foreign.length > 0) {
+      throw new BadRequestException(
+        `Payroll run ${run.id} is in ${foreign.join(', ')}; the business currency is ${businessCurrency}. A run is posted only in the business currency and nothing is converted (D-13), so it is not marked paid.`,
+      );
+    }
+  }
+
+  /** The business's currency (D-13: one per business), normalized; the column default when none is recorded. */
+  private async businessCurrency(client: Prisma.TransactionClient | PrismaService['client'], businessId: string): Promise<string> {
+    const business = await (client as Prisma.TransactionClient).business.findUnique({ where: { id: businessId }, select: { currency: true } });
+    return normalizeCurrency(business?.currency) || DEFAULT_BUSINESS_CURRENCY;
   }
 
   /**

@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { CashPositionService, otherCurrencyCash } from '../finance/cash-position.service';
 import { getBusinessFinancialSnapshotRevision } from '../finance/finance-accounting.util';
 import { normalizeCurrency } from '../finance/posting.service';
@@ -173,8 +173,9 @@ const NO_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: f
 
 /**
  * PR195-PORT: `userId`'s KeyContextSight in `businessId`, read as ModuleScopeGuard
- * reads a membership: its explicit permissionScopes map (a key it lacks is none),
- * else its role's defaults. No viewer, or no membership (a platform SUPER_ADMIN
+ * reads a membership (the shared memberModuleLevel): its explicit permissionScopes
+ * map, any non-null object and an array included (a key it lacks is none), else its
+ * role's defaults. No viewer, or no membership (a platform SUPER_ADMIN
  * who is not a member included), sees none of them. An OWNER membership with an
  * explicit map is bound by it (D-140); the recorded owner field grants nothing
  * (D-125).
@@ -190,11 +191,9 @@ export async function keyContextSight(
     select: { role: true, permissionScopes: true },
   });
   if (!membership) return NO_SIGHT;
-  const scopes: Record<string, string> =
-    membership.permissionScopes && typeof membership.permissionScopes === 'object' && !Array.isArray(membership.permissionScopes)
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-  const reads = (module: string) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read;
+  // Review SEC-P195-2 / CR-P195-2: ModuleScopeGuard's own reading (memberModuleLevel), so a stored array is
+  // an explicit map in which every module is none, as the guard refuses it on REST; it was read as role defaults.
+  const reads = (module: string) => rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
   return { treasury: reads('revenue'), pipeline: reads('crm'), support: reads('operations') };
 }
 

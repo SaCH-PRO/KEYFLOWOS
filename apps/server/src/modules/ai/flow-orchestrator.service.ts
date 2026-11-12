@@ -7130,9 +7130,10 @@ ${triage.standingContext}`;
       case 'payroll_mark_paid': {
         // PR195-PORT (owner PR #195 part 2): mark-paid posts the run to the ledger. The posting is KEY's
         // (the system actor, as commerce_mark_invoice_paid records its payment) and names the member the
-        // turn runs for as initiatedBy (audit data, never authority). Who may run this at all is unchanged:
-        // the authority map (operations write; tier 3, D-36). The account or method comes from the model's
-        // arguments; the actor never does.
+        // turn runs for as initiatedBy (audit data, never authority). Who may run this at all: the authority map
+        // (operations write and, since review SEC-P195-3, expenses write; tier 3, D-36), and PayrollService
+        // holds that member to a Membership of this business with expenses write (SEC-P195-1, D-46, D-73: a run
+        // for no member is refused). The account or method comes from the model's arguments; the actor never does.
         const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
         const run = await this.getPayroll().markRunPaid(businessId, args.runId, {
           paymentAccountId: args.paymentAccountId,

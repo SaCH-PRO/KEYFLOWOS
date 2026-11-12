@@ -69,7 +69,7 @@ export class SafeToSpendService {
       // ledger cash through its posting (mark-paid), so it is not reserved twice.
       this.prisma.client.payrollRun.findMany({
         where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
-        select: { totalGross: true, currency: true },
+        select: { totalGross: true, currency: true, status: true },
         orderBy: { periodStart: 'asc' },
       }),
     ]);
@@ -99,10 +99,19 @@ export class SafeToSpendService {
     // reserved as 0 and said so, so the KPI is not overstated.
     const payrollCentsByCurrency = new Map<string, number>();
     const payrollRunsByCurrency = new Map<string, number>();
+    // Review CR-P195-3: the DRAFT runs among them, in the business currency, named apart in the explanation
+    // (a draft is reserved but not yet approved; nothing voids one today, an owner question).
+    let draftCents = 0;
+    let draftRuns = 0;
     for (const run of committedRuns) {
       const code = normalizeCurrency(run.currency) || currency;
-      payrollCentsByCurrency.set(code, (payrollCentsByCurrency.get(code) ?? 0) + toCents(Number(run.totalGross ?? 0)));
+      const cents = toCents(Number(run.totalGross ?? 0));
+      payrollCentsByCurrency.set(code, (payrollCentsByCurrency.get(code) ?? 0) + cents);
       payrollRunsByCurrency.set(code, (payrollRunsByCurrency.get(code) ?? 0) + 1);
+      if (code === currency && run.status === 'DRAFT') {
+        draftCents += cents;
+        draftRuns += 1;
+      }
     }
     const payrollReserved = fromCents(payrollCentsByCurrency.get(currency) ?? 0);
     const payrollRuns = payrollRunsByCurrency.get(currency) ?? 0;
@@ -153,6 +162,11 @@ export class SafeToSpendService {
         ? `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (${payrollRuns} committed run${payrollRuns === 1 ? '' : 's'})`
         : `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (no unpaid runs)`,
     );
+    if (draftRuns > 0) {
+      explanation.push(
+        `  - includes ${draftRuns} draft run${draftRuns === 1 ? '' : 's'} not yet approved: ${currency} ${fromCents(draftCents).toFixed(2)}`,
+      );
+    }
     for (const o of otherPayroll) {
       const runs = payrollRunsByCurrency.get(o.currency) ?? 0;
       explanation.push(
