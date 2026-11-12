@@ -55,3 +55,10 @@ overrides:
     reason: "Retired develop branch preserved as an archive for historical Waves A-G gap-closure work. Intentionally divergent; does not merge into main."
     owner: SaCH-PRO
     expires: 2026-12-31
+
+  - branch: claude/elegant-curie-7azpsb
+    max_commits: 2000
+    max_files: 1500
+    reason: "Catch-up merge of the reconstruction branch (Release 0 and waves 1-11) into main through PR 197, at the owner's request (2026-11-12)."
+    owner: SaCH-PRO
+    expires: 2026-12-15
