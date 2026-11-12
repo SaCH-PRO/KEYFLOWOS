@@ -79,6 +79,13 @@
  * ruling's figures for each STAFF member: contact-stats totalCount 1 and CLIENT
  * 0 (the owner's 2 and 1), and a member's contacts poll that the owner's edit
  * of c3Priv through PATCH contacts/:c does not move (the owner's poll moves).
+ * Its review repairs (on biz3): SEC-W11CCR-1 (D-133), GET .../data-quality/stats
+ * (totalContacts, averageScore, issueCounts) is worked out over the contacts
+ * the member may open, so it cannot be compared with contact-stats to learn of
+ * c3Priv; SEC-W11CCR-2 (D-63), GET .../contacts/favorites lists only the
+ * favourites the member may open. The same finding's data-quality issues and
+ * wizard and relationship-health at-risk reads are it.todo hand-offs: their
+ * contacts come from services outside that packet's write set.
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -90,7 +97,7 @@
  * membership / contact / invoice / quote rows, the real CrmController and
  * CrmAiController and the services the routes here call (CrmService,
  * CrmStatsService, CrmJourneyService, CrmRevenueService, ContactInsightService
- * with BestChannelService, CrmAiService). Identity is attached by a test middleware from
+ * with BestChannelService, CrmAiService, CrmDataQualityService). Identity is attached by a test middleware from
  * `x-test-user` exactly as the Supabase-verifying AuthMiddleware would after
  * token verification. Stand-ins: the AI gateway (AiUsageService.callAi) is a
  * recorder whose summary repeats the lifetime value it was given and whose
@@ -197,6 +204,8 @@ async function cleanup() {
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-CRM-COUNTS-RULING review repairs: the data-quality issues of biz3's contacts.
+    `DELETE FROM contact_data_issues WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W11-CRM-COUNTS-RULING: the owner's PATCH contacts/:c leaves a TeamAuditInterceptor row.
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -271,6 +280,7 @@ beforeAll(async () => {
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
   const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
   const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
 
   // ---- the real services over the real client -------------------------------
   const prisma = { client: db } as any;
@@ -307,6 +317,9 @@ beforeAll(async () => {
       { provide: CrmRevenueService, useValue: new CrmRevenueService(prisma) },
       { provide: ContactInsightService, useValue: contactInsight },
       { provide: CrmAiService, useValue: crmAi },
+      // W11-CRM-COUNTS-RULING review repairs: the real data-quality reads (GET .../data-quality/stats); the
+      // duplicate detector is on no path here.
+      { provide: CrmDataQualityService, useValue: new CrmDataQualityService(prisma, {} as any) },
       { provide: EventEmitter2, useValue: events },
     ],
   })
@@ -1487,6 +1500,76 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
         expect(await ok3(user, 'contacts/poll'), `${user} after the owner's edit`).toEqual(memberBefore.get(user));
       }
     });
+  });
+
+  // ---- W11-CRM-COUNTS-RULING review repairs SEC-W11CCR-1 (D-133) and SEC-W11CCR-2 (D-63) ----
+  describe("W11-CRM-COUNTS-RULING review repairs: the data-quality stats and the favorites follow the viewer's contact visibility (owner rulings D-133, D-63)", () => {
+    /** One open data-quality issue on each contact, of a kind of its own, a stored score each, both marked favourites (set for these cases, removed after them). */
+    const DQ = { privIssue: `${P}c3Priv_dq`, teamIssue: `${P}c3Team_dq`, privKind: 'invalid_phone', teamKind: 'stale_data', privScore: 40, teamScore: 90 };
+    /** What would tell a member of c3Priv: its id, its last name and its email. */
+    const PRIV_MARKS = [ID3.cPriv, 'PrivSecretThree', `${P}c3priv@contacts.test`];
+    const expectNoPriv = (body: unknown, why: string) => {
+      const text = JSON.stringify(body);
+      for (const mark of PRIV_MARKS) expect(text.includes(mark), `${why}: names ${mark}`).toBe(false);
+    };
+
+    beforeAll(async () => {
+      await db.contactDataIssue.create({
+        data: { id: DQ.privIssue, businessId: ID3.biz, contactId: ID3.cPriv, kind: DQ.privKind, severity: 'high', field: 'phone', message: 'V94E invalid phone', status: 'open' },
+      });
+      await db.contactDataIssue.create({
+        data: { id: DQ.teamIssue, businessId: ID3.biz, contactId: ID3.cTeam, kind: DQ.teamKind, severity: 'low', message: 'V94E stale record', status: 'open' },
+      });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { dataQualityScore: DQ.privScore, custom: { isFavorite: true } } });
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { dataQualityScore: DQ.teamScore, custom: { isFavorite: true } } });
+    });
+    afterAll(async () => {
+      await db.contactDataIssue.deleteMany({ where: { id: { in: [DQ.privIssue, DQ.teamIssue] } } });
+      for (const id of [ID3.cTeam, ID3.cPriv]) await db.contact.update({ where: { id }, data: { dataQualityScore: null, custom: {} } });
+    });
+
+    it("SEC-W11CCR-1 (D-133) (W11-CRM-COUNTS-RULING review): GET .../data-quality/stats as each STAFF member (crm read; revenue read and revenue 'none') counts only the contacts that member may open: totalContacts 1 (its contact-stats totalCount), issueCounts without c3Priv's open issue and averageScore over c3Team's score alone, so comparing it with GET .../contact-stats tells nothing of another member's PRIVATE contact; lastRunAt, staleDays and the response shape stay the owner's; the owner's stats stay business-wide: totalContacts 2, both issues, the average of both scores", async () => {
+      // Control: the owner (no visibility clause) is served the business-wide figures, c3Priv and its issue counted.
+      const owner = await ok3(ID.owner, 'data-quality/stats');
+      expect(
+        { totalContacts: owner.totalContacts, averageScore: owner.averageScore, priv: owner.issueCounts[DQ.privKind], team: owner.issueCounts[DQ.teamKind] },
+        'owner',
+      ).toEqual({ totalContacts: 2, averageScore: (DQ.privScore + DQ.teamScore) / 2, priv: 1, team: 1 });
+      expect(owner.totalContacts, 'owner: its contact-stats totalCount').toBe((await ok3(ID.owner, 'contact-stats')).totalCount);
+
+      for (const user of [ID.rev, ID.noRev]) {
+        // The member cannot open c3Priv.
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = await ok3(user, 'data-quality/stats');
+        // D-133 changes the figures, not the shape or the business's data-quality settings.
+        expect(served, user).toEqual({
+          ...owner,
+          totalContacts: 1,
+          averageScore: DQ.teamScore,
+          issueCounts: { ...owner.issueCounts, [DQ.privKind]: 0 },
+        });
+        expect(served.totalContacts, `${user}: its contact-stats totalCount`).toBe((await ok3(user, 'contact-stats')).totalCount);
+      }
+    });
+
+    it("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review): GET .../contacts/favorites serves each STAFF member (crm read; revenue read and revenue 'none') only the favourites that member may open: c3Team, never c3Priv (another member's PRIVATE contact, marked a favourite: isFavorite is a business-wide flag on contact.custom), whose id, name and email appear nowhere in the response; the owner's favourites stay business-wide (both contacts)", async () => {
+      // Control: the owner is served both favourites.
+      const owner = (await ok3(ID.owner, 'contacts/favorites')) as Array<{ id: string }>;
+      expect(owner.map((c) => c.id).sort(), 'owner').toEqual([ID3.cPriv, ID3.cTeam].sort());
+
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = (await ok3(user, 'contacts/favorites')) as Array<{ id: string }>;
+        expect(served.map((c) => c.id), user).toEqual([ID3.cTeam]);
+        expectNoPriv(served, `${user} GET contacts/favorites`);
+      }
+    });
+
+    // SEC-W11CCR-2 hand-offs: these reads take their contacts from services outside this packet's write
+    // set (crm-stats, crm controller); the visibility clause belongs in their own queries (a follow-up packet).
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/issues (CrmDataQualityService.listIssues) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone, and counts it in total and byKind; GET contacts/:c answers that contact 404. The visibility clause belongs in listIssues' where (crm-data-quality.service.ts, outside this packet's write set); a controller filter of one page would leave total and byKind counting it");
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/wizard (CrmDataQualityService.wizardQueue) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone. The visibility clause belongs in wizardQueue's where (crm-data-quality.service.ts, outside this packet's write set), so hidden issues neither show nor take the queue's places");
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../relationship-health/at-risk (CrmRelationshipHealthService.listAtRisk) serves a STAFF member another member's AT_RISK or DORMANT PRIVATE contact with its id, name, email and phone. The visibility clause belongs in listAtRisk's where (crm-relationship-health.service.ts, outside this packet's write set), so hidden contacts neither show nor take the list's places");
   });
 });
 

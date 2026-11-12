@@ -5,6 +5,7 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { DATA_QUALITY_KINDS } from './crm-data-quality.util';
 import { crmRowCarriesMoney, readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 export type TopOpenDeal = {
@@ -1082,6 +1083,42 @@ export class CrmStatsService {
     };
   }
 
+  /**
+   * W11-CRM-COUNTS-RULING review repair SEC-W11CCR-1 (owner ruling D-133: CRM
+   * count widgets count only the contacts the member may open; the owner sees
+   * business-wide figures): the contact figures of GET .../data-quality/stats
+   * for `viewerUserId` (totalContacts, averageScore and the open issueCounts by
+   * kind), worked out as CrmDataQualityService.getStats works them out but over
+   * the live contacts the viewer may open (and those contacts' open issues), so
+   * comparing them with GET .../contact-stats tells nothing of a hidden
+   * contact. Null when no visibility rule hides a contact from that viewer
+   * (the OWNER, SUPER_ADMIN): the business-wide stats stand. Not cached.
+   */
+  async dataQualityCountsFor(
+    businessId: string,
+    viewerUserId: string,
+  ): Promise<{ totalContacts: number; averageScore: number; issueCounts: Record<string, number> } | null> {
+    const visibility = await this.viewerContactVisibility(businessId, viewerUserId);
+    if (!visibility) return null;
+    const contacts = viewerContactWhere(businessId, visibility);
+    const [byKind, totalContacts, scoreAgg] = await Promise.all([
+      this.prisma.client.contactDataIssue.groupBy({
+        by: ['kind'],
+        where: { businessId, status: 'open', contact: { is: contacts } },
+        _count: { _all: true },
+      }),
+      this.prisma.client.contact.count({ where: contacts }),
+      this.prisma.client.contact.aggregate({
+        where: { AND: [contacts, { dataQualityScore: { not: null } }] },
+        _avg: { dataQualityScore: true },
+      }),
+    ]);
+    const issueCounts: Record<string, number> = {};
+    for (const kind of DATA_QUALITY_KINDS) issueCounts[kind] = 0;
+    for (const row of byKind) issueCounts[row.kind] = row._count._all;
+    return { totalContacts, averageScore: Math.round(scoreAgg._avg.dataQualityScore ?? 100), issueCounts };
+  }
+
   async toggleFavorite(businessId: string, contactId: string) {
     const contact = await this.assertContact(businessId, contactId);
     const custom = (contact.custom as Record<string, unknown>) ?? {};
@@ -1094,9 +1131,21 @@ export class CrmStatsService {
     return { isFavorite, contact: updated };
   }
 
-  async getFavorites(businessId: string) {
+  /**
+   * The business's favourite contacts (GET .../contacts/favorites):
+   * isFavorite is a business-wide flag on contact.custom.
+   *
+   * W11-CRM-COUNTS-RULING review repair SEC-W11CCR-2 (owner ruling D-63, the
+   * contact rule): named a viewer a visibility rule hides contacts from, only
+   * the favourites that viewer may open (resolveCrmAccess + visibilityClause,
+   * the rule GET contacts/:contactId applies), so another member's PRIVATE
+   * contact is never listed; the OWNER, SUPER_ADMIN and a call naming no
+   * viewer (CrmService.getFavorites, a system caller) keep every favourite of
+   * the business.
+   */
+  async getFavorites(businessId: string, viewerUserId?: string) {
     const allContacts = await this.prisma.client.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: viewerContactWhere(businessId, await this.viewerContactVisibility(businessId, viewerUserId)),
       orderBy: { updatedAt: 'desc' },
     });
     return allContacts.filter((c) => {

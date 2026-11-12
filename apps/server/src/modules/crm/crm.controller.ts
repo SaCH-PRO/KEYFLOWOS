@@ -609,8 +609,11 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/favorites')
-  getFavorites(@Param('businessId') businessId: string) {
-    return this.crmStats.getFavorites(businessId);
+  getFavorites(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-COUNTS-RULING review repair SEC-W11CCR-2 (owner ruling D-63):
+    // the favourites the session member may open; the OWNER and SUPER_ADMIN
+    // keep every favourite of the business.
+    return this.crmStats.getFavorites(businessId, this.requireActorUserId(req));
   }
 
   // Declared before its contacts/:contactId sibling: Express answers the first
@@ -859,8 +862,19 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/data-quality/stats')
-  dqStats(@Param('businessId') businessId: string) {
-    return this.dataQuality.getStats(businessId);
+  async dqStats(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-COUNTS-RULING review repair SEC-W11CCR-1 (owner ruling D-133):
+    // a member a visibility rule hides contacts from is served totalContacts,
+    // averageScore and issueCounts over the contacts they may open (as GET
+    // .../contact-stats counts them); the business's data-quality settings
+    // (lastRunAt, staleDays) and the response shape are unchanged. The OWNER
+    // and SUPER_ADMIN keep the business-wide stats.
+    const actorUserId = this.requireActorUserId(req);
+    const [stats, viewerCounts] = await Promise.all([
+      this.dataQuality.getStats(businessId),
+      this.crmStats.dataQualityCountsFor(businessId, actorUserId),
+    ]);
+    return viewerCounts ? { ...stats, ...viewerCounts } : stats;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
