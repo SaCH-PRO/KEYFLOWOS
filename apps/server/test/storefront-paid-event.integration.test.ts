@@ -195,6 +195,9 @@
  *           DROPSHIP line) and an order created paid (a DROPSHIP line; a
  *           tracked line) each get one route set (one supplier PO; one unit
  *           reserved), and three routing calls at once make one route
+ *   V18-T2n5 the router that comes second meets the order routed and is
+ *           answered with its routes: the listener emits fulfillment_routed,
+ *           not routing_failed, for a routed DROPSHIP order (supplier_ordered)
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -2249,6 +2252,37 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       expect(held.arrivals(), 'one call created routes').toBe(1);
     } finally {
       held.restore();
+    }
+  });
+
+  it('V18-T2n5 (W10-SOP-FIX review SOPFIX-SEC-1; D-112) the router that comes second meets the order already routed, and is answered with its routes: for an order created paid with a DROPSHIP line, routed by createOrder (supplier_ordered, one PO), StoreOrderRoutingListener on the door\'s store_order.paid emits store_order.fulfillment_routed naming the one DROPSHIP route and no store_order.routing_failed (which raises an operator "routing failed" action and a failed contact event for an order that is routed), and nothing more is created', async () => {
+    await routingFixtures();
+    const { StoreOrderRoutingListener } = await import('../src/modules/marketplace/store-order-routing.listener');
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const routeOrder = await trackRouting();
+    const listener = new (StoreOrderRoutingListener as any)(app.get(PrismaService), app.get(FulfillmentRoutingService), events);
+    try {
+      // createOrder's own autoRouteOrder routes it (the listener is not on the bus yet): the first router.
+      const order = await createdPaid(T2N.drop);
+      await drain();
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+      expect((await supplierPOs(order.orderNumber)).length).toBe(1);
+      // The listener on the same store_order.paid comes second. At 53fb2438 routeOrder refused the order's status
+      // (supplier_ordered is not routable) before it looked for its routes, and the listener reported a failure.
+      seen = [];
+      await listener.onStoreOrderPaid({ order: { id: order.id }, businessId: ID.biz });
+      await drain();
+      const announced = seen
+        .filter((e) => e.payload?.orderId === order.id)
+        .map((e) => `${e.name}:${(e.payload.strategies ?? []).join(',')}:${e.payload.routeCount ?? e.payload.error}`);
+      expect(announced, 'the second router announces the routes made, and no failure').toEqual(['store_order.fulfillment_routed:DROPSHIP:1']);
+      expect((await supplierPOs(order.orderNumber)).length, 'no second supplier PO').toBe(1);
+      expect(await routesOf(order.id), 'no second route').toEqual(['DROPSHIP:PO_RAISED']);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id } })).status).toBe('supplier_ordered');
+    } finally {
+      routeOrder.mockRestore();
+      await drain();
     }
   });
 
