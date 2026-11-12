@@ -1,5 +1,15 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  computeNormalizedCashBalance,
+  fetchAllPages,
+  getBusinessFinancialSnapshotRevision,
+  invalidateBusinessFinancialSnapshotCache,
+  loadCashLedgerMovements,
+  loadLatestExchangeRates,
+  normalizeCurrencyCode,
+  resolveConversionRate,
+} from '../finance/finance-accounting.util';
 
 export interface GraphEntityLink {
   fromType: string;
@@ -99,6 +109,22 @@ export interface BusinessGraphSnapshot {
     activeProductCount: number;
     averagePrice: number;
   };
+  treasury?: {
+    cashBalance: number;
+    unpaidBillsAmount: number;
+    unpaidBillsCount: number;
+    committedPayrollAmount: number;
+    committedPayrollRuns: number;
+    unconvertedByCurrency?: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }>;
+  };
+  pipeline?: {
+    openDealCount: number;
+    openPipelineValue: number;
+    unconvertedByCurrency?: Record<string, number>;
+  };
+  support?: {
+    openTicketCount: number;
+  };
   momentumScore: number;
   healthIndicators: Array<{ area: string; status: 'good' | 'warning' | 'critical'; detail: string }>;
   links: GraphEntityLink[];
@@ -114,27 +140,36 @@ const CACHE_TTL_MS = 120_000;
 @Injectable()
 export class BusinessGraphService {
   private readonly logger = new Logger(BusinessGraphService.name);
-  private readonly cache = new Map<string, { data: BusinessGraphSnapshot; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { data: BusinessGraphSnapshot; expiresAt: number; revision: number }
+  >();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   async getSnapshot(businessId: string, forceRefresh = false): Promise<BusinessGraphSnapshot> {
+    const currentRevision = getBusinessFinancialSnapshotRevision(businessId);
     if (!forceRefresh) {
       const cached = this.cache.get(businessId);
-      if (cached && cached.expiresAt > Date.now()) {
+      if (cached && cached.expiresAt > Date.now() && cached.revision === currentRevision) {
         return cached.data;
       }
     }
 
     const snapshot = await this.assembleSnapshot(businessId);
-    this.cache.set(businessId, { data: snapshot, expiresAt: Date.now() + CACHE_TTL_MS });
+    this.cache.set(businessId, {
+      data: snapshot,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      revision: getBusinessFinancialSnapshotRevision(businessId),
+    });
     return snapshot;
   }
 
   invalidateCache(businessId: string): void {
     this.cache.delete(businessId);
+    invalidateBusinessFinancialSnapshotCache(businessId);
   }
 
   private async assembleSnapshot(businessId: string): Promise<BusinessGraphSnapshot> {
@@ -173,6 +208,12 @@ export class BusinessGraphService {
       automationRuns,
       activeProducts,
       avgProductPrice,
+      cashAccountsData,
+      unpaidBillsData,
+      committedPayrollData,
+      openDealsData,
+      openTicketsCount,
+      exchangeRates,
     ] = await Promise.all([
       db.business.findUnique({
         where: { id: businessId },
@@ -212,7 +253,82 @@ export class BusinessGraphService {
       db.automation.aggregate({ where: { businessId, deletedAt: null }, _sum: { runCount: true } }),
       db.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       db.product.aggregate({ where: { businessId, deletedAt: null, isActive: true }, _avg: { price: true } }),
+      db.financialAccount?.findMany
+        ? fetchAllPages(({ skip, take }) =>
+            db.financialAccount.findMany({
+              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              select: {
+                id: true,
+                chartOfAccountId: true,
+                openingBalance: true,
+                currentBalance: true,
+                currency: true,
+              },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
+        : db.financialAccount?.aggregate
+          ? db.financialAccount.aggregate({
+              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+              _sum: { currentBalance: true },
+            })
+          : Promise.resolve([]),
+      db.expense?.findMany
+        ? fetchAllPages(({ skip, take }) =>
+            db.expense.findMany({
+              where: { businessId, deletedAt: null, status: 'BILL' },
+              orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+              select: { amount: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
+        : db.expense.aggregate({
+            where: { businessId, deletedAt: null, status: 'BILL' },
+            _sum: { amount: true },
+            _count: true,
+          }),
+      db.payrollRun?.findMany
+        ? fetchAllPages(({ skip, take }) =>
+            db.payrollRun.findMany({
+              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+              orderBy: [{ periodStart: 'asc' }, { id: 'asc' }],
+              select: { totalGross: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
+        : db.payrollRun?.aggregate
+          ? db.payrollRun.aggregate({
+              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+              _sum: { totalGross: true },
+              _count: true,
+            })
+          : Promise.resolve([]),
+      db.deal?.findMany
+        ? fetchAllPages(({ skip, take }) =>
+            db.deal.findMany({
+              where: { businessId, deletedAt: null, status: 'OPEN' },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              select: { value: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
+        : db.deal?.aggregate
+          ? db.deal.aggregate({
+              where: { businessId, deletedAt: null, status: 'OPEN' },
+              _sum: { value: true },
+              _count: true,
+            })
+          : Promise.resolve([]),
+      db.supportTicket?.count
+        ? db.supportTicket.count({
+            where: { businessId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING'] } },
+          })
+        : Promise.resolve(0),
+      loadLatestExchangeRates(db.exchangeRate, businessId),
     ]);
+
+    const baseCurrency = normalizeCurrencyCode(business?.currency, 'TTD');
 
     const statusMap: Record<string, number> = {};
     for (const s of contactsByStatus) {
@@ -234,11 +350,118 @@ export class BusinessGraphService {
       ? (completedProjectTasks / totalProjectTasks) * 100
       : 0;
 
+    const unconvertedTreasury: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }> = {};
+    const unconvertedCash: Record<string, number> = {};
+    type AggregateFallback = { _sum?: Record<string, unknown>; _count?: number };
+
+    let cashBalance: number;
+    if (Array.isArray(cashAccountsData)) {
+      const linkedCoaIds = Array.from(
+        new Set(
+          cashAccountsData
+            .map((a: { chartOfAccountId?: string | null }) => a.chartOfAccountId)
+            .filter(Boolean) as string[],
+        ),
+      );
+      const cashLedgerMovements = await loadCashLedgerMovements(
+        db.ledgerEntry,
+        businessId,
+        linkedCoaIds,
+      );
+      cashBalance = computeNormalizedCashBalance({
+        accounts: cashAccountsData,
+        ledgerMovements: cashLedgerMovements,
+        baseCurrency,
+        rates: exchangeRates,
+        failClosedOnMissingRate: false,
+        unconvertedByCurrency: unconvertedCash,
+      });
+      for (const [cur, amt] of Object.entries(unconvertedCash)) {
+        unconvertedTreasury[cur] = { ...(unconvertedTreasury[cur] ?? {}), cash: Math.round(amt * 100) / 100 };
+      }
+    } else {
+      cashBalance = Number((cashAccountsData as AggregateFallback)?._sum?.currentBalance ?? 0);
+    }
+
+    let unpaidBillsAmount = 0;
+    let unpaidBillsCount: number;
+    if (Array.isArray(unpaidBillsData)) {
+      unpaidBillsCount = unpaidBillsData.length;
+      for (const bill of unpaidBillsData) {
+        const amt = Number(bill.amount ?? 0);
+        const cur = normalizeCurrencyCode(bill.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          unpaidBillsAmount += amt * mult;
+        } else {
+          unconvertedTreasury[cur] = {
+            ...(unconvertedTreasury[cur] ?? {}),
+            unpaidBills: Math.round(((unconvertedTreasury[cur]?.unpaidBills ?? 0) + amt) * 100) / 100,
+          };
+        }
+      }
+      unpaidBillsAmount = Math.round(unpaidBillsAmount * 100) / 100;
+    } else {
+      const agg = unpaidBillsData as AggregateFallback;
+      unpaidBillsAmount = Number(agg?._sum?.amount ?? 0);
+      unpaidBillsCount = Number(agg?._count ?? 0);
+    }
+
+    let committedPayrollAmount = 0;
+    let committedPayrollRuns: number;
+    if (Array.isArray(committedPayrollData)) {
+      committedPayrollRuns = committedPayrollData.length;
+      for (const run of committedPayrollData) {
+        const amt = Number(run.totalGross ?? 0);
+        const cur = normalizeCurrencyCode(run.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          committedPayrollAmount += amt * mult;
+        } else {
+          unconvertedTreasury[cur] = {
+            ...(unconvertedTreasury[cur] ?? {}),
+            committedPayroll: Math.round(((unconvertedTreasury[cur]?.committedPayroll ?? 0) + amt) * 100) / 100,
+          };
+        }
+      }
+      committedPayrollAmount = Math.round(committedPayrollAmount * 100) / 100;
+    } else {
+      const agg = committedPayrollData as AggregateFallback;
+      committedPayrollAmount = Number(agg?._sum?.totalGross ?? 0);
+      committedPayrollRuns = Number(agg?._count ?? 0);
+    }
+
+    let openPipelineValue = 0;
+    let openDealCount: number;
+    const unconvertedPipeline: Record<string, number> = {};
+    if (Array.isArray(openDealsData)) {
+      openDealCount = openDealsData.length;
+      for (const d of openDealsData) {
+        const val = Number(d.value ?? 0);
+        const cur = normalizeCurrencyCode(d.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          openPipelineValue += val * mult;
+        } else {
+          unconvertedPipeline[cur] = Math.round(((unconvertedPipeline[cur] ?? 0) + val) * 100) / 100;
+        }
+      }
+      openPipelineValue = Math.round(openPipelineValue * 100) / 100;
+    } else {
+      const agg = openDealsData as AggregateFallback;
+      openPipelineValue = Number(agg?._sum?.value ?? 0);
+      openDealCount = Number(agg?._count ?? 0);
+    }
+
     const categoryNames = await this.resolveCategoryNames(businessId, expensesByCategory.map(e => e.categoryId).filter(Boolean) as string[]);
     const topCategories = expensesByCategory.map(e => ({
       name: (e.categoryId && categoryNames[e.categoryId]) || 'Uncategorized',
       amount: e._sum.amount ?? 0,
     }));
+
+    const unmappedCurrencies = Array.from(
+      new Set([...Object.keys(unconvertedTreasury), ...Object.keys(unconvertedPipeline)]),
+    );
 
     const healthIndicators = this.computeHealthIndicators({
       overdueCount: overdueInvoices._count ?? 0,
@@ -250,6 +473,12 @@ export class BusinessGraphService {
       budgetUtil,
       totalExpMonth,
       monthlyRev,
+      cashBalance,
+      unpaidBillsAmount,
+      committedPayrollAmount,
+      openTicketsCount,
+      unmappedCurrencies,
+      baseCurrency,
     });
 
     const momentumSignals = [
@@ -271,7 +500,7 @@ export class BusinessGraphService {
         industry: business?.industry ?? null,
         archetype: business?.archetype ?? null,
         revenueModel: business?.revenueModel ?? null,
-        currency: business?.currency ?? 'TTD',
+        currency: baseCurrency,
         stage: business?.businessStage ?? null,
         teamSize: business?.teamSize ?? null,
       },
@@ -320,6 +549,26 @@ export class BusinessGraphService {
       storefront: {
         activeProductCount: activeProducts,
         averagePrice: Math.round((avgProductPrice._avg.price ?? 0) * 100) / 100,
+      },
+      treasury: {
+        cashBalance,
+        unpaidBillsAmount,
+        unpaidBillsCount,
+        committedPayrollAmount,
+        committedPayrollRuns,
+        ...(Object.keys(unconvertedTreasury).length > 0
+          ? { unconvertedByCurrency: unconvertedTreasury }
+          : {}),
+      },
+      pipeline: {
+        openDealCount,
+        openPipelineValue,
+        ...(Object.keys(unconvertedPipeline).length > 0
+          ? { unconvertedByCurrency: unconvertedPipeline }
+          : {}),
+      },
+      support: {
+        openTicketCount: openTicketsCount,
       },
       momentumScore,
       healthIndicators,
@@ -494,6 +743,12 @@ export class BusinessGraphService {
     budgetUtil: number;
     totalExpMonth: number;
     monthlyRev: number;
+    cashBalance?: number;
+    unpaidBillsAmount?: number;
+    committedPayrollAmount?: number;
+    openTicketsCount?: number;
+    unmappedCurrencies?: string[];
+    baseCurrency?: string;
   }): BusinessGraphSnapshot['healthIndicators'] {
     const indicators: BusinessGraphSnapshot['healthIndicators'] = [];
 
@@ -550,6 +805,23 @@ export class BusinessGraphService {
       });
     }
 
+    const obligations = (data.unpaidBillsAmount ?? 0) + (data.committedPayrollAmount ?? 0);
+    if (obligations > 0 && data.cashBalance !== undefined && obligations > data.cashBalance) {
+      indicators.push({
+        area: 'treasury',
+        status: 'critical',
+        detail: `Committed bills and payroll ($${obligations.toLocaleString()}) exceed available cash ($${data.cashBalance.toLocaleString()})`,
+      });
+    }
+
+    if (data.unmappedCurrencies && data.unmappedCurrencies.length > 0) {
+      indicators.push({
+        area: 'treasury',
+        status: 'warning',
+        detail: `Unconverted foreign currency balances (${data.unmappedCurrencies.join(', ')}) excluded from ${data.baseCurrency ?? 'base'} totals — configure exchange rates`,
+      });
+    }
+
     return indicators;
   }
 
@@ -563,9 +835,16 @@ export class BusinessGraphService {
       `Contacts: ${snapshot.contacts.total} total (${snapshot.contacts.staleLeadCount} stale leads)`,
       `Revenue: $${snapshot.revenue.totalCollected.toLocaleString()} collected, $${snapshot.revenue.monthlyRevenue.toLocaleString()} this month`,
       `Outstanding: $${snapshot.revenue.outstandingAmount.toLocaleString()} (${snapshot.revenue.outstandingCount} invoices, ${snapshot.revenue.overdueCount} overdue)`,
+      snapshot.treasury
+        ? `Cash & Obligations: $${snapshot.treasury.cashBalance.toLocaleString()} cash, $${snapshot.treasury.unpaidBillsAmount.toLocaleString()} unpaid bills (${snapshot.treasury.unpaidBillsCount}), $${snapshot.treasury.committedPayrollAmount.toLocaleString()} committed payroll (${snapshot.treasury.committedPayrollRuns} runs)`
+        : null,
+      snapshot.pipeline
+        ? `Pipeline: ${snapshot.pipeline.openDealCount} open deals ($${snapshot.pipeline.openPipelineValue.toLocaleString()})`
+        : null,
       `Bookings: ${snapshot.bookings.upcomingCount} upcoming, ${snapshot.bookings.completedThisMonth} completed this month`,
       `Expenses: $${snapshot.expenses.totalThisMonth.toLocaleString()} this month`,
       `Projects: ${snapshot.projects.activeCount} active, ${snapshot.projects.overdueTaskCount} overdue tasks`,
+      snapshot.support ? `Support: ${snapshot.support.openTicketCount} open tickets` : null,
       `Content: ${snapshot.content.draftPostCount} draft posts, ${snapshot.content.scheduledPostCount} scheduled, ${snapshot.content.draftCampaignCount} draft campaigns`,
       `Automations: ${snapshot.automations.activeCount} active flows`,
       `Store: ${snapshot.storefront.activeProductCount} active products`,

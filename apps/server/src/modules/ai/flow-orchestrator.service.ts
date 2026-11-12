@@ -7124,7 +7124,10 @@ ${triage.standingContext}`;
         return { id: run.id, status: run.status };
       }
       case 'payroll_mark_paid': {
-        const run = await this.getPayroll().markRunPaid(businessId, args.runId);
+        const run = await this.getPayroll().markRunPaid(businessId, args.runId, {
+          paymentAccountId: args.paymentAccountId,
+          paymentMethod: args.paymentMethod,
+        });
         return { id: run.id, status: run.status };
       }
       // === STAFF PERFORMANCE ===

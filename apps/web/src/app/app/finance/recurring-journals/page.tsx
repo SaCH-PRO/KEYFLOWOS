@@ -8,6 +8,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { InlineLineItemBuilder, type LineItem } from "@/components/finance/inline-line-item-builder";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal, deleteRecurringJournal, runRecurringJournal, fetchChartOfAccounts, type RecurringJournalEntry, type ChartOfAccount } from "@/lib/api/finance";
+import { fetchFinanceSettings } from "@/lib/client";
 
 export default function RecurringJournalsPage() {
   const businessId = getStoredBusinessId() ?? "";
@@ -25,6 +26,7 @@ export default function RecurringJournalsPage() {
   const [endDate, setEndDate] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [accounts, setAccounts] = useState<ChartOfAccount[]>([]);
+  const [businessCurrency, setBusinessCurrency] = useState<string>("TTD");
   const [lineItemErrors, setLineItemErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
@@ -32,12 +34,16 @@ export default function RecurringJournalsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [entriesRes, accountsRes] = await Promise.all([
+      const [entriesRes, accountsRes, settingsRes] = await Promise.all([
         fetchRecurringJournals(businessId),
         fetchChartOfAccounts(businessId),
+        fetchFinanceSettings(businessId).catch(() => ({ data: null, error: null })),
       ]);
-      setEntries(entriesRes.data?.items ?? []);
-      setAccounts(accountsRes.data?.items ?? []);
+      setEntries(Array.isArray(entriesRes.data?.items) ? entriesRes.data.items : []);
+      setAccounts(Array.isArray(accountsRes.data?.items) ? accountsRes.data.items : []);
+      if (typeof settingsRes.data?.currency === "string" && settingsRes.data.currency.trim()) {
+        setBusinessCurrency(settingsRes.data.currency.trim().toUpperCase());
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load recurring journals");
     } finally {
@@ -223,7 +229,7 @@ export default function RecurringJournalsPage() {
                 items={lineItems}
                 onChange={setLineItems}
                 accounts={accounts}
-                currency="TTD"
+                currency={businessCurrency}
                 errors={lineItemErrors}
                 disabled={saving}
               />

@@ -1,0 +1,535 @@
+import { BadRequestException } from '@nestjs/common';
+
+export interface ExchangeRateRow {
+  fromCurrency: string;
+  toCurrency: string;
+  rate: number | string | { toString(): string };
+  date?: Date | string;
+}
+
+export const PRISMA_PAGE_CAP = 1000;
+
+/**
+ * Paginate through a Prisma `findMany` delegate in chunks of `PRISMA_PAGE_CAP` (1,000)
+ * so queries are never silently truncated by `defaultTakeExtension` (`packages/db/src/client.ts`).
+ * When a dataset has fewer than 1,000 rows (including unit test stubs), only a single
+ * call is issued.
+ */
+export async function fetchAllPages<T>(
+  fetchPage: (pagination: { skip: number; take: number }) => Promise<T[]>,
+): Promise<T[]> {
+  const all: T[] = [];
+  let skip = 0;
+  while (true) {
+    const page = await fetchPage({ skip, take: PRISMA_PAGE_CAP });
+    if (!Array.isArray(page) || page.length === 0) break;
+    all.push(...page);
+    if (page.length < PRISMA_PAGE_CAP) break;
+    skip += page.length;
+  }
+  return all;
+}
+
+const businessSnapshotRevisions = new Map<string, number>();
+
+export function invalidateBusinessFinancialSnapshotCache(businessId: string): void {
+  if (!businessId) return;
+  businessSnapshotRevisions.set(
+    businessId,
+    (businessSnapshotRevisions.get(businessId) ?? 0) + 1,
+  );
+}
+
+export function getBusinessFinancialSnapshotRevision(businessId: string): number {
+  return businessSnapshotRevisions.get(businessId) ?? 0;
+}
+
+/**
+ * Load the latest ExchangeRate row for each `(fromCurrency, toCurrency)` pair
+ * in a business so high-frequency snapshots of one pair never evict other pairs.
+ */
+export async function loadLatestExchangeRates(
+  exchangeRateDelegate: unknown,
+  businessId: string,
+): Promise<ExchangeRateRow[]> {
+  const delegate = exchangeRateDelegate as
+    | {
+        findMany?: (args: Record<string, unknown>) => Promise<ExchangeRateRow[]>;
+      }
+    | undefined;
+  if (!delegate?.findMany) return [];
+  return fetchAllPages<ExchangeRateRow>(({ skip, take }) =>
+    delegate.findMany!({
+      where: { businessId },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      distinct: ['fromCurrency', 'toCurrency'],
+      ...(skip > 0 ? { skip, take } : {}),
+    }),
+  );
+}
+
+export function normalizeCurrencyCode(code?: string | null, fallback = 'TTD'): string {
+  const cleaned = (code ?? '').trim().toUpperCase();
+  return cleaned || fallback.trim().toUpperCase() || 'TTD';
+}
+
+/**
+ * Resolve a conversion multiplier from `fromCurrency` to `toCurrency` using
+ * the latest configured ExchangeRate rows (ordered newest first).
+ * Supports direct (`from -> to`) and inverse (`to -> from` as `1 / rate`) pairs.
+ * Returns `null` when no valid conversion rate is configured.
+ */
+export function resolveConversionRate(
+  fromCurrency: string,
+  toCurrency: string,
+  rates: ExchangeRateRow[],
+): number | null {
+  const from = normalizeCurrencyCode(fromCurrency);
+  const to = normalizeCurrencyCode(toCurrency);
+  if (from === to) return 1;
+
+  for (const row of rates) {
+    const rowFrom = normalizeCurrencyCode(row.fromCurrency, '');
+    const rowTo = normalizeCurrencyCode(row.toCurrency, '');
+    const numRate = Number(row.rate?.toString?.() ?? row.rate);
+    if (!Number.isFinite(numRate) || numRate <= 0) continue;
+    if (rowFrom === from && rowTo === to) {
+      return numRate;
+    }
+  }
+
+  for (const row of rates) {
+    const rowFrom = normalizeCurrencyCode(row.fromCurrency, '');
+    const rowTo = normalizeCurrencyCode(row.toCurrency, '');
+    const numRate = Number(row.rate?.toString?.() ?? row.rate);
+    if (!Number.isFinite(numRate) || numRate <= 0) continue;
+    if (rowFrom === to && rowTo === from) {
+      return 1 / numRate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Convert an amount into `baseCurrency` or fail closed with BadRequestException
+ * when the amount is in a foreign currency with no configured exchange rate.
+ */
+export function convertToBaseOrThrow(
+  amount: number,
+  itemCurrency: string | null | undefined,
+  baseCurrency: string,
+  rates: ExchangeRateRow[],
+  contextLabel: string,
+): number {
+  const numAmount = Number(amount ?? 0);
+  if (!Number.isFinite(numAmount) || numAmount === 0) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+  const from = normalizeCurrencyCode(itemCurrency, base);
+  if (from === base) return numAmount;
+
+  const multiplier = resolveConversionRate(from, base, rates);
+  if (multiplier == null) {
+    throw new BadRequestException(
+      `Cannot compute ${contextLabel}: missing exchange rate from ${from} to ${base}`,
+    );
+  }
+  return Math.round(numAmount * multiplier * 100) / 100;
+}
+
+export interface CashAccountSnapshotRow {
+  id?: string;
+  chartOfAccountId?: string | null;
+  openingBalance?: unknown;
+  currentBalance?: unknown;
+  currency?: string | null;
+}
+
+export interface CashLedgerMovementRow {
+  id?: string;
+  accountId: string;
+  financialAccountId?: string | null;
+  appliedDelta?: unknown;
+  accountCurrency?: string | null;
+  debit?: unknown;
+  credit?: unknown;
+  currency?: string | null;
+  transactionType?: string | null;
+}
+
+export interface PersistedEntryFinancialAccountTarget {
+  ledgerEntryId?: string;
+  entryIndex: number;
+  accountId: string;
+  financialAccountId: string;
+  appliedDelta?: string;
+  accountCurrency?: string;
+}
+
+export function extractFinancialAccountTargetFromMetadata(
+  metadata: unknown,
+  coaAccountId: string,
+  entryIndex?: number,
+  ledgerEntryId?: string | null,
+): PersistedEntryFinancialAccountTarget | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+  const record = metadata as Record<string, unknown>;
+  const targets = record.entryFinancialAccounts;
+  if (Array.isArray(targets)) {
+    const validTargets = targets.filter(
+      (t): t is PersistedEntryFinancialAccountTarget =>
+        Boolean(
+          t &&
+            typeof t === 'object' &&
+            typeof (t as { financialAccountId?: unknown }).financialAccountId === 'string' &&
+            typeof (t as { accountId?: unknown }).accountId === 'string',
+        ),
+    );
+    if (typeof ledgerEntryId === 'string' && ledgerEntryId.length > 0) {
+      const byLedgerId = validTargets.find((t) => t.ledgerEntryId === ledgerEntryId);
+      if (byLedgerId) return byLedgerId;
+    }
+    if (typeof entryIndex === 'number') {
+      const byIdxAndCoa = validTargets.find(
+        (t) => t.entryIndex === entryIndex && t.accountId === coaAccountId,
+      );
+      if (byIdxAndCoa) return byIdxAndCoa;
+    }
+    const byCoa = validTargets.filter((t) => t.accountId === coaAccountId);
+    if (byCoa.length === 1) {
+      return byCoa[0];
+    }
+    if (byCoa.length > 1) {
+      const distinctFaIds = new Set(byCoa.map((t) => t.financialAccountId));
+      if (distinctFaIds.size === 1) {
+        return byCoa[0];
+      }
+      return null;
+    }
+  }
+  const mapByCoa = record.entryFinancialAccountByCoa;
+  if (mapByCoa && typeof mapByCoa === 'object' && !Array.isArray(mapByCoa)) {
+    const val = (mapByCoa as Record<string, unknown>)[coaAccountId];
+    if (typeof val === 'string' && val) {
+      return {
+        entryIndex: typeof entryIndex === 'number' ? entryIndex : 0,
+        accountId: coaAccountId,
+        financialAccountId: val,
+      };
+    }
+  }
+  return null;
+}
+
+export function extractFinancialAccountIdFromMetadata(
+  metadata: unknown,
+  coaAccountId: string,
+  entryIndex?: number,
+  ledgerEntryId?: string | null,
+): string | null {
+  return (
+    extractFinancialAccountTargetFromMetadata(metadata, coaAccountId, entryIndex, ledgerEntryId)
+      ?.financialAccountId ?? null
+  );
+}
+
+/**
+ * Load all cash/bank ledger movements across all pages (bypassing the 1,000-row
+ * per-query pagination guard) for the given linked ChartOfAccount ids.
+ */
+export async function loadCashLedgerMovements(
+  ledgerEntryDelegate: unknown,
+  businessId: string,
+  linkedCoaIds: string[],
+): Promise<CashLedgerMovementRow[]> {
+  const delegate = ledgerEntryDelegate as
+    | {
+        findMany?: (args: Record<string, unknown>) => Promise<
+          Array<{
+            id?: string;
+            accountId: string;
+            financialAccountId?: string | null;
+            appliedDelta?: unknown;
+            accountCurrency?: string | null;
+            debit: unknown;
+            credit: unknown;
+            currency?: string | null;
+            transaction?: { type?: string | null; metadata?: unknown } | null;
+          }>
+        >;
+      }
+    | undefined;
+  if (linkedCoaIds.length === 0 || !delegate?.findMany) {
+    return [];
+  }
+  const rows = await fetchAllPages(({ skip, take }) =>
+    delegate.findMany!({
+      where: {
+        businessId,
+        accountId: { in: linkedCoaIds },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        accountId: true,
+        debit: true,
+        credit: true,
+        currency: true,
+        transaction: { select: { type: true, metadata: true } },
+      },
+      ...(skip > 0 ? { skip, take } : {}),
+    }),
+  );
+
+  return rows.map((e) => {
+    const target = extractFinancialAccountTargetFromMetadata(
+      e.transaction?.metadata,
+      e.accountId,
+      undefined,
+      e.id,
+    );
+    return {
+      id: e.id,
+      accountId: e.accountId,
+      financialAccountId: e.financialAccountId ?? target?.financialAccountId ?? null,
+      appliedDelta: e.appliedDelta ?? target?.appliedDelta ?? null,
+      accountCurrency: e.accountCurrency ?? target?.accountCurrency ?? null,
+      debit: e.debit,
+      credit: e.credit,
+      currency: e.currency,
+      transactionType: e.transaction?.type ?? null,
+    };
+  });
+}
+
+/**
+ * Normalize TAX_PAYABLE ledger entries into `baseCurrency` across all pages.
+ * Falls back to `ledgerEntry.aggregate` only when `findMany` returns no rows
+ * for `taxPayableAccountId` (e.g. hermetic aggregate-only unit test stubs).
+ */
+export async function loadNormalizedTaxReserved(params: {
+  ledgerEntryDelegate: unknown;
+  businessId: string;
+  taxPayableAccountId: string | null | undefined;
+  baseCurrency: string;
+  rates: ExchangeRateRow[];
+  failClosedOnMissingRate?: boolean;
+}): Promise<number> {
+  const {
+    ledgerEntryDelegate,
+    businessId,
+    taxPayableAccountId,
+    baseCurrency,
+    rates,
+    failClosedOnMissingRate = true,
+  } = params;
+  if (!taxPayableAccountId) return 0;
+
+  const delegate = ledgerEntryDelegate as
+    | {
+        findMany?: (args: Record<string, unknown>) => Promise<
+          Array<{
+            id?: string;
+            accountId?: string;
+            debit?: unknown;
+            credit?: unknown;
+            currency?: string | null;
+          }>
+        >;
+        aggregate?: (args: Record<string, unknown>) => Promise<{
+          _sum?: { debit?: unknown; credit?: unknown };
+        }>;
+      }
+    | undefined;
+  if (!delegate) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+
+  if (typeof delegate.findMany === 'function') {
+    const rows = await fetchAllPages(({ skip, take }) =>
+      delegate.findMany!({
+        where: { businessId, accountId: taxPayableAccountId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          accountId: true,
+          debit: true,
+          credit: true,
+          currency: true,
+        },
+        ...(skip > 0 ? { skip, take } : {}),
+      }),
+    );
+    const matchedRows = rows.filter(
+      (r) => !r.accountId || r.accountId === taxPayableAccountId,
+    );
+    if (matchedRows.length > 0) {
+      let total = 0;
+      for (const r of matchedRows) {
+        const dr = Number(r.debit?.toString?.() ?? r.debit ?? 0);
+        const cr = Number(r.credit?.toString?.() ?? r.credit ?? 0);
+        const netLiability = cr - dr;
+        if (!Number.isFinite(netLiability) || netLiability === 0) continue;
+        const from = normalizeCurrencyCode(r.currency, base);
+        if (from === base) {
+          total += netLiability;
+        } else if (failClosedOnMissingRate) {
+          total += convertToBaseOrThrow(
+            netLiability,
+            from,
+            base,
+            rates,
+            'safe-to-spend tax reserve',
+          );
+        } else {
+          const mult = resolveConversionRate(from, base, rates);
+          if (mult != null) {
+            total += netLiability * mult;
+          }
+        }
+      }
+      return Math.round(total * 100) / 100;
+    }
+  }
+
+  if (typeof delegate.aggregate === 'function') {
+    const agg = await delegate.aggregate({
+      where: { accountId: taxPayableAccountId },
+      _sum: { debit: true, credit: true },
+    });
+    return Number(agg?._sum?.credit ?? 0) - Number(agg?._sum?.debit ?? 0);
+  }
+
+  return 0;
+}
+
+/**
+ * Compute authoritative available cash in `baseCurrency`:
+ * - When non-OPENING_BALANCE ledger movements are supplied for linked
+ *   ChartOfAccount ids, cash is derived from each active FinancialAccount's
+ *   `openingBalance` (falling back to `currentBalance` only if `openingBalance`
+ *   is undefined in a legacy/stub row) plus the movement delta across linked
+ *   accounts.
+ * - When a movement carries a persisted `appliedDelta` (recorded in the target
+ *   FinancialAccount's currency at posting time), that exact account-currency
+ *   delta is used rather than re-converting the raw ledger entry with a later
+ *   exchange rate, preventing FX drift from fabricating or erasing cash.
+ * - Movements that carry a resolved `financialAccountId` belonging to an
+ *   archived/inactive FinancialAccount (not present in `accounts`) are excluded
+ *   even when an active FinancialAccount shares the same `chartOfAccountId`.
+ * - When no ledger movements exist for those COA ids (or in hermetic stubs that
+ *   only populate `currentBalance`), uses `currentBalance ?? openingBalance`.
+ */
+export function computeNormalizedCashBalance(params: {
+  accounts: CashAccountSnapshotRow[];
+  ledgerMovements?: CashLedgerMovementRow[];
+  baseCurrency: string;
+  rates: ExchangeRateRow[];
+  failClosedOnMissingRate?: boolean;
+  unconvertedByCurrency?: Record<string, number>;
+}): number {
+  const {
+    accounts,
+    ledgerMovements = [],
+    baseCurrency,
+    rates,
+    failClosedOnMissingRate = true,
+    unconvertedByCurrency,
+  } = params;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+  const linkedCoaIds = new Set<string>();
+  const activeAccountIds = new Set<string>();
+  const accountById = new Map<string, CashAccountSnapshotRow>();
+  const accountsByCoa = new Map<string, CashAccountSnapshotRow[]>();
+
+  for (const acc of accounts) {
+    if (acc.chartOfAccountId) {
+      linkedCoaIds.add(acc.chartOfAccountId);
+      const list = accountsByCoa.get(acc.chartOfAccountId) ?? [];
+      list.push(acc);
+      accountsByCoa.set(acc.chartOfAccountId, list);
+    }
+    if (acc.id) {
+      activeAccountIds.add(acc.id);
+      accountById.set(acc.id, acc);
+    }
+  }
+
+  const relevantMovements = ledgerMovements.filter((m) => {
+    if (!m.accountId || !linkedCoaIds.has(m.accountId)) return false;
+    if (m.transactionType === 'OPENING_BALANCE') return false;
+    if (m.financialAccountId && activeAccountIds.size > 0 && !activeAccountIds.has(m.financialAccountId)) {
+      return false;
+    }
+    return true;
+  });
+
+  const hasLedgerMovements =
+    relevantMovements.length > 0 ||
+    ledgerMovements.some(
+      (m) =>
+        m.accountId &&
+        linkedCoaIds.has(m.accountId) &&
+        m.transactionType !== 'OPENING_BALANCE' &&
+        Boolean(m.financialAccountId),
+    );
+
+  let total = 0;
+
+  const addAmount = (rawAmount: number, rawCurrency?: string | null) => {
+    if (!Number.isFinite(rawAmount) || rawAmount === 0) return;
+    const from = normalizeCurrencyCode(rawCurrency, base);
+    if (from === base) {
+      total += rawAmount;
+      return;
+    }
+    if (failClosedOnMissingRate) {
+      total += convertToBaseOrThrow(rawAmount, from, base, rates, 'cash balance');
+      return;
+    }
+    const mult = resolveConversionRate(from, base, rates);
+    if (mult != null) {
+      total += rawAmount * mult;
+    } else if (unconvertedByCurrency) {
+      unconvertedByCurrency[from] = (unconvertedByCurrency[from] ?? 0) + rawAmount;
+    }
+  };
+
+  for (const acc of accounts) {
+    const hasOpening = acc.openingBalance !== undefined && acc.openingBalance !== null;
+    const hasCurrent = acc.currentBalance !== undefined && acc.currentBalance !== null;
+    const baseAccountAmount = hasLedgerMovements
+      ? Number((hasOpening ? acc.openingBalance : acc.currentBalance) ?? 0)
+      : Number((hasCurrent ? acc.currentBalance : acc.openingBalance) ?? 0);
+    addAmount(baseAccountAmount, acc.currency);
+  }
+
+  if (hasLedgerMovements) {
+    for (const m of relevantMovements) {
+      const parsedAppliedDelta =
+        m.appliedDelta !== undefined && m.appliedDelta !== null
+          ? Number(m.appliedDelta?.toString?.() ?? m.appliedDelta)
+          : NaN;
+      if (Number.isFinite(parsedAppliedDelta)) {
+        const targetAcc = m.financialAccountId
+          ? accountById.get(m.financialAccountId)
+          : accountsByCoa.get(m.accountId)?.length === 1
+            ? accountsByCoa.get(m.accountId)![0]
+            : undefined;
+        const deltaCurrency = m.accountCurrency ?? targetAcc?.currency ?? m.currency ?? base;
+        addAmount(parsedAppliedDelta, deltaCurrency);
+        continue;
+      }
+      const dr = Number(m.debit?.toString?.() ?? m.debit ?? 0);
+      const cr = Number(m.credit?.toString?.() ?? m.credit ?? 0);
+      addAmount(dr - cr, m.currency);
+    }
+  }
+
+  return Math.round(total * 100) / 100;
+}
+

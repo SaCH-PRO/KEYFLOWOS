@@ -30,8 +30,12 @@ interface SafeToSpend {
   cashBalance: number;
   taxReserved: number;
   billsDueNext30Days: number;
+  payrollReserved?: number;
+  debtPaymentsDue?: number;
   operatingBuffer: number;
+  otherReserves?: number;
   currency: string;
+  explanation?: string[];
 }
 
 export default function FinancialFlowPage() {
@@ -165,6 +169,7 @@ export default function FinancialFlowPage() {
         { id: "revenue", label: "Revenue", icon: Receipt, href: "/app/commerce", tone: "orange" },
         { id: "expenses", label: "Expenses", icon: Wallet, href: "/app/expenses", tone: "gold" },
         { id: "ledger", label: "Ledger", icon: BookOpen, href: "/app/finance/ledger", tone: "teal" },
+        { id: "journal", label: "Journal", icon: BookOpen, href: "/app/finance/journal", tone: "sky" },
         { id: "reports", label: "Reports", icon: FileText, href: "/app/finance/reports", tone: "violet" },
       ],
     },
@@ -186,6 +191,7 @@ export default function FinancialFlowPage() {
     { label: "Accounts", href: "/app/finance/settings#accounts", icon: Landmark, desc: "Bank, cash, reconciliation" },
     { label: "Reports", href: "/app/finance/reports", icon: FileText, desc: "P&L, balance sheet, tax" },
     { label: "General Ledger", href: "/app/finance/ledger", icon: BookOpen, desc: "Detailed transaction history" },
+    { label: "Journal Entries", href: "/app/finance/journal", icon: BookOpen, desc: "Post manual double-entry journals" },
     { label: "Trial Balance", href: "/app/finance/trial-balance", icon: Scale, desc: "Account balances summary" },
     { label: "Bank Rules", href: "/app/finance/bank-rules", icon: ListFilter, desc: "Auto-categorize transactions" },
     { label: "Recurring Journals", href: "/app/finance/recurring-journals", icon: Repeat, desc: "Scheduled journal entries" },
@@ -242,6 +248,42 @@ export default function FinancialFlowPage() {
           </>
         )}
       </div>
+
+      {/* Safe-to-Spend Breakdown */}
+      {safe && (
+        <SectionCard title="Safe-to-Spend Breakdown" icon={ShieldCheck} compact>
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold">{currency} {(safe.cashBalance ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Cash Balance</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.taxReserved ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Tax Reserved</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.billsDueNext30Days ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Bills Due (30d)</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.payrollReserved ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Committed Payroll</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.operatingBuffer ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Operating Buffer</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.otherReserves ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Other Reserves</p>
+            </div>
+            <div className="kf-card p-2.5 border-emerald-500/30">
+              <p className="text-sm font-semibold text-emerald-500">{currency} {(safe.safeToSpend ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Safe to Spend</p>
+            </div>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Cashflow Forecast */}
       {forecast && (

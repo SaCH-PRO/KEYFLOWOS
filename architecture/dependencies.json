@@ -7295,6 +7295,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/business-graph.service.spec.ts",
+      "specifier": "./business-graph.service",
+      "target": "apps/server/src/modules/ai/business-graph.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/business-graph.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/ai/business-graph.service.ts",
       "specifier": "@nestjs/common",
@@ -7306,6 +7320,13 @@
       "source": "apps/server/src/modules/ai/business-graph.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/business-graph.service.ts",
+      "specifier": "../finance/finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
       "type": "relative"
     },
     {
@@ -32370,6 +32391,13 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/finance/finance-accounts.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
@@ -32387,6 +32415,13 @@
       "source": "apps/server/src/modules/finance/finance-accounts.service.ts",
       "specifier": "./chart-of-accounts-seeder.service",
       "target": "apps/server/src/modules/finance/chart-of-accounts-seeder.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/finance-accounts.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
       "type": "relative"
     },
     {
@@ -32520,6 +32555,13 @@
       "source": "apps/server/src/modules/finance/finance-overview.service.ts",
       "specifier": "../../core/redis/redis.service",
       "target": "apps/server/src/core/redis/redis.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/finance-overview.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
       "type": "relative"
     },
     {
@@ -33203,6 +33245,62 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "@prisma/client",
+      "target": "@prisma/client",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "../ai/business-graph.service",
+      "target": "apps/server/src/modules/ai/business-graph.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "./expense-posting.service",
+      "target": "apps/server/src/modules/finance/expense-posting.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "./finance-overview.service",
+      "target": "apps/server/src/modules/finance/finance-overview.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "./posting.service",
+      "target": "apps/server/src/modules/finance/posting.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "./safe-to-spend.service",
+      "target": "apps/server/src/modules/finance/safe-to-spend.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "../payroll/payroll.service",
+      "target": "apps/server/src/modules/payroll/payroll.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
       "specifier": "@prisma/client",
       "target": "@prisma/client",
@@ -33270,6 +33368,20 @@
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/posting.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/finance/posting.service.ts",
+      "specifier": "node:crypto",
+      "target": "node:crypto",
+      "type": "external"
     },
     {
       "resolved": false,
@@ -33427,6 +33539,27 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
+      "specifier": "./safe-to-spend.service",
+      "target": "apps/server/src/modules/finance/safe-to-spend.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/finance/safe-to-spend.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
@@ -33444,6 +33577,13 @@
       "source": "apps/server/src/modules/finance/safe-to-spend.service.ts",
       "specifier": "./chart-of-accounts-seeder.service",
       "target": "apps/server/src/modules/finance/chart-of-accounts-seeder.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/safe-to-spend.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
       "type": "relative"
     },
     {
@@ -35209,6 +35349,20 @@
       "specifier": "./helpdesk.service",
       "target": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/helpdesk/helpdesk.service.spec.ts",
+      "specifier": "./helpdesk.service",
+      "target": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/helpdesk/helpdesk.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
     },
     {
       "resolved": false,
@@ -51523,6 +51677,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/payroll/payroll.module.ts",
+      "specifier": "../finance/finance.module",
+      "target": "apps/server/src/modules/finance/finance.module.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.module.ts",
       "specifier": "./payroll.controller",
       "target": "apps/server/src/modules/payroll/payroll.controller.ts",
       "type": "relative"
@@ -51536,9 +51697,44 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "specifier": "./payroll.service",
+      "target": "apps/server/src/modules/payroll/payroll.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "@keyflow/db",
+      "target": "@keyflow/db",
+      "type": "workspace"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/payroll/payroll.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "@prisma/client",
+      "target": "@prisma/client",
       "type": "external"
     },
     {
@@ -51546,6 +51742,20 @@
       "source": "apps/server/src/modules/payroll/payroll.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "../finance/expense-posting.service",
+      "target": "apps/server/src/modules/finance/expense-posting.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "../finance/finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
       "type": "relative"
     },
     {
@@ -59958,6 +60168,27 @@
     {
       "resolved": false,
       "source": "apps/server/test/payments-webhooks.service.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "specifier": "dotenv",
+      "target": "dotenv",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "specifier": "path",
+      "target": "path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -77632,6 +77863,27 @@
     },
     {
       "resolved": false,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "@testing-library/react",
+      "target": "@testing-library/react",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "../books-journal-tab",
+      "target": "apps/web/src/app/app/finance/components/books-journal-tab.tsx",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/web/src/app/app/finance/components/books-accounts-tab.tsx",
       "specifier": "@/components/ui/empty-state",
       "target": "@/components/ui/empty-state",
@@ -78431,8 +78683,29 @@
     {
       "resolved": false,
       "source": "apps/web/src/app/app/finance/journal/page.tsx",
-      "specifier": "next/navigation",
-      "target": "next/navigation",
+      "specifier": "@/components/layout/unified-page-shell",
+      "target": "@/components/layout/unified-page-shell",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/web/src/app/app/finance/journal/page.tsx",
+      "specifier": "../components/books-journal-tab",
+      "target": "apps/web/src/app/app/finance/components/books-journal-tab.tsx",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/journal/page.tsx",
+      "specifier": "lucide-react",
+      "target": "lucide-react",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/journal/page.tsx",
+      "specifier": "next/link",
+      "target": "next/link",
       "type": "external"
     },
     {
@@ -78468,6 +78741,13 @@
       "source": "apps/web/src/app/app/finance/ledger/page.tsx",
       "specifier": "lucide-react",
       "target": "lucide-react",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/ledger/page.tsx",
+      "specifier": "next/link",
+      "target": "next/link",
       "type": "external"
     },
     {
@@ -78573,6 +78853,13 @@
       "source": "apps/web/src/app/app/finance/recurring-journals/page.tsx",
       "specifier": "@/lib/api/finance",
       "target": "@/lib/api/finance",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/recurring-journals/page.tsx",
+      "specifier": "@/lib/client",
+      "target": "@/lib/client",
       "type": "external"
     },
     {
@@ -86343,6 +86630,13 @@
       "source": "apps/web/src/app/app/payroll/page.tsx",
       "specifier": "@/lib/api/payroll",
       "target": "@/lib/api/payroll",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/payroll/page.tsx",
+      "specifier": "@/lib/client",
+      "target": "@/lib/client",
       "type": "external"
     },
     {
@@ -108356,6 +108650,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/admission.mjs",
+      "specifier": "./merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/admission.mjs",
       "specifier": "./semantic-review.mjs",
       "target": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "relative"
@@ -108435,6 +108736,41 @@
       "source": "scripts/agent-control/lib/events.mjs",
       "specifier": "./control-envelope.mjs",
       "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-record.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-record.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
       "type": "relative"
     },
     {
@@ -108718,6 +109054,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "scripts/agent-control/record-auto-merge.mjs",
+      "specifier": "./lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/record-auto-merge.mjs",
+      "specifier": "./lib/merge-record.mjs",
+      "target": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "scripts/agent-control/select-directive.mjs",
       "specifier": "node:fs",
@@ -108811,6 +109161,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
       "specifier": "../lib/semantic-review.mjs",
       "target": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "relative"
@@ -108820,6 +109177,13 @@
       "source": "scripts/agent-control/tests/admission.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
       "type": "relative"
     },
     {
@@ -108939,6 +109303,62 @@
       "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "specifier": "../status.mjs",
       "target": "scripts/agent-control/status.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
       "type": "relative"
     },
     {
@@ -109108,6 +109528,153 @@
       "specifier": "node:child_process",
       "target": "node:child_process",
       "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:http",
+      "target": "node:http",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "../lib/merge-record.mjs",
+      "target": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "relative"
     },
     {
       "resolved": false,
@@ -109630,6 +110197,48 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "./harness.mjs",
+      "target": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
       "specifier": "./harness.mjs",
       "target": "scripts/agent-control/tests/windows/harness.mjs",
       "type": "relative"
@@ -110511,8 +111120,8 @@
     }
   ],
   "meta": {
-    "edges": 15787,
-    "nodes": 3861,
+    "edges": 15874,
+    "nodes": 3880,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -112794,6 +113403,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/ai/blueprint-onboarding.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/business-graph.service.spec.ts",
       "type": "file"
     },
     {
@@ -116468,6 +117082,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/finance/finance-accounts.service.ts",
       "type": "file"
     },
@@ -116538,6 +117157,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/finance/pdf-builder.ts",
       "type": "file"
     },
@@ -116579,6 +117203,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/finance/revenue-posting.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
       "type": "file"
     },
     {
@@ -116879,6 +117508,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/helpdesk/helpdesk.module.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/helpdesk/helpdesk.service.spec.ts",
       "type": "file"
     },
     {
@@ -119228,6 +119862,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/payroll/payroll.service.ts",
       "type": "file"
     },
@@ -120589,6 +121228,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/test/payments-webhooks.service.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/payroll-financial-truth.integration.test.ts",
       "type": "file"
     },
     {
@@ -123179,6 +123823,11 @@
     {
       "extension": ".tsx",
       "id": "apps/web/src/app/app/finance/cashflow/page.tsx",
+      "type": "file"
+    },
+    {
+      "extension": ".tsx",
+      "id": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
       "type": "file"
     },
     {
@@ -128405,6 +129054,10 @@
       "type": "external"
     },
     {
+      "id": "node:http",
+      "type": "external"
+    },
+    {
       "id": "node:module",
       "type": "external"
     },
@@ -128927,6 +129580,16 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/lib/momentum.mjs",
       "type": "file"
     },
@@ -128992,6 +129655,11 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/record-auto-merge.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/select-directive.mjs",
       "type": "file"
     },
@@ -129008,6 +129676,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
       "type": "file"
     },
     {
@@ -129037,7 +129710,32 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-record.spec.mjs",
       "type": "file"
     },
     {
@@ -129093,6 +129791,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
       "type": "file"
     },
     {

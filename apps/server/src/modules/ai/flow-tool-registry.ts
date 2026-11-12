@@ -4460,7 +4460,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
-    manualEquivalentRoute: '/app/finance',
+    manualEquivalentRoute: '/app/finance/journal',
     changedEntities: ['journalEntry', 'ledgerEntry'],
     parameters: {
       type: 'object',
@@ -4997,16 +4997,25 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
   {
     name: 'payroll_mark_paid',
-    description: 'Mark an approved payroll run as paid.',
+    description: 'Mark an approved payroll run as paid and post the disbursement to the general ledger.',
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
     manualEquivalentRoute: '/app/payroll',
-    changedEntities: ['payrollRun'],
+    changedEntities: ['payrollRun', 'financialTransaction', 'ledgerEntry', 'financialAccount'],
     parameters: {
       type: 'object',
       properties: {
         runId: { type: 'string', description: 'Payroll run ID' },
+        paymentAccountId: {
+          type: 'string',
+          description: 'Active FinancialAccount ID (CASH, BANK, or PAYMENT_PROCESSOR) from which payroll is disbursed',
+        },
+        paymentMethod: {
+          type: 'string',
+          description: 'Disbursement method when paymentAccountId is not specified (cash, bank_transfer, wire, ach, cheque, wipay, paypal, stripe)',
+          enum: ['cash', 'bank_transfer', 'wire', 'ach', 'cheque', 'wipay', 'paypal', 'stripe'],
+        },
       },
       required: ['runId'],
     },

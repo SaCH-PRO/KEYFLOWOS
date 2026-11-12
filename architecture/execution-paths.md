@@ -682,3 +682,56 @@ Key files:
 - `apps/server/src/modules/ai/flow-orchestrator.service.ts` — `governToolCall()`, `confirmThroughBoundary()`, `executeToolAction()`
 - `apps/server/src/modules/helpdesk/helpdesk.service.ts` — `createTicketRow()`, `emitTicketCreated()`
 - Proof: `apps/server/test/key-action-boundary.integration.test.ts`, `apps/server/test/key-action-boundary-surfaces.integration.test.ts`, `scripts/proof-admission/manifests/action-001-negative-controls.json`
+
+## 14. Payroll Disbursement → Double-Entry Ledger → Treasury & KEY Sight
+
+Added in PR #195. Connects staff payroll generation, approval, and disbursement to the double-entry ledger (`FinancialTransaction` + `LedgerEntry`), `FinancialAccount` balances, `SafeToSpendService`, `FinanceOverviewService`, and KEY's `BusinessGraphService`.
+
+```
+POST /payroll/businesses/:businessId/runs/:runId/mark-paid
+  (or KEY tool payroll_mark_paid via FlowOrchestratorService.executeToolAction)
+  → PayrollController.markRunPaid() / FlowOrchestratorService
+      → PayrollService.markRunPaid(businessId, runId, { paymentAccountId, paymentMethod })
+          → requires ExpensePostingService and $transaction (fails closed if absent)
+          → requires explicit paymentAccountId or validated paymentMethod
+          → prisma.client.$transaction(async (tx) => ...)
+              1. Re-reads PayrollRun scoped to businessId
+              2. Validates paymentAccountId (when provided): tenant ownership, isActive,
+                 type in ['CASH', 'BANK', 'PAYMENT_PROCESSOR'], currency match, and
+                 resolves chartOfAccountId
+              3. Conditional atomic claim: tx.payrollRun.updateMany({ where: { id, businessId, status: 'APPROVED' }, data: { status: 'PAID', paidAt } })
+                 (prevents concurrent double-disbursement; idempotent on already-PAID runs)
+              4. ExpensePostingService.onPayrollRunPaid(..., tx)
+                   → resolves EXPENSE_PAYROLL COA and payment COA
+                   → PostingService.post(..., tx) [externalRef = PayrollRun:<runId>:paid]
+                        → creates POSTED FinancialTransaction + balanced LedgerEntry rows
+                          (Dr EXPENSE_PAYROLL / Cr CASH|BANK|PAYMENT_PROCESSOR)
+                        → syncFinancialAccountBalances(tx, ...) updates FinancialAccount.currentBalance
+```
+
+Treasury and KEY context read path:
+
+```
+SafeToSpendService.calculate(businessId)
+FinanceOverviewService.getOverview(businessId)
+BusinessGraphService.assembleSnapshot(businessId)
+  → reads active CASH / BANK / PAYMENT_PROCESSOR FinancialAccount rows + non-OPENING_BALANCE LedgerEntry movements on linked ChartOfAccount ids
+  → computeNormalizedCashBalance() (apps/server/src/modules/finance/finance-accounting.util.ts)
+      → derives cash from openingBalance + net(debit - credit) without double-counting OPENING_BALANCE entries or shared COA links
+      → normalizes multi-currency balances, bills, reserve buckets, payroll runs, and pipeline deals via configured ExchangeRate rows (failing closed in SafeToSpendService / PayrollService.generateRun and isolating unmapped currencies with a treasury warning in BusinessGraphService)
+```
+
+Key files:
+
+- `apps/server/src/modules/payroll/payroll.module.ts` — imports `FinanceModule`
+- `apps/server/src/modules/payroll/payroll.service.ts` — `generateRun()`, `approveRun()`, `markRunPaid()`
+- `apps/server/src/modules/payroll/payroll.controller.ts` — `markRunPaid()`
+- `apps/server/src/modules/finance/expense-posting.service.ts` — `onPayrollRunPaid()`
+- `apps/server/src/modules/finance/posting.service.ts` — `post()`, `reverse()`, `syncFinancialAccountBalances()`
+- `apps/server/src/modules/finance/finance-accounting.util.ts` — `computeNormalizedCashBalance()`, `convertToBaseOrThrow()`, `resolveConversionRate()`
+- `apps/server/src/modules/finance/safe-to-spend.service.ts` — `calculate()`
+- `apps/server/src/modules/finance/finance-overview.service.ts` — `getOverview()`
+- `apps/server/src/modules/ai/business-graph.service.ts` — `assembleSnapshot()`, `computeHealthIndicators()`
+- `apps/web/src/app/app/payroll/page.tsx`, `apps/web/src/lib/api/payroll.ts` — disbursement account/method selection UI
+- `apps/web/src/app/app/financial-flow/page.tsx` — Safe-to-Spend breakdown with `Committed Payroll` and `Other Reserves`
+- Proof: `apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts`
