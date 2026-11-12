@@ -823,6 +823,16 @@
       "packet": "V1-97 (W11-CORTEX-READ-ROUTES-SCOPE)"
     },
     {
+      "prefix": "v97u_",
+      "owner": "apps/server/test/key-genome-finance-scope.integration.test.ts",
+      "packet": "V1-97 (W11-GENOME-FINANCE-SCOPE)"
+    },
+    {
+      "prefix": "v97v_",
+      "owner": "apps/server/test/calendar-names-scope.integration.test.ts",
+      "packet": "V1-97 (W11-CALENDAR-NAMES-SCOPE)"
+    },
+    {
       "prefix": "v97w_",
       "owner": "apps/server/test/owner-role-profile.integration.test.ts",
       "packet": "V1-97 (W11-D116-PROFILE-OWNER)"

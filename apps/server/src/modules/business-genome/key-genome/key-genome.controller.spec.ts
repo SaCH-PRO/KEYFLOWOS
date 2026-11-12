@@ -2,7 +2,14 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { AuthGuard } from '../../../core/auth/auth.guard';
 import { BusinessGuard } from '../../../core/auth/business.guard';
-import { KeyGenomeController } from './key-genome.controller';
+import { ModuleScopeGuard } from '../../../core/auth/module-scope.guard';
+import { PrismaService } from '../../../core/prisma/prisma.service';
+import {
+  KeyGenomeController,
+  isFinanceRecommendation,
+  isFinanceSignal,
+  isMoneyMemoryEvent,
+} from './key-genome.controller';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -79,9 +86,17 @@ async function makeController() {
     findSimilarMemory: vi.fn().mockResolvedValue([makeMemoryEvent()]),
   };
 
+  // W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): the controller reads
+  // the caller's revenue level from their membership. These cases call handlers
+  // without a request (no user), which reads as revenue 'none' without a query.
+  const prisma = {
+    client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'STAFF', permissionScopes: { revenue: 'read' } }) } },
+  };
+
   const moduleRef = await Test.createTestingModule({
     controllers: [KeyGenomeController],
     providers: [
+      mockProvider(PrismaService, prisma),
       mockProvider(GenomeSignalService, {
         listSignals: vi.fn().mockResolvedValue([]),
         getSignal: vi.fn().mockResolvedValue({}),
@@ -250,10 +265,16 @@ async function makeController() {
     .useValue({ canActivate: () => true })
     .overrideGuard(BusinessGuard)
     .useValue({ canActivate: () => true })
+    // W11-GENOME-FINANCE-SCOPE (D-128, D-100): the seven finance handlers carry
+    // ModuleScopeGuard; this unit spec calls handlers directly, as with the two
+    // guards above. The revenue gate itself is proven against a real database in
+    // test/key-genome-finance-scope.integration.test.ts.
+    .overrideGuard(ModuleScopeGuard)
+    .useValue({ canActivate: () => true })
     .compile();
 
   const controller = moduleRef.get<KeyGenomeController>(KeyGenomeController);
-  return { controller, memoryService };
+  return { controller, memoryService, moduleRef, prisma };
 }
 
 describe('KeyGenomeController', () => {
@@ -287,7 +308,10 @@ describe('KeyGenomeController', () => {
 
   it('finds similar memory', async () => {
     const { controller, memoryService } = await makeController();
-    const result = await controller.findSimilarMemory('biz_1', 'VISION_IDENTITY', 'RECOMMENDATION_ACCEPTED', 'SUCCESS');
+    // W11-GENOME-FINANCE-SCOPE review repairs (D-100): a member who reads
+    // revenue (the prisma mock's default membership) gets the query passed
+    // through as before; a member without revenue read is served it filtered.
+    const result = await controller.findSimilarMemory('biz_1', 'VISION_IDENTITY', 'RECOMMENDATION_ACCEPTED', 'SUCCESS', undefined, { user: { id: 'u_read', role: 'USER' } });
 
     expect(memoryService.findSimilarMemory).toHaveBeenCalledWith('biz_1', {
       domain: 'VISION_IDENTITY',
@@ -624,5 +648,58 @@ describe('KeyGenomeController', () => {
 
     expect(result.decision).toBe('ALLOW');
     expect(result.actionType).toBe('CREATE_TASK');
+  });
+});
+
+describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): finance rows of the shared genome tables', () => {
+  const finance = { id: 'rec_fin', domain: 'FINANCIAL', title: 'Business is losing money', insight: 'Net margin is negative (-28.6%).' };
+  const ops = { id: 'rec_ops', domain: 'OPERATIONS', title: 'Document SOPs', insight: 'No SOP.' };
+
+  it('[GFS-U1] the predicates match the rows the finance genome, outcome learning and the cross-domain service write, and no other domain', () => {
+    expect(isFinanceSignal({ sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance' })).toBe(true);
+    // A temporal or KEY writer filing a signal under section FINANCIAL is caught too.
+    expect(isFinanceSignal({ sourceModule: 'temporal_flow', section: 'FINANCIAL', domain: 'cash' })).toBe(true);
+    expect(isFinanceSignal({ sourceModule: 'crm', section: 'SALES', domain: 'customer_sales' })).toBe(false);
+    expect(isFinanceRecommendation({ domain: 'FINANCIAL' })).toBe(true);
+    expect(isFinanceRecommendation({ domain: 'OPERATIONS' })).toBe(false);
+    expect(isMoneyMemoryEvent({ sourceType: 'FINANCE_GENOME', domain: 'FINANCIAL', eventType: 'FINANCE_SNAPSHOT_COMPUTED' })).toBe(true);
+    // Outcome learning copies the finance row's domain into its own events.
+    expect(isMoneyMemoryEvent({ sourceType: 'GENOME_SIGNAL', domain: 'finance', section: 'FINANCIAL', eventType: 'SIGNAL_ACCEPTED' })).toBe(true);
+    expect(isMoneyMemoryEvent({ sourceType: 'CROSS_DOMAIN_GENOME', domain: 'CROSS_DOMAIN', eventType: 'CROSS_DOMAIN_RECOMMENDATIONS_RANKED' })).toBe(true);
+    expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', domain: 'SALES', eventType: 'CUSTOMER_SALES_SNAPSHOT_COMPUTED' })).toBe(true);
+    expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', domain: 'SALES', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED' })).toBe(false);
+    expect(isMoneyMemoryEvent({ sourceType: 'OPERATIONS_GENOME', domain: 'OPERATIONS', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED' })).toBe(false);
+  });
+
+  it('[GFS-U2] POST recommendations/generate serves a member without revenue read the generated rows without the FINANCIAL ones; a revenue read member is served them all', async () => {
+    const { controller, moduleRef, prisma } = await makeController();
+    const recommendations = moduleRef.get(GenomeRecommendationService) as any;
+    recommendations.generateRecommendations.mockResolvedValue([finance, ops]);
+
+    prisma.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { revenue: 'none' } });
+    const withheld = await controller.generateRecommendations('biz_1', {} as any, { user: { id: 'u_none', role: 'USER' } });
+    expect(withheld.map((r: any) => r.id)).toEqual(['rec_ops']);
+
+    // No request user (never past AuthGuard) fails closed as revenue 'none'.
+    expect((await controller.generateRecommendations('biz_1', {} as any)).map((r: any) => r.id)).toEqual(['rec_ops']);
+
+    prisma.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { revenue: 'read' } });
+    const served = await controller.generateRecommendations('biz_1', {} as any, { user: { id: 'u_read', role: 'USER' } });
+    expect(served.map((r: any) => r.id)).toEqual(['rec_fin', 'rec_ops']);
+  });
+
+  it('[GFS-U3] the governance queue drops the items naming a finance signal or recommendation for a member without revenue read', async () => {
+    const { controller, moduleRef, prisma } = await makeController();
+    (moduleRef.get(KeyGenomeGovernanceService) as any).queue.mockResolvedValue([
+      { id: 'signal-sig_fin', type: 'SIGNAL', sourceId: 'sig_fin', summary: 'Runway is 0.8 months' },
+      { id: 'recommendation-rec_fin', type: 'RECOMMENDATION', sourceId: 'rec_fin', summary: finance.insight },
+      { id: 'recommendation-rec_ops', type: 'RECOMMENDATION', sourceId: 'rec_ops', summary: ops.insight },
+    ]);
+    (moduleRef.get(GenomeSignalService) as any).listSignals.mockResolvedValue([{ id: 'sig_fin', sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance' }]);
+    (moduleRef.get(GenomeRecommendationService) as any).listRecommendations.mockResolvedValue([finance, ops]);
+
+    prisma.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { revenue: 'none' } });
+    const queue = await controller.governanceQueue('biz_1', { user: { id: 'u_none', role: 'USER' } });
+    expect((queue as any[]).map((i) => i.id)).toEqual(['recommendation-rec_ops']);
   });
 });

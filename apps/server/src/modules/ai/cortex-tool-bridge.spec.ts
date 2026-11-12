@@ -299,3 +299,51 @@ describe('it fails loudly rather than answering wrongly', () => {
     expect(isCortexBridgedTool('not_a_real_tool')).toBe(false);
   });
 });
+
+describe('W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, SEC-W9KCA-4): who the registry is told the call is for', () => {
+  // A surface with no principal runs the call for a member (contactBindMember): that member is the
+  // registry's audit-only actor (ctx.auditUserId, named on the CortexActionLog row alone), never its
+  // acting user (ctx.userId: the organ handler's caller and the ledger's human actor).
+  const registryCtx = (execute: ReturnType<typeof makeOrchestrator>['execute']) =>
+    (execute.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+
+  it('PRO_AUTO_MONITOR with onBehalfOfUserId: the registry receives auditUserId and no userId', async () => {
+    const { orchestrator, execute } = makeOrchestrator();
+
+    await (orchestrator as any).executeToolAction(
+      BIZ,
+      'inbox_read_thread',
+      { threadId: 'th_1' },
+      { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: 'user_owner' },
+    );
+
+    const ctx = registryCtx(execute);
+    expect(ctx).toMatchObject({ businessId: BIZ, preApproved: true, auditUserId: 'user_owner' });
+    expect(ctx).not.toHaveProperty('userId');
+  });
+
+  it('CHAT with a principal: the registry receives userId and no auditUserId', async () => {
+    const { orchestrator, execute } = makeOrchestrator();
+
+    await (orchestrator as any).executeToolAction(
+      BIZ,
+      'inbox_read_thread',
+      { threadId: 'th_1' },
+      { surface: 'CHAT', principalUserId: 'user_member', sessionId: 'sess_1' },
+    );
+
+    const ctx = registryCtx(execute);
+    expect(ctx).toMatchObject({ businessId: BIZ, userId: 'user_member', sessionId: 'sess_1' });
+    expect(ctx).not.toHaveProperty('auditUserId');
+  });
+
+  it('a surface with no principal and no member names neither', async () => {
+    const { orchestrator, execute } = makeOrchestrator();
+
+    await (orchestrator as any).executeToolAction(BIZ, 'inbox_list_threads', {}, { surface: 'INBOUND_CONVERSATION' });
+
+    const ctx = registryCtx(execute);
+    expect(ctx).not.toHaveProperty('userId');
+    expect(ctx).not.toHaveProperty('auditUserId');
+  });
+});

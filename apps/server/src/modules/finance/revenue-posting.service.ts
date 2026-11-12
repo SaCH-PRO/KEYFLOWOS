@@ -43,6 +43,15 @@ interface RefundPostingOpts extends PostingOpts {
    * transaction. Omitted otherwise, the call refunds all that is left.
    */
   refund?: { paymentId: string; amount: number };
+  /**
+   * W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member on whose
+   * behalf a SYSTEM refunder (KEY's payments_refund_charge) made the refund,
+   * kept as data.initiatedBy on the FINANCE payment_refunded row, as a
+   * payment KEY records keeps it (PaymentPostingOpts.initiatedBy). Ignored
+   * unless `createdById` is a system actor, and never a system actor itself.
+   * Audit data, never authority: KEY stays the refunder (SEC-RCD-1).
+   */
+  initiatedBy?: string | null;
 }
 
 /**
@@ -615,6 +624,11 @@ export class RevenuePostingService {
       }
     }
     const refundedBy = opts.createdById ?? null;
+    // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): beside KEY only, the member its refund ran for
+    // is kept as data.initiatedBy (the same guard as the payment_recorded row): never beside a person,
+    // never a system actor itself.
+    const initiatedBy =
+      isSystemActor(refundedBy) && opts.initiatedBy && !isSystemActor(opts.initiatedBy) ? opts.initiatedBy : null;
     const entry: RecordEventInput = {
       businessId: payment.businessId,
       module: 'FINANCE',
@@ -638,6 +652,7 @@ export class RevenuePostingService {
         ledgerRefundPosted: partlyPosted,
         ledgerPartialRefundsReversed: partialsReversed,
         refundedBy,
+        ...(initiatedBy ? { initiatedBy } : {}),
       },
       // KEY is a SYSTEM actor, a person is USER; with no actor none is named.
       actorType: refundedBy ? (isSystemActor(refundedBy) ? 'SYSTEM' : 'USER') : undefined,

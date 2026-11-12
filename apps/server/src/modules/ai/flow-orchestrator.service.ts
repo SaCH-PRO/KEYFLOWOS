@@ -4296,6 +4296,10 @@ ${triage.standingContext}`;
         // and the gateway is the authority on what actually happened.
         // W10-REFUND-CHARGE-DOOR review SEC-RCD-1 (R0-PL-07): KEY records the refund as its system
         // actor, distinct from any human, as the manual refund door records KEY (SYSTEM).
+        // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member the turn runs for is kept beside
+        // KEY as initiatedBy (audit data on the refund's feed row, never the refunder), as
+        // commerce_mark_invoice_paid keeps it; never a tool argument.
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
         const refund = await this.getPaymentsOps().refundCharge(
           businessId,
           args.gateway,
@@ -4305,6 +4309,7 @@ ${triage.standingContext}`;
             reason: args.reason,
           },
           KEY_SYSTEM_ACTOR_ID,
+          { initiatedBy },
         );
         return { refund };
       }
@@ -7651,8 +7656,9 @@ ${triage.standingContext}`;
    * W9-KEY-CORTEX-AUDIT: the call names its principal and command thread
    * from the dispatch's `action`, so the organ tool's CortexActionLog row is
    * attributed outside a request too (V1-19c's auditActor reads the request
-   * only). Review SEC-W9KCA-4: a surface with no principal names nobody; the
-   * member it runs for is not handed on (see below).
+   * only). Review SEC-W9KCA-4: a surface with no principal names no acting
+   * user; W11-BRIDGED-ORGAN-AUDIT-MEMBER hands the member it runs for to the
+   * registry as the audit-only actor (see below).
    */
   private async executeBridgedCortexTool(
     businessId: string,
@@ -7688,15 +7694,27 @@ ${triage.standingContext}`;
     // and the plan queue, the Pro Auto monitor, an inner custom-logic call, an approved proposal and a
     // KEY-cortex turn's bridged call authenticate nobody, so none is passed there: the call stays KEY's
     // own ('ai'), as before this packet, and its CortexActionLog row names the request's member when it
-    // runs in one (auditActor). Naming the member on that row alone needs an audit-only actor in the
-    // registry (it.todo in key-cortex-action-audit.integration.test.ts; SEC-W9KCA-3, CR-W9KCA-2).
+    // runs in one (auditActor).
+    //
+    // W11-BRIDGED-ORGAN-AUDIT-MEMBER (review SEC-W9KCA-3, CR-W9KCA-2; D-73, D-93): with no principal, the
+    // member the call runs for (contactBindMember: the surface's onBehalfOfUserId; on the plan queue, which
+    // dispatches no member, the stored plan's member, or for a daily-briefing plan stored with none the
+    // owner; nobody for a plan id that names no plan of this business) is the registry's audit-only actor
+    // (ctx.auditUserId): it is named on the organ call's CortexActionLog row alone, so the row names the
+    // member outside a request too. It is never ctx.userId (SEC-W9KCA-4 holds: the organ handler gets no
+    // acting user, the ledger records the AI) and no permission is decided from it. A KEY-cortex turn's
+    // bridged call (CORTEX_BRIDGE) is left as it is: it runs inside the turn's own registry call, whose
+    // actor and command id the registry already names on the organ row (W10-CORTEX-CHAT-SCOPE).
     const principalUserId = action?.principalUserId || undefined;
+    const auditUserId =
+      principalUserId || action?.surface === 'CORTEX_BRIDGE' ? undefined : await this.contactBindMember(businessId, action);
     const result = await registry.execute(
       cortexName,
       {
         businessId,
         preApproved: true,
         ...(principalUserId ? { userId: principalUserId } : {}),
+        ...(auditUserId ? { auditUserId } : {}),
         ...(action?.sessionId ? { sessionId: action.sessionId } : {}),
         ...(action?.correlationId ? { correlationId: action.correlationId } : {}),
         ...(action?.surface === 'PROPOSAL' && action.actionId ? { proposalId: action.actionId } : {}),

@@ -394,13 +394,18 @@ export class PaymentsService {
    * refund, and a failed insert rolls the recording back (refundCharge logs
    * it and the provider's refund event records the refund). A provider
    * event names no refunder and passes none: unchanged.
+   *
+   * W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): `refunder.initiatedBy`
+   * is the member KEY's refund ran for, handed to onPaymentRefunded, which
+   * keeps it as data.initiatedBy on that feed row beside a SYSTEM refunder
+   * only. It names nobody on the row or the posting: KEY stays the refunder.
    */
   private async createRefundWithPosting(
     original: RefundOriginal,
     refund: ProviderRefund,
     amountToRecord: (tx: Prisma.TransactionClient) => Promise<number>,
     alsoLinkedBy: string[] = [],
-    refunder?: { actorId: string | null },
+    refunder?: { actorId: string | null; initiatedBy?: string | null },
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -437,6 +442,8 @@ export class PaymentsService {
         refund: { paymentId: created.id, amount },
         // SEC-RCD-1 (R0-PL-07, R0-CMF2): the posting and its feed row name the refunder, in this transaction.
         ...(refunder ? { createdById: refunder.actorId, auditInTransaction: true } : {}),
+        // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member KEY's refund ran for, audit data only.
+        ...(refunder?.initiatedBy ? { initiatedBy: refunder.initiatedBy } : {}),
       });
       return created;
     });
@@ -597,6 +604,12 @@ export class PaymentsService {
    * feed row in the same transaction (KEY as SYSTEM, a person as USER), as
    * the manual refund door names its refunder. A refund the provider's event
    * records first names nobody, as before: no person is known to it.
+   *
+   * W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): `initiatedBy` is the
+   * member KEY's payments_refund_charge ran for (FlowOrchestratorService
+   * .contactBindMember), kept beside KEY as data.initiatedBy on that feed row
+   * (RevenuePostingService.onPaymentRefunded drops it beside a person or when
+   * it is a system actor). The owner's refund passes none.
    */
   async recordGatewayRefund(input: {
     businessId: string;
@@ -605,6 +618,7 @@ export class PaymentsService {
     refund: { id: string; amount: number; currency: string };
     reason?: string | null;
     actorId: string | null;
+    initiatedBy?: string | null;
   }): Promise<boolean> {
     const { businessId, provider, chargeId, refund } = input;
     if (!refund.id) return false;
@@ -626,7 +640,7 @@ export class PaymentsService {
         ? (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: toCents(amount), charge: chargeId, cumulative: false })
         : async () => amount,
       [],
-      { actorId: input.actorId ?? null },
+      { actorId: input.actorId ?? null, initiatedBy: input.initiatedBy ?? null },
     ).catch(this.refundAlreadyRecorded(provider, refund.id));
     if (!persisted) return false;
     await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {
