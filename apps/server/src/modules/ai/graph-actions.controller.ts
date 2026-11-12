@@ -175,6 +175,23 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
 };
 
 /**
+ * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's, an OWNER
+ * membership of the business): tools that are the business owner's whatever module scope a member holds.
+ * reconcile_connect_statement_source stores a Drive folder or a free-form Gmail search on a bank account,
+ * and reconcile_sweep_statements reads the business's Gmail or Drive with it and imports what it finds into
+ * the account (StatementSourceService), so a member could choose which of the owner's mail KEY reads into
+ * the books. As ownerOnly they are refused to everyone but the owner (and a SUPER_ADMIN) before dispatch on
+ * every surface that reads this map: the plan queue, an approved proposal, POST .../graph-actions, the
+ * cortex chat and the Pro Auto monitor (memberToolRunAuthority, assertMayRunGraphAction); the dispatcher's
+ * own two cases hold the driving member to the same rule (FlowOrchestratorService.assertStatementSourceOwner).
+ * Reading the source configuration (reconcile_list_statement_sources) stays with the revenue readers.
+ */
+const GRAPH_ACTION_OWNER_ONLY: Readonly<Record<string, string>> = {
+  reconcile_connect_statement_source: "D-99: it configures or runs a read of the business's Google mailbox or Drive",
+  reconcile_sweep_statements: "D-99: it configures or runs a read of the business's Google mailbox or Drive",
+};
+
+/**
  * Trial-N integration review NEW-4, repair round 2 (CONTACT-READ-ABORT, NEW-4-REST; D-37: KEY
  * contact reads apply the member's visibility). Contact reads the dispatcher bounds by the
  * principal it is handed (FlowOrchestratorService.contactReadAccess: resolveCrmAccess +
@@ -312,6 +329,8 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   }
+  // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the statement-source tools are the owner's.
+  if (Object.prototype.hasOwnProperty.call(GRAPH_ACTION_OWNER_ONLY, toolName)) requirement.ownerOnly = GRAPH_ACTION_OWNER_ONLY[toolName];
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
   else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
   return organ ? keyOrganRequirement(requirement) : requirement;

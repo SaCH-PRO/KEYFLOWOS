@@ -3598,6 +3598,34 @@ ${triage.standingContext}`;
   }
 
   /**
+   * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's). Setting
+   * up a statement source (reconcile_connect_statement_source) or running a sweep of the business's Gmail
+   * or Drive (reconcile_sweep_statements) is the business owner's. The member KEY runs the call for
+   * (contactBindMember: a chat turn's or PLAN_HTTP's principal, the member a CORTEX_BRIDGE, CUSTOM_LOGIC,
+   * PROPOSAL or PRO_AUTO_MONITOR run is for, a queued plan's member) must pass the rule the web doors
+   * apply (assertGoogleConnectOwner: an OWNER membership of this business, the distinguished owner holding
+   * a membership, or a SUPER_ADMIN), else 403 GOOGLE_CONNECT_OWNER_ONLY. A run with no such member is
+   * refused too (fail closed). Called before StatementSourceService is resolved; the nightly sweep
+   * (StatementSourceService.sweepAll, no actor) does not come through here and is unchanged.
+   */
+  private async assertStatementSourceOwner(businessId: string, action?: KeyDispatchAction): Promise<void> {
+    // Imported at call time, as plan-step-authority is here: a controller module, kept off this file's import graph.
+    const { assertGoogleConnectOwner, GOOGLE_CONNECT_OWNER_ONLY } = await import('../../core/connectors/google-suite.controller');
+    const memberId = await this.contactBindMember(businessId, action);
+    if (!memberId) {
+      throw new HttpException(
+        {
+          code: GOOGLE_CONNECT_OWNER_ONLY,
+          message: 'A statement source of the business Gmail or Drive is set up or swept only for the business owner, and this run is for no member (D-132, D-99).',
+        },
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const user = await this.prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
+    await assertGoogleConnectOwner(this.prisma, businessId, { id: memberId, role: user?.role ?? undefined });
+  }
+
+  /**
    * W9-KEY-OBLIGATIONS-CALLS (owner rulings D-64, D-88; V1-84 review ST-2). The member the command
    * runs for (contactBindMember) as the viewer the call-log routes take from the session
    * (CallLogViewer: their id and their User row's role, as AuthMiddleware attaches it), so KEY's
@@ -4062,6 +4090,8 @@ ${triage.standingContext}`;
         return { accounts: rows, configuredCount: rows.filter((r) => r.automatic).length };
       }
       case 'reconcile_connect_statement_source': {
+        // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the owner's, refused before anything is read or stored.
+        await this.assertStatementSourceOwner(businessId, action);
         if (args.driveFolderId === undefined && args.gmailQuery === undefined) {
           throw new BadRequestException('Give a driveFolderId or a gmailQuery to connect.');
         }
@@ -4072,6 +4102,8 @@ ${triage.standingContext}`;
         return saved;
       }
       case 'reconcile_sweep_statements': {
+        // W11-GOOGLE-STATEMENT-SOURCE-OWNER (D-132, D-99): the owner's, refused before the mailbox or Drive is read.
+        await this.assertStatementSourceOwner(businessId, action);
         const source = String(args.source ?? '').toLowerCase();
         if (source !== 'drive' && source !== 'gmail') {
           throw new BadRequestException('source must be "drive" or "gmail"');
