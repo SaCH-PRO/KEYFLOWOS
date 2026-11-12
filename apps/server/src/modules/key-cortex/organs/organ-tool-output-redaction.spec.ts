@@ -39,6 +39,9 @@ import { KeyConnectorAdapterService } from './key-connector-adapter.service';
 import { StorelinkAdapterService } from './storelink-adapter.service';
 import { auditResultText } from '../key-cortex-tool-registry.service';
 import { FlowOrchestratorService } from '../../ai/flow-orchestrator.service';
+import { KeyCortexConnectorService } from '../key-cortex-connector.service';
+import { SocialAdapterService } from '../adapters/social-adapter.service';
+import { SettingsAdapterService } from '../adapters/settings-adapter.service';
 import type { KeyCortexToolContext } from '../key-cortex-tool-registry.service';
 import type {
   HealthCheckResult,
@@ -49,7 +52,7 @@ import type {
 
 const BIZ = 'biz_w11_redact';
 const CTX: KeyCortexToolContext = { businessId: BIZ };
-const CONNECTOR_SECRET = 'sk_live_w11';
+const CONNECTOR_SECRET = 'fake_connector_secret_w11';
 const PORTAL_TOKEN = 'tok_w11';
 
 type ConnectionViewFn = (c: KeyConnectorConnection) => Record<string, unknown>;
@@ -251,7 +254,7 @@ describe('W11-KEY-ORGAN-OUTPUT-REDACT: key_connector organ tools never answer st
     );
   });
 
-  it('control: key_connector.check_health, trigger_sync and execute_internal answers are unchanged (HealthCheckResult and SyncJob carry no credentials)', async () => {
+  it('control: key_connector.check_health and trigger_sync answers are unchanged (HealthCheckResult and SyncJob carry no credentials); execute_internal answers a module answer without secrets as it came (SEC-W11OR-1 backstop changes nothing there)', async () => {
     const { adapter, keyConnector, cortexConnector } = makeConnectorAdapter();
 
     const health = await adapter.executeTool('key_connector.check_health', CTX, { connectionId: 'conn_w11_stripe' });
@@ -265,6 +268,170 @@ describe('W11-KEY-ORGAN-OUTPUT-REDACT: key_connector organ tools never answer st
     const internal = await adapter.executeTool('key_connector.execute_internal', CTX, { module: 'crm', action: 'count' });
     expect(cortexConnector.execute).toHaveBeenCalledTimes(1);
     expect(internal).toEqual({ success: true, data: { success: true, data: { rows: 3 } } });
+  });
+});
+
+/**
+ * Review SEC-W11OR-1: key_connector.execute_internal forwarded the
+ * KeyCortexConnectorService answer as it came, and two module actions behind it
+ * answer raw credential rows (social.get_connected_accounts: SocialConnection
+ * token and refreshToken; settings.configure_integration: the upserted
+ * IntegrationConnection with authData and authDataRef). These cases run the
+ * REAL KeyCortexConnectorService dispatch and the real social and settings
+ * adapters over stubbed SocialConnectionsService, IntegrationHubService and
+ * Prisma, so the answer is the one those actions really give.
+ */
+const SOCIAL_TOKEN = 'fake_fbpage_access_tok_w11r';
+const SOCIAL_REFRESH = 'fake_fbpage_refresh_tok_w11r';
+const STORED_SECRET = 'fake_stored_connector_secret_w11r';
+const STORED_BARE_KEY = 'fake_stored_bare_key_w11r';
+const AUTH_DATA_REF = 'fake_vault_ref_w11r';
+const ACTOR = 'user_w11r_owner';
+
+/** KeyCortexConnectorService constructor positions (registry 0 .. bridge 19): social 14, settings 18. */
+function realCortexConnector(parts: { social?: unknown; settings?: unknown }): KeyCortexConnectorService {
+  const args: unknown[] = Array.from({ length: 20 }, () => ({}));
+  args[14] = parts.social ?? {};
+  args[18] = parts.settings ?? {};
+  return new KeyCortexConnectorService(...(args as ConstructorParameters<typeof KeyCortexConnectorService>));
+}
+
+function socialConnectionRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'sc_w11r_fb',
+    businessId: BIZ,
+    platform: 'FACEBOOK',
+    platformId: 'page_w11r',
+    accountName: 'W11R Page',
+    profilePicture: null,
+    token: SOCIAL_TOKEN,
+    refreshToken: SOCIAL_REFRESH,
+    expiresAt: new Date('2027-01-01T00:00:00Z'),
+    scopes: 'pages_manage_posts',
+    status: 'CONNECTED',
+    createdAt: new Date('2026-11-01T10:00:00Z'),
+    updatedAt: new Date('2026-11-01T10:00:00Z'),
+    ...over,
+  };
+}
+
+function integrationConnectionRow(): Record<string, unknown> {
+  return {
+    id: 'ic_w11r_stripe',
+    businessId: BIZ,
+    providerKey: 'stripe',
+    displayName: null,
+    status: 'CONNECTED',
+    authDataRef: AUTH_DATA_REF,
+    authData: { secretKey: STORED_SECRET, key: STORED_BARE_KEY },
+    scopes: [],
+    settings: { currency: 'TTD' },
+    healthScore: 100,
+    lastSyncAt: null,
+    lastError: null,
+    createdAt: new Date('2026-11-01T10:00:00Z'),
+    updatedAt: new Date('2026-11-01T10:00:00Z'),
+  };
+}
+
+function internalAdapter(cortexConnector: unknown) {
+  return new KeyConnectorAdapterService({} as never, cortexConnector as never, {} as never);
+}
+
+describe('W11-KEY-ORGAN-OUTPUT-REDACT review SEC-W11OR-1: key_connector.execute_internal never answers stored credentials from the module actions behind it', () => {
+  it('social.get_connected_accounts through execute_internal answers each SocialConnection without its token or refreshToken value, in its answer or in its audit text; the account fields stay', async () => {
+    const connections = {
+      listConnections: vi.fn(async () => [socialConnectionRow()]),
+      getConnection: vi.fn(async () => socialConnectionRow()),
+    };
+    const social = new SocialAdapterService({} as never, connections as never, {} as never, {} as never, {} as never);
+    const adapter = internalAdapter(realCortexConnector({ social }));
+
+    for (const input of [
+      { module: 'social', action: 'get_connected_accounts' },
+      { module: 'social', action: 'get_connected_accounts', params: { platform: 'facebook' } },
+    ]) {
+      const out = await adapter.executeTool('key_connector.execute_internal', { businessId: BIZ, userId: ACTOR }, input);
+      expect(out.success).toBe(true);
+      const text = serialised(out);
+      expect(text.includes(SOCIAL_TOKEN), 'execute_internal answered a social page token').toBe(false);
+      expect(text.includes(SOCIAL_REFRESH), 'execute_internal answered a social refresh token').toBe(false);
+      const audit = auditResultText(out.data, input) ?? '';
+      expect(audit.includes(SOCIAL_TOKEN) || audit.includes(SOCIAL_REFRESH), 'the audit text kept a social token').toBe(false);
+
+      const answer = out.data as { success: boolean; data: Array<Record<string, unknown>> };
+      expect(answer.success).toBe(true);
+      expect(answer.data).toHaveLength(1);
+      expect(answer.data[0]).toMatchObject({ id: 'sc_w11r_fb', platform: 'FACEBOOK', accountName: 'W11R Page', status: 'CONNECTED' });
+    }
+    expect(connections.listConnections).toHaveBeenCalledWith(BIZ);
+    expect(connections.getConnection).toHaveBeenCalledWith(BIZ, 'facebook');
+  });
+
+  it('settings.configure_integration through execute_internal answers the IntegrationConnection without its authData or authDataRef, in its answer or in its audit text; the connection fields stay', async () => {
+    const integrations = { createConnection: vi.fn(async () => integrationConnectionRow()) };
+    const prisma = {
+      client: {
+        user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
+        membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: { connect: 'admin' } })) },
+      },
+    };
+    const settings = new SettingsAdapterService({} as never, integrations as never, prisma as never);
+    const adapter = internalAdapter(realCortexConnector({ settings }));
+    const input = { module: 'settings', action: 'configure_integration', params: { integration: 'stripe', enabled: true } };
+
+    const out = await adapter.executeTool('key_connector.execute_internal', { businessId: BIZ, userId: ACTOR }, input);
+    expect(out.success).toBe(true);
+    expect(integrations.createConnection).toHaveBeenCalledWith(BIZ, 'stripe', { settings: {}, scopes: [] });
+    const text = serialised(out);
+    for (const secret of [STORED_SECRET, STORED_BARE_KEY, AUTH_DATA_REF]) {
+      expect(text.includes(secret), `execute_internal answered a stored connector credential (${secret})`).toBe(false);
+      expect((auditResultText(out.data, input) ?? '').includes(secret), 'the audit text kept a stored credential').toBe(false);
+    }
+
+    const answer = out.data as { success: boolean; data: Record<string, unknown> };
+    expect(answer.success).toBe(true);
+    // Both columns are withheld whole, with deepRedact's marker: authData's own
+    // keys (here a bare `key`) need not match any shared sensitive name.
+    expect(answer.data.authData).toBe('***REDACTED***');
+    expect(answer.data.authDataRef).toBe('***REDACTED***');
+    expect(answer.data).toMatchObject({ id: 'ic_w11r_stripe', providerKey: 'stripe', status: 'CONNECTED', settings: { currency: 'TTD' } });
+  });
+
+  it('the backstop holds for any module answer, at any depth: shared sensitive names and connector credential columns are withheld, other fields and BigInt counts are answered, and the module answer object is not changed', async () => {
+    const moduleAnswer = {
+      success: true,
+      data: {
+        rows: [
+          { id: 'row_w11r', apiKey: 'fake_api_key_w11r', nested: { password: 'fake_password_w11r', label: 'kept_w11r' } },
+          { id: 'row_w11r_2', connection: { authData: { key: STORED_BARE_KEY } } },
+        ],
+        total: BigInt(7),
+      },
+    };
+    const before = JSON.stringify(moduleAnswer, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
+    const adapter = internalAdapter({ execute: vi.fn(async () => moduleAnswer) });
+
+    const out = await adapter.executeTool('key_connector.execute_internal', CTX, { module: 'crm', action: 'count' });
+    const text = serialised(out);
+    for (const secret of ['fake_api_key_w11r', 'fake_password_w11r', STORED_BARE_KEY]) {
+      expect(text.includes(secret), `execute_internal answered ${secret}`).toBe(false);
+    }
+    expect(text).toContain('kept_w11r');
+    expect(text).toContain('row_w11r_2');
+    expect((out.data as { data: { total: unknown } }).data.total).toBe('7');
+    expect(JSON.stringify(moduleAnswer, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v))).toBe(before);
+  });
+
+  it('a module answer with no JSON form (a cycle) keeps only its outcome, still answered as a success because the action may already have written', async () => {
+    const cyclic: Record<string, unknown> = { success: true, data: { token: 'fake_cycle_tok_w11r' } };
+    (cyclic.data as Record<string, unknown>).self = cyclic;
+    const adapter = internalAdapter({ execute: vi.fn(async () => cyclic) });
+
+    const out = await adapter.executeTool('key_connector.execute_internal', CTX, { module: 'crm', action: 'count' });
+    expect(out.success).toBe(true);
+    expect(out.data).toEqual({ success: true, dataWithheld: 'the module answer has no JSON form' });
+    expect(serialised(out).includes('fake_cycle_tok_w11r')).toBe(false);
   });
 });
 
