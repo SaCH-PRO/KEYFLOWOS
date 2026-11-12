@@ -623,21 +623,25 @@ describe('Item 9 (D-57): the money report routes need revenue:read', () => {
       if (route.format === 'pdf') expect(bodies[0]).toEqual({ pdf: true });
     }
 
-    // The JSON bodies are the services' own answers.
-    const from = new Date(range().from);
-    const to = new Date(range().to);
+    // The JSON bodies are the services' own answers. One window for the route calls and the
+    // service calls alike: range() reads the clock each time, so two calls a millisecond apart
+    // give two periods (W10 full-run failure: period.from 02:40:13.480Z vs .481Z).
+    const reportWindow = range();
+    const windowPreset = { startDate: reportWindow.from, endDate: reportWindow.to };
+    const from = new Date(reportWindow.from);
+    const to = new Date(reportWindow.to);
     const json = (v: unknown) => JSON.parse(JSON.stringify(v));
-    const pnl = await get(`${B()}/reports/pnl`, range(), ID.staffRead);
+    const pnl = await get(`${B()}/reports/pnl`, reportWindow, ID.staffRead);
     expect(pnl.body).toEqual(json(await ledgerReporting.getPnl(ID.bizR, from, to, 'accrual')));
     expect(pnl.body.revenue.total).toBe(REPORT_TOTAL);
     const sheet = await get(`${B()}/reports/balance-sheet`, { asOf: to.toISOString() }, ID.staffRead);
     expect(sheet.body).toEqual(json(await ledgerReporting.getBalanceSheet(ID.bizR, to)));
-    const byContact = await get(presetPath('by-contact'), presetRange(), ID.staffRead);
+    const byContact = await get(presetPath('by-contact'), windowPreset, ID.staffRead);
     expect(byContact.status, JSON.stringify(byContact.body)).toBe(200);
     expect(byContact.body).toEqual(json(await revenueReportingSvc.generate(ID.bizR, 'by-contact', { start: from, end: to })));
     expect(byContact.body.totalRevenue).toBe(REPORT_TOTAL);
     for (const as of [ID.ownerR, ID.staffDefault]) {
-      const res = await get(presetPath('by-contact'), presetRange(), as);
+      const res = await get(presetPath('by-contact'), windowPreset, as);
       expect(res.status).toBe(200);
       expect(res.body).toEqual(byContact.body);
     }
