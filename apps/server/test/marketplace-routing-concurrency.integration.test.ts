@@ -1926,12 +1926,20 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
       ["quantity '5' (digit text)", [{ productId: ID.productA, name: 'A', quantity: '5', unitPrice: 0, warehouseId: ID.warehouse }], 'committed'],
       ["receivedQuantity '2' (digit text) of 5 ordered", [{ productId: ID.productA, name: 'A', quantity: 5, receivedQuantity: '2', warehouseId: ID.warehouse }], 'committed'],
       ["unitCost '3' (digit text) on a new stock row", [{ productId: ID.productU, name: 'U', quantity: 4, unitPrice: 3, unitCost: '3', warehouseId: ID.warehouse2 }], 'committed'],
+      // Green before and after: lines that add no stock (not an object, or naming no product) are passed over, as before.
+      [
+        "lines that add no stock (null, 5, a free-text line with quantity 'abc') beside a good line",
+        [null, 5, { name: 'Freight', quantity: 'abc', unitPrice: 'x' }, { productId: ID.productA, name: 'A', quantity: 3, warehouseId: ID.warehouse }],
+        'committed',
+      ],
     ];
     const outcomes: Record<string, unknown> = {};
     const expected: Record<string, unknown> = {};
     const statuses: Record<string, string> = {};
     const stockAfter: Record<string, unknown> = {};
+    // The costs as earlier cases left them (a receipt with a cost rewrites them): none of these probes changes a cost.
     const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const seededB = await db.inventoryStock.findUnique({ where: { id: ID.stockB } });
     try {
       for (const [name, items, answer] of probes) {
         await resetBusinessStock();
@@ -1943,9 +1951,8 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
         statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
         const rows = await db.inventoryStock.findMany({
           where: { businessId: ID.biz, productId: { in: [ID.productA, ID.productB, ID.productU] }, warehouseId: { in: [ID.warehouse, ID.warehouse2] } },
-          orderBy: { id: 'asc' },
         });
-        stockAfter[name] = rows.map((r: any) => `${r.productId}@${r.warehouseId}:${r.quantity}/${r.reserved}/${r.costPerUnit}`);
+        stockAfter[name] = rows.map((r: any) => `${r.productId}@${r.warehouseId}:${r.quantity}/${r.reserved}/${r.costPerUnit}`).sort();
       }
     } finally {
       await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
@@ -1958,7 +1965,7 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
     expect(JSON.stringify(outcomes), 'never a 500').not.toContain('500');
     expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
     expect(statuses).toEqual(Object.fromEntries(probes.map(([name, , answer]) => [name, answer === 'committed' ? 'RECEIVED' : 'SHIPPED'])));
-    const seeded = [`${ID.productA}@${ID.warehouse}:${IN_STOCK}/0/${seededA.costPerUnit}`, `${ID.productB}@${ID.warehouse}:${IN_STOCK}/0/null`];
+    const seeded = [`${ID.productA}@${ID.warehouse}:${IN_STOCK}/0/${seededA.costPerUnit}`, `${ID.productB}@${ID.warehouse}:${IN_STOCK}/0/${seededB.costPerUnit}`];
     const withA = (quantity: number) => [`${ID.productA}@${ID.warehouse}:${quantity}/0/${seededA.costPerUnit}`, seeded[1]];
     expect(stockAfter).toEqual({
       "productId an array of this business's product": seeded,
@@ -1969,6 +1976,7 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
       "quantity '5' (digit text)": withA(IN_STOCK + 5),
       "receivedQuantity '2' (digit text) of 5 ordered": withA(IN_STOCK + 2),
       "unitCost '3' (digit text) on a new stock row": [...seeded, `${ID.productU}@${ID.warehouse2}:4/0/3`],
+      "lines that add no stock (null, 5, a free-text line with quantity 'abc') beside a good line": withA(IN_STOCK + 3),
     });
   });
 });

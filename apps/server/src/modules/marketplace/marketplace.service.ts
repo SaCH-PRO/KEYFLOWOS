@@ -8,6 +8,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
 import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
@@ -1435,13 +1436,47 @@ export class MarketplaceService {
     return updated;
   }
 
+  /**
+   * POST .../purchase-orders (body: any) and the KEY tool inventory_create_purchase_order.
+   *
+   * W11-PO-LINES (owner ruling D-136; F-33): the lines are checked before anything is written. items is absent or a
+   * list; every line is read by core/inventory/purchase-order-lines.ts (400 'Purchase order line N ...', naming the
+   * line, never an id); then every product and warehouse the lines name must be the business's, read as the receipt
+   * reads them (ownedProductsAndWarehouses, raw SQL by the business's own id; a soft-deleted product of the business
+   * counts), or 400 in the receipt's wording. These were stored as sent and refused only when the purchase order was
+   * received (FulfillmentRoutingService.receivedStockLines, Z4RV-SEC-1). The lines are stored as sent once accepted;
+   * lines naming no product (free text, a service, freight) stay accepted, and the totals are computed as before.
+   */
   async createPurchaseOrder(businessId: string, data: any) {
+    const items: unknown[] = data.items ?? [];
+    if (!Array.isArray(items)) throw new BadRequestException('Purchase order items must be a list of lines');
+    const lines = items.map((item, index) => {
+      const read = readPurchaseOrderLine(item, 'create');
+      if (read.problem) throw new BadRequestException(purchaseOrderLineRefusal(index + 1, read.problem));
+      return read.line;
+    });
+    const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
+      this.prisma.client,
+      businessId,
+      lines.map((line) => line.productId),
+      lines.map((line) => line.warehouseId),
+    );
+    const foreign = lines.findIndex(
+      (line) =>
+        (line.productId !== undefined && !ownProducts.has(line.productId)) ||
+        (line.warehouseId !== undefined && !ownWarehouses.has(line.warehouseId)),
+    );
+    if (foreign >= 0) {
+      throw new BadRequestException(
+        `Purchase order line ${foreign + 1} names a product or a warehouse that is not this business's; nothing was saved`,
+      );
+    }
+
     const poNumber = this.generatePONumber();
 
-    const items = data.items || [];
     let subtotal = 0;
-    for (const item of items) {
-      subtotal += (item.unitPrice || 0) * (item.quantity || 1);
+    for (const line of lines) {
+      subtotal += (line.unitPrice || 0) * (line.quantity || 1);
     }
 
     const shippingCost = data.shippingCost || 0;
@@ -1456,7 +1491,7 @@ export class MarketplaceService {
         supplierEmail: data.supplierEmail,
         supplierPhone: data.supplierPhone,
         supplierCountry: data.supplierCountry,
-        items,
+        items: items as Prisma.InputJsonValue,
         subtotal,
         shippingCost,
         taxAmount,

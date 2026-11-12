@@ -10,6 +10,7 @@ import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
 import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
+import { readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 
 /**
  * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
@@ -61,15 +62,6 @@ const ROUTING_ADVANCES_FROM: ReadonlySet<string> = new Set(['placed', 'awaiting_
  */
 export async function claimOrderRouting(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ROUTING_LOCK_NAMESPACE}${businessId}:${orderId}`}))`;
-}
-
-/** A purchase order line as stored in its items JSON (the fields a receipt reads). */
-interface PurchaseOrderLineJson {
-  productId?: string | null;
-  warehouseId?: string | null;
-  quantity?: number;
-  receivedQuantity?: number;
-  unitCost?: number | null;
 }
 
 export interface OrderStatusTimelineEntry {
@@ -1151,19 +1143,37 @@ export class FulfillmentRoutingService {
    * row (its quantity, and its weighted-average cost), or a new row of this
    * business for another business's product, which makes that product read as
    * stock-tracked (resolveInventoryMode) and its storefront refuse to sell it.
+   *
+   * W11-PO-LINES (owner ruling D-136; F-40): each stored line is read first by
+   * core/inventory/purchase-order-lines.ts, the reader createPurchaseOrder
+   * checks a line with. A line naming a product whose ids are not non-empty
+   * strings, or whose stock quantity is not a whole number of 0 or more, is
+   * refused (400 'Purchase order line N is malformed; nothing was received')
+   * before any stock is read or written; only the strings and numbers read are
+   * passed on (the ownership check, the stock locks and the writes). The ids
+   * were coerced with String() for the check and passed raw after it, so a
+   * one-element array (String(['x']) is 'x') reached Prisma (500), digit text
+   * was added to an integer column (500) and a fraction was stored truncated.
+   * A legacy quantity stored as digit text ('5') is received as that number
+   * (D-136), and the line's cost is Number(unitCost) when finite and above 0,
+   * on an updated and a created stock row alike (a text cost on a new row was
+   * a 500). A line that is not an object, or names no product, adds no stock
+   * and is passed over, as before.
    */
   private async receivedStockLines(
     businessId: string,
     items: Prisma.JsonValue,
     defaultWarehouseId: string | undefined,
-  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; item: PurchaseOrderLineJson }>> {
-    const lines = (Array.isArray(items) ? (items as Array<PurchaseOrderLineJson | null>) : []).flatMap((item, index) => {
-      const productId = item?.productId;
-      const quantity = item?.receivedQuantity ?? item?.quantity ?? 0;
-      const warehouseId = item?.warehouseId || defaultWarehouseId;
-      return item && productId && warehouseId && quantity > 0
-        ? [{ line: index + 1, productId, warehouseId, quantity, item }]
-        : [];
+  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; unitCost: number | undefined }>> {
+    const lines = (Array.isArray(items) ? items : []).flatMap((item, index) => {
+      const read = readPurchaseOrderLine(item, 'receipt');
+      if (read.problem) {
+        if (read.problem.field === 'line') return [];
+        throw new BadRequestException(`Purchase order line ${index + 1} is malformed; nothing was received`);
+      }
+      const { productId, stockQuantity: quantity = 0, unitCost } = read.line;
+      const warehouseId = read.line.warehouseId ?? defaultWarehouseId;
+      return productId && warehouseId && quantity > 0 ? [{ line: index + 1, productId, warehouseId, quantity, unitCost }] : [];
     });
     if (lines.length === 0) return lines;
 
@@ -1172,12 +1182,10 @@ export class FulfillmentRoutingService {
     const { products: ownProducts, warehouses: ownWarehouses } = await ownedProductsAndWarehouses(
       this.prisma.client,
       businessId,
-      lines.map((l) => String(l.productId)),
-      lines.map((l) => String(l.warehouseId)),
+      lines.map((l) => l.productId),
+      lines.map((l) => l.warehouseId),
     );
-    const foreign = lines.find(
-      (l) => !ownProducts.has(String(l.productId)) || !ownWarehouses.has(String(l.warehouseId)),
-    );
+    const foreign = lines.find((l) => !ownProducts.has(l.productId) || !ownWarehouses.has(l.warehouseId));
     if (foreign) {
       throw new BadRequestException(
         `Purchase order line ${foreign.line} names a product or a warehouse that is not this business's; nothing was received`,
@@ -1257,7 +1265,7 @@ export class FulfillmentRoutingService {
         });
 
         // The purchase order's lines as read above (no writer changes a purchase order's items after it is created).
-        for (const { productId, warehouseId, quantity: qty, item } of receipts) {
+        for (const { productId, warehouseId, quantity: qty, unitCost } of receipts) {
           // Review Z4RV-SEC-1: the business's own row, read under the lock above. This read the row of the line's
           // (productId, warehouseId) with no business filter, so a line naming another business's product and
           // warehouse added to that business's stock and rewrote its weighted-average cost.
@@ -1271,14 +1279,16 @@ export class FulfillmentRoutingService {
             // Falls back to the existing cost if the PO line carries no
             // unitCost (treats freight-only or zero-cost receipts as
             // not-priced rather than blowing away an established cost).
+            // W11-PO-LINES: unitCost is the line's Number(unitCost) when finite and above 0, read once
+            // (receivedStockLines), else undefined.
             let nextCostPerUnit = existing.costPerUnit ?? null;
-            if (item.unitCost != null && item.unitCost > 0) {
+            if (unitCost !== undefined) {
               const oldQty = Math.max(existing.quantity, 0);
               const oldCost = existing.costPerUnit ?? 0;
               const denom = oldQty + qty;
               nextCostPerUnit = denom > 0
-                ? (oldQty * oldCost + qty * Number(item.unitCost)) / denom
-                : Number(item.unitCost);
+                ? (oldQty * oldCost + qty * unitCost) / denom
+                : unitCost;
             }
             await tx.inventoryStock.update({
               where: { id: existing.id },
@@ -1300,7 +1310,8 @@ export class FulfillmentRoutingService {
                   quantity: qty,
                   reserved: 0,
                   currency: updated.currency ?? 'TTD',
-                  ...(item.unitCost ? { costPerUnit: item.unitCost } : {}),
+                  // W11-PO-LINES: the same cost as the update path (item.unitCost passed raw: a text cost was a 500).
+                  ...(unitCost !== undefined ? { costPerUnit: unitCost } : {}),
                 },
               }),
             );
