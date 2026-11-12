@@ -162,6 +162,32 @@ export async function setOrderMetadataKeyOnce(
 }
 
 /**
+ * W11-SHIPPING-EXPENSE-ONCE (owner ruling D-126; review SEC-SEO-1): writes
+ * `value` under metadata[key] in one statement, only while metadata[key] is
+ * still `expected` (jsonb equality), the rest of the metadata as stored.
+ * Returns whether this call wrote it: false where another call changed the key
+ * since `expected` was read (the WHERE is read again under the row lock, after
+ * any wait for that writer, so of two calls replacing the same value one
+ * writes), or where there is no such order in the business.
+ */
+export async function replaceOrderMetadataKeyIf(
+  client: OrderMetadataClient,
+  businessId: string,
+  orderId: string,
+  key: string,
+  expected: unknown,
+  value: unknown,
+): Promise<boolean> {
+  const written = await client.$executeRaw`
+    UPDATE marketplace_orders
+       SET metadata = ${METADATA} || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb),
+           updated_at = NOW()
+     WHERE id = ${orderId} AND business_id = ${businessId}
+       AND ${METADATA} -> ${key}::text = ${JSON.stringify(expected)}::jsonb`;
+  return written > 0;
+}
+
+/**
  * W11-SHIPPING-EXPENSE-ONCE (D-126): removes metadata[key] in one statement,
  * only while it still holds the claim `claimToken` (metadata[key].claim), so a
  * claim taken back after its work failed never removes a value another call has
