@@ -15,9 +15,10 @@
  *   - GmailService.connectStanding / assertConnectAuthority (D-11): the
  *     commerce Gmail auth-url and the Google Suite consent with gmail;
  *   - SeoController.assertConnectorOwner (D-94): GA4 and Search Console;
- *   - WhatsAppService.isConfigOwner (D-11): PATCH config, and
- *     WhatsAppOperationsScopeGuard, which lets a config owner past
- *     ModuleScopeGuard on the send and inbox routes;
+ *   - WhatsAppService.isConfigOwner (D-11): PATCH config, the writer view of
+ *     GET config and status (phoneNumberId, each credential's last 4; review
+ *     SEC-D116C-1, case D116C-W04), and WhatsAppOperationsScopeGuard, which
+ *     lets a config owner past ModuleScopeGuard on the send and inbox routes;
  *   - SubscriptionsService.assertPlanChangeAuthority (D-11): plan changes;
  *   - KeyConnectorController.requireConnectorWriter (OWNER or ADMIN, D-111): a
  *     recorded owner holding STAFF managed provider connections.
@@ -603,6 +604,93 @@ describe('W11-D116-CONNECTION-OWNER: the WhatsApp sending identity is the OWNER-
       const adminRead = await whatsappConversations(ID.ownerAdmin, ID.bizA);
       expect(adminRead.status, JSON.stringify(adminRead.body)).toBe(200);
       expect(adminRead.body.length).toBe(await conversationCount(ID.bizA));
+      expect(fetchCalls).toEqual([]);
+    } finally {
+      for (const businessId of BUSINESSES) await resetMeta(businessId);
+    }
+  });
+
+  it("[D116C-W04] RED-BEFORE (owner ruling D-116; review SEC-D116C-1; R0-SEC2 writer view): GET /whatsapp/businesses/:b/config and GET .../status answer the recorded owner holding ADMIN the masked view (no phoneNumberId, every credential last4 null, status platformId the fromNumber) and the recorded owner holding STAFF the masked config (its operations: none status read refused by ModuleScopeGuard); the co-owner gets the writer view (phoneNumberId, each credential's last 4, platformId the phoneNumberId); no response carries a credential, no provider traffic", async () => {
+    const fromNumber = '+18685550199';
+    // Obviously fake credentials (non-hex letters, the suite prefix), each at least 12 characters so a writer sees its last 4.
+    const secretsFor = (businessId: string) => ({
+      accessToken: `${businessId}_fake_meta_access_not_real_zzzz`,
+      authToken: `${businessId}_fake_twilio_auth_not_real_yyyy`,
+      accountSid: `${businessId}_fake_twilio_sid_not_real_xxxx`,
+    });
+    const phoneNumberIdFor = (businessId: string) => `${businessId}_pnid_1234567`;
+    const expectNoCredential = (body: unknown, businessId: string, label: string) => {
+      const text = JSON.stringify(body);
+      for (const value of Object.values(secretsFor(businessId))) expect(text.includes(value), `${label}: a credential in the body`).toBe(false);
+    };
+    const getConfig = (actor: string, b: string) => as(http().get(`/whatsapp/businesses/${b}/config`), actor);
+    const getStatus = (actor: string, b: string) => as(http().get(`/whatsapp/businesses/${b}/status`), actor);
+    try {
+      for (const businessId of BUSINESSES) {
+        await resetMeta(businessId);
+        // The co-owner (D-125) stores a Meta config with all three credentials and a phoneNumberId.
+        const saved = await patchWhatsAppConfig(ID.coOwner, businessId, {
+          provider: 'meta', phoneNumberId: phoneNumberIdFor(businessId), fromNumber, ...secretsFor(businessId),
+        });
+        expect([saved.status, saved.body], businessId).toEqual([200, { success: true }]);
+      }
+
+      // The recorded owner holding ADMIN on bizA: the masked config view and the sending number on status.
+      const adminConfig = await getConfig(ID.ownerAdmin, ID.bizA);
+      expect(adminConfig.status, JSON.stringify(adminConfig.body)).toBe(200);
+      expect(adminConfig.body.data).not.toHaveProperty('phoneNumberId');
+      expect(adminConfig.body.data).toEqual({
+        provider: 'meta',
+        fromNumber,
+        credentials: {
+          accessToken: { configured: true, last4: null },
+          authToken: { configured: true, last4: null },
+          accountSid: { configured: true, last4: null },
+        },
+      });
+      expect(JSON.stringify(adminConfig.body).includes(phoneNumberIdFor(ID.bizA)), 'ADMIN-holding recorded owner: phoneNumberId on config').toBe(false);
+      expectNoCredential(adminConfig.body, ID.bizA, 'ADMIN-holding recorded owner GET config');
+      const adminStatus = await getStatus(ID.ownerAdmin, ID.bizA);
+      expect(adminStatus.status, JSON.stringify(adminStatus.body)).toBe(200);
+      expect(adminStatus.body).toEqual({
+        connected: true,
+        destination: { id: `${ID.bizA}:whatsapp`, platformId: fromNumber, displayName: fromNumber },
+      });
+      expect(JSON.stringify(adminStatus.body).includes(phoneNumberIdFor(ID.bizA)), 'ADMIN-holding recorded owner: phoneNumberId on status').toBe(false);
+
+      // The recorded owner holding STAFF (operations: none) on bizS: the masked config; status is ModuleScopeGuard's 403.
+      const staffConfig = await getConfig(ID.ownerStaff, ID.bizS);
+      expect(staffConfig.status, JSON.stringify(staffConfig.body)).toBe(200);
+      expect(staffConfig.body.data).not.toHaveProperty('phoneNumberId');
+      for (const k of ['accessToken', 'authToken', 'accountSid'] as const) {
+        expect(staffConfig.body.data.credentials[k], `STAFF-holding recorded owner: ${k}`).toEqual({ configured: true, last4: null });
+      }
+      expect(JSON.stringify(staffConfig.body).includes(phoneNumberIdFor(ID.bizS)), 'STAFF-holding recorded owner: phoneNumberId on config').toBe(false);
+      expectNoCredential(staffConfig.body, ID.bizS, 'STAFF-holding recorded owner GET config');
+      const staffStatus = await getStatus(ID.ownerStaff, ID.bizS);
+      expect([staffStatus.status, staffStatus.body?.message], JSON.stringify(staffStatus.body)).toEqual([403, 'Insufficient permissions: operations requires read access (you have none)']);
+      expect(JSON.stringify(staffStatus.body).includes(phoneNumberIdFor(ID.bizS)), 'STAFF-holding recorded owner: phoneNumberId on status').toBe(false);
+
+      // CONTROL (D-125): the co-owner gets the writer view on both, so the masked answers above are not vacuous.
+      for (const businessId of BUSINESSES) {
+        const secrets = secretsFor(businessId);
+        const config = await getConfig(ID.coOwner, businessId);
+        expect(config.status, `${businessId}: ${JSON.stringify(config.body)}`).toBe(200);
+        expect(config.body.data, businessId).toEqual({
+          provider: 'meta',
+          fromNumber,
+          phoneNumberId: phoneNumberIdFor(businessId),
+          credentials: {
+            accessToken: { configured: true, last4: secrets.accessToken.slice(-4) },
+            authToken: { configured: true, last4: secrets.authToken.slice(-4) },
+            accountSid: { configured: true, last4: secrets.accountSid.slice(-4) },
+          },
+        });
+        expectNoCredential(config.body, businessId, `co-owner GET config on ${businessId}`);
+        const status = await getStatus(ID.coOwner, businessId);
+        expect(status.status, `${businessId}: ${JSON.stringify(status.body)}`).toBe(200);
+        expect(status.body.destination.platformId, businessId).toBe(phoneNumberIdFor(businessId));
+      }
       expect(fetchCalls).toEqual([]);
     } finally {
       for (const businessId of BUSINESSES) await resetMeta(businessId);
