@@ -77,7 +77,10 @@
  *           ownerId-as-authority shape is flagged on synthetic source, and each
  *           membership-carrying or non-business shape is not; reviews OMV3-R1,
  *           OMV-R1 add the skipTenantIsolation-wrapped reads and the indexed
- *           and parenthesised receivers.
+ *           and parenthesised receivers; review SEAMZ4-SEC-1 adds a
+ *           business-named receiver's ownerId compared with any value but
+ *           null/undefined or a typeof check (the 39e9be12 census's
+ *           'business ownerId compared'), one label per comparison.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -873,6 +876,27 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['indexed receiver, optional chain, caller on the left', 'if (userId !== rows[0]?.ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
       ['parenthesised receiver compared', 'if ((await this.load(id)).ownerId === userId) return;', 'ownerId compared to the caller'],
       ['parenthesised read result compared (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId !== user.id) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      // Review SEAMZ4-SEC-1: a business-named receiver's ownerId compared with
+      // anything (not only a caller-named value), as the census at 39e9be12
+      // flagged it; one label per comparison.
+      ['business row against an auth user', 'if (business.ownerId !== authUser.id) throw new ForbiddenException();', 'business ownerId compared'],
+      ['business row against a uid', 'if (business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['existingBusiness against a requesting user', 'if (existingBusiness.ownerId !== requestingUserId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['biz against a token subject', 'if (biz.ownerId === sub) return biz;', 'business ownerId compared'],
+      ['business row against a principal', 'if (business.ownerId === principal.id) return true;', 'business ownerId compared'],
+      ['business row against an input field', 'const same = business.ownerId === input.ownerUserId;', 'business ownerId compared'],
+      ['business row against a session subject', 'if (business.ownerId === session.sub) return business;', 'business ownerId compared'],
+      ['business row against a bare id', 'return business.ownerId === id;', 'business ownerId compared'],
+      ['business row against claims', 'if (business.ownerId === claims.sub) return;', 'business ownerId compared'],
+      ['rows.business, loose equality', 'if (rows.business.ownerId == uid) return true;', 'business ownerId compared'],
+      ['a *Business receiver, value on the left, loose inequality', 'if (uid != targetBusiness.ownerId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['this.business, optional chain, value on the left', 'if (sub === this.business?.ownerId) return true;', 'business ownerId compared'],
+      ['indexed business receiver', 'if (businesses[0]?.ownerId === sub) return businesses[0];', 'business ownerId compared'],
+      ['business returned by a call', 'if (this.getBusiness(id).ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised business load', 'if ((await this.loadBusiness(id)).ownerId !== principal.id) throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised business read result (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId === session.sub) return;', 'business ownerId compared'],
+      ['parenthesised business type assertion', 'if ((business as Business).ownerId === uid) return true;', 'business ownerId compared'],
+      ['two business owners compared (one site)', 'if (business.ownerId === parentBusiness.ownerId) return true;', 'business ownerId compared'],
     ];
     const PASSED: Array<[string, string]> = [
       ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
@@ -888,6 +912,12 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ["the bootstrap's oldest-Membership read, wrapped", 'tx.membership.findFirst(skipTenantIsolation({ where: { userId, business: { deletedAt: null } }, select: { business: true } }))'],
       ['ownerId selected under a wrapped read', 'this.prisma.client.business.findUnique(skipTenantIsolation({ where: { id: businessId }, select: { ownerId: true } }))'],
       ["an indexed contact's owner", 'if (contacts[0].ownerId !== actorId) throw new ForbiddenException();'],
+      // Review SEAMZ4-SEC-1: a business-named receiver's ownerId checked for
+      // presence (null, undefined) or type decides nothing about the caller.
+      ["a business's ownerId against null and undefined", 'if (business.ownerId === null || biz.ownerId !== undefined) return;'],
+      ["a business's ownerId, loose null checks", 'if (existingBusiness.ownerId != null && rows.business.ownerId == undefined) return;'],
+      ['null and undefined on the left', 'if (null !== business.ownerId && undefined === targetBusiness?.ownerId) return;'],
+      ["a business's ownerId under typeof", "if (typeof business.ownerId === 'string' && 'string' === typeof this.business.ownerId) return;"],
     ];
     expect(FLAGGED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(FLAGGED.map(([shape, , label]) => [shape, [label]]));
     expect(PASSED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(PASSED.map(([shape]) => [shape, []]));
