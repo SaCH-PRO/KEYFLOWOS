@@ -178,9 +178,11 @@ export class IdentityService {
   private static readonly BOOTSTRAP_RETRY_BASE_MS = 15;
 
   /**
-   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; review SEC-W10OM-3): the 403 code
-   * POST /identity/bootstrap answers a caller recorded as Business.ownerId of
-   * their bootstrap business who holds no Membership there.
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; reviews SEC-W10OM-3, OMV-2): the
+   * 403 code POST /identity/bootstrap answers a caller recorded as
+   * Business.ownerId of a live business who holds no Membership on any live
+   * business. A caller who is a member somewhere is answered that business
+   * instead (ensureBootstrapWorkspace).
    */
   static readonly OWNER_MEMBERSHIP_REQUIRED = 'OWNER_MEMBERSHIP_REQUIRED';
 
@@ -1620,6 +1622,22 @@ export class IdentityService {
    * non-deleted business owned by the user. That is unchanged from main, and it
    * is what lets a user bootstrap once and then explicitly create as many more
    * businesses as they like without a later bootstrap adopting one of them.
+   *
+   * Owner ruling D-104 (W10-OWNER-MEMBERSHIP; reviews SEC-W10OM-3, OMV-2): the
+   * answer is always a business the caller holds a Membership on, and nothing
+   * is written on a business that exists. A caller recorded as Business.ownerId
+   * who is no member of the bootstrap business (a co-owner removed them, or the
+   * with_another_owner class the operator backfill skips by default) is
+   * answered, in order:
+   *
+   *   1. the oldest non-deleted business they own and are a member of;
+   *   2. else the business of their oldest Membership on a non-deleted
+   *      business (any role, read across tenants);
+   *   3. else 403 OWNER_MEMBERSHIP_REQUIRED: recorded as an owner, a member
+   *      nowhere.
+   *
+   * Steps 1 and 2 answer isNewBusiness false, so the web sign-in restores the
+   * caller's last workspace choice as it does for any returning user.
    */
   private async ensureBootstrapWorkspace(userId: string, businessName: string) {
     let lastError: unknown;
@@ -1642,21 +1660,44 @@ export class IdentityService {
               // never changes one: it used to upsert { role: 'OWNER' }, so one
               // sign-in re-admitted an owner D-104 refuses (one recorded only
               // as Business.ownerId, or one a co-owner removed) and promoted a
-              // Business.ownerId holding STAFF to OWNER. A caller with no
-              // Membership on the business they are recorded as owning is
-              // refused here, and the business is not answered to them.
+              // Business.ownerId holding STAFF to OWNER. A business the caller
+              // holds no Membership on is never answered to them.
               const member = await tx.business.findFirst({
                 where: { id: existingBusiness.id, members: { some: { userId } } },
                 select: { id: true },
               });
-              if (!member) {
-                throw new ForbiddenException({
-                  code: IdentityService.OWNER_MEMBERSHIP_REQUIRED,
-                  message:
-                    'Your access to this workspace has to be restored by an administrator before you can sign in to it. Contact support.',
-                });
-              }
-              return { business: existingBusiness, isNewBusiness: false };
+              if (member) return { business: existingBusiness, isNewBusiness: false };
+
+              // Review OMV-2: refusing here locked a caller out of sign-in
+              // altogether when they were a member elsewhere (the web sign-in
+              // throws on a bootstrap error). Answer a business they are a
+              // member of instead: the oldest one they own (1), else that of
+              // their oldest Membership (2). Reads only.
+              const ownedMember = await tx.business.findFirst({
+                where: { ownerId: userId, deletedAt: null, members: { some: { userId } } },
+                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              });
+              if (ownedMember) return { business: ownedMember, isNewBusiness: false };
+
+              // Across tenants: POST /identity/bootstrap may run under a tenant
+              // context TenantInterceptor verified for the caller (a
+              // ?businessId= they belong to), which must not narrow this read.
+              const oldestMembership = await tx.membership.findFirst(
+                skipTenantIsolation({
+                  where: { userId, business: { deletedAt: null } },
+                  // `as const`: skipTenantIsolation's generic widens the literal to `string`.
+                  orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+                  select: { business: true as const },
+                }),
+              );
+              if (oldestMembership) return { business: oldestMembership.business, isNewBusiness: false };
+
+              // Recorded as an owner, a member nowhere (3).
+              throw new ForbiddenException({
+                code: IdentityService.OWNER_MEMBERSHIP_REQUIRED,
+                message:
+                  'Your access to this workspace has to be restored by an administrator before you can sign in to it. Contact support.',
+              });
             }
 
             const business = await tx.business.create({

@@ -44,6 +44,11 @@ function txRecorder() {
         calls.push('membership.upsert');
         return { id: 'mem-new' };
       }),
+      // A read (review OMV-2): the caller's Membership on another business.
+      findFirst: vi.fn(async (): Promise<any> => {
+        calls.push('membership.findFirst');
+        return null;
+      }),
     },
   };
   return { tx, calls };
@@ -147,7 +152,7 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(tx.business.findFirst.mock.calls[1]).toEqual([{ where: { id: 'biz-existing', members: { some: { userId: 'user-1' } } }, select: { id: true } }]);
   });
 
-  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, review SEC-W10OM-3): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership there is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
+  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, reviews SEC-W10OM-3, OMV-2, OMV-R2): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership on any live business (not there, on no other business they own, nowhere else: the owned-member and oldest-Membership reads find nothing) is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
     const { tx, calls } = txRecorder();
     let read = 0;
     tx.business.findFirst = vi.fn(async () => {
@@ -165,6 +170,58 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(tx.business.create).not.toHaveBeenCalled();
     expect(tx.membership.upsert).not.toHaveBeenCalled();
     expect(tx.membership.create).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
+    // The refusal comes only after both reads that look for a Membership elsewhere (review OMV-R2).
+    expect(calls).toEqual(['business.findFirst', 'business.findFirst', 'business.findFirst', 'membership.findFirst']);
+  });
+
+  it('owner ruling D-104 (review OMV-2): a caller who is no member of their oldest owned business is answered the oldest owned business they are a member of, and nothing is written', async () => {
+    const { tx, calls } = txRecorder();
+    const answers = [{ id: 'biz-oldest', name: 'Oldest' }, null, { id: 'biz-newer', name: 'Newer' }];
+    tx.business.findFirst = vi.fn(async () => {
+      calls.push('business.findFirst');
+      return (answers.shift() ?? null) as any;
+    });
+    const $transaction = vi.fn(async (fn: any) => fn(tx));
+    const service = buildIdentity({ $transaction });
+
+    const out = await ensure(service, 'user-1', 'Ignored Name');
+
+    expect(out).toEqual({ business: { id: 'biz-newer', name: 'Newer' }, isNewBusiness: false });
+    expect(tx.business.create).not.toHaveBeenCalled();
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(tx.membership.create).not.toHaveBeenCalled();
+    // The answered business is one the caller holds a Membership on.
+    expect((tx.business.findFirst as any).mock.calls[2][0].where).toEqual({ ownerId: 'user-1', deletedAt: null, members: { some: { userId: 'user-1' } } });
+    expect($transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('owner ruling D-104 (review OMV-2): a caller recorded as owner who is a member of none of their owned businesses but holds a Membership elsewhere is answered the business of their oldest Membership on a live business (read across tenants), isNewBusiness false, and nothing is written', async () => {
+    const { tx, calls } = txRecorder();
+    const answers = [{ id: 'biz-owned', name: 'Owned' }, null, null];
+    tx.business.findFirst = vi.fn(async () => {
+      calls.push('business.findFirst');
+      return (answers.shift() ?? null) as any;
+    });
+    tx.membership.findFirst = vi.fn(async () => {
+      calls.push('membership.findFirst');
+      return { business: { id: 'biz-member', name: 'Member' } };
+    });
+    const $transaction = vi.fn(async (fn: any) => fn(tx));
+    const service = buildIdentity({ $transaction });
+
+    const out = await ensure(service, 'user-1', 'Ignored Name');
+
+    expect(out).toEqual({ business: { id: 'biz-member', name: 'Member' }, isNewBusiness: false });
+    expect(tx.business.create).not.toHaveBeenCalled();
+    expect(tx.membership.upsert).not.toHaveBeenCalled();
+    expect(tx.membership.create).not.toHaveBeenCalled();
+    expect(tx.membership.findFirst).toHaveBeenCalledTimes(1);
+    expect((tx.membership.findFirst as any).mock.calls[0][0]).toMatchObject({
+      __skipTenantIsolation: true,
+      where: { userId: 'user-1', business: { deletedAt: null } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
     expect($transaction).toHaveBeenCalledTimes(1);
   });
 

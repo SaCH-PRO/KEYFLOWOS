@@ -38,11 +38,15 @@
  *           admitted by BusinessGuard, scoped by TenantInterceptor and listed by
  *           discovery; that grant is audited too.
  *   OMB-09  census pin: no business access predicate under apps/server/src
- *           admits Business.ownerId without a Membership, except the listed,
- *           referred exceptions (review CR-W10OM-2): no `OR [{ ownerId },
- *           { members }]`, no owner arm `{ id, ownerId: x }` that does not also
- *           require x's Membership, no Business.ownerId compared to a caller and
- *           no `ownerId === actorId` arm outside the exception list.
+ *           admits Business.ownerId without a Membership, except the listed
+ *           exceptions, one per site (reviews CR-W10OM-2, OMV-3): no OR mixing
+ *           an ownerId arm and a members arm (either order, any values), no
+ *           business read whose where names ownerId anywhere without a members
+ *           filter, no `business: { ownerId }` relation filter without one
+ *           (both also through a wrapping skipTenantIsolation(...); reviews
+ *           OMV3-R1, OMV-R1), and no ownerId (on any receiver but a contact,
+ *           indexed or parenthesised ones included, or destructured) compared
+ *           to the caller (userId, actorId, user.id, ...).
  *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
  *           no Membership on a business it did not create: the ownerId-only
  *           owner is refused 403 OWNER_MEMBERSHIP_REQUIRED and stays refused.
@@ -54,6 +58,26 @@
  *   OMB-13  review SEC-W10OM-6: mail addressed to the business owner (weekly
  *           financial briefing, quote alerts, AI usage alerts) reaches the
  *           Business.ownerId user only while they hold a Membership.
+ *   OMB-14  review OMV-2 (a sign-in lockout): a caller a co-owner removed from
+ *           their oldest owned business, who is OWNER of a newer one and STAFF
+ *           of another, signs in: the bootstrap answers the oldest owned
+ *           business they are a member of (was: 403 OWNER_MEMBERSHIP_REQUIRED),
+ *           writes nothing and re-admits them nowhere.
+ *   OMB-15  review OMV-2: a caller recorded as Business.ownerId only of a
+ *           with_another_owner business (the class the backfill skips by
+ *           default), a member of none they own but STAFF and ADMIN elsewhere,
+ *           signs in: the bootstrap answers the business of their oldest
+ *           Membership on a live business, the same one each time, isNewBusiness
+ *           false, nothing written (was: 403).
+ *   OMB-16  control: a caller who owns no business (STAFF elsewhere) still gets
+ *           their first workspace with its founding OWNER Membership, and a
+ *           recorded owner who is a member nowhere live (a soft-deleted
+ *           business's Membership does not count) is still refused 403.
+ *   OMB-17  review OMV-3: the OMB-09 census patterns are not vacuous: each
+ *           ownerId-as-authority shape is flagged on synthetic source, and each
+ *           membership-carrying or non-business shape is not; reviews OMV3-R1,
+ *           OMV-R1 add the skipTenantIsolation-wrapped reads and the indexed
+ *           and parenthesised receivers.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor (global, as in production) and IdentityService.listBusinesses
@@ -74,7 +98,10 @@
  *
  * Fixtures: prefix `v96c_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in beforeAll and
- * afterAll. No $transaction wrapping.
+ * afterAll, the workspace OMB-16's first sign-in creates (a generated id) by its
+ * prefixed owner. No $transaction wrapping. Every OMB-14..16 business whose
+ * ownerId holds no Membership also has another OWNER member, so the estate-wide
+ * founding-membership repair cannot heal it mid-run.
  */
 import 'reflect-metadata';
 import fs from 'fs';
@@ -118,7 +145,30 @@ const ID = {
   bizDeleted: `${P}bizDeleted`,
   /** OMB-12's own business, outside BUSINESSES: the co-owner removes its ownerId member. */
   bizRemoved: `${P}bizRemoved`,
+  // OMB-14..16 (review OMV-2), outside BUSINESSES.
+  /** OWNER of every OMB-14..16 business another user is recorded as owning. */
+  bootCo: `${P}bootCo`,
+  /** ownerId of bootOldest (removed by bootCo) and bootNewer (OWNER); STAFF of bootStaffX. */
+  bootRemoved: `${P}bootRemoved`,
+  /** ownerId of bootOwnedY only (with_another_owner); STAFF, ADMIN elsewhere. */
+  bootFallback: `${P}bootFallback`,
+  /** Owns nothing; STAFF of bootStaffX. */
+  bootFirst: `${P}bootFirst`,
+  /** ownerId of bootNowhere; member only of the soft-deleted bootDeletedY. */
+  bootNowhereUser: `${P}bootNowhereUser`,
+  bootOldest: `${P}bootOldest`,
+  bootNewer: `${P}bootNewer`,
+  bootStaffX: `${P}bootStaffX`,
+  bootOwnedY: `${P}bootOwnedY`,
+  bootDeletedY: `${P}bootDeletedY`,
+  bootStaffY: `${P}bootStaffY`,
+  bootAdminY: `${P}bootAdminY`,
+  bootNowhere: `${P}bootNowhere`,
 };
+
+/** OMB-14..16's users and businesses. */
+const BOOT_USERS = [ID.bootCo, ID.bootRemoved, ID.bootFallback, ID.bootFirst, ID.bootNowhereUser];
+const BOOT_BUSINESSES = [ID.bootOldest, ID.bootNewer, ID.bootStaffX, ID.bootOwnedY, ID.bootDeletedY, ID.bootStaffY, ID.bootAdminY, ID.bootNowhere];
 
 /** Every business of this suite: the backfill is scoped to exactly these. */
 const BUSINESSES = [ID.bizGuard, ID.bizPlain, ID.bizExact, ID.bizStaffOwner, ID.bizGhost, ID.bizDeleted];
@@ -134,7 +184,8 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
-    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    // OMB-16's first sign-in creates a workspace with a generated id, owned by a fixture user.
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try {
@@ -200,6 +251,127 @@ async function ownerIds() {
 function expectCountsOnly(out: string) {
   expect(out).not.toContain(P);
   expect(out).not.toMatch(/@/);
+}
+
+/** Every Membership of OMB-14..16's users or on their businesses, in a stable order. */
+async function bootMemberships() {
+  return db.membership.findMany({
+    where: { OR: [{ userId: { in: BOOT_USERS } }, { businessId: { in: BOOT_BUSINESSES } }] },
+    select: { id: true, userId: true, businessId: true, role: true, permissionScopes: true, maxApprovalTier: true },
+    orderBy: [{ businessId: 'asc' }, { userId: 'asc' }],
+  });
+}
+
+/** The bootstrap's refusal, or null when it answered. */
+async function bootstrapError(userId: string) {
+  return identity.bootstrapUser({ userId, email: `${P}${userId.slice(P.length)}@test.local` }).then(
+    () => null,
+    (e: unknown) => e,
+  );
+}
+
+/**
+ * OMB-09's census (reviews CR-W10OM-2, OMV-3): the ownerId-as-authority shapes
+ * found in whitespace-normalised source, one label per site. OMB-17 runs it on
+ * synthetic source so it cannot go vacuous.
+ *
+ *   'ownerId OR members': an `OR: [...]` holding an ownerId arm and a members
+ *     arm, in either order, whatever the values or the other keys.
+ *   'business read on ownerId without membership': a business read
+ *     (findUnique, findFirst, findMany, count, ...) whose top-level `where`
+ *     names ownerId anywhere and no `members` filter.
+ *   'business relation on ownerId without membership': any read whose `where`
+ *     filters a `business: { ... }` relation on ownerId without `members`.
+ *     For both read rules the `where` is the call argument's, or that of the
+ *     call wrapping it (`findFirst(skipTenantIsolation({ where }))`, the
+ *     cross-tenant idiom; reviews OMV3-R1, OMV-R1).
+ *   'ownerId compared to the caller': `<receiver>.ownerId` or a bare
+ *     (destructured, handed-in) `ownerId` compared (===, !==, ==, !=) with the
+ *     caller (userId, actorId, user.id, req.user?.id, rows.userId, ...), either
+ *     side. The receiver may index or call (rows[0], load(id)) or be
+ *     parenthesised ((await load(id))). A receiver named
+ *     `contact`/`contacts`/`...Contact` is a Contact's owner, not
+ *     Business.ownerId, and is not counted.
+ */
+const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
+const DOT = String.raw`(?:\?\.|!\.|\.)`;
+/** `[...]` and `(...)` segments (one nested paren level): rows[0], load(id), (await load(id)). */
+const INDEX = String.raw`\[[^\[\]]*\]`;
+const PARENS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+const RECEIVER = String.raw`(?:[\w$]+|${PARENS})(?:${DOT}[\w$]+|${INDEX}|${PARENS})*`;
+const EQ = String.raw`\s*[!=]==?\s*`;
+const COMPARED: RegExp[] = [
+  new RegExp(String.raw`(?<![\w$.])(${RECEIVER})${DOT}ownerId${EQ}${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}(${RECEIVER})${DOT}ownerId\b`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])()ownerId${EQ}${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}()ownerId(?![\w$])`, 'g'),
+];
+const READS = String.raw`(?:findUnique|findUniqueOrThrow|findFirst|findFirstOrThrow|findMany|count|aggregate|groupBy)`;
+
+/** The bracket group ('{', '[' or '(') that opens at text[start], brackets balanced. */
+function bracketGroup(text: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if ((c === '}' || c === ']' || c === ')') && --depth === 0) return text.slice(start, i + 1);
+  }
+  return text.slice(start);
+}
+
+/** The object literal under `key:` at the top level of the call argument `args` ('(' ... ')'), or null. */
+function topLevelObject(args: string, key: string): string | null {
+  let depth = 0;
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') depth--;
+    else if (depth === 2 && !/[\w$]/.test(args[i - 1] ?? '')) {
+      const m = new RegExp(String.raw`^${key}\s*:\s*\{`).exec(args.slice(i));
+      if (m) return bracketGroup(args, i + m[0].length - 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * The call argument `args` ('(' ... ')') with any wrapping call unwrapped:
+ * `(skipTenantIsolation({ where }))` gives `({ where })`, so the where of a
+ * cross-tenant read sits where topLevelObject looks (reviews OMV3-R1, OMV-R1).
+ */
+function unwrapCall(args: string): string {
+  let inner = args;
+  for (let m; (m = /^\(\s*[\w$]+(?:\s*\.\s*[\w$]+)*\s*\(/.exec(inner)); ) inner = bracketGroup(inner, m[0].length - 1);
+  return inner;
+}
+
+function censusHits(source: string): string[] {
+  const text = source.replace(/\s+/g, ' ');
+  const hits: string[] = [];
+  for (const m of text.matchAll(/\bOR\s*:\s*\[/g)) {
+    const arms = bracketGroup(text, m.index! + m[0].length - 1);
+    if (/\bownerId\b/.test(arms) && /\bmembers\b/.test(arms)) hits.push('ownerId OR members');
+  }
+  for (const m of text.matchAll(new RegExp(String.raw`(?<![\w$])(\w+)\s*\.\s*${READS}\s*\(`, 'g'))) {
+    const where = topLevelObject(unwrapCall(bracketGroup(text, m.index! + m[0].length - 1)), 'where');
+    if (!where) continue;
+    if (m[1] === 'business' && /\bownerId\b/.test(where) && !/\bmembers\b/.test(where)) {
+      hits.push('business read on ownerId without membership');
+    }
+    for (const rel of where.matchAll(/(?<![\w$])business\s*:\s*\{/g)) {
+      const filter = bracketGroup(where, rel.index! + rel[0].length - 1);
+      if (/\bownerId\b/.test(filter) && !/\bmembers\b/.test(filter)) hits.push('business relation on ownerId without membership');
+    }
+  }
+  for (const re of COMPARED) {
+    for (const m of text.matchAll(re)) {
+      // The receiver's last name, its index and call segments dropped (contacts[0] -> contacts).
+      const tail = (m[1] ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
+      const receiver = tail.split(/\?\.|!\.|\./).pop() ?? '';
+      if (!/contacts?$/i.test(receiver)) hits.push('ownerId compared to the caller');
+    }
+  }
+  return hits.sort();
 }
 
 beforeAll(async () => {
@@ -345,6 +517,99 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-3): the sign-in bootstra
     expect(out.isNewBusiness).toBe(false);
     const rows = await db.membership.findMany({ where: { businessId: ID.bizStaffOwner }, select: { userId: true, role: true } });
     expect(rows).toEqual([{ userId: ID.staffOwner, role: 'STAFF' }]);
+  });
+});
+
+describe('W10-OWNER-MEMBERSHIP (D-104; review OMV-2): the sign-in bootstrap answers a business the caller is a member of and refuses only a recorded owner who is a member nowhere', () => {
+  beforeAll(async () => {
+    for (const id of BOOT_USERS) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+    }
+    // Explicit timestamps: the bootstrap's choices are by age, so the fixture
+    // fixes every age rather than relying on insertion order.
+    const at = (iso: string) => new Date(iso);
+    for (const [id, ownerId, createdAt, deletedAt] of [
+      [ID.bootStaffX, ID.bootCo, at('2019-01-01T00:00:00Z'), null],
+      [ID.bootOldest, ID.bootRemoved, at('2020-01-01T00:00:00Z'), null],
+      [ID.bootNewer, ID.bootRemoved, at('2021-01-01T00:00:00Z'), null],
+      [ID.bootDeletedY, ID.bootCo, at('2018-01-01T00:00:00Z'), at('2024-01-01T00:00:00Z')],
+      [ID.bootStaffY, ID.bootCo, at('2018-06-01T00:00:00Z'), null],
+      [ID.bootOwnedY, ID.bootFallback, at('2020-01-01T00:00:00Z'), null],
+      [ID.bootAdminY, ID.bootCo, at('2022-01-01T00:00:00Z'), null],
+      [ID.bootNowhere, ID.bootNowhereUser, at('2020-01-01T00:00:00Z'), null],
+    ] as const) {
+      await db.business.create({ data: { id, name: id, ownerId, createdAt, deletedAt } });
+    }
+    for (const [userId, businessId, role, createdAt] of [
+      // bootCo holds OWNER on every business, so the businesses another user is
+      // recorded as owning without a Membership are with_another_owner.
+      ...BOOT_BUSINESSES.map((businessId) => [ID.bootCo, businessId, 'OWNER', at('2017-01-01T00:00:00Z')] as const),
+      // OMB-14: bootCo removed bootRemoved from bootOldest (no row there).
+      [ID.bootRemoved, ID.bootNewer, 'OWNER', at('2021-01-01T00:00:00Z')],
+      [ID.bootRemoved, ID.bootStaffX, 'STAFF', at('2019-02-01T00:00:00Z')],
+      // OMB-15: the oldest Membership is on a soft-deleted business; of the live
+      // ones the ADMIN row is older, on the younger business.
+      [ID.bootFallback, ID.bootDeletedY, 'STAFF', at('2019-01-01T00:00:00Z')],
+      [ID.bootFallback, ID.bootAdminY, 'ADMIN', at('2022-02-01T00:00:00Z')],
+      [ID.bootFallback, ID.bootStaffY, 'STAFF', at('2023-01-01T00:00:00Z')],
+      // OMB-16
+      [ID.bootFirst, ID.bootStaffX, 'STAFF', at('2019-03-01T00:00:00Z')],
+      [ID.bootNowhereUser, ID.bootDeletedY, 'STAFF', at('2019-01-01T00:00:00Z')],
+    ] as const) {
+      await db.membership.create({
+        data: { id: `${P}m_${userId.slice(P.length)}_${businessId.slice(P.length)}`, userId, businessId, role, createdAt },
+      });
+    }
+  }, 60_000);
+
+  it('[OMB-14] RED-BEFORE (D-104; review OMV-2): a caller a co-owner removed from their oldest owned business, OWNER of a newer one and STAFF of another, signs in: the bootstrap answers the oldest owned business they are a member of (isNewBusiness false), writes nothing, and re-admits them nowhere', async () => {
+    const before = await bootMemberships();
+    const out = await identity.bootstrapUser({ userId: ID.bootRemoved, email: `${P}${ID.bootRemoved.slice(P.length)}@test.local` });
+    expect(out.business.id).toBe(ID.bootNewer);
+    expect(out.isNewBusiness).toBe(false);
+    expect(await bootMemberships()).toEqual(before);
+    expect(await db.business.count({ where: { ownerId: ID.bootRemoved } }), 'no workspace created').toBe(2);
+    expect((await probe(ID.bootRemoved, ID.bootNewer)).status, 'the answered business admits them').toBe(200);
+    expect((await probe(ID.bootRemoved, ID.bootOldest)).status, 'still refused where they were removed').toBe(403);
+  });
+
+  it('[OMB-15] RED-BEFORE (D-104; review OMV-2): a caller recorded as Business.ownerId only of a with_another_owner business, a member of none they own but STAFF and ADMIN elsewhere, signs in: the bootstrap answers the business of their oldest Membership on a live business, the same one each time (isNewBusiness false), and writes nothing', async () => {
+    const before = await bootMemberships();
+    const first = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${P}${ID.bootFallback.slice(P.length)}@test.local` });
+    expect(first.business.id).toBe(ID.bootAdminY);
+    expect(first.isNewBusiness).toBe(false);
+    const again = await identity.bootstrapUser({ userId: ID.bootFallback, email: `${P}${ID.bootFallback.slice(P.length)}@test.local` });
+    expect(again.business.id, 'deterministic').toBe(ID.bootAdminY);
+    expect(again.isNewBusiness).toBe(false);
+    expect(await bootMemberships()).toEqual(before);
+    expect(await db.business.count({ where: { ownerId: ID.bootFallback } }), 'no workspace created').toBe(1);
+    expect((await probe(ID.bootFallback, ID.bootAdminY)).status, 'the answered business admits them').toBe(200);
+    expect((await probe(ID.bootFallback, ID.bootOwnedY)).status, 'not re-admitted to the business they are recorded as owning').toBe(403);
+  });
+
+  it('[OMB-16] control (D-104): a caller who owns no business (STAFF elsewhere) still gets their first workspace with its founding OWNER Membership, the same one on the next sign-in; a recorded owner who is a member nowhere live (only of a soft-deleted business) is still refused 403 OWNER_MEMBERSHIP_REQUIRED with nothing written', async () => {
+    const before = await bootMemberships();
+    const first = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${P}${ID.bootFirst.slice(P.length)}@test.local` });
+    expect(first.isNewBusiness).toBe(true);
+    const created = await db.business.findUnique({ where: { id: first.business.id }, select: { ownerId: true } });
+    expect(created).toEqual({ ownerId: ID.bootFirst });
+    const after = await bootMemberships();
+    for (const row of before) expect(after).toContainEqual(row);
+    expect(after.filter((row: any) => !before.some((b: any) => b.id === row.id)).map(({ id: _id, ...rest }: any) => rest)).toEqual([
+      { userId: ID.bootFirst, businessId: first.business.id, role: 'OWNER', permissionScopes: null, maxApprovalTier: 0 },
+    ]);
+    const again = await identity.bootstrapUser({ userId: ID.bootFirst, email: `${P}${ID.bootFirst.slice(P.length)}@test.local` });
+    expect(again.business.id).toBe(first.business.id);
+    expect(again.isNewBusiness).toBe(false);
+    expect(await bootMemberships()).toEqual(after);
+
+    const error = await bootstrapError(ID.bootNowhereUser);
+    expect(error, 'bootstrap refused').toBeTruthy();
+    expect((error as any).getStatus?.()).toBe(403);
+    expect((error as any).getResponse?.()).toMatchObject({ code: 'OWNER_MEMBERSHIP_REQUIRED' });
+    expect(JSON.stringify((error as any).getResponse?.())).not.toContain(P);
+    expect(await bootMemberships()).toEqual(after);
+    expect(await db.business.count({ where: { ownerId: ID.bootNowhereUser } }), 'no workspace created').toBe(1);
   });
 });
 
@@ -524,7 +789,7 @@ describe('W10-OWNER-MEMBERSHIP (D-104; review SEC-W10OM-2): a removed owner is n
 });
 
 describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
-  it('[OMB-09] (D-104; review CR-W10OM-2) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed referred exceptions: the ACTION-001 principal basis and onboarding completion\'s ownerId arm', () => {
+  it('[OMB-09] (D-104; reviews CR-W10OM-2, OMV-3) no business access predicate under apps/server/src admits Business.ownerId without a Membership, except the listed exceptions, one per site: the referred ACTION-001 principal basis and onboarding completion\'s ownerId arm, and the informational reads that grant nothing', () => {
     const root = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -535,39 +800,96 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       }
     };
     walk(root);
-    // Whitespace-normalised source, so a predicate split over lines still matches.
+    // One entry per site (censusHits), so a second arm in a listed file fails too.
     const offenders: string[] = [];
-    const patterns: Array<[string, RegExp]> = [
-      // OR: [{ ownerId: x }, { members: { some: ... } }] and the reverse order.
-      ['ownerId OR members', /OR: \[ ?\{ ownerId: [\w.]+ \}, \{ members: \{ some:/],
-      ['members OR ownerId', /OR: \[ ?\{ members: \{ some: \{ userId[^\]]*\}, \{ ownerId: [\w.]+ \},? ?\]/],
-      // An owner arm on a business read that does not also require the Membership.
-      ['owner arm without membership', /business\.(?:findFirst|findMany|count)\(\{ where: \{ id: \w+, ownerId: [\w.]+ \}/],
-      // Review CR-W10OM-2: the same arm in another shape, a business row's ownerId compared to a caller.
-      ['business ownerId compared', /\b(?:business|biz|existingBusiness|rows\.business)\??\.ownerId ?[!=]==|[!=]== ?(?:business|biz|existingBusiness|rows\.business)\??\.ownerId\b/],
-      // A bare `ownerId` (the business's, handed in) against the actor; `contact.ownerId` is a contact's owner, not this.
-      ['ownerId arm on the actor', /(?<![.\w])ownerId ?[!=]== ?actorId\b|\bactorId ?[!=]== ?ownerId\b/],
-    ];
     for (const file of files) {
-      const text = fs.readFileSync(file, 'utf8').replace(/\s+/g, ' ');
-      for (const [label, re] of patterns) if (re.test(text)) offenders.push(`${path.relative(root, file)}: ${label}`);
+      for (const label of censusHits(fs.readFileSync(file, 'utf8'))) offenders.push(`${path.relative(root, file)}: ${label}`);
     }
-    // The known exceptions, each with why it stays. The list is exact: a new arm
-    // fails this pin, and so does aligning one of these without removing it here.
-    const EXCEPTIONS: Record<string, string> = {
+    // The known exceptions, one entry per site, each with why it stays. The list
+    // is exact: a new arm fails this pin, and so does aligning one of these
+    // without removing it here.
+    const EXCEPTIONS: Array<[string, string]> = [
       // Classifies businesses for the KF-EXEC-TENANT-001 repair report; it grants nothing.
-      'modules/identity/founding-membership.service.ts: business ownerId compared': 'repair classifier, no access decision',
+      ['modules/identity/founding-membership.service.ts: ownerId compared to the caller', 'repair classifier, no access decision'],
       // Referred (W10-OWNER-MEMBERSHIP deviation): ACTION-001's principal basis
       // 'owner_without_membership' (approval tier 0) is pinned by the
       // action-001-real-db manifest and its negative control
       // NC-P4-OWNER-WITHOUT-MEMBERSHIP-APPROVES; aligning it changes both.
-      'modules/key-autonomy/action-boundary/control-clearance.ts: business ownerId compared': 'referred: ACTION-001 manifests',
+      ['modules/key-autonomy/action-boundary/control-clearance.ts: ownerId compared to the caller', 'referred: ACTION-001 manifests'],
       // Referred (W10-OWNER-MEMBERSHIP deviation): resolveCompletionActor runs
       // only under a tenant context TenantInterceptor verified (a Membership
       // since D-104, or SUPER_ADMIN); its ownerId arm is pinned by
       // release0-edited-suites (onboarding-concierge.service.spec ST-R032-1).
-      'modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId arm on the actor': 'referred: release0-edited-suites',
-    };
-    expect(offenders.sort()).toEqual(Object.keys(EXCEPTIONS).sort());
+      ['modules/onboarding-concierge/onboarding-concierge.service.ts: ownerId compared to the caller', 'referred: release0-edited-suites'],
+      // Informational (review OMV-3), none grants anything on ownerId alone:
+      // checkSlugAvailability's `existing.ownerId === userId` only answers
+      // { available: true, ownedByYou: true } on the slug route; writing a slug
+      // goes through the business PATCH, which BusinessGuard and the D-11 owner
+      // check (Membership) gate.
+      ['modules/identity/identity.service.ts: ownerId compared to the caller', 'informational: slug availability, grants nothing'],
+      // ensureBootstrapWorkspace's bootstrap-business lookup (oldest owned):
+      // it answers that business only after checking the caller's Membership on
+      // it, and otherwise only a business they hold a Membership on (D-104,
+      // review OMV-2); on its own it decides first-sign-in creation vs the rest.
+      ['modules/identity/identity.service.ts: business read on ownerId without membership', 'informational: bootstrap lookup, Membership checked before answering'],
+      // assertAdoptableInvitePlaceholder's never-bound test: an owned business
+      // makes the row an account, which is refused (409); it admits no one.
+      ['modules/identity/identity.service.ts: business read on ownerId without membership', 'informational: refusal predicate'],
+      // Contact.ownerId, not Business.ownerId: createContact's requested owner
+      // against the actor (a different owner needs reassign permission, and must
+      // be a member), and the Google Contacts default owner setting likewise.
+      ['modules/crm/crm.service.ts: ownerId compared to the caller', "informational: a contact's owner"],
+      ['modules/connect/google-contacts-sync.service.ts: ownerId compared to the caller', "informational: a contact's default owner"],
+    ];
+    expect(offenders.sort()).toEqual(EXCEPTIONS.map(([site]) => site).sort());
+  });
+
+  it('[OMB-17] (D-104; review OMV-3) the census is not vacuous: each ownerId-as-authority shape is flagged on synthetic source, and each membership-carrying or non-business shape is not', () => {
+    // [shape, source, the one label the census must give it]
+    const FLAGGED: Array<[string, string, string]> = [
+      ['OR arm', 'db.business.findMany({ where: { OR: [{ ownerId: userId }, { members: { some: { userId } } }] } })', 'ownerId OR members'],
+      ['OR arm, members first with a role', "tx.business.findFirst({ where: { id: businessId, OR: [{ members: { some: { role: 'OWNER', userId: user.id } } }, { ownerId: user.id }] } })", 'ownerId OR members'],
+      ['OR arm on another receiver (optional chain)', 'this.prisma.client.business.findFirst({ where: { id, OR: [{ ownerId: req.user?.id }, { members: { some: { userId: req.user?.id } } }] } })', 'ownerId OR members'],
+      ['OR arm with another field beside ownerId', 'prisma.business.count({ where: { OR: [{ ownerId: ctx.userId, deletedAt: null }, { members: { some: { userId: ctx.userId } } }] } })', 'ownerId OR members'],
+      ['owner arm right after id', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actorId }, select: { id: true } })', 'business read on ownerId without membership'],
+      ['owner arm before id', 'this.prisma.client.business.findFirst({ where: { ownerId: userId, id: businessId } })', 'business read on ownerId without membership'],
+      ['owner arm after other keys (findUnique)', 'this.prisma.client.business.findUnique({ where: { id: businessId, deletedAt: null, ownerId: user.id }, select: { id: true } })', 'business read on ownerId without membership'],
+      ['owner lookup without an id', "tx.business.findFirst({ where: { ownerId: userId, deletedAt: null }, orderBy: { createdAt: 'asc' } })", 'business read on ownerId without membership'],
+      ['business relation filter on ownerId', 'this.prisma.client.invoice.findFirst({ where: { id: invoiceId, business: { ownerId: userId } } })', 'business relation on ownerId without membership'],
+      ['business row compared', 'if (business.ownerId === userId) return true;', 'ownerId compared to the caller'],
+      ['another receiver compared (existing.ownerId === userId)', 'if (userId && existing.ownerId === userId) return { available: true, ownedByYou: true };', 'ownerId compared to the caller'],
+      ['caller on the left', 'if (req.user.id !== row.ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      ['destructured ownerId compared to user.id', 'const { ownerId } = await load(businessId); if (ownerId === user.id) return;', 'ownerId compared to the caller'],
+      ['destructured ownerId, caller first, optional chain', 'if (user?.id !== ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      ['bare ownerId against the actor', 'if (ownerId && ownerId === actorId) return actorId;', 'ownerId compared to the caller'],
+      // Reviews OMV3-R1, OMV-R1: the repo reads across tenants by wrapping the
+      // argument in skipTenantIsolation(...); its where sits one call deeper.
+      ['business read wrapped in skipTenantIsolation', 'tx.business.findFirst(skipTenantIsolation({ where: { id: businessId, ownerId: userId } }))', 'business read on ownerId without membership'],
+      ['cross-tenant business read wrapped, multi-line', 'this.prisma.client.business.findFirst(\n  skipTenantIsolation({\n    where: { id: businessId, ownerId: userId },\n    select: { id: true },\n  }),\n)', 'business read on ownerId without membership'],
+      ['business relation filter wrapped in skipTenantIsolation (a cross-tenant read)', 'this.prisma.client.invoice.findFirst(skipTenantIsolation({ where: { id: invoiceId, business: { ownerId: userId } } }))', 'business relation on ownerId without membership'],
+      ['membership read with an ownerId relation arm, wrapped', 'tx.membership.findFirst(skipTenantIsolation({ where: { businessId, OR: [{ business: { ownerId: userId } }, { userId }] } }))', 'business relation on ownerId without membership'],
+      // Review OMV-R1: indexed and parenthesised receivers.
+      ['indexed receiver compared', 'if (rows[0].ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['indexed receiver, optional chain, caller on the left', 'if (userId !== rows[0]?.ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
+      ['parenthesised receiver compared', 'if ((await this.load(id)).ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['parenthesised read result compared (non-null assertion)', 'if ((await tx.business.findUnique({ where: { id } }))!.ownerId !== user.id) throw new ForbiddenException();', 'ownerId compared to the caller'],
+    ];
+    const PASSED: Array<[string, string]> = [
+      ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
+      ['ownerId selected, not filtered', 'this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } })'],
+      ['Membership discovery', 'this.prisma.client.business.findMany({ where: { deletedAt: null, members: { some: { userId } } } })'],
+      ['a business created with its founding Membership', "tx.business.create({ data: { name, ownerId: userId, members: { create: { userId, role: 'OWNER' } } } })"],
+      ["a contact's owner", 'if (contact.ownerId !== actorId) throw new ForbiddenException();'],
+      ['a contact OR arm (shares, not members)', 'this.prisma.client.contact.findFirst({ where: { OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }] } })'],
+      ['type and presence checks', "if (typeof config.ownerId === 'string' && ownerId !== undefined && ownerId !== null) return config.ownerId;"],
+      ['ownerId against a stored value', 'if (ownerId !== null && ownerId === storedOwnerId) return ownerId;'],
+      // The wrapped forms of the membership-carrying and Membership reads.
+      ['the D-104 owner arm, wrapped', 'tx.business.findFirst(skipTenantIsolation({ where: { id: businessId, ownerId: userId, members: { some: { userId } } } }))'],
+      ["the bootstrap's oldest-Membership read, wrapped", 'tx.membership.findFirst(skipTenantIsolation({ where: { userId, business: { deletedAt: null } }, select: { business: true } }))'],
+      ['ownerId selected under a wrapped read', 'this.prisma.client.business.findUnique(skipTenantIsolation({ where: { id: businessId }, select: { ownerId: true } }))'],
+      ["an indexed contact's owner", 'if (contacts[0].ownerId !== actorId) throw new ForbiddenException();'],
+    ];
+    expect(FLAGGED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(FLAGGED.map(([shape, , label]) => [shape, [label]]));
+    expect(PASSED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(PASSED.map(([shape]) => [shape, []]));
   });
 });

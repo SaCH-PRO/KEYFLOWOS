@@ -18,8 +18,13 @@ KF-EXEC-TENANT-001 (`IdentityService.createBusiness`, the bootstrap
 created before that can still have an owner recorded only as ownerId. Run the
 backfill when the D-104 alignment deploys. The sign-in bootstrap
 (`POST /identity/bootstrap`) no longer heals them: since review SEC-W10OM-3 it
-writes no Membership on a business it did not create, never changes a role, and
-answers such an owner 403 `OWNER_MEMBERSHIP_REQUIRED` until this script (or a
+writes no Membership on a business it did not create and never changes a role.
+It answers only a business the caller is a member of (review OMV-2): their
+bootstrap business (the oldest one they own) when they are a member there, else
+the oldest business they own and are a member of, else the business of their
+oldest Membership on a live business (`isNewBusiness: false` for all three). It
+answers 403 `OWNER_MEMBERSHIP_REQUIRED` only to a caller recorded as
+`Business.ownerId` who is a member of no live business, until this script (or a
 hand repair) writes their row.
 
 ## What it writes
@@ -92,5 +97,6 @@ re-run to finish), 2 an unknown argument.
   nobody else holds OWNER. FoundingMembershipService keeps classifying a business
   whose OWNER row belongs to another user as `conflicting_owner_membership`.
 - Proof: `apps/server/test/owner-membership-backfill.integration.test.ts`
-  (OMB-01..OMB-13) and `apps/server/test/books-read-scope.integration.test.ts`
-  ([BRS-12]).
+  (OMB-01..OMB-17; OMB-14..OMB-16 are the bootstrap's answers, OMB-09 and
+  OMB-17 the source census and its self-test) and
+  `apps/server/test/books-read-scope.integration.test.ts` ([BRS-12]).
