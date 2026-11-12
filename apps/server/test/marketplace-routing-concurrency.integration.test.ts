@@ -58,6 +58,10 @@
  *         its read and its write, and replaced a token another call had just
  *         set. Now the token is written in one statement only where none is
  *         stored, and a token stored first is the one returned.
+ *   RC-09 (F-25, closed by RC-01's lock order) two paid orders with the same
+ *         tracked line, routed at once: both read reserved 0 before either
+ *         wrote, and the second wrote 0 + 1 over the first's 1. Now the claim
+ *         locks the row before the read: 2 reserved.
  *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
@@ -354,9 +358,10 @@ const announcedFor = (orderId: string) =>
 /**
  * Every interactive transaction run through PrismaService.client (the routing claim, the paid door, a purchase order
  * received) has its inventory_stocks row writes (tx.inventoryStock.update) passed to `afterWrite` once each has run,
- * inside the transaction, with that transaction's number. Restored by the returned function.
+ * inside the transaction, with that transaction's number; with `method` 'findFirst', its stock row reads instead.
+ * Restored by the returned function.
  */
-function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>) {
+function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>, method: 'update' | 'findFirst' = 'update') {
   const real = prismaService.client;
   let txNo = 0;
   const bound = (target: any, prop: PropertyKey) => {
@@ -370,11 +375,11 @@ function hookStockWrites(afterWrite: (txNo: number, args: any) => Promise<void>)
         const delegate = Reflect.get(target, prop);
         return new Proxy(delegate, {
           get(d, p) {
-            if (p !== 'update') return bound(d, p);
+            if (p !== method) return bound(d, p);
             return async (args: any) => {
-              const written = await d.update(args);
+              const result = await d[method](args);
               await afterWrite(no, args);
-              return written;
+              return result;
             };
           },
         });
@@ -775,5 +780,32 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     expect(await market.getOrderToken(ID.biz, second.id)).toBe(other);
     const notFound = await market.getOrderToken(`${P}no_such_biz`, second.id).then(() => 200, (err: any) => err?.getStatus?.());
     expect(notFound).toBe(404);
+  });
+  it('RC-09 (F-25, closed by the SEAMZ4-CR-1 lock order) two paid orders with the same tracked line routed at once, each held after reading the stock row until the other has read it: each reservation counts the other, 2 reserved (the second no longer writes reserved 1 over the first\'s)', async () => {
+    const o1 = await paidOrder([ID.productA]);
+    const o2 = await paidOrder([ID.productA]);
+    const reads = new Set<number>();
+    let allIn!: () => void;
+    const gathered = new Promise<void>((resolve) => (allIn = resolve));
+    const hook = hookStockWrites(async (no) => {
+      if (reads.has(no)) return;
+      reads.add(no);
+      if (reads.size >= 2) allIn();
+      await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+    }, 'findFirst');
+    try {
+      await Promise.all([
+        listener.onStoreOrderPaid({ order: { id: o1.id }, businessId: ID.biz }),
+        listener.onStoreOrderPaid({ order: { id: o2.id }, businessId: ID.biz }),
+      ]);
+    } finally {
+      hook.restore();
+    }
+    expect(announcedFor(o1.id)).toEqual(['fulfillment_routed:1']);
+    expect(announcedFor(o2.id)).toEqual(['fulfillment_routed:1']);
+    expect(await routesOf(o1.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+    expect(await routesOf(o2.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+    // At f38185ce both read reserved 0 before either wrote, and the second wrote 0 + 1 over the first's 1.
+    expect(await stockOf(ID.stockA), 'two units reserved, one per order').toBe(`${IN_STOCK}/2`);
   });
 });
