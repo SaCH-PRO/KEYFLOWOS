@@ -10,7 +10,7 @@ import { appendOrderTimeline, appendOrderTimelineAdvancingStatus } from './order
 import type { BusinessMetaTx } from '../../core/prisma/business-meta';
 import { isLostTransactionConflict, lockStockRowPairsInOrder, lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 import { createStockRowOrConflict, ownedProductsAndWarehouses } from '../../core/inventory/stock-ownership';
-import { readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
+import { readPurchaseOrderLine, STOCK_QUANTITY_MAX } from '../../core/inventory/purchase-order-lines';
 
 /**
  * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
@@ -1254,10 +1254,20 @@ export class FulfillmentRoutingService {
         // (product, warehouse) rows the lines write; every warehouse's row of a line's product made a receipt hold two
         // rows of it, which a transfer writing them in the other order deadlocked with, and the receipt was rolled back.
         await lockStockRowPairsInOrder(rawTx, businessId, receipts);
-        const updated = await tx.purchaseOrder.update({
-          where: { id: poId },
+        // W11-PO-LINES review (SEC-POL-4): the purchase order moves from the status read above, compared and set here.
+        // The status was read before this transaction and the update did not compare it, so two receipts of one SHIPPED
+        // purchase order at once both committed and added its stock twice (two RECEIPT movements). The second now waits
+        // for the first's row lock (behind the stock locks above, as before), reads RECEIVED, updates nothing and is
+        // refused as a receipt after the first is (400), its transaction rolled back with nothing written.
+        const moved = await tx.purchaseOrder.updateMany({
+          where: { id: poId, businessId, status: po.status },
           data: updateData,
         });
+        if (moved.count !== 1) {
+          const now = await tx.purchaseOrder.findFirst({ where: { id: poId, businessId }, select: { status: true } });
+          throw new BadRequestException(`Cannot transition PO from ${now?.status ?? po.status} to ${targetStatus}`);
+        }
+        const updated = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: poId } });
 
         await tx.fulfillmentRoute.updateMany({
           where: { businessId, purchaseOrderId: poId },
@@ -1265,7 +1275,7 @@ export class FulfillmentRoutingService {
         });
 
         // The purchase order's lines as read above (no writer changes a purchase order's items after it is created).
-        for (const { productId, warehouseId, quantity: qty, unitCost } of receipts) {
+        for (const { line, productId, warehouseId, quantity: qty, unitCost } of receipts) {
           // Review Z4RV-SEC-1: the business's own row, read under the lock above. This read the row of the line's
           // (productId, warehouseId) with no business filter, so a line naming another business's product and
           // warehouse added to that business's stock and rewrote its weighted-average cost.
@@ -1274,6 +1284,13 @@ export class FulfillmentRoutingService {
           });
 
           if (existing) {
+            // W11-PO-LINES review (POL-CR-1): the row holds at most STOCK_QUANTITY_MAX (int4); a line taking it above
+            // that answered 500 (P2020). Read under the lock, after any earlier line of this receipt into the same row.
+            if (existing.quantity + qty > STOCK_QUANTITY_MAX) {
+              throw new BadRequestException(
+                `Purchase order line ${line} would take its stock row above ${STOCK_QUANTITY_MAX}; nothing was received`,
+              );
+            }
             // FIN3 — Weighted-average cost recompute on receipt:
             //   newAvg = (oldQty*oldCost + recvQty*recvCost) / (oldQty + recvQty)
             // Falls back to the existing cost if the PO line carries no
@@ -1289,6 +1306,13 @@ export class FulfillmentRoutingService {
               nextCostPerUnit = denom > 0
                 ? (oldQty * oldCost + qty * unitCost) / denom
                 : unitCost;
+              // W11-PO-LINES review (found reproducing SEC-POL-2): a cost so large the average overflows to Infinity was
+              // written as NULL (Prisma sends Infinity as null), erasing the row's cost. Refused instead.
+              if (!Number.isFinite(nextCostPerUnit)) {
+                throw new BadRequestException(
+                  `Purchase order line ${line} has a cost too large to average into its stock row; nothing was received`,
+                );
+              }
             }
             await tx.inventoryStock.update({
               where: { id: existing.id },

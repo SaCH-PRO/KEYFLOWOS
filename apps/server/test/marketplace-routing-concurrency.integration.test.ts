@@ -1979,4 +1979,110 @@ describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-
       "lines that add no stock (null, 5, a free-text line with quantity 'abc') beside a good line": withA(IN_STOCK + 3),
     });
   });
+
+  it("RC-28 (W11-PO-LINES review SEC-POL-1, POL-CR-1, SEC-POL-2; D-136) POST .../purchase-orders with a product line whose stock quantity is above 2147483647 (the most an integer stock column holds), a shippingCost or taxAmount that is not a number, or a subtotal or total that is not finite, is refused with 400 and nothing is saved; a legacy SHIPPED purchase order received with a stock quantity above 2147483647 (a number or digit text), or one that would take its stock row above it, is refused with 400 naming the line, stays SHIPPED and writes nothing; never a 500", async () => {
+    const line = (n: number, what: string) => `400: Purchase order line ${n} ${what}`;
+    const tooMany = (n: number, field = 'quantity') => line(n, `${field} must be at most 2147483647 on a product line`);
+    const creates: Array<[name: string, body: Record<string, unknown>, answer: string, written: number]> = [
+      ["a product line's quantity 3e9", { ...supplier, items: [{ ...ownLine, quantity: 3e9, unitPrice: 0 }] }, tooMany(1), 0],
+      ["a product line's quantity 1e300", { ...supplier, items: [{ ...ownLine, quantity: 1e300, unitPrice: 0 }] }, tooMany(1), 0],
+      ["a product line's receivedQuantity 2147483648", { ...supplier, items: [{ ...ownLine, receivedQuantity: 2147483648 }] }, tooMany(1, 'receivedQuantity'), 0],
+      [
+        'a free-text line whose quantity times price is not finite',
+        { ...supplier, items: [{ name: 'X', quantity: 1e200, unitPrice: 1e200 }] },
+        '400: Purchase order subtotal must be a finite number; nothing was saved',
+        0,
+      ],
+      [
+        'a shippingCost and a taxAmount whose sum is not finite',
+        { ...supplier, items: [], shippingCost: 1e308, taxAmount: 1e308 },
+        '400: Purchase order total must be a finite number; nothing was saved',
+        0,
+      ],
+      ['a shippingCost as text', { ...supplier, items: [ownLine], shippingCost: '5' }, '400: Purchase order shippingCost must be a number; nothing was saved', 0],
+      ['a taxAmount an object', { ...supplier, items: [ownLine], taxAmount: {} }, '400: Purchase order taxAmount must be a number; nothing was saved', 0],
+      // Green before and after: the most a stock row holds is a stock quantity a product line may carry.
+      ["a product line's quantity 2147483647", { ...supplier, items: [{ ...ownLine, quantity: 2147483647, unitPrice: 0 }] }, 'created DRAFT 0/0', 1],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, body, answer, written] of creates) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate(body);
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: written };
+    }
+
+    const malformed = (n: number) => `400: Purchase order line ${n} is malformed; nothing was received`;
+    const aboveRow = (n: number) => `400: Purchase order line ${n} would take its stock row above 2147483647; nothing was received`;
+    const a = (quantity: unknown) => ({ productId: ID.productA, name: 'A', quantity, warehouseId: ID.warehouse });
+    const u = (quantity: unknown) => ({ productId: ID.productU, name: 'U', quantity, warehouseId: ID.warehouse2 });
+    const receipts: Array<[name: string, items: unknown[], answer: string]> = [
+      ['quantity 3e9', [a(3e9)], malformed(1)],
+      ['quantity 1e300', [a(1e300)], malformed(1)],
+      ["quantity '3000000000' (digit text)", [a('3000000000')], malformed(1)],
+      ["receivedQuantity '9999999999' (digit text) of 5 ordered", [{ ...a(5), receivedQuantity: '9999999999' }], malformed(1)],
+      ['quantity 2147483647 onto the stock row holding 10', [a(2147483647)], aboveRow(1)],
+      ['two lines of 2000000000 onto one new stock row', [u(2_000_000_000), u(2_000_000_000)], aboveRow(2)],
+      // Found reproducing SEC-POL-2: the average overflowed to Infinity, which Prisma wrote as a NULL cost (committed).
+      [
+        'unitCost 1e308 on 2 units onto the stock row holding 10 (an average that overflows)',
+        [{ ...a(2), unitCost: 1e308 }],
+        '400: Purchase order line 1 has a cost too large to average into its stock row; nothing was received',
+      ],
+      // Green before and after: the most a stock row holds, onto a new row.
+      ['quantity 2147483647 onto a new stock row', [u(2147483647)], 'committed'],
+    ];
+    const statuses: Record<string, string> = {};
+    const expectedStatuses: Record<string, string> = {};
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    try {
+      for (const [name, items, answer] of receipts) {
+        await resetBusinessStock();
+        const po = await shippedPurchaseOrder(items);
+        outcomes[`receipt: ${name}`] = await answerAndWrites(() =>
+          routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+        );
+        expected[`receipt: ${name}`] =
+          answer === 'committed' ? { answer, stockRowsWritten: 1, movementsWritten: 1 } : { answer, stockRowsWritten: 0, movementsWritten: 0 };
+        statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+        expectedStatuses[name] = answer === 'committed' ? 'RECEIVED' : 'SHIPPED';
+      }
+    } finally {
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+    // At f3e7740a quantity 3e9, 1e300 and 2147483648 were created as DRAFT, the non-finite subtotal and total and the
+    // text shippingCost and object taxAmount answered 500 (PrismaClientValidationError), and every receipt refusal
+    // answered 500 (P2020 for an integer out of range, PrismaClientValidationError for 1e300), each rolled back; the
+    // overflowing average was received with the row's cost written as NULL.
+    expect(outcomes).toEqual(expected);
+    expect((await db.inventoryStock.findUnique({ where: { id: ID.stockA } })).costPerUnit, "stock A's cost as it was").toBe(seededA.costPerUnit);
+    expect(JSON.stringify(outcomes), 'never a 500').not.toContain('500');
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(statuses).toEqual(expectedStatuses);
+  });
+
+  it('RC-29 (W11-PO-LINES review SEC-POL-4) two receipts of one SHIPPED purchase order at once, each having read it SHIPPED and waiting behind a lock on its stock row, receive it once: one commits, adding its stock with one movement, and the other is refused with 400 (the purchase order is RECEIVED) and writes nothing', async () => {
+    await resetBusinessStock();
+    const po = await shippedPurchaseOrder([{ productId: ID.productA, name: 'A', quantity: 3, warehouseId: ID.warehouse }]);
+    const receive = () =>
+      routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' })));
+    try {
+      const before = await stockState();
+      const { firstWaited, answers } = await behindHolder(ID.stockA, receive, receive);
+      const after = await stockState();
+      const status = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+      // At f3e7740a both committed: stock A went from 10 to 16 with two RECEIPT movements (the status was read before
+      // the transaction and the update did not compare it).
+      expect({ firstWaited, answers: [...answers].sort(), stockA: await stockOf(ID.stockA), movementsWritten: after.movements - before.movements, status }).toEqual({
+        firstWaited: true,
+        answers: ['400: Cannot transition PO from RECEIVED to RECEIVED', 'committed'],
+        stockA: `${IN_STOCK + 3}/0`,
+        movementsWritten: 1,
+        status: 'RECEIVED',
+      });
+    } finally {
+      await resetBusinessStock();
+    }
+  });
 });

@@ -1446,6 +1446,8 @@ export class MarketplaceService {
    * counts), or 400 in the receipt's wording. These were stored as sent and refused only when the purchase order was
    * received (FulfillmentRoutingService.receivedStockLines, Z4RV-SEC-1). The lines are stored as sent once accepted;
    * lines naming no product (free text, a service, freight) stay accepted, and the totals are computed as before.
+   * Review SEC-POL-1, POL-CR-1, SEC-POL-2: a product line's stock quantity is at most STOCK_QUANTITY_MAX, and the
+   * shippingCost, taxAmount, subtotal and total are finite numbers (400 otherwise, nothing saved).
    */
   async createPurchaseOrder(businessId: string, data: any) {
     const items: unknown[] = data.items ?? [];
@@ -1481,7 +1483,17 @@ export class MarketplaceService {
 
     const shippingCost = data.shippingCost || 0;
     const taxAmount = data.taxAmount || 0;
+    // W11-PO-LINES review (SEC-POL-2; D-136): every amount stored is a finite number, or 400 with nothing saved. Each line
+    // is finite, but quantity * unitPrice can overflow to Infinity (Prisma writes it as null: a 500 on these required
+    // columns), and a shippingCost or taxAmount that is text or an object made the total text (a 500 too).
+    for (const [field, amount] of [['shippingCost', shippingCost], ['taxAmount', taxAmount]] as const) {
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+        throw new BadRequestException(`Purchase order ${field} must be a number; nothing was saved`);
+      }
+    }
+    if (!Number.isFinite(subtotal)) throw new BadRequestException('Purchase order subtotal must be a finite number; nothing was saved');
     const total = subtotal + shippingCost + taxAmount;
+    if (!Number.isFinite(total)) throw new BadRequestException('Purchase order total must be a finite number; nothing was saved');
 
     return this.prisma.client.purchaseOrder.create({
       data: {

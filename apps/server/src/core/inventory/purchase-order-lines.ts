@@ -30,7 +30,17 @@
  *
  * A problem names the field (or the line) and what it must be, never the value
  * sent (an id of the caller's or of another business's).
+ *
+ * W11-PO-LINES review (SEC-POL-1, POL-CR-1; D-136): a stock quantity is at most
+ * STOCK_QUANTITY_MAX at both readings. inventory_stocks.quantity and
+ * stock_movements.quantity_change are Postgres integers: a whole number above it
+ * (3e9, 1e300, legacy digit text '3000000000') was accepted at create and then
+ * answered 500 at every receipt (P2020, or PrismaClientValidationError), so the
+ * purchase order could never be received.
  */
+
+/** The most a stock quantity can be: inventory_stocks.quantity and stock_movements.quantity_change are int4. */
+export const STOCK_QUANTITY_MAX = 2_147_483_647;
 
 /** A purchase order line as read: each field present only when the line carries it, ids as strings, numbers as numbers. */
 export interface PurchaseOrderLine {
@@ -106,10 +116,16 @@ export function readPurchaseOrderLine(raw: unknown, reading: PurchaseOrderLineRe
     const field = line.receivedQuantity !== undefined ? 'receivedQuantity' : 'quantity';
     const stock = line[field];
     if (atReceipt) {
-      // Absent or 0: the line adds nothing (as before). A fraction or a negative is malformed (D-136).
-      if (stock !== undefined && !(Number.isInteger(stock) && stock >= 0)) return problem(field, `${field} must be a whole number of 0 or more`);
+      // Absent or 0: the line adds nothing (as before). A fraction, a negative or more than a stock row holds is malformed
+      // (D-136; review SEC-POL-1, POL-CR-1).
+      if (stock !== undefined && !(Number.isInteger(stock) && stock >= 0 && stock <= STOCK_QUANTITY_MAX)) {
+        return problem(field, `${field} must be a whole number from 0 to ${STOCK_QUANTITY_MAX}`);
+      }
     } else if (!(stock !== undefined && Number.isInteger(stock) && stock > 0)) {
       return problem(field, `${field} must be a whole number above 0 on a product line`);
+    } else if (stock > STOCK_QUANTITY_MAX) {
+      // Review SEC-POL-1, POL-CR-1: saved, it could never be received (its receipt answered 500).
+      return problem(field, `${field} must be at most ${STOCK_QUANTITY_MAX} on a product line`);
     }
     if (stock !== undefined) line.stockQuantity = stock;
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { purchaseOrderLineRefusal, readPurchaseOrderLine } from './purchase-order-lines';
+import { purchaseOrderLineRefusal, readPurchaseOrderLine, STOCK_QUANTITY_MAX } from './purchase-order-lines';
 
 /** What a reading answers: the line read, or the refusal text for line 1. */
 const answer = (raw: unknown, reading: 'create' | 'receipt') => {
@@ -55,6 +55,25 @@ describe('W11-PO-LINES purchase order line reader (D-136)', () => {
     expect(answer({ ...product, quantity: 0 }, 'receipt')).toMatchObject({ stockQuantity: 0 });
     expect(readPurchaseOrderLine({ ...product, productId: ['prod_1'] }, 'receipt').problem?.field).toBe('productId');
     expect(readPurchaseOrderLine({ ...product, warehouseId: ['wh_1'] }, 'receipt').problem?.field).toBe('warehouseId');
+  });
+
+  it('W11-PO-LINES review SEC-POL-1, POL-CR-1 (D-136): a stock quantity is at most 2147483647 (an int4 stock column) at create and at receipt', () => {
+    expect(STOCK_QUANTITY_MAX).toBe(2_147_483_647);
+    for (const quantity of [2147483648, 3e9, 1e300]) {
+      expect(answer({ ...product, quantity }, 'create')).toBe('Purchase order line 1 quantity must be at most 2147483647 on a product line');
+      expect(readPurchaseOrderLine({ ...product, quantity }, 'receipt').problem?.field).toBe('quantity');
+    }
+    expect(answer({ ...product, receivedQuantity: 2147483648 }, 'create')).toBe(
+      'Purchase order line 1 receivedQuantity must be at most 2147483647 on a product line',
+    );
+    for (const quantity of ['3000000000', '9999999999', '9'.repeat(400)]) {
+      expect(readPurchaseOrderLine({ ...product, quantity }, 'receipt').problem?.field).toBe('quantity');
+    }
+    expect(readPurchaseOrderLine({ ...product, receivedQuantity: '2147483648' }, 'receipt').problem?.field).toBe('receivedQuantity');
+    expect(answer({ ...product, quantity: 2147483647 }, 'create')).toMatchObject({ stockQuantity: 2147483647 });
+    expect(answer({ ...product, quantity: '2147483647' }, 'receipt')).toMatchObject({ stockQuantity: 2147483647 });
+    // A line naming no product adds no stock: its quantity is not bounded (its subtotal is checked at create).
+    expect(answer({ name: 'Freight', quantity: 3e9, unitPrice: 0 }, 'create')).toEqual({ quantity: 3e9, unitPrice: 0 });
   });
 
   it("W11-PO-LINES receipt: the cost is Number(unitCost) when finite and above 0, else none; prices and a free-text line's quantity are not read", () => {
