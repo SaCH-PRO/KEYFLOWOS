@@ -39,9 +39,10 @@ export type GoogleConnectActor = { id?: string; role?: string };
  * connection of `businessId`. It is the Gmail rule's shape
  * (GmailService.assertConnectAuthority, D-11), as SeoController restates it
  * for D-94: an OWNER membership of this business or its distinguished owner
- * (Business.ownerId), with the SUPER_ADMIN bypass BusinessGuard already
- * grants. The rule is the route business's own: owning another business does
- * not count. No actor is 401; anyone else 403 GOOGLE_CONNECT_OWNER_ONLY. The
+ * (Business.ownerId) while it holds that OWNER membership (owner rulings
+ * D-116, D-125: holding ADMIN or STAFF it is that role), with the SUPER_ADMIN
+ * bypass BusinessGuard already grants. The rule is the route business's own:
+ * owning another business does not count. No actor is 401; anyone else 403 GOOGLE_CONNECT_OWNER_ONLY. The
  * routes call it first (after AuthGuard and BusinessGuard), before anything is
  * read or written. Exported for the bookings calendar, Drive and CRM Google
  * contact import doors, whose modules do not import CommerceModule.
@@ -59,8 +60,10 @@ export async function assertGoogleConnectOwner(
   });
   if (membership?.role === 'OWNER') return;
   const owned = await prisma.client.business.findFirst({
-    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-    where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+    // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+    // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+    // ADMIN or STAFF, the recorded owner is that role).
+    where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
     select: { id: true },
   });
   if (owned) return;

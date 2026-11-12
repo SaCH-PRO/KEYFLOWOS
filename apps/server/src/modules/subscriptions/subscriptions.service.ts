@@ -63,7 +63,9 @@ export class SubscriptionsService {
    *
    * The owner is the OWNER membership or the distinguished owner
    * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
-   * BusinessGuard admit an owner by. SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard admit an owner by; since owner rulings D-116 and D-125 the
+   * distinguished owner counts only while it holds an OWNER membership (holding
+   * ADMIN or STAFF it is that role). SUPER_ADMIN keeps the platform bypass
    * BusinessGuard already grants. It runs before the body is read, so a refused
    * member learns nothing about plans or state. The rule is restated here rather
    * than imported: IdentityModule imports AiModule, which imports this module.
@@ -77,8 +79,10 @@ export class SubscriptionsService {
     });
     if (membership?.role === 'OWNER') return { actor, standing: 'OWNER' };
     const owned = await this.db.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+      // ADMIN or STAFF, the recorded owner is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
       select: { id: true },
     });
     if (owned) return { actor, standing: 'OWNER' };

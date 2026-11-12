@@ -39,8 +39,10 @@ export class SeoController {
    * may connect, sync or disconnect the GA4 and Search Console connectors.
    * These connections hold the business's Google OAuth tokens (metaData.ga4,
    * metaData.gsc), so, as for the business mailbox, the business owner only:
-   * the OWNER membership or the distinguished owner (Business.ownerId), with
-   * the SUPER_ADMIN bypass BusinessGuard already grants. The rule is
+   * the OWNER membership or the distinguished owner (Business.ownerId) while
+   * it holds that OWNER membership (owner rulings D-116, D-125: holding ADMIN
+   * or STAFF it is that role), with the SUPER_ADMIN bypass BusinessGuard
+   * already grants. The rule is
    * GmailService.assertConnectAuthority's (D-11), restated rather than
    * imported, as WhatsAppService.isConfigOwner also restates it: SeoModule
    * does not import CommerceModule. Anyone else (an ADMIN or STAFF member) gets 403
@@ -56,8 +58,10 @@ export class SeoController {
     });
     if (membership?.role === 'OWNER') return;
     const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } },
+      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+      // ADMIN or STAFF, the recorded owner is that role).
+      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
       select: { id: true },
     });
     if (owned) return;

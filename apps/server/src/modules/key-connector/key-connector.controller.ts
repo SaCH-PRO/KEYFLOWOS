@@ -127,7 +127,10 @@ export class KeyConnectorController {
    * W7-KEY-CONNECTOR-TENANT review SEC-W7KC-2: the caller may change the
    * tenant's connections or act through them (CONNECTOR_WRITER_ROLES). An
    * OWNER or ADMIN membership, or the business's distinguished owner
-   * (Business.ownerId, the arm BusinessGuard also admits an owner by);
+   * (Business.ownerId, the arm BusinessGuard also admits an owner by) while it
+   * holds an OWNER membership (owner rulings D-116, D-125: a recorded owner
+   * holding STAFF is a STAFF member and is refused; holding ADMIN it is
+   * admitted as an ADMIN, D-111);
    * SUPER_ADMIN keeps the platform bypass BusinessGuard grants (and has named a
    * tenant, requireGuardedTenant). Anyone else, a STAFF member with any scopes
    * included, is refused before a service is reached. A failed lookup refuses,
@@ -150,8 +153,10 @@ export class KeyConnectorController {
       allowed = !!membership && CONNECTOR_WRITER_ROLES.has(membership.role);
       if (!allowed) {
         const owned = await this.prisma.client.business.findFirst({
-          // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-          where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id } } },
+          // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
+          // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
+          // ADMIN or STAFF, the recorded owner is that role).
+          where: { id: businessId, ownerId: user.id, members: { some: { userId: user.id, role: 'OWNER' } } },
           select: { id: true },
         });
         allowed = !!owned;

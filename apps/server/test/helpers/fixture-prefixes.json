@@ -823,6 +823,11 @@
       "packet": "V1-97 (W11-D116-KEY-OWNER)"
     },
     {
+      "prefix": "v97z_",
+      "owner": "apps/server/test/owner-role-connections.integration.test.ts",
+      "packet": "V1-97 (W11-D116-CONNECTION-OWNER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

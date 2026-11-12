@@ -91,11 +91,13 @@
  * ADMIN and a STAFF member get 403 SEO_CONNECTOR_OWNER_ONLY on each of the six
  * routes with nothing changed, the OWNER connects, syncs and disconnects
  * (MW-27); the rule's other arms (an OWNER membership without
- * Business.ownerId, the distinguished owner whose membership is not OWNER,
- * SUPER_ADMIN) are admitted (MW-28). Review SEC-D94-1 (MW-29): the rule is
- * bound to the route's business: the owner of another business, by OWNER
- * membership or by Business.ownerId, who is only STAFF or ADMIN here is
- * refused here (403, nothing changed) and admitted on the business they own.
+ * Business.ownerId, SUPER_ADMIN) are admitted, and since owner rulings D-116
+ * and D-125 (W11-D116-CONNECTION-OWNER) the recorded owner (Business.ownerId)
+ * whose membership is ADMIN is that role, refused like any ADMIN (MW-28).
+ * Review SEC-D94-1 (MW-29): the rule is bound to the route's business: the
+ * owner of another business, by OWNER membership or as its recorded owner
+ * holding its OWNER membership, who is only STAFF or ADMIN here is refused
+ * here (403, nothing changed) and admitted on the business they own.
  * The suite seeds that second business (`v84l_d12b_r_xt_other_biz`) for it.
  *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
@@ -1469,19 +1471,22 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
   const STAFF = `${R}staff`;
   // W4-D94-SEO-OWNER (D-94): an ADMIN member (refused, MW-27), and the owner
   // rule's other arms (MW-28): an OWNER membership that is not Business.ownerId,
-  // and a SUPER_ADMIN with no membership.
+  // and a SUPER_ADMIN with no membership. Owner rulings D-116, D-125
+  // (W11-D116-CONNECTION-OWNER): the recorded owner (ID.owner) whose membership
+  // is ADMIN is refused there, as an ADMIN.
   const ADMIN = `${R}admin`;
   const CO_OWNER = `${R}coowner`;
   const SUPER = `${R}superadmin`;
   // W4-D94-SEO-OWNER review SEC-D94-1 (D-94; MW-29): owners of another
   // business who are only members of this one, one per arm of the owner rule.
-  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds an ADMIN
-  // membership in it (owner ruling D-104, W10-OWNER-MEMBERSHIP: the ownerId
-  // arm counts only with a Membership row, and BusinessGuard admits members
-  // only); XT_MEMBER_OWNER holds its OWNER membership.
+  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds an OWNER
+  // membership in it (owner ruling D-104, W10-OWNER-MEMBERSHIP: BusinessGuard
+  // admits members only; owner ruling D-116, W11-D116-CONNECTION-OWNER: the
+  // recorded owner is the owner only with an OWNER membership); XT_MEMBER_OWNER
+  // holds an OWNER membership of it too, and is not its recorded owner.
   const XT_BIZ = `${R}xt_other_biz`;
   const XT_MEMBER_OWNER = `${R}xt_owner_membership`; // OWNER membership of XT_BIZ (not its ownerId); STAFF here
-  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (ADMIN membership there, D-104); ADMIN here
+  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (OWNER membership there, D-104, D-116); ADMIN here
   let ga4Svc: any;
   let gscSvc: any;
 
@@ -1495,7 +1500,7 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
       await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
     }
     await db.business.create({ data: { id: XT_BIZ, name: `${XT_BIZ}-name`, ownerId: XT_DIST_OWNER, currency: 'TTD' } });
-    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN'], [XT_DIST_OWNER, XT_BIZ, 'ADMIN']] as const) {
+    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN'], [XT_DIST_OWNER, XT_BIZ, 'OWNER']] as const) {
       await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_${businessId.slice(P.length)}`, userId: id, businessId, role } });
     }
     ga4Svc = app.get(SeoGa4);
@@ -1709,39 +1714,36 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
     }
   });
 
-  it('[MW-28] CONTROL (W4-D94-SEO-OWNER, owner ruling D-94; the Gmail owner rule\'s arms): an OWNER membership that is not Business.ownerId, the distinguished owner (Business.ownerId) whose membership is ADMIN, and a SUPER_ADMIN with no membership each connect, sync and disconnect GA4 and Search Console', async () => {
+  it('[MW-28] CONTROL (W4-D94-SEO-OWNER, owner rulings D-94, D-116): an OWNER membership that is not Business.ownerId and a SUPER_ADMIN with no membership each connect, sync and disconnect GA4 and Search Console; the recorded owner (Business.ownerId) whose membership is ADMIN is refused 403 SEO_CONNECTOR_OWNER_ONLY on all six routes with nothing changed and Google handed nothing', async () => {
     const google = stubGoogle();
     const OWNER_MEMBERSHIP = `${P}m_owner_biz`;
     const ADMITTED = [
       [CO_OWNER, 'co-owner (OWNER membership, not Business.ownerId)'],
-      [ID.owner, 'distinguished owner (Business.ownerId, membership ADMIN)'],
       [SUPER, 'SUPER_ADMIN (no membership)'],
     ] as const;
+    // Owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): the recorded owner
+    // holding only an ADMIN membership is that role, not the owner.
+    const REFUSED = [[ID.owner, 'recorded owner (Business.ownerId, membership ADMIN)']] as const;
     try {
       const answered: Record<string, string[]> = {};
       const kept: Record<string, boolean> = {};
       for (const [actor, label] of ADMITTED) {
         await reset(SEO_META);
-        if (actor === ID.owner) await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'ADMIN' } });
-        try {
-          // A re-save of the connected property and site keeps the stored tokens (MW-26), so the syncs run.
-          const results = [
-            await callRoute(actor, 'connect ga4', { propertyId: SEO_GA4.propertyId }),
-            await callRoute(actor, 'sync ga4'),
-            await callRoute(actor, 'connect gsc', { siteUrl: SEO_GSC.siteUrl }),
-            await callRoute(actor, 'sync gsc'),
-          ];
-          const resaved = await storedMeta();
-          kept[label] = resaved.ga4?.accessToken === SEO_GA4.accessToken && resaved.gsc?.accessToken === SEO_GSC.accessToken;
-          results.push(await callRoute(actor, 'disconnect ga4'), await callRoute(actor, 'disconnect gsc'));
-          answered[label] = results.map(outcome);
-          const meta = await storedMeta();
-          expect(meta, `${label}: metaData.ga4 after the disconnect`).not.toHaveProperty('ga4');
-          expect(meta, `${label}: metaData.gsc after the disconnect`).not.toHaveProperty('gsc');
-          expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
-        } finally {
-          if (actor === ID.owner) await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'OWNER' } });
-        }
+        // A re-save of the connected property and site keeps the stored tokens (MW-26), so the syncs run.
+        const results = [
+          await callRoute(actor, 'connect ga4', { propertyId: SEO_GA4.propertyId }),
+          await callRoute(actor, 'sync ga4'),
+          await callRoute(actor, 'connect gsc', { siteUrl: SEO_GSC.siteUrl }),
+          await callRoute(actor, 'sync gsc'),
+        ];
+        const resaved = await storedMeta();
+        kept[label] = resaved.ga4?.accessToken === SEO_GA4.accessToken && resaved.gsc?.accessToken === SEO_GSC.accessToken;
+        results.push(await callRoute(actor, 'disconnect ga4'), await callRoute(actor, 'disconnect gsc'));
+        answered[label] = results.map(outcome);
+        const meta = await storedMeta();
+        expect(meta, `${label}: metaData.ga4 after the disconnect`).not.toHaveProperty('ga4');
+        expect(meta, `${label}: metaData.gsc after the disconnect`).not.toHaveProperty('gsc');
+        expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
       }
       const ALL = ['201 connected', '201 synced', '201 connected', '201 synced', '200 disconnected', '200 disconnected'];
       expect(answered).toEqual(Object.fromEntries(ADMITTED.map(([, label]) => [label, ALL])));
@@ -1751,7 +1753,27 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
         `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} query`,
         `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
       ];
-      expect(google.handed).toEqual([...ONE_ROUND, ...ONE_ROUND, ...ONE_ROUND]);
+      expect(google.handed, 'Google handed two rounds: the co-owner\'s and the SUPER_ADMIN\'s').toEqual([...ONE_ROUND, ...ONE_ROUND]);
+
+      // The recorded owner whose membership is ADMIN: refused on every route, nothing changed.
+      const refused: Record<string, string> = {};
+      for (const [actor, label] of REFUSED) {
+        await reset(SEO_META);
+        google.handed.length = 0;
+        await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'ADMIN' } });
+        try {
+          const before = JSON.stringify(await storedMeta());
+          for (const which of SEO_ROUTES) {
+            const body = which.startsWith('connect') ? (which.endsWith('ga4') ? { propertyId: SEO_GA4.propertyId } : { siteUrl: SEO_GSC.siteUrl }) : {};
+            refused[`${label}: ${which}`] = outcome(await callRoute(actor, which, body));
+          }
+          expect(google.handed, `${label}: Google calls the refused syncs made`).toEqual([]);
+          expect(JSON.stringify(await storedMeta()), `${label}: the stored metaData after the refused requests`).toBe(before);
+        } finally {
+          await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'OWNER' } });
+        }
+      }
+      expect(refused).toEqual(Object.fromEntries(REFUSED.flatMap(([, label]) => SEO_ROUTES.map((which) => [`${label}: ${which}`, `403 ${SEO_OWNER_ONLY}`]))));
     } finally {
       google.restore();
       await reset();
@@ -1765,16 +1787,18 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
   // MW-25..MW-28, and would let the owner of another business who is a member
   // here connect, sync and disconnect this business's Google connections.
   // MW-29 adds one such actor per arm of the rule: the OWNER (by membership)
-  // of another business who is STAFF here, and the distinguished owner
-  // (Business.ownerId) of another business who is ADMIN here. Each is refused
+  // of another business who is STAFF here, and the recorded owner
+  // (Business.ownerId, OWNER membership) of another business who is ADMIN here
+  // (owner ruling D-116: the recorded owner is the owner only with that OWNER
+  // membership). Each is refused
   // here and admitted on the business they own, so the refusal is the
   // business binding, not a fixture that owns nothing.
-  it('[MW-29] RED-BEFORE (W4-D94-SEO-OWNER, owner ruling D-94; review SEC-D94-1): the owner rule is the route business\'s own: the OWNER (by membership) of another business who is STAFF here and the distinguished owner (Business.ownerId) of another business who is ADMIN here each get 403 SEO_CONNECTOR_OWNER_ONLY on the six routes with nothing changed (the stored connections as before; Google handed nothing), while each connects and disconnects GA4 and Search Console on the business they own', async () => {
+  it('[MW-29] RED-BEFORE (W4-D94-SEO-OWNER, owner ruling D-94; review SEC-D94-1): the owner rule is the route business\'s own: the OWNER (by membership) of another business who is STAFF here and the recorded owner (Business.ownerId, OWNER membership) of another business who is ADMIN here each get 403 SEO_CONNECTOR_OWNER_ONLY on the six routes with nothing changed (the stored connections as before; Google handed nothing), while each connects and disconnects GA4 and Search Console on the business they own', async () => {
     await reset(SEO_META);
     const google = stubGoogle();
     const OWNERS_ELSEWHERE = [
       [XT_MEMBER_OWNER, 'OWNER membership of another business, STAFF here'],
-      [XT_DIST_OWNER, 'Business.ownerId of another business, ADMIN here'],
+      [XT_DIST_OWNER, 'Business.ownerId (OWNER membership) of another business, ADMIN here'],
     ] as const;
     try {
       const before = JSON.stringify(await storedMeta());

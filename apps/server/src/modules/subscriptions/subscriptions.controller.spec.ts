@@ -11,8 +11,9 @@
  *
  * The rule pinned here: the POST handlers are exactly trial, activate, cancel,
  * checkout and record-payment (a new POST route fails U01 until it is
- * classified); each admits the business owner (OWNER membership or
- * Business.ownerId) and SUPER_ADMIN, refuses everyone else with 403
+ * classified); each admits the business owner (an OWNER membership; the
+ * recorded owner, Business.ownerId, only while it holds that OWNER membership,
+ * owner rulings D-104, D-116) and SUPER_ADMIN, refuses everyone else with 403
  * {code:'SUBSCRIPTION_OWNER_ONLY'} before reading the body and with nothing
  * written, and writes one team_activity_logs row naming the actor on success.
  * The GET handlers keep the membership rule BusinessGuard applies.
@@ -72,6 +73,13 @@ function fakePrisma(state: { memberships: Record<string, string>; ownerId: strin
             const where = args?.where ?? {};
             if (where.id && where.id !== BIZ) return null;
             if (where.ownerId && where.ownerId !== state.ownerId) return null;
+            // Owner rulings D-104, D-116: a members.some { userId, role } filter
+            // is answered from state.memberships, as Postgres would answer it.
+            const some = where.members?.some;
+            if (some) {
+              const role = state.memberships[some.userId];
+              if (!role || (some.role !== undefined && some.role !== role)) return null;
+            }
             return { id: BIZ, ownerId: state.ownerId };
           }
           if (name === 'subscription' && method.startsWith('find') && method !== 'findMany') return state.activeSub;
@@ -122,9 +130,9 @@ const POST_HANDLERS: Array<{ name: string; path: string; activeSub: typeof ACTIV
   { name: 'recordSubscriptionPayment', path: 'businesses/:businessId/record-payment', activeSub: ACTIVE_FLOW, call: (c, u) => c.recordSubscriptionPayment(BIZ, { plan: 'KEYFLOW', currency: 'USD', method: 'manual' }, u) },
 ];
 
-function controllerFor(activeSub: typeof ACTIVE_FLOW | null) {
+function controllerFor(activeSub: typeof ACTIVE_FLOW | null, extraMemberships: Record<string, string> = {}) {
   const fake = fakePrisma({
-    memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF', [ADMIN.id]: 'ADMIN' },
+    memberships: { [OWNER.id]: 'OWNER', [STAFF.id]: 'STAFF', [ADMIN.id]: 'ADMIN', ...extraMemberships },
     ownerId: LEGACY_OWNER.id,
     activeSub,
   });
@@ -194,11 +202,15 @@ describe('SubscriptionsController — plan changes are OWNER only and audited (R
     }
   });
 
-  it('[R0-08c-U06] the distinguished owner (Business.ownerId) with no membership row is allowed, audited against that owner', async () => {
-    for (const h of POST_HANDLERS) {
-      const { controller, auditWrites } = controllerFor(h.activeSub);
-      await expect(h.call(controller, LEGACY_OWNER), `ownerId owner ${h.name}`).resolves.toBeTruthy();
-      expect(auditWrites().map((c) => c.args.data.userId), h.name).toEqual([LEGACY_OWNER.id]);
+  it('[R0-08c-U06] owner rulings D-104, D-116: the recorded owner (Business.ownerId) with no membership row, or with an ADMIN membership, is refused 403 SUBSCRIPTION_OWNER_ONLY on every POST handler: nothing written, no audit row', async () => {
+    // D-104: no membership row; D-116 (W11-D116-CONNECTION-OWNER): an ADMIN membership makes it an ADMIN, not the owner.
+    for (const [extra, standing] of [[{}, 'no membership'], [{ [LEGACY_OWNER.id]: 'ADMIN' }, 'ADMIN membership']] as const) {
+      for (const h of POST_HANDLERS) {
+        const { controller, writes, auditWrites } = controllerFor(h.activeSub, extra);
+        await expectOwnerOnly(h.call(controller, LEGACY_OWNER), `recorded owner (${standing}) ${h.name}`);
+        expect(writes(), `recorded owner (${standing}) ${h.name}`).toEqual([]);
+        expect(auditWrites(), `recorded owner (${standing}) ${h.name}`).toEqual([]);
+      }
     }
   });
 
