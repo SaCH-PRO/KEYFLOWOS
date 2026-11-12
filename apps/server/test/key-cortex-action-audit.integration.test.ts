@@ -131,6 +131,11 @@
  * model's tool calls on the chat are held to the plan queue's member rule before the registry runs them
  * (SEC-W10CCS-R1: memberToolRunAuthority, D-71, D-57), in ID.toolBiz.
  *
+ * W11-CORTEX-MEMORY-COGNITION (owner ruling D-130, option A) turned buildMemoryContext's SEC-W10CCS-R2
+ * residual it.todo live: its memory block keeps only the reader's own cognition memory (a member-less row
+ * is nobody's own), with the pipeline's cognition headroom, and its learned-lessons block carries only
+ * the reader's own lessons (none for a requester who is no member).
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -1112,15 +1117,22 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
 
   // W9-KEY-CORTEX-AUDIT: the prompt-context service over the real memory store (no semantic search: the
   // session has no message, so no query, and no embedding request is made).
-  async function memoryFor(userId: string | undefined): Promise<string> {
+  // W11-CORTEX-MEMORY-COGNITION (D-130): with the real learning service too, so the learned-lessons block
+  // the same call builds (KeyCortexLearningService.retrieveLessons over cognition_memories) is read as well.
+  async function memoryContextFor(userId: string | undefined): Promise<{ aiMemory: string; lessons?: string }> {
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
     const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
     const unified = new UnifiedMemoryRetrievalService(prisma, {} as any);
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
-    const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, undefined, prisma);
+    const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, new KeyCortexLearningService(prisma), prisma);
     const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages: [] } as any;
     const memory = await promptContext.buildMemoryContext(ID.memBiz, session);
-    return memory.aiMemory ?? '';
+    return { aiMemory: memory.aiMemory ?? '', lessons: memory.lessons };
+  }
+
+  async function memoryFor(userId: string | undefined): Promise<string> {
+    return (await memoryContextFor(userId)).aiMemory;
   }
 
   it("POST /cortex/chat reads episodic memory as the requesting member may: key-cortex-prompt-context.service.ts buildMemoryContext gives a member their own CortexActionLog and AiExecutionLog rows, not another member's (W9-KEY-CORTEX-AUDIT, was it.todo)", async () => {
@@ -1337,14 +1349,156 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     }
   });
 
-  it.todo(
-    'SEC-W10CCS-R2 residual (W10-CORTEX-CHAT-SCOPE review; follow-up packet, outside the W10-CORTEX-CHAT-SCOPE write set): ' +
-      'key-cortex-prompt-context.service.ts buildMemoryContext, whose aiMemory block processQuery and its stream path also ' +
-      "hand buildMessages, still renders every member's cognition memory (CognitionMemory rows: another member's typed " +
-      "chat and KEY's answer to them, read business-wide by UnifiedMemoryRetrievalService) into a member's prompt; it " +
-      "should keep only the reader's own rows, as the pipeline's chatMemoryFragments now does (D-57). Not a regression: " +
-      'the W9 buildMemoryContext rule has the same gap.',
-  );
+  // W11-CORTEX-MEMORY-COGNITION (owner ruling D-130): was the SEC-W10CCS-R2 residual it.todo. buildMemoryContext,
+  // whose aiMemory block processQuery and its stream path also hand buildMessages, keeps a cognition fragment only
+  // when its row is the reader's own (readersOwnCognitionMemory, the pipeline's rule). The rows below are the
+  // shape recordObservation writes for a member, and recordOutcome's member-less shape; removed when the case ends.
+  const cognitionRow = (userId: string | null, label: string, said: string, extra: Record<string, unknown> = {}) =>
+    userId
+      ? {
+          businessId: ID.memBiz,
+          userId,
+          sessionId: `${P}sess_w11_cognition_${label}`,
+          query: `${said} typed: what is our net profit this quarter?`,
+          recommendation: `${said} KEY answered: net profit 48213`,
+          userResponse: 'no_action',
+          confidence: 0.7,
+          ...extra,
+        }
+      : {
+          // recordOutcome: KEY's own tool-outcome learning row, which names no member.
+          businessId: ID.memBiz,
+          sessionId: `${P}sess_w11_cognition_${label}`,
+          query: `Tool execution: v19c.${label}_tool`,
+          recommendation: `Failed: ${said} quoted the caller's input`,
+          userResponse: 'rejected',
+          confidence: 0.4,
+          ...extra,
+        };
+
+  it("W11-CORTEX-MEMORY-COGNITION (D-130, SEC-W10CCS-R2 residual, was it.todo): key-cortex-prompt-context.service.ts buildMemoryContext renders only the reader's own cognition memory: another member's typed chat and KEY's answer to them, and a member-less row, never reach a member's prompt, and a requester who is no member reads none", async () => {
+    const OWNER_SAID = 'V19C-W11-COGNITION-OWNER';
+    const MEMBER_SAID = 'V19C-W11-COGNITION-MEMBER';
+    const NOBODY_SAID = 'V19C-W11-COGNITION-NOBODY';
+    await db.cognitionMemory.createMany({
+      data: [
+        cognitionRow(ID.owner, 'owner', OWNER_SAID),
+        cognitionRow(ID.member, 'member', MEMBER_SAID),
+        cognitionRow(null, 'nobody', NOBODY_SAID),
+      ],
+    });
+    try {
+      const member = await memoryFor(ID.member);
+      expect(member).toContain('[cognition_memory]');
+      expect(member).toContain(`${MEMBER_SAID} typed`);
+      expect(member).toContain(`${MEMBER_SAID} KEY answered`);
+      expect(member).not.toContain(OWNER_SAID);
+      expect(member).not.toContain(NOBODY_SAID);
+      expect(member).toContain('v19c memory: a business-wide fact');
+
+      // The owner (Business.ownerId with its OWNER membership, D-104) reads their own, not the member's.
+      const owner = await memoryFor(ID.owner);
+      expect(owner).toContain(`${OWNER_SAID} typed`);
+      expect(owner).not.toContain(MEMBER_SAID);
+      expect(owner).not.toContain(NOBODY_SAID);
+
+      for (const userId of [ID.outsider, undefined]) {
+        const memory = await memoryFor(userId);
+        expect(memory, String(userId)).not.toContain('[cognition_memory]');
+        expect(memory, String(userId)).toContain('v19c memory: a business-wide fact');
+      }
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+    }
+  });
+
+  // W11-CORTEX-MEMORY-COGNITION (D-130, CR-W10CCS-1): the retrieval reads at most 50 cognition rows (newest first)
+  // and at most 50 rows of each business-wide event store. Here the 50 cognition rows it reads are 49 newer rows of
+  // the owner's and the member's one older row, and both event stores hold 50 newer KEY tool-call records: about
+  // 150 fragments rank above the member's own row. buildMemoryContext asks for 15 plus the tool-call headroom (100)
+  // plus the cognition headroom (50), so the member's row is still read, and kept once the rest is left out.
+  it("W11-CORTEX-MEMORY-COGNITION (D-130, CR-W10CCS-1 headroom): in a busy business whose most recent memory is another member's cognition rows and KEY tool-call records, buildMemoryContext still renders the reader's own older cognition row", async () => {
+    const now = Date.now();
+    const OWNER_SAID = 'V19C-W11-HEADROOM-OWNER';
+    const MEMBER_SAID = 'V19C-W11-HEADROOM-MEMBER';
+    const recent = (i: number) => new Date(now - (i + 1) * 60_000);
+    await db.cognitionMemory.createMany({
+      data: [
+        ...Array.from({ length: 49 }, (_, i) =>
+          cognitionRow(ID.owner, `hr_owner_${i}`, `${OWNER_SAID}-${i}`, { confidence: 0.9, createdAt: recent(i) }),
+        ),
+        cognitionRow(ID.member, 'hr_member', MEMBER_SAID, { confidence: 0.1, createdAt: new Date(now - 30 * 864e5) }),
+      ],
+    });
+    await db.businessEvent.createMany({
+      data: Array.from({ length: 50 }, (_, i) => ({
+        id: `${P}w11hr_be_${i}`,
+        businessId: ID.memBiz,
+        eventType: 'ACTION_EXECUTED',
+        subjectType: 'tool_execution',
+        subjectId: `${P}w11hr_call_${i}`,
+        actorType: 'ai',
+        actorId: ID.owner,
+        action: 'execute',
+        source: 'ai',
+        createdAt: recent(i),
+      })),
+    });
+    await db.cognitiveEvent.createMany({
+      data: Array.from({ length: 50 }, (_, i) => ({
+        id: `${P}w11hr_ce_${i}`,
+        businessId: ID.memBiz,
+        sourceType: 'key_cortex',
+        eventType: 'tool.executed',
+        payload: { tool: 'v19c.w11hr_tool', call: i },
+        confidence: 0.9,
+        createdAt: recent(i),
+      })),
+    });
+    try {
+      const member = await memoryFor(ID.member);
+      expect(member).toContain(`${MEMBER_SAID} typed`);
+      expect(member).not.toContain(OWNER_SAID);
+      expect(member).not.toContain('v19c.w11hr_tool');
+      expect(member).toContain('v19c memory: a business-wide fact');
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+      await db.$executeRawUnsafe(`DELETE FROM business_events WHERE id LIKE ${sqlLikePrefix(`${P}w11hr_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM cognitive_events WHERE id LIKE ${sqlLikePrefix(`${P}w11hr_`)}`);
+    }
+  });
+
+  // W11-CORTEX-MEMORY-COGNITION, owner ruling D-130 option (A): the learned-lessons block the same call builds
+  // (KeyCortexLearningService.retrieveLessons) carries only the reader's own lessons; a member-less row is nobody's.
+  it("W11-CORTEX-MEMORY-COGNITION (D-130 option A): buildMemoryContext's learned-lessons block carries only the reader's own lessons: another member's lessons and a member-less row's are not shown, and a requester who is no member gets no lessons block", async () => {
+    await db.cognitionMemory.createMany({
+      data: [
+        cognitionRow(ID.owner, 'lesson_owner', 'V19C-W11-LESSON-OWNER', { lessonsLearned: ['OWNER-LESSON 48213'] }),
+        cognitionRow(ID.member, 'lesson_member', 'V19C-W11-LESSON-MEMBER', { lessonsLearned: ['MEMBER-LESSON'] }),
+        cognitionRow(null, 'lesson_nobody', 'V19C-W11-LESSON-NOBODY', { lessonsLearned: ['NOBODY-LESSON'] }),
+      ],
+    });
+    try {
+      const member = await memoryContextFor(ID.member);
+      expect(member.lessons).toContain('=== LEARNED LESSONS ===');
+      expect(member.lessons).toContain('MEMBER-LESSON');
+      expect(member.lessons).not.toContain('OWNER-LESSON');
+      expect(member.lessons).not.toContain('NOBODY-LESSON');
+
+      const owner = await memoryContextFor(ID.owner);
+      expect(owner.lessons).toContain('OWNER-LESSON 48213');
+      expect(owner.lessons).not.toContain('MEMBER-LESSON');
+      expect(owner.lessons).not.toContain('NOBODY-LESSON');
+
+      for (const userId of [ID.outsider, undefined]) {
+        const memory = await memoryContextFor(userId);
+        expect(memory.lessons, String(userId)).toBeUndefined();
+        expect(memory.aiMemory, String(userId)).toContain('v19c memory: a business-wide fact');
+      }
+    } finally {
+      await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+    }
+  });
 
   /**
    * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: a chat turn (processQuery or its stream) in ID.toolBiz in which the
