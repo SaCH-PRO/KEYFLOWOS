@@ -1040,8 +1040,8 @@ export class FulfillmentRoutingService {
    * re-reads the order's status (400 when it can no longer be cancelled), locks
    * the stock rows its LOCAL_STOCK routes reserved from (each route's product in
    * its warehouse, and no other row of the product: review Z4RV-CR-1) in the
-   * global order (core/inventory/stock-lock-order.ts), gives back what each reserved and
-   * cancels every route not COMPLETED or CANCELLED. A router that comes after
+   * global order (core/inventory/stock-lock-order.ts), gives back what each
+   * reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after
    * it meets the order cancelled and creates nothing.
    */
   async cancelOrderFulfilment(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
@@ -1155,28 +1155,34 @@ export class FulfillmentRoutingService {
     businessId: string,
     items: Prisma.JsonValue,
     defaultWarehouseId: string | undefined,
-  ): Promise<Array<{ productId: string; warehouseId: string; quantity: number; item: PurchaseOrderLineJson }>> {
-    const lines = (Array.isArray(items) ? (items as Array<PurchaseOrderLineJson | null>) : []).flatMap((item) => {
+  ): Promise<Array<{ line: number; productId: string; warehouseId: string; quantity: number; item: PurchaseOrderLineJson }>> {
+    const lines = (Array.isArray(items) ? (items as Array<PurchaseOrderLineJson | null>) : []).flatMap((item, index) => {
       const productId = item?.productId;
       const quantity = item?.receivedQuantity ?? item?.quantity ?? 0;
       const warehouseId = item?.warehouseId || defaultWarehouseId;
-      return item && productId && warehouseId && quantity > 0 ? [{ productId, warehouseId, quantity, item }] : [];
+      return item && productId && warehouseId && quantity > 0
+        ? [{ line: index + 1, productId, warehouseId, quantity, item }]
+        : [];
     });
     if (lines.length === 0) return lines;
 
     // Read with no soft-delete or tenant filter (raw SQL), by the business's own id.
+    const productIds = [...new Set(lines.map((l) => String(l.productId)))];
+    const warehouseIds = [...new Set(lines.map((l) => String(l.warehouseId)))];
     const [products, warehouses] = await Promise.all([
       this.prisma.client.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join([...new Set(lines.map((l) => String(l.productId)))])})`,
+        SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join(productIds)})`,
       this.prisma.client.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM warehouses WHERE business_id = ${businessId} AND id IN (${Prisma.join([...new Set(lines.map((l) => String(l.warehouseId)))])})`,
+        SELECT id FROM warehouses WHERE business_id = ${businessId} AND id IN (${Prisma.join(warehouseIds)})`,
     ]);
     const ownProducts = new Set(products.map((row) => row.id));
     const ownWarehouses = new Set(warehouses.map((row) => row.id));
-    const foreign = lines.findIndex((line) => !ownProducts.has(String(line.productId)) || !ownWarehouses.has(String(line.warehouseId)));
-    if (foreign >= 0) {
+    const foreign = lines.find(
+      (l) => !ownProducts.has(String(l.productId)) || !ownWarehouses.has(String(l.warehouseId)),
+    );
+    if (foreign) {
       throw new BadRequestException(
-        `Purchase order line ${foreign + 1} names a product or a warehouse that is not this business's; nothing was received`,
+        `Purchase order line ${foreign.line} names a product or a warehouse that is not this business's; nothing was received`,
       );
     }
     return lines;
