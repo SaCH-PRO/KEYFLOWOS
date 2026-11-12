@@ -360,7 +360,8 @@ function businessReceiver(recv: string): boolean {
     .slice(1, -1)
     .trim()
     .replace(/^await\s+/, '')
-    .replace(/\s+as\s+[\w$.]+(?:<[^<>]*>)?(?:\[\])?$/, '')
+    // A trailing `as T` / `satisfies T` (unions and generics included; T holds no parens).
+    .replace(/\s+(?:as|satisfies)\s+[^()]*$/, '')
     .replace(/!$/, '');
   return new RegExp(String.raw`^${RECEIVER}$`).test(inner) && businessReceiver(inner);
 }
