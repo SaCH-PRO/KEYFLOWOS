@@ -818,6 +818,11 @@
       "packet": "V1-97 (W11-GENOME-FINANCE-SCOPE)"
     },
     {
+      "prefix": "v97v_",
+      "owner": "apps/server/test/calendar-names-scope.integration.test.ts",
+      "packet": "V1-97 (W11-CALENDAR-NAMES-SCOPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
