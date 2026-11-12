@@ -685,53 +685,57 @@ Key files:
 
 ## 14. Payroll Disbursement → Double-Entry Ledger → Treasury & KEY Sight
 
-Added in PR #195. Connects staff payroll generation, approval, and disbursement to the double-entry ledger (`FinancialTransaction` + `LedgerEntry`), `FinancialAccount` balances, `SafeToSpendService`, `FinanceOverviewService`, and KEY's `BusinessGraphService`.
+Owner PR #195, ported onto the head's money rules (PR195-PORT). Connects payroll approval and disbursement to the double-entry ledger (`FinancialTransaction` + `LedgerEntry`) through the one ledger door, and the committed-payroll reserve and the ledger cash to `SafeToSpendService` and KEY's `BusinessGraphService`. Cash is the ledger cash position (V1-34); `FinancialAccount.currentBalance` is an opening snapshot nothing moves; one currency per business, nothing converted (D-13).
 
 ```
-POST /payroll/businesses/:businessId/runs/:runId/mark-paid
-  (or KEY tool payroll_mark_paid via FlowOrchestratorService.executeToolAction)
-  → PayrollController.markRunPaid() / FlowOrchestratorService
-      → PayrollService.markRunPaid(businessId, runId, { paymentAccountId, paymentMethod })
-          → requires ExpensePostingService and $transaction (fails closed if absent)
-          → requires explicit paymentAccountId or validated paymentMethod
+POST /payroll/businesses/:businessId/runs/:runId/mark-paid   (operations write; body paymentAccountId | paymentMethod)
+  (or KEY tool payroll_mark_paid via FlowOrchestratorService.executeToolAction: actor key_ai, initiatedBy = the member)
+  → PayrollController.markRunPaid()  (actor = req.user.id)
+      → PayrollService.markRunPaid(businessId, runId, { paymentAccountId | paymentMethod, actorId, initiatedBy })
+          → 503 without ExpensePostingService; 400 without an account or a cash-class method
           → prisma.client.$transaction(async (tx) => ...)
-              1. Re-reads PayrollRun scoped to businessId
-              2. Validates paymentAccountId (when provided): tenant ownership, isActive,
-                 type in ['CASH', 'BANK', 'PAYMENT_PROCESSOR'], currency match, and
-                 resolves chartOfAccountId
-              3. Conditional atomic claim: tx.payrollRun.updateMany({ where: { id, businessId, status: 'APPROVED' }, data: { status: 'PAID', paidAt } })
-                 (prevents concurrent double-disbursement; idempotent on already-PAID runs)
+              1. Reads the PayrollRun by (id, businessId); DRAFT/VOID → 400
+              2. Payment account (when given): this business's, active, CASH|BANK|PAYMENT_PROCESSOR, in the
+                 run's currency, its chart row this business's cash-class system row → that chart row id;
+                 a method → the system chart row for it (resolvePaymentCoa)
+              3. APPROVED: compare-and-set tx.payrollRun.updateMany({ where: { id, businessId, status: 'APPROVED' },
+                 data: { status: 'PAID', paidAt } }); the loser of a race re-reads PAID and goes on
               4. ExpensePostingService.onPayrollRunPaid(..., tx)
-                   → resolves EXPENSE_PAYROLL COA and payment COA
-                   → PostingService.post(..., tx) [externalRef = PayrollRun:<runId>:paid]
-                        → creates POSTED FinancialTransaction + balanced LedgerEntry rows
+                   → EXPENSE_PAYROLL (6400) chart row (ensureDefaults self-heal)
+                   → PostingService.post(..., tx)  [externalRef PayrollRun:<runId>:paid; date paidAt;
+                     AccountingPeriodService.assertOpenForPosting: CLOSED period → 409, the run rolls back;
+                     D-13 currency check; createdById the actor; metadata payrollRunId, paymentAccountId, initiatedBy]
+                        → POSTED FinancialTransaction + balanced LedgerEntry rows
                           (Dr EXPENSE_PAYROLL / Cr CASH|BANK|PAYMENT_PROCESSOR)
-                        → syncFinancialAccountBalances(tx, ...) updates FinancialAccount.currentBalance
+          → invalidateBusinessFinancialSnapshotCache(businessId)
 ```
+
+A PAID run asked again (double click, KEY retry) is not moved; the door's key answers its first posting. A PAID run with no posting (paid before mark-paid posted) is posted dated its own paidAt, which a CLOSED period refuses.
 
 Treasury and KEY context read path:
 
 ```
-SafeToSpendService.calculate(businessId)
-FinanceOverviewService.getOverview(businessId)
-BusinessGraphService.assembleSnapshot(businessId)
-  → reads active CASH / BANK / PAYMENT_PROCESSOR FinancialAccount rows + non-OPENING_BALANCE LedgerEntry movements on linked ChartOfAccount ids
-  → computeNormalizedCashBalance() (apps/server/src/modules/finance/finance-accounting.util.ts)
-      → derives cash from openingBalance + net(debit - credit) without double-counting OPENING_BALANCE entries or shared COA links
-      → normalizes multi-currency balances, bills, reserve buckets, payroll runs, and pipeline deals via configured ExchangeRate rows (failing closed in SafeToSpendService / PayrollService.generateRun and isolating unmapped currencies with a treasury warning in BusinessGraphService)
+SafeToSpendService.calculate(businessId)               (GET finance/.../safe-to-spend, revenue read, D-57)
+  → CashPositionService.getCashPosition() (ledger cash, business currency; other currencies apart)
+  → payrollReserved = DRAFT + APPROVED runs in the business currency; other currencies named apart
+BusinessGraphService.getSnapshot(businessId, forceRefresh, { viewerId })
+  → full snapshot cached per business (2 min, and a newer finance-accounting.util revision forces a refresh)
+  → treasury (ledger cash, unpaid bills, committed payroll, alert) only for revenue read; pipeline for crm read;
+    support for operations read (keyContextSight); no viewer (REST graph routes, other services): none
+FlowOrchestratorService.chat / streamChat → getSnapshot(businessId, false, { viewerId: userId }) → buildContextString
 ```
 
 Key files:
 
 - `apps/server/src/modules/payroll/payroll.module.ts` — imports `FinanceModule`
-- `apps/server/src/modules/payroll/payroll.service.ts` — `generateRun()`, `approveRun()`, `markRunPaid()`
+- `apps/server/src/modules/payroll/payroll.service.ts` — `markRunPaid()`, `disbursementChartRow()`
 - `apps/server/src/modules/payroll/payroll.controller.ts` — `markRunPaid()`
-- `apps/server/src/modules/finance/expense-posting.service.ts` — `onPayrollRunPaid()`
-- `apps/server/src/modules/finance/posting.service.ts` — `post()`, `reverse()`, `syncFinancialAccountBalances()`
-- `apps/server/src/modules/finance/finance-accounting.util.ts` — `computeNormalizedCashBalance()`, `convertToBaseOrThrow()`, `resolveConversionRate()`
+- `apps/server/src/modules/finance/expense-posting.service.ts` — `onPayrollRunPaid()`, `PAYROLL_DISBURSEMENT_METHODS`
+- `apps/server/src/modules/finance/posting.service.ts` — `post()`, `reverse()` (revision bump after commit)
+- `apps/server/src/modules/finance/finance-accounting.util.ts` — the KEY financial snapshot revision
 - `apps/server/src/modules/finance/safe-to-spend.service.ts` — `calculate()`
-- `apps/server/src/modules/finance/finance-overview.service.ts` — `getOverview()`
-- `apps/server/src/modules/ai/business-graph.service.ts` — `assembleSnapshot()`, `computeHealthIndicators()`
-- `apps/web/src/app/app/payroll/page.tsx`, `apps/web/src/lib/api/payroll.ts` — disbursement account/method selection UI
-- `apps/web/src/app/app/financial-flow/page.tsx` — Safe-to-Spend breakdown with `Committed Payroll` and `Other Reserves`
-- Proof: `apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts`
+- `apps/server/src/modules/ai/business-graph.service.ts` — `getSnapshot()`, `keyContextSight()`, `assembleSight()`
+- `apps/web/src/app/app/payroll/page.tsx`, `apps/web/src/lib/api/payroll.ts` — disbursement account/method picker
+- `apps/web/src/app/app/finance/journal/page.tsx`, `apps/web/src/app/app/finance/components/books-journal-tab.tsx` — General Journal
+- `apps/web/src/app/app/financial-flow/page.tsx` — Safe-to-Spend breakdown with `Committed Payroll`
+- Proof: `apps/server/test/payroll-financial-truth.integration.test.ts` (real PostgreSQL), `apps/server/src/modules/payroll/payroll.service.spec.ts`, `apps/server/src/modules/payroll/payroll-mark-paid-authority.spec.ts`, `apps/server/src/modules/ai/business-graph.service.spec.ts`

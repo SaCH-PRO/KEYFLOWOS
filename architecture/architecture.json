@@ -31,7 +31,7 @@
       },
       {
         "date": "2026-11-08",
-        "change": "PR #195: module:payroll and path:payroll-ledger nodes and module:payroll -> module:finance dependency edge added for payroll disbursement ledger posting, normalized cash balance accounting, and KEY treasury sight (execution-paths.md section 14); inventory.json and dependencies.json regenerated"
+        "change": "PR #195 (ported as PR195-PORT): module:payroll and path:payroll-ledger nodes and module:payroll -> module:finance dependency edge added for payroll disbursement ledger posting through the ledger door, the committed-payroll reserve on the ledger cash position, and KEY treasury sight held to the viewer's REST read rules (execution-paths.md section 14); inventory.json and dependencies.json regenerated with the codebase-architect scanners at the port head"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
