@@ -54,16 +54,24 @@ export class PayrollController {
     return this.payroll.approveRun(businessId, runId, req.user?.id);
   }
 
+  /**
+   * PR195-PORT (owner PR #195 part 2): marking a run paid posts it to the ledger
+   * (PayrollService.markRunPaid). The body names the account or method the money
+   * left by; the posting's actor is the signed-in member, never a body field.
+   * The guard is unchanged (operations write): the port widens no authority.
+   */
   @Post('runs/:runId/mark-paid')
   @RequireModuleScope('operations', 'write')
   markRunPaid(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
-    @Body() body?: { paymentAccountId?: string; paymentMethod?: string },
+    @Body() body: { paymentAccountId?: string; paymentMethod?: string } | undefined,
+    @Req() req: { user?: { id?: string } },
   ) {
     return this.payroll.markRunPaid(businessId, runId, {
-      paymentAccountId: body?.paymentAccountId,
-      paymentMethod: body?.paymentMethod,
+      paymentAccountId: typeof body?.paymentAccountId === 'string' ? body.paymentAccountId : undefined,
+      paymentMethod: typeof body?.paymentMethod === 'string' ? body.paymentMethod : undefined,
+      actorId: req?.user?.id ?? null,
     });
   }
 }

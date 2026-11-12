@@ -3,22 +3,16 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { skipTenantIsolation } from '@keyflow/db';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { ExpensePostingService } from '../finance/expense-posting.service';
-import {
-  convertToBaseOrThrow,
-  invalidateBusinessFinancialSnapshotCache,
-  loadLatestExchangeRates,
-  normalizeCurrencyCode,
-  type ExchangeRateRow,
-} from '../finance/finance-accounting.util';
+import { ExpensePostingService, PAYROLL_DISBURSEMENT_METHODS } from '../finance/expense-posting.service';
+import { invalidateBusinessFinancialSnapshotCache } from '../finance/finance-accounting.util';
+import { normalizeCurrency } from '../finance/posting.service';
 
 export interface PayRateInput {
   assignmentId: string;
@@ -32,27 +26,25 @@ export interface PayrollRunFilters {
   limit?: number;
 }
 
+/**
+ * PR195-PORT: how a run is marked paid. One of `paymentAccountId` (a cash-class
+ * FinancialAccount of the run's business, in the run's currency) or
+ * `paymentMethod` (PAYROLL_DISBURSEMENT_METHODS) is required. `actorId` is who
+ * the ledger posting names: the signed-in member on REST, KEY's system actor on
+ * KEY, with `initiatedBy` the member KEY ran for (audit data, never authority).
+ * Both are set by the server (the controller, the KEY dispatcher), never read
+ * from a request body.
+ */
 export interface MarkRunPaidInput {
   paymentAccountId?: string | null;
   paymentMethod?: string | null;
+  actorId?: string | null;
+  initiatedBy?: string | null;
 }
 
-const VALID_PAYROLL_PAYMENT_METHODS = new Set([
-  'cash',
-  'bank',
-  'bank_transfer',
-  'transfer',
-  'wire',
-  'ach',
-  'cheque',
-  'check',
-  'wipay',
-  'paypal',
-  'stripe',
-  'processor',
-]);
-
-const VALID_DISBURSEMENT_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
+/** The FinancialAccount types money can leave by, and the chart rows they keep cash in (V1-34). */
+const DISBURSEMENT_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
+const CASH_CLASS_SYSTEM_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 
 /**
  * Payroll MVP: rates per staff position (OrgAssignment) + pay runs
@@ -66,7 +58,10 @@ export class PayrollService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Optional() @Inject(ExpensePostingService) private readonly expensePosting?: ExpensePostingService,
+    // PR195-PORT: the ledger door's payroll recipe. Optional only so hand-built
+    // instances keep constructing; mark-paid refuses (503) without it rather
+    // than paying a run with no books.
+    @Optional() @Inject(ExpensePostingService) private readonly expensePosting?: ExpensePostingService | null,
   ) {}
 
   // ── Rates ──────────────────────────────────────────────────────────────
@@ -83,7 +78,7 @@ export class PayrollService {
         businessId,
         assignmentId: input.assignmentId,
         amount: input.amount,
-        currency: normalizeCurrencyCode(input.currency, 'TTD'),
+        currency: input.currency ?? 'TTD',
         periodType: input.periodType ?? 'hourly',
         effectiveFrom: new Date(),
       },
@@ -126,12 +121,7 @@ export class PayrollService {
 
   // ── Run generation ─────────────────────────────────────────────────────
 
-  async generateRun(
-    businessId: string,
-    periodStart: Date,
-    periodEnd: Date,
-    opts?: { notes?: string; userId?: string; currency?: string },
-  ) {
+  async generateRun(businessId: string, periodStart: Date, periodEnd: Date, opts?: { notes?: string; userId?: string }) {
     if (!(periodStart < periodEnd)) throw new BadRequestException('periodStart must be before periodEnd');
 
     const overlap = await this.prisma.client.payrollRun.findFirst({
@@ -151,55 +141,19 @@ export class PayrollService {
       throw new BadRequestException('No pay rates configured — set staff rates first (payroll_set_rate)');
     }
 
-    const rateCurrencies = Array.from(
-      new Set(rates.map((r) => normalizeCurrencyCode(r.currency, 'TTD'))),
-    );
-    const business = this.prisma.client.business?.findUnique
-      ? await this.prisma.client.business.findUnique({
-          where: { id: businessId },
-          select: { currency: true },
-        })
-      : null;
-
-    const runCurrency = opts?.currency
-      ? normalizeCurrencyCode(opts.currency, 'TTD')
-      : rateCurrencies.length === 1
-        ? rateCurrencies[0]
-        : normalizeCurrencyCode(business?.currency, rateCurrencies[0] ?? 'TTD');
-
-    const needsConversion = rateCurrencies.some((c) => c !== runCurrency);
-    let exchangeRates: ExchangeRateRow[] = [];
-    if (needsConversion) {
-      exchangeRates = await loadLatestExchangeRates(this.prisma.client.exchangeRate, businessId);
-      for (const rc of rateCurrencies) {
-        if (rc !== runCurrency) {
-          convertToBaseOrThrow(1, rc, runCurrency, exchangeRates, 'payroll run');
-        }
-      }
-    }
-
     const items: Array<{ assignmentId: string; hoursWorked: number | null; grossPay: number; currency: string; notes?: string }> = [];
 
     for (const rate of rates) {
       const assignment = await this.prisma.client.orgAssignment.findFirst({ where: { id: rate.assignmentId } });
       if (!assignment) continue;
 
-      const rateCurrency = normalizeCurrencyCode(rate.currency, runCurrency);
-
       if (rate.periodType === 'monthly') {
-        const convertedGross =
-          rateCurrency === runCurrency
-            ? rate.amount
-            : convertToBaseOrThrow(rate.amount, rateCurrency, runCurrency, exchangeRates, 'payroll run');
         items.push({
           assignmentId: rate.assignmentId,
           hoursWorked: null,
-          grossPay: convertedGross,
-          currency: runCurrency,
-          notes:
-            rateCurrency === runCurrency
-              ? 'Monthly salary'
-              : `Monthly salary (${rateCurrency} ${rate.amount.toFixed(2)} converted to ${runCurrency})`,
+          grossPay: rate.amount,
+          currency: rate.currency,
+          notes: 'Monthly salary',
         });
         continue;
       }
@@ -219,44 +173,35 @@ export class PayrollService {
         hoursWorked = (agg._sum.durationMinutes ?? 0) / 60;
       }
 
-      const rawGross = Math.round(hoursWorked * rate.amount * 100) / 100;
-      const convertedGross =
-        rateCurrency === runCurrency
-          ? rawGross
-          : convertToBaseOrThrow(rawGross, rateCurrency, runCurrency, exchangeRates, 'payroll run');
-
       items.push({
         assignmentId: rate.assignmentId,
         hoursWorked: Math.round(hoursWorked * 100) / 100,
-        grossPay: convertedGross,
-        currency: runCurrency,
-        notes:
-          hoursWorked > 0
-            ? rateCurrency === runCurrency
-              ? `${hoursWorked.toFixed(2)}h × ${rate.amount}`
-              : `${hoursWorked.toFixed(2)}h × ${rateCurrency} ${rate.amount} (converted to ${runCurrency})`
-            : 'No logged hours',
+        grossPay: Math.round(hoursWorked * rate.amount * 100) / 100,
+        currency: rate.currency,
+        notes: hoursWorked > 0 ? `${hoursWorked.toFixed(2)}h × ${rate.amount}` : 'No logged hours',
       });
     }
 
     const totalGross = Math.round(items.reduce((s, i) => s + i.grossPay, 0) * 100) / 100;
+    const currency = rates[0]?.currency ?? 'TTD';
 
-    const createdRun = await this.prisma.client.payrollRun.create({
+    const created = await this.prisma.client.payrollRun.create({
       data: {
         businessId,
         periodStart,
         periodEnd,
         status: 'DRAFT',
         totalGross,
-        currency: runCurrency,
+        currency,
         itemCount: items.length,
         notes: opts?.notes,
         items: { create: items.map((i) => ({ ...i, businessId })) },
       },
       include: { items: true },
     });
+    // PR195-PORT: a DRAFT run is committed payroll (safe-to-spend, KEY's treasury figures).
     invalidateBusinessFinancialSnapshotCache(businessId);
-    return createdRun;
+    return created;
   }
 
   // ── Runs ───────────────────────────────────────────────────────────────
@@ -306,273 +251,143 @@ export class PayrollService {
     if (run.status !== 'DRAFT') {
       throw new BadRequestException(`Run is ${run.status} — only DRAFT runs can be approved`);
     }
-    const approvedRun = await this.prisma.client.payrollRun.update({
+    const approved = await this.prisma.client.payrollRun.update({
       where: { id: runId },
       data: { status: 'APPROVED', approvedAt: new Date(), approvedById: userId ?? null },
     });
-    invalidateBusinessFinancialSnapshotCache(businessId);
-    return approvedRun;
+    invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
+    return approved;
   }
 
-  async markRunPaid(
-    businessId: string,
-    runId: string,
-    paymentInput?: string | MarkRunPaidInput,
-  ) {
+  /**
+   * PR195-PORT (owner PR #195 part 2): mark an APPROVED run paid and post the
+   * disbursement to the ledger, in one transaction: the run's move to PAID
+   * (a compare-and-set on APPROVED) and the posting through the ledger door
+   * (ExpensePostingService.onPayrollRunPaid -> PostingService.post, V1-15)
+   * commit or roll back together, so a posting the door refuses (a CLOSED
+   * period, a currency D-13 does not allow, a chart row of another business)
+   * leaves the run APPROVED with no paidAt.
+   *
+   * Idempotent: a run already PAID (a double click, a KEY retry, the loser of
+   * two concurrent calls) is not moved again; its posting is asked for again
+   * under the same key (PayrollRun:<id>:paid), which the door answers with the
+   * first posting. A PAID run with no posting (paid before mark-paid posted)
+   * gets its posting then, dated its own paidAt, which a CLOSED period refuses
+   * with 409 and nothing changes.
+   *
+   * Tenant: the run is read by (id, businessId); the payment account by (id,
+   * businessId) (another business's account is "not found in this business");
+   * its chart row must be this business's and cash-class. D-13: the account is
+   * in the run's currency; nothing is converted.
+   */
+  async markRunPaid(businessId: string, runId: string, input: MarkRunPaidInput = {}) {
     if (!this.expensePosting) {
-      throw new InternalServerErrorException(
-        'ExpensePostingService is required to mark payroll runs paid',
-      );
+      throw new ServiceUnavailableException('Payroll posting is unavailable: a run is not marked paid without its books');
     }
-    if (typeof this.prisma.client.$transaction !== 'function') {
-      throw new InternalServerErrorException(
-        'Database transaction support is required to mark payroll runs paid',
-      );
-    }
-
-    const opts: MarkRunPaidInput =
-      typeof paymentInput === 'string'
-        ? { paymentMethod: paymentInput }
-        : (paymentInput ?? {});
-
-    const rawAccountId = (opts.paymentAccountId ?? '').trim();
-    const rawMethod = (opts.paymentMethod ?? '').trim().toLowerCase();
-
-    if (!rawAccountId && !rawMethod) {
+    const expensePosting = this.expensePosting;
+    const paymentAccountId = (input.paymentAccountId ?? '').trim();
+    const paymentMethod = (input.paymentMethod ?? '').trim().toLowerCase();
+    if (!paymentAccountId && !paymentMethod) {
       throw new BadRequestException(
         'A payment account (paymentAccountId) or payment method (paymentMethod) is required to mark a payroll run paid',
       );
     }
-    if (rawMethod && !VALID_PAYROLL_PAYMENT_METHODS.has(rawMethod)) {
+    if (paymentMethod && !PAYROLL_DISBURSEMENT_METHODS.has(paymentMethod)) {
       throw new BadRequestException(
-        `Invalid payroll paymentMethod "${opts.paymentMethod}". Allowed values: cash, bank_transfer, wire, ach, cheque, wipay, paypal, stripe`,
+        `Invalid payroll paymentMethod "${input.paymentMethod}". Allowed: ${[...PAYROLL_DISBURSEMENT_METHODS].join(', ')}`,
       );
     }
 
-    const paidRun = await this.prisma.client.$transaction(async (rawTx) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tx = rawTx as any;
-
-      const currentRun = tx.payrollRun?.findFirst
-        ? await tx.payrollRun.findFirst({
-            where: { id: runId, businessId },
-            include: { items: { include: { assignment: true } } },
-          })
-        : await this.getRun(businessId, runId);
-
-      if (!currentRun) {
-        throw new NotFoundException('Payroll run not found');
+    const paid = await this.prisma.client.$transaction(async (tx) => {
+      let run = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
+      if (!run) throw new NotFoundException('Payroll run not found');
+      if (run.status !== 'APPROVED' && run.status !== 'PAID') {
+        throw new BadRequestException(`Run is ${run.status} — it must be APPROVED before marking paid`);
       }
 
-      let resolvedAccountId: string | null = null;
-      let resolvedCoaId: string | null = null;
-      let resolvedMethod: string | null = rawMethod || null;
+      const paymentCoaId = paymentAccountId
+        ? await this.disbursementChartRow(tx as unknown as Prisma.TransactionClient, businessId, paymentAccountId, run.currency)
+        : await expensePosting.resolvePaymentCoa(businessId, paymentMethod);
 
-      if (rawAccountId) {
-        const faDelegate = tx.financialAccount ?? this.prisma.client.financialAccount;
-        if (!faDelegate) {
-          throw new BadRequestException('FinancialAccount lookup unavailable');
-        }
-        const account = faDelegate.findUnique
-          ? await faDelegate.findUnique(
-              skipTenantIsolation({
-                where: { id: rawAccountId },
-                select: {
-                  id: true,
-                  businessId: true,
-                  type: true,
-                  subtype: true,
-                  chartOfAccountId: true,
-                  isActive: true,
-                  currency: true,
-                },
-              }),
-            )
-          : await faDelegate.findFirst(
-              skipTenantIsolation({
-                where: { id: rawAccountId },
-                select: {
-                  id: true,
-                  businessId: true,
-                  type: true,
-                  subtype: true,
-                  chartOfAccountId: true,
-                  isActive: true,
-                  currency: true,
-                },
-              }),
-            );
-
-        if (!account) {
-          throw new BadRequestException(`Payment account ${rawAccountId} not found`);
-        }
-        if (account.businessId !== businessId) {
-          throw new BadRequestException(
-            `Cross-business payment account access blocked: ${rawAccountId}`,
-          );
-        }
-        if (!account.isActive) {
-          throw new BadRequestException(
-            `Payment account ${rawAccountId} is inactive and cannot disburse payroll`,
-          );
-        }
-        if (!VALID_DISBURSEMENT_ACCOUNT_TYPES.has(account.type)) {
-          throw new BadRequestException(
-            `Invalid payment account type "${account.type}" — payroll must be paid from an active CASH, BANK, or PAYMENT_PROCESSOR account`,
-          );
-        }
-
-        const runCurrency = normalizeCurrencyCode(currentRun.currency, 'TTD');
-        const acctCurrency = normalizeCurrencyCode(account.currency, runCurrency);
-        if (acctCurrency !== runCurrency) {
-          throw new BadRequestException(
-            `Payment account currency (${acctCurrency}) does not match payroll run currency (${runCurrency})`,
-          );
-        }
-
-        resolvedAccountId = account.id;
-        resolvedCoaId = account.chartOfAccountId;
-        if (!resolvedMethod) {
-          resolvedMethod =
-            account.type === 'CASH'
-              ? 'cash'
-              : account.type === 'PAYMENT_PROCESSOR'
-                ? account.subtype || 'processor'
-                : 'bank_transfer';
-        }
-      } else if (rawMethod) {
-        const faDelegate = tx.financialAccount ?? this.prisma.client.financialAccount;
-        if (faDelegate?.findFirst) {
-          const namedProcessors = new Set(['wipay', 'paypal', 'stripe']);
-          const expectedType =
-            rawMethod === 'cash'
-              ? 'CASH'
-              : namedProcessors.has(rawMethod) || rawMethod === 'processor'
-                ? 'PAYMENT_PROCESSOR'
-                : 'BANK';
-          const expectedSubtype = namedProcessors.has(rawMethod) ? rawMethod : undefined;
-          const runCurrency = normalizeCurrencyCode(currentRun.currency, 'TTD');
-          const matchedAccount = await faDelegate.findFirst({
-            where: {
-              businessId,
-              type: expectedType,
-              ...(expectedSubtype ? { subtype: expectedSubtype } : {}),
-              isActive: true,
-              currency: runCurrency,
-            },
-            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-            select: {
-              id: true,
-              businessId: true,
-              type: true,
-              subtype: true,
-              chartOfAccountId: true,
-              isActive: true,
-              currency: true,
-            },
-          });
-          if (
-            !matchedAccount ||
-            !matchedAccount.isActive ||
-            matchedAccount.type !== expectedType ||
-            (expectedSubtype &&
-              matchedAccount.subtype !== undefined &&
-              (matchedAccount.subtype ?? '').toLowerCase().trim() !== expectedSubtype) ||
-            normalizeCurrencyCode(matchedAccount.currency, runCurrency) !== runCurrency
-          ) {
-            throw new BadRequestException(
-              `No active ${runCurrency} ${expectedType}${expectedSubtype ? ` (${expectedSubtype})` : ''} financial account found for paymentMethod "${rawMethod}"; specify paymentAccountId or configure an active account first`,
-            );
-          }
-          resolvedAccountId = matchedAccount.id;
-          resolvedCoaId = matchedAccount.chartOfAccountId ?? null;
-        }
-      }
-
-      // Idempotent retry: if the run is already PAID, ensure the ledger posting
-      // exists (via PostingService's externalRef idempotency) and return the
-      // existing paid run without re-transitioning or double-posting.
-      if (currentRun.status === 'PAID') {
-        const existingPaidAt = currentRun.paidAt ? new Date(currentRun.paidAt) : new Date();
-        await this.expensePosting!.onPayrollRunPaid(
-          {
-            id: currentRun.id,
-            businessId,
-            totalGross: Number(currentRun.totalGross),
-            currency: currentRun.currency,
-            paidAt: existingPaidAt,
-            periodStart: new Date(currentRun.periodStart),
-            periodEnd: new Date(currentRun.periodEnd),
-            paymentMethod: resolvedMethod,
-            paymentAccountId: resolvedAccountId,
-            paymentCoaId: resolvedCoaId,
-            notes: currentRun.notes ?? null,
-          },
-          tx as Prisma.TransactionClient,
-        );
-        return currentRun;
-      }
-
-      if (currentRun.status !== 'APPROVED') {
-        throw new BadRequestException(
-          `Run is ${currentRun.status} — it must be APPROVED before marking paid`,
-        );
-      }
-
-      const paidAt = new Date();
-      let updated: typeof currentRun;
-
-      if (typeof tx.payrollRun.updateMany === 'function') {
+      if (run.status === 'APPROVED') {
+        const paidAt = new Date();
         const claim = await tx.payrollRun.updateMany({
           where: { id: runId, businessId, status: 'APPROVED' },
           data: { status: 'PAID', paidAt },
         });
-        if (!claim || claim.count === 0) {
-          throw new ConflictException(
-            `Payroll run ${runId} is already being processed or is no longer in APPROVED state`,
-          );
+        run = await tx.payrollRun.findFirst({ where: { id: runId, businessId } });
+        if (!run) throw new NotFoundException('Payroll run not found');
+        if (claim.count !== 1 && run.status !== 'PAID') {
+          throw new ConflictException(`Payroll run ${runId} is ${run.status}; it was not marked paid`);
         }
-        updated = tx.payrollRun.findFirst
-          ? ((await tx.payrollRun.findFirst({ where: { id: runId, businessId } })) ?? {
-              ...currentRun,
-              status: 'PAID',
-              paidAt,
-            })
-          : { ...currentRun, status: 'PAID', paidAt };
-      } else {
-        updated = await tx.payrollRun.update({
-          where: { id: runId },
-          data: { status: 'PAID', paidAt },
-        });
       }
 
-      const gross = Number(currentRun.totalGross);
-      const postResult = await this.expensePosting!.onPayrollRunPaid(
+      await expensePosting.onPayrollRunPaid(
         {
-          id: currentRun.id,
+          id: run.id,
           businessId,
-          totalGross: gross,
-          currency: currentRun.currency,
-          paidAt,
-          periodStart: new Date(currentRun.periodStart),
-          periodEnd: new Date(currentRun.periodEnd),
-          paymentMethod: resolvedMethod,
-          paymentAccountId: resolvedAccountId,
-          paymentCoaId: resolvedCoaId,
-          notes: currentRun.notes ?? null,
+          totalGross: Number(run.totalGross),
+          currency: run.currency,
+          paidAt: run.paidAt ?? run.updatedAt ?? new Date(),
+          periodStart: new Date(run.periodStart),
+          periodEnd: new Date(run.periodEnd),
+          paymentMethod: paymentMethod || null,
+          paymentCoaId,
+          paymentAccountId: paymentAccountId || null,
+          actorId: input.actorId ?? null,
+          initiatedBy: input.initiatedBy ?? null,
+          notes: run.notes ?? null,
         },
-        tx as Prisma.TransactionClient,
+        tx as unknown as Prisma.TransactionClient,
       );
-
-      if (gross > 0 && (!postResult || !postResult.transactionId)) {
-        throw new InternalServerErrorException(
-          `Failed to create mandatory ledger posting for payroll run ${runId}`,
-        );
-      }
-
-      return updated;
+      return run;
     });
     invalidateBusinessFinancialSnapshotCache(businessId);
-    return paidRun;
+    return paid;
+  }
+
+  /**
+   * The chart row a payroll paid from `paymentAccountId` credits: the account
+   * must be this business's, active, cash-class (CASH, BANK or
+   * PAYMENT_PROCESSOR) and in the run's currency (D-13), and its chart row must
+   * be this business's cash-class system row (where the ledger keeps the cash
+   * it moves, V1-34). Anything else is refused before the run is touched.
+   */
+  private async disbursementChartRow(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    paymentAccountId: string,
+    runCurrency: string,
+  ): Promise<string> {
+    const account = await tx.financialAccount.findFirst({
+      where: { id: paymentAccountId, businessId },
+      select: { id: true, type: true, isActive: true, currency: true, chartOfAccountId: true },
+    });
+    if (!account) throw new BadRequestException(`Payment account ${paymentAccountId} not found in this business`);
+    if (!account.isActive) throw new BadRequestException(`Payment account ${paymentAccountId} is archived`);
+    if (!DISBURSEMENT_ACCOUNT_TYPES.has(account.type)) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} is a ${account.type} account: payroll is paid from a CASH, BANK or PAYMENT_PROCESSOR account`,
+      );
+    }
+    const run = normalizeCurrency(runCurrency);
+    const held = normalizeCurrency(account.currency) || run;
+    if (held !== run) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} holds ${held}; the run is in ${run} (one currency, nothing converted: D-13)`,
+      );
+    }
+    const chart = account.chartOfAccountId
+      ? await tx.chartOfAccount.findFirst({
+          where: { id: account.chartOfAccountId, businessId },
+          select: { id: true, systemKey: true },
+        })
+      : null;
+    if (!chart || !chart.systemKey || !CASH_CLASS_SYSTEM_KEYS.has(chart.systemKey)) {
+      throw new BadRequestException(
+        `Payment account ${paymentAccountId} is not linked to a cash, bank or processor account of this business's chart`,
+      );
+    }
+    return chart.id;
   }
 }

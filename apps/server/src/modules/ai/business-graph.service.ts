@@ -1,15 +1,9 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import {
-  computeNormalizedCashBalance,
-  fetchAllPages,
-  getBusinessFinancialSnapshotRevision,
-  invalidateBusinessFinancialSnapshotCache,
-  loadCashLedgerMovements,
-  loadLatestExchangeRates,
-  normalizeCurrencyCode,
-  resolveConversionRate,
-} from '../finance/finance-accounting.util';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { CashPositionService, otherCurrencyCash } from '../finance/cash-position.service';
+import { getBusinessFinancialSnapshotRevision } from '../finance/finance-accounting.util';
+import { normalizeCurrency } from '../finance/posting.service';
 
 export interface GraphEntityLink {
   fromType: string;
@@ -109,19 +103,31 @@ export interface BusinessGraphSnapshot {
     activeProductCount: number;
     averagePrice: number;
   };
+  /**
+   * PR195-PORT (owner PR #195 part 4): treasury sight. Present only in a
+   * snapshot projected for a viewer with revenue read (D-57: the safe-to-spend
+   * read, which carries these same figures). Cash is the ledger cash position
+   * (V1-34); every amount is in the business currency and an amount in another
+   * currency is named in otherCurrencies, never added or converted (D-13).
+   */
   treasury?: {
+    currency: string;
     cashBalance: number;
+    cashBasis: 'ledger';
     unpaidBillsAmount: number;
     unpaidBillsCount: number;
     committedPayrollAmount: number;
     committedPayrollRuns: number;
-    unconvertedByCurrency?: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }>;
+    otherCurrencies: Array<{ currency: string; cash: number; unpaidBills: number; committedPayroll: number }>;
   };
+  /** PR195-PORT: open deals. Present only for a viewer with crm read (GET crm deals). */
   pipeline?: {
+    currency: string;
     openDealCount: number;
     openPipelineValue: number;
-    unconvertedByCurrency?: Record<string, number>;
+    otherCurrencies: Array<{ currency: string; value: number }>;
   };
+  /** PR195-PORT: open support tickets. Present only for a viewer with operations read (KEY's helpdesk tools). */
   support?: {
     openTicketCount: number;
   };
@@ -137,39 +143,168 @@ export interface BusinessGraphSnapshot {
 
 const CACHE_TTL_MS = 120_000;
 
+/** The health-indicator area of the treasury alerts, shown only with treasury sight. */
+const TREASURY_AREA = 'treasury';
+
+/** Rows read per page by readAll (the client caps an unbounded findMany at 1000 rows). */
+const PAGE_SIZE = 1000;
+
+/** The support ticket statuses that are open work (schema: OPEN, IN_PROGRESS, WAITING; legacy lower-case rows too). */
+const OPEN_TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'WAITING', 'open', 'in_progress', 'waiting'];
+
+/**
+ * PR195-PORT: which of the KEY standing context's money and work figures a
+ * viewer may see, by the rule the head applies to the equivalent REST read:
+ *   - treasury (ledger cash, unpaid bills, committed payroll, the treasury
+ *     alert): revenue read, the safe-to-spend gate (D-57) that serves the same
+ *     cash, bills and payroll reserve;
+ *   - pipeline (open deals and their value): crm read (GET crm deals);
+ *   - support (open tickets): operations read, KEY's helpdesk tools (the
+ *     stricter of the two head rules: the REST ticket list checks membership
+ *     only).
+ */
+export interface KeyContextSight {
+  treasury: boolean;
+  pipeline: boolean;
+  support: boolean;
+}
+
+const NO_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false };
+
+/**
+ * PR195-PORT: `userId`'s KeyContextSight in `businessId`, read as ModuleScopeGuard
+ * reads a membership: its explicit permissionScopes map (a key it lacks is none),
+ * else its role's defaults. No viewer, or no membership (a platform SUPER_ADMIN
+ * who is not a member included), sees none of them. An OWNER membership with an
+ * explicit map is bound by it (D-140); the recorded owner field grants nothing
+ * (D-125).
+ */
+export async function keyContextSight(
+  prisma: PrismaService,
+  businessId: string,
+  userId: string | null | undefined,
+): Promise<KeyContextSight> {
+  if (!userId) return NO_SIGHT;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return NO_SIGHT;
+  const scopes: Record<string, string> =
+    membership.permissionScopes && typeof membership.permissionScopes === 'object' && !Array.isArray(membership.permissionScopes)
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+  const reads = (module: string) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read;
+  return { treasury: reads('revenue'), pipeline: reads('crm'), support: reads('operations') };
+}
+
+/** A money figure as the context string says it: the currency code and two decimals. */
+function money(currency: string, amount: number): string {
+  return `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+const toCents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
+const fromCents = (cents: number) => cents / 100;
+
+/** Every row of a paged read (cursor on id), past the client's 1000-row cap. */
+async function readAll<T>(page: (cursor: string | undefined) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const rows = (await page(cursor)) ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    const last = (rows[rows.length - 1] as { id?: string }).id;
+    if (!last) break;
+    cursor = last;
+  }
+  return out;
+}
+
+/** Sum `rows` in cents per normalized currency, `fallback` for a row with none. */
+function centsByCurrency<T>(rows: T[], amount: (r: T) => unknown, currency: (r: T) => string | null | undefined, fallback: string) {
+  const totals = new Map<string, number>();
+  for (const r of rows) {
+    const code = normalizeCurrency(currency(r)) || fallback;
+    totals.set(code, (totals.get(code) ?? 0) + toCents(amount(r)));
+  }
+  return totals;
+}
+
 @Injectable()
 export class BusinessGraphService {
   private readonly logger = new Logger(BusinessGraphService.name);
-  private readonly cache = new Map<
-    string,
-    { data: BusinessGraphSnapshot; expiresAt: number; revision: number }
-  >();
+  /** The full snapshot per business (sections every viewer may not see included); never served as is. */
+  private readonly cache = new Map<string, { data: BusinessGraphSnapshot; expiresAt: number; revision: number }>();
+  private readonly cashPosition: CashPositionService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+    // PR195-PORT: the ledger cash position (V1-34). Optional so hand-built
+    // instances keep constructing; they read the same ledger through their own.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
-  async getSnapshot(businessId: string, forceRefresh = false): Promise<BusinessGraphSnapshot> {
-    const currentRevision = getBusinessFinancialSnapshotRevision(businessId);
-    if (!forceRefresh) {
-      const cached = this.cache.get(businessId);
-      if (cached && cached.expiresAt > Date.now() && cached.revision === currentRevision) {
-        return cached.data;
-      }
-    }
+  /**
+   * The business snapshot. With no `opts.viewerId` it is the shared snapshot
+   * every caller has always read (REST graph routes, the control tower, the
+   * other KEY services): it carries no treasury, pipeline or support figures
+   * and no treasury alert. With `opts.viewerId` (KEY chat for the member
+   * talking to it) it carries those of them the member may read
+   * (keyContextSight). PR195-PORT (owner PR #195 part 4).
+   *
+   * Cached for two minutes per business, and assembled afresh once a ledger
+   * posting, a payroll run or a cash account changed the business's financial
+   * snapshot revision (finance-accounting.util.ts).
+   */
+  async getSnapshot(
+    businessId: string,
+    forceRefresh = false,
+    opts: { viewerId?: string | null } = {},
+  ): Promise<BusinessGraphSnapshot> {
+    const full = await this.fullSnapshot(businessId, forceRefresh);
+    const sight = opts.viewerId ? await keyContextSight(this.prisma, businessId, opts.viewerId) : NO_SIGHT;
+    return this.project(full, sight);
+  }
 
-    const snapshot = await this.assembleSnapshot(businessId);
-    this.cache.set(businessId, {
-      data: snapshot,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-      revision: getBusinessFinancialSnapshotRevision(businessId),
-    });
-    return snapshot;
+  /** getSnapshot projected for `viewerId` (no viewer: the shared snapshot). PR195-PORT. */
+  async getSnapshotForViewer(
+    businessId: string,
+    viewerId: string | null | undefined,
+    forceRefresh = false,
+  ): Promise<BusinessGraphSnapshot> {
+    return this.getSnapshot(businessId, forceRefresh, { viewerId: viewerId ?? null });
   }
 
   invalidateCache(businessId: string): void {
     this.cache.delete(businessId);
-    invalidateBusinessFinancialSnapshotCache(businessId);
+  }
+
+  private async fullSnapshot(businessId: string, forceRefresh: boolean): Promise<BusinessGraphSnapshot> {
+    const revision = getBusinessFinancialSnapshotRevision(businessId);
+    if (!forceRefresh) {
+      const cached = this.cache.get(businessId);
+      if (cached && cached.expiresAt > Date.now() && cached.revision === revision) {
+        return cached.data;
+      }
+    }
+    const snapshot = await this.assembleSnapshot(businessId);
+    this.cache.set(businessId, { data: snapshot, expiresAt: Date.now() + CACHE_TTL_MS, revision });
+    return snapshot;
+  }
+
+  /** A copy of `full` holding only the sections `sight` allows; the cached object is never changed. */
+  private project(full: BusinessGraphSnapshot, sight: KeyContextSight): BusinessGraphSnapshot {
+    const { treasury, pipeline, support, healthIndicators, ...rest } = full;
+    return {
+      ...rest,
+      ...(sight.treasury && treasury ? { treasury } : {}),
+      ...(sight.pipeline && pipeline ? { pipeline } : {}),
+      ...(sight.support && support ? { support } : {}),
+      healthIndicators: sight.treasury ? healthIndicators : healthIndicators.filter((h) => h.area !== TREASURY_AREA),
+    };
   }
 
   private async assembleSnapshot(businessId: string): Promise<BusinessGraphSnapshot> {
@@ -208,12 +343,6 @@ export class BusinessGraphService {
       automationRuns,
       activeProducts,
       avgProductPrice,
-      cashAccountsData,
-      unpaidBillsData,
-      committedPayrollData,
-      openDealsData,
-      openTicketsCount,
-      exchangeRates,
     ] = await Promise.all([
       db.business.findUnique({
         where: { id: businessId },
@@ -253,82 +382,11 @@ export class BusinessGraphService {
       db.automation.aggregate({ where: { businessId, deletedAt: null }, _sum: { runCount: true } }),
       db.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       db.product.aggregate({ where: { businessId, deletedAt: null, isActive: true }, _avg: { price: true } }),
-      db.financialAccount?.findMany
-        ? fetchAllPages(({ skip, take }) =>
-            db.financialAccount.findMany({
-              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-              select: {
-                id: true,
-                chartOfAccountId: true,
-                openingBalance: true,
-                currentBalance: true,
-                currency: true,
-              },
-              ...(skip > 0 ? { skip, take } : {}),
-            }),
-          )
-        : db.financialAccount?.aggregate
-          ? db.financialAccount.aggregate({
-              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-              _sum: { currentBalance: true },
-            })
-          : Promise.resolve([]),
-      db.expense?.findMany
-        ? fetchAllPages(({ skip, take }) =>
-            db.expense.findMany({
-              where: { businessId, deletedAt: null, status: 'BILL' },
-              orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
-              select: { amount: true, currency: true },
-              ...(skip > 0 ? { skip, take } : {}),
-            }),
-          )
-        : db.expense.aggregate({
-            where: { businessId, deletedAt: null, status: 'BILL' },
-            _sum: { amount: true },
-            _count: true,
-          }),
-      db.payrollRun?.findMany
-        ? fetchAllPages(({ skip, take }) =>
-            db.payrollRun.findMany({
-              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
-              orderBy: [{ periodStart: 'asc' }, { id: 'asc' }],
-              select: { totalGross: true, currency: true },
-              ...(skip > 0 ? { skip, take } : {}),
-            }),
-          )
-        : db.payrollRun?.aggregate
-          ? db.payrollRun.aggregate({
-              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
-              _sum: { totalGross: true },
-              _count: true,
-            })
-          : Promise.resolve([]),
-      db.deal?.findMany
-        ? fetchAllPages(({ skip, take }) =>
-            db.deal.findMany({
-              where: { businessId, deletedAt: null, status: 'OPEN' },
-              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-              select: { value: true, currency: true },
-              ...(skip > 0 ? { skip, take } : {}),
-            }),
-          )
-        : db.deal?.aggregate
-          ? db.deal.aggregate({
-              where: { businessId, deletedAt: null, status: 'OPEN' },
-              _sum: { value: true },
-              _count: true,
-            })
-          : Promise.resolve([]),
-      db.supportTicket?.count
-        ? db.supportTicket.count({
-            where: { businessId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING'] } },
-          })
-        : Promise.resolve(0),
-      loadLatestExchangeRates(db.exchangeRate, businessId),
     ]);
 
-    const baseCurrency = normalizeCurrencyCode(business?.currency, 'TTD');
+    // PR195-PORT (owner PR #195 part 4): treasury, pipeline and support figures.
+    // Computed for the cache; served only to a viewer who may read them (project).
+    const sight = await this.assembleSight(businessId, business?.currency);
 
     const statusMap: Record<string, number> = {};
     for (const s of contactsByStatus) {
@@ -350,118 +408,11 @@ export class BusinessGraphService {
       ? (completedProjectTasks / totalProjectTasks) * 100
       : 0;
 
-    const unconvertedTreasury: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }> = {};
-    const unconvertedCash: Record<string, number> = {};
-    type AggregateFallback = { _sum?: Record<string, unknown>; _count?: number };
-
-    let cashBalance: number;
-    if (Array.isArray(cashAccountsData)) {
-      const linkedCoaIds = Array.from(
-        new Set(
-          cashAccountsData
-            .map((a: { chartOfAccountId?: string | null }) => a.chartOfAccountId)
-            .filter(Boolean) as string[],
-        ),
-      );
-      const cashLedgerMovements = await loadCashLedgerMovements(
-        db.ledgerEntry,
-        businessId,
-        linkedCoaIds,
-      );
-      cashBalance = computeNormalizedCashBalance({
-        accounts: cashAccountsData,
-        ledgerMovements: cashLedgerMovements,
-        baseCurrency,
-        rates: exchangeRates,
-        failClosedOnMissingRate: false,
-        unconvertedByCurrency: unconvertedCash,
-      });
-      for (const [cur, amt] of Object.entries(unconvertedCash)) {
-        unconvertedTreasury[cur] = { ...(unconvertedTreasury[cur] ?? {}), cash: Math.round(amt * 100) / 100 };
-      }
-    } else {
-      cashBalance = Number((cashAccountsData as AggregateFallback)?._sum?.currentBalance ?? 0);
-    }
-
-    let unpaidBillsAmount = 0;
-    let unpaidBillsCount: number;
-    if (Array.isArray(unpaidBillsData)) {
-      unpaidBillsCount = unpaidBillsData.length;
-      for (const bill of unpaidBillsData) {
-        const amt = Number(bill.amount ?? 0);
-        const cur = normalizeCurrencyCode(bill.currency, baseCurrency);
-        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
-        if (mult != null) {
-          unpaidBillsAmount += amt * mult;
-        } else {
-          unconvertedTreasury[cur] = {
-            ...(unconvertedTreasury[cur] ?? {}),
-            unpaidBills: Math.round(((unconvertedTreasury[cur]?.unpaidBills ?? 0) + amt) * 100) / 100,
-          };
-        }
-      }
-      unpaidBillsAmount = Math.round(unpaidBillsAmount * 100) / 100;
-    } else {
-      const agg = unpaidBillsData as AggregateFallback;
-      unpaidBillsAmount = Number(agg?._sum?.amount ?? 0);
-      unpaidBillsCount = Number(agg?._count ?? 0);
-    }
-
-    let committedPayrollAmount = 0;
-    let committedPayrollRuns: number;
-    if (Array.isArray(committedPayrollData)) {
-      committedPayrollRuns = committedPayrollData.length;
-      for (const run of committedPayrollData) {
-        const amt = Number(run.totalGross ?? 0);
-        const cur = normalizeCurrencyCode(run.currency, baseCurrency);
-        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
-        if (mult != null) {
-          committedPayrollAmount += amt * mult;
-        } else {
-          unconvertedTreasury[cur] = {
-            ...(unconvertedTreasury[cur] ?? {}),
-            committedPayroll: Math.round(((unconvertedTreasury[cur]?.committedPayroll ?? 0) + amt) * 100) / 100,
-          };
-        }
-      }
-      committedPayrollAmount = Math.round(committedPayrollAmount * 100) / 100;
-    } else {
-      const agg = committedPayrollData as AggregateFallback;
-      committedPayrollAmount = Number(agg?._sum?.totalGross ?? 0);
-      committedPayrollRuns = Number(agg?._count ?? 0);
-    }
-
-    let openPipelineValue = 0;
-    let openDealCount: number;
-    const unconvertedPipeline: Record<string, number> = {};
-    if (Array.isArray(openDealsData)) {
-      openDealCount = openDealsData.length;
-      for (const d of openDealsData) {
-        const val = Number(d.value ?? 0);
-        const cur = normalizeCurrencyCode(d.currency, baseCurrency);
-        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
-        if (mult != null) {
-          openPipelineValue += val * mult;
-        } else {
-          unconvertedPipeline[cur] = Math.round(((unconvertedPipeline[cur] ?? 0) + val) * 100) / 100;
-        }
-      }
-      openPipelineValue = Math.round(openPipelineValue * 100) / 100;
-    } else {
-      const agg = openDealsData as AggregateFallback;
-      openPipelineValue = Number(agg?._sum?.value ?? 0);
-      openDealCount = Number(agg?._count ?? 0);
-    }
-
     const categoryNames = await this.resolveCategoryNames(businessId, expensesByCategory.map(e => e.categoryId).filter(Boolean) as string[]);
     const topCategories = expensesByCategory.map(e => ({
       name: (e.categoryId && categoryNames[e.categoryId]) || 'Uncategorized',
       amount: e._sum.amount ?? 0,
     }));
-
-    const unmappedCurrencies = Array.from(
-      new Set([...Object.keys(unconvertedTreasury), ...Object.keys(unconvertedPipeline)]),
-    );
 
     const healthIndicators = this.computeHealthIndicators({
       overdueCount: overdueInvoices._count ?? 0,
@@ -473,13 +424,8 @@ export class BusinessGraphService {
       budgetUtil,
       totalExpMonth,
       monthlyRev,
-      cashBalance,
-      unpaidBillsAmount,
-      committedPayrollAmount,
-      openTicketsCount,
-      unmappedCurrencies,
-      baseCurrency,
     });
+    healthIndicators.push(...this.treasuryIndicators(sight.treasury));
 
     const momentumSignals = [
       contactTotal > 0 ? 1 : 0,
@@ -500,7 +446,7 @@ export class BusinessGraphService {
         industry: business?.industry ?? null,
         archetype: business?.archetype ?? null,
         revenueModel: business?.revenueModel ?? null,
-        currency: baseCurrency,
+        currency: business?.currency ?? 'TTD',
         stage: business?.businessStage ?? null,
         teamSize: business?.teamSize ?? null,
       },
@@ -550,26 +496,9 @@ export class BusinessGraphService {
         activeProductCount: activeProducts,
         averagePrice: Math.round((avgProductPrice._avg.price ?? 0) * 100) / 100,
       },
-      treasury: {
-        cashBalance,
-        unpaidBillsAmount,
-        unpaidBillsCount,
-        committedPayrollAmount,
-        committedPayrollRuns,
-        ...(Object.keys(unconvertedTreasury).length > 0
-          ? { unconvertedByCurrency: unconvertedTreasury }
-          : {}),
-      },
-      pipeline: {
-        openDealCount,
-        openPipelineValue,
-        ...(Object.keys(unconvertedPipeline).length > 0
-          ? { unconvertedByCurrency: unconvertedPipeline }
-          : {}),
-      },
-      support: {
-        openTicketCount: openTicketsCount,
-      },
+      treasury: sight.treasury,
+      pipeline: sight.pipeline,
+      support: sight.support,
       momentumScore,
       healthIndicators,
       links: [],
@@ -733,6 +662,117 @@ export class BusinessGraphService {
     return map;
   }
 
+  /**
+   * PR195-PORT (owner PR #195 part 4): the treasury, pipeline and support
+   * figures, on the head's rules. Cash is CashPositionService's ledger cash
+   * (V1-34). Bills (live BILL expenses), committed payroll (DRAFT and APPROVED
+   * runs) and open deals are summed in the business currency; an amount in any
+   * other currency is named apart in otherCurrencies, never added or converted
+   * (D-13, V1-37c, D-107/D-135). Counts include every currency. Every read is
+   * of this business only; lists are read in full past the client's row cap.
+   */
+  private async assembleSight(
+    businessId: string,
+    businessCurrency: string | null | undefined,
+  ): Promise<Required<Pick<BusinessGraphSnapshot, 'treasury' | 'pipeline' | 'support'>>> {
+    const db = this.prisma.client;
+    const [cash, bills, runs, deals, openTicketCount] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId),
+      readAll((cursor) => db.expense.findMany({
+        where: { businessId, deletedAt: null, status: 'BILL' },
+        select: { id: true, amount: true, currency: true },
+        orderBy: { id: 'asc' },
+        take: PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      })),
+      readAll((cursor) => db.payrollRun.findMany({
+        where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+        select: { id: true, totalGross: true, currency: true },
+        orderBy: { id: 'asc' },
+        take: PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      })),
+      readAll((cursor) => db.deal.findMany({
+        where: { businessId, deletedAt: null, status: 'OPEN' },
+        select: { id: true, value: true, currency: true },
+        orderBy: { id: 'asc' },
+        take: PAGE_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      })),
+      db.supportTicket.count({ where: { businessId, deletedAt: null, status: { in: OPEN_TICKET_STATUSES } } }),
+    ]);
+
+    // The cash position labels its business currency; it is the one every figure here is in.
+    const currency = cash.currency || normalizeCurrency(businessCurrency) || 'TTD';
+    const billCents = centsByCurrency(bills, (b) => b.amount, (b) => b.currency, currency);
+    const payrollCents = centsByCurrency(runs, (r) => r.totalGross, (r) => r.currency, currency);
+    const dealCents = centsByCurrency(deals, (d) => d.value ?? 0, (d) => d.currency, currency);
+
+    const otherCash = new Map(otherCurrencyCash(cash).map((o) => [o.currency, o.amount]));
+    const otherCodes = [...new Set([...otherCash.keys(), ...billCents.keys(), ...payrollCents.keys()])]
+      .filter((code) => code !== currency)
+      .sort();
+    const otherTreasury = otherCodes
+      .map((code) => ({
+        currency: code,
+        cash: otherCash.get(code) ?? 0,
+        unpaidBills: fromCents(billCents.get(code) ?? 0),
+        committedPayroll: fromCents(payrollCents.get(code) ?? 0),
+      }))
+      .filter((o) => o.cash !== 0 || o.unpaidBills !== 0 || o.committedPayroll !== 0);
+    const otherDeals = [...dealCents.entries()]
+      .filter(([code, cents]) => code !== currency && cents !== 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([code, cents]) => ({ currency: code, value: fromCents(cents) }));
+
+    return {
+      treasury: {
+        currency,
+        cashBalance: cash.cashBalance,
+        cashBasis: 'ledger',
+        unpaidBillsAmount: fromCents(billCents.get(currency) ?? 0),
+        unpaidBillsCount: bills.length,
+        committedPayrollAmount: fromCents(payrollCents.get(currency) ?? 0),
+        committedPayrollRuns: runs.length,
+        otherCurrencies: otherTreasury,
+      },
+      pipeline: {
+        currency,
+        openDealCount: deals.length,
+        openPipelineValue: fromCents(dealCents.get(currency) ?? 0),
+        otherCurrencies: otherDeals,
+      },
+      support: { openTicketCount },
+    };
+  }
+
+  /**
+   * PR195-PORT: the treasury alerts (area 'treasury', shown only with treasury
+   * sight). Critical when the business-currency bills and committed payroll
+   * exceed the ledger cash (the PR's alert, on ledger cash); a warning naming
+   * the currencies held apart, so a figure that leaves them out is never silent
+   * (D-107's rule for the runway alarm).
+   */
+  private treasuryIndicators(t: NonNullable<BusinessGraphSnapshot['treasury']>): BusinessGraphSnapshot['healthIndicators'] {
+    const out: BusinessGraphSnapshot['healthIndicators'] = [];
+    const obligations = fromCents(toCents(t.unpaidBillsAmount) + toCents(t.committedPayrollAmount));
+    if (obligations > 0 && obligations > t.cashBalance) {
+      out.push({
+        area: TREASURY_AREA,
+        status: 'critical',
+        detail: `Committed bills and payroll (${money(t.currency, obligations)}) exceed ledger cash (${money(t.currency, t.cashBalance)})`,
+      });
+    }
+    if (t.otherCurrencies.length > 0) {
+      out.push({
+        area: TREASURY_AREA,
+        status: 'warning',
+        detail: `Amounts in ${t.otherCurrencies.map((o) => o.currency).join(', ')} are held apart from the ${t.currency} figures, never converted (D-13)`,
+      });
+    }
+    return out;
+  }
+
   private computeHealthIndicators(data: {
     overdueCount: number;
     overdueAmt: number;
@@ -743,12 +783,6 @@ export class BusinessGraphService {
     budgetUtil: number;
     totalExpMonth: number;
     monthlyRev: number;
-    cashBalance?: number;
-    unpaidBillsAmount?: number;
-    committedPayrollAmount?: number;
-    openTicketsCount?: number;
-    unmappedCurrencies?: string[];
-    baseCurrency?: string;
   }): BusinessGraphSnapshot['healthIndicators'] {
     const indicators: BusinessGraphSnapshot['healthIndicators'] = [];
 
@@ -805,24 +839,31 @@ export class BusinessGraphService {
       });
     }
 
-    const obligations = (data.unpaidBillsAmount ?? 0) + (data.committedPayrollAmount ?? 0);
-    if (obligations > 0 && data.cashBalance !== undefined && obligations > data.cashBalance) {
-      indicators.push({
-        area: 'treasury',
-        status: 'critical',
-        detail: `Committed bills and payroll ($${obligations.toLocaleString()}) exceed available cash ($${data.cashBalance.toLocaleString()})`,
-      });
-    }
-
-    if (data.unmappedCurrencies && data.unmappedCurrencies.length > 0) {
-      indicators.push({
-        area: 'treasury',
-        status: 'warning',
-        detail: `Unconverted foreign currency balances (${data.unmappedCurrencies.join(', ')}) excluded from ${data.baseCurrency ?? 'base'} totals — configure exchange rates`,
-      });
-    }
-
     return indicators;
+  }
+
+  private treasuryLine(t: NonNullable<BusinessGraphSnapshot['treasury']>): string {
+    const runs = `${t.committedPayrollRuns} run${t.committedPayrollRuns === 1 ? '' : 's'}`;
+    const line =
+      `Cash & Obligations: ${money(t.currency, t.cashBalance)} cash (ledger), ` +
+      `${money(t.currency, t.unpaidBillsAmount)} unpaid bills (${t.unpaidBillsCount}), ` +
+      `${money(t.currency, t.committedPayrollAmount)} committed payroll (${runs})`;
+    if (t.otherCurrencies.length === 0) return line;
+    const apart = t.otherCurrencies
+      .flatMap((o) => [
+        o.cash !== 0 ? `${money(o.currency, o.cash)} cash` : null,
+        o.unpaidBills !== 0 ? `${money(o.currency, o.unpaidBills)} unpaid bills` : null,
+        o.committedPayroll !== 0 ? `${money(o.currency, o.committedPayroll)} committed payroll` : null,
+      ])
+      .filter(Boolean)
+      .join(', ');
+    return `${line}; held apart, not converted: ${apart}`;
+  }
+
+  private pipelineLine(p: NonNullable<BusinessGraphSnapshot['pipeline']>): string {
+    const deals = `${p.openDealCount} open deal${p.openDealCount === 1 ? '' : 's'}`;
+    const apart = p.otherCurrencies.map((o) => money(o.currency, o.value)).join(', ');
+    return `Pipeline: ${deals} (${money(p.currency, p.openPipelineValue)}${apart ? `; held apart, not converted: ${apart}` : ''})`;
   }
 
   buildContextString(snapshot: BusinessGraphSnapshot): string {
@@ -835,16 +876,15 @@ export class BusinessGraphService {
       `Contacts: ${snapshot.contacts.total} total (${snapshot.contacts.staleLeadCount} stale leads)`,
       `Revenue: $${snapshot.revenue.totalCollected.toLocaleString()} collected, $${snapshot.revenue.monthlyRevenue.toLocaleString()} this month`,
       `Outstanding: $${snapshot.revenue.outstandingAmount.toLocaleString()} (${snapshot.revenue.outstandingCount} invoices, ${snapshot.revenue.overdueCount} overdue)`,
-      snapshot.treasury
-        ? `Cash & Obligations: $${snapshot.treasury.cashBalance.toLocaleString()} cash, $${snapshot.treasury.unpaidBillsAmount.toLocaleString()} unpaid bills (${snapshot.treasury.unpaidBillsCount}), $${snapshot.treasury.committedPayrollAmount.toLocaleString()} committed payroll (${snapshot.treasury.committedPayrollRuns} runs)`
-        : null,
-      snapshot.pipeline
-        ? `Pipeline: ${snapshot.pipeline.openDealCount} open deals ($${snapshot.pipeline.openPipelineValue.toLocaleString()})`
-        : null,
+      // PR195-PORT: present only in a snapshot projected for a viewer who may read them (getSnapshot).
+      snapshot.treasury ? this.treasuryLine(snapshot.treasury) : null,
+      snapshot.pipeline ? this.pipelineLine(snapshot.pipeline) : null,
       `Bookings: ${snapshot.bookings.upcomingCount} upcoming, ${snapshot.bookings.completedThisMonth} completed this month`,
       `Expenses: $${snapshot.expenses.totalThisMonth.toLocaleString()} this month`,
       `Projects: ${snapshot.projects.activeCount} active, ${snapshot.projects.overdueTaskCount} overdue tasks`,
-      snapshot.support ? `Support: ${snapshot.support.openTicketCount} open tickets` : null,
+      snapshot.support
+        ? `Support: ${snapshot.support.openTicketCount} open ticket${snapshot.support.openTicketCount === 1 ? '' : 's'}`
+        : null,
       `Content: ${snapshot.content.draftPostCount} draft posts, ${snapshot.content.scheduledPostCount} scheduled, ${snapshot.content.draftCampaignCount} draft campaigns`,
       `Automations: ${snapshot.automations.activeCount} active flows`,
       `Store: ${snapshot.storefront.activeProductCount} active products`,

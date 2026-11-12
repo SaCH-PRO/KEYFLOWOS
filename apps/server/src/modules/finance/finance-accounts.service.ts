@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import { invalidateBusinessFinancialSnapshotCache } from './finance-accounting.util';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { FinanceAuditService } from './finance-audit.service';
 import { PostingService, normalizeCurrency, type PostingEntryInput, type PostingResult } from './posting.service';
@@ -206,6 +207,8 @@ export class FinanceAccountsService {
         ...(posted && 'notPosted' in posted ? { openingNotPosted: posted.notPosted } : {}),
       },
     });
+    // PR195-PORT: an account's (unposted) opening is part of the ledger cash KEY reads.
+    invalidateBusinessFinancialSnapshotCache(businessId);
     return account;
   }
 
@@ -430,7 +433,9 @@ export class FinanceAccountsService {
     if (input.isActive != null) data.isActive = input.isActive;
     if (input.chartOfAccountId != null) data.chartOfAccountId = input.chartOfAccountId;
 
-    return this.prisma.client.financialAccount.update({ where: { id }, data });
+    const updated = await this.prisma.client.financialAccount.update({ where: { id }, data });
+    invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
+    return updated;
   }
 
   async archive(businessId: string, id: string) {
@@ -439,9 +444,11 @@ export class FinanceAccountsService {
     });
     if (!existing) throw new NotFoundException('Account not found');
     // Soft archive — never hard-delete since LedgerEntry rows reference it.
-    return this.prisma.client.financialAccount.update({
+    const archived = await this.prisma.client.financialAccount.update({
       where: { id },
       data: { isActive: false },
     });
+    invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
+    return archived;
   }
 }

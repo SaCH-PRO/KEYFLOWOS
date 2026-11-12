@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AccountingPeriodService } from './accounting-period.service';
+import { invalidateBusinessFinancialSnapshotCache } from './finance-accounting.util';
 
 export interface PostingEntryInput {
   /** ChartOfAccount.id this entry posts against. */
@@ -408,10 +409,14 @@ export class PostingService {
     };
 
     try {
-      if (txClient) return await exec(txClient);
-      return await this.prisma.client.$transaction(async (tx) =>
-        exec(tx as unknown as Prisma.TransactionClient),
-      );
+      const result = txClient
+        ? await exec(txClient)
+        : await this.prisma.client.$transaction(async (tx) => exec(tx as unknown as Prisma.TransactionClient));
+      // PR195-PORT: KEY's cached treasury figures are stale once the ledger
+      // moved (finance-accounting.util.ts). Bumped after the write; inside a
+      // caller's transaction a rollback leaves only a harmless extra refresh.
+      if (!result.alreadyPosted) invalidateBusinessFinancialSnapshotCache(input.businessId);
+      return result;
     } catch (err: any) {
       // Race: a concurrent caller wrote the same externalRef between our
       // check and our insert. Prisma raises P2002 on the unique index.
@@ -525,9 +530,10 @@ export class PostingService {
       return { transactionId: reversal.id, externalRef: reversal.externalRef, alreadyPosted: false };
     };
 
-    if (txClient) return exec(txClient);
-    return this.prisma.client.$transaction(async (tx) =>
-      exec(tx as unknown as Prisma.TransactionClient),
-    );
+    const result = txClient
+      ? await exec(txClient)
+      : await this.prisma.client.$transaction(async (tx) => exec(tx as unknown as Prisma.TransactionClient));
+    invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT, as post()
+    return result;
   }
 }

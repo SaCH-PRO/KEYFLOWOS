@@ -2002,7 +2002,10 @@ export class FlowOrchestratorService {
       };
     }
 
-    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    // PR195-PORT (owner PR #195 part 4): the standing context carries the treasury, pipeline and support
+    // figures this member may read on REST (BusinessGraphService viewer projection); a turn with no member
+    // carries none.
+    const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
@@ -2449,7 +2452,8 @@ ${triage.standingContext}`;
       return;
     }
 
-    const snapshot = await this.businessGraph.getSnapshot(businessId);
+    // PR195-PORT: as chat(), the figures this member may read (the viewer projection).
+    const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
     const memoryCtx = await this.memory.buildContextBlock(businessId);
     const memorySection = this.memory.buildPromptSection(memoryCtx);
@@ -7124,9 +7128,17 @@ ${triage.standingContext}`;
         return { id: run.id, status: run.status };
       }
       case 'payroll_mark_paid': {
+        // PR195-PORT (owner PR #195 part 2): mark-paid posts the run to the ledger. The posting is KEY's
+        // (the system actor, as commerce_mark_invoice_paid records its payment) and names the member the
+        // turn runs for as initiatedBy (audit data, never authority). Who may run this at all is unchanged:
+        // the authority map (operations write; tier 3, D-36). The account or method comes from the model's
+        // arguments; the actor never does.
+        const initiatedBy = (await this.contactBindMember(businessId, action)) ?? null;
         const run = await this.getPayroll().markRunPaid(businessId, args.runId, {
           paymentAccountId: args.paymentAccountId,
           paymentMethod: args.paymentMethod,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+          initiatedBy,
         });
         return { id: run.id, status: run.status };
       }

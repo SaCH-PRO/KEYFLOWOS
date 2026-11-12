@@ -47,6 +47,27 @@ export function paymentMethodToCoaSystemKey(method?: string | null): string {
   return 'CASH';
 }
 
+/**
+ * PR195-PORT: the payment methods a payroll run may be marked paid by, each a
+ * cash-class disbursement (paymentMethodToCoaSystemKey: CASH, BANK or
+ * PAYMENT_PROCESSOR). A card is a liability, not a disbursement account, and an
+ * unknown word would fall back to CASH there, so neither is accepted.
+ */
+export const PAYROLL_DISBURSEMENT_METHODS: ReadonlySet<string> = new Set([
+  'cash',
+  'bank',
+  'bank_transfer',
+  'transfer',
+  'wire',
+  'ach',
+  'cheque',
+  'check',
+  'wipay',
+  'paypal',
+  'stripe',
+  'processor',
+]);
+
 @Injectable()
 export class ExpensePostingService {
   private readonly logger = new Logger(ExpensePostingService.name);
@@ -494,115 +515,61 @@ export class ExpensePostingService {
   }
 
   /**
-   * Payroll run paid — Dr Payroll & Contractors (EXPENSE_PAYROLL) / Cr Bank|Cash|Processor.
-   * Idempotent on `PayrollRun:{id}:paid`.
-   * Requires an explicit validated disbursement account or disbursement paymentMethod.
+   * PR195-PORT (owner PR #195 part 2): a payroll run paid. Dr Payroll &
+   * Contractors (EXPENSE_PAYROLL, 6400) / Cr the cash-class chart row the money
+   * left (CASH, BANK or PAYMENT_PROCESSOR), through the one ledger door (V1-15):
+   * idempotent on PayrollRun:<id>:paid, dated `paidAt` and refused there in a
+   * CLOSED period, the actor named. `txClient` is the run's transaction
+   * (PayrollService.markRunPaid), so the run's move to PAID and this posting
+   * commit or roll back together.
+   *
+   * The credit row is `paymentCoaId` (the chart row of the payment account the
+   * caller validated) or the system row for a cash-class `paymentMethod`; a run
+   * with neither, or a method that is not a cash-class disbursement (a card),
+   * is refused before anything is written.
+   *
+   * Not ported from the PR (head rulings win): the FinancialAccount balance
+   * target (V1-34: cash is the ledger's; the account is recorded in the
+   * posting's metadata only) and any conversion (D-13: the posting is in the
+   * run's currency, which the door holds to D-13). On KEY the posting is KEY's
+   * (`actorId` the system actor) and names the member it ran for as
+   * `initiatedBy` (audit data, never authority), as commerce mark-paid does.
    */
   async onPayrollRunPaid(
     run: {
       id: string;
       businessId: string;
-      totalGross: number;
+      totalGross: number | string | Prisma.Decimal;
       currency: string;
       paidAt: Date;
       periodStart: Date;
       periodEnd: Date;
       paymentMethod?: string | null;
-      paymentAccountId?: string | null;
       paymentCoaId?: string | null;
+      paymentAccountId?: string | null;
+      actorId?: string | null;
+      initiatedBy?: string | null;
       notes?: string | null;
     },
     txClient?: Prisma.TransactionClient,
   ) {
-    const gross = Number(run.totalGross ?? 0);
-    if (gross <= 0) return null;
+    const gross = Math.round(Number(String(run.totalGross ?? 0)) * 100) / 100;
+    if (!(gross > 0)) return null;
 
-    const payrollCoaId = await this.resolveSystemCoa(run.businessId, 'EXPENSE_PAYROLL');
     let paymentCoaId = run.paymentCoaId ?? null;
     if (!paymentCoaId) {
       const method = (run.paymentMethod ?? '').toLowerCase().trim();
-      const allowedDisbursementMethods = new Set([
-        'cash',
-        'bank',
-        'bank_transfer',
-        'transfer',
-        'wire',
-        'ach',
-        'cheque',
-        'check',
-        'wipay',
-        'paypal',
-        'stripe',
-        'processor',
-      ]);
-      if (!method || !allowedDisbursementMethods.has(method)) {
+      if (!method || !PAYROLL_DISBURSEMENT_METHODS.has(method)) {
         throw new BadRequestException(
-          'Payroll disbursement requires an explicit valid paymentAccountId or paymentMethod (cash, bank_transfer, wire, ach, cheque, wipay, paypal, stripe)',
+          `Payroll disbursement requires an explicit valid paymentAccountId or paymentMethod (${[...PAYROLL_DISBURSEMENT_METHODS].join(', ')})`,
         );
       }
       paymentCoaId = await this.resolvePaymentCoa(run.businessId, method);
     }
+    const payrollCoaId = await this.resolveSystemCoa(run.businessId, 'EXPENSE_PAYROLL');
 
-    let resolvedPaymentAccountId = run.paymentAccountId ?? null;
-    if (!resolvedPaymentAccountId) {
-      const rawClient: unknown = txClient ? (txClient as unknown) : (this.prisma.client as unknown);
-      const rawDb = rawClient as {
-        financialAccount?: {
-          findFirst?: (args: Record<string, unknown>) => Promise<{
-            id: string;
-            subtype?: string | null;
-            chartOfAccountId?: string | null;
-            currency?: string | null;
-            isActive?: boolean;
-          } | null>;
-        };
-      };
-      if (rawDb.financialAccount?.findFirst) {
-        const normalizedMethod = (run.paymentMethod ?? '').toLowerCase().trim();
-        const namedProcessors = new Set(['wipay', 'paypal', 'stripe']);
-        const expectedSubtype = namedProcessors.has(normalizedMethod)
-          ? normalizedMethod
-          : undefined;
-        const runCurrency = (run.currency ?? 'TTD').trim().toUpperCase() || 'TTD';
-        const matchedAccount = await rawDb.financialAccount.findFirst({
-          where: {
-            businessId: run.businessId,
-            chartOfAccountId: paymentCoaId,
-            ...(expectedSubtype ? { subtype: expectedSubtype } : {}),
-            isActive: true,
-            currency: runCurrency,
-          },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: {
-            id: true,
-            subtype: true,
-            chartOfAccountId: true,
-            currency: true,
-            isActive: true,
-          },
-        });
-        if (
-          !matchedAccount ||
-          matchedAccount.isActive === false ||
-          (matchedAccount.chartOfAccountId && matchedAccount.chartOfAccountId !== paymentCoaId) ||
-          (expectedSubtype &&
-            matchedAccount.subtype !== undefined &&
-            (matchedAccount.subtype ?? '').toLowerCase().trim() !== expectedSubtype) ||
-          (matchedAccount.currency &&
-            matchedAccount.currency.trim().toUpperCase() !== runCurrency)
-        ) {
-          throw new BadRequestException(
-            `No active ${runCurrency} financial account is linked to the ${run.paymentMethod ?? 'selected'} chart of account (${paymentCoaId}); specify paymentAccountId or configure an active account first`,
-          );
-        }
-        resolvedPaymentAccountId = matchedAccount.id;
-      }
-    }
-
-    const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} → ${run.periodEnd.toISOString().slice(0, 10)}`;
-    const description = run.notes
-      ? `Payroll run (${periodLabel}) — ${run.notes}`
-      : `Payroll run (${periodLabel})`;
+    const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} to ${run.periodEnd.toISOString().slice(0, 10)}`;
+    const description = run.notes ? `Payroll run (${periodLabel}): ${run.notes}` : `Payroll run (${periodLabel})`;
 
     return this.posting.post(
       {
@@ -616,20 +583,18 @@ export class ExpensePostingService {
         sourceId: run.id,
         kind: 'paid',
         reference: periodLabel,
+        createdById: run.actorId ?? null,
+        metadata: {
+          payrollRunId: run.id,
+          periodStart: run.periodStart.toISOString(),
+          periodEnd: run.periodEnd.toISOString(),
+          ...(run.paymentAccountId ? { paymentAccountId: run.paymentAccountId } : {}),
+          ...(run.paymentMethod ? { paymentMethod: run.paymentMethod.toLowerCase().trim() } : {}),
+          ...(run.initiatedBy ? { initiatedBy: run.initiatedBy } : {}),
+        },
         entries: [
-          {
-            accountId: payrollCoaId,
-            debit: gross,
-            credit: 0,
-            memo: description,
-          },
-          {
-            accountId: paymentCoaId,
-            financialAccountId: resolvedPaymentAccountId,
-            debit: 0,
-            credit: gross,
-            memo: `Payroll disbursement (${periodLabel})`,
-          },
+          { accountId: payrollCoaId, debit: gross, credit: 0, memo: description },
+          { accountId: paymentCoaId, debit: 0, credit: gross, memo: `Payroll disbursement (${periodLabel})` },
         ],
       },
       txClient,

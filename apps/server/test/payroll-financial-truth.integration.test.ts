@@ -418,11 +418,19 @@ describe('PR195-PORT payroll -> ledger -> cash -> safe-to-spend -> KEY (real Pos
 
   it('PFT-06 KEY sight follows the REST read rules; the shared snapshot carries none', async () => {
     const owner = await graph.getSnapshotForViewer(ID.bizA, ID.owner, true);
-    expect(owner.treasury).toMatchObject({ currency: 'TTD', cashBasis: 'ledger', committedPayrollRuns: 0 });
+    // Still committed: PFT-04's JMD run (refused, APPROVED) and PFT-05's TTD run (APPROVED).
+    expect(owner.treasury).toMatchObject({
+      currency: 'TTD',
+      cashBasis: 'ledger',
+      committedPayrollRuns: 2,
+      committedPayrollAmount: 900,
+      otherCurrencies: [{ currency: 'JMD', cash: 0, unpaidBills: 0, committedPayroll: 1_000 }],
+    });
     expect(owner.pipeline).toMatchObject({ openDealCount: 1, openPipelineValue: 12_000 });
     expect(owner.support).toEqual({ openTicketCount: 1 });
     const ownerContext = graph.buildContextString(owner);
     expect(ownerContext).toMatch(/Cash & Obligations: TTD [\d,]+\.\d\d cash \(ledger\)/);
+    expect(ownerContext).toContain('TTD 900.00 committed payroll (2 runs); held apart, not converted: JMD 1,000.00 committed payroll');
     expect(ownerContext).toContain('Pipeline: 1 open deal (TTD 12,000.00)');
     expect(ownerContext).toContain('Support: 1 open ticket');
 

@@ -93,6 +93,7 @@ export class FinanceController {
       description: string;
       reference?: string;
       notes?: string;
+      currency?: string;
       entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
     },
     @Req() req: Request,
@@ -103,19 +104,35 @@ export class FinanceController {
     // SUPER_ADMIN with no Membership posted into any business's ledger.
     if (!userId) throw new ForbiddenException('No access to this business');
     await this.ensureAccess(userId, businessId);
-    const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
+    // PR195-PORT (owner PR #195, the General Journal page): a body with no
+    // line list answers 400 instead of throwing 500 on .reduce, and amounts
+    // sent as strings are read as numbers. A currency, when sent, goes to the
+    // door as written: the door posts the business currency and refuses a
+    // manual journal in any other with 400 (D-13, V1-37), rather than this
+    // route re-labelling the amounts. The PR's per-line financialAccountId is
+    // not taken: the door keeps cash per chart row (V1-34).
+    if (!Array.isArray(body?.entries) || body.entries.length < 2) {
+      throw new BadRequestException('Journal entry requires at least 2 lines');
+    }
+    let currency: string | undefined;
+    if (body.currency !== undefined && body.currency !== null && String(body.currency).trim() !== '') {
+      currency = String(body.currency).trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) throw new BadRequestException(`Invalid currency code: ${String(body.currency)}`);
+    }
+    const totalDebit = body.entries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);
     const input: PostingInput = {
       businessId,
       type: 'ADJUSTMENT',
       date: (() => { const d = new Date(body.date); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid date'); return d; })(),
       amount: totalDebit,
+      ...(currency ? { currency } : {}),
       description: body.description,
       reference: body.reference ?? null,
       notes: body.notes ?? null,
       entries: body.entries.map((e) => ({
         accountId: e.accountId,
-        debit: e.debit ?? 0,
-        credit: e.credit ?? 0,
+        debit: Number(e.debit) || 0,
+        credit: Number(e.credit) || 0,
         memo: e.memo,
       })),
       createdById: userId ?? null,

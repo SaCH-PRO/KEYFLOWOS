@@ -5002,7 +5002,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
     manualEquivalentRoute: '/app/payroll',
-    changedEntities: ['payrollRun', 'financialTransaction', 'ledgerEntry', 'financialAccount'],
+    changedEntities: ['payrollRun', 'financialTransaction', 'ledgerEntry'],
     parameters: {
       type: 'object',
       properties: {
