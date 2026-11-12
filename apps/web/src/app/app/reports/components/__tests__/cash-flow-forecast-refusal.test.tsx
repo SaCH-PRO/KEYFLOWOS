@@ -34,8 +34,13 @@ vi.mock("recharts", async () => {
   const h = React.createElement;
   type Props = { children?: React.ReactNode; data?: unknown[]; dataKey?: string };
   const pass = ({ children }: Props) => h(React.Fragment, null, children);
+  // The series only: raw SVG children (the area chart's <defs> gradient) are dropped, as jsdom has no SVG layout.
   const chart = (testId: string) => ({ children, data }: Props) =>
-    h("div", { "data-testid": testId, "data-points": JSON.stringify(data ?? []) }, children);
+    h(
+      "div",
+      { "data-testid": testId, "data-points": JSON.stringify(data ?? []) },
+      React.Children.toArray(children).filter((c) => React.isValidElement(c) && typeof c.type !== "string"),
+    );
   const series = ({ dataKey }: Props) => h("div", { "data-testid": `series-${dataKey}` });
   const none = () => null;
   return {

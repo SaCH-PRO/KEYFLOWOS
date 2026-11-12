@@ -44,13 +44,21 @@ const TREND_CONFIG: Record<string, { icon: typeof TrendingUp; color: string; lab
 export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowForecastViewProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
+  // W11-AI-CASHFLOW-REVENUE (D-57, D-100): the forecast needs revenue read; the server answers 403 otherwise.
+  const [denied, setDenied] = useState(false);
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
       const res = await fetchCashFlowForecast(businessId, 90);
-      if (res.data) setForecast(res.data);
+      if (res.data) {
+        setForecast(res.data);
+        setDenied(false);
+      } else if ((res as { status?: number }).status === 403) {
+        setForecast(null);
+        setDenied(true);
+      }
     } catch {
     } finally {
       setLoading(false);
@@ -58,6 +66,15 @@ export function CashFlowForecastView({ businessId, currency = "TTD" }: CashFlowF
   }, [businessId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // A refusal is final for this member: a notice, no figure and no refresh that asks again (D-57, D-100).
+  if (denied) {
+    return (
+      <div role="status" className="p-4 text-center">
+        <p className="text-xs text-muted-foreground">Cash flow forecast needs revenue access.</p>
+      </div>
+    );
+  }
 
   if (!forecast && !loading) return null;
 

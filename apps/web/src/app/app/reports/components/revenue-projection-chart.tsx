@@ -56,6 +56,9 @@ export function RevenueProjectionChart({
 }: RevenueProjectionChartProps) {
   const [forecast, setForecast] = useState<CashFlowForecast | null>(null);
   const [loading, setLoading] = useState(false);
+  // W11-AI-CASHFLOW-REVENUE (D-57, D-100): the forecast needs revenue read; the server answers 403 otherwise.
+  // The chart then keeps its historical series (from its own props) and draws no projection.
+  const [denied, setDenied] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>("daily");
 
   const load = useCallback(async () => {
@@ -64,7 +67,13 @@ export function RevenueProjectionChart({
     setLoading(true);
     try {
       const res = await fetchCashFlowForecast(bId, 90);
-      if (res.data) setForecast(res.data);
+      if (res.data) {
+        setForecast(res.data);
+        setDenied(false);
+      } else if ((res as { status?: number }).status === 403) {
+        setForecast(null);
+        setDenied(true);
+      }
     } catch {
     } finally {
       setLoading(false);
@@ -74,9 +83,9 @@ export function RevenueProjectionChart({
   useEffect(() => { load(); }, [load]);
 
   const { chartData, milestones, confidence } = useMemo(() => {
-    if (!forecast) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null, historicalDays: 0 };
+    if (!forecast && !denied) return { chartData: [] as ChartPoint[], milestones: [] as { label: string; value: number }[], confidence: null, historicalDays: 0 };
 
-    const dailyRate = forecast.dailyRevenueRate ?? 0;
+    const dailyRate = forecast?.dailyRevenueRate ?? 0;
 
     let hDays = 30;
     if (periodStart && periodEnd) {
@@ -96,13 +105,16 @@ export function RevenueProjectionChart({
       points.push({
         label: dayLabel,
         historical: rev,
-        projected: d >= hDays ? rev : null,
+        projected: forecast && d >= hDays ? rev : null,
       });
     }
     if (points.length > 0 && points[points.length - 1].label !== "Today") {
       const rev = Math.round(historicalDailyRate * hDays * 100) / 100;
-      points.push({ label: "Today", historical: rev, projected: rev });
+      points.push({ label: "Today", historical: rev, projected: forecast ? rev : null });
     }
+
+    // Refused (D-57, D-100): the historical series only, no projection, milestones or confidence.
+    if (!forecast) return { chartData: points, milestones: [] as { label: string; value: number }[], confidence: null, historicalDays: hDays };
 
     for (let d = step; d <= 90; d += step) {
       const projected = currentRevenue + dailyRate * d;
@@ -120,9 +132,9 @@ export function RevenueProjectionChart({
     ];
 
     return { chartData: points, milestones: ms, confidence: computeConfidence(forecast, hDays), historicalDays: hDays };
-  }, [forecast, currentRevenue, periodStart, periodEnd, granularity]);
+  }, [forecast, denied, currentRevenue, periodStart, periodEnd, granularity]);
 
-  if (!forecast && !loading) return null;
+  if (!forecast && !loading && !denied) return null;
 
   return (
     <Card className="p-4 backdrop-blur border-border/60" style={{ background: "hsl(var(--kf-card) / 0.6)" }}>
@@ -156,13 +168,15 @@ export function RevenueProjectionChart({
               </button>
             ))}
           </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 min-w-[44px] min-h-[44px] justify-center"
-          >
-            <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          {!denied && (
+            <button
+              onClick={load}
+              disabled={loading}
+              className="text-[10px] flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 min-w-[44px] min-h-[44px] justify-center"
+            >
+              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -222,21 +236,24 @@ export function RevenueProjectionChart({
                   connectNulls
                   name="historical"
                 />
-                <Line
-                  type="monotone"
-                  dataKey="projected"
-                  stroke="hsl(var(--kf-accent2))"
-                  strokeWidth={2}
-                  strokeDasharray="6 3"
-                  dot={false}
-                  connectNulls
-                  name="projected"
-                />
+                {forecast && (
+                  <Line
+                    type="monotone"
+                    dataKey="projected"
+                    stroke="hsl(var(--kf-accent2))"
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    dot={false}
+                    connectNulls
+                    name="projected"
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>
 
           <div className="flex items-center justify-between pt-3 border-t border-border/30">
+            {denied && <p className="text-[10px] text-muted-foreground">Projections need revenue access.</p>}
             <div className="flex gap-4">
               {milestones.map((m) => (
                 <div key={m.label} className="text-center">

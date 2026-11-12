@@ -26,6 +26,7 @@ import { WorkspaceRecommendationsService } from './workspace-recommendations.ser
 import { ModelGatewayService, AiMode, BudgetCaps, AiProvider } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCommandService } from './key-command.service';
@@ -281,7 +282,15 @@ export class AiController {
     return this.advisor.generateDailyBriefing(businessId, viewer);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * W11-AI-CASHFLOW-REVENUE (review SEC-W10AT-2; owner rulings D-57, D-100, D-104): the forecast is the
+   * business's currentBalance, projectedBalance, daily revenue and expense rates and an alert naming the
+   * outstanding invoices' total, so it needs revenue read, as its commerce twin GET
+   * commerce/businesses/:businessId/cash-flow-forecast does (TS-20e). ModuleScopeGuard takes businessId from
+   * the path and refuses before any read; SUPER_ADMIN and the membership rule are its own (D-104).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/ai/cash-flow-forecast')
   async cashFlowForecast(
     @Param('businessId') businessId: string,
