@@ -651,7 +651,7 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     const steps = await stepsOf(orderId);
     expect(steps.filter((s) => s === 'routes_created'), `routes_created once (${steps.join(' | ')})`).toHaveLength(1);
     expect(steps.filter((s) => s === 'routed'), `routed once (${steps.join(' | ')})`).toHaveLength(1);
-    expect(steps.filter((s) => s === 'placed'), `no routing step wrote placed back (${steps.join(' | ')})`).toHaveLength(1);
+    expect(steps.indexOf('routed') > steps.lastIndexOf('paid'), `routed after the paid marking (${steps.join(' | ')})`).toBe(true);
   });
 
   it('RC-06 (SEAMZ4-CR-2) a paid order cancelled while it is being routed: the cancel waits for the router, then releases the reservation and cancels the route; the order ends cancelled with no RESERVED route and nothing reserved', async () => {
@@ -727,23 +727,25 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     const whileRowHeld = async (orderId: string, change: string, work: () => Promise<string>) => {
       let commit!: () => void;
       const go = new Promise<void>((resolve) => (commit = resolve));
-      let held!: () => void;
-      const isHeld = new Promise<void>((resolve) => (held = resolve));
+      let held!: (pid: number) => void;
+      const isHeld = new Promise<number>((resolve) => (held = resolve));
       const holder = db.$transaction(
         async (tx: any) => {
           await tx.$executeRawUnsafe(`UPDATE marketplace_orders SET metadata = ${change} WHERE id = $1`, orderId);
-          held();
+          const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
+          held(pid);
           await go;
         },
         { timeout: 20_000, maxWait: 5_000 },
       );
-      await isHeld;
+      const holderPid = await isHeld;
       const answer = work();
-      // Commit once the token write is waiting for the row (or after a window: a reader that never waits).
+      // Commit once the token write waits behind this transaction's row lock (or after a window: a write that never
+      // waits).
       for (let i = 0; i < 40; i += 1) {
         const [{ waiting }] = await db.$queryRawUnsafe(
-          `SELECT COUNT(*)::int AS waiting FROM pg_stat_activity
-            WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%marketplace_orders%' AND pid <> pg_backend_pid()`,
+          'SELECT COUNT(*)::int AS waiting FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))',
+          holderPid,
         );
         if (waiting > 0) break;
         await sleep(50);
