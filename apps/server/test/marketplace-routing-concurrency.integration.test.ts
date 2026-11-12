@@ -166,6 +166,28 @@
  *         updates it; the 409 is left for a pair a row the business does not
  *         read holds (a planted row, D-137; RC-23).
  *
+ * W11-PO-LINES (owner ruling D-136; F-33, F-40): a purchase order's lines were
+ * stored as sent (MarketplaceService.createPurchaseOrder, body: any; the route
+ * and the KEY tool inventory_create_purchase_order) and read at receipt with
+ * their ids coerced by String() for the ownership check, then passed raw to
+ * the lock and to Prisma. Each case below was red at 00532f2f:
+ *
+ *   RC-25 (F-33) lines naming another business's product or warehouse were
+ *         stored on a DRAFT purchase order, refused only at receipt (RC-10).
+ *         Now refused at create with 400 naming the line (the receipt's
+ *         wording), nothing saved.
+ *   RC-26 (F-33) malformed bodies (items not a list, a line not an object, an
+ *         id not a non-empty string, a quantity that is not a number, a
+ *         product line whose quantity is not a positive whole number, D-136,
+ *         a price or cost that is not a number of 0 or more) were stored, or
+ *         answered 500. Now 400 naming the line, nothing saved; free-text
+ *         lines, own products and a body with no items keep today's totals.
+ *   RC-27 (F-40) legacy stored lines answered 500 at receipt (an id that is a
+ *         one-element array passes String(); digit text added to an integer;
+ *         a text cost on a new row), stored a fraction truncated, or skipped a
+ *         word as quantity. Now a malformed id or stock quantity is 400 with
+ *         nothing received, and digit text is received as that number (D-136).
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -1776,7 +1798,177 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
   );
-  it.todo(
-    'Z4RV-SEC-1 follow-up (not this packet): POST .../purchase-orders (MarketplaceService.createPurchaseOrder, body: any) stores lines naming another business\'s product or warehouse as sent; they are refused only when the purchase order is received (RC-10)',
+});
+
+/** POST .../purchase-orders as the route runs it: its handler (MarketplaceController.createPurchaseOrder), with the body as sent. */
+const createPurchaseOrderByRoute = (body: unknown) => Promise.resolve().then(() => controller.createPurchaseOrder(ID.biz, body));
+/** The suite's purchase orders, whatever their business. */
+const purchaseOrderCount = async () => {
+  const [{ n }]: any[] = await db.$queryRawUnsafe(`SELECT COUNT(*)::int AS n FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  return n as number;
+};
+/**
+ * A purchase order create's answer as the route gives it ('created <status> <subtotal>/<total>', else the HTTP status
+ * and message as routeAnswer reads it), how many purchase orders it wrote, and the lines it stored.
+ */
+async function purchaseOrderCreate(body: unknown) {
+  const before = await purchaseOrderCount();
+  let stored: unknown;
+  const answer = await routeAnswer(
+    createPurchaseOrderByRoute(body).then((po: any) => {
+      stored = po?.items;
+      return `created ${po?.status} ${po?.subtotal}/${po?.total}`;
+    }),
   );
+  return { answer, purchaseOrdersWritten: (await purchaseOrderCount()) - before, stored };
+}
+
+describe('W11-PO-LINES purchase order lines checked at create and at receipt (D-136; real database)', () => {
+  const supplier = { supplierName: 'V18R Supplier' };
+  const ownLine = { productId: ID.productA, name: 'A', quantity: 3, unitPrice: 4, unitCost: 4, total: 12, warehouseId: ID.warehouse };
+
+  it("RC-25 (W11-PO-LINES; F-33, Z4RV-SEC-1 at create) POST .../purchase-orders with a line naming another business's product (with no warehouse, in its warehouse, or in this business's), a line into its warehouse (a free-text line, or this business's product), or this business's line then another business's product, is refused with 400 naming the line and no id, and no purchase order is saved", async () => {
+    const foreign = (n: number) => `400: Purchase order line ${n} names a product or a warehouse that is not this business's; nothing was saved`;
+    const probes: Array<[name: string, items: unknown[], answer: string]> = [
+      ["B's product, no warehouse", [{ productId: ID.productXB, name: 'XB', quantity: 2, unitPrice: 1, unitCost: 1, total: 2 }], foreign(1)],
+      [
+        "B's product in B's warehouse (the review's probe)",
+        [{ productId: ID.productXB, name: 'XB', quantity: 1000, unitPrice: 0.01, unitCost: 0.01, total: 10, warehouseId: ID.warehouseB }],
+        foreign(1),
+      ],
+      ["B's unstocked product in this business's warehouse", [{ productId: ID.productXB2, name: 'XB2', quantity: 1, unitPrice: 1, warehouseId: ID.warehouse }], foreign(1)],
+      ["a free-text line into B's warehouse", [{ name: 'Freight', quantity: 1, unitPrice: 5, warehouseId: ID.warehouseB }], foreign(1)],
+      ["this business's product into B's warehouse", [{ ...ownLine, warehouseId: ID.warehouseB }], foreign(1)],
+      [
+        "this business's line first, then B's product",
+        [ownLine, { productId: ID.productXB, name: 'XB', quantity: 5, unitPrice: 1, unitCost: 1, total: 5, warehouseId: ID.warehouseB }],
+        foreign(2),
+      ],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, items, answer] of probes) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate({ ...supplier, items });
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: 0 };
+    }
+    // At 00532f2f each was saved: 'created DRAFT ...', 1 purchase order written (refused only at receipt, RC-10).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-26 (W11-PO-LINES; F-33, D-136 whole stock quantities) POST .../purchase-orders with items not a list, a line not an object, a productId or warehouseId that is not a non-empty string, a quantity that is not a number, a product line whose quantity is not a positive whole number, or a price or cost that is not a number of 0 or more, is refused with 400 naming the line and nothing is saved; a free-text line, this business's product with and without a warehouse, and a body with no items are created with today's subtotal and total", async () => {
+    const list = '400: Purchase order items must be a list of lines';
+    const line = (n: number, what: string) => `400: Purchase order line ${n} ${what}`;
+    const object = (n: number) => line(n, 'must be an object');
+    const productId = (n: number) => line(n, 'productId must be a non-empty string');
+    const warehouseId = (n: number) => line(n, 'warehouseId must be a non-empty string');
+    const numeric = (n: number, field = 'quantity') => line(n, `${field} must be a number`);
+    const whole = (n: number, field = 'quantity') => line(n, `${field} must be a whole number above 0 on a product line`);
+    const money = (n: number, field: string) => line(n, `${field} must be a number of 0 or more`);
+    const refusals: Array<[name: string, body: Record<string, unknown>, answer: string]> = [
+      ['items an object', { ...supplier, items: { productId: ID.productA, quantity: 1 } }, list],
+      ['items a string', { ...supplier, items: 'abc' }, list],
+      ['a line null', { ...supplier, items: [null] }, object(1)],
+      ['a line a number (after a good line)', { ...supplier, items: [ownLine, 5] }, object(2)],
+      ['a line an array', { ...supplier, items: [[ownLine]] }, object(1)],
+      ['productId a number', { ...supplier, items: [{ ...ownLine, productId: 42 }] }, productId(1)],
+      ["productId an array of this business's product", { ...supplier, items: [{ ...ownLine, productId: [ID.productA] }] }, productId(1)],
+      ['productId a filter object', { ...supplier, items: [{ ...ownLine, productId: { not: '' } }] }, productId(1)],
+      ["warehouseId an array of this business's warehouse", { ...supplier, items: [{ ...ownLine, warehouseId: [ID.warehouse] }] }, warehouseId(1)],
+      ["a product line's quantity as text", { ...supplier, items: [{ ...ownLine, quantity: '5' }] }, numeric(1)],
+      ["a product line's quantity a fraction", { ...supplier, items: [{ ...ownLine, quantity: 1.5 }] }, whole(1)],
+      ["a product line's quantity 0", { ...supplier, items: [{ ...ownLine, quantity: 0 }] }, whole(1)],
+      ["a product line's quantity negative", { ...supplier, items: [{ ...ownLine, quantity: -1 }] }, whole(1)],
+      ["a product line's quantity an object", { ...supplier, items: [{ ...ownLine, quantity: {} }] }, numeric(1)],
+      ["a product line with no quantity", { ...supplier, items: [{ productId: ID.productA, name: 'A', unitPrice: 4 }] }, whole(1)],
+      ["a product line's receivedQuantity a fraction", { ...supplier, items: [{ ...ownLine, receivedQuantity: 2.5 }] }, whole(1, 'receivedQuantity')],
+      ['a free-text line quantity as a word', { ...supplier, items: [{ name: 'Freight', quantity: 'two', unitPrice: 5 }] }, numeric(1)],
+      ['unitCost a word', { ...supplier, items: [{ ...ownLine, unitCost: 'x' }] }, money(1, 'unitCost')],
+      ['unitPrice negative', { ...supplier, items: [{ ...ownLine, unitPrice: -4 }] }, money(1, 'unitPrice')],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    for (const [name, body, answer] of refusals) {
+      const { stored: _stored, ...outcome } = await purchaseOrderCreate(body);
+      outcomes[name] = outcome;
+      expected[name] = { answer, purchaseOrdersWritten: 0 };
+    }
+    const freeText = [{ name: 'Freight', quantity: 2, unitPrice: 7.5, total: 15 }];
+    const ownNoWarehouse = [{ productId: ID.productA, name: 'A', quantity: 2, unitPrice: 2.5, total: 5 }];
+    const controls: Array<[name: string, body: Record<string, unknown>, answer: string, stored: unknown]> = [
+      ['a free-text line with no productId, shipping and tax', { ...supplier, items: freeText, shippingCost: 5, taxAmount: 1 }, 'created DRAFT 15/21', freeText],
+      ['a free-text line with no quantity (counted as 1)', { ...supplier, items: [{ name: 'Setup', unitPrice: 9 }] }, 'created DRAFT 9/9', [{ name: 'Setup', unitPrice: 9 }]],
+      ["this business's product into its warehouse", { ...supplier, items: [ownLine] }, 'created DRAFT 12/12', [ownLine]],
+      ["this business's product with no warehouse", { ...supplier, items: ownNoWarehouse }, 'created DRAFT 5/5', ownNoWarehouse],
+      ["this business's product and a free-text line", { ...supplier, items: [ownLine, ...freeText] }, 'created DRAFT 27/27', [ownLine, ...freeText]],
+      ['a body with no items', { ...supplier }, 'created DRAFT 0/0', []],
+    ];
+    for (const [name, body, answer, stored] of controls) {
+      outcomes[name] = await purchaseOrderCreate(body);
+      expected[name] = { answer, purchaseOrdersWritten: 1, stored };
+    }
+    // At 00532f2f items an object and a null line answered 500 (TypeError), a quantity that is a word or an object 500 (a
+    // NaN subtotal, PrismaClientValidationError), and every other refusal was saved as DRAFT (a negative unitPrice with a
+    // negative total). The controls were created as they are now.
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(Object.fromEntries(refusals.map(([name]) => [name, outcomes[name]]))), "no refusal names an id of the suite's").not.toContain(P);
+  });
+
+  it("RC-27 (W11-PO-LINES; F-40, D-136 digit text received as that number) a legacy SHIPPED purchase order received with a line whose productId or warehouseId is an array, or whose quantity is a word or a fraction, is refused with 400 naming the line and stays SHIPPED with nothing written; a quantity or receivedQuantity stored as digit text is received as that number, and a cost stored as digit text on a new stock row is its cost; never a 500", async () => {
+    const malformed = (n: number) => `400: Purchase order line ${n} is malformed; nothing was received`;
+    const probes: Array<[name: string, items: unknown[], answer: string]> = [
+      ["productId an array of this business's product", [{ ...ownLine, productId: [ID.productA] }], malformed(1)],
+      ["warehouseId an array of this business's warehouse (after a good line)", [ownLine, { ...ownLine, productId: ID.productB, warehouseId: [ID.warehouse] }], malformed(2)],
+      ['quantity a word', [{ ...ownLine, quantity: 'abc' }], malformed(1)],
+      ['quantity a fraction', [{ ...ownLine, quantity: 1.5 }], malformed(1)],
+      ['quantity a fraction as text', [{ ...ownLine, quantity: '1.5' }], malformed(1)],
+      ["quantity '5' (digit text)", [{ productId: ID.productA, name: 'A', quantity: '5', unitPrice: 0, warehouseId: ID.warehouse }], 'committed'],
+      ["receivedQuantity '2' (digit text) of 5 ordered", [{ productId: ID.productA, name: 'A', quantity: 5, receivedQuantity: '2', warehouseId: ID.warehouse }], 'committed'],
+      ["unitCost '3' (digit text) on a new stock row", [{ productId: ID.productU, name: 'U', quantity: 4, unitPrice: 3, unitCost: '3', warehouseId: ID.warehouse2 }], 'committed'],
+    ];
+    const outcomes: Record<string, unknown> = {};
+    const expected: Record<string, unknown> = {};
+    const statuses: Record<string, string> = {};
+    const stockAfter: Record<string, unknown> = {};
+    const seededA = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    try {
+      for (const [name, items, answer] of probes) {
+        await resetBusinessStock();
+        const po = await shippedPurchaseOrder(items);
+        outcomes[name] = await answerAndWrites(() =>
+          routeAnswer(routing.advancePurchaseOrderStatus(ID.biz, po.id, 'RECEIVED').then((r: any) => ({ success: r?.status === 'RECEIVED' }))),
+        );
+        expected[name] = answer === 'committed' ? { answer, stockRowsWritten: 1, movementsWritten: 1 } : { answer, stockRowsWritten: 0, movementsWritten: 0 };
+        statuses[name] = (await db.purchaseOrder.findUnique({ where: { id: po.id } })).status;
+        const rows = await db.inventoryStock.findMany({
+          where: { businessId: ID.biz, productId: { in: [ID.productA, ID.productB, ID.productU] }, warehouseId: { in: [ID.warehouse, ID.warehouse2] } },
+          orderBy: { id: 'asc' },
+        });
+        stockAfter[name] = rows.map((r: any) => `${r.productId}@${r.warehouseId}:${r.quantity}/${r.reserved}/${r.costPerUnit}`);
+      }
+    } finally {
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { costPerUnit: seededA.costPerUnit } });
+      await resetBusinessStock();
+    }
+    // At 00532f2f the arrays, quantity '1.5' and '5', receivedQuantity '2' and unitCost '3' answered 500
+    // (PrismaClientValidationError; each rolled back, the purchase order left SHIPPED), quantity 'abc' was skipped (the
+    // purchase order RECEIVED with nothing added), and quantity 1.5 was received (one row and one movement written).
+    expect(outcomes).toEqual(expected);
+    expect(JSON.stringify(outcomes), 'never a 500').not.toContain('500');
+    expect(JSON.stringify(outcomes), "no answer names an id of the suite's").not.toContain(P);
+    expect(statuses).toEqual(Object.fromEntries(probes.map(([name, , answer]) => [name, answer === 'committed' ? 'RECEIVED' : 'SHIPPED'])));
+    const seeded = [`${ID.productA}@${ID.warehouse}:${IN_STOCK}/0/${seededA.costPerUnit}`, `${ID.productB}@${ID.warehouse}:${IN_STOCK}/0/null`];
+    const withA = (quantity: number) => [`${ID.productA}@${ID.warehouse}:${quantity}/0/${seededA.costPerUnit}`, seeded[1]];
+    expect(stockAfter).toEqual({
+      "productId an array of this business's product": seeded,
+      "warehouseId an array of this business's warehouse (after a good line)": seeded,
+      'quantity a word': seeded,
+      'quantity a fraction': seeded,
+      'quantity a fraction as text': seeded,
+      "quantity '5' (digit text)": withA(IN_STOCK + 5),
+      "receivedQuantity '2' (digit text) of 5 ordered": withA(IN_STOCK + 2),
+      "unitCost '3' (digit text) on a new stock row": [...seeded, `${ID.productU}@${ID.warehouse2}:4/0/3`],
+    });
+  });
 });
