@@ -26,6 +26,12 @@ import {
 } from '../../core/connectors/implementations/wipay-merchant';
 import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
 import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
+import {
+  normalizeStorefrontMethod,
+  paypalConfigured,
+  storefrontMethodNotOffered,
+  stripeConfigured,
+} from '../payments/storefront-checkout-methods';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -390,34 +396,24 @@ export class StoreOrderService {
       input.shippingInfo?.zoneId,
     );
 
+    // W11-STORE-CHECKOUT-METHOD-GATE (F-21): the method compared trimmed and
+    // upper-cased (normalizeStorefrontMethod): ' PAYPAL' on a TTD cart passed
+    // the checks below untrimmed and was refused by createStorePayment only
+    // after the order, its retry slot and its promo use had committed. Unknown
+    // methods are not refused here: only the public checkout (SiteController.
+    // publicCheckout) starts a provider session and refuses them, and direct
+    // callers place orders under their own method names.
+    const method = normalizeStorefrontMethod(input.paymentMethod);
+
     // D-69 (trial-N recheck G6PUB-RC1-1): WiPay takes TTD only. A WiPay
     // checkout of an order in another currency is refused here, before the
     // order is written and its promo use counted. createStorePayment refuses
     // it too, but only after the order had committed, so every such checkout
     // left an UNPAID order behind.
-    if ((input.paymentMethod ?? '').toUpperCase() === 'WIPAY') {
-      if (!wipayTakesCurrency(totals.currency)) {
-        throw new BadRequestException(
-          `WiPay takes ${WIPAY_CURRENCY} only: this order is in ${(totals.currency ?? '').toUpperCase() || 'no currency'}`,
-        );
-      }
-      // G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): nor for a business
-      // with no WiPay merchant pair (the one rule the gateway list and the
-      // checkouts read, resolveWipayMerchant). createStorePayment refused it
-      // too, but only after the order and its promo use had committed, so every
-      // attempt (and every retry) left another UNPAID order.
-      // W10-WIPAY-KEY (D-105): the pair is the business's own; a store with no
-      // WiPay key of its own (it used to check out into the platform's account)
-      // is refused with code WIPAY_KEY_REQUIRED, before anything is written.
-      const business = await this.prisma.client.business.findUnique({
-        where: { id: input.businessId },
-        select: { metaData: true },
-      });
-      const merchant = resolveWipayMerchant(business?.metaData);
-      if (!wipayMerchantComplete(merchant)) {
-        const message = 'WiPay is not configured for this business: choose another payment method';
-        throw new BadRequestException(merchant.apiKey ? message : { code: WIPAY_KEY_REQUIRED, message });
-      }
+    if (method === 'WIPAY' && !wipayTakesCurrency(totals.currency)) {
+      throw new BadRequestException(
+        `WiPay takes ${WIPAY_CURRENCY} only: this order is in ${(totals.currency ?? '').toUpperCase() || 'no currency'}`,
+      );
     }
 
     // W10-PAYPAL-CURRENCY review (SEC-W10PPC-1; owner ruling D-106): a PayPal
@@ -427,8 +423,44 @@ export class StoreOrderService {
     // but only after the order had committed, so every attempt (and every
     // retry) left another UNPAID order and used up a limited promo code. Same
     // 400 body as createStorePayment's (paypalCurrencyRefusal).
-    if ((input.paymentMethod ?? '').toUpperCase() === 'PAYPAL' && !paypalTakesCurrency(totals.currency)) {
+    if (method === 'PAYPAL' && !paypalTakesCurrency(totals.currency)) {
       throw new BadRequestException(paypalCurrencyRefusal(totals.currency, 'order'));
+    }
+
+    if (method === 'WIPAY' || method === 'PAYPAL' || method === 'STRIPE') {
+      // The business settings, read once for the provider the checkout names.
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: input.businessId },
+        select: { metaData: true },
+      });
+      const meta = business?.metaData;
+      if (method === 'WIPAY') {
+        // G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): nor for a business
+        // with no WiPay merchant pair (the one rule the gateway list and the
+        // checkouts read, resolveWipayMerchant). createStorePayment refused it
+        // too, but only after the order and its promo use had committed, so every
+        // attempt (and every retry) left another UNPAID order.
+        // W10-WIPAY-KEY (D-105): the pair is the business's own; a store with no
+        // WiPay key of its own (it used to check out into the platform's account)
+        // is refused with code WIPAY_KEY_REQUIRED, before anything is written.
+        const merchant = resolveWipayMerchant(meta);
+        if (!wipayMerchantComplete(merchant)) {
+          const message = 'WiPay is not configured for this business: choose another payment method';
+          throw new BadRequestException(merchant.apiKey ? message : { code: WIPAY_KEY_REQUIRED, message });
+        }
+      }
+      // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106: the payer sees which
+      // methods can pay it): PayPal and Stripe only where the storefront's
+      // gateway list offers them (getAvailableGateways reads the same
+      // paypalConfigured / stripeConfigured). A store with neither its own nor
+      // the platform's PayPal was a 500 from createStorePayment, and one with no
+      // Stripe a 400, both after the order and its promo use had committed.
+      if (method === 'PAYPAL' && !paypalConfigured(meta)) {
+        throw new BadRequestException(storefrontMethodNotOffered('PAYPAL'));
+      }
+      if (method === 'STRIPE' && !stripeConfigured(meta)) {
+        throw new BadRequestException(storefrontMethodNotOffered('STRIPE'));
+      }
     }
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;

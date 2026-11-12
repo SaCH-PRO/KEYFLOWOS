@@ -30,6 +30,16 @@
  * an omitted, blank or mask-shaped value keeps the stored one; an explicit
  * null removes it. The write stays OWNER only (owner ruling D-11).
  *
+ * W11-WIPAY-SANDBOX-KEY-WRITE (owner ruling D-105, review SEC-W10WK-1 part 2;
+ * PC-21b of test/payments-provider-callbacks.integration.test.ts, live here):
+ * WiPay's public sandbox key ('123') is no key wherever it is stored
+ * (wipay-merchant.ts). RED-BEFORE (fb00af1c): the owner's PATCH with
+ * metaData.wipayApiKey ' 123 ' answered 200 and stored '123', and a Business
+ * read answered it {configured:true}, so the payments tab showed WiPay
+ * connected while the server never offered it. GREEN-AFTER: the PATCH is
+ * refused 400 WIPAY_SANDBOX_KEY_REFUSED with nothing written ([SEC2c-W08]),
+ * and a stored sandbox key reads as absent, not configured ([SEC2c-R06]).
+ *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real IdentityController, IdentityService, PrismaService, AuthGuard and
  * BusinessGuard against the database at DATABASE_URL. The one stand-in on the
@@ -345,6 +355,58 @@ describe('R0-SEC2c Business reads answer each payment secret as a {configured} m
     const meta = await storedMeta(ID.bizP);
     for (const k of SECRET_KEYS) expect(meta[k]).toBe(SECRET[k]);
   });
+
+  // W11-WIPAY-SANDBOX-KEY-WRITE (owner ruling D-105, review SEC-W10WK-1 part 2,
+  // PC-21b): WiPay's public sandbox key ('123', WIPAY_PUBLIC_SANDBOX_KEY) is no
+  // key wherever it is stored (resolveWipayMerchant reads it as unset), so a
+  // Business read must not answer it as {configured:true}: the payments tab
+  // showed WiPay connected while the server never offered it.
+  it("[SEC2c-R06] RED-BEFORE (W11-WIPAY-SANDBOX-KEY-WRITE, D-105, SEC-W10WK-1): a stored wipayApiKey that is WiPay's public sandbox key ('123', ' 123 ' or the number 123, seeded by raw SQL) reads as absent (not configured) on GET /identity/businesses/:businessId to every reader (the owner, the co-owner, ADMIN, STAFF, SUPER_ADMIN) and on GET /identity/businesses to every member; the other three secrets still read {configured:true}, wipayAccountNumber and the other settings are kept, a near-miss key ('1234') still reads {configured:true}, and the read leaves the stored row unchanged", async () => {
+    const readers = [ID.owner, ID.coOwner, ID.admin, ID.staff, ID.staffW, ID.superAdmin];
+    // GET /identity/businesses lists the reader's memberships: SUPER_ADMIN has none, so it reads bizP by id only.
+    const members = [ID.owner, ID.coOwner, ID.admin, ID.staff, ID.staffW];
+    const sandbox: Array<[string, unknown]> = [["'123'", '123'], ["' 123 '", ' 123 '], ['the number 123', 123]];
+    // The census: which stored sandbox key which reader received as a wipayApiKey entry.
+    const census: Record<string, string[]> = {};
+    try {
+      for (const [label, stored] of sandbox) {
+        await reset(ID.bizP, { ...SECRET, ...PUBLIC_META, wipayApiKey: stored });
+        const before = await businessRowText(ID.bizP);
+        const reads: Array<[string, any]> = [];
+        for (const actor of readers) {
+          const res = await getBusiness(actor, ID.bizP);
+          expect(res.status, `${label}: ${actor} GET bizP: ${JSON.stringify(res.body)}`).toBe(200);
+          reads.push([`GET ${actor.slice(P.length)}`, res.body]);
+        }
+        for (const actor of members) {
+          const res = await listBusinesses(actor);
+          expect(res.status, `${label}: ${actor} list`).toBe(200);
+          reads.push([`list ${actor.slice(P.length)}`, res.body.find((b: any) => b.id === ID.bizP)]);
+        }
+        for (const [who, business] of reads) {
+          if (Object.prototype.hasOwnProperty.call(business?.metaData ?? {}, 'wipayApiKey')) {
+            (census[label] ??= []).push(who);
+          }
+          for (const k of SECRET_KEYS.filter((s) => s !== 'wipayApiKey')) {
+            expect(business?.metaData?.[k], `${label}: ${who} metaData.${k}`).toEqual(MASKED);
+          }
+          for (const [k, v] of Object.entries(PUBLIC_META)) expect(business?.metaData?.[k], `${label}: ${who} metaData.${k} kept`).toEqual(v);
+          expect(leakedKeys(business), `${label}: ${who} secret values`).toEqual([]);
+        }
+        expect(await businessRowText(ID.bizP), `${label}: the reads leave the Business row byte-identical`).toBe(before);
+        expect((await storedMeta(ID.bizP)).wipayApiKey, `${label}: the stored value is not rewritten by a read`).toEqual(stored);
+      }
+      expect(census, 'stored sandbox key -> readers answered a wipayApiKey entry').toEqual({});
+
+      // Control: only the sandbox key itself reads as absent; a near miss is a key.
+      await reset(ID.bizP, { ...SECRET, ...PUBLIC_META, wipayApiKey: '1234' });
+      const near = await getBusiness(ID.owner, ID.bizP);
+      expect(near.status).toBe(200);
+      expect(near.body.metaData.wipayApiKey, "a stored '1234'").toEqual(MASKED);
+    } finally {
+      await reset(ID.bizP);
+    }
+  });
 });
 
 describe('R0-SEC2c PATCH /identity/businesses/:businessId writes payment secrets write-only (OWNER only, D-11)', () => {
@@ -473,6 +535,79 @@ describe('R0-SEC2c PATCH /identity/businesses/:businessId writes payment secrets
     );
     expect(out).toBeInstanceOf(UpdateBusinessDtoClass);
     expect(out.metaData).toEqual({ stripeSecretKey: 'sk_live_new', paypalClientSecret: null });
+  });
+
+  // W11-WIPAY-SANDBOX-KEY-WRITE (owner ruling D-105, review SEC-W10WK-1 part 2,
+  // PC-21b): applyPaymentSecretWrites stored any non-blank string, so the
+  // owner's save of WiPay's public sandbox key ('123') succeeded silently while
+  // every money reader treats it as no key. The whole PATCH is refused before
+  // anything is read or written.
+  it("[SEC2c-W08] RED-BEFORE (W11-WIPAY-SANDBOX-KEY-WRITE, D-105, SEC-W10WK-1): the owner's PATCH naming WiPay's public sandbox key as metaData.wipayApiKey ('123' or ' 123 '), alone or beside a new stripeSecretKey, is refused 400 WIPAY_SANDBOX_KEY_REFUSED and writes nothing (the Business row byte-identical, the new stripeSecretKey not stored); a real key is stored trimmed, null clears a stored '123', a numeric 123 keeps the stored key (SEC2c-W02) and a STAFF member's or another business owner's PATCH is still refused 403 first (D-11)", async () => {
+    const NEW_STRIPE = `sk_live_${P}W08_NOT_STORED_c4`;
+    const MESSAGE = "WiPay's public sandbox key is not a WiPay API key: enter the API key of your own WiPay account.";
+    const refused: Array<[string, Record<string, unknown>]> = [
+      ["'123' alone", { metaData: { wipayApiKey: '123' } }],
+      ["' 123 ' alone", { metaData: { wipayApiKey: ' 123 ' } }],
+      ["'123' beside a new stripeSecretKey", { metaData: { stripeSecretKey: NEW_STRIPE, wipayApiKey: '123' } }],
+      ["' 123 ' beside a new stripeSecretKey, a profile field and another metaData key", {
+        tagline: `${P}w08-tagline`,
+        metaData: { stripeSecretKey: NEW_STRIPE, wipayApiKey: ' 123 ', bankName: `${P}w08-bank` },
+      }],
+    ];
+    const answered: Record<string, string> = {};
+    const unchanged: Record<string, boolean> = {};
+    const stored: Record<string, boolean> = {};
+    try {
+      for (const [label, body] of refused) {
+        await reset(ID.bizP);
+        const before = await businessRowText(ID.bizP);
+        const res = await patchBusiness(ID.owner, ID.bizP, body);
+        answered[label] = `${res.status} ${res.body?.code ?? ''}`.trim();
+        unchanged[label] = (await businessRowText(ID.bizP)) === before;
+        expect(leakedKeys(res.body), `${label}: secret values`).toEqual([]);
+        expect(JSON.stringify(res.body).includes(NEW_STRIPE), `${label}: the new stripeSecretKey in the body`).toBe(false);
+        if (res.status === 400) expect(res.body?.message, `${label}: refusal message`).toBe(MESSAGE);
+        const meta = await storedMeta(ID.bizP);
+        stored[label] = meta.wipayApiKey === SECRET.wipayApiKey && meta.stripeSecretKey === SECRET.stripeSecretKey;
+      }
+      expect(answered, 'owner PATCH -> answer').toEqual(Object.fromEntries(refused.map(([l]) => [l, '400 WIPAY_SANDBOX_KEY_REFUSED'])));
+      expect(unchanged, 'owner PATCH -> Business row byte-identical').toEqual(Object.fromEntries(refused.map(([l]) => [l, true])));
+      expect(stored, 'owner PATCH -> stored wipayApiKey and stripeSecretKey kept').toEqual(Object.fromEntries(refused.map(([l]) => [l, true])));
+
+      // Control: the owner gate (D-11) still answers first: 403, not the 400.
+      await reset(ID.bizP);
+      for (const actor of [ID.staff, ID.outsider]) {
+        const before = await businessRowText(ID.bizP);
+        const res = await patchBusiness(actor, ID.bizP, { metaData: { wipayApiKey: '123' } });
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(await businessRowText(ID.bizP), `${actor}: the Business row byte-identical`).toBe(before);
+      }
+
+      // Control: a real key (and a near miss of the sandbox key) is stored trimmed.
+      for (const key of [`${P}WIPAY_REAL_W08_kq`, '1234']) {
+        await reset(ID.bizP);
+        const res = await patchBusiness(ID.owner, ID.bizP, { metaData: { wipayApiKey: `  ${key}  ` } });
+        expect(res.status, `${key}: ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body.metaData.wipayApiKey, `${key}: response`).toEqual(MASKED);
+        expect((await storedMeta(ID.bizP)).wipayApiKey, `${key}: stored`).toBe(key);
+      }
+
+      // Control: null still clears, so an owner can remove a stored '123'.
+      await reset(ID.bizP, { ...SECRET, ...PUBLIC_META, wipayApiKey: '123' });
+      const cleared = await patchBusiness(ID.owner, ID.bizP, { metaData: { wipayApiKey: null } });
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      const afterClear = await storedMeta(ID.bizP);
+      expect(Object.prototype.hasOwnProperty.call(afterClear, 'wipayApiKey'), 'the stored sandbox key cleared').toBe(false);
+      for (const k of SECRET_KEYS.filter((s) => s !== 'wipayApiKey')) expect(afterClear[k], `stored ${k}`).toBe(SECRET[k]);
+
+      // Control (SEC2c-W02 contract): a non-string is no new secret, the stored key stays.
+      await reset(ID.bizP);
+      const numeric = await patchBusiness(ID.owner, ID.bizP, { metaData: { wipayApiKey: 123 } });
+      expect(numeric.status, JSON.stringify(numeric.body)).toBe(200);
+      expect((await storedMeta(ID.bizP)).wipayApiKey, 'stored wipayApiKey after a numeric 123').toBe(SECRET.wipayApiKey);
+    } finally {
+      await reset(ID.bizP);
+    }
   });
 });
 

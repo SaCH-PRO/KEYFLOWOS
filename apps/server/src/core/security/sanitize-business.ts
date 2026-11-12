@@ -9,6 +9,8 @@
  * must NOT depend on sanitized service results.
  */
 
+import { isWipayPublicSandboxKey } from '../connectors/implementations/wipay-merchant';
+
 /** OAuth token columns stored on Business that must never leave the boundary. */
 export const BUSINESS_SECRET_FIELDS = [
   'gmailAccessToken',
@@ -99,6 +101,21 @@ export function isStoredSecret(value: unknown): boolean {
   return typeof value !== 'string' || value.trim() !== '';
 }
 
+/**
+ * W11-WIPAY-SANDBOX-KEY-WRITE (owner ruling D-105, review SEC-W10WK-1 part 2):
+ * whether a stored metaData.wipayApiKey is WiPay's public sandbox key, read as
+ * the WiPay merchant reads it (a string compared trimmed, or a finite number
+ * stringified). That key is no key wherever it is stored (resolveWipayMerchant
+ * reads it as unset: WiPay is not offered), so a Business read leaves it out
+ * (not configured), as it does a blank one, and the payments tab does not show
+ * WiPay connected. Every other stored WiPay key still reads {configured:true}.
+ */
+function isStoredWipaySandboxKey(value: unknown): boolean {
+  if (typeof value === 'string') return isWipayPublicSandboxKey(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return isWipayPublicSandboxKey(String(value));
+  return false;
+}
+
 /** metaData with its whatsapp entry, payment secrets and SEO connections masked; any other value is returned as it is. */
 function maskMetaData(metaData: unknown): unknown {
   if (metaData === null || typeof metaData !== 'object' || Array.isArray(metaData)) return metaData;
@@ -111,7 +128,9 @@ function maskMetaData(metaData: unknown): unknown {
   }
   for (const key of MASKED_SECRET_META_KEYS) {
     if (!has(key)) continue;
-    if (isStoredSecret(meta[key])) {
+    if (key === 'wipayApiKey' && isStoredWipaySandboxKey(meta[key])) {
+      delete meta[key];
+    } else if (isStoredSecret(meta[key])) {
       const masked: MaskedSecretMeta = { configured: true };
       meta[key] = masked;
     } else {

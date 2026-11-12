@@ -141,8 +141,13 @@
  *   PC-21  review SEC-W10WK-1: WiPay's public sandbox key ('123') saved as a
  *          business's own key is no key: WiPay is not offered, its checkouts
  *          are refused WIPAY_KEY_REQUIRED and a sandbox-keyed success settles
- *          nothing (PC-21b, the refusal at the payment-secret write, is a
- *          todo: identity.service.ts is outside this packet's write set)
+ *          nothing
+ *   PC-21b W11-WIPAY-SANDBOX-KEY-WRITE (D-105, SEC-W10WK-1 part 2): was a todo
+ *          here; now live in test/payment-secrets-write-only.integration.test.ts
+ *          as [SEC2c-W08] (the owner's profile PATCH naming the sandbox key as
+ *          metaData.wipayApiKey is refused 400 WIPAY_SANDBOX_KEY_REFUSED, nothing
+ *          written) and [SEC2c-R06] (a stored sandbox key reads as absent, not
+ *          configured, on every Business read)
  *
  * W10-PAYPAL-CURRENCY (owner ruling D-106: PayPal is not offered for an
  * invoice or order in a currency PayPal does not support, TTD, JMD, BBD, GYD,
@@ -1825,7 +1830,6 @@ describe("W10-WIPAY-KEY: WiPay only with the business's own key (D-105)", () => 
     expect(await db.notification.count({ where: { businessId: biz } }), 'no refusal notice: no proof verified').toBe(0);
   });
 
-  it.todo(
-    "PC-21b (W10-WIPAY-KEY review SEC-W10WK-1, D-105): the owner's payment-secret write (the business profile PATCH, IdentityService applyPaymentSecretWrites) refuses WiPay's public sandbox key as the business's WiPay API key. Not in the W10-WIPAY-KEY write set (identity.service.ts); a stored '123' is already inert, read as no key everywhere (PC-21)",
-  );
+  // PC-21b (W11-WIPAY-SANDBOX-KEY-WRITE, D-105) is live as [SEC2c-W08] / [SEC2c-R06]
+  // in test/payment-secrets-write-only.integration.test.ts (see the header).
 });
