@@ -299,14 +299,22 @@ export class AiController {
     return this.advisor.predictCashFlow(businessId, days ? parseInt(days, 10) : 30);
   }
 
+  /**
+   * W11-AI-SIMULATE-VIEWER (review SEC-W10AT-3; owner rulings D-63, D-100; timeline-scope TS-13g): this put
+   * the business's whole context (contacts whatever their visibility, every figure, the ten newest Activity
+   * titles) in the model's prompt for any member. The member who asks is now the simulation's viewer
+   * (AiAdvisorService.simulateScenario), as the chat's is: filtered, not refused.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai/simulate')
   async simulate(
     @Param('businessId') businessId: string,
     @Body() body: { scenario: string; variables?: Record<string, any> },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.advisor.simulateScenario(businessId, body.scenario, body.variables);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    return this.advisor.simulateScenario(businessId, body.scenario, body.variables, viewer);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

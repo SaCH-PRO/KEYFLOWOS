@@ -1,12 +1,41 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import type { CanonicalModule } from '../../core/authority/module-vocabulary';
+import {
+  CANONICAL_MODULES,
+  LEVEL_RANK,
+  ROLE_DEFAULT_SCOPES,
+  rankOf,
+  type CanonicalModule,
+} from '../../core/authority/module-vocabulary';
 import { visibilityClause } from '../crm/crm-permissions.helper';
 import { activityPrefilter, readVisibleActivityPage, type TimelineViewer } from '../timeline/timeline-visibility';
 import { AiUsageService } from './ai-usage.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+
+/**
+ * W11-AI-SIMULATE-VIEWER (owner rulings D-63, D-100; timeline-scope TS-13g): the modules an OWNER on
+ * role defaults reads, i.e. every canonical module but connect, which is 'none' for every role by
+ * decision (module-vocabulary.ts). A viewer who reads at least these, reads the rows of unmapped modules
+ * and whom visibilityClause does not restrict (the OWNER, a SUPER_ADMIN) is withheld no part of
+ * getBusinessContext, so their simulation keeps the business's whole context (viewerBusinessContext).
+ */
+const OWNER_DEFAULT_READS: readonly CanonicalModule[] = CANONICAL_MODULES.filter(
+  (module) => rankOf(ROLE_DEFAULT_SCOPES.OWNER[module]) >= LEVEL_RANK.read,
+);
+
+/** What the advisor's viewer rule lets a member read of the business context (advisorReads). */
+interface AdvisorReads {
+  readonly readsRevenue: boolean;
+  readonly readsExpenses: boolean;
+  readonly readsCrm: boolean;
+  readonly readsBookings: boolean;
+  /** The momentum score mixes payment, invoice, contact and booking signals (D-100). */
+  readonly readsMomentum: boolean;
+  /** With crm read, the CRM list rule (visibilityClause, M7) that bounds the contacts; null when unbounded. */
+  readonly contactClause: Prisma.ContactWhereInput | null;
+}
 
 @Injectable()
 export class AiAdvisorService {
@@ -205,17 +234,11 @@ export class AiAdvisorService {
     const context = await this.getBusinessContext(businessId);
     const businessName = context.business?.name ?? 'your business';
 
-    const reads = (module: CanonicalModule) => !viewer || viewer.readable.has(module);
-    const readsRevenue = reads('revenue');
-    const readsExpenses = reads('expenses');
-    const readsCrm = reads('crm');
-    const readsBookings = reads('bookings');
-    const readsMomentum = readsRevenue && readsCrm && readsBookings;
-    const contactClause = viewer && readsCrm ? visibilityClause(viewer.crmAccess, viewer.userId) : null;
+    const { readsRevenue, readsExpenses, readsCrm, readsBookings, readsMomentum, contactClause } = this.advisorReads(viewer);
     const [contactTotal, recentTitles] = await Promise.all([
       contactClause
         ? this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, AND: [contactClause as Prisma.ContactWhereInput] },
+            where: { businessId, deletedAt: null, AND: [contactClause] },
           })
         : context.contacts.total,
       viewer ? this.visibleActivityTitles(viewer) : context.recentActivities.map((a) => a.title),
@@ -483,6 +506,86 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
     return rows.map((row) => row.title);
   }
 
+  /**
+   * W10-ADVISOR-TIMELINE (D-63, D-100), shared since W11-AI-SIMULATE-VIEWER: the advisor's viewer rule,
+   * what POST ai/chat and POST ai/simulate let `viewer` read of the business context. A part is read when
+   * the viewer reads its module (reads(module) = viewer.readable.has(module)): the invoice figures need
+   * revenue read, expenses expenses read, bookings bookings read, the contacts crm read (bounded by
+   * visibilityClause, M7), the momentum score revenue, crm and bookings read. No viewer (a system caller)
+   * reads everything, unbounded.
+   */
+  private advisorReads(viewer?: TimelineViewer): AdvisorReads {
+    const reads = (module: CanonicalModule) => !viewer || viewer.readable.has(module);
+    const readsRevenue = reads('revenue');
+    const readsExpenses = reads('expenses');
+    const readsCrm = reads('crm');
+    const readsBookings = reads('bookings');
+    const clause = viewer && readsCrm ? visibilityClause(viewer.crmAccess, viewer.userId) : null;
+    return {
+      readsRevenue,
+      readsExpenses,
+      readsCrm,
+      readsBookings,
+      readsMomentum: readsRevenue && readsCrm && readsBookings,
+      contactClause: clause ? (clause as Prisma.ContactWhereInput) : null,
+    };
+  }
+
+  /**
+   * W11-AI-SIMULATE-VIEWER (review SEC-W10AT-3; owner rulings D-63, D-100; timeline-scope TS-13g): the
+   * business context POST ai/simulate puts in the model's prompt for `viewer`, the member who asks, by
+   * the chat's viewer rule (advisorReads). A part the viewer does not read is left out, not zeroed:
+   *   - business: always (the profile the chat names too);
+   *   - contacts: with crm read, the count and the five newest over the contacts the viewer may open
+   *     (getBusinessContext's reads AND visibilityClause);
+   *   - invoices: revenue read; expenses: expenses read; bookings: bookings read;
+   *   - momentumScore: revenue, crm and bookings read, as the chat's;
+   *   - recentActivities: the titles of the ten newest rows the timeline rule serves the viewer
+   *     (visibleActivityTitles), as the chat names them.
+   * A viewer the rule withholds nothing from (OWNER_DEFAULT_READS read, unmapped rows read, no
+   * visibilityClause: the OWNER, a SUPER_ADMIN) gets getBusinessContext unchanged, so the OWNER's prompt
+   * is the business's whole prompt, as before.
+   */
+  private async viewerBusinessContext(businessId: string, viewer: TimelineViewer) {
+    const context = await this.getBusinessContext(businessId);
+    const read = this.advisorReads(viewer);
+    const unrestricted =
+      viewer.readsUnmapped &&
+      OWNER_DEFAULT_READS.every((module) => viewer.readable.has(module)) &&
+      visibilityClause(viewer.crmAccess, viewer.userId) === null;
+    if (unrestricted) return context;
+
+    const clause = read.contactClause;
+    const [contacts, recentActivities] = await Promise.all([
+      !read.readsCrm
+        ? null
+        : clause
+          ? Promise.all([
+              this.prisma.client.contact.count({
+                where: { businessId, deletedAt: null, AND: [clause] },
+              }),
+              this.prisma.client.contact.findMany({
+                where: { businessId, deletedAt: null, AND: [clause] },
+                orderBy: { createdAt: 'desc' },
+                take: 5,
+                select: { firstName: true, lastName: true, status: true, createdAt: true },
+              }),
+            ]).then(([total, recent]) => ({ total, recent }))
+          : context.contacts,
+      this.visibleActivityTitles(viewer),
+    ]);
+
+    return {
+      business: context.business,
+      ...(contacts ? { contacts } : {}),
+      ...(read.readsRevenue ? { invoices: context.invoices } : {}),
+      ...(read.readsBookings ? { bookings: context.bookings } : {}),
+      ...(read.readsExpenses ? { expenses: context.expenses } : {}),
+      recentActivities,
+      ...(read.readsMomentum ? { momentumScore: context.momentumScore } : {}),
+    };
+  }
+
   async predictCashFlow(businessId: string, days = 30) {
     if (!this.prisma?.client) {
       this.logger.error('PrismaService not available in predictCashFlow');
@@ -578,8 +681,16 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
     }
   }
 
-  async simulateScenario(businessId: string, scenario: string, variables?: Record<string, any>) {
-    const context = await this.getBusinessContext(businessId);
+  /**
+   * W11-AI-SIMULATE-VIEWER (review SEC-W10AT-3; owner rulings D-63, D-100; timeline-scope TS-13g): the
+   * prompt carried JSON.stringify(getBusinessContext) for any member (the five newest contacts whatever
+   * their visibility, every figure, the ten newest Activity titles unfiltered). With a `viewer` (the
+   * member who asks) it carries only what they read (viewerBusinessContext, the chat's rule): filtered,
+   * not refused. With no viewer the context is the business's whole context, as before; the OWNER's is
+   * the same. The 'simulation' feature, its cost accounting and the answer's shape are unchanged.
+   */
+  async simulateScenario(businessId: string, scenario: string, variables?: Record<string, any>, viewer?: TimelineViewer) {
+    const context = viewer ? await this.viewerBusinessContext(businessId, viewer) : await this.getBusinessContext(businessId);
     const prompt = `You are a business simulation engine. Using the business context below, simulate the following scenario and provide detailed projected outcomes.
 
 BUSINESS CONTEXT:
