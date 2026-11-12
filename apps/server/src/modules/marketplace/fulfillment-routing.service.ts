@@ -7,6 +7,23 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { InventoryLowPayload, InventoryOutPayload, PurchaseOrderReceivedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline } from './order-metadata';
+import type { BusinessMetaTx } from '../../core/prisma/business-meta';
+
+/**
+ * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): the client the routing
+ * engine reads and writes an order's routes with, the transaction its claim
+ * on the order holds (routeOrder).
+ */
+type RoutingTx = BusinessMetaTx;
+
+/**
+ * The claim routeOrder takes on an order: one transaction-scoped advisory
+ * lock per business and order (transaction scoped because the pooler runs in
+ * transaction mode, as the booking slot claim's). maxWait and timeout leave
+ * room for a router that waits for another to finish routing the same order.
+ */
+const ROUTING_LOCK_NAMESPACE = 'marketplace-order-routing:';
+const ROUTING_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 20_000 } as const;
 
 export interface OrderStatusTimelineEntry {
   status: string;
@@ -204,8 +221,48 @@ export class FulfillmentRoutingService {
     return `${prefix}-${timestamp}-${rand}`;
   }
 
+  /**
+   * W10-SOP-FIX review (SOPFIX-SEC-1, SOPFIX-R1; D-112): routing claims the
+   * order before it reads the order's routes. A paid order is routed by two
+   * routers on purpose (mark_paid's or createOrder's un-awaited autoRouteOrder,
+   * and StoreOrderRoutingListener on the paid door's store_order.paid, the
+   * safety net), and the manual POST .../route can run beside them. Each read
+   * the order's routes, found none and created its own: two LOCAL_STOCK
+   * RESERVED routes for one line (the second reservation written over the
+   * first), and a DROPSHIP line raised a supplier PurchaseOrder per router.
+   *
+   * The claim is a transaction-scoped advisory lock on the business and order,
+   * taken first in the transaction that reads the routes and writes the new
+   * ones with the order's status and timeline steps. A router that meets the
+   * order being routed waits for that transaction to commit and then reads its
+   * routes (READ COMMITTED: each statement reads what has committed), so it
+   * takes the existing-routes path and creates nothing. A failure rolls the
+   * routes back with the claim, so the order can be routed again. What follows
+   * routing (stock alerts, notifications to the business) runs once the routes
+   * have committed.
+   */
   async routeOrder(businessId: string, orderId: string): Promise<any[]> {
-    const order = await this.prisma.client.marketplaceOrder.findFirst({
+    const afterCommit: Array<() => Promise<void>> = [];
+    const routes = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ROUTING_LOCK_NAMESPACE}${businessId}:${orderId}`}))`;
+      return this.routeClaimedOrder(tx, businessId, orderId, afterCommit);
+    }, ROUTING_CLAIM_TX_OPTIONS);
+    for (const work of afterCommit) {
+      await work().catch((err) =>
+        this.logger.error(`After routing order ${orderId}: ${(err as Error).message}`),
+      );
+    }
+    return routes;
+  }
+
+  /** routeOrder's work, under its claim on the order: every read and write on `tx`. */
+  private async routeClaimedOrder(
+    tx: RoutingTx,
+    businessId: string,
+    orderId: string,
+    afterCommit: Array<() => Promise<void>>,
+  ): Promise<FulfillmentRouteShape[]> {
+    const order = await tx.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
       include: {
         items: { include: { product: true } },
@@ -215,18 +272,15 @@ export class FulfillmentRoutingService {
 
     if (!order) throw new BadRequestException('Order not found');
 
-    const validRoutingStatuses = ['placed', 'awaiting_fulfillment', 'paid', 'routed', 'awaiting_payment'];
     const normalizedStatus = normalizeOrderStatus(order.status);
-    if (!validRoutingStatuses.includes(normalizedStatus)) {
-      throw new BadRequestException(
-        `Cannot route order in status "${order.status}". ` +
-          `Order must be in placed, paid, or awaiting_fulfillment status first.`,
-      );
-    }
+    const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
 
+    // An order routed already is answered with its routes, whatever status routing moved it to: the router that
+    // waited for the claim meets the order routed (a DROPSHIP order supplier_ordered), and refusing that status
+    // reported a routing failure for an order that is routed (store_order.routing_failed: an operator action and a
+    // failed contact event).
     const existingRoutes = order.fulfillmentRoutes as FulfillmentRouteShape[] | undefined;
     if (existingRoutes && existingRoutes.length > 0) {
-      const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
       if (isPaid) {
         const hasDropship = existingRoutes.some((r) => r.strategy === 'DROPSHIP' || r.strategy === 'HYBRID');
         const finalStatus = hasDropship ? 'supplier_ordered' : 'routed';
@@ -234,7 +288,7 @@ export class FulfillmentRoutingService {
         // W10-SOP-FIX (SOP-V4): status and step in one statement (order-metadata.ts), not the metadata read above
         // written back over what the paid marking, autoRouteOrder and the paid listeners wrote meanwhile.
         await appendOrderTimeline(
-          this.prisma.client,
+          tx,
           businessId,
           orderId,
           [{ status: finalStatus, timestamp: now, note: 'Order status advanced after payment — routes already created' }],
@@ -244,15 +298,23 @@ export class FulfillmentRoutingService {
       return existingRoutes;
     }
 
+    const validRoutingStatuses = ['placed', 'awaiting_fulfillment', 'paid', 'routed', 'awaiting_payment'];
+    if (!validRoutingStatuses.includes(normalizedStatus)) {
+      throw new BadRequestException(
+        `Cannot route order in status "${order.status}". ` +
+          `Order must be in placed, paid, or awaiting_fulfillment status first.`,
+      );
+    }
+
     const routes: FulfillmentRouteShape[] = [];
 
     for (const item of order.items as OrderItemShape[]) {
       const listing = await (
         item.listingId
-          ? this.prisma.client.marketplaceListing.findFirst({
+          ? tx.marketplaceListing.findFirst({
               where: { id: item.listingId, businessId, isActive: true },
             })
-          : this.prisma.client.marketplaceListing.findFirst({
+          : tx.marketplaceListing.findFirst({
               where: { productId: item.productId, businessId, isActive: true },
             })
       );
@@ -264,25 +326,25 @@ export class FulfillmentRoutingService {
 
       switch (strategy) {
         case 'LOCAL_STOCK':
-          route = await this.routeLocalStock(businessId, orderId, item, listing);
+          route = await this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing);
           break;
         case 'DROPSHIP':
-          route = await this.routeDropship(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routeDropship(tx, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
           break;
         case 'PREORDER':
-          route = await this.routePreorder(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routePreorder(tx, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
           break;
         case 'HYBRID':
-          route = await this.routeHybrid(businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
+          route = await this.routeHybrid(tx, afterCommit, businessId, orderId, item, listing, order as unknown as MarketplaceOrderShape);
           break;
         case 'MANUAL':
-          route = await this.routeManual(businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
           break;
         case 'SERVICE':
-          route = await this.routeService(businessId, orderId, item, listing);
+          route = await this.routeService(tx, businessId, orderId, item, listing);
           break;
         default:
-          route = await this.routeManual(businessId, orderId, item, listing);
+          route = await this.routeManual(tx, afterCommit, businessId, orderId, item, listing);
       }
 
       routes.push(route);
@@ -293,7 +355,6 @@ export class FulfillmentRoutingService {
     );
     const now = new Date().toISOString();
 
-    const isPaid = normalizedStatus === 'paid' || normalizedStatus === 'awaiting_fulfillment';
     const finalStatus = isPaid ? (hasDropship ? 'supplier_ordered' : 'routed') : normalizedStatus;
 
     const timelineEntries: OrderStatusTimelineEntry[] = [
@@ -308,18 +369,20 @@ export class FulfillmentRoutingService {
     // W10-SOP-FIX (SOP-V4): status and steps in one statement. The metadata read with the order at the top was written
     // back whole, over the paid marking's step, autoRouteOrder's step and the paid listener's contact link written while
     // the routes were created (and this order is routed by mark_paid and StoreOrderRoutingListener together).
-    await appendOrderTimeline(this.prisma.client, businessId, orderId, timelineEntries, { status: finalStatus });
+    await appendOrderTimeline(tx, businessId, orderId, timelineEntries, { status: finalStatus });
 
     return routes;
   }
 
   private async routeLocalStock(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
   ): Promise<FulfillmentRouteShape> {
-    const product = await this.prisma.client.product.findUnique({
+    const product = await tx.product.findUnique({
       where: { id: item.productId },
       select: { inventoryMode: true, _count: { select: { inventoryStocks: true } } },
     });
@@ -332,7 +395,7 @@ export class FulfillmentRoutingService {
     ).toLowerCase();
 
     if (inventoryMode === 'untracked' || inventoryMode === 'virtual') {
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -348,7 +411,7 @@ export class FulfillmentRoutingService {
       return route as unknown as FulfillmentRouteShape;
     }
 
-    const stock = await this.prisma.client.inventoryStock.findFirst({
+    const stock = await tx.inventoryStock.findFirst({
       where: { productId: item.productId, businessId },
       orderBy: { quantity: 'desc' },
     });
@@ -356,13 +419,13 @@ export class FulfillmentRoutingService {
     const available = stock ? stock.quantity - stock.reserved : 0;
 
     if (available >= item.quantity) {
-      await this.prisma.client.inventoryStock.update({
+      await tx.inventoryStock.update({
         where: { id: stock!.id },
         data: { reserved: stock!.reserved + item.quantity },
       });
 
       const taskNote = `Pick/pack task pending for item ${item.id} x${item.quantity}`;
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -387,11 +450,13 @@ export class FulfillmentRoutingService {
         },
       });
 
-      await this.checkAndAlertReorderThreshold(businessId, stock!.id);
+      // Read once the reservation has committed (routeOrder), as it was read after the reservation's own write.
+      const stockId = stock!.id;
+      afterCommit.push(() => this.checkAndAlertReorderThreshold(businessId, stockId));
 
       return route as unknown as FulfillmentRouteShape;
     } else {
-      const route = await this.prisma.client.fulfillmentRoute.create({
+      const route = await tx.fulfillmentRoute.create({
         data: {
           businessId,
           orderId,
@@ -410,9 +475,11 @@ export class FulfillmentRoutingService {
           `Available: ${available}, Required: ${item.quantity}`,
       );
 
-      this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
-        this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
-      );
+      afterCommit.push(async () => {
+        this.notifyInsufficientStock(businessId, orderId, item, available).catch((err) =>
+          this.logger.error(`Failed to send insufficient-stock notification: ${(err as Error).message}`),
+        );
+      });
 
       return route as unknown as FulfillmentRouteShape;
     }
@@ -448,7 +515,7 @@ export class FulfillmentRoutingService {
     });
   }
 
-  private async resolveSupplierSourceLink(productId: string): Promise<{
+  private async resolveSupplierSourceLink(tx: RoutingTx, productId: string): Promise<{
     id: string;
     priority: number;
     sourceCost?: number | null;
@@ -459,7 +526,7 @@ export class FulfillmentRoutingService {
       };
     };
   } | null> {
-    return this.prisma.client.productSourceLink.findFirst({
+    return tx.productSourceLink.findFirst({
       where: {
         productId,
         isActive: true,
@@ -475,13 +542,14 @@ export class FulfillmentRoutingService {
   }
 
   private async routeDropship(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
     order: MarketplaceOrderShape,
   ): Promise<FulfillmentRouteShape> {
-    const sourceLink = await this.resolveSupplierSourceLink(item.productId);
+    const sourceLink = await this.resolveSupplierSourceLink(tx, item.productId);
 
     let supplierName: string;
     let supplierEmail: string | null;
@@ -511,7 +579,7 @@ export class FulfillmentRoutingService {
 
     const subtotal = unitCost * item.quantity;
 
-    const po = await this.prisma.client.purchaseOrder.create({
+    const po = await tx.purchaseOrder.create({
       data: {
         businessId,
         poNumber: this.generatePONumber(),
@@ -543,7 +611,7 @@ export class FulfillmentRoutingService {
       },
     });
 
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -569,6 +637,7 @@ export class FulfillmentRoutingService {
   }
 
   private async routePreorder(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
@@ -583,7 +652,7 @@ export class FulfillmentRoutingService {
     const itemTotal = item.total ?? item.unitPrice * item.quantity;
     const depositAmount = depositPercent > 0 ? (itemTotal * depositPercent) / 100 : undefined;
 
-    const preOrder = await this.prisma.client.preOrder.create({
+    const preOrder = await tx.preOrder.create({
       data: {
         businessId,
         productId: item.productId,
@@ -601,7 +670,7 @@ export class FulfillmentRoutingService {
       },
     });
 
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -620,13 +689,15 @@ export class FulfillmentRoutingService {
   }
 
   private async routeHybrid(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
     order: MarketplaceOrderShape,
   ): Promise<FulfillmentRouteShape> {
-    const stock = await this.prisma.client.inventoryStock.findFirst({
+    const stock = await tx.inventoryStock.findFirst({
       where: { productId: item.productId, businessId },
       orderBy: { quantity: 'desc' },
     });
@@ -637,10 +708,10 @@ export class FulfillmentRoutingService {
       this.logger.log(
         `Hybrid: local stock satisfied for product ${item.productId} (${available}/${item.quantity})`,
       );
-      return this.routeLocalStock(businessId, orderId, item, listing);
+      return this.routeLocalStock(tx, afterCommit, businessId, orderId, item, listing);
     }
 
-    const sourceLink = await this.resolveSupplierSourceLink(item.productId);
+    const sourceLink = await this.resolveSupplierSourceLink(tx, item.productId);
     const hasSupplier = !!(sourceLink || listing?.supplierName);
 
     if (hasSupplier) {
@@ -649,22 +720,24 @@ export class FulfillmentRoutingService {
           `Local stock insufficient (${available}/${item.quantity}). ` +
           `Using ${sourceLink ? `ProductSourceLink priority=${sourceLink.priority}` : 'listing supplier'}`,
       );
-      return this.routeDropship(businessId, orderId, item, listing, order);
+      return this.routeDropship(tx, businessId, orderId, item, listing, order);
     }
 
     this.logger.log(
       `Hybrid: fallback to preorder for product ${item.productId}. No local stock or supplier available.`,
     );
-    return this.routePreorder(businessId, orderId, item, listing, order);
+    return this.routePreorder(tx, businessId, orderId, item, listing, order);
   }
 
   private async routeManual(
+    tx: RoutingTx,
+    afterCommit: Array<() => Promise<void>>,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
   ): Promise<FulfillmentRouteShape> {
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
@@ -677,9 +750,11 @@ export class FulfillmentRoutingService {
       },
     });
 
-    this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
-      this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
-    );
+    afterCommit.push(async () => {
+      this.notifyManualFulfillmentRequired(businessId, orderId, item).catch((err) =>
+        this.logger.error(`Failed to send manual-fulfillment notification: ${(err as Error).message}`),
+      );
+    });
 
     return route as unknown as FulfillmentRouteShape;
   }
@@ -714,12 +789,13 @@ export class FulfillmentRoutingService {
   }
 
   private async routeService(
+    tx: RoutingTx,
     businessId: string,
     orderId: string,
     item: OrderItemShape,
     listing: ListingShape | null,
   ): Promise<FulfillmentRouteShape> {
-    const route = await this.prisma.client.fulfillmentRoute.create({
+    const route = await tx.fulfillmentRoute.create({
       data: {
         businessId,
         orderId,
