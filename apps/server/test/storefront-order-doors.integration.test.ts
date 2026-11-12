@@ -123,6 +123,35 @@
  *           (the real PromoCodeService over real promo_codes rows, this case
  *           only)
  *
+ * W11-STORE-CHECKOUT-METHOD-GATE (F-21, server half; D-106, D-105, D-69,
+ * D-18): a storefront checkout may name only no method, CASH, MANUAL, or a
+ * method the storefront's gateway list offers for the business and the
+ * order's currency; the method is read trimmed and in any case. At fb00af1c
+ * only an exact 'PAYPAL' on a TTD cart was refused before the order was
+ * written: every other refusal came from createStorePayment after the order,
+ * its retry slot and its promo use had committed (one 500: PayPal with no
+ * PayPal configured).
+ *
+ *   V87-17  refused 400 before the order is written, once and twice with one
+ *           body idempotencyKey: no order, no retry slot, no
+ *           store_order.created, the limited promo code's use not counted (the
+ *           real PromoCodeService), no provider called. (a) ' PAYPAL' and
+ *           'paypal ' on a TTD cart: PAYPAL_CURRENCY_UNSUPPORTED (V87-16b's
+ *           body); (b) 'BITCOIN' and 'CARD': PAYMENT_METHOD_UNSUPPORTED;
+ *           (c) 'PAYPAL' on a USD cart of a store with no PayPal of its own
+ *           and no platform PayPal env: PAYMENT_METHOD_NOT_OFFERED; (d)
+ *           'STRIPE' with no Stripe configured: PAYMENT_METHOD_NOT_OFFERED
+ *   V87-17c controls: 'paypal' and ' PAYPAL ' on a USD cart with PayPal
+ *           configured (env, getPaypalClient stubbed as in V87-16) are PAYPAL
+ *           orders, each asking PayPal for one USD order; 'cash' is a CASH
+ *           order, PENDING, with no session (D-18); 'wipay' on a TTD cart of a
+ *           store with a merchant pair is a WiPay redirect (global fetch
+ *           stubbed for WiPay's host, this case only)
+ *   V87-17d POST /payments/create-checkout {payableType: 'storefront_order',
+ *           gateway: 'paypal'} for an UNPAID USD order of a store with no
+ *           PayPal is 400 PAYMENT_METHOD_NOT_OFFERED (it was a plain Error,
+ *           500) and writes nothing
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard,
  * PublicRateLimitGuard (real Redis, this suite's namespace), SiteService,
@@ -140,8 +169,11 @@
  * InventoryRiskService, TransactionalEmailService, the revenue-posting
  * timeline, ExpensesService (a recorder: store_order.refunded books one), and
  * MarketplaceService.autoRouteOrder (fulfilment routing, held so it writes
- * nothing behind a case). No provider is called: no case starts a WiPay
- * session (every WiPay checkout here is refused before WiPay would be called).
+ * nothing behind a case). No provider is called: the PayPal SDK client is
+ * stubbed where a PayPal order is made (V87-16, V87-16b, V87-17c), and the one
+ * WiPay session (V87-17c) goes to a global fetch stub for WiPay's host; every
+ * other WiPay checkout here is refused before WiPay would be called.
+ * PaymentsController is mounted for the generic storefront checkout (V87-17d).
  *
  * Fixtures: prefix `v87c_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order
@@ -152,7 +184,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -450,6 +482,7 @@ beforeAll(async () => {
   const { CustomerReferralService } = await import('../src/modules/site/customer-referral.service');
   const { CaseStudyService } = await import('../src/modules/site/case-study.service');
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  const { PaymentsController } = await import('../src/modules/payments/payments.controller');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
   const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
@@ -487,7 +520,8 @@ beforeAll(async () => {
 
   const moduleRef = await Test.createTestingModule({
     imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
-    controllers: [SiteController, MarketplaceController],
+    // W11-STORE-CHECKOUT-METHOD-GATE: PaymentsController for the generic storefront checkout (V87-17d).
+    controllers: [SiteController, MarketplaceController, PaymentsController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -1311,6 +1345,198 @@ describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+    }
+  });
+});
+
+describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names only a method it can start, refused before the order is written', () => {
+  /** The platform provider credentials the gateway list falls back to: unset in every case here unless a case sets them. */
+  const PROVIDER_ENV = [
+    'PAYPAL_CLIENT_ID',
+    'PAYPAL_CLIENT_SECRET',
+    'STRIPE_PUBLISHABLE_KEY',
+    'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+  ];
+  const PROMO_17 = 'V87C17';
+  const PROMO_TTD_17 = `${P}promo_ttd_17`;
+  const PROMO_USD_17 = `${P}promo_usd_17`;
+  const WIPAY_REDIRECT = 'https://tt.wipayfinancial.com/v1/gateway_live/pay/v87c-session';
+  let savedEnv: Record<string, string | undefined> = {};
+  let promoStandIn: unknown;
+  /** The WiPay requests the checkouts made (global fetch stubbed; any other host is an unexpected network call). */
+  let wipayRequests: Array<{ url: string; body: string }> = [];
+  let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  const usesOf = async (id: string) => (await db.promoCode.findUnique({ where: { id }, select: { currentUses: true } })).currentUses;
+
+  beforeAll(async () => {
+    // Limited promo codes (3 uses) of the TTD store and the USD store, counted by the real PromoCodeService.
+    await db.promoCode.create({ data: { id: PROMO_TTD_17, businessId: ID.bizA, code: PROMO_17, type: 'PERCENT', value: 10, maxUses: 3 } });
+    await db.promoCode.create({ data: { id: PROMO_USD_17, businessId: ID.bizUsd, code: PROMO_17, type: 'PERCENT', value: 10, maxUses: 3 } });
+  });
+
+  beforeEach(async () => {
+    savedEnv = Object.fromEntries(PROVIDER_ENV.map((k) => [k, process.env[k]]));
+    for (const k of PROVIDER_ENV) delete process.env[k];
+    // The real PromoCodeService over real promo_codes rows, for these cases only (as V87-16b).
+    const { PromoCodeService } = await import('../src/modules/site/promo-code.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    promoStandIn = storeOrders.promoCodeService;
+    storeOrders.promoCodeService = new PromoCodeService(app.get(PrismaService));
+    wipayRequests = [];
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
+      const url = String(input?.url ?? input);
+      if (!new URL(url).host.endsWith('wipayfinancial.com')) throw new Error(`v87c: unexpected network call to ${url}`);
+      wipayRequests.push({ url, body: String(init?.body ?? '') });
+      return new Response(null, { status: 302, headers: { location: WIPAY_REDIRECT } });
+    }) as typeof fetch);
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+    fetchSpy = undefined;
+    storeOrders.promoCodeService = promoStandIn;
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("V87-17 (W11-STORE-CHECKOUT-METHOD-GATE, F-21; D-106, D-105): a storefront checkout naming a method it cannot start is refused 400 before the order is written, once and twice with one retry key: no order, no retry slot, no store_order.created, the limited promo code's use not counted, no provider called; (a) ' PAYPAL' and 'paypal ' on a TTD cart PAYPAL_CURRENCY_UNSUPPORTED, (b) BITCOIN and CARD PAYMENT_METHOD_UNSUPPORTED, (c) PAYPAL on a USD cart of a store with no PayPal PAYMENT_METHOD_NOT_OFFERED, (d) STRIPE with no Stripe PAYMENT_METHOD_NOT_OFFERED", async () => {
+    // The provider edges, watched: none is reached by a refused checkout.
+    const storePayment = vi.spyOn(payments, 'createStorePayment');
+    const paypalClient = vi.spyOn(payments as any, 'getPaypalClient');
+    const notOffered = (name: string) => ({
+      code: 'PAYMENT_METHOD_NOT_OFFERED',
+      message: `${name} is not configured for this business: choose another payment method`,
+    });
+    const paypalTtd = {
+      code: 'PAYPAL_CURRENCY_UNSUPPORTED',
+      message: 'PayPal does not support TTD: this order cannot be paid with PayPal. Choose another payment method.',
+    };
+    const cases: Array<[label: string, slug: string, businessId: string, productId: string, promoId: string, method: string, expected: Record<string, unknown>]> = [
+      // At fb00af1c: 400 'Unsupported payment method:  PAYPAL' from createStorePayment, after the order and promo use committed.
+      ['a1', SLUG.a, ID.bizA, ID.prodA, PROMO_TTD_17, ' PAYPAL', paypalTtd],
+      ['a2', SLUG.a, ID.bizA, ID.prodA, PROMO_TTD_17, 'paypal ', paypalTtd],
+      // At fb00af1c: 400 'Unsupported payment method: BITCOIN' (no code), after the write.
+      ['b1', SLUG.usd, ID.bizUsd, ID.prodUsd, PROMO_USD_17, 'BITCOIN', { code: 'PAYMENT_METHOD_UNSUPPORTED', message: 'Unsupported payment method: BITCOIN' }],
+      ['b2', SLUG.usd, ID.bizUsd, ID.prodUsd, PROMO_USD_17, 'CARD', { code: 'PAYMENT_METHOD_UNSUPPORTED', message: 'Unsupported payment method: CARD' }],
+      // At fb00af1c: 500 (createStorePayment's plain Error 'PayPal is not configured'), after the write.
+      ['c', SLUG.usd, ID.bizUsd, ID.prodUsd, PROMO_USD_17, 'PAYPAL', notOffered('PayPal')],
+      // At fb00af1c: 400 'Stripe is not configured for this business' (no code), after the write.
+      ['d', SLUG.usd, ID.bizUsd, ID.prodUsd, PROMO_USD_17, 'STRIPE', notOffered('Stripe')],
+    ];
+    try {
+      for (const [label, slug, businessId, productId, promoId, method, expected] of cases) {
+        const before = await counts(businessId);
+        seen = [];
+        // Once without a retry key, then twice with the same one (a retried checkout).
+        for (const extra of [{}, { idempotencyKey: `${P}key_17_${label}` }, { idempotencyKey: `${P}key_17_${label}` }]) {
+          await clearRateLimits();
+          const res = await checkout(slug, cart(productId, method, { promoCode: PROMO_17, returnUrl: RETURN_URL, ...extra }));
+          expect(res.status, `${label} ${JSON.stringify(method)}: ${JSON.stringify(res.body)}`).toBe(400);
+          expect(res.body, `${label} ${JSON.stringify(method)}`).toMatchObject(expected);
+        }
+        await settle();
+        expect(await counts(businessId), `${label}: no order, no retry slot`).toEqual(before);
+        expect(storeEvents(), `${label}: no store_order.created`).toEqual([]);
+        expect(await usesOf(promoId), `${label}: the promo code's use is not counted`).toBe(0);
+      }
+      expect(storePayment, 'no payment session is started').not.toHaveBeenCalled();
+      expect(paypalClient, 'PayPal is never called').not.toHaveBeenCalled();
+      expect(fetchSpy, 'no provider request (Stripe, WiPay)').not.toHaveBeenCalled();
+    } finally {
+      storePayment.mockRestore();
+      paypalClient.mockRestore();
+    }
+  });
+
+  it("V87-17c (W11-STORE-CHECKOUT-METHOD-GATE, F-21; D-18, D-69) controls: the method is read trimmed and in any case: 'paypal' and ' PAYPAL ' on a USD cart with PayPal configured are 201 PAYPAL orders, each asking PayPal for one USD order; 'cash' is a 201 CASH order, PENDING, with no session; 'wipay' on a TTD cart of a store with a merchant pair is 201 with a WiPay redirect", async () => {
+    Object.assign(process.env, { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` });
+    // The PayPal SDK client (the provider edge), stubbed as in V87-16: it records the orders it is asked for.
+    const ordered: any[] = [];
+    const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
+      client: {},
+      ordersController: {
+        createOrder: vi.fn(async (req: any) => {
+          ordered.push(req?.body?.purchaseUnits);
+          return { result: { id: `${P}pp_order_17c_${ordered.length}`, links: [] } };
+        }),
+      },
+    });
+    try {
+      for (const method of ['paypal', ' PAYPAL ']) {
+        const before = await counts(ID.bizUsd);
+        const asked = ordered.length;
+        await clearRateLimits();
+        const res = await checkout(SLUG.usd, cart(ID.prodUsd, method, { returnUrl: RETURN_URL }));
+        await settle();
+        // At fb00af1c: 400 'Unsupported payment method: paypal' after the order was written.
+        expect(res.status, `${JSON.stringify(method)}: ${JSON.stringify(res.body)}`).toBe(201);
+        expect(res.body.order, JSON.stringify(method)).toMatchObject({ paymentMethod: 'PAYPAL', currency: 'USD', paymentStatus: 'UNPAID' });
+        expect(res.body.payment, JSON.stringify(method)).toMatchObject({ status: 'PAYPAL_AWAITING_APPROVAL' });
+        expect((await db.marketplaceOrder.findUnique({ where: { id: res.body.order.id } })).paymentMethod, 'stored normalised').toBe('PAYPAL');
+        expect((await counts(ID.bizUsd)).orders).toBe(before.orders + 1);
+        expect(
+          ordered.slice(asked).map((units) => `${units[0].amount.currencyCode}:${units[0].amount.value}`),
+          `${JSON.stringify(method)}: one USD PayPal order`,
+        ).toEqual([`USD:${ORDER_TOTAL.toFixed(2)}`]);
+      }
+
+      // D-18: CASH starts no session and is PENDING. At fb00af1c 'cash' went to createStorePayment: 400 after the write.
+      await clearRateLimits();
+      const cash = await checkout(SLUG.a, cart(ID.prodA, 'cash'));
+      await settle();
+      expect(cash.status, JSON.stringify(cash.body)).toBe(201);
+      expect(cash.body.order).toMatchObject({ paymentMethod: 'CASH', paymentStatus: 'PENDING' });
+      expect(cash.body.payment).toBeNull();
+
+      // D-69, D-105: a TTD cart of a store with its own WiPay merchant pair. At fb00af1c 'wipay': 400 after the write.
+      await clearRateLimits();
+      const wipay = await checkout(SLUG.a, cart(ID.prodA, 'wipay', { returnUrl: RETURN_URL }));
+      await settle();
+      expect(wipay.status, JSON.stringify(wipay.body)).toBe(201);
+      expect(wipay.body.order).toMatchObject({ paymentMethod: 'WIPAY', currency: 'TTD', paymentStatus: 'UNPAID' });
+      expect(wipay.body.payment).toEqual({ status: 'REDIRECT', redirectUrl: WIPAY_REDIRECT });
+      expect(wipayRequests, 'one WiPay session').toHaveLength(1);
+      const sent = new URLSearchParams(wipayRequests[0].body);
+      expect(`${sent.get('order_id')}|${sent.get('total')}|${sent.get('return_url')}`).toBe(`${wipay.body.order.id}|${ORDER_TOTAL.toFixed(2)}|${RETURN_URL}`);
+    } finally {
+      clientSpy.mockRestore();
+    }
+  });
+
+  it('V87-17d (W11-STORE-CHECKOUT-METHOD-GATE, F-21): POST /payments/create-checkout {payableType: storefront_order, gateway: paypal} for an UNPAID USD order of a store with no PayPal answers 400 PAYMENT_METHOD_NOT_OFFERED, not 500, and writes nothing', async () => {
+    const order = await storeOrders.createOrder({
+      businessId: ID.bizUsd,
+      cartItems: [{ productId: ID.prodUsd, quantity: QUANTITY }],
+      customerInfo: { name: 'Vee EightySeven', email: CUSTOMER_EMAIL },
+      storefrontSlug: SLUG.usd,
+    });
+    await settle();
+    expect(`${order.currency}/${order.paymentStatus}`).toBe('USD/UNPAID');
+    const before = await counts(ID.bizUsd);
+    const paypalClient = vi.spyOn(payments as any, 'getPaypalClient');
+    try {
+      await clearRateLimits();
+      const res = await agent()
+        .post('/payments/create-checkout')
+        .send({ payableType: 'storefront_order', payableId: order.id, gateway: 'paypal', returnUrl: RETURN_URL });
+      // At fb00af1c: 500 (a plain Error 'PayPal is not configured').
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body).toMatchObject({
+        code: 'PAYMENT_METHOD_NOT_OFFERED',
+        message: 'PayPal is not configured for this business: choose another payment method',
+      });
+      expect(paypalClient.mock.results.map((r) => r.value), 'no PayPal client, so nothing to call').toEqual(paypalClient.mock.results.map(() => null));
+      expect(fetchSpy, 'no provider request').not.toHaveBeenCalled();
+      expect(await counts(ID.bizUsd), 'nothing written').toEqual(before);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}/${stored.paymentMethod}`).toBe('PENDING/UNPAID/null');
+    } finally {
+      paypalClient.mockRestore();
     }
   });
 });
