@@ -66,6 +66,27 @@
  * so an event of another type whose data carries an amount (payment.completed,
  * store_order.paid / refunded, autopilot.payment_recovery) is left out too.
  *
+ * W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100, on biz3): GET
+ * .../segments counts only the contacts the member may open, as the highlights
+ * already do, worked out per request with no cache read or write; the owner's
+ * counts stay business-wide and cached, and the unpaid projection (SEC-W8MS-3)
+ * is kept. Its review repair SEC-W11SV-1 (owner ruling D-133, the CRM count
+ * widgets, on biz3): GET .../contact-stats (totalCount, by status, by source,
+ * recent growth, top tags) and GET .../contacts/poll (count, newest edit) are
+ * worked out the same way, so the member cannot compare them with segments to
+ * learn of a hidden contact; the owner's figures stay business-wide.
+ * W11-CRM-COUNTS-RULING (owner ruling D-133, option (a), on biz3) pins the
+ * ruling's figures for each STAFF member: contact-stats totalCount 1 and CLIENT
+ * 0 (the owner's 2 and 1), and a member's contacts poll that the owner's edit
+ * of c3Priv through PATCH contacts/:c does not move (the owner's poll moves).
+ * Its review repairs (on biz3): SEC-W11CCR-1 (D-133), GET .../data-quality/stats
+ * (totalContacts, averageScore, issueCounts) is worked out over the contacts
+ * the member may open, so it cannot be compared with contact-stats to learn of
+ * c3Priv; SEC-W11CCR-2 (D-63), GET .../contacts/favorites lists only the
+ * favourites the member may open. The same finding's data-quality issues and
+ * wizard and relationship-health at-risk reads are it.todo hand-offs: their
+ * contacts come from services outside that packet's write set.
+ *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
  * 4 to ai-search; the ai-search matrix is also run on the service directly.
@@ -76,7 +97,7 @@
  * membership / contact / invoice / quote rows, the real CrmController and
  * CrmAiController and the services the routes here call (CrmService,
  * CrmStatsService, CrmJourneyService, CrmRevenueService, ContactInsightService
- * with BestChannelService, CrmAiService). Identity is attached by a test middleware from
+ * with BestChannelService, CrmAiService, CrmDataQualityService). Identity is attached by a test middleware from
  * `x-test-user` exactly as the Supabase-verifying AuthMiddleware would after
  * token verification. Stand-ins: the AI gateway (AiUsageService.callAi) is a
  * recorder whose summary repeats the lifetime value it was given and whose
@@ -93,7 +114,8 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
-vi.setConfig({ testTimeout: 60_000 });
+// hookTimeout as the other real-DB suites set it: the top-level beforeAll (Nest compile + seed) passes 10 s on a loaded machine.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -182,6 +204,10 @@ async function cleanup() {
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-CRM-COUNTS-RULING review repairs: the data-quality issues of biz3's contacts.
+    `DELETE FROM contact_data_issues WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-CRM-COUNTS-RULING: the owner's PATCH contacts/:c leaves a TeamAuditInterceptor row.
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -254,6 +280,7 @@ beforeAll(async () => {
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
   const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
   const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
 
   // ---- the real services over the real client -------------------------------
   const prisma = { client: db } as any;
@@ -290,6 +317,9 @@ beforeAll(async () => {
       { provide: CrmRevenueService, useValue: new CrmRevenueService(prisma) },
       { provide: ContactInsightService, useValue: contactInsight },
       { provide: CrmAiService, useValue: crmAi },
+      // W11-CRM-COUNTS-RULING review repairs: the real data-quality reads (GET .../data-quality/stats); the
+      // duplicate detector is on no path here.
+      { provide: CrmDataQualityService, useValue: new CrmDataQualityService(prisma, {} as any) },
       { provide: EventEmitter2, useValue: events },
     ],
   })
@@ -1203,6 +1233,343 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
       const full: Highlights = await ok3(user, 'highlights');
       expect(full.timeline.filter((entry) => entry.type === 'event').map((entry) => entry.id), user).toEqual(newestTen);
     }
+  });
+
+  // ---- W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100) -------------------------------
+  type SegmentCounts = Record<'lead' | 'prospect' | 'client' | 'lost' | 'unpaid' | 'stale' | 'newThisWeek' | 'atRisk' | 'dormant', number>;
+
+  /** The member's visibility clause, by the rule GET contacts/:c applies (resolveCrmAccess + visibilityClause); null for the owner. */
+  const clauseOf = async (user: string) => {
+    const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
+    return visibilityClause(await resolveCrmAccess({ client: db } as any, ID3.biz, user), user) as Record<string, unknown> | null;
+  };
+
+  /** GET .../segments' nine counts, read straight from the database over the live contacts of biz3 that `clause` admits (null: all of them). */
+  const directSegmentCounts = async (clause: Record<string, unknown> | null): Promise<SegmentCounts> => {
+    const base = clause ? { businessId: ID3.biz, deletedAt: null, AND: [clause] } : { businessId: ID3.biz, deletedAt: null };
+    const startOfWeek = new Date();
+    startOfWeek.setHours(0, 0, 0, 0);
+    const day = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - day + (day === 0 ? -6 : 1));
+    const staleCutoff = new Date();
+    staleCutoff.setDate(staleCutoff.getDate() - 30);
+    const count = (where: Record<string, unknown>) => db.contact.count({ where: { ...base, ...where } }) as Promise<number>;
+    const [lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant] = await Promise.all([
+      count({ status: 'LEAD' }),
+      count({ status: 'PROSPECT' }),
+      count({ status: 'CLIENT' }),
+      count({ status: 'LOST' }),
+      count({ invoices: { some: { status: { in: ['SENT', 'OVERDUE'] }, deletedAt: null } } }),
+      count({ createdAt: { lte: staleCutoff }, bookings: { none: { startTime: { gte: staleCutoff }, deletedAt: null } } }),
+      count({ createdAt: { gte: startOfWeek } }),
+      count({ relationshipHealth: 'AT_RISK' }),
+      count({ relationshipHealth: 'DORMANT' }),
+    ]);
+    return { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
+  };
+
+  it("F-10: GET .../segments counts only the contacts the member may open (W11-CRM-SEGMENTS-VISIBLE, D-63, D-100): each count is worked out from the contacts the member's visibility clause admits (visibilityClause, the rule GET contacts/:c and GET .../highlights apply), so another member's PRIVATE contact (c3Priv) is not counted, for a member with revenue read too; a member without revenue read is also served unpaid 0 (D-100, SEC-W8MS-3); the owner's counts stay business-wide", async () => {
+    // Control: the owner's counts name c3Priv (CLIENT, an overdue SENT invoice) and equal the business-wide counts.
+    const owner: SegmentCounts = await ok3(ID.owner, 'segments');
+    expect([owner.lead, owner.client, owner.unpaid]).toEqual([1, 1, 2]);
+    expect(await clauseOf(ID.owner)).toBeNull();
+    expect(owner).toEqual(await directSegmentCounts(null));
+
+    for (const user of [ID.rev, ID.noRev]) {
+      // The member cannot open c3Priv and GET contacts lists only c3Team.
+      expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+      expect(((await ok3(user, 'contacts')).contacts as Array<{ id: string }>).map((c) => c.id), user).toEqual([ID3.cTeam]);
+      expect(await clauseOf(user), user).not.toBeNull();
+    }
+
+    const rev: SegmentCounts = await ok3(ID.rev, 'segments');
+    expect([rev.lead, rev.client, rev.unpaid], 'revenue read').toEqual([1, 0, 1]);
+    expect(rev, 'revenue read: every key a direct count over the contacts the member may open').toEqual(await directSegmentCounts(await clauseOf(ID.rev)));
+
+    const withheld: SegmentCounts = await ok3(ID.noRev, 'segments');
+    expect([withheld.lead, withheld.client, withheld.unpaid], "revenue 'none'").toEqual([1, 0, 0]);
+    expect(withheld, "revenue 'none': every key a direct count over the contacts the member may open, unpaid 0").toEqual({
+      ...(await directSegmentCounts(await clauseOf(ID.noRev))),
+      unpaid: 0,
+    });
+
+    // The two CRM surfaces agree for each viewer: the highlights' new-this-week segment counts what segments' newThisWeek counts.
+    for (const [user, served] of [[ID.owner, owner], [ID.rev, rev], [ID.noRev, withheld]] as const) {
+      const highlights: Highlights = await ok3(user, 'highlights');
+      expect(segmentsByKey(highlights).get('new-this-week')!.count, user).toBe(served.newThisWeek);
+    }
+  });
+
+  it("F-10: CrmStatsService.segmentSummary named a member works out the counts per request (W11-CRM-SEGMENTS-VISIBLE, D-63): with the owner's payload primed in the business cache under `${businessId}:segmentSummary`, a member is served the member's own counts and the cache is neither read nor written; the owner, and a call naming no viewer, are still served the cached business-wide payload", async () => {
+    const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+    const key = `${ID3.biz}:segmentSummary`;
+    const ownerPayload: SegmentCounts = await ok3(ID.owner, 'segments');
+    expect(ownerPayload.client).toBe(1);
+    const store = new Map<string, unknown>([[key, ownerPayload]]);
+    const reads: string[] = [];
+    const writes: string[] = [];
+    const recordingCache = {
+      get: async (k: string) => { reads.push(k); return store.get(k) ?? null; },
+      set: async (k: string, v: unknown) => { writes.push(k); store.set(k, v); },
+      invalidate: async () => undefined,
+    };
+    // segmentSummary reads no timeline.
+    const stats = new CrmStatsService({ client: db } as any, {} as any, recordingCache as any);
+
+    for (const user of [ID.rev, ID.noRev]) {
+      const served = (await stats.segmentSummary({ businessId: ID3.biz, viewerUserId: user } as any)) as SegmentCounts;
+      expect(served, user).toEqual(await directSegmentCounts(await clauseOf(user)));
+      expect([served.client, served.unpaid], user).toEqual([0, 1]);
+    }
+    expect(reads, 'a member call reads no cache entry').toEqual([]);
+    expect(writes, 'a member call writes no cache entry').toEqual([]);
+    expect(store.get(key)).toEqual(ownerPayload);
+
+    expect(await stats.segmentSummary({ businessId: ID3.biz, viewerUserId: ID.owner } as any), 'owner').toEqual(ownerPayload);
+    expect(reads, 'the owner call reads the business cache entry').toEqual([key]);
+    expect(await stats.segmentSummary({ businessId: ID3.biz }), 'no viewer').toEqual(ownerPayload);
+    expect(reads).toEqual([key, key]);
+    expect(writes, 'served from the cache, nothing rewritten').toEqual([]);
+  });
+
+  // ---- W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133: the CRM count widgets) ----
+  describe('W11-CRM-SEGMENTS-VISIBLE review repair: the contact stats and the contacts poll count only the contacts the member may open (D-133)', () => {
+    /** A source and a tag only c3Priv carries, a source only c3Team carries, and a tag both carry (set for these cases, cleared after them). */
+    const D133 = { privSource: 'v94e-source-priv', teamSource: 'v94e-source-team', privTag: 'v94e-tag-priv', sharedTag: 'v94e-tag-shared' };
+    type ContactStats = {
+      totalCount: number;
+      countByStatus: Record<string, number>;
+      countBySource: Array<{ source: string; count: number }>;
+      recentGrowth: Array<{ week: string; count: number }>;
+      topTags: Array<{ tag: string; count: number }>;
+    };
+    const bySource = (stats: ContactStats) => stats.countBySource.map((row) => [row.source, row.count]).sort();
+    const grown = (stats: ContactStats) => stats.recentGrowth.reduce((sum, week) => sum + week.count, 0);
+
+    beforeAll(async () => {
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { source: D133.teamSource, tags: [D133.sharedTag] } });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { source: D133.privSource, tags: [D133.privTag, D133.sharedTag] } });
+    });
+    afterAll(async () => {
+      for (const id of [ID3.cTeam, ID3.cPriv]) await db.contact.update({ where: { id }, data: { source: null, tags: [] } });
+    });
+
+    it("SEC-W11SV-1 (D-133) (W11-CRM-SEGMENTS-VISIBLE review): GET .../contact-stats counts only the contacts the member may open: a member with crm read (revenue read or 'none') is served totalCount, countByStatus, countBySource, recentGrowth and topTags without another member's PRIVATE contact (c3Priv: CLIENT, a source and a tag of its own), so its status counts agree with GET .../segments; the owner's stats stay business-wide and name it", async () => {
+      // Control: the owner's stats count c3Priv everywhere.
+      const owner: ContactStats = await ok3(ID.owner, 'contact-stats');
+      expect(owner.totalCount).toBe(2);
+      expect(owner.countByStatus).toEqual({ LEAD: 1, PROSPECT: 0, CLIENT: 1, LOST: 0 });
+      expect(bySource(owner)).toEqual([[D133.privSource, 1], [D133.teamSource, 1]]);
+      expect(owner.topTags).toEqual([{ tag: D133.sharedTag, count: 2 }, { tag: D133.privTag, count: 1 }]);
+      expect(grown(owner)).toBe(2);
+      expect(owner.recentGrowth).toHaveLength(6);
+
+      const privCreatedAt = (await db.contact.findUniqueOrThrow({ where: { id: ID3.cPriv }, select: { createdAt: true } })).createdAt.getTime();
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served: ContactStats = await ok3(user, 'contact-stats');
+        expect(served.totalCount, user).toBe(1);
+        expect(served.countByStatus, user).toEqual({ LEAD: 1, PROSPECT: 0, CLIENT: 0, LOST: 0 });
+        expect(bySource(served), user).toEqual([[D133.teamSource, 1]]);
+        expect(served.topTags, user).toEqual([{ tag: D133.sharedTag, count: 1 }]);
+        // The owner's six weeks, each without c3Priv in the week it was created.
+        expect(served.recentGrowth.map((week) => week.week), user).toEqual(owner.recentGrowth.map((week) => week.week));
+        for (const [k, week] of served.recentGrowth.entries()) {
+          const start = new Date(week.week);
+          const end = new Date(start);
+          end.setDate(end.getDate() + 7);
+          const holdsPriv = privCreatedAt >= start.getTime() && privCreatedAt < end.getTime();
+          expect(week.count, `${user} ${week.week}`).toBe(owner.recentGrowth[k].count - (holdsPriv ? 1 : 0));
+        }
+        expect(grown(served), user).toBe(1);
+        // The finding's comparison: the two CRM count routes agree for the member.
+        const segments = await ok3(user, 'segments');
+        expect([served.countByStatus.LEAD, served.countByStatus.PROSPECT, served.countByStatus.CLIENT, served.countByStatus.LOST], user)
+          .toEqual([segments.lead, segments.prospect, segments.client, segments.lost]);
+        expect(JSON.stringify(served), user).not.toContain(D133.privSource);
+        expect(JSON.stringify(served), user).not.toContain(D133.privTag);
+      }
+    });
+
+    it("SEC-W11SV-1 (D-133): CrmStatsService.getContactStats named a member works out the stats per request: with the owner's payload primed in the business cache under `${businessId}:getContactStats`, a member is served the member's own stats and the cache is neither read nor written; the owner, and a call naming no viewer, are still served the cached business-wide payload", async () => {
+      const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+      const key = `${ID3.biz}:getContactStats`;
+      const ownerPayload: ContactStats = await ok3(ID.owner, 'contact-stats');
+      expect([ownerPayload.totalCount, ownerPayload.countByStatus.CLIENT]).toEqual([2, 1]);
+      const store = new Map<string, unknown>([[key, ownerPayload]]);
+      const reads: string[] = [];
+      const writes: string[] = [];
+      const recordingCache = {
+        get: async (k: string) => { reads.push(k); return store.get(k) ?? null; },
+        set: async (k: string, v: unknown) => { writes.push(k); store.set(k, v); },
+        invalidate: async () => undefined,
+      };
+      // getContactStats reads no timeline.
+      const stats = new CrmStatsService({ client: db } as any, {} as any, recordingCache as any);
+
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = (await stats.getContactStats(ID3.biz, user)) as ContactStats;
+        expect([served.totalCount, served.countByStatus.LEAD, served.countByStatus.CLIENT], user).toEqual([1, 1, 0]);
+        expect(bySource(served), user).toEqual([[D133.teamSource, 1]]);
+        expect(served.topTags, user).toEqual([{ tag: D133.sharedTag, count: 1 }]);
+      }
+      expect(reads, 'a member call reads no cache entry').toEqual([]);
+      expect(writes, 'a member call writes no cache entry').toEqual([]);
+      expect(store.get(key)).toEqual(ownerPayload);
+
+      expect(await stats.getContactStats(ID3.biz, ID.owner), 'owner').toEqual(ownerPayload);
+      expect(reads, 'the owner call reads the business cache entry').toEqual([key]);
+      expect(await stats.getContactStats(ID3.biz), 'no viewer').toEqual(ownerPayload);
+      expect(reads).toEqual([key, key]);
+      expect(writes, 'served from the cache, nothing rewritten').toEqual([]);
+    });
+
+    it("SEC-W11SV-1 (D-133): GET .../contacts/poll counts and dates only the contacts the member may open: a member's totalCount leaves c3Priv out and its lastUpdatedAt is c3Team's edit, not c3Priv's later one (which would tell the member a hidden contact changed); the owner's poll stays business-wide (both contacts, c3Priv's edit)", async () => {
+      const teamAt = new Date(Date.now() - 10 * 60_000);
+      const privAt = new Date(Date.now() - 60_000);
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { updatedAt: teamAt } });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { updatedAt: privAt } });
+
+      expect(await ok3(ID.owner, 'contacts/poll')).toEqual({ lastUpdatedAt: privAt.toISOString(), totalCount: 2 });
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        expect(await ok3(user, 'contacts/poll'), user).toEqual({ lastUpdatedAt: teamAt.toISOString(), totalCount: 1 });
+      }
+    });
+  });
+
+  // ---- W11-CRM-COUNTS-RULING (owner ruling D-133, option (a): the CRM count widgets are per viewer) ----
+  describe("W11-CRM-COUNTS-RULING: the contact stats and the contacts poll follow the viewer's contact visibility (owner ruling D-133, option (a))", () => {
+    /** contact-stats' totalCount and countByStatus, read straight from the database over the live contacts of biz3 that `clause` admits (null: all of them). */
+    const directStatusCounts = async (clause: Record<string, unknown> | null) => {
+      const where = clause ? { businessId: ID3.biz, deletedAt: null, AND: [clause] } : { businessId: ID3.biz, deletedAt: null };
+      const countByStatus: Record<string, number> = { LEAD: 0, PROSPECT: 0, CLIENT: 0, LOST: 0 };
+      for (const status of Object.keys(countByStatus)) countByStatus[status] = await db.contact.count({ where: { ...where, status } });
+      return { totalCount: (await db.contact.count({ where })) as number, countByStatus };
+    };
+    const updatedAtOf = async (id: string) => ((await db.contact.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } })).updatedAt as Date);
+    const EDITED_JOB_TITLE = 'V94E edited by the owner';
+
+    afterAll(async () => {
+      // The owner's edit below (PATCH contacts/:c) is undone; its event and audit rows go with the suite's cleanup.
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { jobTitle: null } });
+    });
+
+    it("W11-CRM-COUNTS-RULING (D-133): GET .../contact-stats as each STAFF member (crm read; revenue read and revenue 'none') counts only the contacts that member may open: totalCount 1 and countByStatus.CLIENT 0, c3Priv (CLIENT, another member's PRIVATE contact) left out, each equal to a direct count under the member's visibility clause, in the owner's response shape; the owner's stats stay business-wide: totalCount 2 and countByStatus.CLIENT 1", async () => {
+      // Control: the owner (no visibility clause) is served the business-wide figures, c3Priv counted.
+      const owner = await ok3(ID.owner, 'contact-stats');
+      expect([owner.totalCount, owner.countByStatus.CLIENT], 'owner').toEqual([2, 1]);
+      expect(await clauseOf(ID.owner)).toBeNull();
+      expect({ totalCount: owner.totalCount, countByStatus: owner.countByStatus }, 'owner').toEqual(await directStatusCounts(null));
+
+      for (const user of [ID.rev, ID.noRev]) {
+        // The member cannot open c3Priv.
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = await ok3(user, 'contact-stats');
+        expect([served.totalCount, served.countByStatus.CLIENT], user).toEqual([1, 0]);
+        expect({ totalCount: served.totalCount, countByStatus: served.countByStatus }, user).toEqual(await directStatusCounts(await clauseOf(user)));
+        // D-133 changes the figures, not the response shape.
+        expect(Object.keys(served).sort(), user).toEqual(Object.keys(owner).sort());
+        expect(served.recentGrowth, user).toHaveLength(owner.recentGrowth.length);
+      }
+    });
+
+    it("W11-CRM-COUNTS-RULING (D-133): GET .../contacts/poll as a STAFF member stays at totalCount 1 and the same lastUpdatedAt after the owner edits c3Priv through PATCH contacts/:c, so the poll never wakes the member on a contact they cannot open; the owner's poll moves to that edit (totalCount 2, c3Priv's new updatedAt)", async () => {
+      const ownerBefore = await ok3(ID.owner, 'contacts/poll');
+      expect(ownerBefore.totalCount, 'owner before').toBe(2);
+      const memberBefore = new Map<string, unknown>();
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = await ok3(user, 'contacts/poll');
+        // The member's poll dates c3Team, the one contact they may open.
+        expect(served, user).toEqual({ lastUpdatedAt: (await updatedAtOf(ID3.cTeam)).toISOString(), totalCount: 1 });
+        memberBefore.set(user, served);
+      }
+
+      // The owner edits c3Priv through the real route (crm write, the contact's owner).
+      const edit = await request(app.getHttpServer())
+        .patch(`/crm/businesses/${ID3.biz}/contacts/${ID3.cPriv}`)
+        .set('x-test-user', ID.owner)
+        .send({ jobTitle: EDITED_JOB_TITLE });
+      expect(edit.status, `owner PATCH c3Priv: ${JSON.stringify(edit.body).slice(0, 300)}`).toBe(200);
+      const privEditedAt = await updatedAtOf(ID3.cPriv);
+      expect(privEditedAt.getTime(), 'the edit moved c3Priv').toBeGreaterThan(new Date(ownerBefore.lastUpdatedAt).getTime());
+
+      // The owner's poll moves to the edit; each member's poll is exactly what it was.
+      expect(await ok3(ID.owner, 'contacts/poll'), 'owner after').toEqual({ lastUpdatedAt: privEditedAt.toISOString(), totalCount: 2 });
+      for (const user of [ID.rev, ID.noRev]) {
+        expect(await ok3(user, 'contacts/poll'), `${user} after the owner's edit`).toEqual(memberBefore.get(user));
+      }
+    });
+  });
+
+  // ---- W11-CRM-COUNTS-RULING review repairs SEC-W11CCR-1 (D-133) and SEC-W11CCR-2 (D-63) ----
+  describe("W11-CRM-COUNTS-RULING review repairs: the data-quality stats and the favorites follow the viewer's contact visibility (owner rulings D-133, D-63)", () => {
+    /** One open data-quality issue on each contact, of a kind of its own, a stored score each, both marked favourites (set for these cases, removed after them). */
+    const DQ = { privIssue: `${P}c3Priv_dq`, teamIssue: `${P}c3Team_dq`, privKind: 'invalid_phone', teamKind: 'stale_data', privScore: 40, teamScore: 90 };
+    /** What would tell a member of c3Priv: its id, its last name and its email. */
+    const PRIV_MARKS = [ID3.cPriv, 'PrivSecretThree', `${P}c3priv@contacts.test`];
+    const expectNoPriv = (body: unknown, why: string) => {
+      const text = JSON.stringify(body);
+      for (const mark of PRIV_MARKS) expect(text.includes(mark), `${why}: names ${mark}`).toBe(false);
+    };
+
+    beforeAll(async () => {
+      await db.contactDataIssue.create({
+        data: { id: DQ.privIssue, businessId: ID3.biz, contactId: ID3.cPriv, kind: DQ.privKind, severity: 'high', field: 'phone', message: 'V94E invalid phone', status: 'open' },
+      });
+      await db.contactDataIssue.create({
+        data: { id: DQ.teamIssue, businessId: ID3.biz, contactId: ID3.cTeam, kind: DQ.teamKind, severity: 'low', message: 'V94E stale record', status: 'open' },
+      });
+      await db.contact.update({ where: { id: ID3.cPriv }, data: { dataQualityScore: DQ.privScore, custom: { isFavorite: true } } });
+      await db.contact.update({ where: { id: ID3.cTeam }, data: { dataQualityScore: DQ.teamScore, custom: { isFavorite: true } } });
+    });
+    afterAll(async () => {
+      await db.contactDataIssue.deleteMany({ where: { id: { in: [DQ.privIssue, DQ.teamIssue] } } });
+      for (const id of [ID3.cTeam, ID3.cPriv]) await db.contact.update({ where: { id }, data: { dataQualityScore: null, custom: {} } });
+    });
+
+    it("SEC-W11CCR-1 (D-133) (W11-CRM-COUNTS-RULING review): GET .../data-quality/stats as each STAFF member (crm read; revenue read and revenue 'none') counts only the contacts that member may open: totalContacts 1 (its contact-stats totalCount), issueCounts without c3Priv's open issue and averageScore over c3Team's score alone, so comparing it with GET .../contact-stats tells nothing of another member's PRIVATE contact; lastRunAt, staleDays and the response shape stay the owner's; the owner's stats stay business-wide: totalContacts 2, both issues, the average of both scores", async () => {
+      // Control: the owner (no visibility clause) is served the business-wide figures, c3Priv and its issue counted.
+      const owner = await ok3(ID.owner, 'data-quality/stats');
+      expect(
+        { totalContacts: owner.totalContacts, averageScore: owner.averageScore, priv: owner.issueCounts[DQ.privKind], team: owner.issueCounts[DQ.teamKind] },
+        'owner',
+      ).toEqual({ totalContacts: 2, averageScore: (DQ.privScore + DQ.teamScore) / 2, priv: 1, team: 1 });
+      expect(owner.totalContacts, 'owner: its contact-stats totalCount').toBe((await ok3(ID.owner, 'contact-stats')).totalCount);
+
+      for (const user of [ID.rev, ID.noRev]) {
+        // The member cannot open c3Priv.
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = await ok3(user, 'data-quality/stats');
+        // D-133 changes the figures, not the shape or the business's data-quality settings.
+        expect(served, user).toEqual({
+          ...owner,
+          totalContacts: 1,
+          averageScore: DQ.teamScore,
+          issueCounts: { ...owner.issueCounts, [DQ.privKind]: 0 },
+        });
+        expect(served.totalContacts, `${user}: its contact-stats totalCount`).toBe((await ok3(user, 'contact-stats')).totalCount);
+      }
+    });
+
+    it("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review): GET .../contacts/favorites serves each STAFF member (crm read; revenue read and revenue 'none') only the favourites that member may open: c3Team, never c3Priv (another member's PRIVATE contact, marked a favourite: isFavorite is a business-wide flag on contact.custom), whose id, name and email appear nowhere in the response; the owner's favourites stay business-wide (both contacts)", async () => {
+      // Control: the owner is served both favourites.
+      const owner = (await ok3(ID.owner, 'contacts/favorites')) as Array<{ id: string }>;
+      expect(owner.map((c) => c.id).sort(), 'owner').toEqual([ID3.cPriv, ID3.cTeam].sort());
+
+      for (const user of [ID.rev, ID.noRev]) {
+        expect((await call3(user, `contacts/${ID3.cPriv}`)).status, user).toBe(404);
+        const served = (await ok3(user, 'contacts/favorites')) as Array<{ id: string }>;
+        expect(served.map((c) => c.id), user).toEqual([ID3.cTeam]);
+        expectNoPriv(served, `${user} GET contacts/favorites`);
+      }
+    });
+
+    // SEC-W11CCR-2 hand-offs: these reads take their contacts from services outside this packet's write
+    // set (crm-stats, crm controller); the visibility clause belongs in their own queries (a follow-up packet).
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/issues (CrmDataQualityService.listIssues) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone, and counts it in total and byKind; GET contacts/:c answers that contact 404. The visibility clause belongs in listIssues' where (crm-data-quality.service.ts, outside this packet's write set); a controller filter of one page would leave total and byKind counting it");
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/wizard (CrmDataQualityService.wizardQueue) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone. The visibility clause belongs in wizardQueue's where (crm-data-quality.service.ts, outside this packet's write set), so hidden issues neither show nor take the queue's places");
+    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../relationship-health/at-risk (CrmRelationshipHealthService.listAtRisk) serves a STAFF member another member's AT_RISK or DORMANT PRIVATE contact with its id, name, email and phone. The visibility clause belongs in listAtRisk's where (crm-relationship-health.service.ts, outside this packet's write set), so hidden contacts neither show nor take the list's places");
   });
 });
 

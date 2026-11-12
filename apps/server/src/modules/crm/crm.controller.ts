@@ -597,16 +597,23 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/poll')
-  getContactsPollState(@Param('businessId') businessId: string) {
-    return this.crmStats.getContactsPollState(businessId);
+  getContactsPollState(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling D-133,
+    // "the contacts poll"): the count and the newest edit of the contacts the
+    // session member may open; the OWNER and SUPER_ADMIN keep the
+    // business-wide figures.
+    return this.crmStats.getContactsPollState(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/favorites')
-  getFavorites(@Param('businessId') businessId: string) {
-    return this.crmStats.getFavorites(businessId);
+  getFavorites(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-COUNTS-RULING review repair SEC-W11CCR-2 (owner ruling D-63):
+    // the favourites the session member may open; the OWNER and SUPER_ADMIN
+    // keep every favourite of the business.
+    return this.crmStats.getFavorites(businessId, this.requireActorUserId(req));
   }
 
   // Declared before its contacts/:contactId sibling: Express answers the first
@@ -855,8 +862,19 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/data-quality/stats')
-  dqStats(@Param('businessId') businessId: string) {
-    return this.dataQuality.getStats(businessId);
+  async dqStats(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-COUNTS-RULING review repair SEC-W11CCR-1 (owner ruling D-133):
+    // a member a visibility rule hides contacts from is served totalContacts,
+    // averageScore and issueCounts over the contacts they may open (as GET
+    // .../contact-stats counts them); the business's data-quality settings
+    // (lastRunAt, staleDays) and the response shape are unchanged. The OWNER
+    // and SUPER_ADMIN keep the business-wide stats.
+    const actorUserId = this.requireActorUserId(req);
+    const [stats, viewerCounts] = await Promise.all([
+      this.dataQuality.getStats(businessId),
+      this.crmStats.dataQualityCountsFor(businessId, actorUserId),
+    ]);
+    return viewerCounts ? { ...stats, ...viewerCounts } : stats;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1009,8 +1027,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contact-stats')
-  getContactStats(@Param('businessId') businessId: string) {
-    return this.crmStats.getContactStats(businessId);
+  getContactStats(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
+    // W11-CRM-SEGMENTS-VISIBLE review repair SEC-W11SV-1 (owner ruling
+    // D-133): the stats are the session member's, over the contacts they may
+    // open (as GET .../segments counts them); the OWNER and SUPER_ADMIN keep
+    // the cached business-wide stats.
+    return this.crmStats.getContactStats(businessId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1018,11 +1040,15 @@ export class CrmController {
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/segments')
   async segmentSummary(@Param('businessId') businessId: string, @Req() req: { user?: { id?: string } }) {
-    const summary = await this.crmStats.segmentSummary({ businessId });
+    // W11-CRM-SEGMENTS-VISIBLE (F-10; owner rulings D-63 and D-100): the
+    // counts are the session member's, over the contacts they may open (as
+    // GET .../highlights counts its segments); the OWNER and SUPER_ADMIN keep
+    // the cached business-wide counts.
+    const summary = await this.crmStats.segmentSummary({ businessId, viewerUserId: this.requireActorUserId(req) });
     // W8-MONEY-SIGNALS review repair SEC-W8MS-3 (owner ruling D-100): the
     // unpaid count (contacts with a SENT or OVERDUE invoice) is a money
     // signal; a member without revenue read is served it as 0, the shape and
-    // every other count kept. Projected after the business-wide cache.
+    // every other count kept. Projected after the counts.
     return (await this.readsRevenue(businessId, req)) ? summary : { ...summary, unpaid: 0 };
   }
 
