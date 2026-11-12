@@ -180,7 +180,8 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
  * reconcile_connect_statement_source stores a Drive folder or a free-form Gmail search on a bank account,
  * and reconcile_sweep_statements reads the business's Gmail or Drive with it and imports what it finds into
  * the account (StatementSourceService), so a member could choose which of the owner's mail KEY reads into
- * the books. As ownerOnly they are refused to everyone but the owner (and a SUPER_ADMIN) before dispatch on
+ * the books. As ownerOnly they are refused to everyone but the owner (and a SUPER_ADMIN who is a member;
+ * one who is not is refused by the D-46 revenue-write rule, review SEC-W11GSS-1) before dispatch on
  * every surface that reads this map: the plan queue, an approved proposal, POST .../graph-actions, the
  * cortex chat and the Pro Auto monitor (memberToolRunAuthority, assertMayRunGraphAction); the dispatcher's
  * own two cases hold the driving member to the same rule (FlowOrchestratorService.assertStatementSourceOwner).

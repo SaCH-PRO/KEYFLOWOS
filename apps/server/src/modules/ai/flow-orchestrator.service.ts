@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -3607,6 +3607,15 @@ ${triage.standingContext}`;
    * a membership, or a SUPER_ADMIN), else 403 GOOGLE_CONNECT_OWNER_ONLY. A run with no such member is
    * refused too (fail closed). Called before StatementSourceService is resolved; the nightly sweep
    * (StatementSourceService.sweepAll, no actor) does not come through here and is unchanged.
+   *
+   * Review SEC-W11GSS-1 (D-132, D-46): assertGoogleConnectOwner lets any SUPER_ADMIN through, but the two
+   * web doors refuse a platform SUPER_ADMIN who is no member of the business for this same action: the
+   * HTTP routes by FinanceController.ensureAccess (a Membership row, D-104) and the graph route, plan queue
+   * and approved proposals by the D-46 non-member revenue-write rule (assertMayRunGraphAction). Until a
+   * ruling says otherwise, KEY refuses them the same way (403 'Not a member of this business', not the
+   * owner code), so a non-member SUPER_ADMIN cannot store a Gmail search on the account or sweep the
+   * mailbox or Drive into the books from a chat turn, a KEY-cortex turn or a plan run for them. A
+   * SUPER_ADMIN who holds a membership passes, as both web doors let them.
    */
   private async assertStatementSourceOwner(businessId: string, action?: KeyDispatchAction): Promise<void> {
     // Imported at call time, as plan-step-authority is here: a controller module, kept off this file's import graph.
@@ -3622,6 +3631,18 @@ ${triage.standingContext}`;
       );
     }
     const user = await this.prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
+    if (user?.role === 'SUPER_ADMIN') {
+      // Review SEC-W11GSS-1 (D-46, D-132): a non-member SUPER_ADMIN is refused here as on the web doors.
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: memberId, businessId } },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new ForbiddenException(
+          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not set up or sweep its statement sources (D-46, D-132)',
+        );
+      }
+    }
     await assertGoogleConnectOwner(this.prisma, businessId, { id: memberId, role: user?.role ?? undefined });
   }
 

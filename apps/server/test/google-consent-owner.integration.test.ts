@@ -102,7 +102,9 @@
  * the mailbox and Drive never read), [V94D-L02] (the owner arms set sources and
  * sweep) and [V94D-L03] (KEY: the authority map and the dispatcher's own two
  * cases refuse anyone but the owner on every surface; the Pro Auto monitor run
- * for the owner still sweeps). For these cases FinanceController is mounted
+ * for the owner still sweeps) and [V94D-L04] (review SEC-W11GSS-1, D-46: KEY
+ * refuses a platform SUPER_ADMIN who is no member, as both web doors do; one
+ * who holds a membership still sweeps). For these cases FinanceController is mounted
  * with the real StatementSourceService over the real PrismaService and real
  * FinancialAccount rows; its Gmail and Drive transports are recording
  * stand-ins answering no mail and no files, and its bank import a stand-in no
@@ -1569,6 +1571,81 @@ describe('W11-GOOGLE-STATEMENT-SOURCE-OWNER: setting up and running a bank-state
       expect(statementBankImport.ingest).not.toHaveBeenCalled();
     } finally {
       await db.membership.update({ where: { id: `${P}m_${ID.staff}` }, data: { permissionScopes: { bookings: 'write' } } });
+      await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id = $1`, planId);
+    }
+  });
+
+  it('[V94D-L04] (W11-GOOGLE-STATEMENT-SOURCE-OWNER review SEC-W11GSS-1, D-132, D-46) RED-BEFORE (KEY): a platform SUPER_ADMIN who is no member of the business is refused reconcile_connect_statement_source and reconcile_sweep_statements by the dispatcher (403 "Not a member of this business", not the owner code) on their chat turn (CHAT), a KEY-cortex turn run for them (CORTEX_BRIDGE) and a stored plan of theirs on the plan queue (PLAN_QUEUE), as the web doors refuse them (ensureAccess, [V94D-L02]) and memberToolRunAuthority and assertMayRunGraphAction do (D-46): the stored Gmail search unchanged, StatementSourceService never resolved and the mailbox and Drive never read; a SUPER_ADMIN who holds a membership of the business still sweeps on KEY and on the web, as both web doors let them', async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { StatementSourceService } = await import('../src/modules/finance/statement-source.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { memberToolRunAuthority } = await import('../src/modules/ai/plan-step-authority');
+    const { assertMayRunGraphAction } = await import('../src/modules/ai/graph-actions.controller');
+    const prisma = app.get(PrismaService);
+    const statementSources = app.get(StatementSourceService);
+    const resolved: unknown[] = [];
+    const flow: any = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma,
+      moduleRef: {
+        get: (token: unknown) => {
+          resolved.push(token);
+          return token === StatementSourceService ? statementSources : undefined;
+        },
+      },
+    });
+    const accountId = STATEMENT_ACCOUNT[ID.biz];
+    const TOOLS: Record<string, Record<string, unknown>> = {
+      reconcile_connect_statement_source: { accountId, gmailQuery: 'in:anywhere' },
+      reconcile_sweep_statements: { accountId, source: 'gmail' },
+    };
+    const planId = `${P}plan_super`;
+    const superMembership = `${P}m_${ID.superAdmin}_tmp`;
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.biz, userId: ID.superAdmin, objective: `${P}sweep the bank statements`, status: 'approved' } });
+    try {
+      await resetStatementAccount(ID.biz);
+      const before = await statementMetadataText(ID.biz);
+      clearStatementTransports();
+      const RUNS: Array<[string, Record<string, unknown>]> = [
+        ['the SUPER_ADMIN\'s chat turn', { surface: 'CHAT', principalUserId: ID.superAdmin }],
+        ['a KEY-cortex turn run for the SUPER_ADMIN', { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ID.superAdmin }],
+        ['the SUPER_ADMIN\'s stored plan on the queue', { surface: 'PLAN_QUEUE', planId, planStepId: `${P}step_super` }],
+      ];
+      for (const [tool, args] of Object.entries(TOOLS)) {
+        // The plan queue, an approved proposal and the graph route already refuse them before dispatch (D-46).
+        expect((await memberToolRunAuthority(prisma, ID.biz, ID.superAdmin, tool)).refusal, tool).toMatch(/Not a member of this business.*D-46/);
+        await expect(
+          assertMayRunGraphAction(prisma, ID.biz, { id: ID.superAdmin, role: 'SUPER_ADMIN' }, tool, ID.superAdmin),
+          tool,
+        ).rejects.toThrow(/Not a member of this business.*D-46/);
+        for (const [who, action] of RUNS) {
+          const err: any = await flow.executeToolAction(ID.biz, tool, { ...args }, action).then(
+            () => null,
+            (e: unknown) => e,
+          );
+          expect(err, `${who}: ${tool} was not refused`).not.toBeNull();
+          expect(err.getStatus?.(), `${who}: ${tool}`).toBe(403);
+          expect(err.getResponse?.().code, `${who}: ${tool}`).toBeUndefined();
+          expect(err.message, `${who}: ${tool}`).toMatch(/Not a member of this business.*D-46/);
+        }
+      }
+      expect(resolved, 'StatementSourceService is resolved for no refused run').toEqual([]);
+      expect(await statementMetadataText(ID.biz)).toBe(before);
+      expect(statementGmail.searchMessages).not.toHaveBeenCalled();
+      expect(statementDrive.listFiles).not.toHaveBeenCalled();
+
+      // Control: a SUPER_ADMIN who holds a membership of the business (STAFF) sweeps, on KEY and on the web alike.
+      await db.membership.create({ data: { id: superMembership, userId: ID.superAdmin, businessId: ID.biz, role: 'STAFF' } });
+      const keySweep = await flow.executeToolAction(ID.biz, 'reconcile_sweep_statements', { accountId, source: 'gmail' }, { surface: 'CHAT', principalUserId: ID.superAdmin });
+      expect(keySweep).toEqual({ imported: 0, filesConsidered: 0, skipped: 0, errors: [] });
+      const webSweep = await sweepStatements(ID.biz, 'gmail', ID.superAdmin);
+      expect(webSweep.status, JSON.stringify(webSweep.body)).toBe(201);
+      expect(statementGmail.searchMessages).toHaveBeenCalledTimes(2);
+      expect(resolved).toEqual([StatementSourceService]);
+      // A sweep stamps its time on the sources; the stored Gmail search and Drive folder are the seeded ones.
+      expect(JSON.parse(await statementMetadataText(ID.biz)).statementSources).toMatchObject(statementAccountMetadata(ID.biz).statementSources);
+      expect(statementBankImport.ingest).not.toHaveBeenCalled();
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = $1`, superMembership);
       await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE id = $1`, planId);
     }
   });
