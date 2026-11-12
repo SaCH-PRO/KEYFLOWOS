@@ -203,15 +203,29 @@
  *           red at fb00af1c:
  *   V18-T2o PATCH .../status cannot mark an order paid with a paid-equivalent
  *           value. The payment status is trimmed and upper-cased; PAID goes
- *           through the paid door (D-112), UNPAID, PENDING, PARTIAL and
- *           REFUNDED are written upper-cased, and anything else (COMPLETED in
- *           any case, SETTLED, SUCCEEDED, ...) is 400 naming the paid door,
- *           with nothing written. At the base the owner's COMPLETED was stored
- *           as sent (counted as paid by the COMPLETED readers, off the open
- *           payables) with no invoice, payment or posting, ' PAID' was stored
- *           raw, a lowercase 'paid' replaced an order's stored PAID, and
+ *           through the paid door (D-112), UNPAID, PENDING and PARTIAL are
+ *           written upper-cased, and anything else (COMPLETED in any case,
+ *           SETTLED, SUCCEEDED, ...) is 400 naming the paid door, with nothing
+ *           written. At the base the owner's COMPLETED was stored as sent
+ *           (counted as paid by the COMPLETED readers, off the open payables)
+ *           with no invoice, payment or posting, ' PAID' was stored raw, a
+ *           lowercase 'paid' replaced an order's stored PAID, and
  *           {status:'cancelled', paymentStatus:'PAID'} ran the paid door for a
  *           cancelled order
+ *
+ *           W11-ORDER-PAID-VALUES review repairs (D-117), red at b98a5029:
+ *   V18-T2o2 (SEC-W11OPV-1) paymentStatus REFUNDED on an order not stored
+ *           REFUNDED is 400 naming the fulfil 'refund' action and the refund
+ *           door: it closed an UNPAID order (off the open payables, both paid
+ *           doors then 409) and refunded a PAID one with no Expense and no
+ *           store_order.refunded, with no refund recorded
+ *   V18-T2o3 (CR-W11OPV-1) PATCH PAID on an order stored 'paid' or 'Paid'
+ *           outside the door stores the canonical 'PAID' (b98a5029 kept the
+ *           lowercase spelling, which the 'PAID' readers do not count)
+ *   V18-T2o4 (SEC-W11OPV-2) a PATCH payment write is compare-and-set on the
+ *           payment status it read: a PATCH UNPAID that read the order before
+ *           a concurrent PATCH PAID committed through the paid door is 409,
+ *           not written over the door's PAID
  *   V18-T3  live pin, no source change (trial-N repair round 2 satisfied it): a
  *           CASH and a MANUAL storefront order reach PAID through SiteController
  *           POST /site/businesses/:businessId/orders/:orderId/complete-offline
@@ -2300,7 +2314,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     }
   });
 
-  it('V18-T2o (W11-ORDER-PAID-VALUES, D-117; SOP-V3, CR-W10SOP-6) PATCH .../status cannot mark an order paid with a paid-equivalent value: the owner\'s paymentStatus COMPLETED (any case, padded), SETTLED, SUCCEEDED or any other value outside PAID, UNPAID, PENDING, PARTIAL and REFUNDED is 400 naming the paid door, with the order unchanged, no INV-<orderNumber>, payment or posting, no store_order event, and the order still an open payable; \' paid \' goes through the paid door (one invoice, one payment, one posting); PATCH PAID on an order stored PAID outside the door keeps \'PAID\' stored; {status:\'cancelled\', paymentStatus:\'PAID\'} is 400 with nothing written; controls: \'unpaid\' and \'pending\' are stored UNPAID and PENDING, and a revenue:read STAFF member writing COMPLETED is still 403', async () => {
+  it('V18-T2o (W11-ORDER-PAID-VALUES, D-117; SOP-V3, CR-W10SOP-6) PATCH .../status cannot mark an order paid with a paid-equivalent value: the owner\'s paymentStatus COMPLETED (any case, padded), SETTLED, SUCCEEDED or any other value outside PAID, UNPAID, PENDING and PARTIAL (REFUNDED: V18-T2o2) is 400 naming the paid door, with the order unchanged, no INV-<orderNumber>, payment or posting, no store_order event, and the order still an open payable; \' paid \' goes through the paid door (one invoice, one payment, one posting); PATCH PAID on an order stored PAID outside the door keeps \'PAID\' stored; {status:\'cancelled\', paymentStatus:\'PAID\'} is 400 with nothing written; controls: \'unpaid\' and \'pending\' are stored UNPAID and PENDING, and a revenue:read STAFF member writing COMPLETED is still 403', async () => {
     const { controller } = await marketRoutes();
     const STAFF = await memberOfA('staff_t2o');
     /** The answer to a call: 200, or the HTTP status, with "naming the paid door" when a 400 names it (D-117). */
@@ -2412,20 +2426,207 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(await counts(), 'no invoice, payment or posting').toEqual(beforeCancel);
     expect(storeEvents(), 'no store_order event').toEqual([]);
 
-    // (5) Controls: the allow-list is written upper-cased by a member with revenue write (SEC-SOP-4); REFUNDED via PATCH
-    // on an order not on the doors stays as it is. At fb00af1c each was stored as sent ('pending', ' Partial ', 'unpaid').
+    // (5) Controls: the allow-list is written upper-cased by a member with revenue write (SEC-SOP-4). At fb00af1c each
+    // was stored as sent ('pending', ' Partial ', 'unpaid'). REFUNDED is refused (review SEC-W11OPV-1, V18-T2o2).
     const control = await standardOrderOfA('t2o_control');
     const beforeControl = await counts();
     seen = [];
     const written: string[] = [];
-    for (const paymentStatus of ['pending', ' Partial ', 'unpaid', 'REFUNDED']) {
+    for (const paymentStatus of ['pending', ' Partial ', 'unpaid']) {
       const res = await controller.updateOrderStatus(ID.biz, control.id, { status: 'placed', paymentStatus }, signedIn(ID.owner));
       written.push(`${JSON.stringify(paymentStatus)} -> ${res.paymentStatus}`);
     }
     await settle();
-    expect(written).toEqual(['"pending" -> PENDING', '" Partial " -> PARTIAL', '"unpaid" -> UNPAID', '"REFUNDED" -> REFUNDED']);
+    expect(written).toEqual(['"pending" -> PENDING', '" Partial " -> PARTIAL', '"unpaid" -> UNPAID']);
     expect(await counts(), 'the allow-list writes no money').toEqual(beforeControl);
     expect(storeEvents()).toEqual([]);
+  });
+
+  it('V18-T2o2 (W11-ORDER-PAID-VALUES review SEC-W11OPV-1; D-117, D-14) PATCH .../status cannot refund an order through its payment status: paymentStatus REFUNDED (any case, padded) on an order not stored REFUNDED is 400 naming the fulfil \'refund\' action and the refund door, with nothing written, no Expense and no store_order event: an UNPAID order stays an open payable and the owner then marks it paid through the paid door, and an order stored PAID outside the door (the Shopify sync\'s shape) stays PAID, counted by the \'PAID\' readers; controls: the fulfil \'refund\' of its twin books an Expense of the refund amount and emits store_order.refunded, REFUNDED on an order stored REFUNDED is kept, and a revenue:read STAFF member writing REFUNDED is still 403', async () => {
+    const { controller } = await marketRoutes();
+    const STAFF = await memberOfA('staff_t2o2');
+    /** The answer to a call: 200, or the HTTP status, with "naming the refund doors" when a 400 names them. */
+    const refundAnswer = (work: Promise<unknown>) =>
+      work.then(
+        () => '200',
+        (err: any) => {
+          if (typeof err?.getStatus !== 'function') return `${err?.name}: ${err?.message}`;
+          const names = /fulfil 'refund'/.test(String(err.message)) && /orders\/:orderId\/refund\b/.test(String(err.message));
+          return `${err.getStatus()}${names ? ' naming the refund doors' : `: ${err.message}`}`;
+        },
+      );
+    const openPayable = (id: string) =>
+      // PaymentsOpsService.listOpenPayables' order filter (payments-ops.service.ts), as in V18-T2d.
+      db.marketplaceOrder.count({ where: { id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] }, status: { not: 'CANCELLED' } } });
+
+    // (a) An UNPAID order. At b98a5029 the owner's REFUNDED was 200 and stored REFUNDED (the review's probe P1): off the
+    // open payables with nothing recorded, and both paid doors then refused it (409) until someone PATCHed UNPAID.
+    const unpaid = await standardOrderOfA('t2o2_unpaid');
+    const shape = await orderShape(unpaid.id);
+    const before = await counts();
+    seen = [];
+    expenses.length = 0;
+    const bodies: Array<Record<string, unknown>> = [
+      { status: 'placed', paymentStatus: 'REFUNDED' },
+      { status: 'placed', paymentStatus: 'refunded' },
+      { status: 'shipped', paymentStatus: ' Refunded ' },
+    ];
+    const answers: Record<string, string> = {};
+    for (const body of bodies) {
+      answers[JSON.stringify(body)] = await refundAnswer(controller.updateOrderStatus(ID.biz, unpaid.id, body, signedIn(ID.owner)));
+    }
+    expect(answers, 'refused, naming the refund doors').toEqual(
+      Object.fromEntries(bodies.map((body) => [JSON.stringify(body), '400 naming the refund doors'])),
+    );
+    expect(
+      await answered(controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'placed', paymentStatus: 'REFUNDED' }, signedIn(STAFF))),
+      'REFUNDED as a revenue:read STAFF member',
+    ).toBe(403);
+    await settle();
+    expect(await orderShape(unpaid.id), 'the order as it was').toEqual(shape);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(expenses, 'no Expense').toEqual([]);
+    expect(await openPayable(unpaid.id), 'still an open payable').toBe(1);
+    // The paid door still takes it (at b98a5029: 409, the order closed with nothing recorded).
+    const paid = await controller.updateOrderStatus(ID.biz, unpaid.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner));
+    await settle();
+    expect(`${paid.status}/${paid.paymentStatus}`, 'marked paid through the paid door').toBe('paid/PAID');
+    await expectOnePaidInvoice(unpaid);
+
+    // (b) An order stored PAID outside the door (the Shopify sync's shape). At b98a5029 REFUNDED was 200 (probe P2): a
+    // refund with no Expense and no store_order.refunded, and the 'PAID' readers stopped counting the order.
+    const synced = await standardOrderOfA('t2o2_synced', { status: 'paid', paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+    const twin = await standardOrderOfA('t2o2_twin', { status: 'paid', paymentStatus: 'PAID', metadata: { source: 'shopify' } });
+    const syncedShape = await orderShape(synced.id);
+    const beforeSynced = await counts();
+    seen = [];
+    expenses.length = 0;
+    expect(
+      await refundAnswer(controller.updateOrderStatus(ID.biz, synced.id, { status: 'paid', paymentStatus: 'REFUNDED' }, signedIn(ID.owner))),
+      'REFUNDED on an order stored PAID',
+    ).toBe('400 naming the refund doors');
+    await settle();
+    expect(await orderShape(synced.id), 'the order as it was').toEqual(syncedShape);
+    expect(await db.marketplaceOrder.count({ where: { id: synced.id, paymentStatus: 'PAID' } }), "the 'PAID' readers still count it").toBe(1);
+    expect(await counts()).toEqual(beforeSynced);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+    expect(expenses, 'no Expense').toEqual([]);
+
+    // Control: the fulfil 'refund' of its twin records the refund: an Expense of the amount and one store_order.refunded.
+    const refunded = await controller.fulfillOrder(ID.biz, twin.id, { action: 'refund', refundAmount: ORDER_TOTAL }, signedIn(ID.owner));
+    await settle();
+    expect(`${refunded.status}/${refunded.paymentStatus}`).toBe('refunded/REFUNDED');
+    expect(expenses.map((e) => Number(e.amount)), 'an Expense of the refund').toEqual([ORDER_TOTAL]);
+    expect(storeEvents(), 'one store_order.refunded').toEqual(['store_order.refunded']);
+
+    // Control: REFUNDED on an order stored REFUNDED (any case) records nothing new and is kept, written canonical.
+    const legacy = await standardOrderOfA('t2o2_legacy', { status: 'refunded', paymentStatus: 'refunded', metadata: { source: 'shopify' } });
+    seen = [];
+    expenses.length = 0;
+    const resent: string[] = [];
+    for (const [id, paymentStatus] of [
+      [twin.id, 'REFUNDED'],
+      [legacy.id, ' Refunded '],
+    ] as const) {
+      const res = await controller.updateOrderStatus(ID.biz, id, { status: 'completed', paymentStatus }, signedIn(ID.owner));
+      resent.push(`${res.status}/${res.paymentStatus}`);
+    }
+    await settle();
+    expect(resent, 'kept').toEqual(['completed/REFUNDED', 'completed/REFUNDED']);
+    expect(storeEvents()).toEqual([]);
+    expect(expenses, 'no second Expense').toEqual([]);
+  });
+
+  it('V18-T2o3 (W11-ORDER-PAID-VALUES review CR-W11OPV-1; D-117) PATCH .../status with paymentStatus PAID (any case) on an order stored with a non-canonical paid spelling outside the door (\'paid\', \'Paid\': what the base\'s lowercase write left over a stored PAID) stores the canonical \'PAID\', so the readers that filter paymentStatus \'PAID\' count it and it is not an open payable, with no invoice, payment, posting or store_order event', async () => {
+    const { controller } = await marketRoutes();
+    const before = await counts();
+    seen = [];
+    const stored: string[] = [];
+    for (const [suffix, legacySpelling, sent] of [
+      ['t2o3_lower', 'paid', 'PAID'],
+      ['t2o3_title', 'Paid', 'paid'],
+      ['t2o3_shipped', 'paid', ' Paid '],
+    ] as const) {
+      const order = await standardOrderOfA(suffix, { status: 'paid', paymentStatus: legacySpelling, metadata: { source: 'shopify' } });
+      const status = suffix === 't2o3_shipped' ? 'picking_packing' : 'paid';
+      // At b98a5029 each answered 200 with the legacy spelling kept (stored paid/paid, paid/Paid): no route made it
+      // canonical, as the paid door and mark_paid both take it as paid already.
+      await controller.updateOrderStatus(ID.biz, order.id, { status, paymentStatus: sent }, signedIn(ID.owner));
+      const row = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      stored.push(`${legacySpelling} + ${JSON.stringify(sent)}: ${row.status}/${row.paymentStatus}`);
+      expect(await invoicesOf(order), `${suffix}: no invoice written for it`).toEqual([]);
+    }
+    await settle();
+    expect(stored, "the canonical 'PAID' stored").toEqual([
+      'paid + "PAID": paid/PAID',
+      'Paid + "paid": paid/PAID',
+      'paid + " Paid ": picking_packing/PAID',
+    ]);
+    const ids = (await db.marketplaceOrder.findMany({ where: { businessId: ID.biz, orderNumber: { startsWith: `${P}rp_t2o3_` } }, select: { id: true } })).map(
+      (o: any) => o.id,
+    );
+    expect(await db.marketplaceOrder.count({ where: { id: { in: ids }, paymentStatus: 'PAID' } }), "the 'PAID' readers count them").toBe(3);
+    expect(
+      await db.marketplaceOrder.count({ where: { id: { in: ids }, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] } } }),
+      'none an open payable',
+    ).toBe(0);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+    expect(storeEvents(), 'no store_order event').toEqual([]);
+  });
+
+  it('V18-T2o4 (W11-ORDER-PAID-VALUES review SEC-W11OPV-2; D-117, D-112) a PATCH .../status payment write is compare-and-set on the payment status the PATCH read: an owner\'s paymentStatus UNPAID (or PENDING) that read the order before a concurrent PATCH PAID committed through the paid door is 409 with nothing written, so the order stays PAID with its one invoice, payment and posting and is not an open payable; control: with no concurrent marking the same PATCH is 200', async () => {
+    const { controller } = await marketRoutes();
+    const realCheck = storeOrders.assertMemberMayRecordPayments.bind(storeOrders);
+    for (const paymentStatus of ['UNPAID', 'PENDING']) {
+      const order = await standardOrderOfA(`t2o4_${paymentStatus.toLowerCase()}`);
+      seen = [];
+      // The stale PATCH is held after its order read and its door read (at the revenue write check), while the marking
+      // runs through the paid door to completion: the review's probe P3.
+      let heldIn!: () => void;
+      const reached = new Promise<void>((resolve) => (heldIn = resolve));
+      let release!: () => void;
+      const go = new Promise<void>((resolve) => (release = resolve));
+      let calls = 0;
+      const spy = vi.spyOn(storeOrders, 'assertMemberMayRecordPayments').mockImplementation(async (...args: any[]) => {
+        calls += 1;
+        if (calls === 1) {
+          heldIn();
+          await go;
+        }
+        return realCheck(...args);
+      });
+      let staleAnswer: unknown;
+      try {
+        const stale = answered(controller.updateOrderStatus(ID.biz, order.id, { status: 'placed', paymentStatus }, signedIn(ID.owner)));
+        await reached;
+        const paid = await controller.updateOrderStatus(ID.biz, order.id, { status: 'paid', paymentStatus: 'PAID' }, signedIn(ID.owner));
+        await settle();
+        expect(`${paid.status}/${paid.paymentStatus}`, `${paymentStatus}: the marking through the paid door`).toBe('paid/PAID');
+        release();
+        staleAnswer = await stale;
+      } finally {
+        release();
+        spy.mockRestore();
+      }
+      await settle();
+      // At b98a5029 both were 200 and the stale PATCH wrote placed/UNPAID over the door's PAID: an open payable whose
+      // INV-<orderNumber> is PAID and whose payment is SUCCESSFUL, refused by both paid doors for good (400).
+      expect(staleAnswer, `${paymentStatus}: the stale PATCH`).toBe(409);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`, `${paymentStatus}: stored`).toBe('paid/PAID');
+      await expectOnePaidInvoice(order);
+      expect(
+        await db.marketplaceOrder.count({ where: { id: order.id, paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] } } }),
+        `${paymentStatus}: not an open payable`,
+      ).toBe(0);
+      expect(storeEvents().filter((n) => n !== 'store_order.paid'), `${paymentStatus}: no event from the stale PATCH`).toEqual([]);
+    }
+
+    // Control: with no concurrent marking, the same PATCH writes its value.
+    const order = await standardOrderOfA('t2o4_control');
+    const res = await controller.updateOrderStatus(ID.biz, order.id, { status: 'placed', paymentStatus: 'PENDING' }, signedIn(ID.owner));
+    expect(`${res.status}/${res.paymentStatus}`).toBe('placed/PENDING');
   });
 
   it.todo(

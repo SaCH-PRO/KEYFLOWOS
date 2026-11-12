@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import ExcelJS from 'exceljs';
 import { createHash, randomBytes } from 'crypto';
@@ -54,8 +54,13 @@ function marksPaymentPaid(paymentStatus: unknown): boolean {
  * and dropped from the open payables by payments-ops.service.ts), SETTLED, SUCCEEDED and every other synonym a reader
  * may treat as paid were stored with no invoice, no payment and no books. An allow-list, as a deny-list cannot name
  * every synonym.
+ * Review SEC-W11OPV-1 (D-117, D-14): REFUNDED is not on it. It took an UNPAID order off the open payables with nothing
+ * recorded (both paid doors then refused it, 409) and refunded a PAID one with no Expense and no store_order.refunded,
+ * as the status 'refunded' did (assertNotRefundingThroughStatus): an order is refunded through the fulfil 'refund'
+ * action or the D-14 refund door. REFUNDED on an order already stored REFUNDED records nothing new and is kept
+ * (assertWritablePaymentStatus), as PAID on an order stored PAID is.
  */
-const PATCH_WRITABLE_PAYMENT_STATUSES = new Set(['UNPAID', 'PENDING', 'PARTIAL', 'REFUNDED']);
+const PATCH_WRITABLE_PAYMENT_STATUSES = new Set(['UNPAID', 'PENDING', 'PARTIAL']);
 
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
@@ -808,9 +813,19 @@ export class MarketplaceService {
    * (D-112). Anything else is refused (400) with nothing written and no event: COMPLETED (in any case), SETTLED,
    * SUCCEEDED and every other value a reader may count as paid was stored as sent, with no invoice, no payment and
    * no books.
+   * Review SEC-W11OPV-1 (D-117, D-14): REFUNDED is refused (400 naming the refund routes) unless the order is already
+   * stored REFUNDED (any case), where it records nothing new.
    */
-  private assertWritablePaymentStatus(paymentStatus: string | undefined): void {
+  private assertWritablePaymentStatus(paymentStatus: string | undefined, storedPaymentStatus: string | null | undefined): void {
     if (paymentStatus === undefined || marksPaymentPaid(paymentStatus) || PATCH_WRITABLE_PAYMENT_STATUSES.has(paymentStatus)) return;
+    if (paymentStatus === 'REFUNDED') {
+      if (normalisedPaymentStatus(storedPaymentStatus) === 'REFUNDED') return;
+      throw new BadRequestException(
+        "An order is refunded with the fulfil 'refund' action (POST .../orders/:orderId/fulfill) or, for a storefront order or an " +
+          'order created paid, POST /site/businesses/:businessId/orders/:orderId/refund, which record the refund. Setting its payment ' +
+          'status to REFUNDED records no refund',
+      );
+    }
     throw new BadRequestException(
       "An order is marked paid only through the paid door, which records its invoice, its payment and its books: the fulfil 'mark_paid' " +
         'action (POST .../orders/:orderId/fulfill) or PATCH .../status with paymentStatus PAID. The other payment statuses written here are ' +
@@ -1062,8 +1077,9 @@ export class MarketplaceService {
     const writesPayment = ORDER_PAYMENT_FIELDS.some((field) => paymentData?.[field] !== undefined);
     if (writesPayment) await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
     // W11-ORDER-PAID-VALUES (D-117): after the 403 (a member without revenue write is refused whatever the value), a
-    // payment status outside PAID and the allow-list is refused with nothing written and no event.
-    this.assertWritablePaymentStatus(paymentStatus);
+    // payment status outside PAID and the allow-list is refused with nothing written and no event (REFUNDED: review
+    // SEC-W11OPV-1).
+    this.assertWritablePaymentStatus(paymentStatus, order.paymentStatus);
     const include = { items: { include: { product: true } }, shipments: true } as const;
     if (marksPaymentPaid(paymentStatus) && (order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
       const { doorStatus } = await this.recordPaymentThroughDoor(order, {
@@ -1095,19 +1111,41 @@ export class MarketplaceService {
 
     const updateData: any = { status };
     if (paymentData) {
-      // W11-ORDER-PAID-VALUES (D-117): an allow-listed value is written upper-cased. PAID reaches here only for an order
-      // already stored PAID (outside the door: the Shopify sync, a legacy row), whose stored 'PAID' is kept: a lowercase
-      // 'paid' replaced it, and the readers that filter paymentStatus 'PAID' stopped counting the order.
-      if (paymentStatus !== undefined && paymentStatus !== 'PAID') updateData.paymentStatus = paymentStatus;
+      // W11-ORDER-PAID-VALUES (D-117): the value is written upper-cased. PAID reaches here only for an order already
+      // stored paid in any case (outside the door: the Shopify sync, a legacy row), REFUNDED only for one stored
+      // REFUNDED. Review CR-W11OPV-1: the canonical spelling is written over a stored 'paid' or 'Paid' (what the base's
+      // lowercase write left over a stored PAID), which the readers that filter paymentStatus 'PAID' do not count and
+      // no other route makes canonical; over a stored 'PAID' it changes nothing.
+      if (paymentStatus !== undefined) updateData.paymentStatus = paymentStatus;
       updateData.paymentMethod = paymentData.paymentMethod;
       updateData.paymentRef = paymentData.paymentRef;
     }
 
-    const updated = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: updateData,
-      include: { items: { include: { product: true } }, shipments: true },
-    });
+    let updated;
+    if (writesPayment) {
+      // W11-ORDER-PAID-VALUES review SEC-W11OPV-2 (D-117, D-112): a payment write is compare-and-set on the payment
+      // status read above, which decided it (the door checks, the value checks). An unconditioned update let a PATCH
+      // UNPAID that read the order before a concurrent marking committed through the paid door write UNPAID over the
+      // door's PAID: an open payable whose INV-<orderNumber> is PAID and whose payment is SUCCESSFUL, refused by both
+      // paid doors for good. A change in between is 409 with nothing written and no event.
+      const { count } = await this.prisma.client.marketplaceOrder.updateMany({
+        where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
+        data: updateData,
+      });
+      if (count === 0) {
+        throw new ConflictException(
+          "This order's payment status changed while it was being edited (it was marked paid or refunded meanwhile): nothing was " +
+            'written. Reload the order and edit it again',
+        );
+      }
+      updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
+    } else {
+      updated = await this.prisma.client.marketplaceOrder.update({
+        where: { id: orderId },
+        data: updateData,
+        include,
+      });
+    }
 
     this.emitOrderLifecycleEvent(businessId, updated, status);
 
