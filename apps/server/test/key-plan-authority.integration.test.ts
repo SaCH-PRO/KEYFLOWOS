@@ -1501,3 +1501,41 @@ describe('W10-KEY-PLAN-SCOPE (D-114, D-57): an explicit revenue none binds an AD
     ]);
   });
 });
+
+/**
+ * W11-KEY-ORGAN-AUTHORITY-MAP (owner rulings D-119, D-131): the KEY chat holds each model tool call to
+ * memberToolRunAuthority with no principal (SEC-W10CCS-R1). Before this packet the dotted organ and legacy
+ * cortex tools were mapped to no module scope, so every member but the business owner was refused all of
+ * them. Each now has its entry (key-cortex-organ-tool-authority.ts), judged here over real Membership rows;
+ * a tool still unmapped stays the owner's only (D-119).
+ */
+describe('W11-KEY-ORGAN-AUTHORITY-MAP (D-119, D-131): memberToolRunAuthority judges the KEY chat\'s dotted organ tools by their map entries over real memberships', () => {
+  const KO = {
+    staffOpsW: `${P}staff_opsw`, // STAFF, explicit scope map {operations: 'write'}
+  };
+  let memberToolRunAuthority: (prisma: any, businessId: string, memberId: string, toolName: string) => Promise<{ refusal: string | null; principal: boolean }>;
+
+  beforeAll(async () => {
+    ({ memberToolRunAuthority } = await import('../src/modules/ai/plan-step-authority') as any);
+    await db.user.create({ data: { id: KO.staffOpsW, email: `${P}staff_opsw@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_staff_opsw_biz`, userId: KO.staffOpsW, businessId: ID.biz, role: 'STAFF', permissionScopes: { operations: 'write' } } });
+  });
+
+  it('KO-01 RED-BEFORE (W11-KEY-ORGAN-AUTHORITY-MAP, D-119): a STAFF member whose explicit map holds operations write runs key_inbox.send_reply (the twin of inbox_reply_thread); a STAFF member on role defaults (operations read) is refused it; the owner runs it', async () => {
+    expect((await memberToolRunAuthority(prisma, ID.biz, KO.staffOpsW, 'key_inbox.send_reply')).refusal).toBeNull();
+    expect((await memberToolRunAuthority(prisma, ID.biz, ID.staff, 'key_inbox.send_reply')).refusal).toBe(
+      'Insufficient permissions: operations requires write access (you have read)',
+    );
+    expect((await memberToolRunAuthority(prisma, ID.biz, ID.owner, 'key_inbox.send_reply')).refusal).toBeNull();
+  });
+
+  it('KO-02 RED-BEFORE (W11-KEY-ORGAN-AUTHORITY-MAP, D-119, D-63): an ADMIN runs key_genome.get_blueprint (settings read) and is refused cortex.query_business_data, which stays unmapped and the owner\'s only; the owner runs both', async () => {
+    expect((await memberToolRunAuthority(prisma, ID.biz, ID.admin, 'key_genome.get_blueprint')).refusal).toBeNull();
+    expect((await memberToolRunAuthority(prisma, ID.biz, ID.admin, 'cortex.query_business_data')).refusal).toBe(
+      'Tool "cortex.query_business_data" is mapped to no module scope, so it is not executed from this route',
+    );
+    for (const tool of ['key_genome.get_blueprint', 'cortex.query_business_data']) {
+      expect((await memberToolRunAuthority(prisma, ID.biz, ID.owner, tool)).refusal, tool).toBeNull();
+    }
+  });
+});
