@@ -152,7 +152,7 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(tx.business.findFirst.mock.calls[1]).toEqual([{ where: { id: 'biz-existing', members: { some: { userId: 'user-1' } } }, select: { id: true } }]);
   });
 
-  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, review SEC-W10OM-3): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership there is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
+  it('owner ruling D-104 (W10-OWNER-MEMBERSHIP, reviews SEC-W10OM-3, OMV-2, OMV-R2): a caller recorded as Business.ownerId of their bootstrap business who holds no Membership on any live business (not there, on no other business they own, nowhere else: the owned-member and oldest-Membership reads find nothing) is refused 403 OWNER_MEMBERSHIP_REQUIRED, and nothing is written or retried', async () => {
     const { tx, calls } = txRecorder();
     let read = 0;
     tx.business.findFirst = vi.fn(async () => {
@@ -171,6 +171,8 @@ describe('IdentityService bootstrap workspace — atomicity and convergence', ()
     expect(tx.membership.upsert).not.toHaveBeenCalled();
     expect(tx.membership.create).not.toHaveBeenCalled();
     expect($transaction).toHaveBeenCalledTimes(1);
+    // The refusal comes only after both reads that look for a Membership elsewhere (review OMV-R2).
+    expect(calls).toEqual(['business.findFirst', 'business.findFirst', 'business.findFirst', 'membership.findFirst']);
   });
 
   it('owner ruling D-104 (review OMV-2): a caller who is no member of their oldest owned business is answered the oldest owned business they are a member of, and nothing is written', async () => {
