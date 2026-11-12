@@ -46,7 +46,10 @@
  *           (both also through a wrapping skipTenantIsolation(...); reviews
  *           OMV3-R1, OMV-R1), and no ownerId (on any receiver but a contact,
  *           indexed or parenthesised ones included, or destructured) compared
- *           to the caller (userId, actorId, user.id, ...).
+ *           to the caller (userId, actorId, user.id, ...), nor a
+ *           business-named receiver's ownerId (business, biz,
+ *           existingBusiness, rows.business, any *Business) compared with any
+ *           value but null/undefined or under typeof (review SEAMZ4-SEC-1).
  *   OMB-10  review SEC-W10OM-3: POST /identity/bootstrap (bootstrapUser) writes
  *           no Membership on a business it did not create: the ownerId-only
  *           owner is refused 403 OWNER_MEMBERSHIP_REQUIRED and stays refused.
@@ -295,6 +298,21 @@ async function bootstrapError(userId: string) {
  *     parenthesised ((await load(id))). A receiver named
  *     `contact`/`contacts`/`...Contact` is a Contact's owner, not
  *     Business.ownerId, and is not counted.
+ *   'business ownerId compared' (review SEAMZ4-SEC-1; the 39e9be12 census's
+ *     receiver arm, kept beside the caller one): a business-named receiver's
+ *     ownerId compared (===, !==, ==, !=) with any value but null, undefined
+ *     or under a typeof check, either side: whoever the other side names
+ *     (authUser.id, uid, sub, principal.id, session.sub, input.ownerUserId,
+ *     id, ...), the comparison decides on ownerId. Business-named: the
+ *     receiver's last name is `biz` or ends in `Biz`, `business`, `Business`
+ *     or `businesses`/`Businesses` (business, existingBusiness, rows.business,
+ *     this.business, businesses[0], getBusiness(id)); a wholly parenthesised
+ *     receiver is named by its inside, with `await`, a trailing `!` and an
+ *     `as T` dropped ((await loadBusiness(id)), (business as Business)), and
+ *     a read on a business delegate counts ((await tx.business.findUnique(...))).
+ *   One label per comparison (the operator's offset): a comparison the caller
+ *   rule labels is not labelled again, and two business owners compared with
+ *   each other are one site.
  */
 const CALLER = String.raw`(?:[\w$]+(?:\?\.|!\.|\.))*(?:(?:userId|actorId|actorUserId|callerId|requesterId|viewerId|currentUserId|memberId|actor)\b|(?:user|actor|caller|requester|viewer|currentUser|me)!?(?:\?\.|\.)id\b)`;
 const DOT = String.raw`(?:\?\.|!\.|\.)`;
@@ -302,14 +320,50 @@ const DOT = String.raw`(?:\?\.|!\.|\.)`;
 const INDEX = String.raw`\[[^\[\]]*\]`;
 const PARENS = String.raw`\((?:[^()]|\([^()]*\))*\)`;
 const RECEIVER = String.raw`(?:[\w$]+|${PARENS})(?:${DOT}[\w$]+|${INDEX}|${PARENS})*`;
-const EQ = String.raw`\s*[!=]==?\s*`;
+const OP = String.raw`[!=]==?`;
+/**
+ * Each comparison regex names `recv` (the ownerId receiver, '' for a bare
+ * ownerId) and `lhs` (everything the match holds before the operator), so the
+ * operator's offset (m.index + lhs.length) identifies the site.
+ */
 const COMPARED: RegExp[] = [
-  new RegExp(String.raw`(?<![\w$.])(${RECEIVER})${DOT}ownerId${EQ}${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}(${RECEIVER})${DOT}ownerId\b`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])()ownerId${EQ}${CALLER}`, 'g'),
-  new RegExp(String.raw`(?<![\w$.])${CALLER}${EQ}()ownerId(?![\w$])`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>(?<recv>${RECEIVER})${DOT}ownerId\s*)${OP}\s*${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*(?<recv>${RECEIVER})${DOT}ownerId\b`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>(?<recv>)ownerId\s*)${OP}\s*${CALLER}`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?<lhs>${CALLER}\s*)${OP}\s*(?<recv>)ownerId(?![\w$])`, 'g'),
+];
+/** Null or undefined as a whole operand (not nullOwner, undefinedId). */
+const NULLISH = String.raw`(?:null|undefined)(?![\w$])`;
+/**
+ * Review SEAMZ4-SEC-1: `<receiver>.ownerId` compared with any operand but a
+ * nullish one, the receiver on either side and not under typeof; whether the
+ * receiver is business-named is businessReceiver's call.
+ */
+const BUSINESS_COMPARED: RegExp[] = [
+  new RegExp(String.raw`(?<![\w$.])(?<!\btypeof )(?<lhs>(?<recv>${RECEIVER})${DOT}ownerId\s*)${OP}(?!=)(?!\s*${NULLISH})`, 'g'),
+  new RegExp(String.raw`(?<![!=])(?<!(?<![\w$])${NULLISH}\s*)(?<lhs>)${OP}\s*(?<recv>${RECEIVER})${DOT}ownerId(?![\w$])`, 'g'),
 ];
 const READS = String.raw`(?:findUnique|findUniqueOrThrow|findFirst|findFirstOrThrow|findMany|count|aggregate|groupBy)`;
+const BUSINESS_NAME = /^(?:biz|[\w$]*(?:Biz|[bB]usiness(?:es)?))$/;
+
+/**
+ * Whether a comparison's receiver names a business (review SEAMZ4-SEC-1): its
+ * last name, index and call segments dropped, or a read on a business delegate;
+ * a wholly parenthesised receiver by its inside (await, `!` and `as T` dropped).
+ */
+function businessReceiver(recv: string): boolean {
+  const tail = recv.replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
+  const names = tail.split(/\?\.|!\.|\./);
+  const name = names.pop() ?? '';
+  if (name) return BUSINESS_NAME.test(name) || (new RegExp(String.raw`^${READS}$`).test(name) && BUSINESS_NAME.test(names.pop() ?? ''));
+  const inner = bracketGroup(recv, 0)
+    .slice(1, -1)
+    .trim()
+    .replace(/^await\s+/, '')
+    .replace(/\s+as\s+[\w$.]+(?:<[^<>]*>)?(?:\[\])?$/, '')
+    .replace(/!$/, '');
+  return new RegExp(String.raw`^${RECEIVER}$`).test(inner) && businessReceiver(inner);
+}
 
 /** The bracket group ('{', '[' or '(') that opens at text[start], brackets balanced. */
 function bracketGroup(text: string, start: number): string {
@@ -366,12 +420,24 @@ function censusHits(source: string): string[] {
       if (/\bownerId\b/.test(filter) && !/\bmembers\b/.test(filter)) hits.push('business relation on ownerId without membership');
     }
   }
+  // One label per comparison, keyed by the operator's offset.
+  const compared = new Set<number>();
   for (const re of COMPARED) {
     for (const m of text.matchAll(re)) {
       // The receiver's last name, its index and call segments dropped (contacts[0] -> contacts).
-      const tail = (m[1] ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
+      const tail = (m.groups?.recv ?? '').replace(new RegExp(String.raw`(?:${INDEX}|${PARENS})+$`), '');
       const receiver = tail.split(/\?\.|!\.|\./).pop() ?? '';
-      if (!/contacts?$/i.test(receiver)) hits.push('ownerId compared to the caller');
+      if (/contacts?$/i.test(receiver)) continue;
+      compared.add(m.index! + (m.groups?.lhs ?? '').length);
+      hits.push('ownerId compared to the caller');
+    }
+  }
+  for (const re of BUSINESS_COMPARED) {
+    for (const m of text.matchAll(re)) {
+      const op = m.index! + (m.groups?.lhs ?? '').length;
+      if (compared.has(op) || !businessReceiver(m.groups?.recv ?? '')) continue;
+      compared.add(op);
+      hits.push('business ownerId compared');
     }
   }
   return hits.sort();
