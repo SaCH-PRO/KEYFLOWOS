@@ -965,6 +965,29 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ['parenthesised business type assertion', 'if ((business as Business).ownerId === uid) return true;', 'business ownerId compared'],
       ['two business owners compared (one site)', 'if (business.ownerId === parentBusiness.ownerId) return true;', 'business ownerId compared'],
       ['parenthesised business, union type assertion, non-null assertion', 'if ((rows.business as Business | null)!.ownerId === uid) return true;', 'business ownerId compared'],
+      // Reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: the 39e9be12 census matched
+      // the business-named segment wherever its chain began, so a receiver
+      // chain of any shape counts: optional index and call (?.[..], ?.(..)),
+      // nested index and call groups, a `!` before an index, a space before a
+      // dot (a chain prettier broke over lines), and an identifier with `$`.
+      ['optional index chain to a business', 'if (memberships?.[0]?.business?.ownerId !== user.sub) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional index chain to a business, against the caller', 'if (ctx.rows?.[0].business.ownerId === userId) return true;', 'ownerId compared to the caller'],
+      ['nested index to a business', 'if (byId[ids[0]].business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional call to a business', 'if (this.svc.resolve?.(id).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested call to a business, against the caller', 'if (this.repo.get(toId(String(id))).business.ownerId === userId) return true;', 'ownerId compared to the caller'],
+      ['a $-prefixed biz', 'if ($biz.ownerId === uid) return true;', 'business ownerId compared'],
+      ['prettier-printed long condition (a space before .business)', 'if (\n    (await this.prisma.client.membership.findFirst({ where: { userId: actor.id, businessId } }))!\n      .business.ownerId !== authUser.id\n  )\n    throw new ForbiddenException();', 'business ownerId compared'],
+      ['parenthesised load, two paren levels, to a business', 'if ((await this.load(String(id))).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested index on rows to a business', 'if (rows[ids[0]].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['optional index on rows to a business', 'if (rows?.[0].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['non-null index on rows to a business', 'if (rows![0].business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['optional call on ctx to a business', 'if (ctx.load?.(id).business.ownerId === uid) return true;', 'business ownerId compared'],
+      ['chain broken over lines to a business', 'if (this.tenant\n  .current(req).business.ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['nested index chain to a business, value on the left', 'if (uid !== byId[ids[0]]?.business.ownerId) throw new ForbiddenException();', 'business ownerId compared'],
+      ['prettier member chain, .ownerId on its own line', 'if (\n  this.repo\n    .scoped(ctx)\n    .withTx(tx)\n    .getBusiness(id)\n    .ownerId !== uid\n)\n  throw new ForbiddenException();', 'business ownerId compared'],
+      ['business returned by a nested call', 'if (this.getBusiness(toId(String(id))).ownerId !== uid) throw new ForbiddenException();', 'business ownerId compared'],
+      ['optional index receiver against the caller', 'if (rows?.[0].ownerId === userId) return;', 'ownerId compared to the caller'],
+      ['nested call receiver, caller on the left', 'if (userId !== this.repo.get(toId(String(id))).ownerId) throw new ForbiddenException();', 'ownerId compared to the caller'],
     ];
     const PASSED: Array<[string, string]> = [
       ['the D-104 owner arm (the Membership required)', 'this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true } })'],
@@ -986,6 +1009,12 @@ describe('W10-OWNER-MEMBERSHIP (D-104): census pin', () => {
       ["a business's ownerId, loose null checks", 'if (existingBusiness.ownerId != null && rows.business.ownerId == undefined) return;'],
       ['null and undefined on the left', 'if (null !== business.ownerId && undefined === targetBusiness?.ownerId) return;'],
       ["a business's ownerId under typeof", "if (typeof business.ownerId === 'string' && 'string' === typeof this.business.ownerId) return;"],
+      // Reviews Z4-RV-CENSUS-SEC-1, Z4RV-CENSUS-1: typeof, null, undefined and
+      // a contact's owner at the end of any receiver chain.
+      ['a chained business ownerId under typeof', "if (typeof a?.[0].business.ownerId === 'string' && typeof rows[0].business.ownerId === 'string') return;"],
+      ['a chain broken over lines under typeof', "if (typeof this.tenant\n  .current(req).business.ownerId === 'string') return;"],
+      ['a chained business ownerId against null and undefined', 'if (rows?.[0].business.ownerId === null || undefined !== byId[ids[0]].business?.ownerId) return;'],
+      ["a chained contact's owner", 'if (rows?.[0].contact.ownerId !== actorId) throw new ForbiddenException();'],
     ];
     expect(FLAGGED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(FLAGGED.map(([shape, , label]) => [shape, [label]]));
     expect(PASSED.map(([shape, source]) => [shape, censusHits(source)])).toEqual(PASSED.map(([shape]) => [shape, []]));
