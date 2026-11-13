@@ -1,0 +1,88 @@
+packet_id: KF-MEMORY-CONTEXT-GENOME-PLAN-001
+title: KEY Memory / Context Genome convergence plan
+state: PLANNING
+health: GREEN
+scope_changed: false
+production_touched: false
+implementation_branch: docs/kf-memory-context-genome-plan-001
+baseline_head: 1190c2236011452485d7575668ad0407c7ca43c5
+
+repository_cross_reference:
+  completed:
+    - canonical structured memory writer
+    - unified memory retrieval
+    - semantic/vector memory
+    - perception join into live chat
+    - ingestion orchestrator and listener
+    - ingestion dedupe behavior
+    - CRM entity resolution
+    - Business Genome fact/evidence/signal patterns
+    - conversation genome extraction
+    - Genome memory events
+    - Temporal Flow memory
+    - BusinessEvent lineage
+    - Evidence service
+    - KnowledgeSource and dormant KnowledgeIngestionService
+    - circadian memory consolidation
+    - Business Graph snapshot role
+    - Living System Atlas integration
+    - Mission Control convergence
+  material_findings:
+    - portable/local-first memory representation is absent
+    - KnowledgeIngestionService is dormant and chunk/embed-first
+    - current generic ingestion is stronger than dormant knowledge ingestion
+    - current contact entity resolution is not a universal entity resolver
+    - embeddings are useful derived indexes and must remain rebuildable
+    - Business Genome already contains a strong evidence-backed claim-admission pattern
+    - TemporalFlowMemory is already a derived evidence-linked projection pattern
+    - current consolidation deletes weaker conflicting AiMemory rows and needs lineage-preserving semantics
+    - current once-per-night consolidation checkpoint is process-local
+    - some historical memory docs are stale against current DB-backed memory code
+
+declared_outputs:
+  - architecture/memory/KEY-MEMORY-CONTEXT-GENOME.md
+  - docs/development/KF-MEMORY-CONTEXT-GENOME-PLAN-001.md
+  - docs/development/KF-MEMORY-CONTEXT-GENOME-STATUS.yaml
+
+phases:
+  - M0 memory truth audit
+  - M1 source claim identity provenance contract
+  - M2 portable Vault protocol
+  - M3 raw source registry and content addressing
+  - M4 observation and claim admission
+  - M5 general entity graph
+  - M6 Wiki and INDEX projections
+  - M7 graph-aware Context Compiler
+  - M8 consolidation replay and procedural memory
+  - M9 local-first sync and portability
+  - M10 Mission Control memory/world-model view
+
+immediate_next_packets:
+  - KF-MEMORY-TRUTH-AUDIT-001
+  - KF-MEMORY-SEMANTIC-CONTRACT-001
+  - KF-MEMORY-PORTABLE-VAULT-001
+
+hard_invariants:
+  - no parallel memory authority
+  - no vector index as canonical memory
+  - no inference as authoritative truth
+  - no destructive contradiction resolution without lineage
+  - no duplicate universal identity when domain authority exists
+  - no provider-specific portable format
+  - no second Mission Control
+  - no filesystem file may grant runtime authority
+  - no fake-green progress
+  - architecture-affecting changes update the Living System Atlas
+
+safety:
+  production_deploy_authorized: false
+  production_mutation_authorized: false
+  provider_effect_authorized: false
+  application_packet_release_authorized: false
+  mission_control_mutation_authorized: false
+
+next_action: >-
+  Open the bounded planning PR, review the repository cross-reference for missing
+  memory stores or authority seams, then release only the read-only
+  KF-MEMORY-TRUTH-AUDIT-001 forensic packet. Do not begin schema/runtime
+  implementation before the audit and semantic contract converge.
