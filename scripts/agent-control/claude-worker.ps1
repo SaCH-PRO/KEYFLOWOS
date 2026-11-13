@@ -64,9 +64,12 @@
   Defaults: 15 and 30. Overridable so the bound can be proved in seconds.
 
 .PARAMETER LockRoot
-  Where the machine-wide lock lives: one file per repository and control
-  issue, shared by every checkout a worker could be started from.
-  Default: %LOCALAPPDATA%\KEYFLOWOS\locks.
+  Where the machine lock lives: one file per repository and control issue,
+  shared by every checkout a worker is started from under the same Windows
+  user. Default: %LOCALAPPDATA%\KEYFLOWOS\locks, which is per Windows user
+  (the user's temp directory when LOCALAPPDATA is unset). Workers run as
+  different users, or given different LockRoot values, do not see each
+  other's lock.
 
 .PARAMETER GhPath
 .PARAMETER ClaudePath
