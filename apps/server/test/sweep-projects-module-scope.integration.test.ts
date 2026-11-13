@@ -9,9 +9,13 @@
  * the service (D-85).
  *
  * The rule: every ProjectsController route runs AuthGuard, BusinessGuard, then ModuleScopeGuard, and
- * requires the projects module on its handler: read for a GET and for the read-only
- * POST .../events/:eventId/analyze-impact (it computes and writes nothing), write for every other
- * route. Role defaults (module-vocabulary ROLE_DEFAULT_SCOPES, only when a membership has no
+ * requires the projects module on its handler: read for a GET, write for every other route
+ * (POST .../events/:eventId/analyze-impact included: it writes no project row but spends the
+ * business's metered AI credits, review SEC-5), except the two plan doors owner ruling D-85
+ * governs (POST .../plans/:planId/approve and DELETE .../plans/:planId: OWNER/ADMIN or
+ * projects:write, ProjectsService.assertMayGovernPlans), which name no module on the handler so
+ * the guard cannot refuse an OWNER or ADMIN whose explicit map holds projects below write (review
+ * CR-2). Role defaults (module-vocabulary ROLE_DEFAULT_SCOPES, only when a membership has no
  * explicit map): OWNER and ADMIN projects admin, STAFF read; a key absent from an explicit map is
  * none.
  *
@@ -47,6 +51,7 @@ const ID = {
   staffNone: `${P}staffNone`, // STAFF of bizA, explicit projects 'none'
   staffNoKey: `${P}staffNoKey`, // STAFF of bizA, explicit map without a projects key (none)
   staffWrite: `${P}staffWrite`, // STAFF of bizA, explicit projects 'write'
+  adminExplicitRead: `${P}adminExplicitRead`, // ADMIN of bizA, explicit {projects: read, crm: admin, settings: admin} (D-85 admits the ADMIN)
   outsider: `${P}outsider`, // OWNER of bizB
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -57,6 +62,7 @@ let db: any;
 let app: any;
 let MODULE_SCOPE_KEY = '';
 let ProjectsControllerClass: any;
+const aiUsage = { callAi: vi.fn(async () => { throw new Error('the metered AI call is not under test'); }) };
 
 async function cleanup() {
   for (const sql of [
@@ -176,7 +182,8 @@ beforeAll(async () => {
       { provide: EventEmitter2, useValue: emitter },
       { provide: TaskAssignmentService, useValue: {} },
       { provide: BusinessEventService, useValue: { emit: async () => undefined } },
-      { provide: AiUsageService, useValue: {} },
+      // ProjectPlannerService.analyzeRearrangement's metered model call (SEC-5): recording, never reached by a refused case.
+      { provide: AiUsageService, useValue: aiUsage },
       { provide: BlueprintService, useValue: {} },
       { provide: AiOversightService, useValue: {} },
       { provide: StrategicIntelligenceService, useValue: {} },
@@ -200,7 +207,7 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.admin, ID.staffRead, ID.staffReadExplicit, ID.staffNone, ID.staffNoKey, ID.staffWrite, ID.outsider]) {
+  for (const id of [ID.owner, ID.admin, ID.staffRead, ID.staffReadExplicit, ID.staffNone, ID.staffNoKey, ID.staffWrite, ID.adminExplicitRead, ID.outsider]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V99J Biz A', ownerId: ID.owner } });
@@ -214,6 +221,7 @@ beforeAll(async () => {
   await m(ID.staffNone, ID.bizA, 'STAFF', { projects: 'none', crm: 'read' });
   await m(ID.staffNoKey, ID.bizA, 'STAFF', { crm: 'read' });
   await m(ID.staffWrite, ID.bizA, 'STAFF', { projects: 'write' });
+  await m(ID.adminExplicitRead, ID.bizA, 'ADMIN', { projects: 'read', crm: 'admin', settings: 'admin' });
   await m(ID.outsider, ID.bizB, 'OWNER');
 
   await db.project.create({ data: { id: ID.ownerProject, businessId: ID.bizA, name: `${P}Owner project` } });
@@ -224,8 +232,11 @@ afterAll(async () => {
   if (db) await cleanup();
 });
 
+/** The plan doors owner ruling D-85 governs in ProjectsService.assertMayGovernPlans (OWNER/ADMIN or projects:write). */
+const D85_PLAN_DOORS = ['ProjectsController.approvePlan', 'ProjectsController.deletePlan'];
+
 describe('route census: projects.controller.ts', () => {
-  it("[PRJ-C01] RED-BEFORE: every ProjectsController route runs AuthGuard, BusinessGuard, then ModuleScopeGuard, and requires 'projects' on its handler: read for a GET and for the read-only analyze-impact, write for every other route", () => {
+  it("[PRJ-C01] RED-BEFORE: every ProjectsController route runs AuthGuard, BusinessGuard, then ModuleScopeGuard, and requires 'projects' on its handler: read for a GET, write for every other route (analyze-impact included, SEC-5), none on the two D-85 plan doors (CR-2)", () => {
     const routes = census(ProjectsControllerClass);
     const problems: string[] = [];
     for (const r of routes) {
@@ -235,7 +246,11 @@ describe('route census: projects.controller.ts', () => {
       if (r.guards.indexOf('ModuleScopeGuard') >= 0 && r.guards.indexOf('ModuleScopeGuard') < r.guards.indexOf('BusinessGuard')) {
         problems.push(`${r.key} runs ModuleScopeGuard before BusinessGuard`);
       }
-      const want = r.method === 'GET' || r.key === 'ProjectsController.analyzeImpact' ? 'read' : 'write';
+      if (D85_PLAN_DOORS.includes(r.key)) {
+        if (r.scope) problems.push(`${r.key} requires ${r.scope.module}:${r.scope.minLevel}; D-85 governs it (assertMayGovernPlans)`);
+        continue;
+      }
+      const want = r.method === 'GET' ? 'read' : 'write';
       if (r.scope?.module !== 'projects' || r.scope?.minLevel !== want) {
         problems.push(`${r.key} (${r.method} ${r.path}) requires ${r.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no module scope'}, not projects:${want}`);
       }
@@ -314,5 +329,53 @@ describe("BUG-014: a member with projects read cannot write projects", () => {
 
   it("[PRJ-07] a member of another business is refused (BusinessGuard, unchanged)", async () => {
     expect((await send('delete', `${base()}/projects/${ID.ownerProject}`, ID.outsider)).status).toBe(403);
+  });
+});
+
+describe('review CR-2: the D-85 plan doors admit OWNER/ADMIN or projects:write, as the ruling says', () => {
+  let n = 0;
+  async function draftPlan() {
+    n += 1;
+    const id = `${P}plan_${n}`;
+    await db.projectPlan.create({ data: { id, businessId: ID.bizA, userIdea: `${P}idea ${n}`, status: 'draft' } as any });
+    return id;
+  }
+
+  it('[PRJ-D85-01] RED-BEFORE: an ADMIN whose explicit map holds projects read approves a draft plan and deletes another (D-85: OWNER/ADMIN or projects:write)', async () => {
+    const a = await draftPlan();
+    const approve = await send('post', `${base()}/plans/${a}/approve`, ID.adminExplicitRead);
+    expect([200, 201], JSON.stringify(approve.body)).toContain(approve.status);
+    expect((await db.projectPlan.findUnique({ where: { id: a } })).status).not.toBe('draft');
+    const b = await draftPlan();
+    const del = await send('delete', `${base()}/plans/${b}`, ID.adminExplicitRead);
+    expect(del.status, JSON.stringify(del.body)).toBe(200);
+    expect(await db.projectPlan.findUnique({ where: { id: b } })).toBeNull();
+  });
+
+  it('[PRJ-D85-02] a STAFF member with projects read (role default or explicit) is still refused 403 approving or deleting a plan (the D-85 service check), and the plan stays a draft', async () => {
+    const a = await draftPlan();
+    for (const actor of [ID.staffRead, ID.staffReadExplicit, ID.staffNone]) {
+      const approve = await send('post', `${base()}/plans/${a}/approve`, actor);
+      expect(approve.status, `${actor} approve`).toBe(403);
+      const del = await send('delete', `${base()}/plans/${a}`, actor);
+      expect(del.status, `${actor} delete`).toBe(403);
+    }
+    expect((await db.projectPlan.findUnique({ where: { id: a } })).status).toBe('draft');
+  });
+
+  it('[PRJ-D85-03] a STAFF member with projects write deletes a draft plan; a member of another business is refused (BusinessGuard)', async () => {
+    const a = await draftPlan();
+    expect((await send('delete', `${base()}/plans/${a}`, ID.outsider)).status).toBe(403);
+    expect((await send('delete', `${base()}/plans/${a}`, ID.staffWrite)).status).toBe(200);
+  });
+});
+
+describe('review SEC-5: analyze-impact spends metered AI credits, so it needs projects write', () => {
+  it('[PRJ-AI-01] RED-BEFORE: a STAFF member with projects read (ai none by role default) is refused 403 before the metered model call', async () => {
+    aiUsage.callAi.mockClear();
+    const res = await send('post', `${base()}/plans/${P}plan_any/events/${P}event_any/analyze-impact`, ID.staffRead, { newSortOrder: 2 });
+    expect(res.status).toBe(403);
+    expect(String(res.body?.message ?? '')).toMatch(/projects requires write access \(you have read\)/);
+    expect(aiUsage.callAi).not.toHaveBeenCalled();
   });
 });

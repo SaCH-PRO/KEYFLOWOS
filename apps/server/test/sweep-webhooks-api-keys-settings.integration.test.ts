@@ -15,18 +15,25 @@
  * D-114 / D-140):
  *   - webhook configuration reads (the list, the delivery log) need settings read; every webhook
  *     write (create, delete, enable/disable, send a test delivery) needs settings write;
- *   - a webhook's signing secret is answered once, to the member who created it, in the create
- *     answer; no read answers it afterwards, to anyone (the owner included): today every reader got
- *     it, so the safer of the two is kept;
+ *   - a webhook's signing secret is answered in the create answer, and afterwards only to a member
+ *     with settings admin (the owner and ADMINs by role default; review CR-5: the owner could no
+ *     longer read an existing webhook's secret); a settings write member lists webhooks with their
+ *     full URL and no secret; a settings read member gets the receiver's origin only (review SEC-3:
+ *     for Slack, Zapier and Make hooks the URL path is itself the credential), in the list and in
+ *     the delivery log;
+ *   - a webhook's events carry other modules' records (invoices, contacts, bookings, store orders),
+ *     so the member who creates one, or turns one back on, must hold read on the module of every
+ *     event it subscribes to (revenue for invoice.*, crm with every contact in view for contact.*,
+ *     bookings for booking.*, storefront for store_order.*, ...; review SEC-2, D-114, D-100); an
+ *     event the server does not know is a 400;
  *   - a webhook URL must be http(s) to a public address: the repo's outbound-address guard
  *     (core/security/outbound-address.ts) refuses a loopback, private, link-local (cloud metadata)
  *     or otherwise non-public host at create (400, nothing written) and again at every delivery,
  *     which connects only to the address it checked (a stored row from before the check reaches
  *     nothing);
- *   - API keys are settings admin territory: listing needs settings read, creating needs settings
- *     admin, and revoking needs the owner-level right (an OWNER membership, D-116 / D-125) besides,
- *     since a key records no creator (no schema change here), so any key may be the owner's or
- *     another member's.
+ *   - API keys are settings admin territory: listing needs settings read, creating and revoking need
+ *     settings admin (review CR-3: an ADMIN who may create a key may revoke one; no ruling makes
+ *     revoking owner-only, which stays an owner question in the census).
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService, AuthGuard,
  * BusinessGuard, ModuleScopeGuard, the global ValidationPipe and GlobalHttpExceptionFilter,
@@ -64,7 +71,11 @@ const ID = {
   staffNone: `${P}staffNone`, // STAFF of bizA, the sweep's member: settings/team/ai/connect/revenue/expenses none
   staffDefault: `${P}staffDefault`, // STAFF of bizA, no explicit map (settings none by role default)
   settingsRead: `${P}settingsRead`, // STAFF of bizA, explicit settings 'read'
-  settingsWrite: `${P}settingsWrite`, // STAFF of bizA, explicit settings 'write'
+  settingsWrite: `${P}settingsWrite`, // STAFF of bizA, explicit settings 'write' (revenue none: absent from the map)
+  settingsWriteRevenue: `${P}settingsWriteRevenue`, // STAFF of bizA, explicit settings 'write' and revenue 'read'
+  settingsWriteCrm: `${P}settingsWriteCrm`, // STAFF of bizA, explicit settings 'write' and crm 'read'
+  settingsWriteCrmOwned: `${P}settingsWriteCrmOwned`, // STAFF of bizA, settings 'write', crm 'read' but crm_view 'owned' (their own book only)
+  adminSettingsOnly: `${P}adminSettingsOnly`, // ADMIN of bizA, explicit {settings: admin, revenue: none, crm: none} (D-114 binds the ADMIN)
   settingsAdmin: `${P}settingsAdmin`, // STAFF of bizA, explicit settings 'admin'
   outsider: `${P}outsider`, // OWNER of bizB, no membership in bizA
   bizA: `${P}bizA`,
@@ -236,6 +247,10 @@ beforeAll(async () => {
   await m(ID.staffDefault, ID.bizA, 'STAFF');
   await m(ID.settingsRead, ID.bizA, 'STAFF', { settings: 'read' });
   await m(ID.settingsWrite, ID.bizA, 'STAFF', { settings: 'write' });
+  await m(ID.settingsWriteRevenue, ID.bizA, 'STAFF', { settings: 'write', revenue: 'read' });
+  await m(ID.settingsWriteCrm, ID.bizA, 'STAFF', { settings: 'write', crm: 'read' });
+  await m(ID.settingsWriteCrmOwned, ID.bizA, 'STAFF', { settings: 'write', crm: 'read', crm_view: 'owned' });
+  await m(ID.adminSettingsOnly, ID.bizA, 'ADMIN', { settings: 'admin', revenue: 'none', crm: 'none' });
   await m(ID.settingsAdmin, ID.bizA, 'STAFF', { settings: 'admin' });
   await m(ID.outsider, ID.bizB, 'OWNER');
 }, 120_000);
@@ -290,17 +305,36 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     }
   });
 
-  it('[WHK-02] RED-BEFORE: no read answers a signing secret after creation, to anyone: the owner, a co-owner, an ADMIN and a settings:read member list the webhooks without it', async () => {
+  it('[WHK-02] (review CR-5) a member with settings admin (the owner, a co-owner, an ADMIN, a settings-admin STAFF member) lists the webhooks with the full URL and the signing secret, so an existing webhook\'s secret can be read again', async () => {
     const wh = await seedWebhook();
-    for (const actor of [ID.owner, ID.coOwner, ID.admin, ID.settingsRead]) {
+    for (const actor of [ID.owner, ID.coOwner, ID.admin, ID.settingsAdmin]) {
       const res = await send('get', hooks(), actor);
       expect(res.status, actor).toBe(200);
       const row = (res.body as any[]).find((w) => w.id === wh.id);
       expect(row, actor).toBeTruthy();
-      expect(row.url).toBe(wh.url);
-      expect(row, actor).not.toHaveProperty('secret');
-      expect(JSON.stringify(res.body), actor).not.toContain(wh.secret);
+      expect(row.url, actor).toBe(wh.url);
+      expect(row.secret, actor).toBe(wh.secret);
     }
+  });
+
+  it('[WHK-02b] RED-BEFORE (review SEC-3): a settings write member lists the full URL and no secret; a settings read member gets the receiver origin only (the path, where a Slack or Zapier hook carries its token, is hidden) and no secret', async () => {
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.78/services/T0000/B0000/XXXXSLACKTOKENXXXX?k=v' });
+    const writer = await send('get', hooks(), ID.settingsWrite);
+    expect(writer.status).toBe(200);
+    const writerRow = (writer.body as any[]).find((w) => w.id === wh.id);
+    expect(writerRow.url).toBe(wh.url);
+    expect(writerRow).not.toHaveProperty('secret');
+    expect(JSON.stringify(writer.body)).not.toContain(wh.secret);
+
+    const reader = await send('get', hooks(), ID.settingsRead);
+    expect(reader.status).toBe(200);
+    const readerRow = (reader.body as any[]).find((w) => w.id === wh.id);
+    expect(readerRow, 'the row is listed').toBeTruthy();
+    expect(readerRow.url).toBe('https://203.0.113.78/***');
+    expect(readerRow.urlMasked).toBe(true);
+    expect(readerRow).not.toHaveProperty('secret');
+    expect(JSON.stringify(reader.body)).not.toContain('XXXXSLACKTOKENXXXX');
+    expect(JSON.stringify(reader.body)).not.toContain(wh.secret);
   });
 
   it('[WHK-03] RED-BEFORE: creating a webhook needs settings write: the sweep member, STAFF on defaults and a settings:read member get 403 and nothing is written', async () => {
@@ -313,14 +347,14 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     expect(await webhookRows()).toEqual(before);
   });
 
-  it('[WHK-04] a member with settings write (and the owner) creates a webhook; the create answer carries the signing secret once, and a later read does not', async () => {
-    for (const actor of [ID.settingsWrite, ID.owner]) {
+  it('[WHK-04] a member with settings write and revenue read (and the owner) creates an invoice webhook; the create answer carries the signing secret, and a later read by a settings write member does not', async () => {
+    for (const actor of [ID.settingsWriteRevenue, ID.owner]) {
       const res = await send('post', hooks(), actor, { url: 'https://203.0.113.10/v99w-erp', events: ['invoice.paid'], name: `${P}${actor}` });
       expect(res.status, actor).toBe(201);
       expect(res.body.secret, actor).toMatch(/^[0-9a-f]{64}$/);
       const stored = await db.webhook.findUnique({ where: { id: res.body.id } });
       expect(stored.secret).toBe(res.body.secret);
-      const list = await send('get', hooks(), actor);
+      const list = await send('get', hooks(), ID.settingsWriteRevenue);
       expect(JSON.stringify(list.body), actor).not.toContain(res.body.secret);
     }
   });
@@ -340,12 +374,23 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     expect(sinkHits.filter((h) => h.path === '/v99w-whk05')).toEqual([]);
   });
 
-  it('[WHK-06] RED-BEFORE: the delivery log needs settings read', async () => {
-    const wh = await seedWebhook();
+  it('[WHK-06] RED-BEFORE: the delivery log needs settings read, and answers a settings read member the receiver origin only (review SEC-3)', async () => {
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/hooks/catch/123/SECRETPATH' });
     const refused = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.staffNone);
     expect(refused.status).toBe(403);
+    // A delivery log entry for this webhook, as the dispatcher records one (its in-memory log; no
+    // delivery is attempted, so nothing leaves the machine).
+    (dispatcher as any).addLog({
+      id: `${P}log_06`, webhookId: wh.id, businessId: ID.bizA, event: 'invoice.paid', url: wh.url,
+      status: 'failed', statusCode: 500, attempts: 1, duration: 3, error: 'HTTP 500', timestamp: new Date().toISOString(),
+    });
     const ok = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.settingsRead);
     expect(ok.status).toBe(200);
+    expect((ok.body as any[]).length).toBeGreaterThan(0);
+    for (const entry of ok.body as any[]) expect(entry.url).toBe('https://203.0.113.79/***');
+    expect(JSON.stringify(ok.body)).not.toContain('SECRETPATH');
+    const full = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.settingsWrite);
+    expect((full.body as any[])[0].url).toBe(wh.url);
   });
 
   it('[WHK-07] a member of another business is refused every webhook route of this one (BusinessGuard, unchanged)', async () => {
@@ -353,6 +398,65 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     expect((await send('get', hooks(), ID.outsider)).status).toBe(403);
     expect((await send('delete', `${hooks()}/${wh.id}`, ID.outsider)).status).toBe(403);
     expect(await db.webhook.findUnique({ where: { id: wh.id } })).toBeTruthy();
+  });
+});
+
+describe('review SEC-2: a webhook delivers only what its creator may read', () => {
+  it("[WHK-EV-01] RED-BEFORE: an ADMIN whose explicit map says settings admin but revenue and crm none (D-114) is refused 403 creating a webhook for invoice or contact events, and nothing is written", async () => {
+    const before = await webhookRows();
+    for (const events of [['invoice.paid'], ['invoice.sent', 'invoice.overdue'], ['contact.created'], ['invoice.paid', 'invoice.sent', 'contact.created']]) {
+      const res = await send('post', hooks(), ID.adminSettingsOnly, { url: 'https://203.0.113.77/exfil', events });
+      expect(res.status, events.join(',')).toBe(403);
+      expect(String(res.body?.message ?? ''), events.join(',')).toMatch(/(revenue|crm) read access/);
+      expect(JSON.stringify(res.body)).not.toMatch(/"secret"/);
+    }
+    expect(await webhookRows()).toEqual(before);
+  });
+
+  it('[WHK-EV-02] RED-BEFORE: a settings write member is refused an event whose module they cannot read (invoice.* without revenue read, contact.* without crm read, or with crm read limited to their own contacts); the module they hold is admitted', async () => {
+    const before = await webhookRows();
+    const refused: Array<[string, string[]]> = [
+      [ID.settingsWrite, ['invoice.paid']],
+      [ID.settingsWrite, ['contact.created']],
+      [ID.settingsWriteRevenue, ['contact.updated']],
+      [ID.settingsWriteCrm, ['invoice.paid']],
+      [ID.settingsWriteCrmOwned, ['contact.created']],
+    ];
+    for (const [actor, events] of refused) {
+      const res = await send('post', hooks(), actor, { url: 'https://203.0.113.77/exfil', events });
+      expect(res.status, `${actor} ${events}`).toBe(403);
+    }
+    expect(await webhookRows()).toEqual(before);
+    const crm = await send('post', hooks(), ID.settingsWriteCrm, { url: 'https://203.0.113.77/crm', events: ['contact.created', 'contact.updated'] });
+    expect(crm.status).toBe(201);
+    const revenue = await send('post', hooks(), ID.settingsWriteRevenue, { url: 'https://203.0.113.77/rev', events: ['invoice.paid'] });
+    expect(revenue.status).toBe(201);
+  });
+
+  it('[WHK-EV-03] RED-BEFORE: an event the server does not know is refused 400 and nothing is written', async () => {
+    const before = await webhookRows();
+    const res = await send('post', hooks(), ID.owner, { url: 'https://203.0.113.77/x', events: ['invoice.paid', 'everything.*'] });
+    expect(res.status).toBe(400);
+    expect(String(res.body?.message ?? '')).toMatch(/Unknown webhook event: everything\.\*/);
+    expect(await webhookRows()).toEqual(before);
+  });
+
+  it('[WHK-EV-04] RED-BEFORE: turning a webhook back on needs the same reads (a settings write member without revenue read cannot re-enable the owner\'s disabled invoice webhook); turning one off needs settings write only', async () => {
+    const wh = await seedWebhook(ID.bizA, { isActive: false, events: ['invoice.paid'] });
+    const refused = await send('post', `${hooks()}/${wh.id}/toggle`, ID.settingsWrite, { isActive: true });
+    expect(refused.status).toBe(403);
+    expect((await db.webhook.findUnique({ where: { id: wh.id } })).isActive).toBe(false);
+    const ok = await send('post', `${hooks()}/${wh.id}/toggle`, ID.settingsWriteRevenue, { isActive: true });
+    expect(ok.status).toBe(201);
+    expect((await db.webhook.findUnique({ where: { id: wh.id } })).isActive).toBe(true);
+    const off = await send('post', `${hooks()}/${wh.id}/toggle`, ID.settingsWrite, { isActive: false });
+    expect(off.status).toBe(201);
+    expect((await db.webhook.findUnique({ where: { id: wh.id } })).isActive).toBe(false);
+  });
+
+  it('[WHK-EV-05] the owner (every module by role default) subscribes to invoice, contact, booking and store order events', async () => {
+    const res = await send('post', hooks(), ID.owner, { url: 'https://203.0.113.77/all', events: ['invoice.paid', 'contact.created', 'booking.created', 'store_order.created', 'post.published'] });
+    expect(res.status).toBe(201);
   });
 });
 
@@ -410,7 +514,7 @@ describe('BUG-001: a webhook URL goes through the outbound-address guard (core/s
   });
 });
 
-describe('BUG-013: API keys are settings admin territory, and revoking one is the owner\'s', () => {
+describe('BUG-013: API keys are settings admin territory', () => {
   it('[AK-01] RED-BEFORE: creating an API key needs settings admin: the sweep member, STAFF on defaults, settings read and settings write members get 403 and no key is written', async () => {
     const before = await apiKeyRows();
     for (const actor of [ID.staffNone, ID.staffDefault, ID.settingsRead, ID.settingsWrite, ID.adminNone]) {
@@ -431,29 +535,33 @@ describe('BUG-013: API keys are settings admin territory, and revoking one is th
     expect(JSON.stringify(ok.body)).not.toMatch(/hashed|hashedKey/i);
   });
 
-  it("[AK-03] RED-BEFORE: no member below the owner-level right revokes the owner's key: the sweep member, settings read/write/admin STAFF and an ADMIN get 403 and the key stays live", async () => {
+  it("[AK-03] RED-BEFORE: no member below settings admin revokes the owner's key: the sweep member, STAFF on defaults, settings read and settings write members and an ADMIN whose map says none get 403 and the key stays live", async () => {
     const key = await seedApiKey();
-    for (const actor of [ID.staffNone, ID.staffDefault, ID.settingsRead, ID.settingsWrite, ID.settingsAdmin, ID.admin, ID.adminNone]) {
+    for (const actor of [ID.staffNone, ID.staffDefault, ID.settingsRead, ID.settingsWrite, ID.adminNone]) {
       const res = await send('delete', `${keys()}/${key.id}`, actor);
       expect(res.status, actor).toBe(403);
+      expect(String(res.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
     }
     const stored = await db.apiKey.findUnique({ where: { id: key.id } });
     expect(stored.revokedAt).toBeNull();
   });
 
-  it('[AK-04] the owner and a co-owner (an OWNER membership, D-125) revoke a key; an ADMIN and a settings-admin member create one, and the raw key is answered once', async () => {
-    const k1 = await seedApiKey();
-    expect((await send('delete', `${keys()}/${k1.id}`, ID.owner)).status).toBe(200);
-    expect((await db.apiKey.findUnique({ where: { id: k1.id } })).revokedAt).not.toBeNull();
-    const k2 = await seedApiKey();
-    expect((await send('delete', `${keys()}/${k2.id}`, ID.coOwner)).status).toBe(200);
-    expect((await db.apiKey.findUnique({ where: { id: k2.id } })).revokedAt).not.toBeNull();
+  it('[AK-04] (review CR-3) settings admin revokes and creates: the owner, a co-owner, an ADMIN on role defaults and a settings-admin STAFF member each revoke a key (an ADMIN revokes the key they just created); the raw key is answered once, at create', async () => {
+    for (const actor of [ID.owner, ID.coOwner, ID.admin, ID.settingsAdmin]) {
+      const k = await seedApiKey();
+      const res = await send('delete', `${keys()}/${k.id}`, actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body, actor).toEqual({ success: true });
+      expect((await db.apiKey.findUnique({ where: { id: k.id } })).revokedAt, actor).not.toBeNull();
+    }
     for (const actor of [ID.admin, ID.settingsAdmin, ID.owner]) {
       const res = await send('post', keys(), actor, { name: `${P}${actor}`, scopes: [] });
       expect(res.status, actor).toBe(201);
       expect(res.body.key, actor).toMatch(/^kf_[0-9a-f]{64}$/);
       const list = await send('get', keys(), actor);
       expect(JSON.stringify(list.body), actor).not.toContain(res.body.key);
+      const revoke = await send('delete', `${keys()}/${res.body.apiKey.id}`, actor);
+      expect(revoke.status, `${actor} revokes their own key`).toBe(200);
     }
   });
 

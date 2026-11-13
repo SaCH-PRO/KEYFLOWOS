@@ -1488,7 +1488,8 @@ function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
   );
 }
 
-function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
+/** Exported for its refusal test (SWEEP-P0-SCOPES review CR-4); rendered by BusinessBuilderCard. */
+export function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
   const router = useRouter();
   const [creatingTask, setCreatingTask] = useState<number | null>(null);
   const [createdTasks, setCreatedTasks] = useState<Set<number>>(new Set());

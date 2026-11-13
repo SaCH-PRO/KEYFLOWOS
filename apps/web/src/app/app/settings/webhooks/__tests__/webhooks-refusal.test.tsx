@@ -3,15 +3,17 @@
  * refused them, and never claims a refused write succeeded.
  *
  * The server now holds webhook configuration to the settings module (read to list, write to
- * create, delete, enable/disable or test) and answers a signing secret only once, in the create
- * answer (apps/server webhooks.controller.ts). Before: the page treated every answer of delete as
+ * create, delete, enable/disable or test) and answers a signing secret in the create answer and,
+ * afterwards, only to a member with settings admin; a settings read member gets the receiver's
+ * origin only (review CR-5, SEC-3; apps/server webhooks.controller.ts). Before: the page treated every answer of delete as
  * success ("Webhook deleted", the row removed), showed a refused create as a generic failure and a
  * refused list as "No webhooks configured", inviting the member to add one; and it relied on the
  * list carrying each webhook's secret.
  *
  * Required: a refused list shows the server's refusal instead of the empty state; a refused
  * create, delete or enable/disable shows the server's refusal and leaves the list as it was; a new
- * webhook's secret is shown with a note that it will not be shown again.
+ * webhook's secret is shown with a note that only settings admins can see it again; a listed URL the
+ * server masked says the full receiver URL is hidden.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
@@ -94,7 +96,7 @@ describe("webhooks settings page: refusal states", () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("[WEB-WHK-05] a created webhook's signing secret is shown with a note that it will not be shown again", async () => {
+  it("[WEB-WHK-05] a created webhook's signing secret is shown with a note that only settings admins can see it again (review CR-5)", async () => {
     client.fetchWebhooks.mockResolvedValue({ data: [], error: null });
     client.createWebhook.mockResolvedValue({
       data: { ...OWNER_HOOK, id: "wh_new", name: "New hook", secret: "a".repeat(64) },
@@ -105,7 +107,18 @@ describe("webhooks settings page: refusal states", () => {
     fireEvent.change(screen.getByPlaceholderText(/https:\/\//i), { target: { value: "https://sink.example.com/hook" } });
     fireEvent.click(screen.getByRole("button", { name: /create webhook/i }));
     const card = (await screen.findByText("New hook")).closest("div.p-4") as HTMLElement;
-    expect(within(card).getByText(/will not be shown again/i)).toBeInTheDocument();
+    expect(within(card).getByText(/only members with settings admin can see it again/i)).toBeInTheDocument();
     expect(toast.success).toHaveBeenCalledWith("Webhook created");
+  });
+
+  it("[WEB-WHK-06] RED-BEFORE (review SEC-3): a receiver URL the server masked (settings read) is shown as the origin with a note that the full URL is hidden", async () => {
+    client.fetchWebhooks.mockResolvedValue({
+      data: [{ ...OWNER_HOOK, url: "https://hooks.example.com/***", urlMasked: true }],
+      error: null,
+    });
+    render(<WebhooksSettingsPage />);
+    const card = (await screen.findByText("Owner ERP")).closest("div.p-4") as HTMLElement;
+    expect(within(card).getByText("https://hooks.example.com/***")).toBeInTheDocument();
+    expect(within(card).getByText(/full receiver url is hidden/i)).toBeInTheDocument();
   });
 });

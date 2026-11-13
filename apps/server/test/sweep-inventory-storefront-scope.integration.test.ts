@@ -73,6 +73,7 @@ let app: any;
 let MODULE_SCOPE_KEY = '';
 let MarketplaceControllerClass: any;
 const stockControllers: Record<string, any> = {};
+const commerceIntegration = { createProjectForBundleOrder: vi.fn(async () => ({ id: `${P}bundle_project` })) };
 const driveCalls: string[] = [];
 
 async function cleanup() {
@@ -212,7 +213,8 @@ beforeAll(async () => {
       scopeMod.ModuleScopeGuard,
       MarketplaceService,
       { provide: EventEmitter2, useValue: { emit: () => true } },
-      { provide: CommerceIntegrationService, useValue: {} },
+      // Review SEC-4: the bundle-order project door's service, recording (it creates a Project).
+      { provide: CommerceIntegrationService, useValue: commerceIntegration },
       { provide: FulfillmentRoutingService, useValue: {} },
       { provide: TransactionalEmailService, useValue: {} },
       { provide: ExpensePostingService, useValue: {} },
@@ -449,5 +451,27 @@ describe('BUG-015 family (REST scope census): the other doors that move stock ne
     driveCalls.length = 0;
     expect((await send('post', `/drive/businesses/${ID.bizA}/inventory-sheet/apply`, ID.storeWrite, { rows: [] })).status).toBe(201);
     expect(driveCalls).toEqual([`applyPulledInventory:${ID.bizA}`]);
+  });
+});
+
+describe('review SEC-4: the bundle-order project door needs projects write (the BUG-014 rule)', () => {
+  it('[INV-SEC4-01] RED-BEFORE: POST .../orders/:orderId/create-project runs ModuleScopeGuard with projects write on its handler', () => {
+    const r = census(MarketplaceControllerClass).find((x) => x.handler === 'createProjectForBundleOrder');
+    expect(r).toBeTruthy();
+    expect(r!.guards).toEqual(expect.arrayContaining(['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard']));
+    expect(r!.scope).toEqual({ module: 'projects', minLevel: 'write' });
+  });
+
+  it('[INV-SEC4-02] RED-BEFORE: STAFF on role defaults (projects read) and a storefront-write member without projects are refused 403 before a project is created; the owner is admitted', async () => {
+    commerceIntegration.createProjectForBundleOrder.mockClear();
+    for (const actor of [ID.staffDefault, ID.storeWrite]) {
+      const res = await send('post', `${base()}/orders/${P}order_1/create-project`, actor, { name: `${P}Jada project` });
+      expect(res.status, actor).toBe(403);
+      expect(String(res.body?.message ?? ''), actor).toMatch(/projects requires write access/);
+    }
+    expect(commerceIntegration.createProjectForBundleOrder).not.toHaveBeenCalled();
+    const ok = await send('post', `${base()}/orders/${P}order_1/create-project`, ID.owner, { name: `${P}Owner project` });
+    expect(ok.status).toBe(201);
+    expect(commerceIntegration.createProjectForBundleOrder).toHaveBeenCalledTimes(1);
   });
 });

@@ -1604,7 +1604,7 @@ describe('R0-CMF5 review: the Google Suite connect and the connector routes foll
     expect((await mailboxOf(ID.biz)).email).toBeNull();
   });
 
-  it('[R0-CMF5-I01] the review reproduction: POST /connectors/businesses/:b/disconnect/gmail and .../reconnect/gmail are refused for a STAFF member granted revenue: write, an ADMIN and a STAFF member granted revenue: admin (403 GMAIL_OWNER_ONLY) before the registry is reached; the mailbox and the pending connection stay; another connector type is not gated by the mailbox rule (control)', async () => {
+  it('[R0-CMF5-I01] the review reproduction: POST /connectors/businesses/:b/disconnect/gmail and .../reconnect/gmail are refused for a STAFF member granted revenue: write, an ADMIN and a STAFF member granted revenue: admin (403 GMAIL_OWNER_ONLY) before the registry is reached; the mailbox and the pending connection stay; another connector type is not gated by the mailbox rule (control: an ADMIN disconnects typeform; a STAFF member is refused it by the settings admin rule, SWEEP-P0-SCOPES review SEC-1)', async () => {
     await clearPending(ID.biz);
     const current = googleAccount('conn_kept');
     await seedMailbox(ID.biz, current);
@@ -1624,8 +1624,15 @@ describe('R0-CMF5 review: the Google Suite connect and the connector routes foll
     expect(await pendingOf(ID.biz)).toHaveLength(1);
 
     // W9-GOOGLE-DOORS-SERVER (owner ruling D-99): the control is a non-Google
-    // connector; disconnecting google_calendar is now the owner's.
-    const other = await connectorOp('disconnect', ID.biz, 'typeform', ID.staffWrite);
+    // connector; disconnecting google_calendar is now the owner's. SWEEP-P0-SCOPES review
+    // repair SEC-1: disconnecting any other connector (it clears the connector's stored
+    // credentials) needs settings admin, so the control runs as an ADMIN (settings admin by
+    // role default, refused gmail above by the mailbox rule), and the STAFF member is refused.
+    const staffOther = await connectorOp('disconnect', ID.biz, 'typeform', ID.staffWrite);
+    expect(staffOther.status, JSON.stringify(staffOther.body)).toBe(403);
+    expect(String(staffOther.body?.message ?? '')).toMatch(/settings requires admin access/);
+    expect(registry.disconnectConnector).not.toHaveBeenCalled();
+    const other = await connectorOp('disconnect', ID.biz, 'typeform', ID.admin);
     expect([200, 201], JSON.stringify(other.body)).toContain(other.status);
     expect(registry.disconnectConnector).toHaveBeenCalledWith('typeform', ID.biz);
   });
@@ -2478,7 +2485,7 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearGmailConnector(ID.biz);
   });
 
-  it('[R0-CMF6-M01] review SEC-CMF6-1 RED-BEFORE: DELETE /connectors/businesses/:b/credentials/gmail, which marks the gmail connector row disconnected and clears its account, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before anything is written: the row stays connected with its account and connection time, the nightly sync still selects it and the mailbox stays; a non-member 403, anonymous 401; the owner and a SUPER_ADMIN still clear it, and a STAFF member still clears another connector\'s credentials (a non-Google control connector, typeform; D-99 makes clearing a Google connection\'s credentials the owner\'s, W9-GOOGLE-DOORS-SERVER review SEC-W9GD-1)', async () => {
+  it('[R0-CMF6-M01] review SEC-CMF6-1 RED-BEFORE: DELETE /connectors/businesses/:b/credentials/gmail, which marks the gmail connector row disconnected and clears its account, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before anything is written: the row stays connected with its account and connection time, the nightly sync still selects it and the mailbox stays; a non-member 403, anonymous 401; the owner and a SUPER_ADMIN still clear it, and an ADMIN still clears another connector\'s credentials (a non-Google control connector, typeform; D-99 makes clearing a Google connection\'s credentials the owner\'s, W9-GOOGLE-DOORS-SERVER review SEC-W9GD-1), which a STAFF member may not (settings admin, SWEEP-P0-SCOPES review SEC-1)', async () => {
     await clearPending(ID.biz);
     await clearGmailConnector(ID.biz);
     await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
@@ -2518,7 +2525,17 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
         create: { businessId: ID.biz, connectorType: 'typeform', status: 'connected', connectedAccount: `${P}forms` },
         update: { status: 'connected', connectedAccount: `${P}forms` },
       });
-      const forms = await deleteCredentials(ID.biz, 'typeform', ID.staff);
+      // SWEEP-P0-SCOPES review repair SEC-1: clearing any other connector's credentials needs
+      // settings admin: the STAFF member is refused (the row stays connected), an ADMIN clears it.
+      const refusedForms = await deleteCredentials(ID.biz, 'typeform', ID.staff);
+      expect(refusedForms.status, JSON.stringify(refusedForms.body)).toBe(403);
+      expect(String(refusedForms.body?.message ?? '')).toMatch(/settings requires admin access/);
+      const [keptRow] = await db.$queryRawUnsafe(
+        `SELECT status, connected_account FROM connector_statuses WHERE business_id = $1 AND connector_type = 'typeform'`,
+        ID.biz,
+      );
+      expect(keptRow).toEqual({ status: 'connected', connected_account: `${P}forms` });
+      const forms = await deleteCredentials(ID.biz, 'typeform', ID.admin);
       expect(forms.status, JSON.stringify(forms.body)).toBe(200);
       const [formsRow] = await db.$queryRawUnsafe(
         `SELECT status, connected_account FROM connector_statuses WHERE business_id = $1 AND connector_type = 'typeform'`,

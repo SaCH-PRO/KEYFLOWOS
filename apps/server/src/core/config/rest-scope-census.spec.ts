@@ -7,10 +7,12 @@
  * could make. The census lists every such route the server has; this file makes the next one
  * visible, so a new membership-only write route has to be gated or placed in the census on purpose.
  *
- * WHAT IS READ (typescript AST, every non-test .ts file under apps/server/src/modules): each
- * `@Controller` class, its class-level `@UseGuards`, and per handler the HTTP verb decorator, the
- * method-level `@UseGuards`, `@RequireModuleScope(module, level)` (level defaults to read, as the
- * decorator does) and the handler body text.
+ * WHAT IS READ (typescript AST, every non-test .ts file under apps/server/src: modules/, core/ and
+ * the app root, so a controller outside modules/ is not missed; review SEC-1: the connector
+ * credential and webhook-secret routes live in core/connectors): each `@Controller` class, its
+ * class-level `@UseGuards`, and per handler the HTTP verb decorator, the method-level `@UseGuards`,
+ * `@RequireModuleScope(module, level)` (level defaults to read, as the decorator does) and the
+ * handler body text.
  *
  * THE POPULATION: a route is a membership-only write when its verb is POST, PUT, PATCH or DELETE,
  * it runs a member guard (AuthGuard, BusinessGuard or OptionalAuthGuard), and it does not carry an
@@ -35,6 +37,8 @@
  *                  module the follow-up should apply and why it was not applied here).
  *   secret-read    (GET rows) a read that would carry a secret, reviewed: the reason says how the
  *                  secret is kept out (a scope, `check:<function>`, or the redaction it applies).
+ *                  A reason that starts with a scope (`module:level`) names the enforced scope the
+ *                  route carries (CEN-08).
  *
  * WHAT IS REQUIRED:
  *   CEN-01 the doc parses; every row is unique, names a disposition above and a non-empty reason.
@@ -47,6 +51,8 @@
  *          defines (`service-check:`).
  *   CEN-06 every `exempt-guard` row's route runs the guard it names.
  *   CEN-07 every `exempt-ruled` row cites an owner ruling.
+ *   CEN-08 every `secret-read` row whose reason starts with a scope carries exactly that enforced
+ *          scope (the read that answers a secret is gated where the census says it is).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -54,7 +60,6 @@ import { join, relative, resolve } from 'node:path';
 import * as ts from 'typescript';
 
 const SRC = resolve(__dirname, '../..');
-const MODULES = join(SRC, 'modules');
 const REPO = resolve(SRC, '../../..');
 const CENSUS = join(REPO, 'docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md');
 
@@ -86,7 +91,7 @@ const unquote = (s: string) => s.replace(/^['"`]|['"`]$/g, '');
 
 function routes(): Route[] {
   const out: Route[] = [];
-  for (const file of walk(MODULES)) {
+  for (const file of walk(SRC)) {
     const text = readFileSync(file, 'utf8');
     if (!text.includes('@Controller')) continue;
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
@@ -158,6 +163,9 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(byKey.get('ProjectsController.createProject')?.guards).toEqual(['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard']);
     // a declaration without the guard is inert: still membership-only
     expect(population.map((r) => r.key)).toContain('PushNotificationController.subscribe');
+    // review SEC-1: controllers outside modules/ are read too (core/connectors)
+    expect(byKey.get('ConnectorController.saveCredentials')?.file).toBe('core/connectors/connector.controller.ts');
+    expect(byKey.get('ConnectorController.getWebhookInfo')?.verb).toBe('GET');
   });
 
   it('[CEN-01] the census doc parses: unique rows, known dispositions, a reason on every row', () => {
@@ -233,6 +241,19 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       if (!guards.length) { problems.push(`line ${row.line}: ${row.key} names no guard:<Name>`); continue; }
       const chain = byKey.get(row.key)?.guards ?? [];
       for (const g of guards) if (!chain.includes(g)) problems.push(`line ${row.line}: ${row.key} does not run ${g}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-08] every secret-read row whose reason starts with a scope carries exactly that enforced scope', () => {
+    const problems: string[] = [];
+    for (const row of censusRows().filter((r) => r.disposition === 'secret-read')) {
+      const named = /^`?([a-z]+):(read|write|admin)`?/.exec(row.reason);
+      if (!named) continue;
+      const r = byKey.get(row.key);
+      if (!r || !enforced(r) || r.scope?.module !== named[1] || r.scope?.minLevel !== named[2]) {
+        problems.push(`line ${row.line}: ${row.key} carries ${r?.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no scope'}${r && enforced(r) ? '' : ' (not enforced)'}, not ${named[1]}:${named[2]}`);
+      }
     }
     expect(problems).toEqual([]);
   });
