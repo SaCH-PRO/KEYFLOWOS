@@ -90,6 +90,10 @@ function methodParams(src: string, name: string): string {
 /**
  * Every BusinessGoal write a where clause can scope (update, updateMany,
  * upsert, delete, deleteMany) in the named method must:
+ *   - be a direct call on the delegate (`businessGoal.updateMany(` or
+ *     `businessGoal?.updateMany(`). Any other use of `businessGoal` in the
+ *     method fails: an alias (`const goals = ...businessGoal`) or an indexed
+ *     access hides its writes from this check;
  *   - take an object literal, so its where clause can be read here (a
  *     variable argument hides it);
  *   - name `businessId` in that where clause as the shorthand `businessId` or
@@ -97,7 +101,10 @@ function methodParams(src: string, name: string): string {
  *     `businessId: undefined` is not a scope: Prisma drops an undefined
  *     filter, so the write reaches every tenant whenever no tenant context is
  *     set (a job or scheduler calling the service). Any other value is not
- *     the caller's tenant.
+ *     the caller's tenant;
+ *   - have nothing after that entry that could replace it: no spread
+ *     (`...({ businessId: undefined } as any)` overrides it), no computed key
+ *     and no second businessId key.
  * The method must also take `businessId: string` and never rebind it.
  * Returns one line per violation; empty means scoped.
  */
@@ -110,7 +117,11 @@ function unscopedGoalWrites(src: string, name: string): string[] {
   if (/\b(?:const|let|var)\s+(?:\{[^}]*\b)?businessId\b|(?<![.\w])businessId\s*=(?![=>])/.test(body)) {
     problems.push(`${name} rebinds businessId, so the where clause no longer names the caller's tenant`);
   }
-  const writes = [...body.matchAll(/businessGoal\.(update|updateMany|upsert|delete|deleteMany)\s*\(\s*/g)];
+  for (const use of body.matchAll(/\bbusinessGoal\b(?!\s*\??\.\s*\w+\s*\()/g)) {
+    const around = body.slice(Math.max(0, use.index! - 30), use.index! + 40).replace(/\s+/g, ' ');
+    problems.push(`${name}: the BusinessGoal delegate is used other than as a direct call (…${around}…), so its writes cannot be checked`);
+  }
+  const writes = [...body.matchAll(/\bbusinessGoal\s*\??\.\s*(update|updateMany|upsert|delete|deleteMany)\s*\(\s*/g)];
   if (writes.length === 0) problems.push(`${name} has no BusinessGoal write to check`);
   for (const write of writes) {
     const method = write[1];
@@ -126,9 +137,15 @@ function unscopedGoalWrites(src: string, name: string): string[] {
       continue;
     }
     const where = entries(balanced(arg, whereAt.index + whereAt[0].length - 1));
-    const scoped = where.some((e) => e === 'businessId' || /^businessId\s*:\s*businessId$/.test(e));
-    if (!scoped) {
+    const at = where.findIndex((e) => e === 'businessId' || /^businessId\s*:\s*businessId$/.test(e));
+    if (at < 0) {
       problems.push(`${name}: businessGoal.${method} where { ${where.join(', ')} } does not bind businessId to the parameter`);
+      continue;
+    }
+    // A later spread, computed key or businessId key can replace the scope.
+    const override = where.slice(at + 1).find((e) => e.startsWith('...') || e.startsWith('[') || /^['"]?businessId['"]?\s*:/.test(e));
+    if (override) {
+      problems.push(`${name}: businessGoal.${method} where { ${where.join(', ')} } can override businessId after binding it (${override})`);
     }
   }
   return problems;
@@ -198,6 +215,28 @@ describe('a record id from a request is not a tenant scope', () => {
         src.replace(
           'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {',
           'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {\n    businessId = undefined as any;',
+        ),
+      ],
+      // SEC-CONV1-3-R1: three more that look scoped and are not.
+      [
+        'updateProgress',
+        'a later spread that overrides the tenant',
+        src.replace(progressWrite, progressWrite.replace('businessId }', 'businessId, ...({ businessId: undefined } as any) }')),
+      ],
+      [
+        'suggestActions',
+        'a write through an aliased delegate',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'const goals = this.prisma.client.businessGoal;\n    await goals.updateMany({ where: { id: goalId }, data: {} });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'a write through an optional-chained delegate',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'await this.prisma.client.businessGoal?.updateMany({ where: { id: goalId }, data: {} });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
         ),
       ],
     ];
