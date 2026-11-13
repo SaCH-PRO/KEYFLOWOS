@@ -30,6 +30,10 @@ Neither has been run against a real database. Running them in production is an
 operator decision: take a backup first and run the dry run against that
 database before `--apply`.
 
+Section 3 is a different kind of script: a **read-only** count the owner runs
+against production before v1 hides its deferred modules. It has no `--apply`
+and no write path at all.
+
 ## 1. Cross-tenant custom-field values (SF-1)
 
 ```bash
@@ -184,6 +188,197 @@ and `intake_approved_no_contact`. A dry run adds
 set the row's `module` and `category` back from `data.d115` and remove that key.
 Then re-run the script so it can link the row.
 
+## 3. Read-only usage count of the modules v1 hides (USAGE-COUNT-SCRIPT, D-152)
+
+```bash
+cd apps/server
+pnpm usage:v1-modules > v1-module-usage.json        # the aggregate (no business id): post this one to #80
+umask 077 && mkdir -p ~/v1-usage-private            # the per-business report: keep this one, never post it
+pnpm usage:v1-modules --per-business > ~/v1-usage-private/v1-module-usage-by-business.json
+```
+
+**Why.** v1 hides about 45 screens (owner ruling D-152, from the product
+audit). A business that already keeps records in one of them must not find
+those records apparently gone: NAV-B-HIDE shows such a module read-only to that
+business instead, and keeps the WhatsApp auto-confirm listener working for a
+business with a WhatsApp setup (D-153). This script tells the owner how many
+live businesses have rows in which hidden module, and, with `--per-business`,
+which ones. The owner runs it against production (D-148) three times: now,
+immediately before NAV-B-HIDE starts, and before the redeploy
+(GATE-OWNER-TEST).
+
+**What goes to #80, and what does not.** #80 is an issue of a
+**public repository**, and a production business id is not anonymous: the public
+routes (`/site/storefront/public/<slug>`, `/bookings/public/businesses/<id>/...`,
+`/catalog/public/businesses/<id>/products`) resolve it to the business's name.
+An edited GitHub issue keeps its history and notification emails, so a post
+cannot be taken back. Therefore:
+
+- **Post only the aggregate** (the run without arguments). Per module it gives
+  how many live businesses use it, how many have each facet, and what this
+  schema lacks. It has no business id (`"scope": "aggregate"`).
+- **Keep the per-business report private** (`--per-business`,
+  `"scope": "per-business"`). It names each business id with its counts
+  (payroll runs, contracts, active API keys and webhooks, a WhatsApp setup).
+  Write it with `umask 077` into a directory only the owner can read, outside
+  the deploy checkout. Never post it to #80 or any issue, PR or chat, and never
+  commit it. NAV-B-LEGACY-SERVER answers per business live, so no packet needs
+  these ids from the file.
+
+**What it counts.** The modules, their tables, routes and KEY tools are one
+list, `packages/shared/src/v1-modules.ts` (exported from `@keyflow/shared`),
+which NAV-B-LEGACY-SERVER, NAV-B-HIDE and the KEY tool allowlist also read. For
+every table entry of every module it runs one statement:
+
+```sql
+SELECT t."<business column>" AS business_id, count(*)::int AS n
+  FROM "<table>" t JOIN "businesses" b ON b."id" = t."<business column>"
+ WHERE b."deleted_at" IS NULL
+   [AND t."<soft-delete column>" IS NULL] [AND (<the entry's fixed filter>)]
+ GROUP BY t."<business column>";
+```
+
+A soft-deleted business or row is not counted. A few entries carry a fixed
+filter, because some rows are created for every business and mean nothing:
+
+- `automations`: only *enabled* autopilot loops (opening Automations creates
+  them all, disabled);
+- `presence_pages`: only *saved* website drafts (version 2 and up; opening the
+  builder creates version 1);
+- `connectors` and `accounting_sync`: only `connected` connector rows, and
+  `connectors` leaves out Gmail (v1), the payment keys (Getting paid) and
+  WhatsApp (its own module);
+- `whatsapp.config`: a business whose `meta_data` holds a `whatsapp` object
+  (the Twilio or Meta setup the listener sends with). `businesses.meta_data` is
+  **credentials-bearing**: it holds that setup's account id, token and sender
+  number, among other settings. The count tests the key's presence in its
+  `WHERE` and extracts no value; no statement projects anything but a business
+  id and a count.
+
+Some modules count more than one store:
+
+- `goals`: `ai_goals` (what `/app/goals` lists and the `goals_*` KEY tools
+  write, through `/api/v1/cortex/goals`) and `business_goals` (the older
+  `/ai/businesses/:id/goals` route);
+- `performance`: `staff_performance_snapshots`, the history `/app/performance`
+  trends (taken by the page and by `performance_take_snapshot`).
+
+Rows that are seeded or created on first view, such as deal stages, are not
+counted at all. Modules with no records of their own (dashboards and hubs such
+as Intelligence, Operations or the flow hubs) are listed with
+`measured: false`. Two are deliberate gaps, recorded in the list:
+
+- `legal`: the genesis document pack `/app/legal` generates is
+  `document_instances` rows, which v1 still lists in Settings > Business
+  profile (Documents) and opens at `/app/documents/<id>`, so hiding
+  `/app/legal` makes none of them look gone;
+- `connectors`: a Google Drive connection made through its OAuth route is kept
+  on the business row's `drive_*` token columns and may have no `connected`
+  connector row; counting it would read a credential column, so it is not
+  counted.
+
+`evidence` counts every row: only the Evidence screen and its KEY tools
+(`EvidenceService.submit`) write that table. KEY chat's own "evidence" write
+names columns the table does not have and fails, so it creates no row.
+
+**Safety.** There is no write path:
+
+- Everything runs in **one transaction** whose first statement is
+  `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`. Postgres itself
+  refuses any write inside it (SQLSTATE 25006), and every count sees the same
+  snapshot. The script reads back `transaction_read_only` and refuses to count
+  unless it is `on` (exit 1, nothing printed on stdout).
+- Each statement is bounded: `statement_timeout` 60 s, `lock_timeout` 5 s.
+- It reads only the business column, the soft-delete markers and the columns a
+  filter names. Those are ids and status flags, except
+  `businesses.meta_data` (above), which it reads in a `WHERE` only. No
+  statement projects a name, an email, a phone number, an amount, free text
+  or a credential: every `SELECT` projects a business id and a count, or schema
+  metadata (`pg_catalog` names and column privileges, the latest migration).
+- It makes no network call other than the database connection, and on a
+  failure prints only the error's class and code, never the database's message.
+- A table or column this database does not have (production on an older
+  schema) is listed under the module's `absent`; a column the database role may
+  not read is listed under `unreadable`. Neither is a failure. `schema` gives
+  the latest applied migration, so an `absent` entry can be read against it.
+
+The read-only transaction does not depend on the database role, but the
+operator may run the script as a role granted `SELECT` on only the columns the
+list names. That role can still read `businesses.meta_data`, and with it the
+WhatsApp credentials, so grant it knowingly:
+
+```sql
+CREATE ROLE v1_usage_reader LOGIN;          -- then set its password interactively: \password v1_usage_reader
+GRANT USAGE ON SCHEMA public TO v1_usage_reader;
+GRANT SELECT (id, deleted_at, meta_data) ON businesses TO v1_usage_reader;   -- meta_data: credentials-bearing
+GRANT SELECT (migration_name, finished_at, rolled_back_at) ON _prisma_migrations TO v1_usage_reader;
+-- and, for every other table of the list, SELECT on its business column, its
+-- soft-delete column and the columns its filter names (v1-modules.ts), e.g.
+GRANT SELECT (business_id, status) ON payroll_runs TO v1_usage_reader;
+```
+
+To keep the credentials out of the role's reach, grant `businesses` only
+`(id, deleted_at)`: the run still completes, every other count is the same,
+and `whatsapp.config` is reported under `unreadable` (`config:
+businesses.meta_data`), so the WhatsApp setups are then not counted.
+
+**Output.** One JSON object. The two shapes share these fields:
+
+| Field | Meaning |
+|---|---|
+| `report`, `formatVersion`, `generatedAt` | `v1-module-usage-count`, `2`, the run's time (UTC) |
+| `scope`, `notice` | `aggregate` (the default; post it) or `per-business` (keep it), and what that means |
+| `transaction` | `{ "readOnly": true, "isolation": "repeatable read" }` as Postgres reported it |
+| `schema` | `latestMigration` and `appliedMigrations` from `_prisma_migrations` (null if absent) |
+| `liveBusinesses` | businesses with no `deleted_at` |
+| `summary` | module key -> how many live businesses use it (`null`: nothing to count) |
+| `modules[]` | per module, in list order: `key`, `label`, `treatment`, `returnsIn`, `measured`, `businessCount`, `absent` and `unreadable` |
+
+The aggregate adds, for a module with facets, `facetBusinessCounts`: how many
+live businesses have each facet above zero. The per-business report adds
+`modules[].businesses[]`, sorted by id: `businessId`, `rows` (every count of the
+module, 0 included) and, where the module has them, `facets`.
+
+A business is on a module's list when any of its `rows` is above zero.
+`facets` are informative sub-counts that never decide use: `payroll`
+`runs_reserving_safe_to_spend` (DRAFT and APPROVED runs, which D-144 reserves in
+safe-to-spend, so Money > Overview must say so), `api_keys` and `webhooks`
+`active`, and `presence_pages` `published_live` (served at `/site/<slug>` today).
+Exit status: `0` done, `1` the read failed (nothing is written either way),
+`2` bad arguments (it takes none, or `--per-business` alone). Like the other
+scripts, the process lingers about 30 seconds after printing (the
+`@keyflow/db` pool's idle timeout).
+
+**On the production box.** The API image has no `scripts/` directory, and its
+`@keyflow/shared` build predates the module list, so the script imports the
+list by relative path and both files are mounted read-only into the API
+container. Take them from the commit that carries this packet without touching
+the deploy checkout's working tree (`<ref>`: that commit, or `origin/main`
+once it is merged), and write both outputs outside the checkout:
+
+```bash
+cd /opt/keyflowos
+git fetch origin
+mkdir -p /tmp/v1-usage/apps/server/scripts /tmp/v1-usage/packages/shared/src
+git show <ref>:apps/server/scripts/v1-module-usage-count.ts > /tmp/v1-usage/apps/server/scripts/v1-module-usage-count.ts
+git show <ref>:packages/shared/src/v1-modules.ts > /tmp/v1-usage/packages/shared/src/v1-modules.ts
+RUN='docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T
+  -v /tmp/v1-usage/apps/server/scripts:/app/apps/server/scripts:ro
+  -v /tmp/v1-usage/packages/shared/src:/app/packages/shared/src:ro
+  -w /app/apps/server api npx tsx scripts/v1-module-usage-count.ts'
+
+# 1. The aggregate: no business id. This is what goes to #80.
+$RUN > /tmp/v1-usage/v1-module-usage.json
+
+# 2. The per-business report: the owner's only. Never posted, never committed.
+umask 077 && mkdir -p ~/v1-usage-private
+$RUN --per-business > ~/v1-usage-private/v1-module-usage-by-business-$(date -u +%Y%m%dT%H%MZ).json
+```
+
+Check `"scope": "aggregate"` at the top of `/tmp/v1-usage/v1-module-usage.json`
+before posting it. The script needs nothing but `DATABASE_URL`, which the
+`api` service already has.
+
 ## Proof
 
 `apps/server/test/data-cleanup-scripts.integration.test.ts` (prefix `v96o_`)
@@ -220,3 +415,45 @@ runs both scripts' `main()` in process against Postgres. It covers:
   `src/modules/timeline/timeline-visibility.spec.ts` (TV-10) pins the rule:
   `name_mismatch`, a missing or an unknown reason are owner-only, and
   `source_gone` stays OWNER and ADMIN.
+
+`apps/server/test/v1-module-usage-count.integration.test.ts` (prefix `v61a_`)
+proves section 3 against Postgres:
+
+- V61-01, the list: unique keys; every table and column it names exists in the
+  migrated database; every column a count reads is an id, a soft-delete marker
+  or a status flag, except `businesses.meta_data` (credentials-bearing), which
+  only `whatsapp.config` reads, in a `WHERE` that tests a key; every route is
+  an `apps/web` page; every KEY tool is a registered FLOW tool, in one module
+  only, and every FLOW tool is in a hidden module or in the test's reviewed v1
+  set (so a new tool is classified); every route NAV-B-HIDE and NAV-B-HIDE-2
+  gate resolves to a module, and v1 routes to none;
+- V61-02, exact counts for two live tenants with rows in projects, payroll
+  (with the D-144 facet) and the WhatsApp setup, plus contracts and autopilot
+  loops; a soft-deleted business, project or task, a disabled loop, an unsaved
+  website draft and an empty business are not counted;
+- V61-03, read only: the run's first statement makes the transaction READ ONLY
+  and REPEATABLE READ; an UPDATE and an INSERT inside it are refused (25006)
+  and change nothing; a run writes no row; a transaction that is not read only
+  is refused by the self-check;
+- V61-04, no PII: every SELECT projects only a business id and a count; neither
+  output carries the seeded names, emails, titles, amounts or WhatsApp
+  credentials; a database role granted `SELECT` on only the columns the list
+  names (of which `businesses.meta_data` is the one that is not a flag) gets
+  the same answer, and is refused `businesses.name` (42501); a role granted
+  the same columns without `meta_data` is refused the credentials, still runs,
+  and reports `whatsapp.config` as `unreadable`; no `fetch` is made;
+- V61-05, an absent table or column is reported, not fatal; unknown arguments
+  (and `--per-business` with anything else) exit 2 without touching the
+  database;
+- V61-06, `pnpm usage:v1-modules` (with only `DATABASE_URL`; the aggregate)
+  and the production image shape above (the script and the list alone, no
+  `tsconfig.json`, `@keyflow/db` through `node_modules`; `--per-business`)
+  print the JSON and exit 0;
+- V61-07, through the HTTP routes with the real guards: a goal created through
+  `POST /api/v1/cortex/goals` and a snapshot taken through
+  `POST /staff-performance/businesses/:id/snapshot` put the business on the
+  `goals` and `performance` lists; KEY chat's cortex evidence write fails and
+  writes no `evidence` row;
+- V61-08, the default output carries no business id (none of the database's)
+  and the same counts as `--per-business`, which says it is the owner's alone;
+  this section and the script header say what may be posted.

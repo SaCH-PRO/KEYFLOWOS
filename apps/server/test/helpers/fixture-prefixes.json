@@ -568,6 +568,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v61a_",
+      "owner": "apps/server/test/v1-module-usage-count.integration.test.ts",
+      "packet": "V1-61 (USAGE-COUNT-SCRIPT)"
+    },
+    {
       "prefix": "v61b_",
       "owner": "apps/server/test/storefront-own-payment-keys.integration.test.ts",
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
