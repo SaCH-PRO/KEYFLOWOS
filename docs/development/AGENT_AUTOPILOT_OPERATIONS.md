@@ -95,7 +95,7 @@ authenticated `gh` and Claude sessions. It stores no credential.
 - **Single instance.** Two locks prevent two workers driving one packet. One
   is in the checkout (`.agent-control/.worker/worker.lock`). The other is per
   repository and control issue for the whole machine
-  (`%LOCALAPPDATA%KEYFLOWOSlocksworker-<owner>_<repo>-issue-<n>.lock`,
+  (`%LOCALAPPDATA%\KEYFLOWOS\locks\worker-<owner>_<repo>-issue-<n>.lock`,
   `-LockRoot` to move it), so a second worker for the same issue refuses to
   start whichever checkout it is started from. A lock names its owner by PID
   and process start time. A lock whose owner has died, or whose PID now
