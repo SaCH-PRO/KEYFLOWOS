@@ -56,9 +56,10 @@ is still written), 3 when the output location was refused.
 ## Redaction
 
 Redaction is on by default (`--no-redact` turns it off) and applies to message
-text and thread titles before anything is written. It replaces the secret with
-`[REDACTED]` and keeps the name, quotes, URL user and host around it. It
-recognises:
+text and thread titles as each file is parsed, before anything is hashed or
+written. It replaces the secret with `[REDACTED]` and keeps the name, quotes,
+markdown, URL user and host around it; it takes the whole value or none of it,
+never leaving a marker beside the rest of a secret. It recognises:
 
 - provider token shapes: Stripe secret, restricted and webhook keys
   (`sk_live_`, `sk_test_`, `rk_`, `whsec_`), GitHub tokens (`ghp_`, `gho_`,
@@ -68,33 +69,66 @@ recognises:
   Anthropic (`sk-ant-`) keys, Supabase access and secret keys, SendGrid keys,
   Twilio account and API key SIDs, and JSON Web Tokens (`eyJ…`, which covers
   Supabase anon and service-role keys);
+- the other providers KEYFLOWOS configures (`.env.example`): ElevenLabs
+  (`sk_` and hex), xAI (`xai-`), E2B (`e2b_`), Resend (`re_…_…`), Meta and
+  WhatsApp access tokens (`EAA…`), Klaviyo private keys (`pk_`), Mailchimp
+  (hex and `-usNN`), Hugging Face (`hf_`), and a LiveKit API key and secret
+  written as a pair (`APIxxxx: secret`, as `livekit.yaml` and `LIVEKIT_KEYS`
+  do);
 - PEM private key blocks (`-----BEGIN … PRIVATE KEY-----` through `END`);
 - the password in any `scheme://user:password@host` URL (Postgres, MySQL,
-  MongoDB, Redis and the rest);
+  MongoDB, Redis and the rest), up to the last `@` that a host follows, so a
+  password holding `/`, `@` or other characters is redacted whole;
 - `Authorization: Bearer|Basic|Token …` headers, and `Bearer <token>` where
   the token contains a digit;
 - a value whose name ends in a sensitive word, in any of the forms
-  `name=value`, `name: value`, `"name": "value"` (also JSON-escaped) and
-  `'name': 'value'`: `password`, `passwd`, `secret`, `token`, `api_key` /
-  `apiKey`, `access_key`, `private_key`, `credentials` (so `client_secret`,
-  `X-Auth-Token` and `aws_secret_access_key` count; `tokens` and `max_tokens`
-  do not);
+  `name=value`, `name: value`, `"name": "value"` (also JSON-escaped),
+  `'name': 'value'`, `` `name`: `value` `` and `**name:** value` /
+  `**name**: value` / `__name__: value`: `password`, `passwd`, `secret`,
+  `token`, `api_key` / `apiKey`, `access_key`, `private_key`, `credentials`
+  (so `client_secret`, `X-Auth-Token` and `aws_secret_access_key` count;
+  `tokens` and `max_tokens` do not), and the same for a credential named in
+  words: `API key`, `secret key`, `private key`, `encryption key`,
+  `access key`, `signing key`, `master key` (so `VAPID private key: …` and
+  `ElevenLabs API key: …` count; a bare `key` does not);
 - upper-case environment lines (`KEY=VALUE`, `export KEY=VALUE`, and
-  `KEY_NAME: value` in YAML) whose name has a `SECRET`, `TOKEN`, `KEY`,
-  `PASSWORD`, `PASSWD`, `PASS`, `PWD`, `PRIVATE`, `CREDENTIAL(S)` or `DSN`
-  segment (`JWT_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`; not `KEYFLOW_ENV`);
+  `KEY_NAME: value` in YAML), also backtick-quoted or in bold, whose name has
+  a `SECRET`, `TOKEN`, `KEY`, `PASSWORD`, `PASSWD`, `PASS`, `PWD`, `PRIVATE`,
+  `CREDENTIAL(S)` or `DSN` segment (`JWT_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`;
+  not `KEYFLOW_ENV`);
+- a markdown table row `| NAME | value |` whose first cell is such a name
+  (`BYOK_ENCRYPTION_SECRET`, `Password`, `API key`) and whose next cell is one
+  token. A description in that cell (`| JWT_SECRET | Server |`) is redacted
+  too: the tool cannot tell a word from a weak password;
+- command lines: `curl -u user:password` and `--user user:password` (not a
+  numeric `uid:gid`), `--token`, `--password`, `--api-key`, `--secret` and
+  similar flags followed by a value, and `mysql -p<password>`;
+- a credential named in prose with no assignment and a generated-looking
+  value (16 or more characters with a letter and a digit): `the auth token is
+  …`, `and secret …`, `secret access key …`;
 - an AWS secret access key in a message that names AWS or holds an AWS key
-  id, and a 32-hex Twilio auth token in a message that names Twilio or holds a
-  Twilio account SID.
+  id, a 32-hex Twilio auth token in a message that names Twilio or holds a
+  Twilio account SID, and a LiveKit API secret in a message that names
+  LiveKit or holds a LiveKit API key.
+
+A bare value that is only an English function word (`` `HAWK_API_KEY`: the API
+key ``, `password: required`) is left as prose. Every rule is linear in the
+length of the text, so a pasted bundle of key headers or a long dotted run
+cannot stall the harvester.
 
 It is best-effort. A secret with no recognisable shape and no sensitive name,
-such as a password typed into prose, passes through. Treat every output file
-as sensitive: keep it local, and read `review-queue.md` before pasting any of
-it into an issue, a pull request or a model prompt.
+such as a password typed into prose, passes through. So do assignments in code
+written with `:=` or `=>` (excluded so arrow functions and Go declarations are
+not mangled), a JSON string escaped twice, and a credential whose owner is
+named only in another message of the thread (the context rules read one
+message at a time). Treat every output file as sensitive: keep it local, and
+read `review-queue.md` before pasting any of it into an issue, a pull request
+or a model prompt.
 
 ## Outputs
 
-- `threads.jsonl` — normalized thread inventory
+- `threads.jsonl` — normalized thread inventory; `content_hash` is the sha256 of
+  the thread's message texts after redaction, joined by newlines
 - `messages.jsonl` — normalized evidence corpus
 - `candidates.jsonl` — high-value candidate artifacts
 - `coverage.json` — scan coverage and parse errors

@@ -23,7 +23,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 # --- secret redaction ---------------------------------------------------------
 #
@@ -34,14 +34,43 @@ from typing import Any, Iterable
 # pull request or a model prompt without reading them first.
 #
 # Every rule replaces only the secret itself with REDACTED, keeping any name,
-# quote, URL user or host around it so the evidence stays readable. The rules
-# are applied in order and are idempotent: REDACTED matches none of them.
+# quote, markdown, URL user or host around it so the evidence stays readable.
+# A rule that starts on a value takes all of it: a marker sitting next to the
+# rest of a secret reads as redacted when it is not. The rules are applied in
+# order and are idempotent: REDACTED matches none of them.
+#
+# Every pattern is linear in the length of the text. None may rescan the rest
+# of the text from each of many starting points (a lazy body with no stop, or
+# a run that can start at every character of a longer run), since a pasted
+# blob would then stall the harvester (RedactionTimeTest).
 
 REDACTED = "[REDACTED]"
 
-# A value after a sensitive name: quoted (plain, or JSON-escaped inside a
-# string), or bare up to whitespace or a delimiter.
-_VALUE = r"""(?:\\"(?:[^"\\\n]|\\(?!"))*\\"|"[^"\n]*"|'[^'\n]*'|[^\s,;"'\\]+)"""
+# Markdown emphasis around a name, or closing just after the assignment, as in
+# **Password:** value and __Token__: value.
+_MD = r"(?:\*{1,2}|_{1,2})"
+
+# A quote around a name: plain, JSON-escaped, or a markdown code span.
+_NAME_QUOTE = r"(?:\\?[\"'`])"
+
+# English function words that, standing alone after a name, are prose and not
+# a value: "`HAWK_API_KEY`: the API key", "password: required".
+_PROSE_WORDS = (
+    r"(?i:the|a|an|is|are|was|were|be|not|no|see|set|your|our|its|this|that|it|and|or|to|of|for|in|on"
+    r"|with|by|as|at|if|when|used|required|optional)"
+)
+
+# A value after a sensitive name: quoted (plain, JSON-escaped inside a string,
+# or a markdown code span), or bare up to whitespace or a delimiter. A bare
+# value must hold more than markdown, so the ** that closes **Password:** is
+# never taken for the value; it is not one of _PROSE_WORDS on its own; and it
+# never starts a PEM block (that rule has already redacted the block).
+_VALUE = (
+    r"""(?:\\"(?:[^"\\\n]|\\(?!"))*\\"|"[^"\n]*"|'[^'\n]*'|`[^`\n]+`"""
+    r"""|(?![*_~|]+(?:\s|$)|-----|"""
+    + _PROSE_WORDS
+    + r"""[.)]?(?:[\s,;"'\\]|$))[^\s,;"'`\\][^\s,;"'\\]*)"""
+)
 
 # An assignment: "=" or ":", but not "==", "=>", "::" or ":=" (code, not data).
 _ASSIGN = r"(?::(?![:=])|=(?![=>]))"
@@ -55,6 +84,11 @@ _SENSITIVE_NAME = (
     r"(?:[_-]?(?:key|value|secret|token|hash))?"
 )
 
+# Credential names written as words: "API key", "VAPID private key",
+# "credentials encryption key", "Langfuse secret key". A bare "key" is not
+# sensitive ("the key decision", "the KEY assistant").
+_SENSITIVE_PHRASE = r"(?:api|secret|private|encryption|access|signing|master)[ \t]+key"
+
 # Upper-case environment names with a sensitive underscore-separated segment
 # (JWT_SECRET, CREDENTIALS_ENCRYPTION_KEY, SSH_PRIVATE). Whole segments only,
 # so KEYFLOW_ENV and MAX_TOKENS are not sensitive.
@@ -62,10 +96,13 @@ _ENV_SEGMENT = r"(?:SECRETS?|TOKEN|KEYS?|APIKEY|PASSWORD|PASSWD|PASS|PWD|PRIVATE
 _ENV_NAME = rf"(?:[A-Z0-9]+_)*{_ENV_SEGMENT}(?:_[A-Z0-9]+)*"
 _ENV_NAME_COMPOUND = rf"(?:(?:[A-Z0-9]+_)+{_ENV_SEGMENT}(?:_[A-Z0-9]+)*|{_ENV_SEGMENT}(?:_[A-Z0-9]+)+)"
 
+# Quotes and markdown kept around a redacted value.
+_VALUE_WRAPPERS = ('\\"', '"', "'", "`", "**", "__")
+
 
 def _keep_quotes(value: str) -> str:
-    """REDACTED in place of a value, inside the value's own quotes."""
-    for quote in ('\\"', '"', "'"):
+    """REDACTED in place of a value, inside the value's own quotes or markdown."""
+    for quote in _VALUE_WRAPPERS:
         if len(value) >= 2 * len(quote) and value.startswith(quote) and value.endswith(quote):
             return f"{quote}{REDACTED}{quote}"
     return REDACTED
@@ -84,20 +121,40 @@ def _redact_pem(match: re.Match[str]) -> str:
     return f"-----BEGIN {label}-----{REDACTED}-----END {label}-----"
 
 
+# A password attached to -p, in the rest of a mysql command.
+_MYSQL_PASSWORD = re.compile(r"""(?P<keep>[ \t]-p)(?P<value>"[^"\n]*"|'[^'\n]*'|[^\s"']+)""")
+
+
+def _redact_mysql_command(match: re.Match[str]) -> str:
+    return _MYSQL_PASSWORD.sub(_redact_value, match.group(0))
+
+
 _PRIVATE_KEY_LABEL = r"(?P<label>[A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)"
+
+# The body of a PEM block may not run past another BEGIN or END line, so each
+# header is scanned at most up to the next one, however many lack an END.
+_PEM_BODY = r"(?:(?!-----(?:BEGIN|END) )[\s\S])*?"
 
 SECRET_RULES: list[tuple[str, re.Pattern[str], Any]] = [
     # PEM private keys: the whole block, BEGIN to END (or, cut off, to the end
     # of the base64 that follows BEGIN).
     (
         "pem-private-key",
-        re.compile(rf"-----BEGIN {_PRIVATE_KEY_LABEL}-----(?:[\s\S]*?-----END (?P=label)-----|[A-Za-z0-9+/=\s\\]*)"),
+        re.compile(rf"-----BEGIN {_PRIVATE_KEY_LABEL}-----(?:{_PEM_BODY}-----END (?P=label)-----|[A-Za-z0-9+/=\s\\]*)"),
         _redact_pem,
     ),
-    # scheme://user:password@host, for any scheme: keep the user and host.
+    # scheme://user:password@host, for any scheme: keep the user and host. The
+    # password runs to the last @ that a host follows, so one holding / or @
+    # (generated passwords often do, unencoded) goes whole. It never runs into
+    # another scheme://, and a scheme starts only where a run of scheme
+    # characters starts, which keeps the rule linear.
     (
         "url-credentials",
-        re.compile(r"(?P<keep>\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@\"'<>]*:)(?P<value>[^\s@/\"'<>]+)(?=@)"),
+        re.compile(
+            r"(?P<keep>(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@\"'<>`]*:)"
+            r"(?P<value>(?:(?!://)[^\s\"'<>`])+)"
+            r"(?=@(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~%-]+)(?![A-Za-z0-9._~%-]))"
+        ),
         _redact_value,
     ),
     # Authorization: <scheme> <credential>, as a header or a JSON/YAML field.
@@ -136,42 +193,124 @@ SECRET_RULES: list[tuple[str, re.Pattern[str], Any]] = [
     # Twilio: account SID (AC) and API key SID (SK), each 32 hex. An auth token
     # is 32 bare hex; it is caught by name below, or by context further down.
     ("twilio-sid", re.compile(r"\b(?:AC|SK)[0-9a-fA-F]{32}\b"), _redact_whole),
+    # The other providers KEYFLOWOS configures (.env.example): ElevenLabs
+    # (sk_ and hex; Stripe's sk_live_/sk_test_ are above), xAI, E2B, Resend,
+    # Meta and WhatsApp access tokens (EAA...), Klaviyo private keys, Mailchimp
+    # (hex and a -usNN data centre) and Hugging Face.
+    ("elevenlabs-key", re.compile(r"\bsk_[0-9a-f]{32,}\b"), _redact_whole),
+    ("xai-key", re.compile(r"\bxai-[A-Za-z0-9]{32,}"), _redact_whole),
+    ("e2b-key", re.compile(r"\be2b_[A-Za-z0-9]{20,}"), _redact_whole),
+    ("resend-key", re.compile(r"\bre_(?=[A-Za-z0-9_]*[0-9])[A-Za-z0-9]{6,}_[A-Za-z0-9]{16,}"), _redact_whole),
+    ("meta-access-token", re.compile(r"\bEAA[A-Za-z0-9]{40,}"), _redact_whole),
+    ("klaviyo-private-key", re.compile(r"\bpk_[A-Za-z0-9]{30,}"), _redact_whole),
+    ("mailchimp-key", re.compile(r"\b[0-9a-f]{32}-us[0-9]{1,2}\b"), _redact_whole),
+    ("huggingface-token", re.compile(r"\bhf_[A-Za-z0-9]{30,}"), _redact_whole),
+    # LiveKit: an API key and its secret as a pair, as livekit.yaml `keys:`
+    # and LIVEKIT_KEYS write them. A secret named in prose is caught by
+    # sensitive-word-value or by context further down.
+    (
+        "livekit-key-secret",
+        re.compile(r"(?P<keep>\bAPI[A-Za-z0-9]{8,16}[\"']?:[ \t]*[\"']?)(?P<value>[A-Za-z0-9]{32,})"),
+        _redact_value,
+    ),
     # JSON Web Tokens (Supabase anon and service-role keys are JWTs).
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?"), _redact_whole),
-    # name = value, name: value, "name": "value", with a sensitive name.
+    # name = value, name: value, "name": "value", `name`: `value`,
+    # **name:** value, with a sensitive name or a credential phrase.
     (
         "sensitive-assignment",
         re.compile(
             rf"""(?ix)
             (?P<keep>
               (?<![A-Za-z0-9_.-])
-              (?:\\?["'])?{_SENSITIVE_NAME}(?:\\?["'])?
-              \s*{_ASSIGN}\s*
+              {_NAME_QUOTE}?(?:{_SENSITIVE_PHRASE}|{_SENSITIVE_NAME}){_NAME_QUOTE}?{_MD}?
+              \s*{_ASSIGN}(?:{_MD}(?=\s))?\s*
             )
             (?P<value>{_VALUE})
             """
         ),
         _redact_value,
     ),
-    # KEY=VALUE environment lines (optionally after "export").
+    # KEY=VALUE environment lines (optionally after "export"), also quoted or
+    # in markdown.
     (
         "env-assignment",
-        re.compile(rf"(?P<keep>(?<![A-Za-z0-9_])(?:export\s+)?{_ENV_NAME}\s*=(?![=>])\s*)(?P<value>{_VALUE})"),
+        re.compile(
+            rf"(?P<keep>(?<![A-Za-z0-9_])(?:export\s+)?{_NAME_QUOTE}?{_ENV_NAME}{_NAME_QUOTE}?{_MD}?"
+            rf"\s*=(?![=>])(?:{_MD}(?=\s))?\s*)(?P<value>{_VALUE})"
+        ),
         _redact_value,
     ),
     # KEY: VALUE (YAML, compose files). Single-word names are excluded, so
     # "KEY: ..." in prose about the KEY assistant is left alone.
     (
         "env-yaml-assignment",
-        re.compile(rf"(?P<keep>(?<![A-Za-z0-9_]){_ENV_NAME_COMPOUND}:(?![:=])[ \t]*)(?P<value>{_VALUE})"),
+        re.compile(
+            rf"(?P<keep>(?<![A-Za-z0-9_]){_NAME_QUOTE}?{_ENV_NAME_COMPOUND}{_NAME_QUOTE}?{_MD}?"
+            rf":(?![:=])(?:{_MD}(?=\s))?[ \t]*)(?P<value>{_VALUE})"
+        ),
+        _redact_value,
+    ),
+    # A markdown table row, | NAME | value |: an environment name with a
+    # sensitive segment, a sensitive name or a credential phrase in one cell,
+    # and a one-token value in the next.
+    (
+        "markdown-table-row",
+        re.compile(
+            rf"(?P<keep>\|[ \t]*{_NAME_QUOTE}?{_MD}?(?:{_ENV_NAME}|(?i:{_SENSITIVE_PHRASE}|{_SENSITIVE_NAME}))"
+            rf"{_MD}?{_NAME_QUOTE}?[ \t]*\|[ \t]*)"
+            r"(?P<value>`[^`\n|]+`|(?![*_~]+[ \t]*\|)[^\s|]+)(?=[ \t]*\|)"
+        ),
+        _redact_value,
+    ),
+    # Command lines. curl -u user:password and --user user:password (a numeric
+    # uid:gid, as docker run -u takes, is not a password).
+    (
+        "cli-user-password",
+        re.compile(r"""(?P<keep>(?<![\w-])(?:-u|--user)(?:[ \t]+|=)["']?(?!\d+:\d+(?![^\s"']))[^\s:"'@]+:)(?P<value>[^\s"']+)"""),
+        _redact_value,
+    ),
+    # --token v, --password v, --api-key v and the like; the --name=v form is
+    # a sensitive assignment above. A following flag is not a value, and
+    # --password-stdin has none.
+    (
+        "cli-secret-flag",
+        re.compile(
+            rf"(?P<keep>(?<![\w-])--(?:[A-Za-z0-9]+-)*(?:token|password|passwd|secret|api-?key|access-key|secret-key|private-key)"
+            rf"[ \t]+(?!-))(?P<value>{_VALUE})"
+        ),
+        _redact_value,
+    ),
+    # mysql -p<password>: the password attached to -p anywhere in the rest of
+    # a mysql command (-p alone, followed by a space, prompts).
+    ("mysql-password-flag", re.compile(r"\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n;&|]*"), _redact_mysql_command),
+    # A credential named in prose with no assignment: "the auth token is X",
+    # "and secret X", "secret access key X". Only a value that looks generated
+    # (16 or more characters, with a letter and a digit) counts, so "a token
+    # budget" and "the password reset flow" are left alone.
+    (
+        "sensitive-word-value",
+        re.compile(
+            rf"(?P<keep>(?<![A-Za-z0-9_.-])(?i:{_SENSITIVE_PHRASE}|secret|token|password|passwd|passphrase)"
+            r"(?:[ \t]+(?i:is|was))?[ \t]+)"
+            r"(?P<value>(?=[A-Za-z0-9+/=_.~-]*[0-9])(?=[A-Za-z0-9+/=_.~-]*[A-Za-z])[A-Za-z0-9+/=_.~-]{16,})"
+            r"(?![A-Za-z0-9+/=_.~-])"
+        ),
         _redact_value,
     ),
 ]
 
+
+def _mixed_case_alnum(token: str) -> bool:
+    return any(c.isupper() for c in token) and any(c.islower() for c in token) and any(c.isdigit() for c in token)
+
+
 # Secrets with no shape of their own, redacted only when the same message shows
 # whose they are: an AWS secret access key (40 base64 characters, mixed case)
-# in a message that names AWS or holds an AWS key id, and a Twilio auth token
-# (32 hex) in a message that names Twilio or holds a Twilio account SID.
+# in a message that names AWS or holds an AWS key id, a Twilio auth token
+# (32 hex) in a message that names Twilio or holds a Twilio account SID, and a
+# LiveKit API secret (32 to 64 letters and digits, mixed case) in a message
+# that names LiveKit or holds a LiveKit API key (API and 8 to 16 more).
 _CONTEXT_RULES: list[tuple[re.Pattern[str], re.Pattern[str], Any]] = [
     (
         re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|(?i:\baws\b)"),
@@ -182,6 +321,11 @@ _CONTEXT_RULES: list[tuple[re.Pattern[str], re.Pattern[str], Any]] = [
         re.compile(r"\bAC[0-9a-fA-F]{32}\b|(?i:\btwilio\b)"),
         re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{32}(?![0-9A-Za-z])"),
         lambda token: True,
+    ),
+    (
+        re.compile(r"\bAPI[A-Za-z0-9]{8,16}\b|(?i:\blivekit\b)"),
+        re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9]{32,64}(?![A-Za-z0-9])"),
+        _mixed_case_alnum,
     ),
 ]
 
@@ -315,7 +459,16 @@ def text_from_message(message: dict[str, Any]) -> str:
     return ""
 
 
-def parse_chatgpt_export(data: Any, source_file: Path) -> tuple[list[ThreadRecord], list[MessageRecord]]:
+def _identity(text: str) -> str:
+    return text
+
+
+def parse_chatgpt_export(
+    data: Any, source_file: Path, redactor: Callable[[str], str] = _identity
+) -> tuple[list[ThreadRecord], list[MessageRecord]]:
+    """Threads and messages from a ChatGPT export. redactor is applied to every
+    title and message text before anything is hashed, so text_hash and
+    content_hash are hashes of what is written, never of the text before it."""
     conversations = data if isinstance(data, list) else data.get("conversations", []) if isinstance(data, dict) else []
     threads: list[ThreadRecord] = []
     messages: list[MessageRecord] = []
@@ -324,7 +477,7 @@ def parse_chatgpt_export(data: Any, source_file: Path) -> tuple[list[ThreadRecor
         if not isinstance(conv, dict):
             continue
         thread_id = str(conv.get("id") or conv.get("conversation_id") or f"{source_file.stem}:{index}")
-        title = str(conv.get("title") or "Untitled")
+        title = redactor(str(conv.get("title") or "Untitled"))
         mapping = conv.get("mapping") or {}
         thread_messages: list[MessageRecord] = []
 
@@ -338,6 +491,7 @@ def parse_chatgpt_export(data: Any, source_file: Path) -> tuple[list[ThreadRecor
                 text = text_from_message(msg)
                 if not text:
                     continue
+                text = redactor(text)
                 author = msg.get("author") or {}
                 role = str(author.get("role") or "unknown")
                 created = iso_time(msg.get("create_time"))
@@ -373,8 +527,10 @@ def parse_chatgpt_export(data: Any, source_file: Path) -> tuple[list[ThreadRecor
     return threads, messages
 
 
-def parse_plain_text(path: Path) -> tuple[list[ThreadRecord], list[MessageRecord]]:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def parse_plain_text(path: Path, redactor: Callable[[str], str] = _identity) -> tuple[list[ThreadRecord], list[MessageRecord]]:
+    """One thread of one message from a transcript; redactor as for
+    parse_chatgpt_export."""
+    text = redactor(path.read_text(encoding="utf-8", errors="replace"))
     thread_id = sha256_text(str(path.resolve()))[:20]
     message = MessageRecord(
         thread_id=thread_id,
@@ -387,7 +543,7 @@ def parse_plain_text(path: Path) -> tuple[list[ThreadRecord], list[MessageRecord
     )
     thread = ThreadRecord(
         thread_id=thread_id,
-        title=path.stem,
+        title=redactor(path.stem),
         source_file=str(path),
         source_kind="text_transcript",
         created_at=None,
@@ -533,22 +689,27 @@ def main() -> int:
     errors: list[dict[str, str]] = []
     scanned_files = 0
 
+    # Redaction happens as each file is parsed, before any hash is taken: a
+    # hash of a thread's unredacted text, beside every other byte of it in
+    # messages.jsonl, gives a weak password away to anyone who guesses it.
+    redactor: Callable[[str], str] = _identity if args.no_redact else redact
     for path in iter_inputs(input_root):
         scanned_files += 1
         try:
             if path.suffix.lower() == ".json":
                 data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-                parsed_threads, parsed_messages = parse_chatgpt_export(data, path)
+                parsed_threads, parsed_messages = parse_chatgpt_export(data, path, redactor)
                 if not parsed_threads:
-                    parsed_threads, parsed_messages = parse_plain_text(path)
+                    parsed_threads, parsed_messages = parse_plain_text(path, redactor)
             else:
-                parsed_threads, parsed_messages = parse_plain_text(path)
+                parsed_threads, parsed_messages = parse_plain_text(path, redactor)
             threads.extend(parsed_threads)
             messages.extend(parsed_messages)
         except Exception as exc:
             errors.append({"file": str(path), "error": str(exc)})
 
     # Exact duplicate messages can occur in repeated exports. Keep the first.
+    # Messages are compared as written, after redaction.
     unique_messages: list[MessageRecord] = []
     seen_message_hashes: set[tuple[str, str]] = set()
     for msg in messages:
@@ -556,14 +717,8 @@ def main() -> int:
         if key in seen_message_hashes:
             continue
         seen_message_hashes.add(key)
-        if not args.no_redact:
-            msg.text = redact(msg.text)
-            msg.text_hash = sha256_text(msg.text)
         unique_messages.append(msg)
     messages = unique_messages
-    if not args.no_redact:
-        for thread in threads:
-            thread.title = redact(thread.title)
 
     by_thread: dict[str, list[MessageRecord]] = {}
     for msg in messages:

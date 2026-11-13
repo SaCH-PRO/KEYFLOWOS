@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import os
@@ -5,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -168,6 +170,83 @@ def secret_shapes():
         ("env private", f"SSH_PRIVATE={env_value}", [env_value]),
         ("yaml env secret", f"  BYOK_ENCRYPTION_SECRET: {env_value}", [env_value]),
         ("legacy api_key form", f"api_key={env_value}", [env_value]),
+    ] + written_shapes()
+
+
+def repeat(chars: str, n: int) -> str:
+    return (chars * (n // len(chars) + 1))[:n]
+
+
+def written_shapes():
+    """Secrets written the way ChatGPT and people write them: markdown, URL
+    passwords holding / or @, the provider keys KEYFLOWOS configures
+    (.env.example), credential names in words, and command-line flags."""
+    hexchars = "0123456789abcdef"
+    mixed = "Kf7" + "qL2" + "xW9" + "pR4" + "mT8" + "vB1"
+    letters = "Hq" + "Zt" + "Wm" + "Pk" + "Rv"
+    password = "Tr1n" + "!dad" + "9Qx"
+    token = repeat("t0K" + "e9n", 28)
+    b64 = repeat("Ab3/" + "Cd4+", 64)
+    hex64 = repeat("a1b2c3d4" + "e5f60798", 64)
+    value = repeat("v4L" + "u3e", 24)
+    url_a, url_b, url_c = "Pq7" + "Rs2", "Uv5" + "Wx8", "Yz1" + "Ab"
+    elevenlabs = "sk" + "_" + repeat(hexchars, 48)
+    xai = "xai" + "-" + repeat(mixed, 80)
+    e2b = "e2b" + "_" + repeat(hexchars, 40)
+    resend = "re" + "_" + repeat(mixed, 8) + "_" + repeat(mixed[::-1], 24)
+    meta = "EA" + "AG" + repeat(mixed, 180)
+    klaviyo = "pk" + "_" + repeat(hexchars, 34)
+    mailchimp = repeat("13579bdf" + "02468ace", 32) + "-us" + "21"
+    huggingface = "hf" + "_" + repeat(letters, 34)
+    livekit_key = "API" + repeat(mixed, 12)
+    livekit_secret = repeat(mixed[::-1], 43)
+    vapid = repeat("Vp1_" + "Kd2-", 43)
+    return [
+        # SEC-CONV1-1-R1: markdown.
+        ("markdown bold label", f"KEYFLOWOS staging login. **Password:** {password}", [password]),
+        ("markdown bold name", f"**Password**: {password}", [password]),
+        ("markdown underscore name", f"__Token__: {token}", [token]),
+        ("markdown bold value", f"password: **{password}**", [password]),
+        ("markdown code env name and value", f"`SUPABASE_JWT_SECRET`: `{b64}`", [b64]),
+        ("markdown code env assignment", f"`JWT_SECRET`=`{value}`", [value]),
+        ("markdown code password", f"`password`=`{password}`", [password]),
+        ("markdown code compound env name", f"`CREDENTIALS_ENCRYPTION_KEY`: `{hex64}`", [hex64]),
+        ("markdown bold env name", f"**CREDENTIALS_ENCRYPTION_KEY:** {hex64}", [hex64]),
+        ("markdown table env row", f"| Name | Value |\n|---|---|\n| BYOK_ENCRYPTION_SECRET | {hex64} |", [hex64]),
+        ("markdown table password row", f"| Field | Value |\n|---|---|\n| Username | admin |\n| Password | {password} |", [password]),
+        ("markdown table code cells", f"| `JWT_SECRET` | `{value}` |", [value]),
+        # SEC-CONV1-1-R2: URL passwords with / or @ or other URL-safe characters.
+        (
+            "url password with a slash",
+            f"DATABASE_URL=postgresql://postgres:{url_a}/{url_b}+{url_c}@db.example.invalid:5432/postgres",
+            [url_a, url_b, url_c],
+        ),
+        ("url password with an at sign", f"postgres://app:{url_a}@{url_b}@db.example.invalid/app", [url_a, url_b]),
+        ("url password with sub-delims", f"redis://default:{url_a}!$&()*+,;=:{url_b}@cache.example.invalid:6379", [url_a, url_b]),
+        # SEC-CONV1-1-R3: provider keys KEYFLOWOS configures.
+        ("elevenlabs key", f"KEYFLOWOS voice uses {elevenlabs} for ElevenLabs", [elevenlabs]),
+        ("xai key", f"grok fallback {xai}", [xai]),
+        ("e2b key", f"sandbox {e2b}", [e2b]),
+        ("resend key", f"email via Resend {resend}", [resend]),
+        ("meta access token", f"WhatsApp Cloud API {meta}", [meta]),
+        ("klaviyo private key", f"Klaviyo {klaviyo}", [klaviyo]),
+        ("mailchimp key", f"Mailchimp {mailchimp}", [mailchimp]),
+        ("hugging face token", f"model pull with {huggingface}", [huggingface]),
+        ("livekit secret in prose", f"LiveKit key {livekit_key} and secret {livekit_secret}", [livekit_secret]),
+        ("livekit keys yaml", f"keys:\n  {livekit_key}: {livekit_secret}", [livekit_secret]),
+        # Credential names written as words.
+        ("api key phrase", f"KEYFLOWOS ElevenLabs API key: {value}", [value]),
+        ("private key phrase", f"push: VAPID private key: {vapid}", [vapid]),
+        ("encryption key phrase", f"credentials encryption key: {hex64}", [hex64]),
+        ("secret key phrase", f"Langfuse secret key = {token}", [token]),
+        ("bold api key phrase", f"**API key:** {value}", [value]),
+        # Command-line forms.
+        ("curl user and password", f"curl -u admin:{password} https://api.example.invalid/v1", [password]),
+        ("token flag", f"npx vercel deploy --prod --token {token}", [token]),
+        ("password flag", f"docker login registry.example.invalid --username ci --password {password}", [password]),
+        ("quoted password flag", f"tool --db-password '{password}' --verbose", [password]),
+        ("api key flag", f"cli --api-key {value} run", [value]),
+        ("mysql attached password", f"mysql -uroot -p{password} keyflow", [password]),
     ]
 
 
@@ -181,6 +260,16 @@ ORDINARY_PROSE = (
     "is postgresql://keyflow@localhost:5432/keyflowos with trust auth. Config near-misses: "
     "KEYFLOW_ENV=production, MAX_TOKENS=4096, {\"tokens\": 1500, \"key\": \"theme\"}, "
     "request id 3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b, email ops@example.com."
+)
+
+# Near misses for the markdown, provider, phrase and command-line rules.
+ORDINARY_COMMANDS = (
+    "Run `docker run -u 1000:1000 app`, `git push -u origin main`, `sudo -u postgres psql`, "
+    "`docker login --password-stdin` and `mysql -u root -p keyflow` (it prompts). The API key "
+    "rotation runbook and the secret santa list live at https://example.com/@team/keys; `max_tokens` "
+    "stays 4096 and the token budget is 4096 tokens; hf_hub_download, e2b_sandbox and re_compile are "
+    "function names; the xai-sdk package is pinned.\n| Key | Value |\n|---|---|\n| Name | Description |\n"
+    "- `HAWK_API_KEY`: the API key. `JWT_SECRET`: see the vault. The password: required."
 )
 
 
@@ -201,6 +290,38 @@ class RedactSecretShapesTest(unittest.TestCase):
 
     def test_ordinary_prose_is_untouched(self):
         self.assertEqual(module.redact(ORDINARY_PROSE), ORDINARY_PROSE)
+        self.assertEqual(module.redact(ORDINARY_COMMANDS), ORDINARY_COMMANDS)
+
+    def test_markdown_and_url_forms_keep_their_markup_and_lose_the_whole_value(self):
+        # SEC-CONV1-1-R1/R2: the marker replaces the value, all of it, and
+        # nothing else; it never sits next to the value it claims to hide.
+        secret = "Tr1n" + "!dad" + "9Qx"
+        head, tail = "Pq7" + "Rs2", "Uv5" + "Wx8"
+        cases = [
+            (f"**Password:** {secret}", "**Password:** [REDACTED]"),
+            (f"**Password**: {secret}", "**Password**: [REDACTED]"),
+            (f"__Token__: {secret}", "__Token__: [REDACTED]"),
+            (f"password: **{secret}**", "password: **[REDACTED]**"),
+            (f"`JWT_SECRET`: `{secret}`", "`JWT_SECRET`: `[REDACTED]`"),
+            (f"`password`=`{secret}`", "`password`=`[REDACTED]`"),
+            (f"**CREDENTIALS_ENCRYPTION_KEY:** {secret}", "**CREDENTIALS_ENCRYPTION_KEY:** [REDACTED]"),
+            (f"| BYOK_ENCRYPTION_SECRET | {secret} |", "| BYOK_ENCRYPTION_SECRET | [REDACTED] |"),
+            (f"| `JWT_SECRET` | `{secret}` |", "| `JWT_SECRET` | `[REDACTED]` |"),
+            (f"ElevenLabs API key: {secret}", "ElevenLabs API key: [REDACTED]"),
+            (
+                f"postgres://app:{head}@{tail}@db.example.invalid:5432/app?sslmode=require",
+                "postgres://app:[REDACTED]@db.example.invalid:5432/app?sslmode=require",
+            ),
+            (
+                f"postgresql://postgres:{head}/{tail}+x@db.example.invalid:5432/postgres",
+                "postgresql://postgres:[REDACTED]@db.example.invalid:5432/postgres",
+            ),
+            (f"curl -u admin:{secret} https://api.example.invalid", "curl -u admin:[REDACTED] https://api.example.invalid"),
+            (f"mysql -uroot -p{secret} keyflow", "mysql -uroot -p[REDACTED] keyflow"),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=expected):
+                self.assertEqual(module.redact(text), expected)
 
     def test_legacy_assignment_forms_still_redact(self):
         text = "api_key=abc123 token: xyz password=hunter2"
@@ -208,6 +329,47 @@ class RedactSecretShapesTest(unittest.TestCase):
         for value in ("abc123", "xyz", "hunter2"):
             self.assertNotIn(value, redacted)
         self.assertEqual(redacted.count(MARKER), 3)
+
+
+class RedactionTimeTest(unittest.TestCase):
+    """SEC-CONV1-1-R6: redaction stays linear on inputs built to make a rule
+    backtrack. The private-key rule used to rescan to the end of the text for
+    every BEGIN header with no END (4,000 headers took over 3 s, 10,000 took
+    20 s), and the URL rule rescanned a dotted or dashed run from each of its
+    characters (100,000 characters took 5 s). Each input here is sized so the
+    old rules take seconds and the linear ones a fraction of the limit."""
+
+    LIMIT_SECONDS = 0.5
+
+    def assert_fast(self, label: str, text: str) -> str:
+        start = time.perf_counter()
+        out = module.redact(text)
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, self.LIMIT_SECONDS, f"{label}: redact took {elapsed:.2f} s on {len(text)} characters")
+        return out
+
+    def test_many_private_key_headers_without_an_end(self):
+        header = "-----BEGIN " + "PRIVATE KEY-----\n"
+        out = self.assert_fast("unterminated private key headers", header * 4_000)
+        self.assertIn(MARKER, out)
+
+    def test_other_backtracking_shapes(self):
+        cases = {
+            "private key header without END, then a long body": "-----BEGIN " + "RSA PRIVATE KEY-----\n" + "QUJD" * 100_000,
+            "dotted run (URL scheme candidates)": "a." * 50_000,
+            "dashed run": "a-" * 50_000,
+            "scheme-like tokens": "x://y:" * 20_000,
+            "at signs after a URL user": "postgres://u:" + "p@" * 50_000,
+            "identifier run": "a" * 200_000,
+            "environment-name run": "A_" * 50_000,
+            "table pipes": "| SECRET " * 10_000,
+            "flag prefixes": "--a-" * 25_000,
+            "sensitive words": "token secret password " * 5_000,
+            "mysql words": "mysql " * 20_000,
+        }
+        for label, text in cases.items():
+            with self.subTest(shape=label):
+                self.assert_fast(label, text)
 
 
 def write_export(path: Path, title: str, texts: list[str]) -> None:
@@ -286,6 +448,58 @@ class HarvestOutputRedactionTest(unittest.TestCase):
         self.assertIn(ORDINARY_PROSE, [m["text"] for m in messages], "prose changed in messages.jsonl")
         self.assertIn(ORDINARY_PROSE, [c["excerpt"] for c in candidates], "prose changed in candidates.jsonl")
         self.assertIn(ORDINARY_PROSE, queue.splitlines(), "prose changed in review-queue.md")
+
+    def read_jsonl(self, path: Path) -> list[dict]:
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    def test_thread_content_hash_is_over_the_redacted_text(self):
+        # SEC-CONV1-1-R4: messages.jsonl holds every other byte of the thread,
+        # so a hash of the unredacted thread lets a weak password be guessed.
+        weak = "Trin" + "idad#1"
+        raw = [f"KEYFLOWOS admin password: {weak} (rotate after demo)", "KEYFLOWOS: we decided the kernel stays small."]
+        export = self.tmp / "conversations.json"
+        write_export(export, "KEYFLOWOS admin", raw)
+        transcript = self.tmp / "transcripts" / "old-thread.md"
+        transcript.parent.mkdir()
+        transcript.write_text(f"KEYFLOWOS staging password: {weak}\n", encoding="utf-8")
+        output = self.tmp / "harvest"
+
+        for source in (export, transcript):
+            with self.subTest(source=source.name):
+                result = run_harvester("--input", str(source), "--output", str(output), "--min-score", "0")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                threads = self.read_jsonl(output / "threads.jsonl")
+                messages = self.read_jsonl(output / "messages.jsonl")
+                self.assertEqual(len(threads), 1)
+                written = "\n".join(m["text"] for m in messages)
+                self.assertNotIn(weak, written)
+                self.assertEqual(threads[0]["content_hash"], hashlib.sha256(written.encode("utf-8")).hexdigest())
+                unredacted = written.replace(MARKER, weak)
+                self.assertNotEqual(threads[0]["content_hash"], hashlib.sha256(unredacted.encode("utf-8")).hexdigest())
+                for message in messages:
+                    self.assertEqual(message["text_hash"], hashlib.sha256(message["text"].encode("utf-8")).hexdigest())
+
+    def test_thread_titles_get_the_same_redaction(self):
+        # SEC-CONV1-1-R5: titles go through redact() too, so every new form
+        # is covered there as well.
+        shapes = written_shapes()
+        output = self.tmp / "harvest"
+        export = self.tmp / "conversations.json"
+        payload = []
+        for index, (label, text, _) in enumerate(shapes):
+            payload.append({"id": f"t{index}", "title": f"KEYFLOWOS {text}", "create_time": 1, "update_time": 2, "mapping": {}})
+        export.write_text(json.dumps(payload), encoding="utf-8")
+        result = run_harvester("--input", str(export), "--output", str(output), "--min-score", "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        raw = (output / "threads.jsonl").read_text(encoding="utf-8")
+        titles = {t["thread_id"]: t["title"] for t in self.read_jsonl(output / "threads.jsonl")}
+        for index, (label, _, secrets) in enumerate(shapes):
+            with self.subTest(shape=label):
+                self.assertIn(MARKER, titles[f"t{index}"])
+                for value in secrets:
+                    self.assertNotIn(value, titles[f"t{index}"])
+                    self.assertNotIn(value, raw)
+        self.assertIn("ElevenLabs API key: [REDACTED]", raw)
 
 
 
