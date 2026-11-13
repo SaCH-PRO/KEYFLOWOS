@@ -21,6 +21,14 @@
  *          the invoice it created with the payment (the listener resolves it)
  *   SO-05  completeCheckout on an order already PAID writes nothing and emits
  *          nothing (control)
+ *   SO-06  W11-ORDER-CANCEL-RELEASE (F-35; D-136): CANCELLED is written on the
+ *          order's routing claim transaction (ROUTING_CLAIM_TX_OPTIONS): the
+ *          claim first, then the order's routes cancelled and the status
+ *          written on that transaction, with one store_order.cancelled after
+ *          it; a SHIPPED order's CANCELLED is 400 with no status written and no
+ *          event. At bb316619 CANCELLED was a plain update outside any
+ *          transaction (SHIPPED included); the real-database proof is
+ *          test/marketplace-routing-concurrency.integration.test.ts RC-42
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StoreOrderService } from './store-order.service';
@@ -66,11 +74,19 @@ function build(stored: ReturnType<typeof order>) {
     payment: {
       create: vi.fn(async ({ data }: any) => { writes.push('payment.create'); return { id: 'pay_v18_1', ...data }; }),
     },
-    inventoryStock: { findUnique: vi.fn(), update: vi.fn() },
+    inventoryStock: { findUnique: vi.fn(), findFirst: vi.fn(async () => null), update: vi.fn() },
     stockMovement: { create: vi.fn() },
     marketplaceOrder: {
+      findFirst: vi.fn(async () => stored),
       update: vi.fn(async ({ data }: any) => { writes.push('order.update'); return { ...stored, ...data }; }),
     },
+    // W11-ORDER-CANCEL-RELEASE: a cancel's claim, release and timeline step on the transaction.
+    fulfillmentRoute: {
+      findMany: vi.fn(async () => []),
+      updateMany: vi.fn(async () => { writes.push('routes.cancel'); return { count: 0 }; }),
+    },
+    $executeRaw: vi.fn(async () => { writes.push('tx.executeRaw'); return 1; }),
+    $queryRaw: vi.fn(async () => []),
   };
 
   const client = {
@@ -173,5 +189,30 @@ describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
     expect(h.writes).toEqual([]);
     expect(h.client.$transaction).not.toHaveBeenCalled();
     expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
+  });
+});
+
+describe('W11-ORDER-CANCEL-RELEASE StoreOrderService: CANCELLED releases the order on its routing claim', () => {
+  it('SO-06 CANCELLED is written on the routing claim transaction (claim, routes cancelled, step, status), then emits store_order.cancelled once; a SHIPPED order is 400 with nothing written and no event', async () => {
+    const h = build(order({ status: 'CONFIRMED', paymentStatus: 'PAID' }));
+    const out = await h.svc.updateOrderStatus('ord_v18_1', ' cancelled ', BIZ);
+    expect(h.client.$transaction).toHaveBeenCalledTimes(1);
+    expect(h.client.$transaction.mock.calls[0][1]).toEqual({ maxWait: 5_000, timeout: 20_000 });
+    // The claim (an advisory lock), the routes cancelled, the cancelled step, then the status: all on the transaction.
+    expect(h.writes).toEqual(['tx.executeRaw', 'routes.cancel', 'tx.executeRaw', 'order.update']);
+    expect(h.tx.marketplaceOrder.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'CANCELLED' } }));
+    expect(h.client.marketplaceOrder.update).not.toHaveBeenCalled();
+    expect(out.status).toBe('CANCELLED');
+    expect(out.paymentStatus, 'the payment kept').toBe('PAID');
+    expect(h.emitted.map((e) => e.name)).toEqual(['store_order.cancelled']);
+
+    const shipped = build(order({ status: 'SHIPPED', paymentStatus: 'PAID' }));
+    await expect(shipped.svc.updateOrderStatus('ord_v18_1', 'CANCELLED', BIZ)).rejects.toMatchObject({
+      status: 400,
+      message: 'Cannot cancel order in SHIPPED status',
+    });
+    expect(shipped.writes.filter((w) => w !== 'tx.executeRaw'), 'no status, route or step written').toEqual([]);
+    expect(shipped.client.marketplaceOrder.update).not.toHaveBeenCalled();
+    expect(shipped.emitted).toEqual([]);
   });
 });

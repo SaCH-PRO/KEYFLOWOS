@@ -204,6 +204,20 @@
  * refused before WiPay would be called.
  * PaymentsController is mounted for the generic storefront checkout (V87-17d).
  *
+ * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136), through the routes and
+ * guards (the real-database proof of the claim, the release and the races is
+ * test/marketplace-routing-concurrency.integration.test.ts, RC-39..RC-42):
+ *
+ *   V87-18  PATCH /site/.../orders/:id/status {status:'cancelled'} and PATCH
+ *           /marketplace/.../orders/:id/status {status:'CANCELLED'} (the web
+ *           orders tab's spelling) of a checked-out storefront order routed by
+ *           FulfillmentRoutingService cancel its route (CANCELLED) with the
+ *           status, emit one store_order.cancelled, and leave its money as it
+ *           was (no refund recorded, the payment kept). At bb316619 both wrote
+ *           the status alone: the route stayed RESERVED. A SHIPPED order is 400
+ *           on both routes with nothing written and no event (D-136); at
+ *           bb316619 both wrote CANCELLED over it
+ *
  * Fixtures: prefix `v87c_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order
  * in beforeAll and afterAll; no $transaction wrapping.
@@ -286,6 +300,8 @@ async function cleanup() {
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V87-18's routes (the order delete cascades them too).
+    `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // V87-16b's promo codes (the business delete cascades them too).
@@ -1722,5 +1738,73 @@ describe('W11-STORE-CHECKOUT-METHOD-GATE (F-21): a storefront checkout names onl
     } finally {
       paypalClient.mockRestore();
     }
+  });
+});
+
+describe('W11-ORDER-CANCEL-RELEASE (F-35, D-136): a status edit that cancels an order releases its fulfilment, through the routes', () => {
+  it("V87-18 PATCH /site/.../status {status:'cancelled'} and PATCH /marketplace/.../status {status:'CANCELLED'} of a checked-out, routed storefront order cancel its route with the status, emit one store_order.cancelled and keep its money (no refund, the payment kept); a SHIPPED order is 400 on both routes with nothing written and no event", async () => {
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    const routing = app.get(FulfillmentRoutingService);
+    const routesOf = async (orderId: string) =>
+      (await db.fulfillmentRoute.findMany({ where: { businessId: ID.bizA, orderId }, orderBy: { createdAt: 'asc' } })).map(
+        (r: any) => `${r.strategy}:${r.status}`,
+      );
+    /** A CASH storefront order checked out by the owner (CONFIRMED / PAID), then routed: one LOCAL_STOCK route RESERVED. */
+    const routedOrder = async () => {
+      const order = await checkedOutOrder();
+      expect((await routing.routeOrder(ID.bizA, order.id)).length, 'routed').toBe(1);
+      expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+      return order;
+    };
+
+    for (const [route, cancel] of [
+      ['PATCH /site cancelled', (orderId: string) => siteStatus(ID.owner, orderId, 'cancelled')],
+      ['PATCH /marketplace CANCELLED', (orderId: string) => marketStatus(ID.owner, orderId, { status: 'CANCELLED' })],
+    ] as const) {
+      const order = await routedOrder();
+      const paid = await bookState(order);
+      expect(paid.order.startsWith('CONFIRMED/PAID/'), paid.order).toBe(true);
+      const before = await counts();
+      seen = [];
+      const res = await cancel(order.id);
+      await settle();
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(200);
+      // At bb316619: 200 CANCELLED with the route still RESERVED.
+      expect(
+        { status: res.body.status, routes: await routesOf(order.id), events: storeEvents(), book: await bookState(order), counts: await counts() },
+        route,
+      ).toEqual({
+        status: 'CANCELLED',
+        routes: ['LOCAL_STOCK:CANCELLED'],
+        events: ['store_order.cancelled'],
+        book: { ...paid, order: paid.order.replace(/^CONFIRMED\//, 'CANCELLED/') },
+        counts: before,
+      });
+      expect(expenses, 'nothing booked').toEqual([]);
+    }
+
+    // D-136: a shipped order is not cancelled by a status edit (it is refunded or returned).
+    const shipped = await routedOrder();
+    await db.marketplaceOrder.update({ where: { id: shipped.id }, data: { status: 'SHIPPED' } });
+    const book = await bookState(shipped);
+    const row = await db.marketplaceOrder.findUnique({ where: { id: shipped.id } });
+    seen = [];
+    const refused = [await siteStatus(ID.owner, shipped.id, 'CANCELLED'), await marketStatus(ID.owner, shipped.id, { status: 'cancelled' })];
+    await settle();
+    const after = await db.marketplaceOrder.findUnique({ where: { id: shipped.id } });
+    // At bb316619: both 200, CANCELLED written over the shipped order.
+    expect({
+      answers: refused.map((r) => `${r.status}: ${r.body?.message}`),
+      book: await bookState(shipped),
+      updatedAt: after.updatedAt.toISOString(),
+      routes: await routesOf(shipped.id),
+      events: storeEvents(),
+    }).toEqual({
+      answers: ['400: Cannot cancel order in SHIPPED status', '400: Cannot cancel order in SHIPPED status'],
+      book,
+      updatedAt: row.updatedAt.toISOString(),
+      routes: ['LOCAL_STOCK:RESERVED'],
+      events: [],
+    });
   });
 });

@@ -240,6 +240,44 @@
  *         transfer lose, so the receipt's run again was taken by no case:
  *         without it this answers the 'ask an operator' 409, PO SHIPPED.
  *
+ * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136: a shipped or delivered
+ * order is not cancelled by a status edit; the packet's cases RC-20..RC-23 are
+ * RC-39..RC-42 here, RC-20..RC-38 being taken): the fulfil 'cancel' action
+ * takes the order's routing claim and releases its reservations
+ * (FulfillmentRoutingService.cancelOrderFulfilment, RC-06, RC-11), but the two
+ * status edits that cancel an order, PATCH /marketplace/businesses/:businessId/
+ * orders/:orderId/status {status:'cancelled'} (MarketplaceService.
+ * updateOrderStatus) and PATCH /site/businesses/:businessId/orders/:orderId/
+ * status {status:'CANCELLED'} (StoreOrderService.updateOrderStatus), wrote the
+ * status alone: no claim, no release, no transition check. Each case below was
+ * red at bb316619, called through the route's handler (as the routes run it,
+ * with the body as sent and the member's id):
+ *
+ *   RC-39 (packet RC-20) a routed paid order with tracked A x2 PATCHed
+ *         'cancelled', 'CANCELLED' (the web orders tab's spelling) or
+ *         ' Cancelled ': it was stored cancelled with its route RESERVED and
+ *         A still reserved 2 (held for good), no cancelled step, and the
+ *         padded spelling emitted no store_order.cancelled. Now the route is
+ *         CANCELLED, A reserved back to 0, the status stored as sent with a
+ *         cancelled step, the payment kept, and store_order.cancelled emitted
+ *         once. Payment fields the member may write are still written.
+ *   RC-40 (packet RC-21) PATCH 'cancelled' while routeOrder is held where it
+ *         reserves (RC-06's hold): the edit committed at once and the router
+ *         then committed its RESERVED route and reservation on the cancelled
+ *         order. Now the edit waits for the router, then releases.
+ *   RC-41 (packet RC-22; D-136) PATCH 'cancelled' on an order stored shipped,
+ *         delivered, completed, cancelled or refunded (and the storefront's
+ *         SHIPPED, DELIVERED, CANCELLED) was written. Now 400 with nothing
+ *         written (the order row, its route and its reservation as they were)
+ *         and no event.
+ *   RC-42 (packet RC-23) a CONFIRMED / PAID storefront order (paid offline,
+ *         its stock decremented by the paid door) routed by the listener,
+ *         then PATCH /site CANCELLED: stored CANCELLED with its route RESERVED
+ *         and its reservation held. Now the route is CANCELLED and the
+ *         reservation released (the quantity the checkout decremented is not
+ *         restocked: out of scope). A SHIPPED, DELIVERED, COMPLETED, CANCELLED
+ *         or REFUNDED storefront order is 400 with nothing written.
+ *
  * Nothing on these paths is mocked: PrismaService, FulfillmentRoutingService,
  * StoreOrderRoutingListener, MarketplaceService, StoreOrderService (the paid
  * door), InvoiceWorkflowService, RevenuePostingService, ExpensePostingService
@@ -2704,6 +2742,280 @@ describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the s
       hook.restore();
       received.stop();
       await resetBusinessStock();
+    }
+  });
+});
+
+/**
+ * W11-ORDER-CANCEL-RELEASE: PATCH /marketplace/businesses/:businessId/orders/:orderId/status as the route runs it
+ * (MarketplaceController.updateOrderStatus), with the body as sent and the member's id.
+ */
+const marketStatusByRoute = (orderId: string, body: Record<string, unknown>) =>
+  Promise.resolve().then(() => controller.updateOrderStatus(ID.biz, orderId, body, { user: { id: ID.owner } }));
+/** The site route's handler (SiteController.updateOrderStatus) over the suite's StoreOrderService; built by the describe block below. */
+let siteController: any;
+/** PATCH /site/businesses/:businessId/orders/:orderId/status as the route runs it, with the body as sent and the member's id. */
+const siteStatusByRoute = (orderId: string, status: string) =>
+  Promise.resolve().then(() => siteController.updateOrderStatus(ID.biz, orderId, { status }, { user: { id: ID.owner } }));
+/** A status edit's answer as the route gives it: '<status>/<paymentStatus>' of the order returned, else the HTTP status and message. */
+const statusAnswer = (work: Promise<any>) =>
+  work.then(
+    (o: any) => `${o?.status}/${o?.paymentStatus}`,
+    (err: any) =>
+      typeof err?.getStatus === 'function' ? `${err.getStatus()}: ${err.message}` : `500: ${err?.code ?? err?.name}: ${err?.message}`,
+  );
+/** The store_order.cancelled events emitted for an order since `seen` was cleared, each as the status its payload carries. */
+const cancelledEventsOf = (orderId: string) =>
+  seen.filter((e) => e.name === 'store_order.cancelled' && e.payload?.order?.id === orderId).map((e) => e.payload.order.status);
+/** The order's stored row as one comparable string (status, payment fields, metadata, updatedAt). */
+const orderRowOf = async (orderId: string) => {
+  const o = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+  return JSON.stringify([o.status, o.paymentStatus, o.paymentMethod, o.paymentRef, o.metadata, o.updatedAt]);
+};
+
+/** A paid STANDARD order with one line of tracked A x2, routed: its LOCAL_STOCK route RESERVED and 2 of A reserved. */
+async function routedOrderOfA2() {
+  const order = await paidOrder([ID.productA]);
+  await db.marketplaceOrderItem.updateMany({ where: { orderId: order.id }, data: { quantity: 2, total: PRICE * 2 } });
+  expect((await routing.routeOrder(ID.biz, order.id)).length, 'routed').toBe(1);
+  expect(await statusOf(order.id)).toBe('routed/PAID');
+  expect(await routesOf(order.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+  expect(await stockOf(ID.stockA), '2 of A reserved').toBe(`${IN_STOCK}/2`);
+  return order;
+}
+
+/**
+ * A storefront order of tracked A x2 paid offline by the owner (the paid door decrements its stock) and routed by the
+ * listener on store_order.paid: CONFIRMED / PAID, its route RESERVED, A at 8 with 2 reserved. The listener must be on the
+ * bus (listenerOnTheBus).
+ */
+async function routedStorefrontOrderOfA2() {
+  const placed = await storeOrders.createOrder({
+    businessId: ID.biz,
+    cartItems: [{ productId: ID.productA, quantity: 2 }],
+    customerInfo: { name: 'Vee Router', email: CUSTOMER_EMAIL },
+    paymentMethod: 'CASH',
+  });
+  expect(placed.type).toBe('STOREFRONT');
+  await storeOrders.completeOfflineOrder(placed.id, ID.biz, ID.owner);
+  await drain();
+  expect(announcedFor(placed.id), 'routed by the listener').toEqual(['fulfillment_routed:1']);
+  expect(await statusOf(placed.id)).toBe('CONFIRMED/PAID');
+  expect(await routesOf(placed.id)).toEqual(['LOCAL_STOCK:RESERVED']);
+  expect(await stockOf(ID.stockA), 'the paid door decremented 2, routing reserved 2').toBe(`${IN_STOCK - 2}/2`);
+  return placed;
+}
+
+describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the routing claim and releases its reservations (F-35, D-136; real database)', () => {
+  beforeAll(async () => {
+    const { SiteController } = await import('../src/modules/site/site.controller');
+    siteController = new (SiteController as any)({}, storeOrders, {}, {}, {}, {}, {}, {}, {});
+  });
+  afterAll(async () => {
+    await drain();
+    await resetBusinessStock();
+  });
+
+  it("RC-39 (W11-ORDER-CANCEL-RELEASE; packet case RC-20; F-35) PATCH /marketplace/.../status cancelled ('cancelled', 'CANCELLED' as the web orders tab sends it, and ' Cancelled ') on a routed paid order with tracked A x2 releases it: its route CANCELLED, A reserved back to 0, the status stored as sent with a cancelled step, the payment kept, and store_order.cancelled emitted once; a cancel carrying payment fields the member may write still writes them", async () => {
+    for (const sent of ['cancelled', 'CANCELLED', ' Cancelled ']) {
+      await setStock(ID.stockA, IN_STOCK);
+      const order = await routedOrderOfA2();
+      seen = [];
+      const answer = await statusAnswer(marketStatusByRoute(order.id, { status: sent }));
+      // At bb316619: stored as sent with its route RESERVED and A at 10/2 (held for good), no cancelled step, and
+      // ' Cancelled ' emitted no store_order.cancelled.
+      expect(
+        {
+          answer,
+          stored: await statusOf(order.id),
+          routes: await routesOf(order.id),
+          stockA: await stockOf(ID.stockA),
+          cancelledEvents: cancelledEventsOf(order.id),
+          lastStep: (await stepsOf(order.id)).at(-1),
+        },
+        JSON.stringify(sent),
+      ).toEqual({
+        answer: `${sent}/PAID`,
+        stored: `${sent}/PAID`,
+        routes: ['LOCAL_STOCK:CANCELLED'],
+        stockA: `${IN_STOCK}/0`,
+        cancelledEvents: [sent],
+        lastStep: 'cancelled',
+      });
+    }
+
+    // Payment fields the member may write (an order not on the doors, not paid) are written as today, with the cancel.
+    await setStock(ID.stockA, IN_STOCK);
+    const unpaid = await orderWithLines([ID.productA], { status: 'placed', paymentStatus: 'UNPAID' });
+    expect((await routing.routeOrder(ID.biz, unpaid.id)).length, 'a placed order is routed too (no status advance)').toBe(1);
+    expect(await stockOf(ID.stockA)).toBe(`${IN_STOCK}/1`);
+    seen = [];
+    const answer = await statusAnswer(marketStatusByRoute(unpaid.id, { status: 'CANCELLED', paymentStatus: 'pending', paymentMethod: 'cash' }));
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: unpaid.id } });
+    expect({
+      answer,
+      stored: `${stored.status}/${stored.paymentStatus}/${stored.paymentMethod}`,
+      routes: await routesOf(unpaid.id),
+      stockA: await stockOf(ID.stockA),
+      cancelledEvents: cancelledEventsOf(unpaid.id),
+      lastStep: (await stepsOf(unpaid.id)).at(-1),
+    }).toEqual({
+      answer: 'CANCELLED/PENDING',
+      stored: 'CANCELLED/PENDING/cash',
+      routes: ['LOCAL_STOCK:CANCELLED'],
+      stockA: `${IN_STOCK}/0`,
+      cancelledEvents: ['CANCELLED'],
+      lastStep: 'cancelled',
+    });
+  });
+
+  it("RC-40 (W11-ORDER-CANCEL-RELEASE; packet case RC-21) PATCH /marketplace/.../status 'cancelled' while routeOrder is held where it reserves (RC-06's hold): the edit waits for the router, then releases; the order ends cancelled with its route CANCELLED, nothing reserved and no 'routed' written over it", async () => {
+    const order = await paidOrder([ID.productA]);
+    const real = routing.routeLocalStock.bind(routing);
+    let cancelDone!: () => void;
+    const cancelled = new Promise<void>((resolve) => (cancelDone = resolve));
+    let arrived!: () => void;
+    const reserved = new Promise<void>((resolve) => (arrived = resolve));
+    // The router is held after it has reserved and made its route (not committed) until the edit has returned, or the
+    // window passes.
+    vi.spyOn(routing as any, 'routeLocalStock').mockImplementation(async (...args: any[]) => {
+      const route = await real(...args);
+      arrived();
+      await Promise.race([cancelled, sleep(HOLD_WINDOW_MS)]);
+      return route;
+    });
+    const routingDone = routing.routeOrder(ID.biz, order.id).then(
+      (routes: any[]) => routes.length,
+      (err: any) => `${err?.name}: ${err?.message}`,
+    );
+    await reserved;
+    seen = [];
+    const answer = await statusAnswer(marketStatusByRoute(order.id, { status: 'cancelled' }));
+    cancelDone();
+    expect(await routingDone, 'the router committed its route').toBe(1);
+    // At bb316619: answered cancelled at once; the router then committed its RESERVED route and 1 reserved on the
+    // cancelled order.
+    const steps = await stepsOf(order.id);
+    expect({
+      answer,
+      stored: await statusOf(order.id),
+      routes: await routesOf(order.id),
+      stockA: await stockOf(ID.stockA),
+      cancelledEvents: cancelledEventsOf(order.id),
+      routedWritten: steps.includes('routed'),
+      cancelledAfterRouting: steps.lastIndexOf('cancelled') > steps.indexOf('routes_created'),
+    }).toEqual({
+      answer: 'cancelled/PAID',
+      stored: 'cancelled/PAID',
+      routes: ['LOCAL_STOCK:CANCELLED'],
+      stockA: `${IN_STOCK}/0`,
+      cancelledEvents: ['cancelled'],
+      routedWritten: false,
+      cancelledAfterRouting: true,
+    });
+  });
+
+  it("RC-41 (W11-ORDER-CANCEL-RELEASE; packet case RC-22; D-136) PATCH /marketplace/.../status 'cancelled' or 'CANCELLED' on an order stored shipped, delivered, completed, cancelled or refunded (or the storefront's SHIPPED, DELIVERED, CANCELLED) is refused with 400 and writes nothing: the order row, its route and its reservation as they were, and no event", async () => {
+    for (const storedStatus of ['shipped', 'delivered', 'completed', 'cancelled', 'refunded', 'SHIPPED', 'DELIVERED', 'CANCELLED']) {
+      await setStock(ID.stockA, IN_STOCK);
+      const order = await paidOrder([ID.productA]);
+      expect((await routing.routeOrder(ID.biz, order.id)).length).toBe(1);
+      await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: storedStatus } });
+      const before = await orderRowOf(order.id);
+      seen = [];
+      const answers: string[] = [];
+      for (const sent of ['cancelled', 'CANCELLED']) answers.push(await statusAnswer(marketStatusByRoute(order.id, { status: sent })));
+      // At bb316619: both answered '<sent>/PAID' and stored, the route RESERVED and the unit reserved on a closed order.
+      expect(
+        {
+          answers,
+          row: await orderRowOf(order.id),
+          routes: await routesOf(order.id),
+          stockA: await stockOf(ID.stockA),
+          events: seen.map((e) => e.name),
+        },
+        storedStatus,
+      ).toEqual({
+        answers: [`400: Cannot cancel order in ${storedStatus} status`, `400: Cannot cancel order in ${storedStatus} status`],
+        row: before,
+        routes: ['LOCAL_STOCK:RESERVED'],
+        stockA: `${IN_STOCK}/1`,
+        events: [],
+      });
+    }
+  });
+
+  it('RC-42 (W11-ORDER-CANCEL-RELEASE; packet case RC-23) a CONFIRMED / PAID storefront order (paid offline, its stock decremented by the paid door) routed by the listener, then PATCH /site/.../status CANCELLED (and \' cancelled \'): its route CANCELLED and its reservation released (the decremented quantity is not restocked), stored CANCELLED / PAID with a cancelled step and one store_order.cancelled; a SHIPPED, DELIVERED, COMPLETED, CANCELLED or REFUNDED storefront order is 400 with nothing written and no event; control: a PENDING one is cancelled', async () => {
+    const off = listenerOnTheBus();
+    try {
+      for (const sent of ['CANCELLED', ' cancelled ']) {
+        await setStock(ID.stockA, IN_STOCK);
+        const placed = await routedStorefrontOrderOfA2();
+        seen = [];
+        const answer = await statusAnswer(siteStatusByRoute(placed.id, sent));
+        // At bb316619: stored CANCELLED with its route RESERVED and A at 8/2 (the reservation held for good).
+        expect(
+          {
+            answer,
+            stored: await statusOf(placed.id),
+            routes: await routesOf(placed.id),
+            stockA: await stockOf(ID.stockA),
+            cancelledEvents: cancelledEventsOf(placed.id),
+            lastStep: (await stepsOf(placed.id)).at(-1),
+          },
+          JSON.stringify(sent),
+        ).toEqual({
+          answer: 'CANCELLED/PAID',
+          stored: 'CANCELLED/PAID',
+          routes: ['LOCAL_STOCK:CANCELLED'],
+          stockA: `${IN_STOCK - 2}/0`,
+          cancelledEvents: ['CANCELLED'],
+          lastStep: 'cancelled',
+        });
+      }
+
+      for (const storedStatus of ['SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED', 'REFUNDED']) {
+        await setStock(ID.stockA, IN_STOCK);
+        const placed = await routedStorefrontOrderOfA2();
+        await db.marketplaceOrder.update({ where: { id: placed.id }, data: { status: storedStatus } });
+        const before = await orderRowOf(placed.id);
+        seen = [];
+        const answer = await statusAnswer(siteStatusByRoute(placed.id, 'CANCELLED'));
+        // At bb316619: 'CANCELLED/PAID', written over the closed order with its reservation held.
+        expect(
+          {
+            answer,
+            row: await orderRowOf(placed.id),
+            routes: await routesOf(placed.id),
+            stockA: await stockOf(ID.stockA),
+            events: seen.map((e) => e.name),
+          },
+          storedStatus,
+        ).toEqual({
+          answer: `400: Cannot cancel order in ${storedStatus} status`,
+          row: before,
+          routes: ['LOCAL_STOCK:RESERVED'],
+          stockA: `${IN_STOCK - 2}/2`,
+          events: [],
+        });
+      }
+
+      // Control: a PENDING storefront order (not paid, not routed) is cancelled.
+      const pending = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: [{ productId: ID.productA, quantity: 1 }],
+        customerInfo: { name: 'Vee Router', email: CUSTOMER_EMAIL },
+        paymentMethod: 'CASH',
+      });
+      await drain();
+      seen = [];
+      expect(await statusOf(pending.id)).toBe('PENDING/UNPAID');
+      expect(await statusAnswer(siteStatusByRoute(pending.id, 'cancelled'))).toBe('CANCELLED/UNPAID');
+      expect(await routesOf(pending.id)).toEqual([]);
+      expect(cancelledEventsOf(pending.id)).toEqual(['CANCELLED']);
+    } finally {
+      off();
+      await drain();
     }
   });
 });
