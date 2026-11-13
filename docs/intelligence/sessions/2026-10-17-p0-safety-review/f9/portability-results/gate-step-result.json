@@ -1,0 +1,28 @@
+{
+  "purpose": "EXACT_NON_DRAFT_ADMISSION_STEP_ONLY_NOT_FULL_GITHUB_CI",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "step": "Require ChatGPT admission before non-draft merge readiness",
+  "results": [
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_merge_authority": false,
+      "step_exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_merge_authority": false,
+      "step_exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "review_status": "CORRECTION_REQUIRED",
+      "both_artifact_merge_authority": false,
+      "step_exit_code": 1,
+      "stdout": "::error::Non-draft impl/* PR requires ChatGPT review_status READY_TO_MERGE or ACCEPT_FOR_ADMISSION; found: CORRECTION_REQUIRED\n",
+      "stderr": ""
+    }
+  ]
+}

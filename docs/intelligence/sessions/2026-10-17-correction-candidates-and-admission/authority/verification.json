@@ -1,0 +1,32 @@
+{
+  "verified_at_utc": "2026-10-17T22:12:35.529855+00:00",
+  "checks": {
+    "published_replay_consistent": true,
+    "current_truth_entrypoint_consistent": true,
+    "direct_reduce_matches_reconcile": true,
+    "entrypoints_same_reduction": true,
+    "entrypoints_same_findings": true,
+    "entrypoints_same_holds": true,
+    "entrypoints_same_authority_basis": true,
+    "application_dag_drainable": true,
+    "platform_dag_drainable": true,
+    "platform_contract_valid": true,
+    "platform_not_active": true
+  },
+  "current_source_and_method_files": 25,
+  "source_unchanged_after_both_replays": true,
+  "command_results": {
+    "published_replay_exit_code": 0,
+    "connector_truth_status_platform_replay_exit_code": 0
+  },
+  "comments": {
+    "count": 1461,
+    "normalized_sha256": "e63b63494742d269f7efee9bc9b0a345b6cf9501248ad782fd3834a1d491762b"
+  },
+  "notes": [
+    "Current-main status.buildStatus used an empty registry to avoid auth, installed-worker and process probes.",
+    "CLI live collection was not executed. Repository reads were frozen connector responses.",
+    "No claim that a dependency-safe candidate such as TIME is released.",
+    "Platform file status INACTIVE_SUCCESSOR and evaluated authority state HELD are recorded separately."
+  ]
+}

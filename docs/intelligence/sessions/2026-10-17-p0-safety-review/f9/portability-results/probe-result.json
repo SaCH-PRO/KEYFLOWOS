@@ -1,0 +1,128 @@
+{
+  "purpose": "READ_ONLY_DEFECT_CHARACTERIZATION_NOT_FIXED",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "node": "v24.19.0",
+  "unsafe_cases": [
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": "ABSENT",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": false,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": null,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": 0,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": "false",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "ACCEPT_FOR_ADMISSION",
+      "both_artifact_grants": "true",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": "ABSENT",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": false,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": null,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": 0,
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": "false",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    },
+    {
+      "review_status": "READY_TO_MERGE",
+      "both_artifact_grants": "true",
+      "expected_secure": "REJECT",
+      "actual_eligible": true,
+      "reason": "all_admission_contracts_satisfied"
+    }
+  ],
+  "preserved_boundary_controls": [
+    {
+      "name": "draft stays closed",
+      "actual_eligible": false,
+      "reason": "pr_is_draft"
+    },
+    {
+      "name": "correction status stays closed",
+      "actual_eligible": false,
+      "reason": "review_not_ready"
+    },
+    {
+      "name": "missing independent review stays closed",
+      "actual_eligible": false,
+      "reason": "semantic_review_not_satisfied"
+    },
+    {
+      "name": "base drift stays closed",
+      "actual_eligible": false,
+      "reason": "source_main_drift"
+    },
+    {
+      "name": "pending required check stays closed",
+      "actual_eligible": false,
+      "reason": "required_check_pending_at_head"
+    },
+    {
+      "name": "wrong packet artifact stays closed",
+      "actual_eligible": false,
+      "reason": "control_artifacts_not_bound_to_pr"
+    }
+  ],
+  "uninspected_artifact_bits_in_synthetic_recheck": {
+    "actual_eligible": true,
+    "reason": "all_admission_contracts_satisfied",
+    "limitation": "This varies immutable artifact contents at one synthetic head and is not a real revocation-race proof. A live authority revocation is absent from the current caller inputs; that gap is established by source and the mocked request trace."
+  }
+}

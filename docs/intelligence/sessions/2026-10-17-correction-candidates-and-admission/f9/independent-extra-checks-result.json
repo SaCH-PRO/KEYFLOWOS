@@ -1,0 +1,83 @@
+{
+  "observed_at": "2026-10-17T22:14:31.595Z",
+  "scope": "Independent pure-predicate ordering/provenance checks and source/transcript verification; no suite rerun or remote action.",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "linux"
+  },
+  "source_artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "verification": {
+    "baseline_files": 39,
+    "changed_files": [
+      "scripts/agent-control/lib/merge-grant.mjs",
+      "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "scripts/agent-control/tests/merge-cli.spec.mjs"
+    ],
+    "root_tap_transcripts_verified": 3
+  },
+  "cases": 9,
+  "passed": 9,
+  "failed": 0,
+  "results": [
+    {
+      "name": "release before later hold cannot cancel it",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    },
+    {
+      "name": "rehold after valid release remains active",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    },
+    {
+      "name": "bad release followed by valid release restores explicit permission",
+      "granted": true,
+      "reason": "merge_grant_valid",
+      "result": "PASS"
+    },
+    {
+      "name": "valid release for a different packet cannot cancel target hold",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    },
+    {
+      "name": "invalid release after a grant supersedes it",
+      "granted": false,
+      "reason": "merge_grant_superseded",
+      "result": "PASS"
+    },
+    {
+      "name": "duplicate-effect release before a later hold leaves the hold active",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    },
+    {
+      "name": "edited release makes collection unverifiable",
+      "granted": false,
+      "reason": "merge_grant_authority_unverified",
+      "result": "PASS"
+    },
+    {
+      "name": "same invalid-release counterexample now refuses",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    },
+    {
+      "name": "duplicate-effect release after the hold cannot clear it",
+      "granted": false,
+      "reason": "merge_grant_target_held",
+      "result": "PASS"
+    }
+  ],
+  "original_counterexample": {
+    "baseline_granted": true,
+    "candidate_granted": false
+  },
+  "remote_actions": [],
+  "candidate_edits": []
+}

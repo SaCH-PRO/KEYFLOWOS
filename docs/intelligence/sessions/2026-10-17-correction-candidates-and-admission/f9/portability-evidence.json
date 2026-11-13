@@ -1,0 +1,120 @@
+{
+  "scope": "Portability validation only; historical proof remains unchanged and no source/candidate/remote edits occurred.",
+  "observed_at_utc": "2026-10-17T22:18:00.714214+00:00",
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "posix"
+  },
+  "reconstruction": {
+    "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+    "method": "verified-existing-source",
+    "source_files_verified": 39,
+    "candidate_files_changed": [
+      "scripts/agent-control/lib/merge-grant.mjs",
+      "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "scripts/agent-control/tests/merge-cli.spec.mjs"
+    ],
+    "candidate_hashes_match_review": true,
+    "patch_sha256": "9d296effe62897ae2f7f5ea3f3d23bbfdf4422d701423dad794685c7c1d4c3aa",
+    "network_requests": 0,
+    "source_repository_mutations": [],
+    "dependency_installs": []
+  },
+  "preserved_original_files": [
+    {
+      "path": "correction.patch",
+      "bytes": 7980,
+      "sha256": "9d296effe62897ae2f7f5ea3f3d23bbfdf4422d701423dad794685c7c1d4c3aa",
+      "byte_identical_to_original": true
+    },
+    {
+      "path": "source-manifest.json",
+      "bytes": 9134,
+      "sha256": "556477692c6977441d67fa466ffd286f72aa4e16821008d2af20b878fe51c35d",
+      "byte_identical_to_original": true
+    },
+    {
+      "path": "proof-summary.json",
+      "bytes": 3321,
+      "sha256": "1e9f01f3c14841f7286f018169fcf933f785cb2ea72d864155b72d8c19b654a1",
+      "byte_identical_to_original": true
+    },
+    {
+      "path": "independent-review.md",
+      "bytes": 5706,
+      "sha256": "287143edbb5d786ea04dae3961bdcec609d777da3bcd69a64ee9cde468b053bb",
+      "byte_identical_to_original": true
+    },
+    {
+      "path": "independent-extra-checks-result.json",
+      "bytes": 2376,
+      "sha256": "d3b69f3e08a26f29ab90ffdb34b18f7c8d67789076e50802ed88859ff527038f",
+      "byte_identical_to_original": true
+    },
+    {
+      "path": "independent-inline-cli-result.json",
+      "bytes": 737,
+      "sha256": "17656afa9745cfbbd82c197331de4bc2f35ee471fe2b44dec0a62a75288120d2",
+      "byte_identical_to_original": true
+    }
+  ],
+  "original_tap_files_checked_unchanged": true,
+  "fresh_smoke": {
+    "name": "candidate-cli-smoke",
+    "exit_code": 0,
+    "counts": {
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "failures": [],
+    "tap_sha256": "a8c3df08ed0a7dcc5cd038a1ffd9f1ceb63d44f5f5079321cdb60cc8f17d655a",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "fresh_independent": {
+    "predicate_cases": 9,
+    "predicate_passed": 9,
+    "predicate_result_sha256": "89282a08b2c9a54b955b77520cbbdcacd0061af1fbfceca72d611c6d9e270ecc",
+    "inline_exit_code": 0,
+    "inline_snapshots": 2,
+    "inline_synthetic_puts": 1,
+    "inline_result_sha256": "2fdda706270b923beee3ebda2e52abad5cb5a1a2d3517e57df543bdb368f03b8"
+  },
+  "execution_environment_keys": [
+    "PATH"
+  ],
+  "initial_environment_failures": [
+    {
+      "kind": "sandbox process launch restriction",
+      "outer_runner_exit": 1,
+      "outer_test_file_failures": 1,
+      "tap_sha256": "7240e425dda559e129b4571f1c91d7cc29b1e4d031760876005f91a8f05eb429",
+      "raw_tap": "retained outside publication"
+    },
+    {
+      "kind": "diagnostic no-isolation run",
+      "observed_error": "spawnSync Node EPERM",
+      "tests": 17,
+      "pass": 1,
+      "fail": 16,
+      "interpretation": "CLI child processes did not start; this is not a semantic correction verdict",
+      "raw_transcript": "tool output only; no persisted transcript identity assigned"
+    }
+  ],
+  "successful_execution": "Identical synthetic smoke runner with permitted local subprocess execution; new result directory; no credential/network use.",
+  "git_export": {
+    "status": "NOT_RUN",
+    "reason": "No Git checkout containing the pinned object was supplied; current preparation directory is not a Git repository."
+  },
+  "full_portable_matrix": {
+    "status": "NOT_RUN",
+    "reason": "Existing original matrix and hashes are preserved; only bounded smoke needed for package portability."
+  },
+  "historical_proof_unchanged": true,
+  "real_network_requests": 0,
+  "real_merges": 0,
+  "remaining_limits": "Node20 hosted, Windows, mutation-control manifest, full-project and eventual published-head proof remain outstanding."
+}

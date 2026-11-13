@@ -1,0 +1,84 @@
+{
+  "record_kind": "worker_review_followthrough_verified_publications",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "f9": {
+    "directive_id": 6240051686,
+    "acknowledgement_id": 6240199516,
+    "progress_receipt_id": 6240437264,
+    "progress_receipt_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240437264",
+    "acknowledgement_and_receipt_unedited": true,
+    "receipt_matches_prepared_body": true,
+    "latest_selected_directive_preserved": true
+  },
+  "worker_reviews": [
+    {
+      "pr_number": 169,
+      "review_id": 5559896104,
+      "review_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#pullrequestreview-5559896104",
+      "commit_id": "7aa3c1910075a02287b0815867026a500187594f",
+      "actual_github_state": "COMMENTED",
+      "substantive_verdict": "CHANGES_REQUIRED",
+      "priority": "P2",
+      "finding_count": 1,
+      "body_verified": true,
+      "inline_comments": [
+        {
+          "id": 4304342983,
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#discussion_r4304342983",
+          "commit_id": "7aa3c1910075a02287b0815867026a500187594f",
+          "path": "scripts/agent-control/claude-worker.ps1",
+          "position": 85,
+          "body_verified": true
+        }
+      ]
+    },
+    {
+      "pr_number": 175,
+      "review_id": 5559896456,
+      "review_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#pullrequestreview-5559896456",
+      "commit_id": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "actual_github_state": "COMMENTED",
+      "substantive_verdict": "CHANGES_REQUIRED",
+      "priority": "P2",
+      "finding_count": 1,
+      "body_verified": true,
+      "inline_comments": [
+        {
+          "id": 4304343195,
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#discussion_r4304343195",
+          "commit_id": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+          "path": "scripts/agent-control/claude-worker.ps1",
+          "position": 299,
+          "body_verified": true
+        }
+      ]
+    }
+  ],
+  "programme_replay": {
+    "comments": 1445,
+    "generation": 118,
+    "observed_generation": 118,
+    "consistent": true,
+    "active_packet": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+    "state": "FIXING_PROOF_FAILURES",
+    "checkpointed": 5,
+    "total": 35,
+    "merge_authority": false
+  },
+  "navigation_preparation": {
+    "owner_pr": 173,
+    "expected_parent": "842aa4acfd110c9595bb7229c4788dcb6394d771",
+    "path": "docs/intelligence/CANONICAL-SOURCE.md",
+    "status": "PREPARED_FOR_SEPARATE_ORDINARY_COMMIT_AFTER_THIS_EVIDENCE_EXISTS",
+    "integration": "Not merged; revised-head independent review and applicable checks remain."
+  },
+  "final_publication_lookup": "The actual evidence commit and subsequent #173 pointer commit are recorded in the PR descriptions and a later non-authority #80 publication receipt; this prepublication record does not invent their future SHA values.",
+  "execution_limits": [
+    "No typed authority after the existing F9 directive.",
+    "No admission, ready transition, merge or worker upgrade.",
+    "No production/database/provider effects.",
+    "No application completion credit.",
+    "No changes to checkpoint, DAG, programme maps or existing paused cycles."
+  ]
+}

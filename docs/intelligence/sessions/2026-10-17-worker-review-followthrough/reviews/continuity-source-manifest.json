@@ -1,0 +1,36 @@
+{
+  "source_pr": 180,
+  "source_remote_head": "e8905778afb58ddb52bc9b5e857bc6daae0657ae",
+  "source_remote_path": "docs/intelligence/00-START-HERE.md",
+  "source_local_path": "/tmp/keyflow-continuation-docs/docs/intelligence/00-START-HERE.md",
+  "source_sha256": "251378ae388c680959e2cbd584c5e625df5f410fc1713c88474e5a749dfb9b3a",
+  "prepared_sha256": "bc9b3d9288a3a38d5d12c871338eac1189dc06db2fec00c61c67319bd68767fd",
+  "prior_content_preserved": true,
+  "changed_repository_paths": [
+    "docs/intelligence/00-START-HERE.md"
+  ],
+  "shared_checkout_modified": false,
+  "remote_writes": false,
+  "independent_review": "not performed; author preparation only",
+  "existing_owners": {
+    "173": {
+      "head": "842aa4acfd110c9595bb7229c4788dcb6394d771",
+      "draft": true,
+      "state": "open"
+    },
+    "157": {
+      "head": "5d64ecdb46b1a9e8b22a9db5c33e318f99f9c120",
+      "draft": true,
+      "state": "open"
+    }
+  },
+  "source_remote_content_verified": true,
+  "source_remote_verification": "Read exact e8905778 GitHub blob via connector and compared to local source; equal ignoring any terminal newline added by scratch patch transport.",
+  "relative_links_verified": [
+    "handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+    "sessions/2026-10-17-h1-review-and-continuation/README.md",
+    "AGENT-CONTINUITY.md"
+  ],
+  "addition_lines": 15,
+  "historical_body_byte_identical": true
+}

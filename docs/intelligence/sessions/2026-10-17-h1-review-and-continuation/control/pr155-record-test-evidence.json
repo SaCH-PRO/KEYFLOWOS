@@ -1,0 +1,49 @@
+{
+  "command": [
+    "node",
+    "--test",
+    "--test-isolation=none",
+    "--test-name-pattern=NC branch artifact",
+    "/tmp/keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs"
+  ],
+  "note": "Original repository test, process isolation disabled so this host actually executes its named subtest; each mutant is isolated in a temporary copy. No repository source is mutated.",
+  "mutants": [
+    {
+      "id": "NC-RETURN-ARTIFACT-PREMATURE-ID",
+      "exit_code": 1,
+      "intended_assertion_observed": true,
+      "caught": true,
+      "log": "\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (12.106623ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 32.081654\n\n\u2716 failing tests:\n\ntest at ../../../keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:191:1\n\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (12.106623ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n  + [\n  +   'return_message_id must be null until the RETURN is posted; found CC-RETURN-META-CONTROL-PARSER-PREMATURE-001',\n  +   'CC-RETURN-META-CONTROL-PARSER-PREMATURE-001 is named but not listed as previously posted or never posted'\n  + ]\n  - []\n  \n      at TestContext.<anonymous> (file:///tmp/keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:206:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1382:25)\n      at Test.start (node:internal/test_runner/test:1242:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [Array],\n    expected: [],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+    },
+    {
+      "id": "NC-RETURN-ARTIFACT-PASS-PROSE",
+      "exit_code": 1,
+      "intended_assertion_observed": true,
+      "caught": true,
+      "log": "\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (10.82918ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 32.862903\n\n\u2716 failing tests:\n\ntest at ../../../keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:191:1\n\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (10.82918ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n  + [\n  +   'prose claims DAST (HawkScan) passed before the RETURN: \"DAST (HawkScan) is a required exact-head check and passed.\"'\n  + ]\n  - []\n  \n      at TestContext.<anonymous> (file:///tmp/keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:206:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1382:25)\n      at Test.start (node:internal/test_runner/test:1242:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [Array],\n    expected: [],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+    },
+    {
+      "id": "NC-RETURN-ARTIFACT-MISSING-SCOPE",
+      "exit_code": 1,
+      "intended_assertion_observed": true,
+      "caught": true,
+      "log": "\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (12.220736ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 35.211381\n\n\u2716 failing tests:\n\ntest at ../../../keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:191:1\n\u2716 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (12.220736ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n  + [\n  +   'proof_matrix \"required exact-head workflows and the independent semantic review of the head that carries this file\" evidence_scope none must be one of exact_head, semantic_head'\n  + ]\n  - []\n  \n      at TestContext.<anonymous> (file:///tmp/keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs:206:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1382:25)\n      at Test.start (node:internal/test_runner/test:1242:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [Array],\n    expected: [],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"
+    }
+  ],
+  "clean_artifact_suite": {
+    "command": [
+      "node",
+      "/tmp/keyflow-forward-20261017/scripts/agent-control/tests/return-evidence.spec.mjs"
+    ],
+    "exit_code": 0,
+    "tests": 17,
+    "passed": 17,
+    "failed": 0,
+    "log": "\u2714 a truthful pre-RETURN artifact has no problems (2.726854ms)\n\u2714 the exact-head gates are the required workflows plus the fresh AI review (0.170762ms)\n\u2714 NC premature return id: a return_message_id before the RETURN is posted is rejected (0.342828ms)\n\u2714 NC premature return status: anything but AWAITING_POSTCHECK_RETURN is rejected (0.385791ms)\n\u2714 NC future return id: a RETURN id named anywhere must be accounted for (0.663912ms)\n\u2714 NC exact-head pending: a finished exact-head gate cannot be claimed before the RETURN (0.627378ms)\n\u2714 NC exact-head complete: every exact-head gate must be listed (0.428615ms)\n\u2714 NC proof vocabulary: proof_matrix results use the evidence states (0.564855ms)\n\u2714 NC missing scope: a proof_matrix entry without evidence_scope is rejected, so it cannot bypass the exact-head rule (1.532998ms)\n\u2714 NC scope mislabel: an obligation that names an exact-head gate must be scoped exact_head (0.795487ms)\n\u2714 NC pass prose: prose cannot claim an exact-head gate passed while it is PENDING (2.849575ms)\n\u2714 NC completion prose: completion vocabulary claims a finished gate as surely as \"passed\" (0.615089ms)\n\u2714 NC umbrella prose: \"exact-head workflows\" and \"required checks\" name every gate at once (0.575432ms)\n\u2714 NC branch artifact: the real claude-return.yaml on this branch is a truthful pre-RETURN record (5.743917ms)\n\u2714 the exact-head review gate is the provider-neutral independent semantic review (0.193477ms)\n\u2714 NC review alias prose: \"the ChatGPT review passed\" before the RETURN is a claim (0.647789ms)\n\u2714 NC review alias scope: an obligation naming a provider review must be scoped exact_head (0.286153ms)\n\u2139 tests 17\n\u2139 suites 0\n\u2139 pass 17\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 26.172026\n"
+  },
+  "runtime": "v24.19.0",
+  "artifact_revision": "Final preparation after historical-prose cleanup; no future artifact SHA asserted",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "scope": "Existing artifact tests and three mutation controls against the prepared two-file record. The application semantic suite was not rerun for this metadata commit.",
+  "published_artifact": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+}

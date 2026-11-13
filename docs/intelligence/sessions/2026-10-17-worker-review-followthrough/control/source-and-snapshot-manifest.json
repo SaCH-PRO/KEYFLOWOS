@@ -1,0 +1,91 @@
+{
+  "report_kind": "worker_review_followthrough_source_and_snapshot_manifest",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "source_files": [
+    {
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/truth.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/reconcile.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/authority-effects.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/control-envelope.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/yaml.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/dag.mjs"
+    },
+    {
+      "path": "scripts/agent-control/select-directive.mjs",
+      "sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/select-directive.mjs"
+    },
+    {
+      "path": ".agent-control/programme-state.yaml",
+      "sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.agent-control/programme-state.yaml"
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml"
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state-machine.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/events.mjs"
+    }
+  ],
+  "comment_snapshot": {
+    "collection_completed_at_utc": "2026-10-17T20:23:09.405Z",
+    "count": 1445,
+    "latest_comment_id": 6240437264,
+    "latest_comment_created_at": "2026-10-17T20:22:42Z",
+    "normalized_sha256": "797bc3341ddfab7fdbea1f078e9a7917f184eede0968e24dd27ca4db6aec891f",
+    "hash_method": "SHA-256(JSON.stringify(canonicalComments(...))); the exact canonicalization function is exported by replay-authority.mjs. Full comments are supplied separately.",
+    "known_local_snapshot": "/tmp/kf-followthrough-20261017/comments.json",
+    "included_in_package": false,
+    "collection_method": "Previously complete 1436-comment snapshot plus overlapping REST updated-since tail; new total cross-checked with the issue's comment count.",
+    "overlap_since": "2026-10-17T20:00:00Z",
+    "old_verified_count": 1436,
+    "tail_count": 10,
+    "issue_count": 1445
+  },
+  "repository_snapshot": {
+    "filename": "repository-truth.json",
+    "normalized_sha256": "dd5169bfc74418025fdf345883dabe09665c3693585deffe7711f16ced3e0a5d",
+    "hash_method": "SHA-256(JSON.stringify(repository-truth.json.snapshot))"
+  },
+  "limits": [
+    "Evidence only; no admission or execution authority.",
+    "Pinned Git blob hashes cover all replay source modules, checkpoint and DAG; no repository files are modified."
+  ]
+}

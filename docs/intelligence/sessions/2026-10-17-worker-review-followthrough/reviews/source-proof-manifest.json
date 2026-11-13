@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "review_agent": "/root/h1_collector_review",
+  "head_revalidation_utc": "2026-10-17T20:16:25Z",
+  "status": "PROVING",
+  "health": "YELLOW / FRICTION",
+  "recommendation": "CHANGES_REQUIRED",
+  "publication_state": "LOCAL_REPORT_NOT_POSTED",
+  "report": "pr169-pr175-review.md",
+  "collision_fixture": "collision-fixture.json",
+  "verified_main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "source_checkout": "/tmp/kf169-review-20261017",
+  "pull_requests": [
+    {
+      "number": 169,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169",
+      "head_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "semantic_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "artifact_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "separate_packet_artifact_commit": false,
+      "branch": "fix/agent-control-worker-worktree-path-001",
+      "base_branch": "main",
+      "fork_snapshot_sha": "7d2619c771cd008f21bae9c60ca348e3deaa07cd",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "copilot": {
+        "outcome": "NOT_RUN",
+        "reason": "quota_exhausted",
+        "review_id": 5484329501,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#pullrequestreview-5484329501"
+      },
+      "prior_independent_review_found": false,
+      "exact_head_successful_runs": [38161878743, 38161878750, 38161878732, 38161878746, 38161878740, 38161878707, 38161875757],
+      "ci_qualifications": [
+        "Agent Control Gate artifact validation and ChatGPT admission steps skipped as inapplicable",
+        "HawkScan scan/setup steps skipped",
+        "Current-main integration not certified by this report"
+      ]
+    },
+    {
+      "number": 175,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175",
+      "head_sha": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "semantic_sha": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "artifact_sha": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "separate_packet_artifact_commit": false,
+      "branch": "fix/agent-control-worker-coordination-001",
+      "base_branch": "fix/agent-control-worker-worktree-path-001",
+      "base_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "depends_on_pr": 169,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "copilot": {
+        "outcome": "NOT_RUN",
+        "reason": "quota_exhausted",
+        "review_id": 5484828496,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/175#pullrequestreview-5484828496"
+      },
+      "prior_independent_review_found": false,
+      "exact_head_successful_runs": [38172351521, 38172351633, 38172351533, 38172347219],
+      "ci_qualifications": [
+        "Stacked non-main base",
+        "No main-target CI/CD or HawkScan run in inspected exact-head run set",
+        "Current-main integration remains required"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "KF169-P2-01",
+      "pr_number": 169,
+      "priority": "P2",
+      "title": "Colliding shortened IDs reuse another directive's retained worktree",
+      "head_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "source_path": "scripts/agent-control/claude-worker.ps1",
+      "anchors": [
+        {"lines": [485, 489], "meaning": "SHA-256 truncated to four bytes"},
+        {"lines": [515, 527], "meaning": "Tag and prefix treated as shortened-worktree identity"},
+        {"lines": [437, 443], "meaning": "Registration only binds repository path"},
+        {"lines": [545, 559], "meaning": "Reuse without full-ID ownership or base resolution"},
+        {"lines": [655, 660], "meaning": "Invoke Claude in accepted directory"},
+        {"lines": [574, 580], "meaning": "Retain dirty or unpushed work"},
+        {"lines": [751, 764], "meaning": "Cleanup attempted only on successful completion"}
+      ],
+      "source_url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/7aa3c1910075a02287b0815867026a500187594f/scripts/agent-control/claude-worker.ps1#L515-L527",
+      "local_executed_proof": "collision-fixture.json",
+      "source_only_proof": "Retained worktree passes tag/prefix and repository registration checks; invocation has no full-ID ownership enforcement",
+      "windows_tick_executed_locally": false,
+      "acceptance": [
+        "Bind shortened-tree ownership to full raw directive ID or full digest",
+        "Different colliding directive receives distinct tree or counted refusal before wake",
+        "Deterministic regression using both fixture IDs with retained partial work",
+        "Preserve retry behavior when longest tracked path changes, whole-ID compatibility, and ambiguous-match refusal"
+      ]
+    },
+    {
+      "id": "KF175-P2-01",
+      "pr_number": 175,
+      "priority": "P2",
+      "title": "Unavailable or timed-out mutex permits stale-lock reclaim race",
+      "head_sha": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "source_path": "scripts/agent-control/claude-worker.ps1",
+      "anchors": [
+        {"lines": [511, 515], "meaning": "Comment identifies reclaim race but assumes atomic-create fallback"},
+        {"lines": [519, 530], "meaning": "Mutex exception or timeout still enters unguarded reclaim transaction"},
+        {"lines": [483, 504], "meaning": "CreateNew protects creation only"},
+        {"lines": [547, 562], "meaning": "Separate checkout locks precede shared machine lock"}
+      ],
+      "source_url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/09d00c3e03af1d31b2e4df93aaa4cf062718f4ec/scripts/agent-control/claude-worker.ps1#L519-L530",
+      "test_gap": {
+        "path": "scripts/agent-control/tests/windows/worker-lock.spec.mjs",
+        "lines": [264, 296],
+        "description": "Positive four-starter proof does not force mutex failure or timeout"
+      },
+      "interleaving": [
+        "A and B from separate checkouts both read same stale machine lock without owning acquisition mutex",
+        "A deletes stale file, creates its fresh lock, returns success",
+        "B executes already-decided deletion and removes A's fresh lock",
+        "B creates its fresh lock and returns success"
+      ],
+      "local_executed_proof": null,
+      "source_only_proof": "Exact control flow plus deterministic permitted interleaving",
+      "windows_contention_reproduction_executed_locally": false,
+      "installed_worker_failure_observed": false,
+      "acceptance": [
+        "Fail closed unless acquisition mutex is owned, or protect complete read/reclaim/create by another mechanism",
+        "Prove acquisition exception and timeout cannot reclaim unsafely or wake a second worker",
+        "Preserve normal concurrent-start and stale-owner reclaim proofs"
+      ]
+    }
+  ],
+  "hosted_proofs": [
+    {
+      "pr_number": 169,
+      "head_sha": "7aa3c1910075a02287b0815867026a500187594f",
+      "run_id": 38161878707,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38161878707",
+      "job_logs_read": true,
+      "node_version": "20.18.1",
+      "windows": {"job_id": 114536325860, "tests": 511, "pass": 510, "fail": 0, "skip": 1, "negative_controls_live": 188, "negative_controls_total": 188},
+      "ubuntu": {"job_id": 114536326056, "tests": 478, "pass": 477, "fail": 0, "skip": 1}
+    },
+    {
+      "pr_number": 175,
+      "head_sha": "09d00c3e03af1d31b2e4df93aaa4cf062718f4ec",
+      "run_id": 38172351521,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38172351521",
+      "job_logs_read": true,
+      "node_version": "20.18.1",
+      "windows": {"job_id": 114567418379, "tests": 527, "pass": 526, "fail": 0, "skip": 1, "negative_controls_live": 204, "negative_controls_total": 204},
+      "ubuntu": {"job_id": 114567418099, "tests": 478, "pass": 477, "fail": 0, "skip": 1}
+    }
+  ],
+  "shared_skip": {
+    "test_name": "the cursor makes directive processing idempotent",
+    "reason": "requires authenticated gh"
+  },
+  "history_sources": [
+    {"kind": "prior_non_independent_review", "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#issuecomment-6111375923", "reviewed_head_prefix": "2d012625"},
+    {"kind": "retry_name_correction", "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#issuecomment-6111981335", "head_prefix": "7aa3c191"},
+    {"kind": "implementer_review_packet", "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/169#issuecomment-6112655766"},
+    {"kind": "scope_return", "message_id": "CC-RETURN-META-CONTROL-LOOP-HARDENING-003", "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6112456137"},
+    {"kind": "scope_progress", "message_id": "CC-PROGRESS-META-CONTROL-LOOP-HARDENING-004", "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6113926596"}
+  ],
+  "authority_history_coverage": {
+    "snapshot_path": "/tmp/keyflow-live-authority-20261017/comments.json",
+    "comment_count": 1436,
+    "snapshot_through_utc": "2026-10-17T20:01:38Z",
+    "root_reported_no_new_169_175_authority_through_utc": "2026-10-17T20:10:57Z"
+  },
+  "local_execution_limits": {
+    "operating_system": "Linux",
+    "pwsh_on_path": false,
+    "powershell_installed_for_review": false,
+    "windows_suite_run_locally": false,
+    "local_full_suite_claim": false,
+    "remote_writes": false,
+    "tracked_source_changes": false,
+    "installed_worker_actions": false
+  },
+  "dependency_order": [
+    "Correct and prove PR169 ownership; exact revised-head review and current-main integration",
+    "Integrate and review PR175 against accepted PR169, including mutex failure and existing pre-wake obligations",
+    "Merge PR169 before PR175 after required exact-head checks",
+    "Separately controlled worker upgrade, accounting for old workers without machine lock",
+    "Post-upgrade verification and durable checkpoint"
+  ],
+  "scope_ledger": {
+    "resolved": ["Current heads and review history", "Hosted proof totals and skip interpretation", "Source confirmation of two P2 findings"],
+    "remaining": ["Corrections", "New-head independent review and proof", "Current-main integration", "Merge", "Controlled upgrade", "Post-upgrade verification", "Durable checkpoint"],
+    "deferred": ["Local Windows execution unavailable; hosted logs inspected"],
+    "dropped": [],
+    "superseded": ["PR169 old retry-name finding fixed at7aa3c191", "Old-head proof counts superseded by current-head hosted totals"],
+    "existing_follow_on_scope": ["Persistent fetch failure and other pre-wake accounting remain PR175 scope, not duplicate findings against PR169"]
+  }
+}

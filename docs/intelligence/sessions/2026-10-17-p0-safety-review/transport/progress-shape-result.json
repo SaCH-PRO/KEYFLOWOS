@@ -1,0 +1,27 @@
+{
+  "purpose": "OFFLINE_MESSAGE_SHAPE_CHECK_NOT_AUTHORITY",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "comments_count": 1422,
+  "body_sha256": "29dbe41cad32627fec75a0a214e9aa192f40f56d320baff4d536bd8d5740f5ef",
+  "original": {
+    "verified": true,
+    "candidates": 116,
+    "newest": "CG-DIR-HANDOFF-UI-001",
+    "selected": "CG-DIR-HANDOFF-UI-001"
+  },
+  "progress": {
+    "verified": true,
+    "candidates": 116,
+    "newest": "CG-DIR-HANDOFF-UI-001",
+    "selected": "CG-DIR-HANDOFF-UI-001"
+  },
+  "hypothetical_review": {
+    "verified": true,
+    "candidates": 117,
+    "newest": "CG-PROGRESS-P0-SAFETY-REVIEW-20261017-001",
+    "selected": "CG-PROGRESS-P0-SAFETY-REVIEW-20261017-001"
+  },
+  "progress_preserves_h1": true,
+  "hypothetical_review_displaces_h1": true,
+  "outbound_requests": 0
+}
