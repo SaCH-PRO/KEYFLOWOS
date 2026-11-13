@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4   # shallow is fine — the compare is server-side
+      - uses: actions/checkout@v7   # shallow is fine — the compare is server-side
 
       - name: Check deploy drift
         env:
