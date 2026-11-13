@@ -1,7 +1,7 @@
 # KEYFLOWOS Historical Intelligence Reconciliation Programme
 
 Programme ID: KF-HIR-001
-Status: ACTIVE
+Status: Proposed 2026-10-07; not adopted by BUILD-MAP-001; historical record
 Purpose: prove that valuable work from KEYFLOWOS inception to present has a current disposition and is not stranded in old conversations, documents, branches, or superseded plans.
 
 ## Core question
