@@ -1,7 +1,7 @@
 import { Injectable, Inject, Optional, forwardRef, BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomBytes, randomUUID } from 'crypto';
-import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
+import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { lockStockRowsInOrder } from '../../core/inventory/stock-lock-order';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -27,10 +27,17 @@ import {
 import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
 import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
 import {
+  ORDER_STATUS_CHANGED_DURING_CANCEL,
+  ROUTING_CLAIM_TX_OPTIONS,
+  releaseOrderFulfilmentForCancel,
+  statusEditMayCancel,
+} from '../marketplace/fulfillment-routing.service';
+import { appendOrderTimeline } from '../marketplace/order-metadata';
+import {
   normalizeStorefrontMethod,
-  paypalConfigured,
+  storePaypalCredentials,
+  storeStripeCredentials,
   storefrontMethodNotOffered,
-  stripeConfigured,
 } from '../payments/storefront-checkout-methods';
 
 /**
@@ -144,6 +151,22 @@ export const SITE_FULFILMENT_STATUSES: ReadonlySet<string> = new Set([
  * (a concurrent creation of the same contact refuses the first attempt).
  */
 const CONTACT_RESOLVE_ATTEMPTS = 3;
+
+/**
+ * W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1): a tracked line of a provider
+ * settlement whose (product, default warehouse) pair another business's stock
+ * row holds, so no stock was taken for it (completeCheckout, providerSettlement).
+ */
+interface StockHeldElsewhereLine {
+  productId: string;
+  name: string;
+  quantity: number;
+}
+
+/** The notification a business is told of such lines with (tellStockHeldElsewhere). */
+export const STOCK_NOT_DECREMENTED_NOTIFICATION = 'store_order.stock_not_decremented';
+
+const PROVIDER_LABEL: Record<string, string> = { wipay: 'WiPay', stripe: 'Stripe', paypal: 'PayPal' };
 
 /**
  * Trial-N review (G6PUB-SEC-2): an order nothing more is collected for:
@@ -454,14 +477,20 @@ export class StoreOrderService {
       }
       // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106: the payer sees which
       // methods can pay it): PayPal and Stripe only where the storefront's
-      // gateway list offers them (getAvailableGateways reads the same
-      // paypalConfigured / stripeConfigured). A store with neither its own nor
-      // the platform's PayPal was a 500 from createStorePayment, and one with no
-      // Stripe a 400, both after the order and its promo use had committed.
-      if (method === 'PAYPAL' && !paypalConfigured(meta)) {
+      // gateway list offers them (getStorefrontGateways reads the same
+      // storePaypalCredentials / storeStripeCredentials). A store with no PayPal
+      // was a 500 from createStorePayment, and one with no Stripe a 400, both
+      // after the order and its promo use had committed.
+      // W11-STORE-OWN-PAYMENT-KEYS (owner ruling D-138): the store's own
+      // complete set only (PayPal: client id and secret; Stripe: publishable
+      // key, secret key and webhook secret, in its settings). The platform's
+      // PayPal / Stripe env never stands in for a store, and a store's key is
+      // never completed by a platform key: refused here before anything is
+      // written, as createStorePayment refuses it.
+      if (method === 'PAYPAL' && !storePaypalCredentials(meta)) {
         throw new BadRequestException(storefrontMethodNotOffered('PAYPAL'));
       }
-      if (method === 'STRIPE' && !stripeConfigured(meta)) {
+      if (method === 'STRIPE' && !storeStripeCredentials(meta)) {
         throw new BadRequestException(storefrontMethodNotOffered('STRIPE'));
       }
     }
@@ -878,6 +907,11 @@ export class StoreOrderService {
    * order's shipping fee once per order, and only for a member with revenue
    * write (CommerceIntegrationService.bookShippingExpenseOnce); the status
    * change itself stays open to every member and never fails on the booking.
+   * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): CANCELLED releases
+   * the order's fulfilment under its routing claim, as the marketplace cancel
+   * does (400 with nothing written for an order that can no longer be
+   * cancelled: SHIPPED, DELIVERED, COMPLETED, CANCELLED, REFUNDED). Every
+   * other status is written as before.
    */
   async updateOrderStatus(
     orderId: string,
@@ -906,11 +940,14 @@ export class StoreOrderService {
     });
     if (!existing) throw new NotFoundException('Order not found');
 
-    const order = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { status: normalized },
-      include: { items: true },
-    });
+    const order =
+      normalized === 'CANCELLED'
+        ? await this.cancelReleasingFulfilment(businessId, orderId)
+        : await this.prisma.client.marketplaceOrder.update({
+            where: { id: orderId },
+            data: { status: normalized },
+            include: { items: true },
+          });
 
     // CONFIRMED is the merchant's fulfilment status, not money (V1-18, CF-45).
     // `store_order.paid` is emitted only by completeCheckout, after the
@@ -933,6 +970,37 @@ export class StoreOrderService {
     if (normalized === 'SHIPPED') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     return order;
+  }
+
+  /**
+   * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): updateOrderStatus's CANCELLED, in one transaction under the
+   * order's routing claim, as the marketplace status cancel (MarketplaceService.updateOrderStatus) and the fulfil
+   * 'cancel' action: releaseOrderFulfilmentForCancel waits for a router to commit, re-reads the status (400 with nothing
+   * written for an order that can no longer be cancelled; canTransitionOrder reads this vocabulary through
+   * LEGACY_STATUS_MAP), gives back what the order's LOCAL_STOCK routes reserved and cancels its routes; then the
+   * cancelled step and CANCELLED. It wrote CANCELLED alone: a routed order's reservations were held for good, an order
+   * being routed got its routes after the cancel, and a SHIPPED order was cancelled. It releases reservations only (what
+   * a paid checkout decremented is not restocked) and records no refund.
+   *
+   * Review repairs: the status is read in any case, padded or not (statusEditMayCancel, OCR-COR-1): an open order the
+   * marketplace route stored 'processing' was refused 400 by canTransitionOrder alone, and no route could cancel it.
+   * CANCELLED is written compare-and-set on the status read under the claim (OCR-COR-2, D-136): a SHIPPED takes no
+   * claim, so one that committed while the release waited for its stock rows had CANCELLED written over it by id; 409
+   * now, the transaction rolled back (the release with it), nothing written and no event.
+   */
+  private cancelReleasingFulfilment(businessId: string, orderId: string) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const readStatus = await releaseOrderFulfilmentForCancel(tx, businessId, orderId, statusEditMayCancel);
+      await appendOrderTimeline(tx, businessId, orderId, [
+        { status: 'cancelled', timestamp: new Date().toISOString(), note: 'Order cancelled' },
+      ]);
+      const { count } = await tx.marketplaceOrder.updateMany({
+        where: { id: orderId, businessId, status: readStatus },
+        data: { status: 'CANCELLED' },
+      });
+      if (count === 0) throw new ConflictException(ORDER_STATUS_CHANGED_DURING_CANCEL);
+      return tx.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include: { items: true } });
+    }, ROUTING_CLAIM_TX_OPTIONS);
   }
 
   /**
@@ -961,11 +1029,15 @@ export class StoreOrderService {
     if (paymentStatus === 'PAID') {
       // Route through completeCheckout so Invoice + Payment + stock decrement
       // + RevenueAttribution all land in one transaction.
+      // W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1): a provider settlement (the
+      // WiPay callback, the Stripe and PayPal webhooks): the provider has taken
+      // the money (completeCheckout, providerSettlement).
       return this.completeCheckout({
         orderId,
         paymentRef,
         provider: provider ?? 'unknown',
         method: provider ?? 'unknown',
+        providerSettlement: true,
       });
     }
 
@@ -1124,6 +1196,21 @@ export class StoreOrderService {
      * not decrement it again here.
      */
     stockMovesOnFulfilment?: boolean;
+    /**
+     * W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1, CPS-COR-2; D-137, the D-76
+     * pattern): a provider settlement (updatePaymentStatus: the WiPay
+     * callback, the Stripe and PayPal webhooks). The provider has taken the
+     * customer's money, so a tracked line whose (product, default warehouse)
+     * pair is held by another business's stock row (a planted row D-137 leaves
+     * for an operator) does not refuse it: the money is recorded, no stock is
+     * taken for that line (the other business's row is never written), and the
+     * business is told ('store_order.stock_not_decremented'). Refused, the
+     * settlement recorded nothing and the callback released its claim, so every
+     * redelivery was refused the same way. Every other stock refusal stands,
+     * and the offline completion (no provider holds the money) is refused for
+     * such a line as for a missing own row.
+     */
+    providerSettlement?: boolean;
   }) {
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id: input.orderId },
@@ -1221,6 +1308,13 @@ export class StoreOrderService {
     // The protection itself is unchanged. A product that IS tracked still
     // cannot oversell, still needs a warehouse and a stock row, and still
     // rolls the checkout back — see the loop below.
+    //
+    // W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): only the business's
+    // own stock rows count as stock kept for the product (ownStockRows, the
+    // filter every reader of the rule uses). A row of another business (a
+    // planted row on this product, left for an operator by D-137) is not this
+    // business's stock: counted, it made a product with no inventoryMode
+    // tracked and the decrement below then sold from that row.
     const productIds = order.items.map((i) => i.productId);
     const products = await this.prisma.client.product.findMany({
       where: { id: { in: productIds } },
@@ -1229,7 +1323,7 @@ export class StoreOrderService {
         inventoryMode: true,
         outOfStockBehavior: true,
         name: true,
-        _count: { select: { inventoryStocks: true } },
+        _count: { select: { inventoryStocks: { where: ownStockRows(order.businessId) } } },
       },
     });
     const productMode = new Map(
@@ -1335,7 +1429,27 @@ export class StoreOrderService {
       //    fail the entire checkout (rolling back invoice + payment) so
       //    we never sell stock we can't fulfill. Untracked / virtual
       //    products are explicitly skipped per their inventoryMode.
+      //
+      //    W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): the row read and
+      //    written is the business's own row of the (product, default
+      //    warehouse) pair, the one lockStockRowsInOrder locked above. The pair
+      //    is unique across every business, so a planted row of another
+      //    business can hold it; read by the pair alone, that row was
+      //    decremented without its lock, given this business's 'sale' movement,
+      //    and costed by no COGS (onProductSold reads this business's rows). A
+      //    pair held by another business's row is no stock of this business:
+      //    the same refusal as a missing own row, and the other row is never
+      //    written.
+      //
+      //    W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1, CPS-COR-2; the D-76
+      //    pattern): except for a provider settlement, whose money the provider
+      //    has already taken. There a line whose only blocker is the pair held
+      //    by another business's row takes no stock and is kept in
+      //    `stockHeldElsewhere`; the money is recorded and the business is told
+      //    after the commit (tellStockHeldElsewhere). The other row is still
+      //    never written.
       const decrementedProductIds: string[] = [];
+      const stockHeldElsewhere: StockHeldElsewhereLine[] = [];
       const trackedItems = input.stockMovesOnFulfilment
         ? []
         : order.items.filter((i) => {
@@ -1353,15 +1467,25 @@ export class StoreOrderService {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
           continue;
         }
-        const stock = await tx.inventoryStock.findUnique({
+        const stock = await tx.inventoryStock.findFirst({
           where: {
-            productId_warehouseId: {
-              productId: item.productId,
-              warehouseId: defaultWarehouse!.id,
-            },
+            businessId: order.businessId,
+            productId: item.productId,
+            warehouseId: defaultWarehouse!.id,
           },
         });
         if (!stock) {
+          if (input.providerSettlement) {
+            // Who holds the pair (unique across every business): read only, never written.
+            const holder = await tx.inventoryStock.findUnique({
+              where: { productId_warehouseId: { productId: item.productId, warehouseId: defaultWarehouse!.id } },
+              select: { businessId: true },
+            });
+            if (holder && holder.businessId !== order.businessId) {
+              stockHeldElsewhere.push({ productId: item.productId, name: item.name, quantity: item.quantity });
+              continue;
+            }
+          }
           throw new BadRequestException(
             `Cannot finalize checkout: tracked product ${item.productId} has no stock row in the default warehouse.`,
           );
@@ -1448,13 +1572,17 @@ export class StoreOrderService {
         include: { items: true },
       });
 
-      return { updatedOrder, invoice, decrementedProductIds };
+      return { updatedOrder, invoice, decrementedProductIds, stockHeldElsewhere };
     });
 
     // Tx committed — now safe to flush buffered invoice events and
     // dispatch the storefront-funnel timeline + CRM hooks.
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);
+    }
+
+    if (result.stockHeldElsewhere.length > 0) {
+      await this.tellStockHeldElsewhere(order, defaultWarehouse!, provider, result.stockHeldElsewhere);
     }
 
     try {
@@ -1502,6 +1630,58 @@ export class StoreOrderService {
     }
 
     return result.updatedOrder;
+  }
+
+  /**
+   * W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-1, CPS-COR-2; the D-76 pattern of
+   * PaymentsService.refuseWipayCurrency): after a provider settlement that took
+   * no stock for a line whose (product, default warehouse) pair another
+   * business's stock row holds (a planted row D-137 leaves for an operator),
+   * the business is told once (the settlement commits once: a settled order is
+   * answered as it stands) by a STOCK_NOT_DECREMENTED_NOTIFICATION naming the
+   * order, each such product and its quantity, and the warehouse, never the
+   * other business; and the operator log names the order for the planted-row
+   * repair (W11-PLANTED-STOCK-CENSUS). Best effort: the money is recorded, so
+   * a failure here is logged and the settlement stands.
+   */
+  private async tellStockHeldElsewhere(
+    order: { id: string; businessId: string; orderNumber: string },
+    warehouse: { id: string; name: string },
+    provider: string,
+    lines: StockHeldElsewhereLine[],
+  ): Promise<void> {
+    const label = PROVIDER_LABEL[provider] ?? provider;
+    this.logger.error(
+      `[store-order] order ${order.id} of business ${order.businessId} settled by ${provider} with no stock taken for ` +
+        `${lines.map((l) => `${l.productId} x${l.quantity}`).join(', ')} in warehouse ${warehouse.id}: the (product, warehouse) ` +
+        'stock row is another business\'s (D-137 planted row); repair it with the planted-row census, then adjust the stock',
+    );
+    try {
+      const named = lines.map((l) => `${l.name} x ${l.quantity}`).join(', ');
+      await this.prisma.client.notification.create({
+        data: {
+          businessId: order.businessId,
+          type: STOCK_NOT_DECREMENTED_NOTIFICATION,
+          title: 'Paid order: stock not taken',
+          body:
+            `Order ${order.orderNumber} was paid through ${label} and the payment is recorded, but no stock was taken ` +
+            `from ${warehouse.name} for ${named}: the stock row for ${lines.length === 1 ? 'that product' : 'those products'} ` +
+            'in that warehouse is held by another record. Ask an operator to repair it, then adjust your stock by hand.',
+          data: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            provider,
+            warehouseId: warehouse.id,
+            products: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+            reason: 'stock_row_held_elsewhere',
+          },
+        },
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `[store-order] could not tell business ${order.businessId} of order ${order.id}'s stock not taken: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async listOrders(

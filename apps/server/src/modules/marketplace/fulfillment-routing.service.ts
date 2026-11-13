@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException, ConflictException, Inject, NotFoundException } from '@nestjs/common';
-import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
+import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -251,6 +251,127 @@ export function canTransitionOrder(from: string, to: string): boolean {
   return VALID_ORDER_TRANSITIONS[normalizedFrom]?.includes(to) ?? false;
 }
 
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-1: the order status a stored status names, read in any case and with any
+ * surrounding spaces (the marketplace vocabulary, or the storefront's through LEGACY_STATUS_MAP); undefined for a label
+ * of neither (e.g. 'on_hold'). PATCH /marketplace/.../status writes any status as sent, so a stored status is not
+ * always spelled as canTransitionOrder's tables are.
+ */
+function namedOrderStatus(status: string): string | undefined {
+  const trimmed = status.trim();
+  for (const spelling of [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()]) {
+    const named = Object.prototype.hasOwnProperty.call(LEGACY_STATUS_MAP, spelling) ? LEGACY_STATUS_MAP[spelling] : spelling;
+    if (Object.prototype.hasOwnProperty.call(VALID_ORDER_TRANSITIONS, named)) return named;
+  }
+  return undefined;
+}
+
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-1 (owner ruling D-136): whether a status edit (PATCH /marketplace/.../status
+ * 'cancelled', PATCH /site/.../status CANCELLED) may cancel an order stored with this status. A status of either
+ * vocabulary, in any case and with any surrounding spaces, may be cancelled as canTransitionOrder says: 'processing',
+ * 'pending' and 'confirmed' are open, a shipped, delivered, completed, cancelled or refunded one is not (D-136). A label
+ * of neither vocabulary (e.g. 'on_hold', written by the marketplace route as sent) names no step past which a cancel is
+ * refused, so it may be cancelled, as it was before the packet. canTransitionOrder alone (case-sensitive) refused every
+ * such open order with 400 'Cannot cancel order in processing status', and the fulfil 'cancel' refuses them too, so no
+ * route could cancel it. The fulfil 'cancel' keeps canTransitionOrder (FulfillmentRoutingService.cancelOrderFulfilment).
+ */
+export function statusEditMayCancel(status: string): boolean {
+  const named = namedOrderStatus(status);
+  return named === undefined || VALID_ORDER_TRANSITIONS[named].includes('cancelled');
+}
+
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-2 (D-136): the 409 a status-edit cancel answers when the order's status
+ * changed between releaseOrderFulfilmentForCancel's read (under the routing claim) and the cancel's write (a
+ * compare-and-set on that status). A ship takes no claim (PATCH 'shipped', PATCH /site SHIPPED, the fulfil 'ship'), so it
+ * can commit while the cancel waits for the stock rows; the cancel wrote 'cancelled' over the shipped order by id.
+ */
+export const ORDER_STATUS_CHANGED_DURING_CANCEL =
+  "This order's status changed while it was being cancelled (it was shipped or edited meanwhile): nothing was written. " +
+  'Reload the order and cancel it again if it can still be cancelled';
+
+/**
+ * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): the release of an order's fulfilment for a cancel, on the
+ * cancel's own transaction (run with ROUTING_CLAIM_TX_OPTIONS), which then writes the order's cancelled status and step.
+ * Every cancel runs it: the fulfil 'cancel' action (FulfillmentRoutingService.cancelOrderFulfilment, which delegates
+ * here) and the two status edits that cancel an order, PATCH /marketplace/.../orders/:orderId/status 'cancelled'
+ * (MarketplaceService.updateOrderStatus) and PATCH /site/.../orders/:orderId/status CANCELLED (StoreOrderService.
+ * updateOrderStatus). The status edits wrote the status alone: the order's routes stayed RESERVED and their stock
+ * reserved for good, an order being routed got its RESERVED routes and reservations after the edit, and a shipped or
+ * delivered order was cancelled.
+ *
+ * It takes the order's routing claim (claimOrderRouting), waiting for a router to commit, then re-reads the order's
+ * status: 400 'Cannot cancel order in <status> status' when it can no longer be cancelled (canTransitionOrder, which
+ * reads the storefront's vocabulary through LEGACY_STATUS_MAP: PENDING, CONFIRMED and PROCESSING can; SHIPPED,
+ * DELIVERED, COMPLETED, CANCELLED and REFUNDED cannot, D-136), the caller's transaction then rolled back with nothing
+ * written. Otherwise it locks the stock rows the order's LOCAL_STOCK routes reserved from (each route's product in its
+ * warehouse, and no other row of the product: review Z4RV-CR-1) in the global order (core/inventory/stock-lock-order.
+ * ts), gives back what each reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after it
+ * meets the order cancelled and creates nothing. It releases reservations only: it restocks nothing a paid storefront
+ * checkout decremented, and records no refund.
+ *
+ * Review repairs: `mayCancel` is the check on the status read. The fulfil 'cancel' keeps canTransitionOrder (the
+ * default); the status edits pass statusEditMayCancel, which reads the status in any case with any surrounding spaces
+ * (OCR-COR-1). It returns the status it read, on which the status edits' order write is a compare-and-set
+ * (OCR-COR-2): a ship takes no claim, so one that commits while this waits for its stock rows is not written over
+ * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back).
+ */
+export async function releaseOrderFulfilmentForCancel(
+  tx: RoutingTx,
+  businessId: string,
+  orderId: string,
+  mayCancel: (status: string) => boolean = (status) => canTransitionOrder(status, 'cancelled'),
+): Promise<string> {
+  await claimOrderRouting(tx, businessId, orderId);
+  const order = await tx.marketplaceOrder.findFirst({
+    where: { id: orderId, businessId },
+    select: { status: true, items: { select: { id: true, productId: true, quantity: true } } },
+  });
+  if (!order) throw new NotFoundException('Order not found');
+  if (!mayCancel(order.status)) {
+    throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
+  }
+
+  const itemsById = new Map(order.items.map((item) => [item.id, item]));
+  const routes = await tx.fulfillmentRoute.findMany({
+    where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: { in: ['RESERVED', 'PICKING_PACKING'] } },
+  });
+  const releases = routes.flatMap((route) => {
+    const routeMeta = (route.metadata ?? {}) as RouteMetadata;
+    const item = route.orderItemId ? itemsById.get(route.orderItemId) : undefined;
+    const untracked =
+      routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual';
+    return !route.warehouseId || untracked || !item ? [] : [{ warehouseId: route.warehouseId, item }];
+  });
+
+  // Every stock row these routes reserved from, locked at once in the global order before the first is written:
+  // only those rows (W10-Z4-ROUTE-FIX review Z4RV-CR-1). Locking the product's rows in every warehouse, a cancel of
+  // one line held two rows of its product, and a transfer writing them in the other order (from row, then to row)
+  // deadlocked with it: the cancel was rolled back, its route RESERVED and its unit reserved.
+  await lockStockRowPairsInOrder(
+    tx,
+    businessId,
+    releases.map(({ warehouseId, item }) => ({ productId: item.productId, warehouseId })),
+  );
+  for (const { warehouseId, item } of releases) {
+    // Read under the lock: what is reserved now, every reservation committed before it counted.
+    const stock = await tx.inventoryStock.findFirst({ where: { businessId, productId: item.productId, warehouseId } });
+    if (stock) {
+      await tx.inventoryStock.update({
+        where: { id: stock.id },
+        data: { reserved: Math.max(0, stock.reserved - item.quantity) },
+      });
+    }
+  }
+
+  await tx.fulfillmentRoute.updateMany({
+    where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+    data: { status: 'CANCELLED' },
+  });
+  return order.status;
+}
+
 @Injectable()
 export class FulfillmentRoutingService {
   private readonly logger = new Logger(FulfillmentRoutingService.name);
@@ -496,9 +617,13 @@ export class FulfillmentRoutingService {
     listing: ListingShape | null,
     lockedStockIds: readonly string[],
   ): Promise<FulfillmentRouteShape> {
+    // W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-3, CPS-COR-1; D-137): only the business's own stock rows count as stock
+    // kept for the product (ownStockRows), as at the paid door: another business's planted row made a no-mode line the
+    // door had sold as untracked read as tracked here, and it was failed for stock (this routing reserves from the
+    // business's own rows only).
     const product = await tx.product.findUnique({
       where: { id: item.productId },
-      select: { inventoryMode: true, _count: { select: { inventoryStocks: true } } },
+      select: { inventoryMode: true, _count: { select: { inventoryStocks: { where: ownStockRows(businessId) } } } },
     });
 
     // See core/inventory/inventory-mode.ts. Resolving NULL to 'tracked' routed
@@ -1045,54 +1170,12 @@ export class FulfillmentRoutingService {
    * global order (core/inventory/stock-lock-order.ts), gives back what each
    * reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after
    * it meets the order cancelled and creates nothing.
+   *
+   * W11-ORDER-CANCEL-RELEASE: the work is releaseOrderFulfilmentForCancel (above), which the status edits that cancel
+   * an order run too; this method delegates to it unchanged.
    */
   async cancelOrderFulfilment(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
-    await claimOrderRouting(tx, businessId, orderId);
-    const order = await tx.marketplaceOrder.findFirst({
-      where: { id: orderId, businessId },
-      select: { status: true, items: { select: { id: true, productId: true, quantity: true } } },
-    });
-    if (!order) throw new NotFoundException('Order not found');
-    if (!canTransitionOrder(order.status, 'cancelled')) {
-      throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
-    }
-
-    const itemsById = new Map(order.items.map((item) => [item.id, item]));
-    const routes = await tx.fulfillmentRoute.findMany({
-      where: { businessId, orderId, strategy: 'LOCAL_STOCK', status: { in: ['RESERVED', 'PICKING_PACKING'] } },
-    });
-    const releases = routes.flatMap((route) => {
-      const routeMeta = (route.metadata ?? {}) as RouteMetadata;
-      const item = route.orderItemId ? itemsById.get(route.orderItemId) : undefined;
-      const untracked =
-        routeMeta.noReservationRequired || routeMeta.inventoryMode === 'untracked' || routeMeta.inventoryMode === 'virtual';
-      return !route.warehouseId || untracked || !item ? [] : [{ warehouseId: route.warehouseId, item }];
-    });
-
-    // Every stock row these routes reserved from, locked at once in the global order before the first is written:
-    // only those rows (W10-Z4-ROUTE-FIX review Z4RV-CR-1). Locking the product's rows in every warehouse, a cancel of
-    // one line held two rows of its product, and a transfer writing them in the other order (from row, then to row)
-    // deadlocked with it: the cancel was rolled back, its route RESERVED and its unit reserved.
-    await lockStockRowPairsInOrder(
-      tx,
-      businessId,
-      releases.map(({ warehouseId, item }) => ({ productId: item.productId, warehouseId })),
-    );
-    for (const { warehouseId, item } of releases) {
-      // Read under the lock: what is reserved now, every reservation committed before it counted.
-      const stock = await tx.inventoryStock.findFirst({ where: { businessId, productId: item.productId, warehouseId } });
-      if (stock) {
-        await tx.inventoryStock.update({
-          where: { id: stock.id },
-          data: { reserved: Math.max(0, stock.reserved - item.quantity) },
-        });
-      }
-    }
-
-    await tx.fulfillmentRoute.updateMany({
-      where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-      data: { status: 'CANCELLED' },
-    });
+    await releaseOrderFulfilmentForCancel(tx, businessId, orderId);
   }
 
   async checkAndAlertReorderThreshold(businessId: string, stockId: string): Promise<void> {

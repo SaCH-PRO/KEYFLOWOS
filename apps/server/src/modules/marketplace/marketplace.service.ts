@@ -11,7 +11,14 @@ import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRo
 import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
-import { FulfillmentRoutingService, ROUTING_CLAIM_TX_OPTIONS, canTransitionOrder } from './fulfillment-routing.service';
+import {
+  FulfillmentRoutingService,
+  ORDER_STATUS_CHANGED_DURING_CANCEL,
+  ROUTING_CLAIM_TX_OPTIONS,
+  canTransitionOrder,
+  releaseOrderFulfilmentForCancel,
+  statusEditMayCancel,
+} from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, recordOrderRefundedTotal, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
 import { CommerceService } from '../commerce/commerce.service';
@@ -69,6 +76,22 @@ const PATCH_WRITABLE_PAYMENT_STATUSES = new Set(['UNPAID', 'PENDING', 'PARTIAL']
 
 /** W10-STORE-ORDER-PAID review (SEC-SOP-4, D-112): the order fields that record its money. */
 const ORDER_PAYMENT_FIELDS = ['paymentStatus', 'paymentMethod', 'paymentRef'] as const;
+
+/**
+ * W11-ORDER-PAID-VALUES review SEC-W11OPV-2 (D-117): the 409 a PATCH .../status payment write answers when the order's
+ * payment status changed between its read and its compare-and-set write.
+ */
+const ORDER_PAYMENT_STATUS_CHANGED =
+  "This order's payment status changed while it was being edited (it was marked paid or refunded meanwhile): nothing was " +
+  'written. Reload the order and edit it again';
+
+/**
+ * W11-ORDER-CANCEL-RELEASE (F-35): a PATCH .../status that cancels the order: 'cancelled' in any case, with any
+ * surrounding spaces (the web's orders tab sends CANCELLED).
+ */
+function cancelsOrder(status: string): boolean {
+  return status.trim().toLowerCase() === 'cancelled';
+}
 
 /** inventory_stocks.quantity, reserved and reorder_at are Postgres integers: the largest whole number they hold. */
 const STOCK_INT_MAX = 2_147_483_647;
@@ -1162,6 +1185,14 @@ export class MarketplaceService {
    *   payment through the paid door with this member as the recorder (D-112).
    *   W10-STORE-ORDER-PAID review (SEC-SOP-4): so does writing any of its
    *   payment fields (paymentStatus, paymentMethod, paymentRef).
+   *
+   * W11-ORDER-CANCEL-RELEASE (F-35; D-136): a status that cancels the order
+   * ('cancelled', any case, padded) releases its fulfilment under the order's
+   * routing claim, as the fulfil 'cancel' action does (400 for an order that
+   * can no longer be cancelled). Every other status is written as before.
+   * Review repairs: the cancel is stored trimmed (SEC-W11OCR-1), an open
+   * order in any spelling may be cancelled (OCR-COR-1), and the write is a
+   * compare-and-set on the status read under the claim (OCR-COR-2: 409).
    */
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     this.assertPlainStatusBody(status, paymentData);
@@ -1233,6 +1264,47 @@ export class MarketplaceService {
       updateData.paymentRef = paymentData.paymentRef;
     }
 
+    if (cancelsOrder(status)) {
+      // W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): a cancel is the fulfil 'cancel' action's, in one transaction
+      // under the order's routing claim. releaseOrderFulfilmentForCancel waits for a router to commit, re-reads the
+      // status (400 with nothing written for an order that can no longer be cancelled: shipped, delivered, completed,
+      // cancelled, refunded), gives back what its LOCAL_STOCK routes reserved and cancels its routes; then the cancelled
+      // step, and the status as sent with the payment fields the member may write (compare-and-set, as below). It wrote
+      // the status alone: the order's routes stayed RESERVED and their stock reserved for good, an order being routed
+      // got its routes and reservations after the cancel, and a shipped order was cancelled. A cancel records no refund
+      // and keeps a paid order's payment. One store_order.cancelled once it has committed.
+      // Review SEC-W11OCR-1: the status is stored trimmed, in the case sent (the web's CANCELLED unchanged). Stored
+      // with its spaces (' cancelled '), it was released and announced cancelled, but isClosedStorefrontOrder (upper-
+      // cased, not trimmed) did not read it as closed: the paid doors (PATCH paid, complete-offline, the public
+      // checkout) then recorded a payment on the cancelled order.
+      updateData.status = status.trim();
+      const cancelled = await this.prisma.client.$transaction(async (tx) => {
+        // Review OCR-COR-1: the status read in any case, padded or not (statusEditMayCancel): an open order stored
+        // 'processing' or 'on_hold' (this route writes any status as sent) was refused 400 by canTransitionOrder alone.
+        const readStatus = await releaseOrderFulfilmentForCancel(tx, businessId, orderId, statusEditMayCancel);
+        await appendOrderTimeline(tx, businessId, orderId, [
+          { status: 'cancelled', timestamp: new Date().toISOString(), note: 'Order cancelled' },
+        ]);
+        // Review OCR-COR-2 (D-136): compare-and-set on the status read under the claim (and, with payment fields, on
+        // the payment status read above, as below). A ship takes no claim, so one that committed while the release
+        // waited for its stock rows had 'cancelled' written over it by id: 409 now, the transaction rolled back (the
+        // release with it), nothing written and no event.
+        const { count } = await tx.marketplaceOrder.updateMany({
+          where: { id: orderId, businessId, status: readStatus, ...(writesPayment ? { paymentStatus: order.paymentStatus } : {}) },
+          data: updateData,
+        });
+        if (count === 0) {
+          const now = await tx.marketplaceOrder.findFirst({ where: { id: orderId, businessId }, select: { status: true, paymentStatus: true } });
+          throw new ConflictException(
+            writesPayment && now?.status === readStatus ? ORDER_PAYMENT_STATUS_CHANGED : ORDER_STATUS_CHANGED_DURING_CANCEL,
+          );
+        }
+        return tx.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
+      }, ROUTING_CLAIM_TX_OPTIONS);
+      this.emitOrderLifecycleEvent(businessId, cancelled, 'cancelled');
+      return cancelled;
+    }
+
     let updated;
     if (writesPayment) {
       // W11-ORDER-PAID-VALUES review SEC-W11OPV-2 (D-117, D-112): a payment write is compare-and-set on the payment
@@ -1244,12 +1316,7 @@ export class MarketplaceService {
         where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
         data: updateData,
       });
-      if (count === 0) {
-        throw new ConflictException(
-          "This order's payment status changed while it was being edited (it was marked paid or refunded meanwhile): nothing was " +
-            'written. Reload the order and edit it again',
-        );
-      }
+      if (count === 0) throw new ConflictException(ORDER_PAYMENT_STATUS_CHANGED);
       updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
     } else {
       updated = await this.prisma.client.marketplaceOrder.update({

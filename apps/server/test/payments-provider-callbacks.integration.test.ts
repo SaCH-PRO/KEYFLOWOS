@@ -170,6 +170,15 @@
  *   PC-15  (amended) the storefront PayPal order in its own currency is shown
  *          on a EUR order
  *
+ * W11-STORE-OWN-PAYMENT-KEYS (owner ruling D-138: a storefront offers PayPal
+ * or Stripe only with the business's own complete credentials, never the
+ * platform's env, alone or mixed): the storefront cases that check out with
+ * PayPal or Stripe (PC-08d, PC-15, PC-16) give the business they check out its
+ * own PayPal pair or Stripe triple in its settings for the case (giveOwnKeys)
+ * instead of relying on the platform env, and PC-08d reads the storefront's
+ * own gateway list (getStorefrontGateways). What they assert is unchanged. The
+ * storefront rule itself is proven in storefront-own-payment-keys.
+ *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -194,7 +203,7 @@ import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { PaymentsService } from '../src/modules/payments/payments.service';
 
@@ -265,6 +274,13 @@ const paypalRefusal = (currency: string, payable: 'invoice' | 'order') => ({
 });
 /** PayPal app credentials (env), set only inside the cases that read a gateway list for PayPal (PC-08b..PC-08d). */
 const PAYPAL_ENV = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
+/** W11-STORE-OWN-PAYMENT-KEYS (D-138): a business's own PayPal pair and Stripe triple, as its settings store them. */
+const OWN_PAYPAL = { paypalClientId: `${P}own_paypal_client_fake`, paypalClientSecret: `${P}own_paypal_secret_fake` };
+const OWN_STRIPE = {
+  stripePublishableKey: `${P}own_stripe_publishable_fake`,
+  stripeSecretKey: `${P}own_stripe_secret_fake`,
+  stripeWebhookSecret: `${P}own_stripe_webhook_fake`,
+};
 
 /** Runs `fn` with PayPal configured for every business (PAYPAL_ENV), then restores the environment. */
 async function withPaypalEnv<T>(fn: () => Promise<T>): Promise<T> {
@@ -281,6 +297,21 @@ async function withPaypalEnv<T>(fn: () => Promise<T>): Promise<T> {
 }
 const TOTAL = 100;
 const STORE_TOTAL = 50;
+
+/**
+ * W11-STORE-OWN-PAYMENT-KEYS (D-138): adds `keys` to the settings of each business for the rest of the case (a
+ * storefront takes PayPal or Stripe only with the business's own complete set); each business's settings are restored
+ * as they were when the case finishes.
+ */
+async function giveOwnKeys(businessIds: string[], keys: Record<string, unknown>): Promise<void> {
+  for (const id of businessIds) {
+    const metaData = (await db.business.findUnique({ where: { id }, select: { metaData: true } })).metaData;
+    onTestFinished(async () => {
+      await db.business.update({ where: { id }, data: { metaData: (metaData ?? {}) as object } });
+    });
+    await db.business.update({ where: { id }, data: { metaData: { ...((metaData as object) ?? {}), ...keys } } });
+  }
+}
 
 let db: any;
 let app: any;
@@ -1238,18 +1269,20 @@ describe('W10-PAYPAL-CURRENCY: PayPal is not offered for a currency PayPal does 
     });
   });
 
-  it("PC-08d (W10-PAYPAL-CURRENCY, D-106): the storefront surface: the gateway list the storefront reads (getAvailableGateways, what GET /site/storefront/public/:slug/gateways answers) offers no PayPal for a TTD, JMD, BBD, GYD or XCD amount, nor for a TTD business's cart in no currency; createStorePayment and the generic storefront checkout of a TTD order's PayPal order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called, the order UNPAID; control: USD and EUR are offered PayPal in their own currency and a USD storefront order's checkout makes a USD order", async () => {
+  it("PC-08d (W10-PAYPAL-CURRENCY, D-106): the storefront surface: the gateway list the storefront reads (getStorefrontGateways, what GET /site/storefront/public/:slug/gateways answers; the businesses hold their own PayPal pair, D-138) offers no PayPal for a TTD, JMD, BBD, GYD or XCD amount, nor for a TTD business's cart in no currency; createStorePayment and the generic storefront checkout of a TTD order's PayPal order are refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called, the order UNPAID; control: USD and EUR are offered PayPal in their own currency and a USD storefront order's checkout makes a USD order", async () => {
     // Review PPC-REV-01: the EUR control's business, also when this case runs alone.
     await ensureEurBusiness();
+    // W11-STORE-OWN-PAYMENT-KEYS (D-138): the storefront takes PayPal only with the business's own pair.
+    await giveOwnKeys([ID.bizPaypal, ID.bizKeyed, ID.bizEur], OWN_PAYPAL);
     await withPaypalEnv(async () => {
       const before = paypalCalls();
       // At 71a97cb1: { id: 'paypal', currencies: ['USD'] } for every amount.
       for (const code of ['TTD', 'JMD', 'BBD', 'GYD', 'XCD', 'ttd']) {
-        expect((await payments.getAvailableGateways(ID.bizPaypal, code)).map((g) => g.id), code).not.toContain('paypal');
+        expect((await payments.getStorefrontGateways(ID.bizPaypal, code)).map((g) => g.id), code).not.toContain('paypal');
       }
-      expect((await payments.getAvailableGateways(ID.bizKeyed)).map((g) => g.id), 'a TTD business, no cart currency').not.toContain('paypal');
-      expect((await payments.getAvailableGateways(ID.bizPaypal)).find((g) => g.id === 'paypal'), 'a USD business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
-      expect((await payments.getAvailableGateways(ID.bizEur)).find((g) => g.id === 'paypal'), 'a EUR business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['EUR'] });
+      expect((await payments.getStorefrontGateways(ID.bizKeyed)).map((g) => g.id), 'a TTD business, no cart currency').not.toContain('paypal');
+      expect((await payments.getStorefrontGateways(ID.bizPaypal)).find((g) => g.id === 'paypal'), 'a USD business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['USD'] });
+      expect((await payments.getStorefrontGateways(ID.bizEur)).find((g) => g.id === 'paypal'), 'a EUR business').toEqual({ id: 'paypal', name: 'PayPal', currencies: ['EUR'] });
 
       // At 71a97cb1: PayPal asked for a TTD order by both.
       const direct = await payments
@@ -1445,6 +1478,8 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
     // support: its PayPal order is now refused before PayPal is called, PC-08d). Review PPC-REV-01: the EUR business
     // is seeded here too, so this case runs alone.
     await ensureEurBusiness();
+    // W11-STORE-OWN-PAYMENT-KEYS (D-138): the storefront takes PayPal only with the business's own pair.
+    await giveOwnKeys([ID.bizEur], OWN_PAYPAL);
     const eurOrder = `${P}storeEur`;
     await db.marketplaceOrder.create({
       data: {
@@ -1483,16 +1518,12 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
   });
 
   it('PC-16 (G6ML-4): the storefront Stripe checkout answers its session and writes no PENDING payment naming the order as an invoice', async () => {
-    const previous = process.env.STRIPE_SECRET_KEY;
-    process.env.STRIPE_SECRET_KEY = `${P}sk_test`;
-    try {
-      // At 2db133a4: P2003 (payments.invoice_id references invoices) after the Stripe session was created: every storefront Stripe checkout fails.
-      const result = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'STRIPE', businessId: ID.bizKeyed, returnUrl: RETURN_URL });
-      expect(result).toEqual({ paymentId: `${P}cs_store`, status: 'REDIRECT', redirectUrl: STRIPE_SESSION_URL });
-    } finally {
-      if (previous === undefined) delete process.env.STRIPE_SECRET_KEY;
-      else process.env.STRIPE_SECRET_KEY = previous;
-    }
+    // W11-STORE-OWN-PAYMENT-KEYS (D-138): the storefront takes Stripe only with the business's own triple (it was the
+    // platform's STRIPE_SECRET_KEY here).
+    await giveOwnKeys([ID.bizKeyed], OWN_STRIPE);
+    // At 2db133a4: P2003 (payments.invoice_id references invoices) after the Stripe session was created: every storefront Stripe checkout fails.
+    const result = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'STRIPE', businessId: ID.bizKeyed, returnUrl: RETURN_URL });
+    expect(result).toEqual({ paymentId: `${P}cs_store`, status: 'REDIRECT', redirectUrl: STRIPE_SESSION_URL });
     const sent = new URLSearchParams(providerRequests.find((r) => r.url.includes('api.stripe.com'))!.body);
     expect(sent.get('client_reference_id')).toBe(ID.storeOrder);
     expect(sent.get('line_items[0][price_data][currency]')).toBe('ttd');
