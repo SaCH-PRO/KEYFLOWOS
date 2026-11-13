@@ -139,7 +139,13 @@ such as a password typed into prose, passes through. So do assignments in code
 written with `:=` or `=>` (excluded so arrow functions and Go declarations are
 not mangled), a JSON string escaped twice, and a credential whose owner is
 named only in another message of the thread (the context rules read one
-message at a time). Treat every output file as sensitive: keep it local, and
+message at a time). Two more known gaps (verification on 2026-11-13): a value
+that contains spaces, such as a Google app password written in four groups
+(`SMTP_PASSWORD=abcd efgh ijkl mnop`), is redacted only up to its first space,
+so the later groups stay next to the `[REDACTED]` marker; and a value shown in
+a fenced code block under a sensitive label (`**JWT_SECRET:**` followed by a
+` ``` ` block) is not redacted at all. A `[REDACTED]` marker therefore does not
+prove the whole secret is gone. Treat every output file as sensitive: keep it local, and
 read `review-queue.md` before pasting any of it into an issue, a pull request
 or a model prompt.
 
