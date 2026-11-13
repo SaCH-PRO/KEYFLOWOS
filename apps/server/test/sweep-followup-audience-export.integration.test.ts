@@ -234,6 +234,31 @@ describe('WH3-1: binding a messaging connection is binding an export account', (
     expect((row?.providerMeta as any)?.boundBy).toBe(ID.admin);
     expect(said(res)).not.toMatch(/adminbox_oauth/);
   });
+
+  it('[SFA-WH31-BIND-03] RED-BEFORE: a PATCH that changes a messaging account (its token) rebinds it: a settings admin whose map says crm none is refused 403 and the account and its binder stay; a label change binds nothing; a settings admin who reads crm is recorded as the new binder, whatever the body names', async () => {
+    const made = await bindEmail(ID.admin, 'patchbox');
+    expect(made.status, said(made)).toBe(201);
+    const id = made.body.id as string;
+    const url = `/communications/businesses/${ID.bizA}/connections/${id}`;
+    const stored = () => db.channelConnection.findUnique({ where: { id } });
+    const before = await stored();
+
+    const refused = await send('patch', url, ID.setAdminCrmNone, { token: secret(P, 'patchbox', 'swap') });
+    expect(refused.status, said(refused)).toBe(403);
+    expect(said(refused)).toMatch(/needs crm read access/);
+    expect((await stored())?.token).toBe(before?.token);
+    expect(((await stored())?.providerMeta as any)?.boundBy).toBe(ID.admin);
+
+    const relabel = await send('patch', url, ID.setAdminCrmNone, { label: `${P}relabelled` });
+    expect(relabel.status, said(relabel)).toBe(200);
+    expect(((await stored())?.providerMeta as any)?.boundBy).toBe(ID.admin);
+
+    const rebound = await send('patch', url, ID.owner, { token: secret(P, 'patchbox', 'owner'), providerMeta: { boundBy: ID.setAdminCrmNone } });
+    expect(rebound.status, said(rebound)).toBe(200);
+    expect(((await stored())?.providerMeta as any)?.boundBy).toBe(ID.owner);
+
+    expect((await send('delete', url, ID.owner)).status).toBe(200); // the later cases send through the ADMIN's mailbox only
+  });
 });
 
 describe('WH3-1: an audience send queues only the contacts every receiver may open', () => {

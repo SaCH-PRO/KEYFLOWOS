@@ -28,8 +28,15 @@
  *         sending identity resets a verified row to 'disconnected' through the
  *         transaction client, so a failed status write rolls the config back.
  *   "connected" for a business's own config therefore means: a verified check
- *   (a smoke test that reached the provider with these credentials) passed,
+ *   (a check that reached the provider with these credentials) passed,
  *   and nothing changed the sending identity or disconnected it since.
+ *
+ * SWEEP-P0-FOLLOWUP, whatsappsmoke ruling (recommended option): POST smoke/whatsapp only REPORTS its check. It
+ * records nothing (the connector writes no verification, the registry no status), so a passed test never switches
+ * WhatsApp back on after an explicit disconnect, and the route is open to members again. A passed check is recorded
+ * by Connect and Reconnect alone (authenticate, which checks through the connector's verifyAndRecord). The cases
+ * that used a passed smoke test to make a verified row now use Connect; the race cases put that recorded check in
+ * flight; the smoke cases pin that the test reports and writes nothing.
  *
  * NO PROVIDER TRAFFIC: global fetch is replaced by a stub for every case; a
  * call the stub does not expect throws and fails the case.
@@ -259,16 +266,26 @@ async function memberView(h: ReturnType<typeof makeHarness>) {
 }
 
 /**
- * A verified smoke test's row: the business's stored Meta config checked
- * against the stubbed Graph API through the registry. Review SEC-WAH-3: a
- * hand-written 'connected' row is not one (no check vouched for the config),
- * so the cases that need a verified row make it this way. Afterwards any
- * provider call fails the case again.
+ * A verified check's row: the business's stored Meta config checked against
+ * the stubbed Graph API by Connect (POST authenticate) through the registry.
+ * Review SEC-WAH-3: a hand-written 'connected' row is not one (no check
+ * vouched for the config), so the cases that need a verified row make it this
+ * way. SWEEP-P0-FOLLOWUP (whatsappsmoke): a passed smoke test no longer makes
+ * one; Connect does. Afterwards any provider call fails the case again.
  */
 async function verifyMetaConfig(h: ReturnType<typeof makeHarness>) {
   stubFetch({ [GRAPH]: GRAPH_OK });
-  expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+  expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
   stubFetch({});
+}
+
+/**
+ * SWEEP-P0-FOLLOWUP (whatsappsmoke): the check Connect and Reconnect record through (WhatsAppConnector's private
+ * verifyAndRecord). authenticate answers only connected or not, so the race cases that pin the refusal reason put
+ * this check in flight directly; the other cases go through the registry's Connect and Reconnect.
+ */
+function recordedCheck(h: ReturnType<typeof makeHarness>) {
+  return h.connector['verifyAndRecord'](BIZ);
 }
 
 const LOG_METHODS = ['log', 'warn', 'error', 'debug', 'verbose', 'fatal'] as const;
@@ -396,7 +413,7 @@ describe('PR196-WHATSAPP-HEALTH: health reads the business\'s own config', () =>
 });
 
 describe('PR196-WHATSAPP-HEALTH: smoke checks verify the business\'s own credentials with its provider', () => {
-  it('[WAH-S1] RED-BEFORE: a Meta config with no platform env vars is verified against the Graph API with the business\'s decrypted token; on success the row reads connected and the account is the sending number', async () => {
+  it('[WAH-S1] RED-BEFORE: a Meta config with no platform env vars is verified against the Graph API with the business\'s decrypted token; the test records nothing (SWEEP-P0-FOLLOWUP whatsappsmoke), Connect records the passed check: the row reads connected and the account is the sending number', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
     const { calls } = stubFetch({ [GRAPH]: GRAPH_OK });
@@ -408,13 +425,19 @@ describe('PR196-WHATSAPP-HEALTH: smoke checks verify the business\'s own credent
     expect(calls[0].init?.headers?.Authorization).toBe(`Bearer ${META_TOKEN}`);
     expect(result).toMatchObject({ success: true, account: FROM });
     expect(leaks(result)).toEqual([]);
+    expect(h.db.status()).toBeNull();
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
+
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].init?.headers?.Authorization).toBe(`Bearer ${META_TOKEN}`);
     expect(h.db.status()).toMatchObject({ status: 'connected', connectedAccount: FROM });
     const view = await memberView(h);
     expect(view.health).toMatchObject({ status: 'connected', connectedAccount: FROM });
     expect(leaks(view)).toEqual([]);
   });
 
-  it('[WAH-S2] RED-BEFORE (4-D2): a Twilio config is verified by asking Twilio for the account (GET Accounts/{sid}.json, the business\'s decrypted SID and token); the answer carries no SID fragment and no token', async () => {
+  it('[WAH-S2] RED-BEFORE (4-D2): a Twilio config is verified by asking Twilio for the account (GET Accounts/{sid}.json, the business\'s decrypted SID and token); the answer carries no SID fragment and no token; Connect records it (the test does not)', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, TWILIO_CONFIG);
     const { calls } = stubFetch({ [TWILIO_ACCOUNT]: TWILIO_OK });
@@ -427,6 +450,11 @@ describe('PR196-WHATSAPP-HEALTH: smoke checks verify the business\'s own credent
     expect(calls[0].init?.headers?.Authorization).toBe(`Basic ${Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString('base64')}`);
     expect(result).toMatchObject({ success: true, account: FROM });
     expect(leaks(result)).toEqual([]);
+    expect(h.db.status()).toBeNull();
+
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toBe(TWILIO_ACCOUNT);
     expect(h.db.status()).toMatchObject({ status: 'connected', connectedAccount: FROM });
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
   });
@@ -531,14 +559,55 @@ describe('PR196-WHATSAPP-HEALTH: smoke checks verify the business\'s own credent
     expect(leaks(result)).toEqual([]);
     expect(leaks(h.db.status())).toEqual([]);
   });
+
+  it('[WAH-S10] RED-BEFORE (SWEEP-P0-FOLLOWUP whatsappsmoke): after an explicit disconnect a passed test says WhatsApp stays disconnected and writes nothing; health still reads disconnected until Reconnect', async () => {
+    const h = makeHarness();
+    await h.service.saveConfig(BIZ, META_CONFIG);
+    await verifyMetaConfig(h);
+    await h.registry.disconnectConnector('whatsapp', BIZ);
+    const before = structuredClone(h.db.status());
+    h.db.writes.length = 0;
+    stubFetch({ [GRAPH]: GRAPH_OK });
+
+    const result = await h.registry.smokeTestConnector('whatsapp', BIZ);
+
+    expect(result.success).toBe(true);
+    expect(result.detail).toMatch(/stays disconnected/);
+    expect(leaks(result)).toEqual([]);
+    expect(h.db.writes.filter((w) => w.op !== '$queryRaw')).toEqual([]);
+    expect(h.db.status()).toEqual(before);
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
+    expect(await h.connector.isConnected(BIZ)).toBe(false);
+
+    expect(await h.registry.reconnectConnector('whatsapp', BIZ)).toEqual({ connected: true });
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
+  });
+
+  it('[WAH-S10b] RED-BEFORE (SWEEP-P0-FOLLOWUP whatsappsmoke): on the platform path too, a passed test never lifts an explicit disconnect and writes nothing', async () => {
+    process.env.WHATSAPP_ACCESS_TOKEN = PLATFORM_TOKEN;
+    process.env.WHATSAPP_PHONE_NUMBER_ID = PLATFORM_PNID;
+    const h = makeHarness();
+    await h.registry.disconnectConnector('whatsapp', BIZ);
+    const before = structuredClone(h.db.status());
+    h.db.writes.length = 0;
+    stubFetch({ [GRAPH_PLATFORM]: { body: { verified_name: 'Platform' } } });
+
+    const result = await h.registry.smokeTestConnector('whatsapp', BIZ);
+
+    expect(result.success).toBe(true);
+    expect(result.detail).toMatch(/stays disconnected/);
+    expect(leaks(result)).toEqual([]);
+    expect(h.db.writes.filter((w) => w.op !== '$queryRaw')).toEqual([]);
+    expect(h.db.status()).toEqual(before);
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
+  });
 });
 
 describe('PR196-WHATSAPP-HEALTH: saveConfig keeps the connector status in step with the config (4-D4)', () => {
-  it('[WAH-C1] RED-BEFORE: replacing a verified config\'s credentials resets the row to disconnected through the transaction client (never connected, never the phoneNumberId), until a smoke test verifies the new ones', async () => {
+  it('[WAH-C1] RED-BEFORE: replacing a verified config\'s credentials resets the row to disconnected through the transaction client (never connected, never the phoneNumberId), until a check (Connect) verifies the new ones', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
-    stubFetch({ [GRAPH]: GRAPH_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    await verifyMetaConfig(h);
     h.db.setStatus({ ...h.db.status(), connectedAccount: PNID }); // a pre-packet row
     h.db.writes.length = 0;
 
@@ -556,8 +625,7 @@ describe('PR196-WHATSAPP-HEALTH: saveConfig keeps the connector status in step w
   it('[WAH-C2] re-saving the masked view (credentials kept, same provider, phone number id and sending number) keeps a verified status', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
-    stubFetch({ [GRAPH]: GRAPH_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    await verifyMetaConfig(h);
     h.db.writes.length = 0;
 
     await h.service.saveConfig(BIZ, { provider: 'meta', phoneNumberId: PNID, fromNumber: FROM, accessToken: '•••• 5Pf0' });
@@ -602,7 +670,7 @@ describe('PR196-WHATSAPP-HEALTH: saveConfig keeps the connector status in step w
 });
 
 describe('PR196-WHATSAPP-HEALTH: the whole cycle, as any member reads it', () => {
-  it('[WAH-F1] save, verify, disconnect, re-verify, rotate: every answer and every log line is free of the phoneNumberId, the SID and the tokens', async () => {
+  it('[WAH-F1] save, test, Connect, disconnect, test, Reconnect, rotate: every answer and every log line is free of the phoneNumberId, the SID and the tokens; a test never switches WhatsApp on (SWEEP-P0-FOLLOWUP whatsappsmoke)', async () => {
     process.env.WHATSAPP_ACCESS_TOKEN = PLATFORM_TOKEN;
     process.env.WHATSAPP_PHONE_NUMBER_ID = PLATFORM_PNID;
     const h = makeHarness();
@@ -614,6 +682,8 @@ describe('PR196-WHATSAPP-HEALTH: the whole cycle, as any member reads it', () =>
 
     stubFetch({ [GRAPH]: GRAPH_OK });
     answers.push(await h.registry.smokeTestConnector('whatsapp', BIZ));
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected'); // the test only reports
+    answers.push(await h.registry.authenticateConnector('whatsapp', BIZ));
     answers.push(await memberView(h));
     expect((answers.at(-1) as Awaited<ReturnType<typeof memberView>>).health?.status).toBe('connected');
 
@@ -622,6 +692,8 @@ describe('PR196-WHATSAPP-HEALTH: the whole cycle, as any member reads it', () =>
     expect((answers.at(-1) as Awaited<ReturnType<typeof memberView>>).health?.status).toBe('disconnected');
 
     answers.push(await h.registry.smokeTestConnector('whatsapp', BIZ));
+    expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected'); // a test never lifts the disconnect
+    answers.push(await h.registry.reconnectConnector('whatsapp', BIZ));
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
 
     await h.service.saveConfig(BIZ, TWILIO_CONFIG);
@@ -630,8 +702,11 @@ describe('PR196-WHATSAPP-HEALTH: the whole cycle, as any member reads it', () =>
 
     stubFetch({ [TWILIO_ACCOUNT]: { status: 401, body: { code: 20003, message: `Accounts/${TWILIO_SID}` } } });
     answers.push(await h.registry.smokeTestConnector('whatsapp', BIZ));
+    answers.push(await h.registry.authenticateConnector('whatsapp', BIZ));
+    expect(answers.at(-1)).toEqual({ connected: false });
     stubFetch({ [TWILIO_ACCOUNT]: TWILIO_OK });
     answers.push(await h.registry.smokeTestConnector('whatsapp', BIZ));
+    answers.push(await h.registry.authenticateConnector('whatsapp', BIZ));
     answers.push(await memberView(h));
     expect((answers.at(-1) as Awaited<ReturnType<typeof memberView>>).health?.status).toBe('connected');
 
@@ -671,11 +746,11 @@ function webhookInfoController(h: ReturnType<typeof makeHarness>) {
 }
 
 describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it checked, and only while it stands', () => {
-  it('[WAH-R1] RED-BEFORE (SEC-WAH-1, CR-PR196-3): a smoke test of the old token in flight while the owner rotates it reports failure and records nothing; the rotated token reads disconnected until a check sends it', async () => {
+  it('[WAH-R1] RED-BEFORE (SEC-WAH-1, CR-PR196-3): a check of the old token in flight while the owner rotates it reports failure and records nothing; the rotated token reads disconnected until a check sends it', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
     const held = heldProvider();
-    const smoke = h.registry.smokeTestConnector('whatsapp', BIZ);
+    const smoke = recordedCheck(h);
     await held.inFlight();
     expect(held.calls[0].init?.headers?.Authorization).toBe(`Bearer ${META_TOKEN}`);
 
@@ -690,24 +765,24 @@ describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it c
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
 
     const { calls } = stubFetch({ [GRAPH]: GRAPH_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
     expect(calls[0].init?.headers?.Authorization).toBe(`Bearer ${ROTATED}`);
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
   });
 
-  it('[WAH-R1b] RED-BEFORE (SEC-WAH-1, CR-PR196-3): with a verified row, the reset of a save made while a smoke test is in flight stands; nothing writes the row connected again', async () => {
+  it('[WAH-R1b] RED-BEFORE (SEC-WAH-1, CR-PR196-3): with a verified row, the reset of a save made while a Reconnect check is in flight stands; nothing writes the row connected again', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
     await verifyMetaConfig(h);
     const held = heldProvider();
-    const smoke = h.registry.smokeTestConnector('whatsapp', BIZ);
+    const smoke = h.registry.reconnectConnector('whatsapp', BIZ);
     await held.inFlight();
 
     await h.service.saveConfig(BIZ, { ...META_CONFIG, accessToken: ROTATED });
     expect(h.db.status()?.status).toBe('disconnected');
     held.release(GRAPH_OK);
 
-    expect((await smoke).success).toBe(false);
+    expect(await smoke).toEqual({ connected: false });
     expect(h.db.status()?.status).toBe('disconnected');
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
   });
@@ -721,7 +796,7 @@ describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it c
     });
     vi.stubGlobal('fetch', fn);
 
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(false);
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: false });
     expect(fn.mock.calls.every((c) => !JSON.stringify(c).includes(ROTATED))).toBe(true);
     expect(h.db.status()?.status ?? 'disconnected').not.toBe('connected');
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
@@ -738,12 +813,12 @@ describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it c
     expect(await h.connector.isConnected(BIZ)).toBe(false);
   });
 
-  it('[WAH-R2] RED-BEFORE (SEC-WAH-2, 4-D3): a smoke test in flight across a disconnect reports failure and the disconnect stands, also against a later \'connected\' write', async () => {
+  it('[WAH-R2] RED-BEFORE (SEC-WAH-2, 4-D3): a check in flight across a disconnect reports failure and the disconnect stands, also against a later \'connected\' write', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
     await verifyMetaConfig(h);
     const held = heldProvider();
-    const smoke = h.registry.smokeTestConnector('whatsapp', BIZ);
+    const smoke = recordedCheck(h);
     await held.inFlight();
 
     await h.registry.disconnectConnector('whatsapp', BIZ);
@@ -759,41 +834,45 @@ describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it c
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
   });
 
-  it('[WAH-R2b] RED-BEFORE (SEC-WAH-2): on the platform path too, a platform smoke test in flight across a disconnect does not undo it', async () => {
+  it('[WAH-R2b] RED-BEFORE (SEC-WAH-2): on the platform path too, a platform check in flight across a disconnect does not undo it, nor does a platform smoke test (which records nothing, SWEEP-P0-FOLLOWUP whatsappsmoke)', async () => {
     process.env.WHATSAPP_ACCESS_TOKEN = PLATFORM_TOKEN;
     process.env.WHATSAPP_PHONE_NUMBER_ID = PLATFORM_PNID;
     const h = makeHarness();
     const held = heldProvider();
+    const check = recordedCheck(h);
     const smoke = h.registry.smokeTestConnector('whatsapp', BIZ);
-    await held.inFlight();
+    await held.inFlight(2);
 
     await h.registry.disconnectConnector('whatsapp', BIZ);
+    const after = structuredClone(h.db.status());
     held.release({ body: { verified_name: 'Platform' } });
 
-    expect((await smoke).success).toBe(false);
+    expect((await check).success).toBe(false);
+    expect((await smoke).success).toBe(true); // it reports the provider's answer, and only that
+    expect(h.db.status()).toEqual(after);
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('disconnected');
   });
 
-  it('[WAH-R2c] two checks of the same config in flight together both pass and the config reads connected (the later one finds the earlier one recorded the same config)', async () => {
+  it('[WAH-R2c] two Connect checks of the same config in flight together both pass and the config reads connected (the later one finds the earlier one recorded the same config)', async () => {
     const h = makeHarness();
     await h.service.saveConfig(BIZ, META_CONFIG);
     const held = heldProvider();
-    const first = h.registry.smokeTestConnector('whatsapp', BIZ);
-    const second = h.registry.smokeTestConnector('whatsapp', BIZ);
+    const first = h.registry.authenticateConnector('whatsapp', BIZ);
+    const second = h.registry.authenticateConnector('whatsapp', BIZ);
     await held.inFlight(2);
     held.release(GRAPH_OK);
 
-    expect((await first).success).toBe(true);
-    expect((await second).success).toBe(true);
+    expect(await first).toEqual({ connected: true });
+    expect(await second).toEqual({ connected: true });
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
   });
 
-  it('[WAH-R3] RED-BEFORE (SEC-WAH-1, 4-D2/4-D4): a platform-token smoke test in flight while the owner saves a first config of the business\'s own never makes that config read connected', async () => {
+  it('[WAH-R3] RED-BEFORE (SEC-WAH-1, 4-D2/4-D4): a platform-token check in flight while the owner saves a first config of the business\'s own never makes that config read connected', async () => {
     process.env.WHATSAPP_ACCESS_TOKEN = PLATFORM_TOKEN;
     process.env.WHATSAPP_PHONE_NUMBER_ID = PLATFORM_PNID;
     const h = makeHarness();
     const held = heldProvider();
-    const smoke = h.registry.smokeTestConnector('whatsapp', BIZ);
+    const smoke = recordedCheck(h);
     await held.inFlight();
     expect(held.calls[0].url.startsWith(`${GRAPH_PLATFORM}?`)).toBe(true);
 
@@ -821,7 +900,7 @@ describe('PR196-WHATSAPP-HEALTH review: a check vouches only for the config it c
     expect(await h.connector.isConnected(BIZ)).toBe(false);
 
     const { calls } = stubFetch({ [GRAPH]: GRAPH_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
     expect(calls[0].init?.headers?.Authorization).toBe(`Bearer ${ROTATED}`);
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
   });
@@ -940,7 +1019,7 @@ describe('PR196-WHATSAPP-HEALTH review: the dashboard Connect/Reconnect and GET 
 
     h.db.writes.length = 0;
     stubFetch({ [GRAPH]: GRAPH_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
     ops = h.db.writes.map((w) => `${w.via}:${w.op}`);
     expect(ops.slice(0, 2)).toEqual(['tx:$queryRaw', 'tx:connectorStatus.upsert']);
   });
@@ -949,7 +1028,7 @@ describe('PR196-WHATSAPP-HEALTH review: the dashboard Connect/Reconnect and GET 
     const h = makeHarness();
     await h.service.saveConfig(BIZ, TWILIO_CONFIG);
     stubFetch({ [TWILIO_ACCOUNT]: TWILIO_OK });
-    expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
+    expect(await h.registry.authenticateConnector('whatsapp', BIZ)).toEqual({ connected: true });
     expect(leaks(h.db.status())).toEqual([]);
     await h.registry.disconnectConnector('whatsapp', BIZ);
     await h.service.saveConfig(BIZ, META_CONFIG);

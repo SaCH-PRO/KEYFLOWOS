@@ -100,6 +100,7 @@ import { SignatureParserService } from '../src/modules/connect/signature-parser.
 import { GoogleBusinessProfileService } from '../src/modules/connect/google-business-profile.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConnectorRegistryService } from '../src/core/connectors/connector-registry.service';
@@ -199,11 +200,51 @@ type TableName = (typeof TABLES)[number];
 
 const db = {} as Record<TableName, Table>;
 const prisma = { client: {} as Record<string, unknown> };
+
+/**
+ * SWEEP-P0-FOLLOWUP (CW3-2): the connector metadata writers merge their own keys in SQL over the row as it stands
+ * (mergeConnectorMetadata: `metadata || patch`; ConnectorFormMappingService.updateFormMappings: formMappings read
+ * FOR UPDATE, then `jsonb_set(metadata, '{formMappings}', ...)`), so nothing they did not write is written back. The
+ * stand-in answers those three statements on its connectorStatus rows, with the same effect; any other raw
+ * statement fails the case. Their concurrency (the row lock, the merge over a revoke) is proven on the database in
+ * test/sweep-followup-bindings-scope.integration.test.ts.
+ */
+function connectorRow(businessId: unknown, connectorType: unknown): Row {
+  const row = db.connectorStatus.rows.find((r) => r.businessId === businessId && r.connectorType === connectorType);
+  if (!row) throw new Error(`connectorStatus: no row for ${String(businessId)}/${String(connectorType)}`);
+  return row;
+}
+const rawSql = {
+  $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma.client),
+  $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join('?');
+    if (/SELECT metadata -> 'formMappings' AS form_mappings FROM connector_statuses[\s\S]*FOR UPDATE/.test(sql)) {
+      return [{ form_mappings: connectorRow(values[0], values[1]).metadata?.formMappings ?? null }];
+    }
+    throw new Error(`unexpected raw query in this stand-in: ${sql}`);
+  },
+  $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join('?');
+    if (/SET metadata = jsonb_set\(COALESCE\(metadata, '\{\}'::jsonb\), '\{formMappings\}'/.test(sql)) {
+      const row = connectorRow(values[1], values[2]);
+      row.metadata = { ...(row.metadata ?? {}), formMappings: JSON.parse(String(values[0])) };
+      return 1;
+    }
+    if (/SET metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \?::jsonb/.test(sql)) {
+      const row = connectorRow(values[1], values[2]);
+      row.metadata = { ...(row.metadata ?? {}), ...JSON.parse(String(values[0])) };
+      return 1;
+    }
+    throw new Error(`unexpected raw statement in this stand-in: ${sql}`);
+  },
+};
+
 function resetDb() {
   for (const name of TABLES) {
     db[name] = new Table(name);
     prisma.client[name] = db[name].model();
   }
+  Object.assign(prisma.client, rawSql);
 }
 resetDb();
 
@@ -298,6 +339,10 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      // SWEEP-P0-FOLLOWUP (CW3-2, D-181): the connector form mapping routes need settings admin now; route authority
+      // is not this suite's (proven on the database in test/sweep-followup-bindings-scope.integration.test.ts).
+      .overrideGuard(ModuleScopeGuard)
       .useValue({ canActivate: () => true })
       .compile();
     app = moduleRef.createNestApplication();
