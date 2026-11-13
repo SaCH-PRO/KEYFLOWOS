@@ -2987,9 +2987,29 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       }
     }, 60_000);
 
-    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone; the business-wide fact still reaches them', async () => {
+    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone, the SUPER_ADMIN not even rows of their own left in the business (as a non-member in buildMemoryContext); the business-wide fact still reaches them', async () => {
+      const ADMIN_SAID = 'V19C-FPS-ADMIN';
       await db.cognitionMemory.createMany({
-        data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID), fpsCognition(null, FPS.NOBODY_SAID)],
+        data: [
+          fpsCognition(ID.owner, FPS.OWNER_SAID),
+          fpsCognition(ID.member, FPS.MEMBER_SAID),
+          fpsCognition(null, FPS.NOBODY_SAID),
+          // The SUPER_ADMIN's own rows in a business they are no member of (as a removed member's are): nobody's to read.
+          fpsCognition(FPS.admin, ADMIN_SAID),
+        ],
+      });
+      await db.cortexActionLog.create({
+        data: {
+          businessId: FPS.biz,
+          userId: FPS.admin,
+          sessionId: `${P}sess_fps_admin`,
+          actionType: 'v19c.fps.admin_action',
+          status: 'success',
+          description: "v19c fps: the SUPER_ADMIN's own episode",
+        },
+      });
+      await db.aiExecutionLog.create({
+        data: { businessId: FPS.biz, userId: FPS.admin, action: 'v19c.fps.admin_exec', success: true, rationale: 'v19c fps: the SUPER_ADMIN asked' },
       });
       try {
         for (const path of PATHS) {
@@ -3003,6 +3023,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             expect(prompt, label).not.toContain(FPS.NOBODY_SAID);
             expect(prompt, label).not.toContain('v19c.fps.owner_');
             expect(prompt, label).not.toContain('v19c.fps.member_');
+            expect(prompt, label).not.toContain(ADMIN_SAID);
+            expect(prompt, label).not.toContain('v19c.fps.admin_');
             expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
             expect(prompt, label).toContain(FPS.fact);
           }
@@ -3011,6 +3033,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
         expect(outbound, 'no outbound request').toEqual([]);
       } finally {
         await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
+        await db.$executeRawUnsafe('DELETE FROM ai_execution_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
       }
     }, 60_000);
 
