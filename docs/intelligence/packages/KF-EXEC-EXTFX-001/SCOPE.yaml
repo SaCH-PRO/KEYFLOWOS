@@ -1,0 +1,34 @@
+package_id: KF-EXEC-EXTFX-001
+package_version: 1
+hardening_level: L2
+status: AUTHORIZED_FOR_BOUNDED_IMPLEMENTATION
+owner_journeys: [J23, J18]
+owner_kernels: [K7, K8, K9, K11]
+secondary_kernels: [K3, K6, K12]
+dependencies:
+  - KF-EXEC-K12-001
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+semantic_write_owners:
+  - OutboundDelivery.effect_identity
+  - OutboundDelivery.attempt_identity
+  - OutboundDelivery.provider_outcome
+  - OutboundDelivery.consequence_state
+  - DeliveryEvent.attempt_outcome_evidence
+read_only_dependencies:
+  - OutboundContent
+  - OutboundVariant
+  - ChannelDestination
+  - ChannelConnection
+  - CampaignContact
+provider_effects:
+  - RESEND_EMAIL_SEND
+schema_migration_expected: true
+migration_strategy: additive_nullable_then_cutover
+rollout_class: BOUNDED_EXTERNAL_EFFECT
+forbidden_expansion:
+  - universal WorkOccurrence table
+  - universal Attempt table
+  - generic recovery engine
+  - Gmail/Meta/Twilio idempotency
+  - broad workflow refactor

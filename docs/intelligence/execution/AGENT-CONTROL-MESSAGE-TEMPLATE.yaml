@@ -1,0 +1,68 @@
+message_id: ""
+message_type: DIRECTIVE
+packet_id: ""
+sender: chatgpt
+in_reply_to: null
+
+source_main: ""
+source_head: ""
+implementation_branch: ""
+
+state: CHARACTERIZING
+health: GREEN
+scope_changed: false
+production_touched: false
+
+summary: ""
+evidence_refs: []
+next_action: ""
+
+directive:
+  objective: ""
+  allowed_scope: []
+  prohibited_scope: []
+  invariants: []
+  proof_obligations: []
+  stop_conditions: []
+  merge_authority: false
+
+return_envelope:
+  source_drift: null
+  characterization: null
+  changed_files: []
+  schema_migrations: []
+  tests:
+    commands: []
+    discovered: []
+    passed: []
+    failed: []
+    skipped: []
+  negative_controls: []
+  provider_or_external_runs: []
+  cleanup: []
+  new_consumers_or_writers: []
+  deviations_from_packet: []
+  rollback_floor: []
+  open_questions: []
+  trust_impact:
+    domains: []
+    data_classes_touched: []
+    personal_data: false
+    sensitive_data: false
+    secrets_or_credentials: false
+    payment_or_financial_data: false
+    external_processors_or_providers: []
+    ai_action_or_inference: false
+    privacy_retention_or_deletion: false
+    security_controls_changed: []
+    new_attack_surface: []
+    required_negative_controls: []
+    evidence_refs: []
+    residual_risks: []
+  assurance:
+    domains_touched: []
+    state_changes_proposed: []
+    catastrophic_scenarios_exercised: []
+    catastrophic_disposition_changes_proposed: []
+    new_gaps: []
+    invalidated_prior_proof: []

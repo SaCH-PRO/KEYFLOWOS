@@ -1,0 +1,499 @@
+version: 1
+adopted: "2026-09-28"
+status: CANONICAL_WHOLE_SYSTEM_CENSUS
+allowed_states:
+  - UNASSESSED
+  - CHARACTERIZING
+  - CHARACTERIZED
+  - DESIGNED
+  - IMPLEMENTED_NOT_PROVEN
+  - PROVEN_AT_DECLARED_SCOPE
+  - EXTERNALLY_VERIFIED
+  - BLOCKED
+  - NOT_APPLICABLE
+
+release_policy:
+  t0_unassessed_allowed: false
+  t1_unassessed_allowed: false
+  t0_minimum_state: PROVEN_AT_DECLARED_SCOPE
+  t1_default_minimum_state: PROVEN_AT_DECLARED_SCOPE
+  unknown_or_skipped_counts_as_pass: false
+
+domains:
+  - id: IA-001
+    family: identity
+    name: authentication_integrity
+    tier: T0
+    state: CHARACTERIZED
+    owners: [AUTH_001, OPS_001]
+    proof_target: "token/session validation, invalid-token rejection, auth-bypass denial, account lifecycle"
+  - id: IA-002
+    family: identity
+    name: session_cookie_lifecycle
+    tier: T1
+    state: CHARACTERIZED
+    owners: [AUTH_001, OPS_001]
+    proof_target: "secure cookie/session fixation/logout/revocation/expiry behavior"
+  - id: IA-003
+    family: identity
+    name: mfa_privileged_access
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "MFA requirements and enforcement for privileged production/admin identities"
+  - id: IA-004
+    family: identity
+    name: account_recovery
+    tier: T1
+    state: UNASSESSED
+    owners: [AUTH_001, OPS_001]
+    proof_target: "recovery cannot bypass identity proof or leave stale sessions"
+  - id: IA-005
+    family: tenancy
+    name: tenant_genesis_and_membership
+    tier: T0
+    state: PROVEN_AT_DECLARED_SCOPE
+    owners: [TENANT_001]
+    evidence: ["PR84 checkpointed in CURRENT-STATE.yaml"]
+  - id: IA-006
+    family: tenancy
+    name: cross_tenant_data_isolation
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [TENANT_001, INTEGRATED_001]
+    proof_target: "all reachable reads/writes/files/vectors/jobs/actions reject wrong tenant"
+  - id: IA-007
+    family: authority
+    name: effective_human_authority
+    tier: T0
+    state: PROVEN_AT_DECLARED_SCOPE
+    owners: [AUTH_001]
+    evidence: ["PR85 checkpointed in CURRENT-STATE.yaml"]
+  - id: IA-008
+    family: authority
+    name: revocation_to_action_admission_freshness
+    tier: T0
+    state: CHARACTERIZING
+    owners: [ACTION_001]
+    evidence: ["AUTH transferred obligation to ACTION"]
+  - id: IA-009
+    family: privileged_access
+    name: superadmin_support_access
+    tier: T0
+    state: UNASSESSED
+    owners: [AUTH_001, OPS_001]
+    proof_target: "least privilege, explicit elevation, audit, tenant-safe support access"
+  - id: IA-010
+    family: privileged_access
+    name: production_engineer_access
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "least privilege, MFA, logging, access review, emergency path"
+  - id: IA-011
+    family: action_governance
+    name: capability_control_clearance
+    tier: T0
+    state: CHARACTERIZING
+    owners: [ACTION_001]
+    proof_target: "immutable material action identity, current control evidence, atomic claim"
+  - id: IA-012
+    family: action_governance
+    name: direct_surface_bypass_resistance
+    tier: T0
+    state: DESIGNED
+    owners: [ACTION_001, CONVO_001, VOICE_001]
+    proof_target: "voice/chat/proactive/direct tool surfaces cannot bypass clearance"
+  - id: IA-013
+    family: secrets
+    name: application_secret_storage
+    tier: T0
+    state: CHARACTERIZED
+    owners: [OPS_001]
+    proof_target: "no committed/plaintext production secrets; environment separation and access controls"
+  - id: IA-014
+    family: secrets
+    name: connector_token_encryption
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [CONNECTOR_001, OPS_001]
+    proof_target: "encrypted storage, restricted decryption, rotation, revocation, log exclusion"
+  - id: IA-015
+    family: secrets
+    name: cryptographic_key_rotation
+    tier: T1
+    state: UNASSESSED
+    owners: [CONNECTOR_001, OPS_001]
+    proof_target: "rotation without data loss; retired keys/tokens become unusable as intended"
+  - id: IA-016
+    family: appsec
+    name: input_validation_and_injection
+    tier: T0
+    state: UNASSESSED
+    owners: [INTEGRATED_001, OPS_001]
+    proof_target: "SQL/NoSQL/template/command/XSS/content injection coverage appropriate to surfaces"
+  - id: IA-017
+    family: appsec
+    name: file_upload_and_document_security
+    tier: T1
+    state: UNASSESSED
+    owners: [DELIVERYBILL_001, PUBLIC_001, OPS_001]
+    proof_target: "type/size/content/path/object ACL/malware-risk controls"
+  - id: IA-018
+    family: appsec
+    name: api_object_authorization_idor
+    tier: T0
+    state: UNASSESSED
+    owners: [INTEGRATED_001, OPS_001]
+    proof_target: "systematic BOLA/IDOR test over authenticated API surface"
+  - id: IA-019
+    family: appsec
+    name: csrf_cors_browser_boundary
+    tier: T1
+    state: UNASSESSED
+    owners: [OPS_001, UX_001]
+    proof_target: "browser credential boundary and origin policy proof"
+  - id: IA-020
+    family: async
+    name: replay_idempotency
+    tier: T0
+    state: PROVEN_AT_DECLARED_SCOPE
+    owners: [EXTFX_001, TIME_001, INGRESS_001]
+    evidence: ["EXTFX declared-scope proof checkpointed"]
+  - id: IA-021
+    family: async
+    name: concurrent_claim_exactly_once_effect
+    tier: T0
+    state: DESIGNED
+    owners: [ACTION_001, TIME_001, COMMERCE_001]
+    proof_target: "simultaneous workers/executors cannot create duplicate semantic effect"
+  - id: IA-022
+    family: async
+    name: stale_worker_process_generation
+    tier: T0
+    state: DESIGNED
+    owners: [CONNECTOR_001, TEMPORAL_002, WITHDRAW_001]
+    proof_target: "revoked/superseded generations cannot later act"
+  - id: IA-023
+    family: ingress
+    name: webhook_authenticity
+    tier: T0
+    state: DESIGNED
+    owners: [INGRESS_001]
+    proof_target: "signature, timestamp/replay, tenant/provider binding"
+  - id: IA-024
+    family: providers
+    name: external_effect_uncertainty
+    tier: T0
+    state: PROVEN_AT_DECLARED_SCOPE
+    owners: [EXTFX_001, RECOVERY_001]
+    evidence: ["EXTFX P01-P16 admitted at declared scope"]
+  - id: IA-025
+    family: providers
+    name: oauth_scope_and_generation_fencing
+    tier: T0
+    state: DESIGNED
+    owners: [CONNECTOR_001]
+    proof_target: "least scopes, revocation, stale callbacks/work rejected"
+  - id: IA-026
+    family: providers
+    name: subprocessor_inventory_and_due_diligence
+    tier: T1
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "provider purpose/data/region/security/contract register"
+  - id: IA-027
+    family: data_governance
+    name: data_inventory_and_classification
+    tier: T1
+    state: UNASSESSED
+    owners: [PRIVACY_001, OPS_001]
+    proof_target: "field/system/provider level inventory with data class and purpose"
+  - id: IA-028
+    family: data_governance
+    name: minimization_and_purpose_limitation
+    tier: T1
+    state: UNASSESSED
+    owners: [PRIVACY_001]
+    proof_target: "data collection/persistence justified and bounded"
+  - id: IA-029
+    family: data_governance
+    name: data_residency_transfer_map
+    tier: T1
+    state: UNASSESSED
+    owners: [PRIVACY_001, OPS_001]
+    proof_target: "regions, subprocessors, transfers and market restrictions known"
+  - id: IA-030
+    family: privacy
+    name: subject_access_export_correction
+    tier: T1
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [PRIVACY_001]
+    proof_target: "tenant-safe access/export/correction with completeness evidence"
+  - id: IA-031
+    family: privacy
+    name: fine_grained_deletion_and_derived_state
+    tier: T0
+    state: DESIGNED
+    owners: [KNOWLEDGE_002, PRIVACY_001]
+    evidence: ["J19 identifies derived-state invalidation gap"]
+  - id: IA-032
+    family: privacy
+    name: whole_tenant_erasure
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [PRIVACY_001]
+    proof_target: "business purge plus post-delete verification across current storage surfaces"
+  - id: IA-033
+    family: privacy
+    name: retention_and_legal_hold
+    tier: T0
+    state: DESIGNED
+    owners: [PRIVACY_001, DELIVERYBILL_001]
+    evidence: ["F218/C168 show retention delete contradiction"]
+  - id: IA-034
+    family: privacy
+    name: backup_deletion_propagation
+    tier: T1
+    state: UNASSESSED
+    owners: [PRIVACY_001, OPS_001]
+    proof_target: "backup expiry/restore cannot silently resurrect active erased data"
+  - id: IA-035
+    family: ai
+    name: prompt_tenant_context_isolation
+    tier: T0
+    state: UNASSESSED
+    owners: [KNOWLEDGE_001, CONVO_001, INTEGRATED_001]
+    proof_target: "AI retrieval/context never crosses tenant boundary"
+  - id: IA-036
+    family: ai
+    name: prompt_injection_tool_abuse
+    tier: T0
+    state: UNASSESSED
+    owners: [ACTION_001, CONVO_001, VOICE_001]
+    proof_target: "untrusted content cannot bypass capability/control/clearance"
+  - id: IA-037
+    family: ai
+    name: ai_provider_data_handling
+    tier: T1
+    state: UNASSESSED
+    owners: [KNOWLEDGE_001, OPS_001]
+    proof_target: "provider retention/training/region/contract behavior classified"
+  - id: IA-038
+    family: ai
+    name: hallucination_and_epistemic_containment
+    tier: T1
+    state: DESIGNED
+    owners: [KNOWLEDGE_001, KNOWLEDGE_002, COMMAND_001]
+    proof_target: "AI inference not promoted to canonical business truth without evidence rules"
+  - id: IA-039
+    family: ai
+    name: model_tool_action_lineage
+    tier: T1
+    state: DESIGNED
+    owners: [ACTION_001, CONVO_001, VOICE_001]
+    proof_target: "reconstruct model/context/tool/control/outcome for material action"
+  - id: IA-040
+    family: finance
+    name: cardholder_data_scope_minimization
+    tier: T0
+    state: UNASSESSED
+    owners: [FINANCE_001, COMMERCE_001, OPS_001]
+    proof_target: "actual payment flow proves no prohibited PAN/CVV persistence and defines PCI scope"
+  - id: IA-041
+    family: finance
+    name: financial_authority_and_approval
+    tier: T0
+    state: DESIGNED
+    owners: [ACTION_001, FINANCE_001]
+    proof_target: "current authority/control required for material financial action"
+  - id: IA-042
+    family: finance
+    name: ledger_cash_reconciliation
+    tier: T0
+    state: DESIGNED
+    owners: [FINANCE_001]
+    proof_target: "ledger/cash/provider state divergence detected and repairable"
+  - id: IA-043
+    family: audit
+    name: security_audit_integrity
+    tier: T1
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [ACTION_001, OPS_001]
+    proof_target: "material events complete, redacted, correlated, access-controlled and durable"
+  - id: IA-044
+    family: audit
+    name: log_secret_pii_redaction
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [OPS_001, INTEGRATED_001]
+    proof_target: "negative tests for secret/token/PII leakage across logs/traces/artifacts"
+  - id: IA-045
+    family: supply_chain
+    name: dependency_vulnerability_management
+    tier: T1
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [K12, OPS_001]
+    proof_target: "blocking policy, exception/risk acceptance, remediation SLA"
+  - id: IA-046
+    family: supply_chain
+    name: secret_scanning_push_protection
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [K12, OPS_001]
+    proof_target: "push protection and blocking behavior actually enabled"
+  - id: IA-047
+    family: supply_chain
+    name: sast_codeql
+    tier: T1
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [K12, OPS_001]
+    proof_target: "static analysis active and release-relevant findings dispositioned"
+  - id: IA-048
+    family: cicd
+    name: pipeline_and_branch_protection
+    tier: T0
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [K12, OPS_001]
+    proof_target: "required checks, protected merge, least privilege, immutable release evidence"
+  - id: IA-049
+    family: infrastructure
+    name: environment_separation
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "dev/staging/prod data/credentials/deploy boundaries"
+  - id: IA-050
+    family: infrastructure
+    name: network_and_database_exposure
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001]
+    proof_target: "public exposure, firewall/network policy, database/admin interface access"
+  - id: IA-051
+    family: infrastructure
+    name: dns_domain_email_security
+    tier: T1
+    state: UNASSESSED
+    owners: [OPS_001]
+    proof_target: "domain registrar security, DNS change control, SPF/DKIM/DMARC where applicable"
+  - id: IA-052
+    family: resilience
+    name: backup_integrity_and_restore
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "tested restore, integrity, RPO/RTO and key/secret dependencies"
+  - id: IA-053
+    family: resilience
+    name: disaster_recovery
+    tier: T0
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "regional/provider/service failure recovery procedure and exercise"
+  - id: IA-054
+    family: resilience
+    name: capacity_scaling_performance
+    tier: T1
+    state: UNASSESSED
+    owners: [OPS_001]
+    proof_target: "declared load limits, backpressure, saturation and graceful degradation"
+  - id: IA-055
+    family: resilience
+    name: runaway_cost_containment
+    tier: T1
+    state: UNASSESSED
+    owners: [ENTITLE_001, OPS_001]
+    proof_target: "AI/provider/queue/storage abuse cannot create uncontrolled spend"
+  - id: IA-056
+    family: incident
+    name: security_detection_and_alerting
+    tier: T0
+    state: UNASSESSED
+    owners: [RECOVERY_001, OPS_001]
+    proof_target: "detect account/tenant/secret/provider/security anomalies with routing"
+  - id: IA-057
+    family: incident
+    name: incident_response_and_breach_decision
+    tier: T0
+    state: UNASSESSED
+    owners: [RECOVERY_001, OPS_001, RELEASE_001]
+    proof_target: "severity, containment, evidence, impact scoping, notification decision and exercise"
+  - id: IA-058
+    family: abuse
+    name: rate_limits_and_resource_abuse
+    tier: T1
+    state: IMPLEMENTED_NOT_PROVEN
+    owners: [PUBLIC_001, OPS_001]
+    proof_target: "per-identity/tenant/IP/cost controls appropriate to public and authenticated surfaces"
+  - id: IA-059
+    family: abuse
+    name: fraud_spam_and_platform_misuse
+    tier: T1
+    state: UNASSESSED
+    owners: [PUBLIC_001, GROWTH_001, OPS_001]
+    proof_target: "abuse cases, reporting, suspension and outbound reputation protection"
+  - id: IA-060
+    family: customer_exit
+    name: export_exit_and_provider_cleanup
+    tier: T1
+    state: DESIGNED
+    owners: [PRIVACY_001, CONNECTOR_001]
+    proof_target: "portable export, revocation, provider cleanup and tenant exit evidence"
+  - id: IA-061
+    family: ux_runtime
+    name: accessibility
+    tier: T2
+    state: UNASSESSED
+    owners: [UX_001, EXPERIENCE_001]
+    proof_target: "declared WCAG target and automated/manual evidence"
+  - id: IA-062
+    family: ux_runtime
+    name: browser_device_runtime_compatibility
+    tier: T2
+    state: UNASSESSED
+    owners: [UX_001, INTEGRATED_001]
+    proof_target: "supported browser/device matrix and critical-flow proof"
+  - id: IA-063
+    family: assurance
+    name: privacy_legal_applicability
+    tier: T1
+    state: UNASSESSED
+    owners: [PRIVACY_001, RELEASE_001]
+    proof_target: "market-specific legal applicability reviewed against actual data flows"
+  - id: IA-064
+    family: assurance
+    name: customer_contract_dpa_terms_alignment
+    tier: T1
+    state: UNASSESSED
+    owners: [RELEASE_001]
+    proof_target: "terms/DPA/privacy notice match implemented behavior and subprocessors"
+  - id: IA-065
+    family: assurance
+    name: cyber_liability_and_tech_eo
+    tier: T1
+    state: UNASSESSED
+    owners: [RELEASE_001]
+    proof_target: "coverage decision, limits/exclusions/control attestations documented"
+  - id: IA-066
+    family: assurance
+    name: external_penetration_test
+    tier: T1
+    state: UNASSESSED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "independent test scope, findings, remediation and retest"
+  - id: IA-067
+    family: assurance
+    name: soc2_iso_evidence_readiness
+    tier: T2
+    state: DESIGNED
+    owners: [OPS_001, RELEASE_001]
+    proof_target: "control/evidence map from operating controls, not retroactive screenshots"
+  - id: IA-068
+    family: regulated_profiles
+    name: healthcare_hipaa_profile
+    tier: T0
+    state: NOT_APPLICABLE
+    owners: [RELEASE_001]
+    applicability_condition: "remains N/A only while KEYFLOWOS does not market/operate applicable ePHI business-associate processing"
+    reopen_trigger: "healthcare/ePHI use or US covered-entity/business-associate commitment"
