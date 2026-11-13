@@ -66,6 +66,9 @@ export default function DeliveryNotesPage() {
         setItemsJson('[{"description":"","quantity":1}]');
         setNotesInput("");
         toast.success("Delivery note created");
+      } else if (res.error) {
+        // SWEEP-P0-SCOPES second review repair (CRV-2): a refused create (storefront write) says why.
+        toast.error(res.error);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create");
@@ -82,6 +85,8 @@ export default function DeliveryNotesPage() {
       if (res.data) {
         setNotes((prev) => prev.map((n) => (n.id === id ? res.data! : n)));
         toast.success("Delivery note fulfilled");
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to fulfill");
@@ -96,6 +101,8 @@ export default function DeliveryNotesPage() {
       if (res.data) {
         setNotes((prev) => prev.map((n) => (n.id === id ? res.data! : n)));
         toast.success("Delivery note cancelled");
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to cancel");
@@ -106,7 +113,14 @@ export default function DeliveryNotesPage() {
     if (!businessId) return;
     if (!window.confirm("Are you sure? This cannot be undone.")) return;
     try {
-      await deleteDeliveryNote(businessId, id);
+      // SWEEP-P0-SCOPES second review repair (CRV-1): the api client answers a refusal (storefront
+      // write) as { error } and does not throw; a refused delete keeps the row and says why. It was
+      // removed and reported deleted whatever the server answered.
+      const res = await deleteDeliveryNote(businessId, id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       setNotes((prev) => prev.filter((n) => n.id !== id));
       toast.success("Deleted");
     } catch (e) {

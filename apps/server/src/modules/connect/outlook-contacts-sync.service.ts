@@ -20,6 +20,11 @@ import {
   type SyncPrincipals,
 } from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
+import { exportAudience } from '../../core/connectors/connector-exports';
+import { assertReceiversMayOpenContacts, contactIdsEveryReceiverMayOpen, type ExportAudience } from '../../core/auth/receiver-reads';
+
+/** The connector type whose account the push sends to and whose binder ConnectorStatus records (round 3, WPH2-1). */
+const OUTLOOK_CONTACTS = 'outlook_contacts';
 
 interface MsContact {
   id: string;
@@ -264,6 +269,8 @@ export class OutlookContactsSyncService {
     const actor = principals.actor;
     // SEC-W6CTM-3: asked once, when the run first needs to create a contact.
     let mayCreate: boolean | undefined;
+    // SWEEP-P0-SCOPES round 3 (WPH2-1): the account's binder, the receiver of every contact this run links.
+    const receivers = await exportAudience(this.prisma, businessId, OUTLOOK_CONTACTS, null);
 
     let imported = 0;
     let updated = 0;
@@ -315,7 +322,9 @@ export class OutlookContactsSyncService {
             // a tombstone deletes the linked contact only through the CRM's own
             // delete door (deleteTombstoned); one the run's members may not
             // delete is left as it is (and stays linked), reported skipped.
-            if (!(await this.deleteTombstoned(businessId, map.contactId, principals))) {
+            // Round 3 (WPH2-1): nor does the account's mailbox delete a contact
+            // its binder may not open (a link made before the binder rule).
+            if (!(await this.receiversMayOpen(businessId, receivers, map.contactId)) || !(await this.deleteTombstoned(businessId, map.contactId, principals))) {
               skipped += 1;
               refused += 1;
               continue;
@@ -377,6 +386,16 @@ export class OutlookContactsSyncService {
         }
 
         if (contactId) {
+          // SWEEP-P0-SCOPES round 3 (WPH2-1): an existing contact is linked to
+          // the account (and written from its mailbox) only when the account's
+          // binder may open it: a link is what the push sends every later edit
+          // through. One the binder may not open is left as it is (not linked),
+          // reported skipped, whoever runs the sync.
+          if (!(await this.receiversMayOpen(businessId, receivers, contactId))) {
+            skipped += 1;
+            refused += 1;
+            continue;
+          }
           // W6-CONNECT-TAG-MERGE (SEC-D92R-2; review SEC-W6CTM-2): an existing
           // contact is written only when every member of the run (the member
           // who starts it and the configuring member) may write it; one they
@@ -617,8 +636,22 @@ export class OutlookContactsSyncService {
    * Push a local KEYFLOW contact up to Outlook (bidirectional sync). Used by
    * ContactSyncService when a local edit needs to replicate. Returns the
    * external id created by Graph (or the existing one if updating).
+   *
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-1): the export
+   * receiver rule, before anything is sent. The account is whoever completed
+   * the Outlook consent (a settings admin, D-114 binding an ADMIN to an
+   * explicit map), not the sync's principals: the owner's PRIVATE contacts,
+   * linked by the owner's routine sync, went to that mailbox with every later
+   * edit. The receiver is the account's recorded binder (exportAudience: its
+   * crm read checked again now; an account bound before binders were recorded
+   * is read as a non-owner's), and the contact is sent only when the binder
+   * may open it (a contact in the trash is read by its visibility too, so its
+   * removal reaches only an account that could open it). Otherwise nothing is
+   * sent: 403, which ContactSyncService answers as not pushed.
    */
   async pushContact(businessId: string, contactId: string): Promise<string | null> {
+    const receivers = await exportAudience(this.prisma, businessId, OUTLOOK_CONTACTS, null);
+    await assertReceiversMayOpenContacts(this.prisma, businessId, receivers, [contactId], 'the Outlook account this contact would be pushed to', { includeDeleted: true });
     const token = await this.tokens.getValidAccessToken(businessId);
     const contact = await this.prisma.client.contact.findUnique({
       where: { id: contactId },
@@ -694,6 +727,11 @@ export class OutlookContactsSyncService {
       })
       .catch(() => undefined);
     return created.id;
+  }
+
+  /** Round 3 (WPH2-1): the account's binder may open the contact (in the trash too: a link to it stays the binder's question). */
+  private async receiversMayOpen(businessId: string, receivers: ExportAudience, contactId: string): Promise<boolean> {
+    return (await contactIdsEveryReceiverMayOpen(this.prisma, businessId, receivers, [contactId], { includeDeleted: true })).has(contactId);
   }
 
   /** Disconnect Outlook Contacts: clear MS tokens and mark connector_status. */

@@ -18,6 +18,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
 import { KeyConnectorService } from './key-connector.service';
 import { ConnectProviderDto, AiCommandDto } from './dto';
 import { AiGatewayCommand } from './key-connector.types';
@@ -145,6 +146,22 @@ export class KeyConnectorController {
     }
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 1 class repair (CLASS B; owner rulings D-111 and D-114): binding or removing
+   * a provider connection (its stored credentials, IntegrationConnection.authData) needs what D-111
+   * names, an OWNER or ADMIN membership (requireConnectorWriter), and settings admin as
+   * ModuleScopeGuard reads it: an explicit permission map binds an ADMIN too (D-114), so an ADMIN whose
+   * map says settings 'none' is refused, as the SEC-1 credential routes refuse them. The sync trigger
+   * and the AI command keep D-111 alone (they act through a connection, they do not bind one).
+   */
+  private async requireConnectorAdmin(
+    businessId: string,
+    user: { id?: string; role?: string } | undefined,
+  ): Promise<void> {
+    await this.requireConnectorWriter(businessId, user);
+    await assertMemberModuleLevel(this.prisma, businessId, user, 'settings', 'admin');
+  }
+
   // ── Provider Discovery ──────────────────────────────────────────────
 
   @Get('providers')
@@ -191,7 +208,7 @@ export class KeyConnectorController {
     @Req() req: Request & { user?: { id?: string; role?: string } },
   ) {
     const businessId = this.requireGuardedTenant(guardedBusinessId);
-    await this.requireConnectorWriter(businessId, req.user);
+    await this.requireConnectorAdmin(businessId, req.user);
     const userId = req.user?.id ?? '';
     const result = await this.service.connectProvider(
       businessId,
@@ -214,7 +231,7 @@ export class KeyConnectorController {
     @Req() req: Request & { user?: { id?: string; role?: string } },
   ) {
     const businessId = this.requireGuardedTenant(guardedBusinessId);
-    await this.requireConnectorWriter(businessId, req.user);
+    await this.requireConnectorAdmin(businessId, req.user);
     const userId = req.user?.id ?? '';
     await this.service.disconnectProvider(businessId, connectionId, userId);
     return { success: true, message: 'Connection removed' };

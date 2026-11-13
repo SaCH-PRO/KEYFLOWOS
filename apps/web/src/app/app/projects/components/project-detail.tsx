@@ -155,6 +155,10 @@ export function ProjectDetail({
     if (res.data) {
       onProjectUpdate(res.data);
       toast.success("Project updated");
+    } else if (res.error) {
+      // SWEEP-P0-SCOPES review repair (CR-1): a refused edit (projects write) says why.
+      toast.error(res.error);
+      return;
     }
     setEditing(false);
   };
@@ -165,12 +169,21 @@ export function ProjectDetail({
     if (res.data) {
       onProjectUpdate(res.data);
       toast.success(`Moved to ${getStageInfo(stage).label}`);
+    } else if (res.error) {
+      toast.error(res.error);
     }
   };
 
   const handleDelete = async () => {
     if (!businessId) return;
-    await deleteProject(businessId, project.id);
+    // SWEEP-P0-SCOPES review repair (CR-1): the api client answers a refusal (projects write) as
+    // { error } and does not throw; a refused delete keeps the project and says why. It was removed
+    // from the list and reported deleted whatever the server answered.
+    const res = await deleteProject(businessId, project.id);
+    if (res.error) {
+      toast.error(res.error);
+      return;
+    }
     onProjectDelete(project.id);
     toast.success("Project deleted");
   };
@@ -182,6 +195,8 @@ export function ProjectDetail({
     if (res.data) {
       onProjectUpdate(res.data);
       toast.success(newStatus === "ARCHIVED" ? "Project archived" : "Project unarchived");
+    } else if (res.error) {
+      toast.error(res.error);
     }
     setMenuOpen(false);
   };
@@ -297,7 +312,12 @@ export function ProjectDetail({
   const handleDeleteTask = useCallback(async (projectId: string, taskId: string) => {
     if (!businessId) return;
     try {
-      await deleteProjectTask(businessId, taskId);
+      // SWEEP-P0-SCOPES review repair (CR-1): a refused delete keeps the task and says why.
+      const res = await deleteProjectTask(businessId, taskId);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       onProjectUpdate({ ...project, tasks: project.tasks.filter((t) => t.id !== taskId) });
     } catch { toast.error("Failed to delete task"); }
   }, [businessId, project, onProjectUpdate]);
@@ -315,6 +335,8 @@ export function ProjectDetail({
           ...project,
           tasks: project.tasks.map((t) => (t.id === taskId ? { ...t, ...mapped } : t)),
         });
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update task"); }
   }, [businessId, project, onProjectUpdate]);
@@ -327,6 +349,8 @@ export function ProjectDetail({
         const next = [...milestones, toUiMilestone(res.data)];
         setMilestones(next);
         onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to add milestone"); }
   }, [businessId, project, milestones, onProjectUpdate]);
@@ -345,6 +369,8 @@ export function ProjectDetail({
         const next = milestones.map((m) => (m.id === id ? toUiMilestone(updated) : m));
         setMilestones(next);
         onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update milestone"); }
   }, [businessId, project, milestones, onProjectUpdate]);
@@ -352,7 +378,12 @@ export function ProjectDetail({
   const handleDeleteMilestone = useCallback(async (id: string) => {
     if (!businessId) return;
     try {
-      await deleteProjectMilestone(businessId, project.id, id);
+      // SWEEP-P0-SCOPES review repair (CR-1): a refused delete keeps the milestone and says why.
+      const res = await deleteProjectMilestone(businessId, project.id, id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       const next = milestones.filter((m) => m.id !== id);
       setMilestones(next);
       onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });

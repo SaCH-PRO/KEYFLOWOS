@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Inject, Param, Body, UseGuards, Query } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { ShopifyService } from './shopify.service';
 import { ConnectorCredentialsService } from '../../core/connectors/connector-credentials.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -13,7 +14,14 @@ export class ShopifyController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 1 class repair (finding RC-2; CLASS B): settings admin. It stores the shop
+   * domain and access token from the body as the business's Shopify credentials
+   * (ConnectorCredentialsService.setCredentials, the store POST connectors/.../credentials/:type writes
+   * under settings admin since SEC-1), so any member replaced the business's Shopify shop and token.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connect')
   async connect(
     @Param('businessId') businessId: string,

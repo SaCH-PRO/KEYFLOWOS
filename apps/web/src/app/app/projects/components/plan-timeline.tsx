@@ -40,7 +40,11 @@ import type { ProjectPlanEvent } from "@/lib/project-plans-api";
 interface PlanTimelineProps {
   events: ProjectPlanEvent[];
   planStatus: string;
-  onReorder: (updates: { eventId: string; sortOrder: number }[]) => void;
+  /**
+   * SWEEP-P0-SCOPES second review repair (CRV-2): resolves false when the server refused the new
+   * order, and the timeline puts the events back as they were (the order shown is the server's).
+   */
+  onReorder: (updates: { eventId: string; sortOrder: number }[]) => void | boolean | Promise<void | boolean>;
   onAnalyzeImpact?: (eventId: string, newSortOrder: number) => Promise<{
     canProceed: boolean;
     dependencyViolations: string[];
@@ -226,10 +230,16 @@ export function PlanTimeline({
 
     if (oldIndex === newIndex) return;
 
+    const previous = items;
     const reordered = arrayMove(items, oldIndex, newIndex);
     const updates = reordered.map((item, idx) => ({ eventId: item.id, sortOrder: idx + 1 }));
     setItems(reordered);
-    onReorder(updates);
+    // SWEEP-P0-SCOPES second review repair (CRV-2): the move is shown at once, and taken back when the
+    // server refuses it (projects write); a refused move asks for no impact analysis either.
+    if ((await onReorder(updates)) === false) {
+      setItems(previous);
+      return;
+    }
 
     // Trigger impact analysis
     if (onAnalyzeImpact) {

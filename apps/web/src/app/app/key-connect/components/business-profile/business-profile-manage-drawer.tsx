@@ -231,12 +231,18 @@ export function BusinessProfileManageDrawer({ businessId }: { businessId: string
       toast.error("No Business Profile account found");
       return;
     }
-    setActiveLocation(loc.name);
     const locationId = loc.name.replace(/^locations\//, "");
-    await apiPostSimple(
+    // SWEEP-P0-SCOPES round 2 (CW-3): the server holds this to the owner (D-99); a refused set says so,
+    // and the location that was active stays active.
+    const res = await apiPostSimple(
       `/connect/businesses/${businessId}/business-profile/active-location`,
       { accountId, locationId },
     );
+    if (res.error) {
+      toast.error(res.error);
+      return;
+    }
+    setActiveLocation(loc.name);
     toast.success(`Active location set: ${loc.title ?? loc.name}`);
   };
 

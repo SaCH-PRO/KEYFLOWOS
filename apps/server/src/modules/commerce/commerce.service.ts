@@ -1145,10 +1145,14 @@ export class CommerceService {
     return invoice;
   }
 
-  async listInvoices(businessId: string, page = 1, pageSize = 50) {
+  /**
+   * @param filter.contactId SWEEP-P0-SCOPES (browser sweep BUG-030): only that contact's invoices,
+   *   in this business (a contact's Money and Quotes & Invoices tabs); omitted: every invoice.
+   */
+  async listInvoices(businessId: string, page = 1, pageSize = 50, filter: { contactId?: string } = {}) {
     page = Math.max(page, 1);
     pageSize = Math.min(Math.max(pageSize, 1), 100);
-    const where = { businessId, deletedAt: null };
+    const where = { businessId, deletedAt: null, ...(filter.contactId ? { contactId: filter.contactId } : {}) };
     const [data, total] = await Promise.all([
       this.prisma.client.invoice.findMany({
         where,
@@ -2809,10 +2813,11 @@ export class CommerceService {
 
   // ========== QUOTES ==========
 
-  async listQuotes(businessId: string, page = 1, pageSize = 50) {
+  /** @param filter.contactId SWEEP-P0-SCOPES (BUG-030): only that contact's quotes, in this business. */
+  async listQuotes(businessId: string, page = 1, pageSize = 50, filter: { contactId?: string } = {}) {
     page = Math.max(page, 1);
     pageSize = Math.min(Math.max(pageSize, 1), 100);
-    const where = { businessId, deletedAt: null };
+    const where = { businessId, deletedAt: null, ...(filter.contactId ? { contactId: filter.contactId } : {}) };
     const [data, total] = await Promise.all([
       this.prisma.client.quote.findMany({
         where,

@@ -59,6 +59,7 @@ const ID = {
   ownerA: `${P}owner_a`, // OWNER membership of A, and A's Business.ownerId
   adminA: `${P}admin_a`, // ADMIN of A
   staffA: `${P}staff_a`, // STAFF of A, permissionScopes {}
+  adminSetNoneA: `${P}admin_setnone_a`, // ADMIN of A whose explicit map says settings 'none' (D-114: the map binds the ADMIN)
   ownerB: `${P}owner_b`, // OWNER of B
   bizA: `${P}biz_a`,
   bizB: `${P}biz_b`,
@@ -198,7 +199,7 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.ownerA, ID.adminA, ID.staffA, ID.ownerB]) {
+  for (const id of [ID.ownerA, ID.adminA, ID.staffA, ID.adminSetNoneA, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V93A Biz A', ownerId: ID.ownerA } });
@@ -207,6 +208,7 @@ beforeAll(async () => {
     [ID.ownerA, ID.bizA, 'OWNER', undefined],
     [ID.adminA, ID.bizA, 'ADMIN', undefined],
     [ID.staffA, ID.bizA, 'STAFF', {}],
+    [ID.adminSetNoneA, ID.bizA, 'ADMIN', { settings: 'none', connect: 'admin' }],
     [ID.ownerB, ID.bizB, 'OWNER', undefined],
   ] as const) {
     await db.membership.create({
@@ -298,6 +300,19 @@ describe('KeyConnectorController authority (W7-KEY-CONNECTOR-TENANT review SEC-W
     expect(await syncJobsOf(ID.bizA)).toEqual([]);
     expect(await auditOf(ID.bizA)).toEqual(auditBefore);
     expect((await auditOf(ID.bizA)).filter((r: { user_id: string }) => r.user_id === ID.staffA)).toEqual([]);
+  });
+
+  it('RED-BEFORE (SWEEP-P0-SCOPES round 1 class repair, CLASS B; D-114): an ADMIN of A whose explicit map says settings none is refused 403 on connect and disconnect (binding a provider credential is settings admin), and nothing is written', async () => {
+    const connectionsBefore = await connectionsOf(ID.bizA);
+    const auditBefore = await auditOf(ID.bizA);
+    const connect = await call('post', '/key-connector/providers/typeform/connect', { user: ID.adminSetNoneA, body: { providerKey: 'typeform', authData: { apiKey: SECRET_STAFF } } });
+    expect(connect.status).toBe(403);
+    expect(String(connect.body?.message ?? '')).toMatch(/settings requires admin access/);
+    const disconnect = await call('delete', `/key-connector/connections/${ID.connA3}`, { user: ID.adminSetNoneA });
+    expect(disconnect.status).toBe(403);
+    expectNoCredentials('connect', connect.body);
+    expect(await connectionsOf(ID.bizA)).toEqual(connectionsBefore);
+    expect(await auditOf(ID.bizA)).toEqual(auditBefore);
   });
 
   it("A's ADMIN triggers a sync, runs an AI command and disconnects A's slack connection, each acting on A and audited under the ADMIN; B's connection is untouched (positive control, OWNER or ADMIN as the tRPC keyConnector router admits)", async () => {

@@ -56,6 +56,9 @@ interface Props {
 export function ConnectorCredentialDialog({ businessId, type, open, onClose, onSaved }: Props) {
   const [schema, setSchema] = useState<CredentialSchemaResponse | null>(null);
   const [webhookInfo, setWebhookInfo] = useState<WebhookInfo | null>(null);
+  // SWEEP-P0-SCOPES review repair (SEC-1): the server's refusal of the webhook URL and secret
+  // (settings admin), shown instead of "no credentials to enter".
+  const [webhookInfoError, setWebhookInfoError] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState<string | null>(null);
@@ -66,6 +69,7 @@ export function ConnectorCredentialDialog({ businessId, type, open, onClose, onS
   const fetchSchema = useCallback(async () => {
     setLoading(true);
     setWebhookInfo(null);
+    setWebhookInfoError(null);
     const res = await apiGet<CredentialSchemaResponse>(
       `/connectors/businesses/${businessId}/credentials/${type}`,
     );
@@ -82,6 +86,7 @@ export function ConnectorCredentialDialog({ businessId, type, open, onClose, onS
         `/connectors/businesses/${businessId}/webhook-info/${type}`,
       );
       if (info.data) setWebhookInfo(info.data);
+      else if (info.error) setWebhookInfoError(info.error);
     }
     setLoading(false);
   }, [businessId, type]);
@@ -297,7 +302,13 @@ export function ConnectorCredentialDialog({ businessId, type, open, onClose, onS
                     </div>
                   )}
 
-                  {schema.fields.length === 0 && !webhookInfo && (
+                  {webhookInfoError && (
+                    <p role="alert" className="text-xs text-red-400">
+                      {webhookInfoError}
+                    </p>
+                  )}
+
+                  {schema.fields.length === 0 && !webhookInfo && !webhookInfoError && (
                     <p className="text-xs text-muted-foreground">
                       This connector has no credentials to enter.
                     </p>

@@ -3,9 +3,13 @@ import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ConnectorActivityService } from '../../core/connectors/connector-activity.service';
+import { connectorExportReads } from '../../core/connectors/connector-exports';
+import { receiverReadRefusal } from '../../core/auth/receiver-reads';
 
 interface OAuthState {
   businessId: string;
+  /** SWEEP-P0-SCOPES round 3 (WPH2-1): the member who started the consent, recorded as the account's binder. */
+  boundBy: string;
   nonce: string;
   exp: number;
 }
@@ -30,7 +34,7 @@ export class MicrosoftOAuthService {
     @Inject(ConnectorActivityService) private readonly activity: ConnectorActivityService,
   ) {}
 
-  buildAuthUrl(businessId: string): string {
+  buildAuthUrl(businessId: string, boundBy: string): string {
     if (!this.clientId) {
       throw new BadRequestException('Microsoft OAuth not configured (MICROSOFT_CLIENT_ID missing)');
     }
@@ -40,8 +44,10 @@ export class MicrosoftOAuthService {
     if (!this.stateSecret) {
       throw new BadRequestException('MICROSOFT_STATE_SECRET (or GOOGLE_STATE_SECRET) not configured');
     }
+    if (!boundBy) throw new BadRequestException('Authentication required');
     const state: OAuthState = {
       businessId,
+      boundBy,
       // Math.random() is not a cryptographic source and its output is
       // predictable from prior draws in V8. The state is HMAC-signed, so the
       // nonce is defence in depth rather than the only control — but a
@@ -62,12 +68,29 @@ export class MicrosoftOAuthService {
     return `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/authorize?${params.toString()}`;
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-1): the account this callback binds is
+   * recorded with its binder, the member the signed state names (ConnectorStatus metadata.boundBy, as
+   * ConnectorCredentialsService.setCredentials records it for the integration pushes): every push to it
+   * sends only contacts that member may open (OutlookContactsSyncService.pushContact). A state that names
+   * no binder (one signed before this repair) binds nothing, and the binder's reads are checked again here
+   * (a binder narrowed between the start and the callback binds nothing).
+   */
   async handleCallback(code: string, signedState: string) {
     const state = this.verifyState(signedState);
-    if (!state) throw new BadRequestException('Invalid or expired OAuth state');
+    if (!state || typeof state.boundBy !== 'string' || !state.boundBy) throw new BadRequestException('Invalid or expired OAuth state');
     if (!this.clientId || !this.clientSecret || !this.redirectUri) {
       throw new BadRequestException('Microsoft OAuth not configured');
     }
+    const binder = await this.prisma.client.user.findUnique({ where: { id: state.boundBy }, select: { role: true } });
+    const refusal = await receiverReadRefusal(
+      this.prisma,
+      state.businessId,
+      { id: state.boundBy, role: binder?.role ?? undefined },
+      connectorExportReads('outlook_contacts') ?? [],
+      'connecting outlook_contacts, which receives the business\'s crm records,',
+    );
+    if (refusal) throw new BadRequestException(refusal);
 
     const tokenRes = await fetch(
       `https://login.microsoftonline.com/${this.tenant}/oauth2/v2.0/token`,
@@ -135,6 +158,12 @@ export class MicrosoftOAuthService {
       error = e instanceof Error ? e.message : 'network error';
     }
 
+    const stored = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId: state.businessId, connectorType: 'outlook_contacts' } },
+      select: { metadata: true },
+    });
+    const kept = stored?.metadata && typeof stored.metadata === 'object' && !Array.isArray(stored.metadata) ? (stored.metadata as Record<string, unknown>) : {};
+    const metadata = { ...kept, boundBy: state.boundBy };
     await this.prisma.client.connectorStatus.upsert({
       where: {
         businessId_connectorType: {
@@ -151,6 +180,7 @@ export class MicrosoftOAuthService {
         lastError: ok ? null : error,
         lastErrorAt: ok ? null : new Date(),
         errorCount: ok ? 0 : 1,
+        metadata,
       },
       update: {
         status: ok ? 'connected' : 'error',
@@ -159,6 +189,7 @@ export class MicrosoftOAuthService {
         lastError: ok ? null : error,
         lastErrorAt: ok ? null : new Date(),
         ...(ok ? { errorCount: 0 } : {}),
+        metadata,
       },
     });
     await this.activity.record({

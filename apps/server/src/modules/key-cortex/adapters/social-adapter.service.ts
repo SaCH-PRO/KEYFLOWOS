@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { assertCommandActorModuleLevel } from '../../../core/auth/member-module-level';
 import { SocialService } from '../../social/social.service';
 import { SocialConnectionsService } from '../../social/social-connections.service';
 import { SocialPublishingService } from '../../social/social-publishing.service';
@@ -159,7 +160,13 @@ export class SocialAdapterService {
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
     const start = Date.now();
     switch (command.action) {
+      // SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10c): linking
+      // and unlinking a social account set or clear the business's social token (SocialConnection), the
+      // credential SocialController's routes write under settings admin since SV-2. Every KEY door reaches
+      // these actions, so the rule is applied here, on the command's human actor (a refusal throws, and
+      // KeyCortexConnectorService answers it as the connector failure shape).
       case 'connect_account': {
+        await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'settings', 'admin');
         const connected = await this.connectAccount({
           businessId: command.businessId,
           platform: command.parameters.platform as string,
@@ -169,6 +176,7 @@ export class SocialAdapterService {
         return connectorOk(command, start, connected);
       }
       case 'disconnect_account': {
+        await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'settings', 'admin');
         const disconnected = await this.disconnectAccount({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
