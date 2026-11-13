@@ -31,9 +31,14 @@
  * The table entries are constants read by trusted code. `where` is a fixed SQL
  * boolean over the table's own columns (alias `t`), never built from input;
  * every column a count reads is named in `businessColumn`, `softDeleteColumn`
- * or `whereColumns`, and none of them holds a name, an email, a phone number,
- * an amount or free text (the integration test grants a database role only
- * those columns and runs the count under it).
+ * or `whereColumns`. All of them are ids, soft-delete markers or status flags
+ * except one: `businesses.meta_data`, the JSON bag that holds the WhatsApp
+ * provider credentials and sender number, which `whatsapp.config` reads in a
+ * WHERE that tests a key's presence and extracts no value (review SEC-V61-2).
+ * No count projects anything but a business id and a number. The integration
+ * test grants a database role only those columns and runs the count under it,
+ * and runs it again without `meta_data` (whatsapp.config is then reported
+ * `unreadable`).
  */
 
 /** Where a hidden module's rows live, and which of them mean "the business uses it". */
@@ -82,7 +87,11 @@ export interface V1HiddenModule {
   readonly tables: readonly V1ModuleTable[];
   /** Informative sub-counts, reported but never deciding use. */
   readonly facets?: readonly V1ModuleTable[];
-  /** KEY (FLOW) tools that act in this module (apps/server/src/modules/ai/flow-tool-registry.ts). */
+  /**
+   * KEY (FLOW) tools that act in this module (apps/server/src/modules/ai/flow-tool-registry.ts).
+   * Every FLOW tool is either here, in one module, or in the reviewed v1 set the integration test
+   * keeps (review SEC-V61-3), so a new tool is classified before KEY-TOOL-DOMAIN-HIDE reads this.
+   */
   readonly keyTools: readonly string[];
   readonly note?: string;
 }
@@ -432,8 +441,9 @@ export const V1_HIDDEN_MODULES = [
     keyTools: [
       'structure_create_delegation_rule', 'structure_find_person', 'structure_get_org_tree', 'structure_get_stats',
       'structure_list_assignments', 'structure_list_delegation_rules', 'structure_list_job_roles', 'structure_list_org_units',
-      'structure_update_delegation_rule',
+      'structure_update_delegation_rule', 'people_org_chart',
     ],
+    note: 'people_org_chart reads the org tree and its stats (StructureService.getOrgTree, getStats).',
   },
   {
     key: 'connectors',
@@ -451,8 +461,12 @@ export const V1_HIDDEN_MODULES = [
         note: 'Gmail stays in v1, payment keys live in Getting paid, WhatsApp is its own module.',
       },
     ],
-    keyTools: [],
-    note: 'Tiles inside /app/key-connect, which v1 keeps showing Gmail only. Google Calendar sync is one of them.',
+    keyTools: ['drive_create_document', 'drive_create_folder'],
+    note:
+      'Tiles inside /app/key-connect, which v1 keeps showing Gmail only; Google Calendar sync and Google Drive are two of them. ' +
+      'The Drive tools write to Google Drive (GoogleDriveService.createFolder, createDoc). A Drive connection made through ' +
+      'the OAuth route is kept on the business row (drive_* token columns) and may have no connected connector_statuses ' +
+      'row, so it is not counted here: counting it would read a credential column.',
   },
   // ---------------------------------------------------------------- Projects and operations
   {
@@ -481,9 +495,16 @@ export const V1_HIDDEN_MODULES = [
     treatment: 'defer-v1plus',
     rulings: [HIDE],
     routes: ['/app/performance'],
-    tables: [],
+    tables: [
+      {
+        name: 'snapshots',
+        table: 'staff_performance_snapshots',
+        businessColumn: 'business_id',
+        note: 'Taken by POST /staff-performance/businesses/:id/snapshot (the page) and performance_take_snapshot; the page trends them.',
+      },
+    ],
     keyTools: ['performance_scorecard', 'performance_take_snapshot', 'performance_team_summary', 'performance_trend'],
-    note: 'Scores derived from tasks and time; no records of the business of its own.',
+    note: 'Live scores are derived from tasks and time; the saved snapshots are the history the trend shows (review UCS-COR-2).',
   },
   {
     key: 'operations',
@@ -515,7 +536,11 @@ export const V1_HIDDEN_MODULES = [
     routes: ['/app/legal'],
     tables: [],
     keyTools: [],
-    note: 'Read-out of the blueprint and the risk register; no records of its own.',
+    note:
+      'Read-out of the blueprint and the risk register. The genesis document pack it generates is document_instances rows, ' +
+      'which v1 still lists in Settings > Business profile (Documents: GET /documents/businesses/:id/instances, /app/documents ' +
+      'redirecting to /app/profile?tab=outputs) and opens at /app/documents/<id>; onboarding links them too. Hiding /app/legal ' +
+      'therefore makes none of them look gone, so they are deliberately not counted (review UCS-COR-2).',
   },
   {
     key: 'evidence',
@@ -523,7 +548,16 @@ export const V1_HIDDEN_MODULES = [
     treatment: 'defer-v1plus',
     rulings: [HIDE],
     routes: ['/app/evidence'],
-    tables: [{ name: 'evidence', table: 'evidence', businessColumn: 'business_id' }],
+    tables: [
+      {
+        name: 'evidence',
+        table: 'evidence',
+        businessColumn: 'business_id',
+        note:
+          'Only EvidenceService.submit writes here. KEY chat\'s cortex write (KeyCortexEvidenceService.createEvidence, ' +
+          'processConsciously step 11) names columns this table does not have and fails, so no row is auto-created (review UCS-COR-3).',
+      },
+    ],
     keyTools: ['evidence_list', 'evidence_submit', 'evidence_verify'],
   },
   {
@@ -553,7 +587,22 @@ export const V1_HIDDEN_MODULES = [
     treatment: 'defer-v1plus',
     rulings: [HIDE],
     routes: ['/app/goals'],
-    tables: [{ name: 'goals', table: 'business_goals', businessColumn: 'business_id' }],
+    tables: [
+      {
+        name: 'ai_goals',
+        table: 'ai_goals',
+        businessColumn: 'business_id',
+        note:
+          'What /app/goals lists and the goals_* KEY tools write: KeyCortexPlannerService behind /api/v1/cortex/goals ' +
+          '(also trigger rules and goal intents in KEY chat, which the page shows too). Review UCS-COR-1.',
+      },
+      {
+        name: 'business_goals',
+        table: 'business_goals',
+        businessColumn: 'business_id',
+        note: 'The older store: POST /ai/businesses/:id/goals (no web page calls it).',
+      },
+    ],
     keyTools: ['goals_create', 'goals_create_plan', 'goals_delete', 'goals_get', 'goals_list'],
   },
   {
@@ -703,7 +752,10 @@ export const V1_HIDDEN_MODULES = [
         businessColumn: 'id',
         where: "jsonb_typeof(t.\"meta_data\" -> 'whatsapp') = 'object'",
         whereColumns: ['meta_data'],
-        note: 'The Twilio or Meta setup WhatsAppNotificationsListener sends booking and invoice messages with. Only the key is tested; no value is read out.',
+        note:
+          'The Twilio or Meta setup WhatsAppNotificationsListener sends booking and invoice messages with. meta_data holds ' +
+          'its credentials (and other settings): the count tests the key\'s presence in a WHERE and projects no value; a ' +
+          'database role without SELECT on meta_data gets this entry under `unreadable` (review SEC-V61-2).',
       },
       { name: 'messages', table: 'whatsapp_messages', businessColumn: 'business_id' },
       { name: 'contacts', table: 'whatsapp_contacts', businessColumn: 'business_id' },

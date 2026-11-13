@@ -7,11 +7,28 @@
  *
  * v1 hides about 45 screens. A business that already keeps records in one of
  * them must not find those records apparently gone: NAV-B-HIDE shows such a
- * module read-only to that business instead. This script tells the owner
- * which live businesses have rows in which hidden module. The owner runs it
- * against production (D-148) and posts its JSON to #80: once now, again
+ * module read-only to that business instead. This script tells the owner how
+ * many live businesses have rows in which hidden module, and (on request)
+ * which. The owner runs it against production (D-148): once now, again
  * immediately before NAV-B-HIDE starts, and again before the redeploy
  * (GATE-OWNER-TEST).
+ *
+ * TWO OUTPUTS, AND WHICH ONE MAY BE POSTED
+ *
+ *   (no argument)     the aggregate: per module, how many live businesses use
+ *                     it, how many have each facet, and what this schema
+ *                     lacks. No business id. This is the output the owner
+ *                     posts to #80.
+ *   --per-business    the same counts per business id. It stays with the
+ *                     owner: never posted to #80, never committed. #80 is an
+ *                     issue of a PUBLIC repository, and a production business
+ *                     id resolves to the business's name through the public
+ *                     routes (/site/storefront/public/<slug>,
+ *                     /bookings/public/businesses/<id>/...), so a posted id
+ *                     would publish that business's payroll, contracts and
+ *                     integrations (review SEC-V61-1). NAV-B-LEGACY-SERVER
+ *                     answers per business live; nothing downstream needs the
+ *                     ids from this file.
  *
  * WHAT IT COUNTS
  *
@@ -25,10 +42,13 @@
  *    GROUP BY t."<business column>"
  *
  * so it reads only the business column, the soft-delete markers and the
- * columns a filter names (status flags), never a name, an email, a phone
- * number, an amount or free text. Its JSON carries module metadata, business
- * ids and counts only. A soft-deleted business is not counted; a row with a
- * soft-delete mark is not counted.
+ * columns a filter names. Those are ids and status flags, with one exception:
+ * whatsapp.config tests whether businesses.meta_data holds a `whatsapp` key,
+ * and meta_data is the JSON bag that also holds the WhatsApp provider
+ * credentials. That test sits in the WHERE and extracts no value; no statement
+ * projects anything but a business id and a count (review SEC-V61-2). A
+ * soft-deleted business is not counted; a row with a soft-delete mark is not
+ * counted.
  *
  * SAFETY
  *
@@ -39,8 +59,10 @@
  * is `on`. Each statement is bounded (statement_timeout 60 s, lock_timeout
  * 5 s). It makes no network call other than the database connection. A table
  * or column this database does not have (production on an older schema) is
- * reported under `absent`, not a failure. On a failure it prints only the
- * error's class and code, never the database's message.
+ * reported under `absent`, and one the database role may not read (a role
+ * granted no SELECT on businesses.meta_data, say) under `unreadable`; neither
+ * is a failure. On a failure it prints only the error's class and code, never
+ * the database's message.
  *
  * It imports the list by relative path, not through @keyflow/shared: the API
  * image deployed on the production box carries a @keyflow/shared build older
@@ -49,7 +71,8 @@
  *
  * Usage (from apps/server; reads DATABASE_URL from the environment, else the
  * repo-root .env):
- *   pnpm usage:v1-modules > v1-module-usage.json
+ *   pnpm usage:v1-modules > v1-module-usage.json                 # post this one to #80
+ *   pnpm usage:v1-modules --per-business > <a private file>      # keep this one
  *
  * Output: the JSON report on stdout; one summary line on stderr.
  * Exit status: 0 done, 1 the database read failed (nothing is written either
@@ -68,6 +91,9 @@ export interface ReadTx {
 export interface ReadDb {
   $transaction<R>(fn: (tx: ReadTx) => Promise<R>, options?: { maxWait?: number; timeout?: number }): Promise<R>;
 }
+
+/** The one argument the script takes: print the per-business report (the owner's only) instead of the aggregate. */
+export const PER_BUSINESS_FLAG = '--per-business';
 
 /** The statements that open the transaction, in order; the first one makes it read only. */
 export const READ_ONLY_PREAMBLE = [
@@ -139,11 +165,16 @@ export interface ModuleUsage {
   businesses: Array<{ businessId: string; rows: Record<string, number>; facets?: Record<string, number> }>;
   /** Entries this database cannot answer: `<name>: <table>` or `<name>: <table>.<column>`. */
   absent: string[];
+  /** Entries the database role may not read (a column without SELECT): `<name>: <table>.<column>`. */
+  unreadable: string[];
 }
 
+/** The per-business report (`--per-business`): it holds production business ids and stays with the owner. */
 export interface UsageReport {
   report: 'v1-module-usage-count';
-  formatVersion: 1;
+  formatVersion: 2;
+  scope: 'per-business';
+  notice: string;
   generatedAt: string;
   transaction: { readOnly: true; isolation: string };
   schema: { latestMigration: string | null; appliedMigrations: number | null };
@@ -153,30 +184,68 @@ export interface UsageReport {
   modules: ModuleUsage[];
 }
 
-/** Which of `tables` exist here, with their columns (pg_catalog: names only, visible whatever the role's privileges). */
-async function existingColumns(tx: ReadTx, tables: string[]): Promise<Map<string, Set<string>>> {
-  const rows = await tx.$queryRawUnsafe<Array<{ table_name: string; column_name: string }>>(
-    'SELECT c.relname AS table_name, a.attname AS column_name FROM pg_catalog.pg_class c ' +
+/** A module in the aggregate: its counts of businesses, no business id. */
+export interface AggregateModuleUsage {
+  key: string;
+  label: string;
+  treatment: string;
+  returnsIn: string | null;
+  measured: boolean;
+  businessCount: number;
+  /** Facet name -> live businesses with that facet above zero (modules with facets only). */
+  facetBusinessCounts?: Record<string, number>;
+  absent: string[];
+  unreadable: string[];
+}
+
+/** The aggregate report (the default): module-level counts only, the output the owner posts to #80. */
+export interface AggregateUsageReport extends Omit<UsageReport, 'scope' | 'modules'> {
+  scope: 'aggregate';
+  modules: AggregateModuleUsage[];
+}
+
+export const PER_BUSINESS_NOTICE =
+  'Holds production business ids, which the public routes resolve to business names. The owner keeps this file ' +
+  'privately: never post it to #80 (an issue of a public repository) and never commit it. Post the aggregate ' +
+  '(the run without --per-business) instead.';
+
+export const AGGREGATE_NOTICE =
+  'Module-level counts only: no business id. This is the output to post to #80; the per-business ids stay with the owner.';
+
+/** A column of one of the tables the list names: whether this database has it and whether this role may read it. */
+type ColumnAccess = Map<string, Map<string, { readable: boolean }>>;
+
+/**
+ * Which of `tables` exist here, with their columns and whether the current role
+ * may SELECT each one (pg_catalog: names and privileges only, visible whatever
+ * the role's privileges; no data is read).
+ */
+async function existingColumns(tx: ReadTx, tables: string[]): Promise<ColumnAccess> {
+  const rows = await tx.$queryRawUnsafe<Array<{ table_name: string; column_name: string; readable: boolean }>>(
+    "SELECT c.relname AS table_name, a.attname AS column_name, has_column_privilege(c.oid, a.attnum, 'SELECT') AS readable " +
+      'FROM pg_catalog.pg_class c ' +
       'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
       'JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid ' +
       "WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped " +
       'AND c.relname = ANY($1::text[])',
     tables,
   );
-  const out = new Map<string, Set<string>>();
+  const out: ColumnAccess = new Map();
   for (const r of rows) {
-    if (!out.has(r.table_name)) out.set(r.table_name, new Set());
-    out.get(r.table_name)!.add(r.column_name);
+    if (!out.has(r.table_name)) out.set(r.table_name, new Map());
+    out.get(r.table_name)!.set(r.column_name, { readable: r.readable === true });
   }
   return out;
 }
 
-/** The reason an entry cannot be counted here, or null when it can. */
-function absence(entry: V1ModuleTable, have: Map<string, Set<string>>): string | null {
+/** Why an entry cannot be counted here (`absent`: not in this schema; `unreadable`: no SELECT), or null when it can. */
+function absence(entry: V1ModuleTable, have: ColumnAccess): { kind: 'absent' | 'unreadable'; text: string } | null {
   const columns = have.get(entry.table);
-  if (!columns) return `${entry.name}: ${entry.table}`;
+  if (!columns) return { kind: 'absent', text: `${entry.name}: ${entry.table}` };
   const missing = columnsOf(entry).find((c) => !columns.has(c));
-  return missing ? `${entry.name}: ${entry.table}.${missing}` : null;
+  if (missing) return { kind: 'absent', text: `${entry.name}: ${entry.table}.${missing}` };
+  const closed = columnsOf(entry).find((c) => !columns.get(c)!.readable);
+  return closed ? { kind: 'unreadable', text: `${entry.name}: ${entry.table}.${closed}` } : null;
 }
 
 async function countEntry(tx: ReadTx, entry: V1ModuleTable): Promise<Map<string, number>> {
@@ -220,13 +289,14 @@ export async function countModuleUsage(
   const usage: ModuleUsage[] = [];
   for (const m of modules) {
     const absent: string[] = [];
+    const unreadable: string[] = [];
     const tableCounts = new Map<string, Map<string, number>>();
     const facetCounts = new Map<string, Map<string, number>>();
     for (const [entries, into] of [[m.tables, tableCounts], [m.facets ?? [], facetCounts]] as const) {
       for (const entry of entries) {
         const why = absence(entry, have);
         if (why) {
-          absent.push(why);
+          (why.kind === 'absent' ? absent : unreadable).push(why.text);
           continue;
         }
         into.set(entry.name, await countEntry(tx, entry));
@@ -250,18 +320,55 @@ export async function countModuleUsage(
       businessCount: businesses.length,
       businesses,
       absent,
+      unreadable,
     });
   }
 
   return {
     report: 'v1-module-usage-count',
-    formatVersion: 1,
+    formatVersion: 2,
+    scope: 'per-business',
+    notice: PER_BUSINESS_NOTICE,
     generatedAt: now.toISOString(),
     transaction: { readOnly: true, isolation: state.isolation },
     schema: { latestMigration, appliedMigrations },
     liveBusinesses: Number(live?.n ?? 0),
     summary: Object.fromEntries(usage.map((u) => [u.key, u.measured ? u.businessCount : null])),
     modules: usage,
+  };
+}
+
+/**
+ * The aggregate of a per-business report: the same counts with every business
+ * id dropped. A facet becomes the number of businesses with it above zero.
+ */
+export function aggregateReport(report: UsageReport): AggregateUsageReport {
+  return {
+    report: report.report,
+    formatVersion: report.formatVersion,
+    scope: 'aggregate',
+    notice: AGGREGATE_NOTICE,
+    generatedAt: report.generatedAt,
+    transaction: report.transaction,
+    schema: report.schema,
+    liveBusinesses: report.liveBusinesses,
+    summary: report.summary,
+    modules: report.modules.map((m) => {
+      const facetNames = [...new Set(m.businesses.flatMap((b) => Object.keys(b.facets ?? {})))];
+      return {
+        key: m.key,
+        label: m.label,
+        treatment: m.treatment,
+        returnsIn: m.returnsIn,
+        measured: m.measured,
+        businessCount: m.businessCount,
+        ...(facetNames.length
+          ? { facetBusinessCounts: Object.fromEntries(facetNames.map((f) => [f, m.businesses.filter((b) => (b.facets?.[f] ?? 0) > 0).length])) }
+          : {}),
+        absent: m.absent,
+        unreadable: m.unreadable,
+      };
+    }),
   };
 }
 
@@ -285,8 +392,12 @@ export async function main(
 ): Promise<number> {
   const error: Log = deps.error ?? console.error;
   const out = deps.out ?? ((text: string) => void process.stdout.write(text));
-  if (argv.length > 0) {
-    error('Bad arguments (this script takes none). Usage: v1-module-usage-count > v1-module-usage.json');
+  const perBusiness = argv.length === 1 && argv[0] === PER_BUSINESS_FLAG;
+  if (argv.length > 0 && !perBusiness) {
+    error(
+      `Bad arguments (it takes none, or ${PER_BUSINESS_FLAG} alone). Usage: v1-module-usage-count > v1-module-usage.json ` +
+        `(the aggregate, to post to #80), or v1-module-usage-count ${PER_BUSINESS_FLAG} > <a private file> (business ids: the owner's only)`,
+    );
     return 2;
   }
   const database = deps.db ?? (db as unknown as ReadDb);
@@ -298,12 +409,17 @@ export async function main(
     else error(`The usage count failed: ${describeFailure(err)}. Nothing was written (the transaction is read only).`);
     return 1;
   }
-  out(`${JSON.stringify(report, null, 2)}\n`);
+  out(`${JSON.stringify(perBusiness ? report : aggregateReport(report), null, 2)}\n`);
   const used = report.modules.filter((m) => m.businessCount > 0).length;
   const absent = report.modules.reduce((n, m) => n + m.absent.length, 0);
+  const unreadable = report.modules.reduce((n, m) => n + m.unreadable.length, 0);
   error(
     `v1 module usage count (read only): ${report.liveBusinesses} live businesses; ${used} of ${report.modules.length} hidden modules in use` +
-      (absent ? `; ${absent} table(s) absent from this schema` : ''),
+      (absent ? `; ${absent} table(s) absent from this schema` : '') +
+      (unreadable ? `; ${unreadable} count(s) unreadable by this database role` : '') +
+      (perBusiness
+        ? '. This is the per-business report: it holds business ids; keep it private and never post it to #80.'
+        : '. Aggregate (no business id): this is the output to post to #80.'),
   );
   return 0;
 }
