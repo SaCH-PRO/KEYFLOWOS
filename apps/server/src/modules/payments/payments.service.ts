@@ -64,8 +64,35 @@ type PaypalWebhookCredentials = {
   clientId: string | null;
   clientSecret: string | null;
   webhookId: string | null;
+  /** W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-1): the business whose own settings these values are. */
+  businessId: string;
   storefrontBusinessId?: string;
 };
+
+/**
+ * W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-1): the PayPal app a webhook was verified with. `businessId` is the
+ * business whose own PayPal settings verified it (resolvePaypalBusinessCreds), or null for the platform's app (the
+ * env). `store` is set when that business is a storefront order's store, verified with its own complete set only
+ * (D-138). Every capture the event carries is settled only for what that app may settle: a storefront order of that
+ * store (maybeCompleteStorefrontOrder), an invoice whose business takes PayPal with that app (paypalAppOfInvoice).
+ */
+type PaypalVerifier = { businessId: string | null; store: boolean };
+
+/** The platform's PayPal app (the env): what a direct call of the capture processors stands for, as before. */
+const PLATFORM_PAYPAL_VERIFIER: PaypalVerifier = Object.freeze({ businessId: null, store: false });
+
+/**
+ * The business's own PayPal settings, as a PayPal webhook naming one of its invoices is verified with them
+ * (resolvePaypalBusinessCreds): each of the three values it saved, or null when it saved none of them (the platform's
+ * app then verifies, and is the app its invoice pay link takes PayPal with: paypalConfigured, as built).
+ */
+function ownPaypalSettings(meta: unknown): { clientId: string | null; clientSecret: string | null; webhookId: string | null } | null {
+  const m = (meta as Record<string, any> | null) ?? {};
+  const clientId = (m.paypalClientId as string | undefined) || null;
+  const clientSecret = (m.paypalClientSecret as string | undefined) || null;
+  const webhookId = (m.paypalWebhookId as string | undefined) || null;
+  return clientId || clientSecret || webhookId ? { clientId, clientSecret, webhookId } : null;
+}
 
 /**
  * V1-15c review (SEC-V15C-2, CR-V15C-1): the aborts of a payment transaction
@@ -1257,7 +1284,9 @@ export class PaymentsService {
     // Verify signature using a webhook endpoint secret. Prefer the global env
     // secret (one shared Stripe webhook endpoint per deployment); fall back to
     // a per-business secret stored in business.metaData.stripeWebhookSecret
-    // when an invoice can be resolved from the event.
+    // when an invoice can be resolved from the event, or to a store's own
+    // complete Stripe set's webhook secret when it names a storefront order
+    // (W11-STORE-OWN-PAYMENT-KEYS review, D-138).
     const candidateInvoiceId: string | undefined =
       obj?.metadata?.invoiceId ||
       obj?.client_reference_id ||
@@ -1281,6 +1310,24 @@ export class PaymentsService {
       if (inv && businessSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
         signatureOk = true;
         signedForBusinessId = inv.businessId;
+      } else if (!inv && signatureHeader) {
+        // W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-2, OPK-COR-1; D-138): a storefront Stripe session is made on
+        // the store's own account (createStorePayment), so that account's event naming the order is verified with the
+        // store's own webhook secret, from its complete set only (storeStripeCredentials), and speaks for that store
+        // only. Another store's secret, or a store's secret beside a platform key, never verifies it.
+        const order: { businessId: string; business: { metaData: unknown } | null } | null = await Promise.resolve()
+          .then(() =>
+            this.prisma.client.marketplaceOrder.findUnique({
+              where: { id: candidateInvoiceId },
+              select: { businessId: true, business: { select: { metaData: true } } },
+            }),
+          )
+          .catch(() => null);
+        const own = order ? storeStripeCredentials(order.business?.metaData) : null;
+        if (order && own && this.verifyStripeSignature(rawPayload, signatureHeader, own.webhookSecret)) {
+          signatureOk = true;
+          signedForBusinessId = order.businessId;
+        }
       }
     }
 
@@ -1367,7 +1414,10 @@ export class PaymentsService {
    *
    * Storefront order O (createStorePayment): the door settles O for its whole
    * total, so the event must name O in metadata.orderId and O's business in
-   * metadata.businessId and carry exactly O's total in O's currency.
+   * metadata.businessId and carry exactly O's total in O's currency. Since
+   * W11-STORE-OWN-PAYMENT-KEYS (D-138) it must also be signed by the account
+   * O's session is made on: a store's own secret (O's store only), or, for a
+   * store with no complete Stripe set of its own, the platform's (as built).
    *
    * Anything else is refused (400) before the dedupe claim, so nothing is
    * written, and the refusal is kept as one webhook_events row under
@@ -1418,13 +1468,22 @@ export class PaymentsService {
 
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id },
-      select: { id: true, businessId: true, total: true, currency: true },
+      select: { id: true, businessId: true, total: true, currency: true, business: { select: { metaData: true } } },
     });
     if (!order) return;
+    // W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-2, SEC-W11OPK-3; D-138): a delivery a store's own secret signed
+    // speaks for that store only, and a store holding its own complete Stripe set has its sessions made on its own
+    // account (createStorePayment), so a platform-signed event naming its order is not its session's. The order of a
+    // store with no Stripe of its own is still settled by a platform-signed session, as built (required Release 0
+    // case MP-06d; a deviation recorded for an owner ruling).
+    const foreignSigner =
+      signedForBusinessId !== null
+        ? signedForBusinessId !== order.businessId
+        : storeStripeCredentials(order.business?.metaData) !== null;
     const reason =
       obj.metadata?.orderId !== order.id
         ? 'order'
-        : namedBusiness !== order.businessId
+        : foreignSigner || namedBusiness !== order.businessId
           ? 'business'
           : currency === '' || currency !== normalizeCurrency(order.currency)
             ? 'currency'
@@ -2001,12 +2060,18 @@ export class PaymentsService {
     // W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront order resolves to its
     // store's own PayPal app only (never the env), and only a store's own app
     // settles that store's orders (maybeCompleteStorefrontOrder).
+    // Review repair (SEC-W11OPK-1): the app is chosen from the first purchase
+    // unit, but every captured unit is settled, so each one is settled only for
+    // what that app may settle (an invoice: paypalAppOfInvoice).
     const businessCreds = await this.resolvePaypalBusinessCreds(event.resource || {});
     const verified = await this.verifyPaypalSignature(headers, rawPayload, sandbox, businessCreds ?? undefined);
     if (!verified) {
       throw new BadRequestException('Invalid PayPal webhook signature');
     }
-    const verifiedStore = businessCreds?.storefrontBusinessId ?? null;
+    const verifier: PaypalVerifier = {
+      businessId: businessCreds?.businessId ?? null,
+      store: Boolean(businessCreds?.storefrontBusinessId),
+    };
 
     const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
       'paypal',
@@ -2025,7 +2090,7 @@ export class PaymentsService {
     return this.underProviderEventClaim<WebhookAck>('paypal', event.id, async () => {
       switch (eventType) {
         case 'PAYMENT.CAPTURE.COMPLETED':
-          await this.processPaypalCaptureCompleted(resource, event.id, verifiedStore);
+          await this.processPaypalCaptureCompleted(resource, event.id, verifier);
           return { ok: true, received: true, processed: eventType };
         case 'CHECKOUT.ORDER.COMPLETED':
           // For ORDER.COMPLETED, resource.id is the *order* id, not the
@@ -2033,7 +2098,7 @@ export class PaymentsService {
           // Persist a Payment row per capture so refund linkage (which keys on
           // capture id) keeps working, and idempotency stays intact even if
           // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
-          await this.processPaypalOrderCompleted(resource, event.id, verifiedStore);
+          await this.processPaypalOrderCompleted(resource, event.id, verifier);
           return { ok: true, received: true, processed: eventType };
         case 'PAYMENT.CAPTURE.REFUNDED':
         case 'PAYMENT.CAPTURE.REVERSED':
@@ -2058,12 +2123,23 @@ export class PaymentsService {
       where: { id: link.businessId },
       select: { metaData: true },
     }).catch(() => null);
-    const meta = (business?.metaData as Record<string, any> | null) ?? {};
-    const clientId = (meta.paypalClientId as string | undefined) ?? null;
-    const clientSecret = (meta.paypalClientSecret as string | undefined) ?? null;
-    const webhookId = (meta.paypalWebhookId as string | undefined) ?? null;
-    if (!clientId && !clientSecret && !webhookId) return null;
-    return { clientId, clientSecret, webhookId };
+    const own = ownPaypalSettings(business?.metaData);
+    return own ? { ...own, businessId: link.businessId } : null;
+  }
+
+  /**
+   * W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-1): the PayPal app an invoice of this business is settled by: the
+   * business's own when it saved any PayPal setting of its own (a webhook naming its invoice is verified with them,
+   * resolvePaypalBusinessCreds), else the platform's (null; the invoice pay link's PayPal, as built). A failed read
+   * throws, so the delivery's claim is given back and PayPal redelivers it (V1-15c) rather than the capture being
+   * refused for a read that did not happen.
+   */
+  private async paypalAppOfInvoice(businessId: string): Promise<string | null> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    return ownPaypalSettings(business?.metaData) ? businessId : null;
   }
 
   /**
@@ -2101,6 +2177,7 @@ export class PaymentsService {
       clientId: own?.clientId ?? null,
       clientSecret: own?.clientSecret ?? null,
       webhookId: storePaypalWebhookId(order.business?.metaData),
+      businessId: order.businessId,
       storefrontBusinessId: order.businessId,
     };
   }
@@ -2111,7 +2188,7 @@ export class PaymentsService {
    * resource.id is the order id (not a capture id), so persisting it
    * directly would create a row that refund events cannot link to.
    */
-  private async processPaypalOrderCompleted(resource: any, eventId?: string, verifiedStore: string | null = null): Promise<void> {
+  private async processPaypalOrderCompleted(resource: any, eventId?: string, verifier: PaypalVerifier = PLATFORM_PAYPAL_VERIFIER): Promise<void> {
     const orderId: string | undefined = resource?.id;
     const purchaseUnits: any[] = Array.isArray(resource?.purchase_units) ? resource.purchase_units : [];
     const captures: any[] = [];
@@ -2135,7 +2212,7 @@ export class PaymentsService {
       return;
     }
     for (const cap of captures) {
-      await this.processPaypalCaptureCompleted(cap, eventId, verifiedStore);
+      await this.processPaypalCaptureCompleted(cap, eventId, verifier);
     }
   }
 
@@ -2169,7 +2246,9 @@ export class PaymentsService {
     return null;
   }
 
-  private async processPaypalCaptureCompleted(resource: any, eventId?: string, verifiedStore: string | null = null): Promise<void> {
+  private async processPaypalCaptureCompleted(resource: any, eventId?: string, verifier: PaypalVerifier = PLATFORM_PAYPAL_VERIFIER): Promise<void> {
+    // D-138: a storefront order is settled by PayPal only for its own store, verified with that store's own app.
+    const verifiedStore = verifier.store ? verifier.businessId : null;
     const captureId: string | undefined = resource?.id;
     if (!captureId) {
       this.logger.warn('PayPal capture completed event missing capture id');
@@ -2207,6 +2286,21 @@ export class PaymentsService {
         currency: resource?.amount?.currency_code,
       }, verifiedStore);
       if (completed) return;
+      return;
+    }
+
+    // W11-STORE-OWN-PAYMENT-KEYS review (SEC-W11OPK-1): the app that verified the webhook was chosen from the event's
+    // first purchase unit, and this capture may be a later unit's. It is recorded for the invoice only when that app
+    // is the one the invoice's business takes PayPal with (its own settings, else the platform's): one business's own
+    // app (a storefront order's store, or an invoice's business) never settles another business's invoice with money
+    // paid into its own account, and the platform's app never settles the invoice of a business with its own PayPal.
+    const invoiceApp = await this.paypalAppOfInvoice(invoice.businessId);
+    if (invoiceApp !== verifier.businessId) {
+      this.logger.error(
+        `PayPal capture ${captureId} for invoice ${invoice.id} not recorded: the webhook was verified with ` +
+          `${verifier.businessId ? `business ${verifier.businessId}'s own` : "the platform's"} PayPal app, not the one ` +
+          `business ${invoice.businessId} takes PayPal with (SEC-W11OPK-1)`,
+      );
       return;
     }
 

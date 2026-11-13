@@ -33,7 +33,11 @@
  * PaymentsService.resolvePaypalBusinessCreds). Before D-138 each credential
  * came from the settings or else the env, one by one, so the platform's PayPal
  * / Stripe, alone or beside one of the store's own keys, counted as the
- * store's.
+ * store's. Review repair (SEC-W11OPK-2, OPK-COR-1): the storefront Stripe
+ * settlement too: the store's own account's event naming its order is verified
+ * with storeStripeCredentials(...).webhookSecret (PaymentsService.
+ * handleStripeWebhook), and a platform-signed one does not settle the order of
+ * a store holding its own complete set (bindStripePaymentEvent).
  *
  * The invoice pay link is NOT changed by D-138 here: paypalConfigured and
  * stripeConfigured below are its reading (PaymentsService.getAvailableGateways
