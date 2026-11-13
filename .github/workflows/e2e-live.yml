@@ -35,14 +35,32 @@ name: E2E Live (Release 0 journey)
 # The API runs with NODE_ENV=test, HIBP_DISABLED=true, no schedulers and no
 # provider key of any kind outside the ai-on job (journey legs tagged
 # @scheduler run in GATE-SCHEDULER-RUN, @staging legs on the staging stack).
-# The traces, the API log and the journeys' 3G timing records are uploaded
-# whether the run passes or fails.
+#
+# Three Playwright steps, each writing its own --output folder (Playwright
+# empties its output folder when a run starts, so a shared one would lose the
+# earlier step's traces):
+#   release0-live.spec.ts        required; its traces are uploaded as their own
+#                                artifact, release0-live-trace-<variant> (R0-25
+#                                closedBy evidence)
+#   the journey harness self-check (e2e/journeys/harness-self-check.spec.ts)
+#                                required
+#   the v1 journeys (e2e/journeys/, less @harness)
+#                                a RED report until the packets that fix them
+#                                land: the step continues on error, so the job's
+#                                verdict stays Release 0's, unless dispatched with
+#                                journeys_required (GATE-JOURNEY-RUN)
+# The job summary names each step's verdict. The traces, the API log and the
+# journeys' 3G timing records are uploaded whether the run passes or fails.
 
 on:
   workflow_dispatch:
     inputs:
       ai_on:
         description: 'Also run the ai-on variant (staging authority for provider traffic; e2e-ai-on environment, capped key)'
+        type: boolean
+        default: false
+      journeys_required:
+        description: 'Fail the job when a v1 journey fails (GATE-JOURNEY-RUN); otherwise the journeys are a RED report and Release 0 decides the job'
         type: boolean
         default: false
 
@@ -186,9 +204,10 @@ jobs:
         run: cd apps/web && pnpm exec playwright install --with-deps chromium
 
       # release0-live.spec.ts is closedBy evidence: it runs unedited, on both
-      # projects, in every variant, and must pass.
+      # projects, in every variant, and must pass. Its own output folder.
       - name: Run the Release 0 live journey (phone + desktop)
-        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop
+        id: release0
+        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop --output=test-results/release0-live
         env:
           E2E_LIVE: '1'
           # The standalone server the build above produced (next.config.ts
@@ -197,16 +216,59 @@ jobs:
           E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
 
-      # The v1 journeys (red until the packets that fix them land; their
-      # failing steps are the gate's RED report). Runs whether or not the
-      # Release 0 step passed, so one run reports both.
-      - name: Run the journey specs (phone + desktop)
+      - name: Upload the Release 0 trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release0-live-trace-${{ matrix.variant }}
+          path: |
+            apps/web/test-results/release0-live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # The harness's own guarantees (every person's browser watched, no
+      # session for a customer, members refused by scope): required.
+      - name: Check the journey harness (phone + desktop)
+        id: harness
         if: ${{ !cancelled() }}
-        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --project=phone --project=desktop
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/harness-self-check.spec.ts --project=phone --project=desktop --output=test-results/journey-harness
         env:
           E2E_LIVE: '1'
           E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
+
+      # The v1 journeys: red until the packets that fix them land, and their
+      # failing steps are the gate's RED report, so this step does not decide
+      # the job unless dispatched with journeys_required. Runs whether or not
+      # the steps above passed, so one run reports all three.
+      - name: Run the journey specs (phone + desktop; RED report unless journeys_required)
+        id: journeys
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ !inputs.journeys_required }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --grep-invert @harness --project=phone --project=desktop --output=test-results/journeys
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Report the verdicts
+        if: always()
+        run: |
+          {
+            echo "### ${E2E_VARIANT}: Release 0 and the v1 journeys (phone + desktop)"
+            echo "- Release 0 live journey (release0-live.spec.ts, required): ${R0_OUTCOME:-not run}"
+            echo "- Journey harness self-check (required): ${HARNESS_OUTCOME:-not run}"
+            if [ "$JOURNEYS_REQUIRED" = "true" ]; then
+              echo "- v1 journeys (required in this run): ${JOURNEYS_OUTCOME:-not run}"
+            else
+              echo "- v1 journeys (RED report, not required: dispatch with journeys_required to require them): ${JOURNEYS_OUTCOME:-not run}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          R0_OUTCOME: ${{ steps.release0.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          JOURNEYS_OUTCOME: ${{ steps.journeys.outcome }}
+          JOURNEYS_REQUIRED: ${{ inputs.journeys_required }}
 
       - name: Upload traces, timings and API log
         if: always()
@@ -214,7 +276,9 @@ jobs:
         with:
           name: journeys-${{ matrix.variant }}
           path: |
-            apps/web/test-results/
+            apps/web/test-results/release0-live/
+            apps/web/test-results/journey-harness/
+            apps/web/test-results/journeys/
             ${{ runner.temp }}/api.log
           retention-days: 14
           if-no-files-found: warn
@@ -337,19 +401,60 @@ jobs:
         run: cd apps/web && pnpm exec playwright install --with-deps chromium
 
       - name: Run the Release 0 live journey (phone + desktop)
-        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop
+        id: release0
+        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop --output=test-results/release0-live
         env:
           E2E_LIVE: '1'
           E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
 
-      - name: Run the journey specs (phone + desktop)
+      - name: Upload the Release 0 trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release0-live-trace-ai-on
+          path: |
+            apps/web/test-results/release0-live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Check the journey harness (phone + desktop)
+        id: harness
         if: ${{ !cancelled() }}
-        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --project=phone --project=desktop
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/harness-self-check.spec.ts --project=phone --project=desktop --output=test-results/journey-harness
         env:
           E2E_LIVE: '1'
           E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Run the journey specs (phone + desktop; RED report unless journeys_required)
+        id: journeys
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ !inputs.journeys_required }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --grep-invert @harness --project=phone --project=desktop --output=test-results/journeys
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Report the verdicts
+        if: always()
+        run: |
+          {
+            echo "### ai-on: Release 0 and the v1 journeys (phone + desktop)"
+            echo "- Release 0 live journey (release0-live.spec.ts, required): ${R0_OUTCOME:-not run}"
+            echo "- Journey harness self-check (required): ${HARNESS_OUTCOME:-not run}"
+            if [ "$JOURNEYS_REQUIRED" = "true" ]; then
+              echo "- v1 journeys (required in this run): ${JOURNEYS_OUTCOME:-not run}"
+            else
+              echo "- v1 journeys (RED report, not required: dispatch with journeys_required to require them): ${JOURNEYS_OUTCOME:-not run}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          R0_OUTCOME: ${{ steps.release0.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          JOURNEYS_OUTCOME: ${{ steps.journeys.outcome }}
+          JOURNEYS_REQUIRED: ${{ inputs.journeys_required }}
 
       - name: Upload traces, timings and API log
         if: always()
@@ -357,7 +462,9 @@ jobs:
         with:
           name: journeys-ai-on
           path: |
-            apps/web/test-results/
+            apps/web/test-results/release0-live/
+            apps/web/test-results/journey-harness/
+            apps/web/test-results/journeys/
             ${{ runner.temp }}/api.log
           retention-days: 14
           if-no-files-found: warn

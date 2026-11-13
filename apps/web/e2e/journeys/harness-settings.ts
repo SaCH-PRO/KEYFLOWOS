@@ -191,3 +191,97 @@ export const KEY_UI: ReadonlyArray<{ what: string; role: "button" | "link" | "he
 
 /** A fixture name with the run's prefix, for rows found later by prefix (README: fixtures). */
 export const JOURNEY_PREFIX = "v62j_";
+
+// ── what every browser in a journey did (review SEC-GH-1, SEC-GH-2) ───────
+
+/** An API call a browser context made, as the watch records it. */
+export interface ApiCall {
+  method: string;
+  url: string;
+  status: number;
+}
+
+/**
+ * The API calls that named a business other than the ones `businessIds` holds
+ * (`/businesses/<id>/` paths), as release0-live.spec.ts callsNamingAnotherBusiness
+ * reads them, ported unchanged but for the list: the literal segment "slug"
+ * (a by-slug lookup) is not an id, and an id is compared decoded. Each call
+ * once, as "<status> <method> <path>". A 403 or 404 counts: the defect is the
+ * browser naming the business (M09: the custom-field form read biz_demo, refused).
+ */
+export function callsNamingAnotherBusiness(apiCalls: readonly ApiCall[], businessIds: string | Iterable<string>): string[] {
+  const allowed = new Set(typeof businessIds === "string" ? [businessIds] : businessIds);
+  const out: string[] = [];
+  for (const c of apiCalls) {
+    const path = new URL(c.url).pathname;
+    const m = path.match(/\/businesses\/([^/]+)/);
+    if (m && m[1] !== "slug" && !allowed.has(decodeURIComponent(m[1]))) out.push(`${c.status} ${c.method} ${path}`);
+  }
+  return [...new Set(out)];
+}
+
+/** What one watched browser context did, and the businesses its browser may name. */
+export interface WatchedCalls {
+  /** Who the context is in the journey: "owner", "customer 1", a person's label. */
+  who: string;
+  businessIds: readonly string[];
+  offHost: readonly string[];
+  serverErrors: readonly string[];
+  apiCalls: readonly ApiCall[];
+}
+
+export type FindingKind = "left localhost" | "5xx" | "named another business";
+
+/** Something a journey's browser did that fails the journey. */
+export interface JourneyFinding {
+  kind: FindingKind;
+  who: string;
+  line: string;
+}
+
+/**
+ * Every finding across every watched context, in context order: a request
+ * that left localhost, a 5xx (the R0-07 503 provider_not_configured is not one;
+ * the watch records it apart), and an API call naming a business the context
+ * is not on. Each journey fails on any of them (journey-helpers.ts journeyWatch).
+ */
+export function journeyWatchFindings(contexts: readonly WatchedCalls[]): JourneyFinding[] {
+  const out: JourneyFinding[] = [];
+  for (const c of contexts) {
+    for (const line of c.offHost) out.push({ kind: "left localhost", who: c.who, line });
+    for (const line of c.serverErrors) out.push({ kind: "5xx", who: c.who, line });
+    for (const line of callsNamingAnotherBusiness(c.apiCalls, c.businessIds)) out.push({ kind: "named another business", who: c.who, line });
+  }
+  return out;
+}
+
+/** One line per finding: "<who>: <kind>: <line>". */
+export function describeFinding(f: JourneyFinding): string {
+  return `${f.who}: ${f.kind}: ${f.line}`;
+}
+
+/**
+ * The findings that fail the test, and the declared ones that were not raised.
+ * A journey declares nothing, so every finding fails it. Only the harness
+ * self-check (SELF_CHECK_SPEC) declares the findings it provokes on purpose
+ * (its negative controls), and each declared one must then be raised.
+ */
+export function sortFindings(findings: readonly JourneyFinding[], declared: readonly RegExp[]): { unexpected: JourneyFinding[]; missing: string[] } {
+  const lines = findings.map(describeFinding);
+  return {
+    unexpected: findings.filter((_, i) => !declared.some((re) => re.test(lines[i]))),
+    missing: declared.filter((re) => !lines.some((line) => re.test(line))).map(String),
+  };
+}
+
+/** The one spec that may declare findings (journey-helpers.ts option watchSelfCheck). */
+export const SELF_CHECK_SPEC = /[\\/]e2e[\\/]journeys[\\/]harness-self-check\.spec\.ts$/;
+
+/**
+ * The session a customer's browser starts from: none. Playwright fills every
+ * context option a test omits from the test's own, so a context made inside a
+ * journey without storageState starts signed in as the owner (review GH-COR-2).
+ */
+export function anonymousStorageState(): { cookies: []; origins: [] } {
+  return { cookies: [], origins: [] };
+}

@@ -10,8 +10,9 @@ GATE-JOURNEY-RUN.
 | File | What it is |
 |---|---|
 | `harness-settings.ts` | The rules, with no Playwright runtime: variants, projects, leg tags, the production-build check, the 3G profile and budget, the KEY UI markers, the fixture prefix. Pinned by `src/__tests__/journey-harness.test.ts`. |
-| `journey-helpers.ts` | The `test` journeys import (fixtures: a fresh tenant per test, signed in; the stack preflight; the off-host and 5xx watch) and the shared helpers. |
+| `journey-helpers.ts` | The `test` journeys import (fixtures: a fresh tenant per test, signed in; the stack preflight; the watch on every browser the journey makes) and the shared helpers. |
 | `smoke.spec.ts` | The harness end to end: Today for a fresh owner, no KEY UI under KEY_DISABLED, nothing covering a primary button, Today's 3G load timing. |
+| `harness-self-check.spec.ts` | The harness's own guarantees, live (tag `@harness`): a customer has no session, a bare `browser.newContext()` is refused, a member is refused by module scope and not tenancy, and negative controls showing the watch raises an off-host request, a 5xx and another business named, from any person's browser. Required in CI. |
 | `../release0-live.spec.ts` | The Release 0 live journey (closedBy evidence). It runs in the journey projects unedited and must pass in every variant. |
 
 ## Two projects
@@ -80,20 +81,41 @@ test("the customer pays on /pay/link with WiPay", { tag: "@staging" }, async ({ 
   `@scheduler` legs and run in GATE-SCHEDULER-RUN. `controlledClock()` pins the
   browser's clock only; the server's clock belongs to that run.
 - **No provider traffic.** Outside the `ai-on` job the API gets no provider key
-  of any kind (an `env -i` allow-list), and every journey fails on a browser
-  request that leaves localhost and on any 5xx (the R0-07 503
-  `provider_not_configured` of an optional service is recorded, not a
-  failure).
+  of any kind (an `env -i` allow-list), and every journey fails on a request
+  that leaves localhost and on any 5xx from any browser it makes: the owner's
+  page, and every customer, second tenant or member made through the helpers
+  below (the R0-07 503 `provider_not_configured` of an optional service is
+  recorded, not a failure).
 - **No production, no staging data.** The API and web must be local (the
   preflight refuses anything else).
+
+## The watch: every browser in a journey
+
+The automatic `journeyWatch` fixture watches the owner's page and every
+context the helpers below make, and fails the journey, naming who did it, on:
+
+- a request that leaves localhost (a font, an analytics call, a provider);
+- a 5xx (the R0-07 503 `provider_not_configured` is recorded, not a failure);
+- an API call naming a business the context is not on: `/businesses/<id>/`
+  with an id other than the context's own (release0-live.spec.ts
+  `callsNamingAnotherBusiness`, ported to `harness-settings.ts`; "no
+  allowance": a 403 or 404 counts, since the defect is the screen naming
+  another or a stale business). A customer's browser may name the journey's
+  business (the owner's). A leg that names another business on purpose
+  declares it with `allowBusinessNamed(context, businessId, why)`, recorded as
+  a `tenancy-allowance` annotation.
+
+Inside a journey, `browser.newContext()` and `browser.newPage()` are refused.
+Playwright fills every context option a test leaves out from the test's own,
+and a journey's `storageState` is the owner's session, so a bare context would
+start signed in as the owner, and the watch would not see it.
 
 ## Helpers (`journey-helpers.ts`)
 
 - `test`: fixtures `owner` (a fresh onboarded tenant per test; `page` starts
   signed in to it), `tenantOptions` (set per file with `test.use`), `stack`
-  (the per-worker preflight) and an automatic watch that fails the test on an
-  off-host request or a 5xx. Without `E2E_LIVE=1` every journey is skipped
-  with that reason.
+  (the per-worker preflight) and the automatic watch above. Without
+  `E2E_LIVE=1` every journey is skipped with that reason.
 - `freshTenant(request, label, { onboard, currency, sells, timezone, businessName })`:
   a new user and business through `POST /identity/bootstrap`, then, with
   `onboard` (default), the two routes the manual onboarding form uses. Journey A
@@ -102,8 +124,23 @@ test("the customer pays on /pay/link with WiPay", { tag: "@staging" }, async ({ 
   onboarding answer, stored where BIZ-SETTINGS-SERVER keeps it
   (`Business.metaData.sells`) and read back.
 - Currency: `currency: "TTD" | "USD"` on the tenant (TTD by default).
-- `signedInContext(browser, tenant, baseURL)`: a second person (a member, a
-  second tenant) in their own context.
+- `anonymousContext(browser, { who?, ...context options })`: a customer's
+  browser, with no session at all (an explicit empty `storageState`), watched.
+  Use it for every customer leg: quote acceptance (D), `/pay/link` (E),
+  booking (F), the store (G).
+- `memberOf(request, owner, label, { role, scopes, maxApprovalTier })`: a
+  member of the owner's business, for the authority legs (D-71/D-146 module
+  scopes, the D-11 owner-only rules, journey J's staff limits, K's member
+  gate). The owner invites a newly signed-in user with the role (`STAFF` by
+  default, or `ADMIN`) and, if given, an explicit scope map (a module it leaves
+  out is `none`). The API then refuses the member by module scope
+  ("Insufficient permissions: ..."), never by tenancy. A second tenant from
+  `freshTenant` is not a member: the API refuses it with "No access to this
+  business", which proves nothing about scopes.
+- `signedInContext(browser, person, { who?, ...context options })`: a browser
+  signed in as a member (from `memberOf`) or another tenant (from
+  `freshTenant`), on that person's business, watched.
+- `allowBusinessNamed(context, businessId, why)`: see the watch above.
 - `controlledClock(page, at)`: pins the browser clock before the page loads.
 - `recordLoadTiming(page, testInfo, label, url, ready)`: loads `url` on Chrome's
   3G preset with the cache off and records the time until `ready` holds against
@@ -130,8 +167,17 @@ its own).
 
 CI: `.github/workflows/e2e-live.yml` (manual dispatch). Each variant job
 builds the server and the web, boots the API with that variant's environment,
-then runs `release0-live.spec.ts` and this folder on both projects, and uploads
-the traces, the timings and the API log.
+then runs three Playwright steps on both projects, each into its own folder
+(`--output`, since Playwright empties its output folder when a run starts):
+
+| Step | Output | Verdict |
+|---|---|---|
+| `release0-live.spec.ts` | `test-results/release0-live` | Required. Uploaded as its own artifact, `release0-live-trace-<variant>` (the R0-25 closedBy evidence). |
+| `harness-self-check.spec.ts` | `test-results/journey-harness` | Required. |
+| this folder, less the self-check (`--grep-invert @harness`) | `test-results/journeys` | A RED report: the step continues on error, so it does not decide the job, unless the run is dispatched with `journeys_required` (GATE-JOURNEY-RUN). |
+
+The job summary names each step's verdict. The journeys' artifact
+(`journeys-<variant>`) holds every folder, the timings and the API log.
 
 Locally, with the API started as e2e-live.yml starts it (the database of its
 own, `NODE_ENV=test`, `AI_DISABLED=1`, `DISABLE_SCHEDULERS=1`,
@@ -153,6 +199,16 @@ Playwright did not download).
 
 `smoke.spec.ts` is red until SWP-LAYERS (the KEY bubble and the Genome banner
 unmounted, one z-index layer contract) and SWP-KEY-SHELL-SMOKE (no KEY UI under
-KEY_DISABLED; the drawer never opens by itself) land. The journey specs are red
-until the packets that fix their steps land. A red journey is the gate's
-report, not a reason to skip it.
+KEY_DISABLED; the drawer never opens by itself) land. What it reports at the
+GATE-HARNESS base:
+
+- under KEY_DISABLED, on both projects: the KEY UI that renders (the "Talk to
+  KEY" bubble, the drawer opening by itself, the header's "Ask KEY", Today's
+  KEY doors);
+- in every variant, the calendar New event sheet's "Create" is covered: on the
+  phone (375x812) by the Mobile navigation bar, on the desktop (1440x900) by
+  the KEY bubble (sweep BUG-004, a 1440x900 finding). At 375px the bubble
+  renders but covers neither button the smoke checks.
+
+The journey specs are red until the packets that fix their steps land. A red
+journey is the gate's report, not a reason to skip it.

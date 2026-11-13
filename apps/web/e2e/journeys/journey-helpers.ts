@@ -5,21 +5,30 @@ import {
   type APIRequestContext,
   type Browser,
   type BrowserContext,
+  type BrowserContextOptions,
   type Locator,
   type Page,
   type TestInfo,
 } from "@playwright/test";
 import { createHmac } from "node:crypto";
-import { liveSessionState } from "../helpers/workspace";
+import { e2eBaseURL, liveSessionState } from "../helpers/workspace";
 import {
   JOURNEY_PREFIX,
   KEY_UI,
   LOAD_BUDGET_MS,
+  SELF_CHECK_SPEC,
   THROTTLE_3G,
+  anonymousStorageState,
+  describeFinding,
   describeTiming,
   devBuildSigns,
+  journeyWatchFindings,
   nextBuildIdOf,
   parseVariant,
+  sortFindings,
+  type ApiCall,
+  type FindingKind,
+  type JourneyFinding,
   type JourneyVariant,
   type LoadTiming,
 } from "./harness-settings";
@@ -39,12 +48,21 @@ import {
  * Before the first journey of a worker, the stack is checked (preflight):
  * the API answers, the API and web are local, the web is a production build
  * (`next build` output, so feature flags take production values), and the API
- * runs the variant E2E_VARIANT names. Throughout every journey: no request
- * leaves localhost and no 5xx (the R0-07 503 provider_not_configured of an
- * optional service is recorded, not a failure, as in release0-live.spec.ts).
+ * runs the variant E2E_VARIANT names. Throughout every journey, in every
+ * browser context it makes (the owner's page, and each customer, second tenant
+ * or member made through anonymousContext, signedInContext and memberOf): no
+ * request leaves localhost, no 5xx (the R0-07 503 provider_not_configured of an
+ * optional service is recorded, not a failure, as in release0-live.spec.ts),
+ * and the browser names no business other than the one that context is on
+ * (release0-live.spec.ts callsNamingAnotherBusiness, "no allowance"; a leg that
+ * names another on purpose declares it with allowBusinessNamed). A bare
+ * browser.newContext() is refused inside a journey: Playwright would start it
+ * signed in as the owner, and the watch would not see it.
  */
 
 export { expect } from "@playwright/test";
+export { callsNamingAnotherBusiness, describeFinding } from "./harness-settings";
+export type { JourneyFinding } from "./harness-settings";
 
 export const LIVE = process.env.E2E_LIVE === "1";
 export const API_URL = (process.env.E2E_API_URL ?? "http://localhost:3001").replace(/\/+$/, "");
@@ -176,9 +194,159 @@ export async function seedBusinessType(request: APIRequestContext, tenant: Tenan
   tenant.sells = sells;
 }
 
-/** A browser context signed in as `tenant`, on its business (workspace.ts liveSessionState), for a second person. */
-export async function signedInContext(browser: Browser, tenant: Tenant, baseURL: string): Promise<BrowserContext> {
-  return browser.newContext({ storageState: liveSessionState(tenant.token, tenant.businessId, baseURL) });
+// ── the other people in a journey ─────────────────────────────────────────
+
+/** Anyone with a session: the owner, another tenant, a member of the owner's business. */
+export interface Person {
+  label: string;
+  token: string;
+  /** The business their session is on (kf_business_id). */
+  businessId: string;
+}
+
+/** The member roles an owner can invite (the API refuses OWNER). */
+export type MemberRole = "ADMIN" | "STAFF";
+
+export interface MemberOptions {
+  /** STAFF by default. */
+  role?: MemberRole;
+  /**
+   * An explicit module scope map (D-71, D-146), e.g. { team: "read" }; a module
+   * it leaves out is `none`. Omitted: the role's defaults (STAFF: read on most
+   * modules, none on settings, team and ai).
+   */
+  scopes?: Record<string, string>;
+  maxApprovalTier?: number;
+}
+
+/** A member of the owner's business: their session is on the owner's business, with a role and module scopes. */
+export interface Member extends Person {
+  sub: string;
+  email: string;
+  role: MemberRole;
+  /** The scope map the membership stores (the role's defaults, written out, when none was asked for). */
+  scopes: Record<string, string> | null;
+  membershipId: string;
+  /** The business their own first sign-in made (POST /identity/bootstrap always makes one); not the one they work on. */
+  ownBusinessId: string;
+}
+
+/**
+ * A member of `owner`'s business, for the authority legs (D-71/D-146 module
+ * scopes, the D-11 owner-only rules, journey J's staff limits, K's member
+ * gate). A new user signs in (POST /identity/bootstrap, which gives every new
+ * user a business of their own, left aside here), then the owner invites that
+ * address with the role and scopes asked for (POST
+ * /identity/businesses/:id/team, the Team screen's route), which makes the
+ * membership at once for an address that already has an account. Read back:
+ * the member's token opens the owner's business (GET
+ * /identity/businesses/:id). Sign them in with signedInContext(browser, member):
+ * their session is on the owner's business, so the API refuses them by module
+ * scope ("Insufficient permissions"), never by tenancy ("No access to this
+ * business"). A second freshTenant() is not a member: it is another tenant.
+ */
+export async function memberOf(request: APIRequestContext, owner: Tenant, label: string, options: MemberOptions = {}): Promise<Member> {
+  const role = options.role ?? "STAFF";
+  const person = await freshTenant(request, label, { onboard: false });
+  const invite = await request.post(`${API_URL}/identity/businesses/${owner.businessId}/team`, {
+    headers: auth(owner.token),
+    data: {
+      email: person.email,
+      role,
+      ...(options.scopes ? { scopes: options.scopes } : {}),
+      ...(options.maxApprovalTier === undefined ? {} : { maxApprovalTier: options.maxApprovalTier }),
+    },
+  });
+  const text = await invite.text();
+  expect(invite.status(), `${owner.label} invites ${label} as ${role}: ${text}`).toBe(201);
+  const membership = JSON.parse(text) as { id: string; userId: string; role: string; permissionScopes?: Record<string, string> | null };
+  expect({ userId: membership.userId, role: membership.role }, `the membership ${label} was given`).toEqual({ userId: person.sub, role });
+  const read = await request.get(`${API_URL}/identity/businesses/${owner.businessId}`, { headers: auth(person.token) });
+  expect(read.status(), `${label} opens ${owner.label}'s business as a member: ${await read.text()}`).toBe(200);
+  return {
+    label,
+    sub: person.sub,
+    email: person.email,
+    token: person.token,
+    businessId: owner.businessId,
+    role,
+    scopes: membership.permissionScopes ?? null,
+    membershipId: membership.id,
+    ownBusinessId: person.businessId,
+  };
+}
+
+/** Options for a context the harness makes: any Playwright context option but the session, plus how the watch names it. */
+export type JourneyContextOptions = Omit<BrowserContextOptions, "storageState"> & {
+  /** How the run's findings name this context (default "customer <n>", or the person's label). */
+  who?: string;
+};
+
+/**
+ * A customer's browser: a context with no session at all (no cookie, nothing
+ * stored), watched like the owner's page. Use it for every leg a customer
+ * walks: quote acceptance (D), /pay/link (E), booking (F), the store (G). Its
+ * browser may name the journey's business (the owner's: public pages read
+ * /bookings/public/businesses/<id>/..., for instance); a page that names it
+ * another way (a slug in an id's place) is declared with allowBusinessNamed.
+ * Never browser.newContext(): inside a journey Playwright starts that one
+ * signed in as the owner, and the watch does not see it.
+ */
+export async function anonymousContext(browser: Browser, options: JourneyContextOptions = {}): Promise<BrowserContext> {
+  const journey = journeyInProgress("anonymousContext");
+  const { who, ...contextOptions } = options;
+  const context = await newWatchedContext(browser, { ...contextOptions, storageState: anonymousStorageState() });
+  return enlist(journey, context, who ?? `customer ${++journey.customers}`, [journey.owner.businessId], true);
+}
+
+/**
+ * A browser signed in as `person` (another tenant from freshTenant, a member
+ * from memberOf), on `person.businessId` (workspace.ts liveSessionState),
+ * watched like the owner's page: its browser may name only that business.
+ * The third argument may still be a base URL string (the harness's first
+ * version); by default the project's base URL is used.
+ */
+export async function signedInContext(
+  browser: Browser,
+  person: Person,
+  options: JourneyContextOptions | string = {},
+): Promise<BrowserContext> {
+  const journey = journeyInProgress("signedInContext");
+  const opts: JourneyContextOptions = typeof options === "string" ? { baseURL: options } : options;
+  const { who, ...contextOptions } = opts;
+  const baseURL = contextOptions.baseURL ?? journey.baseURL;
+  const context = await newWatchedContext(browser, {
+    ...contextOptions,
+    storageState: liveSessionState(person.token, person.businessId, baseURL),
+  });
+  return enlist(journey, context, who ?? person.label, [person.businessId], true);
+}
+
+/**
+ * Declares that `context` (the test's own `context`, or one the harness made)
+ * names `businessId` on purpose, for a leg that probes another tenant's
+ * business (release0-live.spec.ts forces tenant A's id into tenant B's
+ * session). Recorded as a "tenancy-allowance" annotation with the reason; any
+ * other business that context names still fails the journey.
+ */
+export function allowBusinessNamed(context: BrowserContext, businessId: string, why: string): void {
+  const journey = journeyInProgress("allowBusinessNamed");
+  if (!why.trim()) throw new Error("allowBusinessNamed needs the reason this leg names another business");
+  const watched = journey.contexts.find((c) => c.context === context);
+  if (!watched) throw new Error("allowBusinessNamed: this context is not one the journey watches (the test's own, or one from anonymousContext / signedInContext)");
+  watched.businessIds.add(businessId);
+  journey.testInfo.annotations.push({ type: "tenancy-allowance", description: `${watched.who} may name business ${businessId}: ${why.trim()}` });
+}
+
+/**
+ * Every finding the watch has raised so far in this journey, across every
+ * context, as journeyWatch's teardown will judge them (each fails the journey).
+ * For the harness self-check; a journey has no need to read it.
+ */
+export async function watchFindingsSoFar(): Promise<JourneyFinding[]> {
+  const journey = journeyInProgress("watchFindingsSoFar");
+  await Promise.all(journey.contexts.map((c) => settled(c.watch)));
+  return journeyWatchFindings(journey.contexts.map(asWatchedCalls));
 }
 
 // ── what the browser did ──────────────────────────────────────────────────
@@ -187,12 +355,22 @@ export interface Watch {
   offHost: string[];
   serverErrors: string[];
   optionalUnavailable: string[];
-  apiCalls: Array<{ method: string; url: string; status: number }>;
+  apiCalls: ApiCall[];
+}
+
+/** The response handlers of each watch still reading a body. */
+const inFlight = new WeakMap<Watch, Set<Promise<void>>>();
+
+/** Resolves once every response the watch has seen so far is recorded. */
+async function settled(w: Watch): Promise<void> {
+  await Promise.allSettled([...(inFlight.get(w) ?? [])]);
 }
 
 /** Records, per context, requests that left localhost, 5xx answers and API calls (release0-live.spec.ts watch). */
 export function watch(context: BrowserContext): Watch {
   const w: Watch = { offHost: [], serverErrors: [], optionalUnavailable: [], apiCalls: [] };
+  const pending = new Set<Promise<void>>();
+  inFlight.set(w, pending);
   context.on("request", (req) => {
     if (!isLocal(req.url())) w.offHost.push(`${req.method()} ${req.url()}`);
   });
@@ -201,22 +379,92 @@ export function watch(context: BrowserContext): Watch {
       if (!isLocal(ws.url())) w.offHost.push(`WS ${ws.url()}`);
     });
   });
-  context.on("response", async (res) => {
+  context.on("response", (res) => {
     const url = res.url();
     if (url.startsWith(`${API_URL}/`)) w.apiCalls.push({ method: res.request().method(), url, status: res.status() });
     if (res.status() < 500) return;
     const line = `${res.status()} ${res.request().method()} ${url}`;
-    let code: unknown;
-    try {
-      code = ((await res.json()) as { code?: unknown } | null)?.code;
-    } catch {
-      code = undefined;
-    }
-    if (res.status() === 503 && code === "provider_not_configured") w.optionalUnavailable.push(line);
-    else w.serverErrors.push(line);
+    const recorded = (async () => {
+      let code: unknown;
+      try {
+        code = ((await res.json()) as { code?: unknown } | null)?.code;
+      } catch {
+        code = undefined;
+      }
+      if (res.status() === 503 && code === "provider_not_configured") w.optionalUnavailable.push(line);
+      else w.serverErrors.push(line);
+    })();
+    pending.add(recorded);
+    void recorded.finally(() => pending.delete(recorded));
   });
   return w;
 }
+
+// ── the journey in progress: every context it watches ─────────────────────
+
+interface WatchedContext {
+  who: string;
+  context: BrowserContext;
+  watch: Watch;
+  /** The businesses this context's browser may name: its own, plus any allowBusinessNamed declares. */
+  businessIds: Set<string>;
+  /** Made by the harness (closed at the end of the test); the owner's is Playwright's. */
+  harnessMade: boolean;
+}
+
+interface JourneyInProgress {
+  owner: Tenant;
+  baseURL: string;
+  testInfo: TestInfo;
+  contexts: WatchedContext[];
+  customers: number;
+}
+
+/** The journey this worker is running (a worker runs one test at a time); set by journeyWatch. */
+let current: JourneyInProgress | null = null;
+
+function journeyInProgress(helper: string): JourneyInProgress {
+  if (!current) {
+    throw new Error(`${helper}() works inside a journey test only (\`test\` from journey-helpers.ts, live): the harness watches the contexts it makes for the test`);
+  }
+  return current;
+}
+
+function enlist(journey: JourneyInProgress, context: BrowserContext, who: string, businessIds: string[], harnessMade: boolean): BrowserContext {
+  if (journey.contexts.some((c) => c.who === who)) throw new Error(`two contexts in one journey are both called "${who}"; give one another \`who\``);
+  journey.contexts.push({ who, context, watch: watch(context), businessIds: new Set(businessIds), harnessMade });
+  return context;
+}
+
+const asWatchedCalls = (c: WatchedContext) => ({
+  who: c.who,
+  businessIds: [...c.businessIds],
+  offHost: c.watch.offHost,
+  serverErrors: c.watch.serverErrors,
+  apiCalls: c.watch.apiCalls,
+});
+
+/**
+ * The refusal a bare browser.newContext() / browser.newPage() meets inside a
+ * journey (review GH-COR-2, SEC-GH-1): Playwright fills every option a test
+ * omits from the test's own, so it would start signed in as the owner; and the
+ * watch would not see it.
+ */
+const BARE_CONTEXT_REFUSED =
+  "a journey makes other people's browsers with anonymousContext() (a customer), signedInContext() (another tenant, a member) or memberOf() then signedInContext() (journey-helpers.ts): " +
+  "a bare browser.newContext() or browser.newPage() would start signed in as the owner (the journey's storageState) and is not watched";
+
+/** browser.newContext as Playwright defines it, past the journey's refusal. */
+function newWatchedContext(browser: Browser, options: BrowserContextOptions): Promise<BrowserContext> {
+  const proto = Object.getPrototypeOf(browser) as Browser;
+  return proto.newContext.call(browser, options);
+}
+
+const FINDING_MESSAGE: Record<FindingKind, string> = {
+  "left localhost": "requests that left localhost (every context of the journey)",
+  "5xx": "5xx responses (every context of the journey)",
+  "named another business": "API calls naming a business other than the context's own (release0-live.spec.ts: no allowance)",
+};
 
 // ── preflight ─────────────────────────────────────────────────────────────
 
@@ -307,8 +555,24 @@ interface JourneyFixtures {
   tenantOptions: TenantOptions;
   /** A fresh onboarded tenant for this test, and the session the page starts signed in to. */
   owner: Tenant;
-  /** The page's context, watched; the test fails on a request off localhost or a 5xx. */
+  /**
+   * The watch on the owner's page (its context), and, through the helpers, on
+   * every context the journey makes; the test fails on any request off
+   * localhost, any 5xx, and any API call naming a business the context is not on.
+   */
   journeyWatch: Watch;
+  /**
+   * The findings a harness negative control provokes on purpose (`provokes`:
+   * patterns over describeFinding lines). Only
+   * e2e/journeys/harness-self-check.spec.ts may set it; each must then be
+   * raised, and nothing else may be. (An object, not a bare array: test.use
+   * reads an array whose second item is an object as [value, options].)
+   */
+  watchSelfCheck: WatchSelfCheck;
+}
+
+export interface WatchSelfCheck {
+  provokes: RegExp[];
 }
 
 interface JourneyWorkerFixtures {
@@ -321,9 +585,12 @@ const NOT_LIVE = "requires a running API, web server and database (E2E_LIVE=1); 
  * `test` for journey specs. Without E2E_LIVE every journey is skipped with the
  * reason (as release0-live.spec.ts is): it needs a running API, web and
  * database. With it, `owner` is a fresh tenant and `page` (and `context`)
- * start signed in to it; a second person (a member, another tenant) gets their
- * own context from freshTenant() and signedInContext(), and a customer an
- * anonymous browser.newContext().
+ * start signed in to it. Everyone else gets a browser from the harness,
+ * watched like the owner's: another tenant from freshTenant() then
+ * signedInContext(browser, tenant); a customer from anonymousContext(browser);
+ * a member of the owner's business from memberOf(request, owner, label,
+ * { role, scopes }) then signedInContext(browser, member). A bare
+ * browser.newContext() is refused: it would start signed in as the owner.
  */
 export const test = base.extend<JourneyFixtures, JourneyWorkerFixtures>({
   stack: [
@@ -346,19 +613,50 @@ export const test = base.extend<JourneyFixtures, JourneyWorkerFixtures>({
   storageState: async ({ owner, baseURL }, use) => {
     await use(liveSessionState(owner.token, owner.businessId, baseURL ?? undefined));
   },
+  watchSelfCheck: [{ provokes: [] }, { option: true }],
   journeyWatch: [
-    async ({ context }, use, testInfo) => {
+    async ({ context, owner, browser, baseURL, watchSelfCheck }, use, testInfo) => {
       testInfo.skip(!LIVE, NOT_LIVE);
-      const w = watch(context);
-      await use(w);
-      if (w.optionalUnavailable.length) {
+      const provoked = watchSelfCheck.provokes;
+      if (provoked.length && !SELF_CHECK_SPEC.test(testInfo.file)) {
+        throw new Error(`watchSelfCheck declares findings a journey may raise; only e2e/journeys/harness-self-check.spec.ts may set it (set in ${testInfo.file})`);
+      }
+      const journey: JourneyInProgress = {
+        owner,
+        baseURL: baseURL ?? e2eBaseURL(),
+        testInfo,
+        contexts: [],
+        customers: 0,
+      };
+      enlist(journey, context, "owner", [owner.businessId], false);
+      // A bare browser.newContext() (and browser.newPage(), which calls it) is
+      // refused for the test's duration; the helpers go past it.
+      const refuse = async () => {
+        throw new Error(BARE_CONTEXT_REFUSED);
+      };
+      Object.defineProperty(browser, "newContext", { value: refuse, configurable: true, writable: true });
+      current = journey;
+      try {
+        await use(journey.contexts[0].watch);
+      } finally {
+        current = null;
+        delete (browser as { newContext?: unknown }).newContext;
+      }
+
+      await Promise.all(journey.contexts.map((c) => settled(c.watch)));
+      for (const c of journey.contexts) if (c.harnessMade) await c.context.close().catch(() => {});
+      const optional = journey.contexts.flatMap((c) => c.watch.optionalUnavailable.map((line) => `${c.who}: ${line}`));
+      if (optional.length) {
         testInfo.annotations.push({
           type: "optional-services",
-          description: `${w.optionalUnavailable.length} R0-07 503 provider_not_configured answer(s), by contract`,
+          description: `${optional.length} R0-07 503 provider_not_configured answer(s), by contract`,
         });
       }
-      expect.soft(w.offHost, "requests that left localhost").toEqual([]);
-      expect.soft(w.serverErrors, "5xx responses").toEqual([]);
+      const { unexpected, missing } = sortFindings(journeyWatchFindings(journey.contexts.map(asWatchedCalls)), provoked);
+      for (const kind of Object.keys(FINDING_MESSAGE) as FindingKind[]) {
+        expect.soft(unexpected.filter((f) => f.kind === kind).map(describeFinding), FINDING_MESSAGE[kind]).toEqual([]);
+      }
+      if (provoked.length) expect.soft(missing, "findings the self-check provoked that the watch did not raise").toEqual([]);
     },
     { auto: true },
   ],
