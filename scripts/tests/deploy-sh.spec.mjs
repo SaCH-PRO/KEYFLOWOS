@@ -430,6 +430,8 @@ test('[DSH-P12] under bash -x a deploy that passes the preflight traces no .env.
     assert.equal(result.code, 0, result.out);
     assert.match(result.out, /DEPLOYED/);
     assertNoSentinel(result, sentinels);
+    // Off for the preflight only: the caller's tracing is back for the rest.
+    assert.match(result.out, /^\++ BACKUP_DIR=/m, 'tracing did not resume after the preflight');
   });
 });
 

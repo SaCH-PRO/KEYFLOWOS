@@ -28,6 +28,18 @@
 #     on the right commit, degraded or not. Both are checked now: the env file
 #     against the API's boot rules before anything is touched, and /healthz
 #     polled until it is ok with the API reachable (scripts/tests/deploy-sh.spec.mjs).
+#   * Bash reads a script from the file it opened. `git checkout` replaces
+#     scripts/deploy.sh with a NEW file, and the running bash goes on reading
+#     the copy the box had before the checkout. So `deploy.sh <ref>` used to
+#     run the PREVIOUS deploy.sh's logic from start to finish: the first
+#     deploy of a changed deploy.sh got none of its changes. After the
+#     checkout this script now re-runs the ref's own copy when it differs.
+#     A box whose copy predates that re-run cannot do it: for the first deploy
+#     after it lands, update the checkout by hand and run with no ref
+#     (docs/DEPLOY_RUNBOOK.md, "First deploy of a changed deploy.sh").
+#   * Run under `bash -x`, the .env.production preflight used to trace every
+#     production secret. It turns tracing off for itself, and the dump it
+#     takes is created 0600 (it holds every tenant's data).
 #
 # Anything you learn the next time this hurts belongs here, not in your memory.
 #
@@ -37,9 +49,16 @@
 #
 # Environment (each optional):
 #   DEPLOY_SKIP_CI_CHECK=1    deploy without the CI gate below (typed on purpose)
-#   DEPLOY_BACKUP_DIR=<dir>   where the pre-deploy dump goes (default /root)
+#   DEPLOY_BACKUP_DIR=<dir>   where the pre-deploy dump goes (default /root);
+#                             the dump is created 0600 whatever the umask
+#   DEPLOY_REEXEC             set by this script when it re-runs the ref's own
+#                             deploy.sh after a checkout; not for typing
 #
 set -euo pipefail
+
+# The copy of this script that bash is running, taken before anything can
+# replace it on disk. See the checkout step.
+SELF_SUM="$(git hash-object --no-filters -- "${BASH_SOURCE[0]}" 2>/dev/null || true)"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -75,13 +94,20 @@ die() { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
 # assignment of a name wins, and the value is trimmed as the API trims it
 # (quotes and spaces around a placeholder do not hide it; ANY assignment of a
 # placeholder is refused). No value is ever printed: only names and line
-# numbers. scripts/tests/deploy-sh.spec.mjs pins these lists to env.ts and
+# numbers, and the check turns `bash -x` tracing off for itself, because
+# traced, every assignment it reads would print. For a name the check reads
+# (DEPLOY_READ_NAMES), a line compose would read differently from KEY=value
+# is refused as unverifiable rather than read wrong: a YAML-style
+# `NAME: value` line, and a `$` outside single quotes (compose fills
+# `${VAR}` and `$VAR` from the file or from its own environment).
+# scripts/tests/deploy-sh.spec.mjs pins these lists to env.ts and
 # main.ts. A refusal the API makes later, inside Nest, is caught by the health
 # wait at the end of this script.
 DEPLOY_JWT_SECRET_PLACEHOLDERS=('your-supabase-jwt-signing-secret' 'your-jwt-secret')
 DEPLOY_S3_GROUP=('S3_BUCKET' 'S3_REGION' 'S3_ACCESS_KEY_ID' 'S3_SECRET_ACCESS_KEY' 'S3_ENDPOINT' 'S3_PUBLIC_URL' 'S3_FORCE_PATH_STYLE')
 DEPLOY_S3_REQUIRED=('S3_BUCKET' 'S3_REGION' 'S3_ACCESS_KEY_ID' 'S3_SECRET_ACCESS_KEY')
 DEPLOY_EMAIL_VERIFICATION_REQUIRED=('SUPABASE_SERVICE_ROLE_KEY' 'RESEND_API_KEY' 'EMAIL_FROM_ADDRESS')
+DEPLOY_READ_NAMES=('SUPABASE_JWT_SECRET' 'KEYFLOW_SKIP_ENV_VALIDATION' 'KEYFLOW_DEV_AUTH_BYPASS' 'AUTH_REQUIRE_EMAIL_VERIFICATION' "${DEPLOY_S3_GROUP[@]}" "${DEPLOY_EMAIL_VERIFICATION_REQUIRED[@]}")
 SERVER_ENV_TS="apps/server/src/core/config/env.ts"
 
 env_trim() {
@@ -107,9 +133,14 @@ env_unwrap() {
 
 # Reads an env file into ENV_KEYS / ENV_VALS / ENV_LINES, one entry per
 # assignment, in file order. The values stay in these arrays; nothing prints them.
+# A line this cannot read as compose does goes to ENV_UNREAD_KEYS /
+# ENV_UNREAD_LINES / ENV_UNREAD_WHY instead: compose ends a name at the first
+# `=` OR `:` (a YAML-style `NAME: value`), and fills `${VAR}` / `$VAR` in an
+# unquoted or double-quoted value. Only single quotes are literal.
 env_file_parse() {
-  local raw line key val n=0
+  local raw line head sep key val why n=0 interp
   ENV_KEYS=(); ENV_VALS=(); ENV_LINES=()
+  ENV_UNREAD_KEYS=(); ENV_UNREAD_LINES=(); ENV_UNREAD_WHY=()
   while IFS= read -r raw || [ -n "$raw" ]; do
     n=$((n + 1))
     line="${raw%$'\r'}"
@@ -117,14 +148,29 @@ env_file_parse() {
     line="$(env_trim "$line")"
     case "$line" in ''|'#'*) continue ;; esac
     case "$line" in export[[:space:]]*) line="$(env_trim "${line#export}")" ;; esac
-    case "$line" in *=*) ;; *) continue ;; esac
-    key="$(env_trim "${line%%=*}")"
-    val="$(env_trim "${line#*=}")"
+    case "$line" in *[=:]*) ;; *) continue ;; esac
+    head="${line%%[=:]*}"
+    sep="${line:${#head}:1}"
+    key="$(env_trim "$head")"
+    val="$(env_trim "${line:$(( ${#head} + 1 ))}")"
+    interp=1
     case "$val" in
       \"*) val="${val#\"}"; val="${val%%\"*}" ;;
-      \'*) val="${val#\'}"; val="${val%%\'*}" ;;
+      \'*) val="${val#\'}"; val="${val%%\'*}"; interp=0 ;;
       *) val="${val%%[[:space:]]#*}" ;;
     esac
+    why=""
+    if [ "$sep" = ":" ]; then
+      why="it is written NAME: value, which compose reads as an assignment (YAML style) and this check does not"
+    elif [ "$interp" -eq 1 ]; then
+      case "$val" in *'$'*) why="its value holds a \$ outside single quotes, which compose replaces from the file or from its own environment" ;; esac
+    fi
+    if [ -n "$why" ]; then
+      ENV_UNREAD_KEYS+=("$key")
+      ENV_UNREAD_LINES+=("$n")
+      ENV_UNREAD_WHY+=("$why")
+      continue
+    fi
     ENV_KEYS+=("$key")
     ENV_VALS+=("$(env_unwrap "$val")")
     ENV_LINES+=("$n")
@@ -158,11 +204,26 @@ env_ts_placeholders() {
 
 # Refuses (exit 1) when the env file holds a value the API refuses at boot.
 check_env_production() {
+  # Never traced: under `bash -x` every value this reads would be printed.
+  # `local -` restores the caller's options when this returns (bash >= 4.4),
+  # and env_file_parse and env_last run inside it.
+  local -
+  set +x
   local file="$1" i p k flag skip=0 s3_any=0
   local -a placeholders problems=() from_ts=()
   mapfile -t from_ts < <(env_ts_placeholders)
   placeholders=("${DEPLOY_JWT_SECRET_PLACEHOLDERS[@]}" ${from_ts[@]+"${from_ts[@]}"})
   env_file_parse "$file"
+
+  # A line for a name this check reads, written so compose reads it otherwise.
+  for i in "${!ENV_UNREAD_KEYS[@]}"; do
+    for k in "${DEPLOY_READ_NAMES[@]}"; do
+      if [ "${ENV_UNREAD_KEYS[$i]}" = "$k" ]; then
+        problems+=("$k (line ${ENV_UNREAD_LINES[$i]}) cannot be verified: ${ENV_UNREAD_WHY[$i]}. Write it as $k=value, in single quotes if the value holds a \$.")
+        break
+      fi
+    done
+  done
 
   for i in "${!ENV_KEYS[@]}"; do
     if [ "${ENV_KEYS[$i]}" != SUPABASE_JWT_SECRET ] || [ -z "${ENV_VALS[$i]}" ]; then continue; fi
@@ -216,6 +277,9 @@ check_env_production() {
       ;;
   esac
 
+  # The values are not needed past this point; nothing later may print them.
+  ENV_VALS=()
+  ENV_LAST_VAL=""
   if [ "${#problems[@]}" -gt 0 ]; then
     printf '\n\033[31mFAILED: %s would not boot the API (its own rules: %s, apps/server/src/main.ts):\033[0m\n' "$file" "$SERVER_ENV_TS" >&2
     for p in "${problems[@]}"; do printf '  - %s\n' "$p" >&2; done
@@ -260,6 +324,26 @@ if [ -n "$REF" ]; then
   # By name: this is a single-branch clone, so a bare fetch will not find it.
   git fetch origin "$REF" || die "could not fetch $REF"
   git checkout -B "$REF" FETCH_HEAD || die "could not check out $REF"
+
+  # The checkout wrote the ref's scripts/deploy.sh as a new file, but bash
+  # goes on reading the file it opened: the copy from BEFORE the checkout.
+  # Left alone, this deploy would run the previous deploy.sh to the end and
+  # none of the ref's changes to it (its preflight, its health wait). So when
+  # the copies differ, run the ref's own, with no ref: the fetch, the
+  # checkout and the dirty check above are done. (scripts/tests/deploy-sh.spec.mjs DSH-R)
+  REF_SUM="$(git hash-object --no-filters -- "$ROOT_DIR/scripts/deploy.sh" 2>/dev/null || true)"
+  if [ "$REF_SUM" != "$SELF_SUM" ]; then
+    [ -f "$ROOT_DIR/scripts/deploy.sh" ] || die "$REF has no scripts/deploy.sh to deploy it with"
+    # A re-run never checks anything out, so it cannot get here. If it does
+    # (DEPLOY_REEXEC typed by hand), going on would be the old copy again.
+    [ -z "${DEPLOY_REEXEC:-}" ] || die "scripts/deploy.sh differs from the copy running, and this run is already a re-run.
+     Refusing to go on with a deploy.sh that is not the deployed one.
+     Run it again with no ref and DEPLOY_REEXEC unset:  $ROOT_DIR/scripts/deploy.sh"
+    say "scripts/deploy.sh changed with $REF: re-running the checked-out copy"
+    export DEPLOY_REEXEC=1
+    case "$-" in *x*) exec bash -x "$ROOT_DIR/scripts/deploy.sh" ;; esac
+    exec bash "$ROOT_DIR/scripts/deploy.sh"
+  fi
 fi
 
 GIT_COMMIT="$(git rev-parse HEAD)"
@@ -361,8 +445,11 @@ STAMP="$(date +%F-%H%M%S)"
 BACKUP_DIR="${DEPLOY_BACKUP_DIR:-/root}"
 [ -d "$BACKUP_DIR" ] || die "backup directory $BACKUP_DIR does not exist — refusing to deploy without a backup"
 BACKUP="${BACKUP_DIR%/}/keyflow-backup-${STAMP}.sql"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
-  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$BACKUP" \
+# Every tenant's data: created 0600 whatever the umask. /root (0700) used to
+# hide a 0644 dump; DEPLOY_BACKUP_DIR can point anywhere.
+( umask 077
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
+    sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$BACKUP" ) \
   || die "pg_dump failed — refusing to deploy without a backup"
 TABLES="$(grep -c '^CREATE TABLE' "$BACKUP" || true)"
 [ "$TABLES" -gt 100 ] || die "backup has only $TABLES CREATE TABLE statements — it is not a real dump"

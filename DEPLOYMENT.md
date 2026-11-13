@@ -4,9 +4,11 @@
 >
 > **Production is a Hetzner VPS at `37.27.27.0` running Docker Compose** from
 > `/opt/keyflowos`, behind Caddy. Deploy with `./scripts/deploy.sh <git-ref>` on
-> the box. The Render workspace referenced below was deleted on 2026-08-08 after
-> it was found returning 502 with no database credentials — it had never served a
-> request.
+> the box (if the box's deploy.sh has no `DEPLOY_REEXEC` step, update the
+> checkout by hand first and run it with no ref: `docs/DEPLOY_RUNBOOK.md`,
+> "First deploy of a changed deploy.sh"). The Render workspace referenced below
+> was deleted on 2026-08-08 after it was found returning 502 with no database
+> credentials — it had never served a request.
 >
 > Read `render.yaml` for the measured build constraints that still apply
 > (memory ceilings, why `tsx` cannot start the server, why `NODE_ENV=production`
