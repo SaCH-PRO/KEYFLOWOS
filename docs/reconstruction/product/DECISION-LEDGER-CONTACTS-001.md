@@ -4,6 +4,8 @@ Status: DECISIONS PENDING; this is not consent to implementation.
 Source: main@b1948d2797e1bae3660a3d7173abb75397e05aad.
 Related: CONTACTS-v1.md, issue #186, issue #80.
 
+> **Historical note (2026-11-12, convergence tie-off).** The "PENDING" statuses below are dated 2026-10-29. DEC-CONTACTS-002 was ruled by owner ruling D-25 (2026-11-02, `docs/reconstruction/BUILD-MAP-001.md`, owner rulings): every contact write records a ContactAuditEntry, and the GDPR purge is in v1 with a retained-basis audit row (V1-38). This note does not claim Option A's fail-closed durable audit: at main `f5d58ef7`, `CrmService.auditContact` still writes the entry fire-and-forget. DEC-CONTACTS-001 (firstName) is still unruled; it remains backlog item CT-BP-06 (V1+) in BUILD-MAP-001, and `create-contact.dto.ts` still makes firstName optional.
+
 ## DEC-CONTACTS-001 — Contact first-name requirement
 
 **Conflict independently verified:** web contact-form.tsx (blob 4c73765f) line 52 requires nonempty firstName; server create-contact.dto.ts (blob 31b2a0f0) lines 12-17 permits missing firstName; crm.service.ts accepts nullable firstName; internal CRM callers include forms and connector ingestion that can deliver null firstName.

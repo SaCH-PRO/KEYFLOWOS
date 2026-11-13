@@ -4,6 +4,8 @@ Status: PROVISIONAL PRODUCT PRIORITIZATION, not merge approval, automatic deleti
 Base: main@b1948d2797e1bae3660a3d7173abb75397e05aad; prepared 2026-10-29.  
 Authority: product reconstruction proposal derived from original vision, current APP_SPEC, May information architecture, and October 28 Release-0 issue. Operator sign-off still pending.
 
+> **Historical note (2026-11-12, convergence tie-off).** This ranking is dated 2026-10-29. Later owner rulings in `docs/reconstruction/BUILD-MAP-001.md` refine it. **D-04:** the quote branch is in Release 0, so P0-3 covers quotes and invoices, not "quote OR invoice". **D-07:** the customer link (paid and remaining) and the receipt are in Release 0, token links only, and the bare-id pay page is retired, so P0-5 is required, not conditional. **D-18:** storefront product checkout is in scope and hardened, not retired, which widens P1-4. **D-17** also keeps both KEY pipelines (Flow for member chat, Cortex for plans), which refines row D-1. Where this table and those rulings differ, the rulings govern.
+
 ## Disposition language
 
 - KEEP — retain the existing functional domain and prove/harden its reachable v1 behavior.

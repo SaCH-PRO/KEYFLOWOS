@@ -15,7 +15,7 @@
 
 ## Preservation and control
 
-The reconstruction is research/documentation only. It does not authorize production changes, grant merging, change active packets, alter gates, deploy services or re-activate halted `architecture/os/` cycles. Existing instructions under `AGENTS.md`, `docs/development/EXECUTION_CONTROL_STANDARD.md`, issue #80 and applicable authority remain in force. This branch is intentionally separate from main.
+The reconstruction is research/documentation only. It does not authorize production changes, grant merging, change active packets, alter gates, deploy services or re-activate halted `architecture/os/` cycles. Existing instructions under `AGENTS.md`, `docs/development/EXECUTION_CONTROL_STANDARD.md`, issue #80 and applicable authority remain in force. This branch is intentionally separate from main. *(Historical, true when written on 2026-10-29. On 2026-11-12 the convergence tie-off brought these files into main unchanged, as the sources `docs/reconstruction/BUILD-MAP-001.md` cites; the branch `docs/keyflow-reconstruction-20261029`, tip `1b143fa3`, is no longer the place to read them.)*
 
 ## Execution next
 
