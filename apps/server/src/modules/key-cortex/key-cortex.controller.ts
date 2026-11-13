@@ -56,7 +56,7 @@ import {
   type ExecutionContext,
   type NestInterceptor,
 } from '@nestjs/common';
-import { KeyCortexSessionService } from './key-cortex-session.service';
+import { KeyCortexSessionService, ownedSession, resolveOwnSessionId } from './key-cortex-session.service';
 import {
   KeyCortexConsciousnessService,
   type ConsciousPhaseEvent,
@@ -4706,49 +4706,30 @@ export class KeyCortexController {
   /**
    * Review ST-1, and R0-09c review ST-1..ST-4: the authenticated user's own
    * session `sessionId` in `businessId`, the tenant the guard checked, or null
-   * when no session has that id.
+   * when no session has that id; another tenant's session (cached or not) and
+   * another member's are refused as not found, like an unknown id on the routes
+   * that read one (an `error` event once an SSE stream is committed). There is
+   * no cross-member read here, SUPER_ADMIN included.
    *
-   * KeyCortexConversationService.getSession and
-   * KeyCortexSessionService.getOrCreateSession read the Redis entry
-   * `cortex:session:<id>` before the database and check no tenant there; the
-   * Prisma tenant extension scopes only the database fallback. So a member of
-   * A naming B's session id, once B's own traffic had cached it, read B's
-   * messages and ran chat, the streams and the conscious pipeline on B's
-   * session (appending A's turns to B's cached session). Within one tenant the
-   * services check no owner either, so a STAFF member naming the OWNER's
-   * session id read the OWNER's conversation (GET sessions/:id, GET messages),
-   * renamed or archived it (PATCH, DELETE), ran the reasoning engine and the
-   * conscious pipeline on it (the pipeline then acted for session.userId, the
-   * OWNER) and rewrote the OWNER's feedback on it.
-   *
-   * A session is its creator's: POST sessions and the session services create
-   * it for the authenticated actor (R0-09c), and GET sessions lists only the
-   * actor's own. A session of another tenant, or of another member of this
-   * one, is refused as not found, like an unknown id on the routes that read
-   * one (an `error` event once an SSE stream is committed); there is no
-   * cross-member read here, SUPER_ADMIN included.
+   * The rule, and why, is SESSION OWNERSHIP in key-cortex-session.service.ts
+   * (`ownedSession`), where W11-KEY-CHAT-SESSION-BIND moved it so the WS
+   * key:chat handler applies it too. The session is read as before
+   * (KeyCortexConversationService.getSession): the routes answer with it.
    */
   private async ownSession(businessId: string, actorId: string, sessionId: string): Promise<CortexSession | null> {
-    const session = await this.conversation.getSession(sessionId);
-    if (!session) return null;
-    if (session.businessId !== businessId || session.userId !== actorId) {
-      throw new NotFoundException('Session not found');
-    }
-    return session;
+    return ownedSession(await this.conversation.getSession(sessionId), businessId, actorId);
   }
 
   /**
    * The session id a handler may hand the session services (chat, the
    * streams, the conscious pipeline): one of the actor's own sessions in this
-   * tenant (`ownSession`), or `undefined` when no session has that id, so the
-   * services start a new session for the actor under `businessId` exactly as
-   * they did for an unknown id; the caller's id never reaches their cache
-   * read, so a session cached after this check cannot be picked up. Sessions
-   * never change tenant or owner, so an id returned here stays the actor's.
+   * tenant, or `undefined` when no session has that id, so the services start
+   * a new session for the actor under `businessId` exactly as they did for an
+   * unknown id (`resolveOwnSessionId`, key-cortex-session.service.ts; another
+   * tenant's or member's is refused as `ownSession` refuses it).
    */
   private async ownSessionId(businessId: string, actorId: string, sessionId: string | undefined): Promise<string | undefined> {
-    if (!sessionId) return undefined;
-    return (await this.ownSession(businessId, actorId, sessionId)) ? sessionId : undefined;
+    return resolveOwnSessionId((id) => this.conversation.getSession(id), businessId, actorId, sessionId);
   }
 
   /** PATCH and DELETE sessions/:id: the session must exist and be the actor's own (`ownSession`). */

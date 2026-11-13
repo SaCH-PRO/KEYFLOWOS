@@ -228,6 +228,37 @@ describe('UnifiedMemoryRetrievalService', () => {
     expect(prisma.client.businessEvent.findMany).not.toHaveBeenCalled();
   });
 
+  // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: the /ai flow chat's perception block reads, for a turn with no reader
+  // (the support desk, the staff bridge, a SUPER_ADMIN who is no member), the business-wide stores by name: business
+  // events still reach it, and no member's AiExecutionLog or CortexActionLog row is read at all (not read and dropped).
+  it('a read that names its stores (sourceTypes) queries no personal store it leaves out, and still reads business events', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      businessEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'be_1', eventType: 'invoice.overdue', subjectType: 'invoice', actorType: 'system', action: 'OVERDUE', createdAt: now },
+        ]),
+      },
+      aiExecutionLog: { findMany: vi.fn().mockResolvedValue([{ id: 'ael_1', action: 'x', success: true, createdAt: now }]) },
+      cortexActionLog: { findMany: vi.fn().mockResolvedValue([{ id: 'cal_1', actionType: 'X', status: 'success', createdAt: now }]) },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', {
+      sourceTypes: ['ai_memory', 'genome_memory_event', 'temporal_flow_memory', 'cognitive_event', 'business_event'],
+    });
+
+    expect(fragments.map((f) => f.sourceType)).toEqual(['business_event']);
+    expect(prisma.client.businessEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.client.aiExecutionLog.findMany).not.toHaveBeenCalled();
+    expect(prisma.client.cortexActionLog.findMany).not.toHaveBeenCalled();
+
+    // A read that names a personal store still queries it (retrieveEpisodicContext, the eval's cortex_action_log read).
+    await service.retrieveContext('biz_1', { sourceTypes: ['cortex_action_log'] });
+    expect(prisma.client.cortexActionLog.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.client.aiExecutionLog.findMany).not.toHaveBeenCalled();
+  });
+
   it('retrieveEpisodicContext returns only episodic fragments', async () => {
     const now = new Date();
     const prisma = makePrisma({

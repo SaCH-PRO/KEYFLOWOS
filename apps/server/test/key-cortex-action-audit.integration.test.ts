@@ -145,9 +145,39 @@
  *
  * W11-CORTEX-MEMORY-COGNITION review repairs: buildMemoryContext's reader is the requester, not the member the
  * session names (SEC-W11MC-1: a turn on another member's session, as the WS key:chat handler allows, read that
- * member's memory and lessons). Three residuals outside the write set are it.todo below: key:chat session
+ * member's memory and lessons). Three residuals outside the write set were it.todo below: key:chat session
  * ownership (SEC-W11MC-1 root cause), promoted cognition rows (SEC-W11MC-2), the /ai flow chat's perception
  * block (SEC-W11MC-3).
+ *
+ * W11-KEY-CHAT-SESSION-BIND turned the SEC-W11MC-1 residual it.todo live: over the WS gateway (REAL database and
+ * the REAL Redis session cache at REDIS_URL), a member's key:chat naming another member's session, or a session of
+ * another business, runs on a new session of the member's own, with neither session's running summary nor its
+ * messages in the prompt, and the socket receives what it receives for an id that names no session. Its review
+ * (SEC-W11KCSB-2) adds the business half of that rule: the member's OWN session of another business the member
+ * belongs to is refused on a socket of this business alike (and honoured on a socket of its own business).
+ *
+ * W11-MEMORY-PROMOTE-SCOPE turned the SEC-W11MC-2 residual it.todo live: the hourly memory consolidation
+ * (memory-consolidation.service.ts) promotes only member-less cognition rows into the business-wide AiMemory row
+ * learning:learned:<functionId>; a member's accepted row (what they typed and KEY's answer to them) stays theirs and
+ * reaches no other member's memory block or key:chat prompt. A learned:* row an earlier run promoted from a member's
+ * row is withdrawn by the next run (every reader of the business's AI memory renders it; none reads by key). Its
+ * review repair (SEC-W11MPS-1) withdraws the row's semantic copies too (ai_memory_embeddings, written by POST
+ * .../agent/memory/backfill and read back by GET .../agent/memory/search and the memory block's semantic search).
+ *
+ * W11-FLOW-PERCEPTION-SCOPE turned the last residual it.todo (SEC-W11MC-3) live: over POST /ai/businesses/:id/flow/chat
+ * and its stream (the real AiFlowController, AuthGuard, BusinessGuard and FlowOrchestratorService over the real memory
+ * stores), the "WHAT YOU HAVE OBSERVED" block (buildPerceptionSection) keeps what buildMemoryContext keeps, through the
+ * same helpers (key-cortex-prompt-context.service.ts): its reader is the requester when they are a member of the
+ * business, else nobody; it renders only the reader's own cognition memory (a member-less row is nobody's own) and no
+ * KEY tool-call record of the business-wide stores, reads no per-member memory for a turn with no reader (a non-member
+ * SUPER_ADMIN, the Chatwoot support desk), and asks for the same headroom so the reader's own rows still fill it.
+ *
+ * Its review repair (SEC-W11FPS-1, SEC-W11FPS-2, CR-W11FPS-1) drives the real writers of the business-wide records the
+ * review found still reaching another reader: KEY's own records of a member's turn (KeyCortexLifecycleService through the
+ * real bus: what they typed, KEY's whole answer), the legacy action route's action.<status> (KeyCortexActionsService:
+ * the tool's answer), and the copies of a tool call's ledger row EventEmitterFlowBridgeService republishes; none reaches
+ * another reader of the perception block, buildMemoryContext's block or POST /cortex/chat's own memory read. A turn with
+ * no reader still perceives the business (an overdue invoice's business event).
  *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
@@ -159,6 +189,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import * as ts from 'typescript';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { Redis } from 'ioredis';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -261,6 +292,8 @@ async function cleanup() {
     `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W11-BRIDGED-ORGAN-AUDIT-MEMBER: the plans the plan-queue cases dispatch.
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-KEY-CHAT-SESSION-BIND: the KEY sessions the key:chat case seeds and the turns it starts.
+    `DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -1222,16 +1255,25 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   // session has no message, so no query, and no embedding request is made).
   // W11-CORTEX-MEMORY-COGNITION (D-130): with the real learning service too, so the learned-lessons block
   // the same call builds (KeyCortexLearningService.retrieveLessons over cognition_memories) is read as well.
-  async function memoryContextFor(userId: string | undefined): Promise<{ aiMemory: string; lessons?: string }> {
+  // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: `asking` gives the session one message of the member's (the turn's
+  // query) and the semantic store to search with it, so the block's semantic fragments ([ai_memory_embedding], what
+  // loadSemanticMemory reads from ai_memory_embeddings) are read as well.
+  // W11-FLOW-PERCEPTION-SCOPE: `businessId` names the business the block is read for (ID.memBiz unless named).
+  async function memoryContextFor(
+    userId: string | undefined,
+    asking?: { question: string; semantic: unknown },
+    businessId: string = ID.memBiz,
+  ): Promise<{ aiMemory: string; lessons?: string }> {
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
     const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
     const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
-    const unified = new UnifiedMemoryRetrievalService(prisma, {} as any);
+    const unified = new UnifiedMemoryRetrievalService(prisma, (asking?.semantic ?? {}) as any);
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
     const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, new KeyCortexLearningService(prisma), prisma);
-    const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages: [] } as any;
+    const messages = asking ? [{ role: 'user', content: asking.question, timestamp: new Date() }] : [];
+    const session = { id: `${P}sess_mem_chat`, businessId, userId, messages } as any;
     // W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1: the requester is the session's own member here.
-    const memory = await promptContext.buildMemoryContext(ID.memBiz, session, userId);
+    const memory = await promptContext.buildMemoryContext(businessId, session, userId);
     return { aiMemory: memory.aiMemory ?? '', lessons: memory.lessons };
   }
 
@@ -1317,12 +1359,15 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
    * the turn runs on (the requester's own by default; the WS key:chat handler hands the pipeline the client's
    * session id unchecked), and `realMemoryContext` runs the real KeyCortexPromptContextService over the real
    * memory store and the real learning service instead of the stand-in.
+   * W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2): `businessId` names the business the turn is in (ID.memBiz unless
+   * named).
    */
   async function chatTurnFor(
     userId: string | undefined,
     path: 'processQuery' | 'streamQuery',
-    opts: { sessionUserId?: string; realMemoryContext?: boolean } = {},
+    opts: { sessionUserId?: string; realMemoryContext?: boolean; businessId?: string } = {},
   ): Promise<{ prompt: string; memoryContext: { aiMemory?: string; lessons?: string } }> {
+    const businessId = opts.businessId ?? ID.memBiz;
     const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
     const { KeyCortexMemoryRetrievalService } = await import('../src/modules/key-cortex/key-cortex-memory-retrieval.service');
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
@@ -1332,7 +1377,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     const prompts: string[] = [];
     const memoryContexts: Array<{ aiMemory?: string; lessons?: string }> = [];
     const sessionUserId = 'sessionUserId' in opts ? opts.sessionUserId : userId;
-    const session = { id: `${P}sess_chat_prompt`, businessId: ID.memBiz, userId: sessionUserId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const session = { id: `${P}sess_chat_prompt`, businessId, userId: sessionUserId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
     const realPromptContext = opts.realMemoryContext
       ? new (KeyCortexPromptContextService as any)(
@@ -1362,7 +1407,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
         classifyPersona: async () => undefined,
         selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
       } as any,
-      { buildContextSnapshot: async () => ({ businessId: ID.memBiz, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+      { buildContextSnapshot: async () => ({ businessId, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
       { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
       {
         getOrCreateSession: async () => session,
@@ -1395,7 +1440,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       memory,
       { route: async () => route } as any,
     );
-    const query = { text: 'what happened lately', businessId: ID.memBiz, userId } as any;
+    const query = { text: 'what happened lately', businessId, userId } as any;
     const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
     if (path === 'processQuery') await pipeline.processQuery(query, flags);
     else for await (const chunk of pipeline.streamQuery(query, flags)) void chunk;
@@ -1682,37 +1727,1665 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     }
   });
 
-  // W11-CORTEX-MEMORY-COGNITION review residuals (D-130), each reproduced on this database at the repair and kept as an
-  // it.todo: the fix of each is outside the W11-CORTEX-MEMORY-COGNITION write set (the three key-cortex files
-  // key-cortex-prompt-context.service.ts, key-cortex-learning.service.ts and key-cortex-query-pipeline.service.ts).
-  it.todo(
-    'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 residual (D-130; follow-up packet, outside the write set): the WS ' +
-      'key:chat handler (key-cortex.gateway.ts handleChat) hands streamReasoning the client\'s sessionId unchecked, and ' +
-      'KeyCortexSessionService.getOrCreateSession loads any session by id, so a member (or a member of another business) ' +
-      'naming another member\'s session id still has that session\'s running summary and its last 10 messages in their ' +
-      'prompt (buildMemoryContext and buildMessages render the session they are handed), and their turn is appended to ' +
-      'it. buildMemoryContext now reads its memory and lessons for the requester (SEC-W11MC-1 repaired); resolving the ' +
-      'client\'s sessionId through the controller\'s ownSessionId rule (the actor\'s own session in the guarded business, ' +
-      'else a new session) on key:chat closes it.',
-  );
+  /**
+   * W11-KEY-CHAT-SESSION-BIND: KeyCortexGateway as the app wires key:chat, over a socket of ID.member (a STAFF
+   * member of ID.memBiz and of ID.toolBiz) connected to `businessId` (ID.memBiz unless named). REAL: the gateway (handleConnection, the live re-check, handleChat),
+   * KeyCortexReasoningService.streamReasoning and the query pipeline (processQuery) behind it,
+   * KeyCortexSessionService over the real database and the real Redis at REDIS_URL (the session cache
+   * getOrCreateSession reads before the database), KeyCortexPromptContextService (buildMemoryContext and
+   * buildMessages: the session's running summary and its last 10 messages) over the real memory store and
+   * learning service, and the membership half of the socket's connect decision
+   * (KeyCortexWsAuthService.verifyBusinessMembership). Stand-ins: the token half of that decision
+   * (authenticateSocket answers ID.member), the model provider (records the prompt it is handed), and the
+   * collaborators chatTurnFor stands in. `prompts` holds every prompt the provider was handed; `visible` every
+   * event the socket received (to the socket, and to its user and business rooms).
+   */
+  async function keyChatSocket(redis: Redis, businessId: string = ID.memBiz) {
+    const { RedisService } = await import('../src/core/redis/redis.service');
+    const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
+    const { KeyCortexGateway } = await import('../src/modules/key-cortex/key-cortex.gateway');
+    const { KeyCortexWsAuthService } = await import('../src/modules/key-cortex/key-cortex-ws-auth.service');
+    const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const { KeyCortexMemoryRetrievalService } = await import('../src/modules/key-cortex/key-cortex-memory-retrieval.service');
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
 
-  it.todo(
-    'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-2 (D-130; follow-up packet, outside the write set): ' +
-      'memory-consolidation.service.ts promoteFacts copies a member\'s accepted cognition row with confidence >= 0.9 ' +
-      '(its recommendation: KEY\'s whole answer to that member) into the business-wide AiMemory row ' +
-      'learning:learned:<functionId>, which buildMemoryContext and chatMemoryFragments render to every member as ' +
-      '[ai_memory] (reproduced: the owner\'s promoted "net profit" answer in the STAFF member\'s memory block). Promoting ' +
-      'only member-less rows, or keeping the promoted value per member, closes it.',
-  );
+    const prompts: Array<Array<{ role: string; content: string }>> = [];
+    const sessionService = new KeyCortexSessionService(prisma, new RedisService(redis as any));
+    const contextService = {
+      buildContextSnapshot: async () => ({ businessId, genomeStage: 'startup', executiveReadiness: 50 }),
+      formatContextForPrompt: () => '',
+    };
+    // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
+    const promptContext = new (KeyCortexPromptContextService as any)(
+      contextService,
+      new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any),
+      new KeyCortexLearningService(prisma),
+      prisma,
+    );
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: false, includeMemoryContext: true,
+      includeActions: false, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      {
+        complete: async (request: { messages: Array<{ role: string; content: string }> }) => {
+          prompts.push(request.messages.map((m) => ({ role: m.role, content: String(m.content ?? '') })));
+          return { content: 'v19c answer', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false };
+        },
+      } as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      contextService as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      sessionService,
+      promptContext,
+      { handleToolCalls: async () => null } as any,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      {} as any,
+      { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'v19c answer', confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      new KeyCortexMemoryRetrievalService(new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any)),
+      { route: async () => route } as any,
+    );
+    // Positionally, as Nest constructs it: model gateway, prisma, redis, personality, context, actions, session,
+    // prompt context, tool loop, action detection, legacy insight, provider selection, structured output, mood
+    // detection, suggestion, genome context, system prompt, interaction, command execution, query pipeline; the
+    // optional v2/v3 layers absent (streamReasoning -> processQuery -> the query pipeline).
+    const reasoning = new (KeyCortexReasoningService as any)(
+      ...Array.from({ length: 19 }, () => ({})),
+      pipeline,
+    );
+    const membership = new KeyCortexWsAuthService({} as any, prisma, {} as any);
+    const wsAuth = {
+      authenticateSocket: async () => ({ userId: ID.member, email: null, role: 'USER' }),
+      verifyBusinessMembership: (userId: string, role: string, businessId: unknown) =>
+        membership.verifyBusinessMembership(userId, role, businessId),
+    };
+    // Positionally, as Nest constructs it: reasoning, approval, event, executor, ws auth and (W11-KEY-CHAT-SESSION-BIND)
+    // the session service key:chat resolves the client's session id through.
+    const gateway = new (KeyCortexGateway as any)(reasoning, {}, { emit: () => undefined }, {}, wsAuth, sessionService);
+    const visible: unknown[][] = [];
+    (gateway as any).server = { to: (room: string) => ({ emit: (event: string, payload: unknown) => visible.push(['room', room, event, payload]) }) };
+    const socket = {
+      id: `${P}kcsb_socket`,
+      handshake: { auth: { token: `${P}kcsb_stand_in`, businessId }, headers: {}, query: {} },
+      join: () => undefined,
+      emit: (event: string, payload: unknown) => visible.push(['socket', event, payload]),
+      disconnect: vi.fn(),
+      to: () => ({ emit: () => undefined }),
+    };
+    await gateway.handleConnection(socket as any);
+    expect(socket.disconnect, `the member of ${businessId} connects`).not.toHaveBeenCalled();
+    expect(visible.map((v) => v[1])).toEqual(['key:connected']);
 
-  it.todo(
-    'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-3 (D-130, SEC-W10CCS-R2; follow-up packet, outside the write set): ' +
-      'the /ai flow chat and its stream (flow-orchestrator.service.ts buildPerceptionSection) render every member\'s ' +
-      'cognition memory into a member\'s "WHAT YOU HAVE OBSERVED" block, with neither readersOwnCognitionMemory nor ' +
-      'isToolCallRecord (reproduced: the owner\'s typed chat and KEY\'s answer in the STAFF member\'s section). Filtering ' +
-      'its fragments with the shared readersOwnCognitionMemory and isToolCallRecord (key-cortex-prompt-context.service.ts) ' +
-      'closes it.',
-  );
+    /** One key:chat turn naming `sessionId`: the prompt the provider was handed, and what the socket received (no timestamps). */
+    const chat = async (sessionId: unknown) => {
+      prompts.length = 0;
+      visible.length = 0;
+      await gateway.handleChat({ text: KCSB_TURN, sessionId } as any, socket as any);
+      expect(prompts, `one prompt for ${String(sessionId)}: ${JSON.stringify(visible)}`).toHaveLength(1);
+      const received = JSON.parse(JSON.stringify(visible, (key, value) => (key === 'timestamp' ? undefined : value)));
+      return { prompt: prompts[0], received };
+    };
+    return { chat };
+  }
+
+  // W11-KEY-CHAT-SESSION-BIND: what the seeded sessions hold, so a prompt that renders one is visible.
+  const KCSB_TURN = 'v19c kcsb: what should I do next';
+  const KCSB = {
+    otherBiz: `${P}biz_kcsb_other`,
+    ownerSession: `${P}sess_kcsb_owner`,
+    otherBizSession: `${P}sess_kcsb_other_biz`,
+    memberSession: `${P}sess_kcsb_member`,
+    nowhere: `${P}sess_kcsb_nowhere`,
+    /** Review SEC-W11KCSB-2: ID.member's OWN session, of ID.toolBiz (ID.member is STAFF of ID.memBiz and of ID.toolBiz). */
+    memberOtherBizSession: `${P}sess_kcsb_member_other_biz`,
+  };
+  const kcsbMessages = (marker: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `${P}kcsb_msg_${marker}_${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `${marker}-MSG-${i}`,
+      timestamp: '2026-11-12T00:00:00.000Z',
+    }));
+
+  /** The parts of a prompt that only a session can put there: its running summary and its history (the turn's own text excluded). */
+  function sessionPart(prompt: Array<{ role: string; content: string }>) {
+    const history = prompt.slice(0, -1).filter((m) => m.role === 'user' || m.role === 'assistant');
+    const summary = prompt.filter((m) => m.content.includes('=== CONVERSATION SUMMARY ==='));
+    return { summary, history };
+  }
+
+  // W11-KEY-CHAT-SESSION-BIND (review SEC-W11MC-1 residual, D-130): was an it.todo. The WS key:chat handler
+  // (key-cortex.gateway.ts handleChat) handed streamReasoning the client's sessionId unchecked, and
+  // KeyCortexSessionService.getOrCreateSession loads any session by id (its Redis entry first, then the database,
+  // which no tenant context scopes on a socket), so a member naming another member's session id, or a session of
+  // another business, had that session's running summary and its last 10 messages in their prompt
+  // (buildMemoryContext and buildMessages render the session they are handed), and their turn was appended to it.
+  // key:chat now resolves the client's id by the session ownership rule the HTTP routes apply (moved from
+  // KeyCortexController.ownSessionId into key-cortex-session.service.ts): the member's own session in the socket's
+  // business, else a new session for the member, exactly as for an id that names no session, so nothing the socket
+  // receives tells a foreign id from an unknown one.
+  it("W11-KEY-CHAT-SESSION-BIND (review SEC-W11MC-1 residual, D-130, was it.todo): over the WS gateway, a STAFF member's key:chat naming the owner's session of the same business, or a session of another business, runs on a new session of the member's own: the prompt handed to the model holds neither session's running summary nor its messages, neither session is written, and the socket receives exactly what it receives for an id that names no session; read from the database and from the Redis session cache alike. The member's own session id is honoured", async () => {
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const sessionKeys = async () =>
+      (await db.cortexSession.findMany({ where: { businessId: { in: [ID.memBiz, KCSB.otherBiz] } }, select: { id: true } })).map(
+        (s: { id: string }) => `cortex:session:${s.id}`,
+      );
+    try {
+      await db.business.create({ data: { id: KCSB.otherBiz, name: 'V19C KCSB Other Biz', ownerId: ID.outsider } });
+      await db.membership.create({ data: { userId: ID.outsider, businessId: KCSB.otherBiz, role: 'OWNER' } });
+      await db.cortexSession.createMany({
+        data: [
+          {
+            id: KCSB.ownerSession, businessId: ID.memBiz, userId: ID.owner, status: 'active',
+            runningSummary: 'V19C-KCSB-OWNER-SUMMARY: the owner discussed the private payroll plan',
+            messages: kcsbMessages('V19C-KCSB-OWNER', 12),
+          },
+          {
+            id: KCSB.otherBizSession, businessId: KCSB.otherBiz, userId: ID.outsider, status: 'active',
+            runningSummary: 'V19C-KCSB-OTHERBIZ-SUMMARY: another business discussed its supplier terms',
+            messages: kcsbMessages('V19C-KCSB-OTHERBIZ', 12),
+          },
+          {
+            id: KCSB.memberSession, businessId: ID.memBiz, userId: ID.member, status: 'active',
+            runningSummary: 'V19C-KCSB-MEMBER-SUMMARY: the member asked about their rota',
+            messages: kcsbMessages('V19C-KCSB-MEMBER', 3),
+          },
+        ],
+      });
+      await redis.del(...Object.values(KCSB).map((id) => `cortex:session:${id}`));
+      const foreignRows = () =>
+        db.cortexSession.findMany({
+          where: { id: { in: [KCSB.ownerSession, KCSB.otherBizSession] } },
+          select: { id: true, businessId: true, userId: true, messages: true, runningSummary: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+        });
+      const foreignBefore = await foreignRows();
+      const membersNewSessions = () =>
+        db.cortexSession.findMany({
+          where: { businessId: ID.memBiz, userId: ID.member, id: { not: KCSB.memberSession } },
+          select: { id: true, messages: true, runningSummary: true },
+          orderBy: { createdAt: 'asc' },
+        });
+      const newBefore = (await membersNewSessions()).length;
+
+      const { chat } = await keyChatSocket(redis);
+      const unknown = await chat(KCSB.nowhere);
+      expect(sessionPart(unknown.prompt)).toEqual({ summary: [], history: [] });
+      const leaked = (prompt: Array<{ role: string; content: string }>) =>
+        prompt.map((m) => m.content).filter((c) => c.includes('V19C-KCSB-OWNER') || c.includes('V19C-KCSB-OTHERBIZ'));
+
+      // The foreign sessions as they sit in the database only, then as their own traffic leaves them in the
+      // Redis session cache (what getOrCreateSession caches: the row).
+      for (const where of ['database', 'cache'] as const) {
+        if (where === 'cache') {
+          for (const row of await db.cortexSession.findMany({ where: { id: { in: [KCSB.ownerSession, KCSB.otherBizSession] } } })) {
+            await redis.set(`cortex:session:${row.id}`, JSON.stringify(row), 'EX', 600);
+          }
+        }
+        const cachedBefore = await redis.mget(`cortex:session:${KCSB.ownerSession}`, `cortex:session:${KCSB.otherBizSession}`);
+        for (const foreign of [KCSB.ownerSession, KCSB.otherBizSession]) {
+          const turn = await chat(foreign);
+          const label = `${where}: ${foreign}`;
+          expect(leaked(turn.prompt), label).toEqual([]);
+          expect(sessionPart(turn.prompt), label).toEqual({ summary: [], history: [] });
+          expect(JSON.stringify(turn.received), label).not.toContain('V19C-KCSB');
+          expect(JSON.stringify(turn.received), label).not.toMatch(/not found/i);
+          // A refused foreign id does not reveal whether it exists: the socket gets what it gets for an unknown id.
+          expect(turn.received, label).toEqual(unknown.received);
+        }
+        expect(await foreignRows(), `${where}: neither foreign session is written`).toEqual(foreignBefore);
+        expect(
+          await redis.mget(`cortex:session:${KCSB.ownerSession}`, `cortex:session:${KCSB.otherBizSession}`),
+          `${where}: neither cached foreign session is rewritten`,
+        ).toEqual(cachedBefore);
+      }
+
+      // Each foreign or unknown turn ran on a new session of the member's own in ID.memBiz, holding that turn only.
+      const created = (await membersNewSessions()).slice(newBefore);
+      expect(created).toHaveLength(5);
+      for (const s of created) {
+        expect((s.messages as Array<{ content: string }>).map((m) => m.content)).toEqual([KCSB_TURN, 'v19c answer']);
+        expect(String(s.runningSummary)).not.toContain('V19C-KCSB');
+      }
+
+      // The member's own session id is honoured: its running summary and history are in the prompt, and the turn is appended to it.
+      const own = await chat(KCSB.memberSession);
+      const ownPart = sessionPart(own.prompt);
+      expect(ownPart.summary.map((m) => m.content).join('\n')).toContain('V19C-KCSB-MEMBER-SUMMARY');
+      expect(ownPart.history.map((m) => m.content)).toEqual(['V19C-KCSB-MEMBER-MSG-0', 'V19C-KCSB-MEMBER-MSG-1', 'V19C-KCSB-MEMBER-MSG-2']);
+      expect(leaked(own.prompt)).toEqual([]);
+      const ownRow = await db.cortexSession.findUnique({ where: { id: KCSB.memberSession }, select: { messages: true } });
+      expect((ownRow.messages as Array<{ content: string }>).map((m) => m.content).slice(-2)).toEqual([KCSB_TURN, 'v19c answer']);
+      expect((await membersNewSessions()).length - newBefore, 'no new session for the own id').toBe(5);
+
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      const keys = await sessionKeys();
+      if (keys.length > 0) await redis.del(...keys);
+      await redis.del(...Object.values(KCSB).map((id) => `cortex:session:${id}`));
+      await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      await db.$executeRawUnsafe('DELETE FROM memberships WHERE business_id = $1', KCSB.otherBiz);
+      await db.$executeRawUnsafe('DELETE FROM businesses WHERE id = $1', KCSB.otherBiz);
+      redis.disconnect();
+    }
+  }, 60_000);
+
+  // W11-KEY-CHAT-SESSION-BIND review SEC-W11KCSB-2: the business half of the session ownership rule on key:chat.
+  // Every foreign session the case above names also belongs to another member, so a rule that compared the member
+  // alone (`session.userId === actorId`) passed it, the gateway spec and every real-database KEY session suite. This
+  // case names the member's OWN session of another business the member belongs to (ID.member is STAFF of ID.memBiz
+  // and of ID.toolBiz): only the business comparison refuses it on a socket of ID.memBiz. Before the packet, its
+  // running summary and messages reached the prompt and the turn was appended to the ID.toolBiz row.
+  it("W11-KEY-CHAT-SESSION-BIND review SEC-W11KCSB-2: over the WS gateway, a member of ID.memBiz and ID.toolBiz on a socket of ID.memBiz naming their own session of ID.toolBiz runs on a new session of their own in ID.memBiz: the prompt holds neither that session's running summary nor its messages, neither its row nor its cached entry is written, and the socket receives exactly what it receives for an id that names no session; read from the database and from the Redis session cache alike. On a socket of ID.toolBiz the same id is honoured", async () => {
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const key = `cortex:session:${KCSB.memberOtherBizSession}`;
+    const sessionKeys = async () =>
+      (await db.cortexSession.findMany({ where: { businessId: { in: [ID.memBiz, ID.toolBiz] } }, select: { id: true } })).map(
+        (s: { id: string }) => `cortex:session:${s.id}`,
+      );
+    try {
+      await db.cortexSession.create({
+        data: {
+          id: KCSB.memberOtherBizSession, businessId: ID.toolBiz, userId: ID.member, status: 'active',
+          runningSummary: 'V19C-KCSB-MEMBER-OTHERBIZ-SUMMARY: the member discussed the other business supplier rota',
+          messages: kcsbMessages('V19C-KCSB-MEMBER-OTHERBIZ', 12),
+        },
+      });
+      await redis.del(key, `cortex:session:${KCSB.nowhere}`);
+      const row = () =>
+        db.cortexSession.findUnique({
+          where: { id: KCSB.memberOtherBizSession },
+          select: { id: true, businessId: true, userId: true, messages: true, runningSummary: true, updatedAt: true, lastAccessedAt: true },
+        });
+      const rowBefore = await row();
+      const membersSessions = (businessId: string) =>
+        db.cortexSession.findMany({
+          where: { businessId, userId: ID.member },
+          select: { id: true, messages: true, runningSummary: true },
+          orderBy: { createdAt: 'asc' },
+        });
+      const memBizBefore = (await membersSessions(ID.memBiz)).length;
+      const leaked = (prompt: Array<{ role: string; content: string }>) =>
+        prompt.map((m) => m.content).filter((c) => c.includes('V19C-KCSB-MEMBER-OTHERBIZ'));
+
+      const onMemBiz = await keyChatSocket(redis);
+      const unknown = await onMemBiz.chat(KCSB.nowhere);
+      expect(sessionPart(unknown.prompt)).toEqual({ summary: [], history: [] });
+
+      for (const where of ['database', 'cache'] as const) {
+        if (where === 'cache') {
+          // As the member's own traffic on ID.toolBiz leaves it (what getOrCreateSession caches: the row).
+          await redis.set(key, JSON.stringify(await db.cortexSession.findUnique({ where: { id: KCSB.memberOtherBizSession } })), 'EX', 600);
+        }
+        const cachedBefore = await redis.get(key);
+        const turn = await onMemBiz.chat(KCSB.memberOtherBizSession);
+        expect(leaked(turn.prompt), where).toEqual([]);
+        expect(sessionPart(turn.prompt), where).toEqual({ summary: [], history: [] });
+        expect(JSON.stringify(turn.received), where).not.toContain('V19C-KCSB');
+        // The socket cannot tell the member's session of another business from an id that names nothing.
+        expect(turn.received, where).toEqual(unknown.received);
+        expect(await row(), `${where}: the ID.toolBiz session is not written`).toEqual(rowBefore);
+        expect(await redis.get(key), `${where}: its cached entry is not rewritten`).toBe(cachedBefore);
+      }
+
+      // Each turn ran on a new session of the member's own in ID.memBiz, holding that turn only; ID.toolBiz got none.
+      const created = (await membersSessions(ID.memBiz)).slice(memBizBefore);
+      expect(created).toHaveLength(3);
+      for (const s of created) {
+        expect((s.messages as Array<{ content: string }>).map((m) => m.content)).toEqual([KCSB_TURN, 'v19c answer']);
+        expect(String(s.runningSummary)).not.toContain('V19C-KCSB');
+      }
+      expect((await membersSessions(ID.toolBiz)).map((s: { id: string }) => s.id)).toEqual([KCSB.memberOtherBizSession]);
+
+      // Positive control: the session IS the member's own, so on a socket of ID.toolBiz it is honoured (its running
+      // summary and its history in the prompt, the turn appended to it).
+      const onToolBiz = await keyChatSocket(redis, ID.toolBiz);
+      const own = await onToolBiz.chat(KCSB.memberOtherBizSession);
+      const ownPart = sessionPart(own.prompt);
+      expect(ownPart.summary.map((m) => m.content).join('\n')).toContain('V19C-KCSB-MEMBER-OTHERBIZ-SUMMARY');
+      const history = ownPart.history.map((m) => m.content);
+      expect(history.length).toBeGreaterThan(0);
+      expect(history).toContain('V19C-KCSB-MEMBER-OTHERBIZ-MSG-11');
+      for (const content of history) expect(content).toMatch(/^V19C-KCSB-MEMBER-OTHERBIZ-MSG-\d+$/);
+      const after = await db.cortexSession.findUnique({ where: { id: KCSB.memberOtherBizSession }, select: { messages: true } });
+      expect((after.messages as Array<{ content: string }>).map((m) => m.content).slice(-2)).toEqual([KCSB_TURN, 'v19c answer']);
+
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      const keys = await sessionKeys();
+      if (keys.length > 0) await redis.del(...keys);
+      await redis.del(key, `cortex:session:${KCSB.nowhere}`);
+      await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      redis.disconnect();
+    }
+  }, 60_000);
+
+  // W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2, D-130): what the promotion cases seed in ID.memBiz. The owner's two
+  // chat turns (one with a detected business function, one without: `learned:general`, the key a member-less row
+  // promotes into too), the STAFF member's turn, and a member-less row.
+  const MPS = {
+    ownerFnSession: `${P}sess_mps_owner_fn`,
+    ownerGeneralSession: `${P}sess_mps_owner_general`,
+    memberSession: `${P}sess_mps_member`,
+    chatSession: `${P}sess_mps_chat_nowhere`,
+    ownerFn: 'v19c_mps_finance',
+    memberFn: 'v19c_mps_rota',
+    OWNER_FN: 'V19C-MPS-OWNER-FN: net profit this quarter is 48213 after the private payroll plan',
+    OWNER_GENERAL: 'V19C-MPS-OWNER-GENERAL: move the supplier deposit before the owner draws salary',
+    MEMBER: 'V19C-MPS-MEMBER: swap your Thursday shift with the cashier',
+    NOBODY: 'V19C-MPS-NOBODY: crm.mps_follow_up',
+  };
+
+  /** Every learning memory of ID.memBiz (what the consolidation promotes), by key. */
+  const learningMemories = () =>
+    db.aiMemory.findMany({
+      where: { businessId: ID.memBiz, category: 'learning' },
+      select: { key: true, value: true, source: true, confidence: true },
+      orderBy: { key: 'asc' },
+    });
+
+  async function removeMpsRows() {
+    await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
+    await db.$executeRawUnsafe(`DELETE FROM ai_memories WHERE business_id = $1 AND category = 'learning'`, ID.memBiz);
+    // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies POST .../agent/memory/backfill writes.
+    await db.$executeRawUnsafe('DELETE FROM ai_memory_embeddings WHERE business_id = $1', ID.memBiz);
+    // KeyCortexLearningService.recordFeedback's outcome logs.
+    await db.$executeRawUnsafe('DELETE FROM genome_recommendation_outcomes WHERE business_id = $1', ID.memBiz);
+    await db.$executeRawUnsafe('DELETE FROM key_evolution_logs WHERE business_id = $1', ID.memBiz);
+  }
+
+  /**
+   * W11-MEMORY-PROMOTE-SCOPE: GET /ai/businesses/:businessId/ai/memory, the HTTP route that hands any member of the
+   * business every AiMemory row (AiMemoryService.getAll), on the real AiController behind its real AuthGuard,
+   * BusinessGuard and CrmRateLimitGuard over the real database. Stand-ins: identity attachment only (a middleware reads
+   * `x-v19c-user` and attaches the seeded user, as the Supabase-verifying AuthMiddleware would), and the controller's
+   * collaborators for routes this case does not call. `memories(userId)`: the rows the route answers that member.
+   */
+  async function aiMemoryOverHttp() {
+    const { Test } = await import('@nestjs/testing');
+    const { default: request } = await import('supertest');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+    const { AiController } = await import('../src/modules/ai/ai.controller');
+    const { AiMemoryService } = await import('../src/modules/ai/ai-memory.service');
+    const OFF_ROUTE = new Set([
+      'AiAdvisorService', 'AiUsageService', 'AiExecutionLogService', 'AiOversightService', 'BusinessGraphService',
+      'IntentParserService', 'PlannerService', 'StrategicIntelligenceService', 'ProAutoMonitorService',
+      'ProfileIntelligenceService', 'WorkspaceRecommendationsService', 'ModelGatewayService', 'KeyCommandService',
+      'AutopilotRulesService', 'AgentHealthService', 'JourneyOrchestratorService', 'MorningBriefingService',
+      'UnifiedInboxService', 'GoalTrackerService', 'WorkloadAggregatorService', 'TaskPrioritizerService',
+      'CapacityInsightService', 'TaskRebalancerService', 'KeyAgentConfigService', 'UndoService',
+      'ProactiveSuggestionService', 'WorkflowTemplateService', 'KeyActionProposalService',
+      'KeyCortexApprovalOrchestratorService',
+    ]);
+    const moduleRef = await Test.createTestingModule({
+      controllers: [AiController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        CrmRateLimitGuard,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        // getAll reads the database only; the execution log and the blueprint serve other methods.
+        { provide: AiMemoryService, useFactory: (p: any) => new AiMemoryService(p, {} as any, {} as any), inject: [PrismaService] },
+      ],
+    })
+      .useMocker((token: any) => (OFF_ROUTE.has(typeof token === 'function' ? token.name : String(token)) ? {} : undefined))
+      .compile();
+    const http = moduleRef.createNestApplication();
+    http.use(async (req: any, _res: any, next: any) => {
+      const id = req.headers['x-v19c-user'];
+      if (typeof id === 'string' && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    http.useGlobalFilters(new GlobalHttpExceptionFilter());
+    await http.init();
+    const memories = async (userId: string): Promise<Array<{ category: string; key: string; value: string }>> => {
+      const res = await request(http.getHttpServer()).get(`/ai/businesses/${ID.memBiz}/ai/memory`).set('x-v19c-user', userId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body.memories;
+    };
+    return { memories, close: () => http.close() };
+  }
+  const values = (rows: Array<{ value: string }>) => rows.map((m) => m.value).join('\n');
+
+  /** W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: every embedding is this one vector, so every copy matches any query. */
+  const UNIT_VECTOR = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
+
+  /**
+   * W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copy of the business's AI memory. The real
+   * SemanticMemoryService over the real ai_memory_embeddings table (pgvector); its one provider call
+   * (AiUsageService.trackEmbedding) is a stand-in that answers UNIT_VECTOR, after `beforeEmbedding(text)` (which may
+   * hold one text back), so no request leaves the process. Over HTTP, on the real AgentController behind its real
+   * AuthGuard and BusinessGuard (identity attachment as in aiMemoryOverHttp): POST
+   * /ai/businesses/:businessId/agent/memory/backfill, which any member may send (it copies every AiMemory row of the
+   * business into ai_memory_embeddings: source_type 'memory', source_id the row's id), and GET
+   * /ai/businesses/:businessId/agent/memory/search, which answers any member the matching copies.
+   */
+  async function semanticMemoryOverHttp(beforeEmbedding: (text: string) => Promise<void> | void = () => undefined) {
+    const { Test } = await import('@nestjs/testing');
+    const { default: request } = await import('supertest');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { AgentController } = await import('../src/modules/ai/agent.controller');
+    const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
+    const usage = {
+      trackEmbedding: async (_businessId: string, _userId: unknown, _operation: string, texts: string[]) => {
+        for (const text of texts) await beforeEmbedding(text);
+        return texts.map(() => UNIT_VECTOR);
+      },
+    };
+    const semantic = new SemanticMemoryService(prisma, new EventEmitter2(), usage as any);
+    const OFF_ROUTE = new Set([
+      'AgentStateMachineService', 'AgentBusService', 'PatternDetectorService', 'UndoService',
+      'CalendarIntelligenceService', 'DocumentIntelligenceService',
+    ]);
+    const moduleRef = await Test.createTestingModule({
+      controllers: [AgentController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: SemanticMemoryService, useValue: semantic },
+      ],
+    })
+      .useMocker((token: any) => (OFF_ROUTE.has(typeof token === 'function' ? token.name : String(token)) ? {} : undefined))
+      .compile();
+    const http = moduleRef.createNestApplication();
+    http.use(async (req: any, _res: any, next: any) => {
+      const id = req.headers['x-v19c-user'];
+      if (typeof id === 'string' && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    http.useGlobalFilters(new GlobalHttpExceptionFilter());
+    await http.init();
+    const backfill = async (userId: string): Promise<number> => {
+      const res = await request(http.getHttpServer()).post(`/ai/businesses/${ID.memBiz}/agent/memory/backfill`).set('x-v19c-user', userId);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return res.body.backfilled;
+    };
+    const search = async (userId: string, q: string): Promise<string> => {
+      const res = await request(http.getHttpServer())
+        .get(`/ai/businesses/${ID.memBiz}/agent/memory/search`)
+        .query({ q, limit: '50' })
+        .set('x-v19c-user', userId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return (res.body.results as Array<{ content: string }>).map((r) => r.content).join('\n');
+    };
+    return { semantic, backfill, search, close: () => http.close() };
+  }
+
+  /** W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the distinct contents of ID.memBiz's semantic copies of its AI memory. */
+  const memoryCopies = async (): Promise<string[]> =>
+    (
+      await db.$queryRawUnsafe(
+        `SELECT DISTINCT content FROM ai_memory_embeddings WHERE business_id = $1 AND source_type = 'memory'`,
+        ID.memBiz,
+      )
+    )
+      .map((r: { content: string }) => r.content)
+      .sort();
+
+  // W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2, D-130): was an it.todo (W11-CORTEX-MEMORY-COGNITION review residual,
+  // reproduced: the owner's promoted "net profit" answer in the STAFF member's memory block). The hourly consolidation
+  // (memory-consolidation.service.ts promoteFacts) copied ANY accepted cognition row of the business with confidence
+  // >= 0.9 into the business-wide AiMemory row learning:learned:<functionId>. A member's row is what they typed and KEY's
+  // whole answer to them (processQuery's recordObservation, with the model's own confidence, accepted on POST
+  // /cortex/feedback), so one member's conversation became [ai_memory] in every member's prompt (buildMemoryContext,
+  // chatMemoryFragments, the key:chat turn), past D-130's rule that a member sees only their own cognition memory.
+  // Only a member-less row is business-wide; a member's own row stays theirs (AiMemory has no per-member shape).
+  // The rows below are written by the services that write them in the app: KeyCortexLearningService.recordObservation
+  // (the chat turn) and recordFeedback (POST /cortex/feedback's service, handed the caller as userId), and the
+  // member-less shape KeyCortexGenomeBridgeService.recordOutcome writes. The consolidation is the real service on the
+  // real database (run(): what the hourly sweep runs for a resting business); the reader is the real
+  // buildMemoryContext and the real WS key:chat gateway of the STAFF member (keyChatSocket).
+  it("W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2, D-130, was it.todo): memory consolidation promotes only member-less cognition rows into the business-wide AI memory: the owner's accepted 0.95 cognition rows (KEY's answers to the owner, as the chat records them and POST /cortex/feedback accepts them) and the STAFF member's are not promoted, so neither reaches the other member's memory block nor the prompt of the STAFF member's key:chat turn over the WS gateway; a member-less accepted row is promoted as before and reaches both (control); each member still reads their own row as their own cognition memory", async () => {
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
+    const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
+    // No model gateway: recordFeedback's lessons are the rule-based ones (no provider call).
+    const learning = new KeyCortexLearningService(prisma);
+    const turn = (userId: string, sessionId: string, functionId: string | undefined, said: string) =>
+      learning.recordObservation({
+        sessionId,
+        businessId: ID.memBiz,
+        userId,
+        functionId,
+        query: `${said} typed: what should I do next?`,
+        recommendation: said,
+        confidence: 0.95,
+        metadata: { correlationId: `${P}corr_mps_${sessionId}` },
+      });
+    let overHttp: Awaited<ReturnType<typeof aiMemoryOverHttp>> | undefined;
+    try {
+      await removeMpsRows();
+      await turn(ID.owner, MPS.ownerFnSession, MPS.ownerFn, MPS.OWNER_FN);
+      await turn(ID.owner, MPS.ownerGeneralSession, undefined, MPS.OWNER_GENERAL);
+      await turn(ID.member, MPS.memberSession, MPS.memberFn, MPS.MEMBER);
+      // POST /cortex/feedback: each member accepts KEY's answer on their own session.
+      await learning.recordFeedback({ businessId: ID.memBiz, sessionId: MPS.ownerFnSession, userId: ID.owner, userResponse: 'accepted' });
+      await learning.recordFeedback({ businessId: ID.memBiz, sessionId: MPS.ownerGeneralSession, userId: ID.owner, userResponse: 'accepted' });
+      await learning.recordFeedback({ businessId: ID.memBiz, sessionId: MPS.memberSession, userId: ID.member, userResponse: 'accepted' });
+      // The member-less row KeyCortexGenomeBridgeService.recordOutcome writes for a KEY action that succeeded.
+      await db.cognitionMemory.create({
+        data: {
+          businessId: ID.memBiz,
+          roleId: 'key_cortex',
+          query: 'mps_follow_up',
+          recommendation: MPS.NOBODY,
+          userResponse: 'accepted',
+          actualOutcome: 'success',
+          confidence: 1,
+          lessonsLearned: ['Action succeeded'],
+          confidenceDelta: 0.05,
+        },
+      });
+      const seeded = await db.cognitionMemory.findMany({
+        where: { businessId: ID.memBiz },
+        select: { userId: true, functionId: true, recommendation: true, userResponse: true, confidence: true },
+        orderBy: { recommendation: 'asc' },
+      });
+      // Every row is eligible by the promotion bar (accepted, confidence >= 0.9): only the member decides it now.
+      expect(seeded).toEqual([
+        { userId: ID.member, functionId: MPS.memberFn, recommendation: MPS.MEMBER, userResponse: 'accepted', confidence: 0.95 },
+        { userId: null, functionId: null, recommendation: MPS.NOBODY, userResponse: 'accepted', confidence: 1 },
+        { userId: ID.owner, functionId: MPS.ownerFn, recommendation: MPS.OWNER_FN, userResponse: 'accepted', confidence: 0.95 },
+        { userId: ID.owner, functionId: null, recommendation: MPS.OWNER_GENERAL, userResponse: 'accepted', confidence: 0.95 },
+      ]);
+      expect(await learningMemories()).toEqual([]);
+
+      const consolidation = new MemoryConsolidationService(prisma);
+      const first = await consolidation.run(ID.memBiz);
+      // The member-less row is promoted as before; no member's row is.
+      const promoted = [{ key: 'learned:general', value: MPS.NOBODY, source: 'key_cortex_learning', confidence: 1 }];
+      expect(await learningMemories()).toEqual(promoted);
+      expect(first.promoted).toBe(1);
+      // A second night converges on the same rows.
+      const second = await consolidation.run(ID.memBiz);
+      expect(second.promoted).toBe(1);
+      expect(await learningMemories()).toEqual(promoted);
+
+      // The STAFF member's memory block: the member-less promotion, their own row, none of the owner's answers.
+      const member = await memoryFor(ID.member);
+      expect(member).toContain(`learning.learned:general: ${MPS.NOBODY}`);
+      expect(member).toContain(`${MPS.MEMBER} typed`);
+      expect(member).not.toContain('V19C-MPS-OWNER');
+      // The owner's: the member-less promotion, their own rows, not the member's answer.
+      const owner = await memoryFor(ID.owner);
+      expect(owner).toContain(`learning.learned:general: ${MPS.NOBODY}`);
+      expect(owner).toContain(`${MPS.OWNER_FN} typed`);
+      expect(owner).not.toContain('V19C-MPS-MEMBER');
+      // A requester who is no member reads the business-wide memory only.
+      const outsider = await memoryFor(ID.outsider);
+      expect(outsider).toContain(`learning.learned:general: ${MPS.NOBODY}`);
+      expect(outsider).not.toContain('V19C-MPS-OWNER');
+      expect(outsider).not.toContain('V19C-MPS-MEMBER');
+
+      // GET /ai/businesses/:id/ai/memory, which hands any member every AI memory row of the business.
+      overHttp = await aiMemoryOverHttp();
+      const staffRows = await overHttp.memories(ID.member);
+      expect(
+        staffRows.filter((m) => m.category === 'learning').map((m) => ({ key: m.key, value: m.value })),
+      ).toEqual([{ key: 'learned:general', value: MPS.NOBODY }]);
+      expect(values(staffRows)).not.toContain('V19C-MPS-OWNER');
+      expect(values(await overHttp.memories(ID.owner))).not.toContain('V19C-MPS-MEMBER');
+
+      // The prompt of the STAFF member's key:chat turn over the WS gateway (a new session of the member's own).
+      await redis.del(`cortex:session:${MPS.chatSession}`);
+      const { chat } = await keyChatSocket(redis);
+      const { prompt, received } = await chat(MPS.chatSession);
+      const rendered = prompt.map((m) => m.content).join('\n');
+      expect(rendered).toContain(`learning.learned:general: ${MPS.NOBODY}`);
+      expect(rendered).not.toContain('V19C-MPS-OWNER');
+      expect(JSON.stringify(received)).not.toContain('V19C-MPS-OWNER');
+
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (overHttp) await overHttp.close();
+      const keys = (
+        await db.cortexSession.findMany({ where: { businessId: ID.memBiz }, select: { id: true } })
+      ).map((s: { id: string }) => `cortex:session:${s.id}`);
+      if (keys.length > 0) await redis.del(...keys);
+      await redis.del(`cortex:session:${MPS.chatSession}`);
+      await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      await removeMpsRows();
+      redis.disconnect();
+    }
+  }, 60_000);
+
+  // W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2): rows an earlier consolidation already promoted from a member's
+  // cognition row exist wherever the hourly sweep ran before this packet. Every reader of the business's AI memory
+  // renders them (none reads by key: buildMemoryContext, chatMemoryFragments, AiMemoryService behind GET
+  // /businesses/:id/ai/memory and its context block), so the consolidation withdraws them itself: a
+  // learning:learned:<functionId> row it wrote (source key_cortex_learning) whose value is what promotion takes from a
+  // member's row of that function (its first 500 characters), and from no member-less row, is removed on the next run.
+  // The rows below are what the base's promoteFacts wrote, with sources that have since decayed below the promotion bar.
+  it("W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2): a learning:learned:* row an earlier consolidation promoted from a member's cognition row is withdrawn by the next run, also once its source row has decayed below the promotion bar or once only its first 500 characters were promoted, so it stops reaching the other member's memory block; a promoted member-less row (decayed too) and a learning memory a user wrote are kept", async () => {
+    const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
+    const OLD = {
+      // Longer than the 500 characters promoted, with the characters a SQL pattern prefix reads as wildcards or an
+      // escape (%, _ and \) in its first 500.
+      OWNER: `V19C-MPS-OLD-OWNER: move 50% of payroll_fund to C:\\cash\\plan, the owner's private cash plan ${'x'.repeat(700)}`,
+      MEMBER: 'V19C-MPS-OLD-MEMBER: the member asked for a raise',
+      NOBODY: 'V19C-MPS-OLD-NOBODY: invoices.mps_send',
+      USER: 'V19C-MPS-OLD-USER: always quote in TTD',
+    };
+    const row = (userId: string | null, functionId: string, recommendation: string, confidence: number) => ({
+      businessId: ID.memBiz,
+      ...(userId ? { userId, sessionId: `${P}sess_mps_old_${functionId}` } : { roleId: 'key_cortex' }),
+      functionId,
+      query: `${functionId}: what next?`,
+      recommendation,
+      userResponse: 'accepted',
+      confidence,
+    });
+    // What the base's promoteFacts wrote for each (learned:<functionId>, the first 500 characters, its confidence).
+    const promotion = (functionId: string, recommendation: string, confidence: number) => ({
+      businessId: ID.memBiz,
+      category: 'learning',
+      key: `learned:${functionId}`,
+      value: recommendation.slice(0, 500),
+      source: 'key_cortex_learning',
+      confidence,
+    });
+    let overHttp: Awaited<ReturnType<typeof aiMemoryOverHttp>> | undefined;
+    try {
+      await removeMpsRows();
+      await db.cognitionMemory.createMany({
+        data: [
+          row(ID.owner, 'v19c_mps_old_owner', OLD.OWNER, 0.95),
+          // Decayed since its promotion: no longer eligible, its promoted copy still served.
+          row(ID.member, 'v19c_mps_old_member', OLD.MEMBER, 0.6),
+          row(null, 'v19c_mps_old_nobody', OLD.NOBODY, 0.6),
+        ],
+      });
+      await db.aiMemory.createMany({
+        data: [
+          promotion('v19c_mps_old_owner', OLD.OWNER, 0.95),
+          promotion('v19c_mps_old_member', OLD.MEMBER, 0.95),
+          promotion('v19c_mps_old_nobody', OLD.NOBODY, 0.95),
+          // Written through PUT /businesses/:id/ai/memory (AiMemoryService.upsert's default source): nobody promoted it.
+          { businessId: ID.memBiz, category: 'learning', key: 'v19c_mps_old_user', value: OLD.USER, source: 'user', confidence: 1 },
+        ],
+      });
+      // Served before the run: in the STAFF member's memory block and over GET /ai/businesses/:id/ai/memory.
+      overHttp = await aiMemoryOverHttp();
+      expect(await memoryFor(ID.member), 'before the run').toContain('V19C-MPS-OLD-OWNER');
+      expect(values(await overHttp.memories(ID.member)), 'before the run').toContain('V19C-MPS-OLD-OWNER');
+
+      await new MemoryConsolidationService(prisma).run(ID.memBiz);
+
+      expect(await learningMemories()).toEqual([
+        { key: 'learned:v19c_mps_old_nobody', value: OLD.NOBODY, source: 'key_cortex_learning', confidence: 0.95 },
+        { key: 'v19c_mps_old_user', value: OLD.USER, source: 'user', confidence: 1 },
+      ]);
+      const member = await memoryFor(ID.member);
+      expect(member).not.toContain('V19C-MPS-OLD-OWNER');
+      expect(member).toContain(OLD.NOBODY);
+      expect(member).toContain(OLD.USER);
+      const owner = await memoryFor(ID.owner);
+      expect(owner).not.toContain('V19C-MPS-OLD-MEMBER');
+      expect(owner).toContain(OLD.NOBODY);
+      const staffRows = values(await overHttp.memories(ID.member));
+      expect(staffRows).not.toContain('V19C-MPS-OLD-OWNER');
+      expect(staffRows).toContain(OLD.NOBODY);
+      expect(staffRows).toContain(OLD.USER);
+      expect(values(await overHttp.memories(ID.owner))).not.toContain('V19C-MPS-OLD-MEMBER');
+      // The withdrawn rows' sources are untouched: each member keeps their own row.
+      expect(await db.cognitionMemory.count({ where: { businessId: ID.memBiz } })).toBe(3);
+    } finally {
+      if (overHttp) await overHttp.close();
+      await removeMpsRows();
+    }
+  }, 60_000);
+
+  // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1 (reproduced by the review on the real database): a promoted row has a
+  // second, semantic copy. POST /ai/businesses/:id/agent/memory/backfill (any member may send it) copies every AiMemory
+  // row of the business into ai_memory_embeddings (source_type 'memory', source_id the row's id, content
+  // `learning: learned:<fn> = <value>`), and every member reads those copies back: GET .../agent/memory/search, and
+  // KEY's memory block as [ai_memory_embedding] (buildMemoryContext and chatMemoryFragments search with the turn's
+  // query). Withdrawing the row left its copy, so the owner's promoted answer was still served to the STAFF member.
+  // The copies withdrawn here: (1) a withdrawn row's own copies; (2) a copy whose row still exists but no longer holds
+  // the member's answer (the member-less row of the same function is promoted into the same key in place, before the
+  // withdrawal reads it; the base's nightly promotion overwrote such rows the same way); (3) a copy written after its
+  // row was withdrawn (a backfill that read the row before the withdrawal and wrote its copy after: held back here at
+  // the embedding call), removed by the next run. A member-less row's copy, a user's learning memory's copy and the
+  // business fact's copy are kept. Every embedding is the stand-in vector (no outbound request).
+  it("W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies of a promoted member row (what POST .../agent/memory/backfill writes into ai_memory_embeddings) are withdrawn with it, so GET .../agent/memory/search and the STAFF member's memory block stop serving the owner's answer: a withdrawn row's copies, a copy of the member's answer whose row a member-less promotion rewrote in place, and a copy a racing backfill wrote after the withdrawal (on the next run); a member-less row's, a user's learning memory's and a fact's copies are kept", async () => {
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
+    const EMB = {
+      OWNER: 'V19C-MPS-EMB-OWNER: net profit this quarter is 48213 after the private payroll plan',
+      MEMBER: 'V19C-MPS-EMB-MEMBER: I am interviewing elsewhere, keep it between us',
+      SHARED_NOBODY: 'V19C-MPS-EMB-SHARED-NOBODY: crm.mps_rota_follow_up',
+      NOBODY: 'V19C-MPS-EMB-NOBODY: invoices.mps_send',
+      USER: 'V19C-MPS-EMB-USER: always quote in TTD',
+      RACE: 'V19C-MPS-EMB-RACE-OWNER: the owner plans to sell the delivery van',
+    };
+    const QUESTION = 'how is the business doing?';
+    const cognition = (userId: string | null, functionId: string, recommendation: string, confidence: number) => ({
+      businessId: ID.memBiz,
+      ...(userId ? { userId, sessionId: `${P}sess_mps_emb_${functionId}` } : { roleId: 'key_cortex' }),
+      functionId,
+      query: `${functionId}: what next?`,
+      recommendation,
+      userResponse: 'accepted',
+      confidence,
+    });
+    // What the base's promoteFacts wrote (learned:<functionId>, the recommendation, its confidence).
+    const promotion = (functionId: string, recommendation: string) => ({
+      businessId: ID.memBiz,
+      category: 'learning',
+      key: `learned:${functionId}`,
+      value: recommendation,
+      source: 'key_cortex_learning',
+      confidence: 0.95,
+    });
+    const copyOf = (key: string, value: string) => `learning: ${key} = ${value}`;
+    // beforeAll's business-wide fact, as the backfill copies it.
+    const FACT_COPY = `fact: ${P}shared_fact = v19c memory: a business-wide fact`;
+    let release: () => void = () => undefined;
+    let reachedRace: () => void = () => undefined;
+    const raceReached = new Promise<void>((resolve) => (reachedRace = resolve));
+    const raceReleased = new Promise<void>((resolve) => (release = resolve));
+    let holdRace = false;
+    let http: Awaited<ReturnType<typeof semanticMemoryOverHttp>> | undefined;
+    try {
+      await removeMpsRows();
+      await db.cognitionMemory.createMany({
+        data: [
+          cognition(ID.owner, 'v19c_mps_emb_owner', EMB.OWNER, 0.95),
+          cognition(ID.member, 'v19c_mps_emb_shared', EMB.MEMBER, 0.95),
+          // Eligible for promotion, into the same key as the member's row.
+          cognition(null, 'v19c_mps_emb_shared', EMB.SHARED_NOBODY, 1),
+          // Decayed below the bar since its promotion: its promoted row and copy stay.
+          cognition(null, 'v19c_mps_emb_nobody', EMB.NOBODY, 0.6),
+          cognition(ID.owner, 'v19c_mps_emb_race', EMB.RACE, 0.95),
+        ],
+      });
+      await db.aiMemory.createMany({
+        data: [
+          promotion('v19c_mps_emb_owner', EMB.OWNER),
+          promotion('v19c_mps_emb_shared', EMB.MEMBER),
+          promotion('v19c_mps_emb_nobody', EMB.NOBODY),
+          // Written through PUT /businesses/:id/ai/memory (source user): nobody promoted it.
+          { businessId: ID.memBiz, category: 'learning', key: 'v19c_mps_emb_user', value: EMB.USER, source: 'user', confidence: 1 },
+        ],
+      });
+      http = await semanticMemoryOverHttp(async (text) => {
+        if (holdRace && text.includes('V19C-MPS-EMB-RACE')) {
+          reachedRace();
+          await raceReleased;
+        }
+      });
+      const asking = { question: QUESTION, semantic: http.semantic };
+
+      // The STAFF member backfills the business's semantic memory: one copy of every AiMemory row.
+      expect(await http.backfill(ID.member)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
+      expect(await memoryCopies()).toEqual(
+        [
+          FACT_COPY,
+          copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY),
+          copyOf('learned:v19c_mps_emb_owner', EMB.OWNER),
+          copyOf('learned:v19c_mps_emb_shared', EMB.MEMBER),
+          copyOf('v19c_mps_emb_user', EMB.USER),
+        ].sort(),
+      );
+      // Served before the run: the owner's answer to the STAFF member, the member's to the owner.
+      expect(await http.search(ID.member, QUESTION), 'before the run').toContain('V19C-MPS-EMB-OWNER');
+      expect(await http.search(ID.owner, QUESTION), 'before the run').toContain('V19C-MPS-EMB-MEMBER');
+      expect((await memoryContextFor(ID.member, asking)).aiMemory, 'before the run').toContain('V19C-MPS-EMB-OWNER');
+
+      const consolidation = new MemoryConsolidationService(prisma);
+      await consolidation.run(ID.memBiz);
+
+      // The rows: the owner's promotion withdrawn; the shared key now holds the member-less row's answer.
+      expect(await learningMemories()).toEqual([
+        { key: 'learned:v19c_mps_emb_nobody', value: EMB.NOBODY, source: 'key_cortex_learning', confidence: 0.95 },
+        { key: 'learned:v19c_mps_emb_shared', value: EMB.SHARED_NOBODY, source: 'key_cortex_learning', confidence: 1 },
+        { key: 'v19c_mps_emb_user', value: EMB.USER, source: 'user', confidence: 1 },
+      ]);
+      // The copies: the withdrawn row's, and the member's answer under the rewritten key, are gone; the rest are kept.
+      expect(await memoryCopies()).toEqual(
+        [FACT_COPY, copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY), copyOf('v19c_mps_emb_user', EMB.USER)].sort(),
+      );
+      const staffSearch = await http.search(ID.member, QUESTION);
+      expect(staffSearch).not.toContain('V19C-MPS-EMB-OWNER');
+      expect(staffSearch).toContain(EMB.NOBODY);
+      expect(staffSearch).toContain(EMB.USER);
+      expect(await http.search(ID.owner, QUESTION)).not.toContain('V19C-MPS-EMB-MEMBER');
+      const staffBlock = (await memoryContextFor(ID.member, asking)).aiMemory;
+      expect(staffBlock).not.toContain('V19C-MPS-EMB-OWNER');
+      expect(staffBlock).toContain('[ai_memory_embedding]');
+      expect((await memoryContextFor(ID.owner, asking)).aiMemory).not.toContain('V19C-MPS-EMB-MEMBER');
+
+      // A backfill racing the withdrawal: it reads the owner's promoted RACE row (as the base wrote it) and writes the
+      // row's copy only after the run has withdrawn the row.
+      await db.aiMemory.create({ data: promotion('v19c_mps_emb_race', EMB.RACE) });
+      holdRace = true;
+      const racing = http.backfill(ID.member);
+      await raceReached;
+      await consolidation.run(ID.memBiz);
+      expect(await db.aiMemory.count({ where: { businessId: ID.memBiz, key: 'learned:v19c_mps_emb_race' } })).toBe(0);
+      release();
+      await racing;
+      // The late copy is served until the next run...
+      expect(await memoryCopies()).toContain(copyOf('learned:v19c_mps_emb_race', EMB.RACE));
+      expect(await http.search(ID.member, QUESTION), 'the late copy').toContain('V19C-MPS-EMB-RACE');
+      // ...which withdraws it.
+      await consolidation.run(ID.memBiz);
+      expect(await memoryCopies()).toEqual(
+        [
+          FACT_COPY,
+          copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY),
+          copyOf('learned:v19c_mps_emb_shared', EMB.SHARED_NOBODY),
+          copyOf('v19c_mps_emb_user', EMB.USER),
+        ].sort(),
+      );
+      const staffAfter = await http.search(ID.member, QUESTION);
+      expect(staffAfter).not.toContain('V19C-MPS-EMB-RACE');
+      expect(staffAfter).not.toContain('V19C-MPS-EMB-OWNER');
+      expect((await memoryContextFor(ID.member, asking)).aiMemory).not.toContain('V19C-MPS-EMB-RACE');
+
+      // The sources are untouched: each member keeps their own row.
+      expect(await db.cognitionMemory.count({ where: { businessId: ID.memBiz } })).toBe(5);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      release();
+      globalThis.fetch = realFetch;
+      if (http) await http.close();
+      await removeMpsRows();
+    }
+  }, 60_000);
+
+  // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): was an it.todo (W11-CORTEX-MEMORY-COGNITION review residual,
+  // reproduced: the owner's typed chat and KEY's answer in the STAFF member's section). The /ai flow chat and its stream
+  // (flow-orchestrator.service.ts buildPerceptionSection) rendered the business's memory into a member's "WHAT YOU HAVE
+  // OBSERVED" block by neither of buildMemoryContext's rules: every member's cognition memory (what a member typed and
+  // KEY's whole answer to them) and KEY's member-less rows, every KEY tool-call record of the business-wide stores (another
+  // member's tool answer and typed input), and, for a turn that names no member (the Chatwoot support desk and the staff
+  // bridge pass none), every member's episodic rows. The block now keeps what buildMemoryContext keeps, through the same
+  // shared helpers: the reader is the requester when they are a member of the business (else nobody), only the reader's
+  // own cognition rows, no tool-call record, no per-member memory for a turn with no reader, with the same headroom.
+  describe('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the /ai flow chat perception block', () => {
+    const FPS = {
+      biz: `${P}biz_fps`,
+      /** A platform SUPER_ADMIN who is no member of FPS.biz: BusinessGuard admits them; they are nobody's reader. */
+      admin: `${P}fps_admin`,
+      fact: 'V19C-FPS-FACT: a business-wide fact',
+      turn: 'v19c fps: how are we doing this month?',
+      OWNER_SAID: 'V19C-FPS-OWNER',
+      MEMBER_SAID: 'V19C-FPS-MEMBER',
+      NOBODY_SAID: 'V19C-FPS-NOBODY',
+      /** What the owner typed into their own KEY tool call (key_inbox.get_thread's input). */
+      OWNER_NOTE: 'V19C-FPS-OWNER-TYPED-NOTE',
+    };
+    const PATHS = ['chat', 'stream'] as const;
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    let flow: Awaited<ReturnType<typeof flowChatOverHttp>> | undefined;
+
+    /** One member's cognition row of FPS.biz as recordObservation writes it, or (null) recordOutcome's member-less row. */
+    const fpsCognition = (userId: string | null, said: string, extra: Record<string, unknown> = {}) => ({
+      businessId: FPS.biz,
+      ...(userId ? { userId } : { roleId: 'key_cortex' }),
+      sessionId: `${P}sess_fps_${said}`,
+      query: `${said} typed: what is our net profit this quarter?`,
+      recommendation: `${said} KEY answered: net profit 48213`,
+      userResponse: 'no_action',
+      confidence: 0.9,
+      ...extra,
+    });
+
+    /** The fragment lines of a prompt's "WHAT YOU HAVE OBSERVED" block (a fragment's content may run on below its line). */
+    const observed = (prompt: string): string[] => {
+      const at = prompt.indexOf('WHAT YOU HAVE OBSERVED');
+      return at < 0 ? [] : prompt.slice(at).split('\n').filter((l) => l.startsWith('- ['));
+    };
+    /** A line of a KEY tool call's record in a business-wide store (what isToolCallRecord names). */
+    const toolCallRecordLines = (prompt: string) =>
+      observed(prompt).filter(
+        (l) => /^- \[cognitive_event\] (tool\.|cortex\.action_)/.test(l) || (l.startsWith('- [business_event]') && /tool_execution|AiExecutionLog/.test(l)),
+      );
+
+    /**
+     * POST /ai/businesses/:businessId/flow/chat and .../flow/chat/stream on the real AiFlowController behind its real
+     * AuthGuard, BusinessGuard and CrmRateLimitGuard, over the real FlowOrchestratorService (chat, streamChat and
+     * buildPerceptionSection), whose UnifiedMemoryRetrievalService (reached through moduleRef, as getUnifiedMemory
+     * reaches the app's provider) reads the real stores; no query is passed to it, so its semantic store (a stand-in
+     * answering nothing) is never searched. Stand-ins: identity attachment (a middleware reads `x-v19c-user`, as in
+     * aiMemoryOverHttp), the model provider (aiUsage: records the system prompt it is handed and answers a plain reply),
+     * and the prompt's other context reads (business graph, AI memory block, blueprint, onboarding, attachments); no
+     * triage verdict, as when CognitiveTriageService is absent (the standard window). `turn(userId, path)`: the system
+     * prompt of one turn of that user over HTTP; `deskTurn(path)`: of a turn that names no member, as the Chatwoot
+     * support desk calls chat() (chatwoot.service.ts: no user).
+     */
+    async function flowChatOverHttp(businessId: string) {
+      const { Test } = await import('@nestjs/testing');
+      const { default: request } = await import('supertest');
+      const { ValidationPipe } = await import('@nestjs/common');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiFlowController } = await import('../src/modules/ai/flow.controller');
+      const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+      const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+      const { RoleEngineService } = await import('../src/modules/ai/role-engine.service');
+      const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
+      const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
+      const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+
+      const prompts: string[] = [];
+      const warnings: string[] = [];
+      const usage = { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 };
+      type GatewayRequest = { messages: Array<{ role: string; content: unknown }> };
+      const record = (req: GatewayRequest) =>
+        prompts.push(req.messages.filter((m) => m.role === 'system').map((m) => String(m.content ?? '')).join('\n'));
+      const aiUsage = {
+        checkRateLimit() {},
+        async checkCredits() {
+          return { allowed: true };
+        },
+        async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
+          record(req);
+          return { content: 'v19c fps: noted.', toolCalls: [], usage };
+        },
+        async *trackAndStream(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
+          record(req);
+          yield { type: 'content_delta', content: 'v19c fps: noted.' };
+        },
+      };
+      const recorder = { emit() { return true; }, async recordEvent() { return undefined; }, async create() { return undefined; } };
+      const roleEngine = new RoleEngineService(prisma, {} as any, recorder as any);
+      const jobRolePolicy = new JobRolePolicyService();
+      const providers = new Map<unknown, unknown>();
+      const moduleRef = {
+        get(token: any) {
+          if (!providers.has(token)) throw new Error(`v19c: no provider for ${token?.name ?? String(token)}`);
+          return providers.get(token);
+        },
+      };
+      providers.set(KeyActionBoundaryService, new KeyActionBoundaryService(prisma, moduleRef as any));
+      providers.set(JobRolePolicyService, jobRolePolicy);
+      providers.set(UnifiedMemoryRetrievalService, new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any));
+      const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+        logger: { log() {}, debug() {}, verbose() {}, error() {}, warn: (m: unknown) => warnings.push(String(m)) },
+        prisma,
+        moduleRef,
+        aiUsage,
+        roleEngine,
+        governance: new AiOversightService(prisma, {} as any, {} as any, roleEngine, {} as any, jobRolePolicy),
+        executionLog: { logToolExecution: async () => undefined, log: async () => undefined },
+        businessGraph: {
+          invalidateCache() {},
+          getSnapshot: async () => ({ business: { name: 'V19C FPS Biz' } }),
+          buildContextString: () => '',
+        },
+        memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
+        semanticMemory: { search: async () => [] },
+        genomeFacts: { listTopFacts: async () => [] },
+        buildAttachmentContext: async () => '',
+        buildBlueprintSection: async () => '',
+        buildOnboardingDirective: async () => '',
+        getTriage: () => null,
+        saveConversationHistory: async () => undefined,
+        enforceDoNotSay: async () => undefined,
+      });
+      const testing = await Test.createTestingModule({
+        controllers: [AiFlowController],
+        providers: [
+          { provide: PrismaService, useValue: prisma },
+          AuthGuard,
+          BusinessGuard,
+          CrmRateLimitGuard,
+          { provide: FlowOrchestratorService, useValue: orchestrator },
+        ],
+      }).compile();
+      const http = testing.createNestApplication();
+      http.getHttpAdapter().getInstance().set('trust proxy', true);
+      http.use(async (req: any, _res: any, next: any) => {
+        const id = req.headers['x-v19c-user'];
+        if (typeof id === 'string' && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      http.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+      http.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await http.init();
+
+      let ip = 0;
+      const turn = async (userId: string, path: 'chat' | 'stream'): Promise<string> => {
+        prompts.length = 0;
+        ip += 1;
+        const req = request(http.getHttpServer())
+          .post(`/ai/businesses/${businessId}/flow/chat${path === 'stream' ? '/stream' : ''}`)
+          .set('x-v19c-user', userId)
+          .set('x-forwarded-for', `10.19.3.${ip}`)
+          .send({ message: FPS.turn });
+        if (path === 'chat') {
+          const res = await req;
+          expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+        } else {
+          const res = await req.buffer(true).parse((r: any, cb: any) => {
+            let text = '';
+            r.setEncoding('utf8');
+            r.on('data', (c: string) => {
+              text += c;
+            });
+            r.on('end', () => cb(null, text));
+          });
+          const chunks = String(res.body)
+            .split('\n')
+            .filter((l) => l.startsWith('data: ') && l !== 'data: [DONE]')
+            .map((l) => JSON.parse(l.slice('data: '.length)));
+          expect(chunks.filter((c: any) => c.type === 'error'), String(res.body).slice(0, 400)).toEqual([]);
+        }
+        expect(prompts, `one model call for ${userId} (${path})`).toHaveLength(1);
+        return prompts[0];
+      };
+      const deskTurn = async (path: 'chat' | 'stream'): Promise<string> => {
+        prompts.length = 0;
+        const desk = { route: '/app/helpdesk', surface: 'helpdesk' };
+        if (path === 'chat') {
+          await orchestrator.chat(businessId, FPS.turn, [], undefined, desk, undefined, undefined, `${P}fps_desk_conv`);
+        } else {
+          for await (const chunk of orchestrator.streamChat(businessId, FPS.turn, [], desk, undefined, undefined, `${P}fps_desk_conv`)) {
+            expect((chunk as { type: string }).type, JSON.stringify(chunk).slice(0, 400)).not.toBe('error');
+          }
+        }
+        expect(prompts, `one model call for the support desk (${path})`).toHaveLength(1);
+        return prompts[0];
+      };
+      return { turn, deskTurn, warnings, close: () => http.close() };
+    }
+
+    async function removeFpsRows() {
+      for (const table of [
+        'cortex_action_logs', 'ai_execution_logs', 'business_events', 'cognitive_events', 'cognition_memories',
+        'tool_outcome_scores', 'ai_memories', 'key_commands', 'cortex_sessions', 'memberships',
+      ]) {
+        await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE business_id = $1`, FPS.biz);
+      }
+      await db.$executeRawUnsafe('DELETE FROM businesses WHERE id = $1', FPS.biz);
+      await db.$executeRawUnsafe('DELETE FROM users WHERE id = $1', FPS.admin);
+    }
+
+    beforeAll(async () => {
+      globalThis.fetch = (async (input: unknown) => {
+        outbound.push(String(input));
+        throw new Error('v19c: no outbound traffic in this case');
+      }) as typeof fetch;
+      await removeFpsRows();
+      await db.user.create({ data: { id: FPS.admin, email: `${P}fps_admin@test.local`, role: 'SUPER_ADMIN' } });
+      await db.business.create({ data: { id: FPS.biz, name: 'V19C FPS Biz', ownerId: ID.owner } });
+      // The owner holds the OWNER membership (D-104); ID.member is a STAFF member on role defaults.
+      await db.membership.createMany({
+        data: [
+          { userId: ID.owner, businessId: FPS.biz, role: 'OWNER' },
+          { userId: ID.member, businessId: FPS.biz, role: 'STAFF' },
+        ],
+      });
+      await db.aiMemory.create({ data: { businessId: FPS.biz, category: 'fact', key: `${P}fps_fact`, value: FPS.fact } });
+      // Each member's own episodic rows (W9-KEY-CORTEX-AUDIT narrows them to the reader).
+      await db.cortexActionLog.createMany({
+        data: (['owner', 'member'] as const).map((who) => ({
+          businessId: FPS.biz,
+          userId: who === 'owner' ? ID.owner : ID.member,
+          sessionId: `${P}sess_fps_${who}`,
+          actionType: `v19c.fps.${who}_action`,
+          status: 'success',
+          description: `v19c fps: the ${who}'s own episode`,
+        })),
+      });
+      await db.aiExecutionLog.createMany({
+        data: (['owner', 'member'] as const).map((who) => ({
+          businessId: FPS.biz,
+          userId: who === 'owner' ? ID.owner : ID.member,
+          action: `v19c.fps.${who}_exec`,
+          success: true,
+          rationale: `v19c fps: the ${who} asked`,
+        })),
+      });
+      flow = await flowChatOverHttp(FPS.biz);
+    }, 60_000);
+
+    afterAll(async () => {
+      globalThis.fetch = realFetch;
+      if (flow) await flow.close();
+      await removeFpsRows();
+    });
+
+    it("W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, was it.todo): over POST /ai/businesses/:id/flow/chat and its stream, a STAFF member's \"WHAT YOU HAVE OBSERVED\" block holds only their own cognition memory: the owner's typed chat and KEY's answer to them, and a member-less row, are not in it; the member's own row, their own episodic rows and the business-wide fact are (control); the owner reads their own row, not the member's; buildMemoryContext's block for the same member holds none of them either (parity)", async () => {
+      await db.cognitionMemory.createMany({
+        data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID), fpsCognition(null, FPS.NOBODY_SAID)],
+      });
+      try {
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(member, path).not.toContain(FPS.OWNER_SAID);
+          expect(member, path).not.toContain(FPS.NOBODY_SAID);
+          expect(member, path).toContain('WHAT YOU HAVE OBSERVED');
+          expect(member, path).toContain(`${FPS.MEMBER_SAID} typed`);
+          expect(member, path).toContain(`${FPS.MEMBER_SAID} KEY answered`);
+          expect(member, path).toContain('v19c.fps.member_action');
+          expect(member, path).not.toContain('v19c.fps.owner_action');
+          expect(member, path).toContain(FPS.fact);
+
+          // The owner (Business.ownerId with its OWNER membership, D-104) reads their own row, not the member's.
+          const owner = await flow!.turn(ID.owner, path);
+          expect(owner, path).not.toContain(FPS.MEMBER_SAID);
+          expect(owner, path).not.toContain(FPS.NOBODY_SAID);
+          expect(owner, path).toContain(`${FPS.OWNER_SAID} typed`);
+          expect(owner, path).toContain(FPS.fact);
+        }
+        // Parity: the memory block POST /cortex/chat renders for the same member (buildMemoryContext) keeps the same rows.
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).toContain(`${FPS.MEMBER_SAID} typed`);
+        expect(block).not.toContain(FPS.OWNER_SAID);
+        expect(block).not.toContain(FPS.NOBODY_SAID);
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, SEC-W9KCA-2): over POST /ai/businesses/:id/flow/chat and its stream, the owner's real KEY tool call (the registry's ledger business events and the bus's tool events) is not in a STAFF member's perception block: neither its answer nor the owner's typed input, nor any tool-call record line; the owner's own call reaches the owner only on their own CortexActionLog row; buildMemoryContext's block for the member holds none of it either (parity)", async () => {
+      try {
+        const t = thread('fps_tool');
+        const result = await auditedRegistry.execute(
+          TOOL_ORGAN_THREAD,
+          { businessId: FPS.biz, userId: ID.owner, autonomyLevel: 2, ...t },
+          { threadId: `${P}thread_fps_owner`, note: FPS.OWNER_NOTE },
+        );
+        expect(result).toMatchObject({ success: true, data: { thread: { body: OWNER_THREAD_SECRET } } });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, subjectType: 'tool_execution' } })).toBe(2);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'tool.executed' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(toolCallRecordLines(member), path).toEqual([]);
+          expect(member, path).not.toContain(OWNER_THREAD_SECRET);
+          expect(member, path).not.toContain(FPS.OWNER_NOTE);
+          expect(member, path).toContain('v19c.fps.member_action');
+          expect(member, path).toContain(FPS.fact);
+
+          const owner = await flow!.turn(ID.owner, path);
+          expect(toolCallRecordLines(owner), path).toEqual([]);
+          expect(owner, path).not.toContain(FPS.OWNER_NOTE);
+          for (const line of observed(owner).filter((l) => l.includes(OWNER_THREAD_SECRET))) {
+            expect(line, path).toMatch(/^- \[cortex_action_log\] key_inbox\.get_thread: /);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain(OWNER_THREAD_SECRET);
+        expect(block).not.toContain(FPS.OWNER_NOTE);
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', FPS.biz, TOOL_ORGAN_THREAD);
+      }
+    }, 60_000);
+
+    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone, the SUPER_ADMIN not even rows of their own left in the business (as a non-member in buildMemoryContext); the business-wide fact still reaches them', async () => {
+      const ADMIN_SAID = 'V19C-FPS-ADMIN';
+      await db.cognitionMemory.createMany({
+        data: [
+          fpsCognition(ID.owner, FPS.OWNER_SAID),
+          fpsCognition(ID.member, FPS.MEMBER_SAID),
+          fpsCognition(null, FPS.NOBODY_SAID),
+          // The SUPER_ADMIN's own rows in a business they are no member of (as a removed member's are): nobody's to read.
+          fpsCognition(FPS.admin, ADMIN_SAID),
+        ],
+      });
+      await db.cortexActionLog.create({
+        data: {
+          businessId: FPS.biz,
+          userId: FPS.admin,
+          sessionId: `${P}sess_fps_admin`,
+          actionType: 'v19c.fps.admin_action',
+          status: 'success',
+          description: "v19c fps: the SUPER_ADMIN's own episode",
+        },
+      });
+      await db.aiExecutionLog.create({
+        data: { businessId: FPS.biz, userId: FPS.admin, action: 'v19c.fps.admin_exec', success: true, rationale: 'v19c fps: the SUPER_ADMIN asked' },
+      });
+      try {
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain(FPS.OWNER_SAID);
+            expect(prompt, label).not.toContain(FPS.MEMBER_SAID);
+            expect(prompt, label).not.toContain(FPS.NOBODY_SAID);
+            expect(prompt, label).not.toContain('v19c.fps.owner_');
+            expect(prompt, label).not.toContain('v19c.fps.member_');
+            expect(prompt, label).not.toContain(ADMIN_SAID);
+            expect(prompt, label).not.toContain('v19c.fps.admin_');
+            expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
+        await db.$executeRawUnsafe('DELETE FROM ai_execution_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
+      }
+    }, 60_000);
+
+    // W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1, SEC-W11FPS-2, CR-W11FPS-1). The cases below drive the real writers of
+    // the records the review found still reaching another reader, through the real bus (KeyCortexEventBusService with the
+    // cognitive store: each publish is one business_events row and one cognitive_events row, both read business-wide).
+    const fpsStubs = {
+      safety: { check: async () => ({ allowed: true }), recordExecution: async () => undefined },
+      saga: { addStep: async () => undefined, completeStep: async () => undefined, failStep: async () => undefined, compensate: async () => [] },
+      redis: { get: async () => null, set: async () => 'OK', setex: async () => 'OK', del: async () => 1 },
+    };
+    async function fpsBus() {
+      const { KeyCortexEventBusService } = await import('../src/modules/key-cortex/key-cortex-event-bus.service');
+      const { CognitiveEventBusService } = await import('../src/modules/key-cortex/cognitive-event-bus.service');
+      return new KeyCortexEventBusService(prisma, new CognitiveEventBusService(prisma));
+    }
+    /** A line of KEY's own record of a turn (cortex.turn_*, cortex.session_started, cortex.command_status_changed, and their KeyCommand / CortexSession business_events rows). */
+    const keyTurnRecordLines = (prompt: string) =>
+      observed(prompt).filter(
+        (l) => /^- \[(cognitive_event|business_event)\] cortex\.(turn_|session_started|command_status_changed)/.test(l) || /\bKeyCommand\b|\bCortexSession\b/.test(l),
+      );
+    /** A line of a KEY action's record (KeyCortexActionsService.emitActionEvent: action.<status>) or of a ledger row (ACTION_*), in either business-wide store. */
+    const keyActionRecordLines = (prompt: string) =>
+      observed(prompt).filter((l) => /^- \[(cognitive_event|business_event)\] (action\.|ACTION_)/.test(l) || /Tool_execution/.test(l));
+    /** POST /cortex/chat's own memory read (key-cortex-query-pipeline.service.ts chatMemoryFragments) for `userId` in FPS.biz. */
+    const fpsCortexChat = (userId: string | undefined, path: 'processQuery' | 'streamQuery') =>
+      chatTurnFor(userId, path, { businessId: FPS.biz }).then((t) => t.prompt);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1: KEY's own records of the owner's turn, written by the real KeyCortexLifecycleService through the real bus (cortex.turn_started carries what the owner typed, cortex.turn_completed KEY's whole answer; cortex.session_started and cortex.command_status_changed; their KeyCommand and CortexSession business_events rows), reach no reader: not the perception block over POST .../flow/chat and its stream of a STAFF member, the owner, a non-member SUPER_ADMIN or the support desk, nor buildMemoryContext's block or POST /cortex/chat's own memory read (processQuery and its stream) for the member", async () => {
+      const OWNER_TYPED = 'V19C-FPS-TURN-OWNER-TYPED fire Bob, salary 85000';
+      const KEY_ANSWERED = 'V19C-FPS-TURN-KEY-ANSWERED net profit 48213';
+      const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
+      const { KeyCortexConversationService } = await import('../src/modules/key-cortex/key-cortex-conversation.service');
+      const lifecycle = new KeyCortexLifecycleService(
+        prisma,
+        fpsStubs.redis as any,
+        await fpsBus(),
+        new KeyCortexConversationService(prisma, fpsStubs.redis as any),
+      );
+      const types = ['cortex.turn_started', 'cortex.session_started', 'cortex.command_status_changed', 'cortex.turn_completed'];
+      try {
+        // The owner's turn as processQuery runs it (POST /cortex/chat): startTurn with what they typed, completeTurn with KEY's answer.
+        const { identity } = await lifecycle.startTurn({ businessId: FPS.biz, userId: ID.owner, rawInput: OWNER_TYPED, mode: 'ask' });
+        await lifecycle.completeTurn(identity, { responseText: KEY_ANSWERED, actionsExecuted: 0, actionsFailed: 0, autonomyApproved: 0 });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: { in: types } } })).toBe(4);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: { in: types } } })).toBe(4);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['owner', await flow!.turn(ID.owner, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+            expect(prompt, label).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+            expect(keyTurnRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+        expect(block).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+        expect(block).toContain(FPS.fact);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+          expect(prompt, path).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+          expect(prompt, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM key_commands WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_sessions WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-2: the owner's KEY action through the real KeyCortexActionsService.executeActions (POST /cortex/chat's legacy action route) and its real bus records action.success with the tool's answer; that record reaches no reader other than through the owner's own action rows: not the perception block of a STAFF member, a non-member SUPER_ADMIN or the support desk, nor the owner's as a business-wide record, nor buildMemoryContext's block or POST /cortex/chat's own memory read for the member", async () => {
+      const OWNER_ANSWER = 'V19C-FPS-ACTION-OWNER-ANSWER revenue 48213, Privett owes 9100';
+      const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
+      const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
+      // Positionally, as Nest constructs them: the registry with no ledger sinks of its own (its tool.* records are
+      // isToolCallRecord's case above), and the legacy facade over it with the business at autonomy level 2 and the bus.
+      const reg = new KeyCortexToolRegistryService(prisma, fpsStubs.safety as any, {} as any, fpsStubs.saga as any, undefined, undefined, undefined, undefined);
+      const legacy = new KeyCortexActionsService(
+        prisma,
+        undefined,
+        {} as any,
+        reg,
+        undefined,
+        undefined,
+        { resolve: async () => ({ level: 2 }) } as any,
+        await fpsBus(),
+      );
+      legacy.onModuleInit();
+      // A stand-in for the data organ cortex.analyze_data runs (no ledger read here): it answers the owner's figures.
+      reg.register({
+        name: 'cortex.analyze_data',
+        module: 'data',
+        description: 'v19c: a stand-in data organ',
+        parameters: { type: 'object', properties: { dataSource: { type: 'string' } }, required: ['dataSource'] },
+        riskTier: 1,
+        requiresApproval: false,
+        handler: async () => ({ success: true, data: { sample: [{ note: OWNER_ANSWER }] } }),
+      });
+      const session = { id: `${P}sess_fps_action_owner`, businessId: FPS.biz, userId: ID.owner, messages: [] } as any;
+      try {
+        const results = await legacy.executeActions(
+          [{ actionType: 'ANALYZE_DATA', status: 'success', description: 'v19c fps: analyze the invoices', result: { dataSource: 'invoices' } }],
+          session,
+        );
+        expect(results).toMatchObject([{ status: 'success', result: { sample: [{ note: OWNER_ANSWER }] } }]);
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: 'action.success' } })).toBe(1);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'action.success' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+            expect(keyActionRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+          // The owner reads their own action on their own rows only, never as a business-wide record.
+          expect(keyActionRecordLines(await flow!.turn(ID.owner, path)), `owner (${path})`).toEqual([]);
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+        expect(block).toContain(FPS.fact);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+          expect(prompt, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, ID.owner);
+      }
+    }, 60_000);
+
+    // Found while repairing SEC-W11FPS-2 (the same record class): in the app, BusinessEventService has the EventEmitter2,
+    // emits business_event.created for every ledger row it writes, and EventEmitterFlowBridgeService (KeyCortexModule)
+    // forwards that to the KEY bus, which persists a second copy of the registry's ACTION_EXECUTED ledger row: a
+    // business_events row of subject 'Tool_execution' (the bridge capitalises the subject) and a cognitive_events row
+    // 'ACTION_EXECUTED', each carrying the whole ledger input, the tool's answer in it.
+    it("W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-2 class): the bridged copies of the owner's real KEY tool call's ledger row (BusinessEventService with the real EventEmitter2, the real EventEmitterFlowBridgeService and bus) reach no other reader: not the perception block of a STAFF member, a non-member SUPER_ADMIN or the support desk, nor buildMemoryContext's block or POST /cortex/chat's own memory read for the member", async () => {
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { EventEmitterFlowBridgeService } = await import('../src/modules/key-cortex/event-emitter-flow-bridge.service');
+      const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
+      const { KeyCortexAuditService } = await import('../src/modules/key-cortex/key-cortex-audit.service');
+      const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+      const events = new EventEmitter2();
+      const bus = await fpsBus();
+      new EventEmitterFlowBridgeService(events, bus).onModuleInit();
+      const bridged = new KeyCortexToolRegistryService(
+        prisma,
+        fpsStubs.safety as any,
+        {} as any,
+        fpsStubs.saga as any,
+        undefined,
+        new KeyCortexAuditService(new BusinessEventService(prisma, events)),
+        bus,
+        undefined,
+      );
+      bridged.register({
+        name: TOOL_ORGAN_THREAD,
+        module: 'v19c',
+        description: 'v19c: an audited tool',
+        parameters: { type: 'object', properties: {}, required: [] },
+        riskTier: 1,
+        requiresApproval: false,
+        handler: async () => ({ success: true, data: { thread: { body: OWNER_THREAD_SECRET } } }),
+      });
+      try {
+        const result = await bridged.execute(
+          TOOL_ORGAN_THREAD,
+          { businessId: FPS.biz, userId: ID.owner, autonomyLevel: 2, ...thread('fps_bridged') },
+          { threadId: `${P}thread_fps_bridged`, note: FPS.OWNER_NOTE },
+        );
+        expect(result).toMatchObject({ success: true });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, subjectType: 'Tool_execution', eventType: 'ACTION_EXECUTED' } })).toBe(1);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'ACTION_EXECUTED' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain(OWNER_THREAD_SECRET);
+            expect(prompt, label).not.toContain(FPS.OWNER_NOTE);
+            expect(keyActionRecordLines(prompt), label).toEqual([]);
+            expect(toolCallRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain(OWNER_THREAD_SECRET);
+        expect(block).not.toContain(FPS.OWNER_NOTE);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain(OWNER_THREAD_SECRET);
+          expect(prompt, path).not.toContain(FPS.OWNER_NOTE);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', FPS.biz, TOOL_ORGAN_THREAD);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a turn with no reader still perceives the business: a non-member SUPER_ADMIN over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk's chat() and streamChat(), as the staff bridge calls chat()), get the business-wide business event (an overdue invoice, written by the real BusinessEventService) as the STAFF member does, and still no member's cognition, CortexActionLog or AiExecutionLog row", async () => {
+      const INVOICE = 'V19C-FPS-INV-OVERDUE-0042';
+      const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+      await new BusinessEventService(prisma).emit({
+        businessId: FPS.biz,
+        eventType: 'invoice.overdue',
+        subjectType: 'invoice',
+        subjectId: `${P}fps_inv_0042`,
+        actorType: 'system',
+        actorId: 'invoice_overdue_watcher',
+        action: 'OVERDUE',
+        source: 'worker',
+        after: { number: INVOICE, daysOverdue: 21 },
+      });
+      await db.cognitionMemory.createMany({ data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID)] });
+      try {
+        expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: 'invoice.overdue' } })).toBe(1);
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(observed(prompt).filter((l) => l.startsWith('- [business_event] invoice.overdue: ') && l.includes(INVOICE)), label).toHaveLength(1);
+            expect(prompt, label).toContain(FPS.fact);
+            if (who === 'STAFF member') continue;
+            expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
+            expect(prompt, label).not.toContain('v19c.fps.owner_');
+            expect(prompt, label).not.toContain('v19c.fps.member_');
+            expect(prompt, label).not.toContain(FPS.OWNER_SAID);
+            expect(prompt, label).not.toContain(FPS.MEMBER_SAID);
+          }
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    // CR-W10CCS-1's headroom, as buildMemoryContext's case above: the retrieval reads at most 50 rows of each store, newest
+    // first. Here 49 newer cognition rows of the owner's, 50 newer ledger tool-call records and 50 newer bus tool events
+    // rank above the member's own row (with the fact and the member's own episodic rows, about 150 fragments). The block
+    // asks for its window plus the shared headroom, so the member's row is still read, and kept once the rest is left out.
+    it("W11-FLOW-PERCEPTION-SCOPE (D-130, CR-W10CCS-1 headroom): over POST /ai/businesses/:id/flow/chat and its stream, in a busy business whose most recent memory is another member's cognition rows and KEY tool-call records, a STAFF member's perception block still renders their own older cognition row and none of the rest", async () => {
+      const now = Date.now();
+      const OWNER_SAID = 'V19C-FPS-HEADROOM-OWNER';
+      const MEMBER_SAID = 'V19C-FPS-HEADROOM-MEMBER';
+      const recent = (i: number) => new Date(now - (i + 1) * 60_000);
+      await db.cognitionMemory.createMany({
+        data: [
+          ...Array.from({ length: 49 }, (_, i) => fpsCognition(ID.owner, `${OWNER_SAID}-${i}`, { createdAt: recent(i) })),
+          fpsCognition(ID.member, MEMBER_SAID, { confidence: 0.7, createdAt: new Date(now - 60 * 60_000) }),
+        ],
+      });
+      await db.businessEvent.createMany({
+        data: Array.from({ length: 50 }, (_, i) => ({
+          id: `${P}fps_hr_be_${i}`,
+          businessId: FPS.biz,
+          eventType: 'ACTION_EXECUTED',
+          subjectType: 'tool_execution',
+          subjectId: `${P}fps_hr_call_${i}`,
+          actorType: 'ai',
+          actorId: ID.owner,
+          action: 'execute',
+          source: 'ai',
+          createdAt: recent(i),
+        })),
+      });
+      await db.cognitiveEvent.createMany({
+        data: Array.from({ length: 50 }, (_, i) => ({
+          id: `${P}fps_hr_ce_${i}`,
+          businessId: FPS.biz,
+          sourceType: 'key_cortex',
+          eventType: 'tool.executed',
+          payload: { tool: 'v19c.fps_hr_tool', call: i },
+          confidence: 0.9,
+          createdAt: recent(i),
+        })),
+      });
+      try {
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(member, path).toContain(`${MEMBER_SAID} typed`);
+          expect(member, path).not.toContain(OWNER_SAID);
+          expect(member, path).not.toContain('v19c.fps_hr_tool');
+          expect(toolCallRecordLines(member), path).toEqual([]);
+          expect(member, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+  });
 
   /**
    * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: a chat turn (processQuery or its stream) in ID.toolBiz in which the

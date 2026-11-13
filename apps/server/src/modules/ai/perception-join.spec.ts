@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
+import { PROMPT_MEMORY_HEADROOM } from '../key-cortex/key-cortex-prompt-context.service';
 
 const src = readFileSync(join(__dirname, 'flow-orchestrator.service.ts'), 'utf8');
 
@@ -41,15 +42,58 @@ function methodSource(name: string): string {
 }
 
 type Fragment = {
+  id?: string;
   sourceType: string;
   title: string;
   content: string;
+  entityType?: string | null;
 };
 
+/** The stores UnifiedMemoryRetrievalService does not read when handed includeEpisodic false. */
+const EPISODIC_STORES = ['business_event', 'ai_execution_log', 'cortex_action_log'];
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-2: answers as the real retrieval service answers the options it is handed
+ * (pinned against its source in 'the real retrieval service behaves as the stub assumes'): includeEpisodic false reads
+ * no business event and no personal store, and sourceTypes keeps only the stores it names. A stub that ignored them
+ * passed a case the real code failed (a turn with no reader lost every business event).
+ */
 class MemoryStub {
   fragments: Fragment[] = [];
-  retrieveContext = vi.fn(() => Promise.resolve(this.fragments));
+  retrieveContext = vi.fn((_businessId?: string, opts: { includeEpisodic?: boolean; sourceTypes?: string[] } = {}) =>
+    Promise.resolve(
+      this.fragments.filter(
+        (f) =>
+          !(opts.includeEpisodic === false && EPISODIC_STORES.includes(f.sourceType)) &&
+          (!opts.sourceTypes || opts.sourceTypes.includes(f.sourceType)),
+      ),
+    ),
+  );
 }
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the two reads the block's reader rule makes, answered from
+ * this table. user_1 is a member of biz_1 (BusinessGuard's predicate, userCanAccessBusiness); user_9 is no member.
+ * COGNITION_OWNERS: the member each cognition row of biz_1 is recorded for (null: a member-less row).
+ */
+const MEMBERS: Record<string, string[]> = { biz_1: ['user_1', 'user_2'] };
+const COGNITION_OWNERS: Record<string, string | null> = { cog_own: 'user_1', cog_other: 'user_2', cog_nobody: null };
+const prismaStub = {
+  client: {
+    business: {
+      findFirst: vi.fn(async ({ where }: { where: { id: string; members: { some: { userId: string } } } }) =>
+        (MEMBERS[where.id] ?? []).includes(where.members.some.userId) ? { id: where.id } : null,
+      ),
+    },
+    cognitionMemory: {
+      findMany: vi.fn(async ({ where }: { where: { id: { in: string[] }; businessId: string; userId: string } }) =>
+        where.businessId === 'biz_1'
+          ? where.id.in.filter((id) => COGNITION_OWNERS[id] === where.userId).map((id) => ({ id }))
+          : [],
+      ),
+    },
+  },
+};
 
 /**
  * Runs the REAL method against a stub instance.
@@ -71,12 +115,33 @@ function makeOrchestrator(memory: MemoryStub) {
     moduleRef: { get: () => memory },
     logger: { warn: vi.fn() },
     getUnifiedMemory: () => memory,
+    // W11-FLOW-PERCEPTION-SCOPE: the reader's membership and their own cognition rows are read with it.
+    prisma: prismaStub,
   };
 
   return {
     buildPerceptionSection: (b: string, q: string, t?: string, u?: string) =>
       impl.call(instance, b, q, t, u),
   };
+}
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: the read a turn with no reader makes: nobody's userId, episodic stores
+ * not turned off, and sourceTypes naming the business-wide stores (business events included) and no personal one.
+ */
+function expectNoReaderRead(memory: MemoryStub, label: string) {
+  const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
+    string,
+    { userId?: string; includeEpisodic?: boolean; sourceTypes?: string[] },
+  ])[1];
+  expect(opts.userId, label).toBeUndefined();
+  expect(opts.includeEpisodic, label).not.toBe(false);
+  expect(opts.sourceTypes, label).toEqual(
+    expect.arrayContaining(['business_event', 'cognitive_event', 'ai_memory', 'genome_memory_event', 'temporal_flow_memory']),
+  );
+  for (const personal of ['ai_execution_log', 'cortex_action_log', 'cognition_memory']) {
+    expect(opts.sourceTypes, `${label}: ${personal}`).not.toContain(personal);
+  }
 }
 
 describe('perception reaches the prompt', () => {
@@ -153,8 +218,21 @@ describe('cost is graded by the thalamus', () => {
 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, Record<string, number>])[1];
     expect(opts.limit).toBeGreaterThan(0);
-    expect(opts.limit).toBeLessThanOrEqual(25);
+    // W11-FLOW-PERCEPTION-SCOPE (SEC-W11MC-3, CR-W10CCS-1): the window (12 for deliberate; it was the whole limit, at
+    // most 25) plus the shared headroom buildMemoryContext asks for, so leaving out the rows that are not the reader's
+    // still fills the window. The headroom is no more than the eight stores can hand back (50 rows each), and the
+    // block renders at most the window (pinned in 'the block renders at most its window' below).
+    expect(opts.limit).toBe(12 + PROMPT_MEMORY_HEADROOM);
+    expect(PROMPT_MEMORY_HEADROOM).toBeGreaterThan(0);
+    expect(PROMPT_MEMORY_HEADROOM).toBeLessThanOrEqual(8 * 50);
     expect(opts.minRankScore).toBeGreaterThan(0);
+  });
+
+  it('the block renders at most its window: 6 fragments for standard, 12 for deliberate, however many the store answers', async () => {
+    memory.fragments = Array.from({ length: 200 }, (_, i) => ({ sourceType: 'genome_memory_event', title: `g${i}`, content: `c${i}` }));
+    const lines = (out: string) => out.split('\n').filter((l) => l.startsWith('- ['));
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard'))).toHaveLength(6);
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate'))).toHaveLength(12);
   });
 
   it('gives up rather than stalling time-to-first-token', async () => {
@@ -232,6 +310,20 @@ describe('personal memory stays personal', () => {
     expect(opts.userId, 'perception is not scoped to the caller').toBe('user_1');
   });
 
+  // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the reader is the caller only while they are a member of
+  // the business (buildMemoryContext's rule). A turn with no member (the Chatwoot support desk, the staff bridge) and
+  // a caller who is no member (a platform SUPER_ADMIN) read no per-member memory: no personal store at all, rather than
+  // every member's rows (an absent userId used to leave AiExecutionLog and CortexActionLog unnarrowed).
+  // Review CR-W11FPS-1: but the business-wide stores, business events included (an overdue invoice), are still read:
+  // the read names the business-wide stores (sourceTypes) instead of turning off every episodic store.
+  it('a turn with no member, or a caller who is no member, reads no member\'s personal memory: no userId, and only the business-wide stores, business events included', async () => {
+    for (const userId of [undefined, 'user_9']) {
+      memory.retrieveContext.mockClear();
+      await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
+      expectNoReaderRead(memory, String(userId));
+    }
+  });
+
   it('is passed on BOTH chat paths', () => {
     const wired = src.match(/buildPerceptionSection\(businessId, message, triage\?\.tier, userId\)/g) ?? [];
     expect(wired.length, 'a chat path leaks other members’ history').toBe(2);
@@ -291,6 +383,95 @@ describe('personal memory stays personal', () => {
   });
 });
 
+describe("only the reader's own cognition memory, and no KEY tool-call record (W11-FLOW-PERCEPTION-SCOPE, SEC-W11MC-3)", () => {
+  // CognitionMemory is per member (what a member typed and KEY's whole answer to them) but the retrieval reads it
+  // business-wide; the business-wide event stores carry every KEY tool call's input and answer. buildMemoryContext keeps
+  // neither (readersOwnCognitionMemory, isToolCallRecord); this block now keeps neither either, through the same helper.
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'cog_other', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OTHER-MEMBER typed' },
+      { id: 'cog_nobody', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: NOBODY typed' },
+      { id: 'be_tool', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'tool_execution', content: 'TOOL-ANSWER' },
+      { id: 'ce_tool', sourceType: 'cognitive_event', title: 'tool.executed', content: 'tool.executed: TOOL-INPUT' },
+      { id: 'cog_own', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OWN typed' },
+      { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+    ];
+  });
+
+  it("keeps a cognition fragment only when it is the reader's own: another member's row and a member-less row are left out", async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).toContain('OWN typed');
+    expect(out).not.toContain('OTHER-MEMBER');
+    expect(out).not.toContain('NOBODY');
+  });
+
+  it('leaves out the business-wide records of KEY tool calls (isToolCallRecord), and keeps the business events that are not one', async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).not.toContain('TOOL-ANSWER');
+    expect(out).not.toContain('TOOL-INPUT');
+    expect(out).toContain('INV-014 overdue');
+  });
+
+  it('a turn with no member, or a caller who is no member, gets no cognition fragment at all', async () => {
+    for (const userId of [undefined, 'user_9']) {
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
+      expect(out, String(userId)).not.toContain('[cognition_memory]');
+      expect(out, String(userId)).toContain('INV-014 overdue');
+    }
+  });
+
+  it('a membership check that cannot be made reads as no member (fail closed), and never fails the request', async () => {
+    prismaStub.client.business.findFirst.mockRejectedValueOnce(new Error('connection reset'));
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).not.toContain('[cognition_memory]');
+    expectNoReaderRead(memory, 'check failed');
+    expect(out).toContain('INV-014 overdue');
+  });
+});
+
+describe("no business-wide record of one person's KEY turn or KEY action, for any reader (W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1, SEC-W11FPS-2)", () => {
+  // The bus persists every KEY event to business_events and cognitive_events, both read business-wide. KEY's own turn
+  // records carry what a member typed (cortex.turn_started rawInput) and KEY's whole answer (cortex.turn_completed
+  // responseText); KeyCortexActionsService's action.<status> carries the tool's answer; the ledger's ACTION_* rows carry
+  // it too, also as the copies EventEmitterFlowBridgeService republishes (subject 'Tool_execution') and the approval
+  // orchestrator's execution row (subject key_action_proposal, its executionResult).
+  let memory: MemoryStub;
+  const MARKERS = [
+    'TURN-TYPED', 'TURN-ANSWER', 'TURN-FAILED', 'SESSION-PERSONA', 'STATUS-CHANGE', 'ACTION-ANSWER', 'ACTION-ERROR-ANSWER',
+    'BRIDGED-LEDGER-ANSWER', 'BRIDGED-COGNITIVE-ANSWER', 'PROPOSAL-EXECUTION-RESULT',
+  ];
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'ce_turn', sourceType: 'cognitive_event', title: 'cortex.turn_started', content: 'cortex.turn_started: {"rawInput":"TURN-TYPED"}' },
+      { id: 'be_turn', sourceType: 'business_event', title: 'cortex.turn_completed', entityType: 'KeyCommand', content: 'key_cortex PUBLISHED KeyCommand: {"responseText":"TURN-ANSWER"}' },
+      { id: 'ce_turn_failed', sourceType: 'cognitive_event', title: 'cortex.turn_failed', content: 'cortex.turn_failed: {"error":"TURN-FAILED"}' },
+      { id: 'be_session', sourceType: 'business_event', title: 'cortex.session_started', entityType: 'CortexSession', content: 'key_cortex PUBLISHED CortexSession: SESSION-PERSONA' },
+      { id: 'ce_status', sourceType: 'cognitive_event', title: 'cortex.command_status_changed', content: 'STATUS-CHANGE' },
+      { id: 'ce_action', sourceType: 'cognitive_event', title: 'action.success', content: 'action.success: {"result":"ACTION-ANSWER"}' },
+      { id: 'be_action', sourceType: 'business_event', title: 'action.error', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: ACTION-ERROR-ANSWER' },
+      { id: 'be_bridged', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'Tool_execution', content: 'ai PUBLISHED Tool_execution: BRIDGED-LEDGER-ANSWER' },
+      { id: 'ce_bridged', sourceType: 'cognitive_event', title: 'ACTION_EXECUTED', content: 'ACTION_EXECUTED: BRIDGED-COGNITIVE-ANSWER' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'key_action_proposal', content: 'ai execute key_action_proposal: PROPOSAL-EXECUTION-RESULT' },
+      { id: 'be_insight', sourceType: 'business_event', title: 'insight.generated', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: CASHFLOW-DIP' },
+      { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+    ];
+  });
+
+  it('leaves them out for a member, the owner, a caller who is no member and a turn with no member; the business events that are not one stay', async () => {
+    for (const userId of ['user_1', 'user_2', 'user_9', undefined]) {
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate', userId);
+      for (const marker of MARKERS) expect(out, `${String(userId)}: ${marker}`).not.toContain(marker);
+      expect(out, String(userId)).toContain('INV-014 overdue');
+      expect(out, String(userId)).toContain('CASHFLOW-DIP');
+    }
+  });
+});
+
 describe('the real retrieval service behaves as the stub assumes', () => {
   // Guards the gap that let the defect through: these assertions read the
   // ACTUAL implementation, so they fail if its contract changes underneath the
@@ -302,6 +483,19 @@ describe('the real retrieval service behaves as the stub assumes', () => {
 
   it('still runs semantic search only when a query is supplied', () => {
     expect(unified).toMatch(/options\.query \? this\.loadSemanticMemory\(/);
+  });
+
+  // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-2: what MemoryStub mirrors. includeEpisodic false skips the business
+  // events query, and sourceTypes drops what it does not name before the limit is cut (so naming the stores costs no
+  // fragment of the window). That a read naming its stores does not query the personal ones it leaves out is pinned at
+  // runtime in unified-memory-retrieval.service.spec.ts.
+  it('includeEpisodic false reads no business event; sourceTypes filters before the limit', () => {
+    const fn = unified.slice(unified.indexOf('private async loadStructuredMemory('));
+    const body = fn.slice(0, fn.indexOf('\n  private '));
+    expect(body).toMatch(/includeEpisodic\s*\?\s*this\.prisma\.client\.businessEvent\.findMany/);
+    const filterAt = unified.indexOf('options.sourceTypes && !options.sourceTypes.includes(f.sourceType)');
+    expect(filterAt).toBeGreaterThan(0);
+    expect(unified.indexOf('filtered.slice(0, limit)')).toBeGreaterThan(filterAt);
   });
 
   it('its semantic path really does embed — this is why we omit the query', () => {

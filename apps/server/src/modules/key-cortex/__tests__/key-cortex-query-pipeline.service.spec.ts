@@ -443,6 +443,49 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
       }
     },
   );
+
+  // W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1 / SEC-W11FPS-2: the bus persists KEY's own turn records (what a member
+  // typed, KEY's whole answer) and the legacy action route's action.<status> (the tool's answer) to the business-wide
+  // stores, and the ledger's ACTION_* rows have copies there under other subjects (EventEmitterFlowBridgeService's
+  // 'Tool_execution'; the approval orchestrator's key_action_proposal). None of them reaches the system prompt, for a
+  // member or for a requester who is no member; a business-wide KEY event that is no such record still does.
+  it.each(['processQuery', 'streamQuery'] as const)(
+    'W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2) %s: no business-wide record of one person\'s KEY turn or action reaches the system prompt',
+    async (path) => {
+      const records = [
+        fragment('mf_fact', 'ai_memory', 'fact', 'v96r business-wide fact'),
+        fragment('mf_turn', 'cognitive_event', 'cortex.turn_started', 'v96r another member typed this turn'),
+        fragment('mf_turn_be', 'business_event', 'cortex.turn_completed', 'v96r KEY answered another member', 'KeyCommand'),
+        fragment('mf_session', 'business_event', 'cortex.session_started', 'v96r another member session', 'CortexSession'),
+        fragment('mf_action', 'cognitive_event', 'action.success', 'v96r another member action answer'),
+        fragment('mf_action_be', 'business_event', 'action.error', 'v96r another member action error', 'KEY_CORTEX_EVENT'),
+        fragment('mf_bridged', 'business_event', 'ACTION_EXECUTED', 'v96r bridged ledger answer', 'Tool_execution'),
+        fragment('mf_bridged_ce', 'cognitive_event', 'ACTION_EXECUTED', 'v96r bridged cognitive answer'),
+        fragment('mf_proposal', 'business_event', 'ACTION_EXECUTED', 'v96r approved proposal result', 'key_action_proposal'),
+        fragment('mf_insight', 'business_event', 'insight.generated', 'v96r a KEY insight about the business', 'KEY_CORTEX_EVENT'),
+      ];
+      for (const access of [{ id: 'biz-1' }, null]) {
+        mockPromptContextService.buildMessages.mockClear();
+        (mockPrisma.client.business.findFirst as any).mockImplementationOnce(async () => access);
+        const pipeline = createPipeline({ memoryFragments: records });
+        const query = { text: 'What happened lately?', businessId: 'biz-1', userId: 'user-1' } as any;
+        const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
+        if (path === 'processQuery') await pipeline.processQuery(query, flags);
+        else for await (const _chunk of pipeline.streamQuery(query, flags)) void _chunk;
+
+        const systemPrompt = mockPromptContextService.buildMessages.mock.calls[0][2] as string;
+        const label = access ? 'member' : 'no member';
+        expect(systemPrompt, label).toContain('v96r business-wide fact');
+        expect(systemPrompt, label).toContain('v96r a KEY insight about the business');
+        for (const leaked of [
+          'typed this turn', 'KEY answered another member', 'another member session', 'action answer', 'action error',
+          'bridged ledger answer', 'bridged cognitive answer', 'approved proposal result',
+        ]) {
+          expect(systemPrompt, `${label}: ${leaked}`).not.toContain(leaked);
+        }
+      }
+    },
+  );
 });
 
 // W10-CORTEX-CHAT-SCOPE review repairs SEC-W10CCS-R2 and CR-W10CCS-1 (D-57): the memory block processQuery and

@@ -146,6 +146,11 @@ export class UnifiedMemoryRetrievalService {
     // binds to.
     const personalWhere: any = { ...episodicWhere };
     if (options.userId) personalWhere.userId = options.userId;
+    // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a read that names the stores it wants (sourceTypes) does not
+    // query a personal store it leaves out. A prompt with no reader names the business-wide stores, so it reads no
+    // member's AiExecutionLog or CortexActionLog row at all, rather than every member's rows to drop afterwards.
+    const readsPersonal = (source: MemorySourceType) =>
+      includeEpisodic && (!options.sourceTypes || options.sourceTypes.includes(source));
 
     const [
       aiMemories,
@@ -245,7 +250,7 @@ export class UnifiedMemoryRetrievalService {
             },
           })
         : Promise.resolve([]),
-      includeEpisodic
+      readsPersonal('ai_execution_log')
         ? this.prisma.client.aiExecutionLog.findMany({
             where: personalWhere,
             orderBy: { createdAt: 'desc' },
@@ -264,7 +269,7 @@ export class UnifiedMemoryRetrievalService {
             },
           })
         : Promise.resolve([]),
-      includeEpisodic
+      readsPersonal('cortex_action_log')
         ? this.prisma.client.cortexActionLog.findMany({
             where: personalWhere,
             orderBy: { createdAt: 'desc' },
