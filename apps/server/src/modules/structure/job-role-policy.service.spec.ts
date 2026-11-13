@@ -121,13 +121,14 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     // commerce_mark_invoice_paid: PATCH invoices/:id/paid needs revenue:write; the Stripe
     // webhook that also calls it is not a member route (review 2 C1)
     write: ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link', 'commerce_mark_invoice_paid'],
-    admin: ['commerce_delete_invoice', 'payments_refund_charge'],
+    // finance_post_journal_entry: POST finance journal-entries needs revenue write since PR195-JOURNAL-SCOPE
+    // (CR-P195-4), and the tool is tier 3, so KEY needs admin (D-36's ladder)
+    admin: ['commerce_delete_invoice', 'payments_refund_charge', 'finance_post_journal_entry'],
     deny: [
       // mails the customer through a call no member route makes for a customer: GOVERNED_UNGRANTED (review 7 DRV5-2)
       'commerce_send_invoice',
       // reached unscoped (catalog.controller)
       'commerce_create_product',
-      'finance_post_journal_entry',
       // GET reports/expense-by carries no revenue and declares no scope (V1-81 D-57)
       'finance_expense_breakdown',
       'crm_create_contact',
@@ -508,9 +509,13 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     // V1-81 (D-57): the money reports are governed by revenue:read now, so the legacy key loses them
     expect(allows(envelope({ finance: 'write' }), 'finance_cashflow')).toBe(false);
     // Tier 3: {finance: 'write'} was refused it at the gate before (maxRiskTier 2); the
-    // envelope now says so itself, and {finance: 'admin'} still reaches it.
+    // envelope says so itself. PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries now
+    // needs revenue write, so the tool is governed and only the revenue key reaches it (at admin,
+    // its tier); the legacy `finance` key no longer does, at any level (D-35's narrowing).
     expect(allows(envelope({ finance: 'write' }), 'finance_post_journal_entry')).toBe(false);
-    expect(passes(envelope({ finance: 'admin' }), 'finance_post_journal_entry')).toBe(true);
+    expect(allows(envelope({ finance: 'admin' }), 'finance_post_journal_entry')).toBe(false);
+    expect(passes(envelope({ revenue: 'admin' }), 'finance_post_journal_entry')).toBe(true);
+    expect(allows(envelope({ revenue: 'write' }), 'finance_post_journal_entry')).toBe(false);
   });
 
   /** What a legacy row reached before the V1-21b repair: family match, capped by its tier. */
@@ -545,11 +550,12 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
 
   it('the governed tools a legacy key loses, pinned (an owner decision whether to migrate such rows)', () => {
     const lost = (key: string) => reachedBefore(LEGACY[key], 'admin').filter((t) => ROUTE_GOVERNED.has(t));
-    // V1-81 (owner ruling D-57): the five money report tools and finance_view_receivables (FOLLOW3-A6) are governed by revenue:read
+    // V1-81 (owner ruling D-57): the five money report tools and finance_view_receivables (FOLLOW3-A6) are governed by revenue:read;
+    // PR195-JOURNAL-SCOPE (CR-P195-4): finance_post_journal_entry by revenue write
     expect(lost('finance')).toEqual([
       'expenses_create', 'expenses_list', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill', 'finance_list_bills',
-      'finance_pay_bill', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary', 'finance_view_payables',
-      'finance_view_receivables',
+      'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary',
+      'finance_view_payables', 'finance_view_receivables',
     ]);
     expect(lost('commerce')).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',

@@ -20,6 +20,14 @@
  *   J-04  an unbalanced entry is refused before anything is sent
  *   J-05  /app/finance/journal is the journal page itself, no longer a
  *         redirect to the ledger
+ *
+ * PR195-JOURNAL-SCOPE (CR-P195-4): posting needs revenue write on the server.
+ * The client has no cheap way to know the member's scopes before it posts (no
+ * endpoint answers the caller's own module levels, and the team list needs
+ * team read, which STAFF lacks), so the 403 itself is rendered as a refusal:
+ *   J-06  a 403 on post is an alert naming the refusal, the form closes and
+ *         New Entry goes; nothing says "posted"
+ *   J-07  any other refusal (400) keeps the form and says why
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -162,6 +170,41 @@ describe("General Journal (PR195-PORT)", () => {
     fillBalancedEntry("500", "450");
     fireEvent.click(screen.getByText("Post Entry"));
     expect(createJournalEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("J-06 PR195-JOURNAL-SCOPE (CR-P195-4): a post the server refuses 403 (revenue write) renders a clear refusal, closes the form and offers no New Entry", async () => {
+    createJournalEntryMock.mockResolvedValue({
+      data: null,
+      error: "Insufficient permissions: revenue requires write access (you have read)",
+      status: 403,
+    });
+    render(<BooksJournalTab />);
+    await waitFor(() => expect(screen.getByText("Prior USD adjustment")).toBeTruthy());
+    fireEvent.click(screen.getByText("New Entry"));
+    fillBalancedEntry();
+    fireEvent.click(screen.getByText("Post Entry"));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    const alert = screen.getByRole("alert").textContent ?? "";
+    expect(alert).toMatch(/can.t post journal entries in this business/i);
+    expect(alert).toMatch(/revenue requires write access/);
+    // Not a silent failure, and not a success: the form is gone, New Entry with it, and nothing says "posted".
+    expect(screen.queryByText("Post Entry")).toBeNull();
+    expect(screen.queryByText("New Entry")).toBeNull();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    // The member may still read the journal they may not write.
+    expect(screen.getByText("Prior USD adjustment")).toBeTruthy();
+  });
+
+  it("J-07 a post refused for another reason (400) keeps the form and says why", async () => {
+    createJournalEntryMock.mockResolvedValue({ data: null, error: "Journal entry requires at least 2 lines", status: 400 });
+    render(<BooksJournalTab />);
+    await waitFor(() => expect(screen.getByText("Prior USD adjustment")).toBeTruthy());
+    fireEvent.click(screen.getByText("New Entry"));
+    fillBalancedEntry();
+    fireEvent.click(screen.getByText("Post Entry"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Journal entry requires at least 2 lines"));
+    expect(screen.getByText("Post Entry")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("J-05 /app/finance/journal is the General Journal page, not a redirect", async () => {

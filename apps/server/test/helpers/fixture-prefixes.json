@@ -853,6 +853,11 @@
       "packet": "V1-98 (PR195-PORT)"
     },
     {
+      "prefix": "v98j_",
+      "owner": "apps/server/test/journal-write-scope.integration.test.ts",
+      "packet": "V1-98 (PR195-JOURNAL-SCOPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
