@@ -28,7 +28,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml } from '../lib/yaml.mjs';
-import { MUTATION_LOCK } from '../lib/events.mjs';
+import { MUTATION_LOCK, normalizeEvent } from '../lib/events.mjs';
+import { buildMergeRecord, mergeMarker } from '../lib/merge-record.mjs';
+import { auditMergeRecords, mergeResultOf, AUTOPILOT_MERGER } from '../lib/merge-record-audit.mjs';
 
 const WORKFLOW = '.github/workflows/agent-control-autopilot.yml';
 
@@ -356,4 +358,84 @@ test('every job that records a merge holds the one mutation lock, so two recorde
     assert.equal(job.concurrency?.group, MUTATION_LOCK, `${name} must hold the mutation lock`);
     assert.equal(job.concurrency['cancel-in-progress'], false, `${name} must queue, not cancel`);
   }
+});
+
+// ------------------------------------------------------------- wake event
+//
+// The AUTO_EVENT wake comment is posted by the workflow token, an author the
+// AUTO_MERGE recorder and audit trust. It echoes fields of the event that
+// woke it, and an issue_comment RETURN from ANY commenter is actionable with
+// its packet_id copied verbatim. Echoed as it was, a stranger could put any
+// text, a merge marker among it, into a trusted comment (SECOPS-2). The step
+// is a github-script; it is taken out of the workflow and run as GitHub runs
+// it, with stand-ins for github, context and core.
+
+const AsyncFunction = (async () => {}).constructor;
+
+async function runWakeStep(event, { decision = { action: 'NOOP', reason: 'stub decision' }, existing = [] } = {}) {
+  const workflow = parseYaml(fs.readFileSync(WORKFLOW, 'utf8'));
+  const found = (workflow.jobs['normalize-event'].steps || []).find((s) => s.name === 'Publish actionable wake event');
+  assert.ok(found, 'normalize-event must have a step named "Publish actionable wake event"');
+  assert.match(String(found.uses), /^actions\/github-script@/);
+  const posted = [];
+  const github = {
+    paginate: async () => existing,
+    rest: {
+      issues: {
+        listComments: () => { throw new Error('listComments is called through paginate'); },
+        createComment: async (args) => { posted.push(args); return { data: { id: 9001 } }; },
+      },
+    },
+  };
+  const context = { repo: { owner: 'o', repo: 'r' } };
+  const core = { info: () => {} };
+  const env = { EVENT_JSON: JSON.stringify(event), DECISION_JSON: JSON.stringify({ decision }) };
+  await new AsyncFunction('github', 'context', 'core', 'process', found.with.script)(github, context, core, { env });
+  return posted;
+}
+
+function strangerReturn(packetId, login = 'someone-else') {
+  const body = ['```yaml', 'message_type: RETURN', `packet_id: ${packetId}`, '```'].join('\n');
+  return normalizeEvent('issue_comment', {
+    action: 'created',
+    issue: { number: 80 },
+    comment: { id: 555, body, user: { login }, html_url: 'https://github.com/o/r/issues/80#issuecomment-555' },
+  });
+}
+
+test('wake event: a stranger\'s packet_id carrying a merge marker is not echoed into the trusted comment', async () => {
+  const marker = mergeMarker('a'.repeat(40));
+  const event = strangerReturn(marker);
+  // The premise: such a comment wakes, and its packet_id arrives verbatim.
+  assert.equal(event.actionable, true);
+  assert.equal(event.packet_id, marker);
+  const posted = await runWakeStep(event);
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].issue_number, 80);
+  assert.ok(!posted[0].body.includes('keyflow-autopilot-merge'), posted[0].body);
+  assert.match(posted[0].body, /^packet_id: null$/m);
+});
+
+test('wake event: a packet_id that is not a packet id is printed as null; a real one is echoed', async () => {
+  for (const odd of ['kf-exec-action-001', 'KF X', '<b>KF</b>', `KF-${'A'.repeat(90)}`, '-KF']) {
+    const [comment] = await runWakeStep(strangerReturn(odd));
+    assert.match(comment.body, /^packet_id: null$/m, odd);
+  }
+  const [comment] = await runWakeStep(strangerReturn('KF-EXEC-ACTION-001'));
+  assert.match(comment.body, /^packet_id: KF-EXEC-ACTION-001$/m);
+  assert.match(comment.body, /^<!-- keyflow-autopilot-event:issue_comment:555:created -->$/m);
+});
+
+test('wake event, end to end: a stranger\'s RETURN naming a past merge leaves that merge\'s audit clean', async () => {
+  // The reported path: normalizeEvent, this step's comment as the workflow
+  // token, then the hourly audit over the control room.
+  const pr = {
+    number: 120, merged: true, merged_at: '2026-10-11T16:13:07Z', merged_by: { login: AUTOPILOT_MERGER },
+    merge_commit_sha: 'a'.repeat(40), head: { ref: 'impl/p120', sha: 'b'.repeat(40) },
+  };
+  const [wake] = await runWakeStep(strangerReturn(mergeMarker(pr.merge_commit_sha)));
+  const record = { id: 9, user: { login: AUTOPILOT_MERGER }, body: buildMergeRecord(mergeResultOf(pr)).body };
+  const report = auditMergeRecords([pr], [{ id: 8, user: { login: AUTOPILOT_MERGER }, body: wake.body }, record]);
+  assert.equal(report.clean, true, JSON.stringify(report.entries));
+  assert.deepEqual(report.conflicts, []);
 });

@@ -85,6 +85,49 @@ test('a marker alone, or a record by a stranger, does not count as recorded', ()
   assert.deepEqual(markerOnly.entries[0].conflicts[0].problems, ['marker_only']);
 });
 
+/**
+ * The AUTO_EVENT wake comment as the workflow token posted it before SECOPS-2:
+ * a stranger's RETURN wakes the autopilot and its packet_id was echoed
+ * verbatim. Comments of this shape may already be on the control room.
+ */
+function echoedWakeEvent(pr, id) {
+  const body = [
+    '<!-- keyflow-autopilot-event:issue_comment:555:created -->',
+    '```yaml',
+    'message_id: AUTO-EVENT-issue_comment:555:created',
+    'message_type: AUTO_EVENT',
+    'sender: github-autopilot',
+    'kind: RETURN',
+    'idempotency_key: issue_comment:555:created',
+    `packet_id: ${mergeMarker(pr.merge_commit_sha)}`,
+    'pr_number: null',
+    'workflow: null',
+    'conclusion: null',
+    'head_sha: null',
+    'source_ref: https://github.com/o/r/issues/80#issuecomment-555',
+    'derived_action: NOOP',
+    'derived_reason: "stub"',
+    '```',
+  ].join('\n');
+  return { id, user: BOT, body, html_url: `https://example.invalid/c/${id}` };
+}
+
+test('a trusted comment that carries the marker but does not open with it (a stranger\'s text echoed by the workflow) is neither a record nor a conflict', () => {
+  // Every historical merge SHA is public, so before this a stranger could
+  // make the hourly audit report CONFLICT, and fail, for any past merge,
+  // permanently: nothing deletes comments. (SECOPS-2)
+  const pr = mergedPr(120);
+  const beside = auditMergeRecords([pr], [echoedWakeEvent(pr, 8), recordComment(pr, 9)]);
+  assert.equal(beside.clean, true, JSON.stringify(beside.entries));
+  assert.deepEqual(beside.conflicts, []);
+  assert.equal(beside.entries[0].record_comment_id, 9);
+
+  // Where the record is missing, it stays MISSING, so --reconcile posts it.
+  const alone = auditMergeRecords([pr], [echoedWakeEvent(pr, 8)]);
+  assert.deepEqual(alone.conflicts, []);
+  assert.deepEqual(alone.missing, [120]);
+});
+
 test('a trusted comment naming another PR for the same merge is a CONFLICT, even beside the true record', () => {
   const pr = mergedPr(159);
   const wrong = { id: 8, user: BOT, body: recordOf(pr).body.replace('pr_number: 159', 'pr_number: 160') };
@@ -231,6 +274,19 @@ test('cli: an old autopilot merge beyond the first page of closed PRs is still a
     assert.equal(r.status, 5);
     assert.deepEqual(r.json.missing, [41]);
     assert.deepEqual(gh.requests.filter((q) => q.path === '/repos/o/r/pulls').map((q) => q.page), [1, 2, 3]);
+  } finally { await gh.close(); }
+});
+
+test('cli: an echoed marker in a trusted wake comment does not stop --reconcile from posting the real record', async () => {
+  const pr = mergedPr(120);
+  const gh = await fakeGitHub({ prs: [pr], comments: [echoedWakeEvent(pr, 8)] });
+  try {
+    const r = await cli(gh, ['--reconcile']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.json.outcome, 'clean');
+    assert.deepEqual(r.json.posted.map((p) => [p.pr, p.outcome]), [[120, 'recorded']]);
+    assert.equal(gh.posts().length, 1);
+    assert.equal(gh.comments.at(-1).body, recordOf(pr).body);
   } finally { await gh.close(); }
 });
 
