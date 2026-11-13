@@ -589,8 +589,26 @@ def excerpt(text: str, limit: int = 1200) -> str:
 
 OUTPUT_FILES = ("threads.jsonl", "messages.jsonl", "candidates.jsonl", "coverage.json", "review-queue.md")
 
-# Exit status when --output is a path git would offer to commit.
+# Exit status when --output is refused.
 EXIT_UNSAFE_OUTPUT = 3
+
+# Where, inside a git work tree, the harvest may go: this directory at the top
+# of the work tree, which the repository's .gitignore ignores.
+ARTIFACTS_DIR = ".artifacts"
+
+# Variables that point git at another repository, index or work tree. The
+# check drops them, so its answer is about the work tree the output is in.
+_GIT_LOCATION_VARIABLES = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+)
 
 
 def _nearest_work_tree(path: Path) -> Path | None:
@@ -603,20 +621,28 @@ def _nearest_work_tree(path: Path) -> Path | None:
 
 
 def unsafe_output_reason(output: Path) -> str | None:
-    """Why writing the harvest to output could put it in a commit, or None.
+    """Why the harvest may not be written to output, or None when it may.
 
-    The outputs hold exported conversation text, so inside a git work tree
-    every output file must be one git ignores: otherwise `git add -A` stages
-    it. Outside any work tree there is nothing to check. Anything git cannot
-    confirm counts as not ignored.
+    The outputs hold exported conversation text. Outside every git work tree
+    there is nothing to check. Inside one, the only place accepted is the work
+    tree's top-level .artifacts/ directory, and only while git ignores every
+    output file there and tracks none of them. Being ignored is not enough
+    anywhere else: apps/web/public/.artifacts/ is ignored, yet Next serves that
+    folder over HTTP and the web image copies it. Anything git cannot confirm
+    counts as not ignored. Symlinks are resolved first, so a link from outside
+    the work tree into it is judged by where it lands.
     """
     resolved = output.resolve()
     root = _nearest_work_tree(resolved)
     if root is None:
         return None
+    artifacts = root / ARTIFACTS_DIR
+    if resolved != artifacts and artifacts not in resolved.parents:
+        return f"{resolved} is inside the git work tree at {root} but not under its top-level {ARTIFACTS_DIR}/ directory"
     git = shutil.which("git")
     if git is None:
         return f"{resolved} is inside the git work tree at {root}, and git is not on PATH to confirm it is ignored"
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARIABLES}
     for name in OUTPUT_FILES:
         rel = os.path.relpath(resolved / name, root)
         # Without --no-index, a tracked file is reported as not ignored, which
@@ -625,6 +651,7 @@ def unsafe_output_reason(output: Path) -> str | None:
             [git, "-C", str(root), "check-ignore", "-q", "--", rel],
             capture_output=True,
             text=True,
+            env=env,
         )
         if result.returncode == 1:
             return f"{resolved / name} is inside the git work tree at {root} and is not ignored by git"
@@ -656,31 +683,22 @@ def main() -> int:
         "credential shapes and values with a sensitive name, not every secret, so read the outputs "
         "before sharing any of them.",
     )
-    parser.add_argument(
-        "--allow-unignored-output",
-        action="store_true",
-        help="Write even when --output is inside a git work tree and git does not ignore it. "
-        "Without it the harvester refuses (exit 3), since git add would stage the conversation text.",
-    )
     args = parser.parse_args()
 
     input_root = Path(args.input)
     output = Path(args.output)
     unsafe = unsafe_output_reason(output)
-    if unsafe and not args.allow_unignored_output:
+    if unsafe:
+        root = _nearest_work_tree(output.resolve())
         print(
-            f"refusing to write the harvest: {unsafe}, so `git add` would stage exported conversation text.\n"
-            "Write it outside the work tree or under an ignored directory (the repository ignores any "
-            "`.artifacts/` directory), or pass --allow-unignored-output to write it anyway.",
+            f"refusing to write the harvest: {unsafe}.\n"
+            "The harvest holds exported conversation text. Inside a git work tree it may only go under the "
+            f"top-level {ARTIFACTS_DIR}/ directory, and only while git ignores it, for example\n"
+            f"  --output {(root or Path.cwd()) / ARTIFACTS_DIR / 'thread-harvest'}\n"
+            "or anywhere outside the work tree. Nothing was written.",
             file=sys.stderr,
         )
         return EXIT_UNSAFE_OUTPUT
-    if unsafe:
-        print(
-            f"WARNING: {unsafe}. Writing anyway because of --allow-unignored-output; "
-            "do not stage or commit these files.",
-            file=sys.stderr,
-        )
     output.mkdir(parents=True, exist_ok=True)
     project_terms = [t.lower() for t in (PROJECT_TERMS_DEFAULT + args.project_terms)]
 

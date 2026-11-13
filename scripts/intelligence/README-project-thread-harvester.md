@@ -23,6 +23,10 @@ It does **not** decide that a chat idea is canonical. Its output is evidence for
 
 ## Usage
 
+Run it from the repository root, so the relative `--output` lands in the
+top-level `.artifacts/` directory (the only place inside the checkout it may
+write; see below):
+
 ```bash
 python scripts/intelligence/project_thread_harvester.py \
   --input /path/to/chatgpt-export/conversations.json \
@@ -39,16 +43,30 @@ python scripts/intelligence/project_thread_harvester.py \
   --project-term "Living System Atlas"
 ```
 
+From any other directory, give `--output` as an absolute path under the
+repository root's `.artifacts/`, or a directory outside the checkout.
+
 ### Where the output may go
 
-The outputs hold exported conversation text, so they must never be committed.
-The repository ignores any `.artifacts/` directory at any depth, so the
-relative `--output .artifacts/thread-harvest` above is safe from any directory
-inside the checkout. When `--output` lies inside a git work tree, the
-harvester asks `git check-ignore` about every output file first and refuses
-(exit status 3, nothing written) if any of them is not ignored, is tracked, or
-cannot be confirmed. `--allow-unignored-output` writes anyway, with a warning;
-an output outside every work tree is not checked.
+The outputs hold exported conversation text, so they must never be committed,
+served or shipped. The harvester accepts exactly two kinds of `--output`:
+
+- a directory outside every git work tree (not checked further);
+- the work tree's top-level `.artifacts/` directory or a directory under it,
+  and only while `git check-ignore` confirms every output file there is
+  ignored and none is tracked.
+
+Everything else inside a work tree is refused (exit status 3, nothing
+written), ignored or not. The repository ignores `.artifacts/` at any depth,
+but an ignored directory elsewhere can still leave the machine:
+`apps/web/public/.artifacts/` is ignored, yet Next serves that folder over
+HTTP and the web image copies it. So the relative `--output
+.artifacts/thread-harvest` is accepted when run from the repository root; run from
+`apps/web/public` or `scripts/intelligence` it is refused, and the message
+names the absolute path to use instead. Symlinks are resolved first, and
+`GIT_DIR` / `GIT_WORK_TREE` and the other git location variables are ignored
+for the check, so the answer is about the work tree the output really lands
+in. There is no override flag.
 
 Exit status: 0 on success, 2 when some input files failed to parse (the rest
 is still written), 3 when the output location was refused.

@@ -519,7 +519,10 @@ OUTPUT_FILES = ("threads.jsonl", "messages.jsonl", "candidates.jsonl", "coverage
 
 @unittest.skipUnless(shutil.which("git"), "git is not installed")
 class OutputLocationGuardTest(unittest.TestCase):
-    """--output inside a git work tree must be a path git ignores."""
+    """Inside a git work tree the harvest may only go under the top-level
+    .artifacts/ directory, and only while git ignores it (SEC-CONV1-2-R1).
+    An ignored directory elsewhere is not enough: apps/web/public/.artifacts/
+    is ignored, yet Next serves it and the web image copies it."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -530,44 +533,67 @@ class OutputLocationGuardTest(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True, env=self.env)
         (self.repo / ".gitignore").write_text("**/.artifacts/\n", encoding="utf-8")
         (self.repo / "scripts" / "intelligence").mkdir(parents=True)
+        (self.repo / "apps" / "web" / "public").mkdir(parents=True)
         self.export = self.tmp / "conversations.json"
         write_export(self.export, "KEYFLOWOS thread", ["KEYFLOWOS: we decided the kernel must stay small."])
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def harvest(self, output: str, *extra: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-        return run_harvester("--input", str(self.export), "--output", output, *extra, cwd=cwd, env=self.env)
+    def harvest(self, output: str, *extra: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        return run_harvester("--input", str(self.export), "--output", output, *extra, cwd=cwd, env=env or self.env)
 
-    def test_refuses_an_unignored_output_inside_the_work_tree(self):
-        output = self.repo / "harvest"
-        result = self.harvest(str(output))
+    def assert_refused(self, result: subprocess.CompletedProcess, output: Path) -> None:
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertIn("not ignored by git", result.stderr)
-        self.assertIn("--allow-unignored-output", result.stderr)
+        self.assertIn("refusing to write the harvest", result.stderr)
+        self.assertIn(str(self.repo.resolve() / ".artifacts"), result.stderr, "the refusal must name the place that is accepted")
         self.assertFalse(output.exists(), "a refused run must not create the output directory")
 
-    def test_refuses_the_documented_command_run_from_a_subdirectory_when_unignored(self):
-        # The same relative --output the README shows, from another directory,
-        # with a .gitignore that only covers the root-level directory (the
-        # rule before this fix).
-        (self.repo / ".gitignore").write_text(".artifacts/thread-harvest/\n", encoding="utf-8")
-        cwd = self.repo / "scripts" / "intelligence"
-        result = self.harvest(".artifacts/thread-harvest", cwd=cwd)
-        self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertFalse((cwd / ".artifacts").exists())
-
-    def test_accepts_an_ignored_output_at_any_depth(self):
-        cwd = self.repo / "scripts" / "intelligence"
-        result = self.harvest(".artifacts/thread-harvest", cwd=cwd)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        for name in OUTPUT_FILES:
-            self.assertTrue((cwd / ".artifacts" / "thread-harvest" / name).is_file(), name)
+    def assert_ignored_by_git(self) -> None:
         status = subprocess.run(
             ["git", "-C", str(self.repo), "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True, check=True, env=self.env,
         )
         self.assertNotIn(".artifacts", status.stdout, "harvest output would be offered to git add")
+
+    def test_accepts_the_top_level_artifacts_directory(self):
+        result = self.harvest(".artifacts/thread-harvest", cwd=self.repo)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        for name in OUTPUT_FILES:
+            self.assertTrue((self.repo / ".artifacts" / "thread-harvest" / name).is_file(), name)
+        self.assert_ignored_by_git()
+
+    def test_accepts_the_top_level_artifacts_directory_by_absolute_path_from_a_subdirectory(self):
+        output = self.repo / ".artifacts" / "thread-harvest"
+        result = self.harvest(str(output), cwd=self.repo / "scripts" / "intelligence")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((output / "messages.jsonl").is_file())
+        self.assert_ignored_by_git()
+
+    def test_refuses_an_ignored_artifacts_directory_below_the_top_level(self):
+        output = self.repo / "apps" / "web" / "public" / ".artifacts" / "thread-harvest"
+        result = self.harvest(str(output))
+        self.assert_refused(result, output)
+        self.assertIn("top-level .artifacts", result.stderr)
+
+    def test_refuses_the_documented_relative_command_run_from_a_subdirectory(self):
+        for cwd in (self.repo / "scripts" / "intelligence", self.repo / "apps" / "web" / "public"):
+            with self.subTest(cwd=str(cwd.relative_to(self.repo))):
+                result = self.harvest(".artifacts/thread-harvest", cwd=cwd)
+                self.assert_refused(result, cwd / ".artifacts")
+
+    def test_refuses_an_unignored_output_inside_the_work_tree(self):
+        output = self.repo / "harvest"
+        result = self.harvest(str(output))
+        self.assert_refused(result, output)
+
+    def test_refuses_the_top_level_artifacts_directory_when_git_does_not_ignore_it(self):
+        (self.repo / ".gitignore").write_text("", encoding="utf-8")
+        output = self.repo / ".artifacts" / "thread-harvest"
+        result = self.harvest(str(output))
+        self.assert_refused(result, output)
+        self.assertIn("not ignored by git", result.stderr)
 
     def test_refuses_an_output_whose_files_are_tracked(self):
         output = self.repo / ".artifacts" / "thread-harvest"
@@ -578,13 +604,31 @@ class OutputLocationGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertEqual((output / "messages.jsonl").read_text(encoding="utf-8"), "")
 
-    def test_allow_flag_writes_with_a_loud_warning(self):
+    def test_refuses_a_symlink_from_outside_that_resolves_into_the_work_tree(self):
+        (self.repo / "docs").mkdir()
+        link = self.tmp / "looks-outside"
+        link.symlink_to(self.repo / "docs", target_is_directory=True)
+        result = self.harvest(str(link / "harvest"))
+        self.assert_refused(result, self.repo / "docs" / "harvest")
+
+    def test_git_location_variables_do_not_change_the_answer(self):
+        # A GIT_DIR naming another repository that ignores everything must not
+        # make this work tree's unignored .artifacts/ look ignored.
+        (self.repo / ".gitignore").write_text("", encoding="utf-8")
+        other = self.tmp / "other"
+        subprocess.run(["git", "init", "-q", str(other)], check=True, env=self.env)
+        (other / ".git" / "info").mkdir(exist_ok=True)
+        (other / ".git" / "info" / "exclude").write_text("*\n", encoding="utf-8")
+        env = dict(self.env, GIT_DIR=str(other / ".git"))
+        output = self.repo / ".artifacts" / "thread-harvest"
+        result = self.harvest(str(output), env=env)
+        self.assert_refused(result, output)
+
+    def test_there_is_no_override_flag(self):
         output = self.repo / "harvest"
         result = self.harvest(str(output), "--allow-unignored-output")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("WARNING", result.stderr)
-        self.assertIn("not ignored by git", result.stderr)
-        self.assertTrue((output / "messages.jsonl").is_file())
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(output.exists())
 
     def test_output_outside_any_work_tree_is_accepted(self):
         output = self.tmp / "elsewhere"

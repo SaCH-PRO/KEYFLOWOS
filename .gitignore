@@ -57,11 +57,11 @@ screenshot-home.png
 # agent-control worker runtime state (locks, logs, processed-directive cursor)
 .agent-control/.worker/
 
-# Local artifact directories, at any depth. This covers the project thread
-# harvester's output (scripts/intelligence/README-project-thread-harvester.md),
-# which holds exported conversation text and must stay local wherever the
-# harvester is run from; the harvester refuses an --output inside the work
-# tree that git does not ignore.
+# Local artifact directories, at any depth. The project thread harvester
+# (scripts/intelligence/README-project-thread-harvester.md) writes exported
+# conversation text, and inside the work tree it writes only under the
+# top-level .artifacts/ covered here: being ignored is not enough elsewhere
+# (apps/web/public/.artifacts/ is ignored but still served and shipped).
 **/.artifacts/
 
 # Python bytecode. CPython folds constant expressions when it compiles, so the
