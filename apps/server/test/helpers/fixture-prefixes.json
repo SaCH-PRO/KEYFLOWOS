@@ -890,6 +890,10 @@
       "reason": "Boots the built server in a child process and asserts it listens; seeds and deletes no rows."
     },
     {
+      "file": "apps/server/test/backfill-scripts-cli.integration.test.ts",
+      "reason": "Runs the operator scripts' dry runs (no arguments) as child processes against DATABASE_URL; dry runs write no rows, so there is nothing to seed or clean up."
+    },
+    {
       "file": "apps/server/test/key-inbox-intelligence.integration.test.ts",
       "reason": "Seeds rows with random ids (createId) under an existing business and deletes them by those id lists; no LIKE cleanup."
     },
@@ -898,16 +902,16 @@
       "reason": "Spawns main.ts with KEYFLOW_DEV_AUTH_BYPASS set and asserts the boot guard exits; touches no rows."
     },
     {
+      "file": "apps/server/test/schema-sync-path.integration.test.ts",
+      "reason": "creates and drops its own throwaway database; writes no rows in the shared database"
+    },
+    {
       "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
       "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
     },
     {
       "file": "apps/server/test/trpc-mount-flag.integration.test.ts",
       "reason": "Boots the built server twice in child processes (TRPC_ENABLED unset, then 1) and probes /trpc over HTTP; seeds and deletes no rows."
-    },
-    {
-      "file": "apps/server/test/schema-sync-path.integration.test.ts",
-      "reason": "creates and drops its own throwaway database; writes no rows in the shared database"
     }
   ]
 }
