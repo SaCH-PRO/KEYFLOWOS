@@ -1012,8 +1012,22 @@ describe('V61-07 rows the module pages and KEY tools write through the HTTP rout
 // ids stay in the `--per-business` file the owner keeps.
 describe('V61-08 what is posted to #80 carries no business id', () => {
   it('the default output is the aggregate: no business id anywhere, and the same counts as the --per-business run', async () => {
-    const agg = await runMain();
-    const detail = await runMain([PER_BUSINESS]);
+    // Both runs read one REPEATABLE READ snapshot, so a business another suite creates between them
+    // (the full suite runs files in parallel on this database) cannot change the counts compared below.
+    const { agg, detail } = await db.$transaction(
+      async (outer: any) => {
+        await outer.$executeRawUnsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+        const tx = {
+          $queryRawUnsafe: (sql: string, ...values: unknown[]) => outer.$queryRawUnsafe(sql, ...values),
+          // The snapshot is already REPEATABLE READ and READ ONLY; a second SET TRANSACTION after a query is refused.
+          $executeRawUnsafe: (sql: string, ...values: unknown[]) =>
+            /^\s*SET TRANSACTION\b/i.test(sql) ? Promise.resolve(0) : outer.$executeRawUnsafe(sql, ...values),
+        };
+        const snapshot = { $transaction: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx) };
+        return { agg: await runMain([], { db: snapshot }), detail: await runMain([PER_BUSINESS], { db: snapshot }) };
+      },
+      { maxWait: 30_000, timeout: 120_000 },
+    );
     expect(agg.code, agg.err).toBe(0);
     expect(detail.code, detail.err).toBe(0);
     const a = agg.report!;
