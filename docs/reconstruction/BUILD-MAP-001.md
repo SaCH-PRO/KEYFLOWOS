@@ -419,7 +419,7 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 |---|---|---|---|---|
 | #38 KEY IRONCLAD — The 9 Layers of Consciousness | main | STALE | — | Services already on main and further evolved; the 10 endpoints are superseded by POST conscious/chat (PRS-M38). |
 | #63 Free contact enrichment by default (no paid account); Apollo now optional | main | DEFER | V1+ | A CONTACTS-v1 non-goal. Fetches by default; parsing and SSRF fixes needed (PRS-M14). |
-| #90 chore: optimize Copilot code review for KEYFLOWOS | main | STALE | — | Folded into #94, which #104 superseded (PRS-M10). |
+| #90 chore: optimize Copilot code review for KEYFLOWOS | main | PORTED 2026-11-12 (was STALE) | — | Folded into #94, which #104 superseded (PRS-M10). Ported to main 2026-11-12 (conv/docs-records): the five Copilot review-guidance files under `.github/`, with the programme-state bullet rewritten to the control-state precedence of AGENT_CONTROL_PLANE.md and this map added to the read-first list. |
 | #91 chore: align KEYFLOWOS runtime with Node 24 for Vercel | main | PORT | V1-39 | Runtime-pin pieces only, after D-21. Web-build Prisma scoping is V1+ (PRS-M04, PRS-M57). |
 | #94 KF-AI-PR-REVIEW-GATE-001: exact-head AI review admission gate | main | STALE | — | Superseded by #104's provider-neutral review (PRS-M10). |
 | #105 docs: canonical KEYFLOW Connector Fabric architecture | intel branch | DOCS | — | Connector Fabric architecture (P2-6); needs a placement ruling (PRS-M52). |
