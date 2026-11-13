@@ -833,6 +833,11 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES, BUG-030)"
     },
     {
+      "prefix": "v99f_",
+      "owner": "apps/server/test/sweep-census-families.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES census families)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"
