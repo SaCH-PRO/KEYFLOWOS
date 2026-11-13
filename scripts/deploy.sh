@@ -20,12 +20,24 @@
 #     livekit.production.yaml was modified only on the box and was lost this way.
 #   * The server's tsc needs ~3.5GB. The box has 7.6GB total and no swap by
 #     default; 4GB of swap was added to make the build survivable.
+#   * On 2026-11-13 this script printed DEPLOYED while the API crash-looped on
+#     "[FATAL] Environment validation failed: SUPABASE_JWT_SECRET is a public
+#     placeholder". .env.production is read only inside the containers, so a
+#     value the API refuses at boot surfaced after the backup, the build and
+#     the restart; and the verify step read /healthz once and trusted any body
+#     on the right commit, degraded or not. Both are checked now: the env file
+#     against the API's boot rules before anything is touched, and /healthz
+#     polled until it is ok with the API reachable (scripts/tests/deploy-sh.spec.mjs).
 #
 # Anything you learn the next time this hurts belongs here, not in your memory.
 #
 # Usage:   scripts/deploy.sh [git-ref]
 #          scripts/deploy.sh                 # deploy current checkout
 #          scripts/deploy.sh main            # fetch and deploy main
+#
+# Environment (each optional):
+#   DEPLOY_SKIP_CI_CHECK=1    deploy without the CI gate below (typed on purpose)
+#   DEPLOY_BACKUP_DIR=<dir>   where the pre-deploy dump goes (default /root)
 #
 set -euo pipefail
 
@@ -39,6 +51,187 @@ REF="${1:-}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[31mFAILED: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# --- the API's boot rules, for the .env.production preflight ------------------
+#
+# The refusals the API makes before Nest starts, checked against the env file
+# before anything is backed up, built or restarted:
+#
+#   * SUPABASE_JWT_SECRET holding a public placeholder (env.ts,
+#     PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS; R0-SEC-02). The list is read from
+#     the env.ts being deployed, plus this copy for a ref whose env.ts has none.
+#     Refused even under KEYFLOW_SKIP_ENV_VALIDATION: with a public value anyone
+#     can mint tokens the API accepts.
+#   * the S3 group (env.ts validateS3Group): any S3_* set needs every one of
+#     DEPLOY_S3_REQUIRED, and S3_ENDPOINT must start with http:// or https://.
+#     Skipped under KEYFLOW_SKIP_ENV_VALIDATION=1|true, as the API skips it.
+#   * KEYFLOW_DEV_AUTH_BYPASS true or 1 (main.ts assertNoDevAuthBypass).
+#   * email verification, on in production unless AUTH_REQUIRE_EMAIL_VERIFICATION
+#     says otherwise, needs every one of DEPLOY_EMAIL_VERIFICATION_REQUIRED (main.ts).
+#
+# NODE_ENV, PORT and DATABASE_URL are not read: docker-compose.production.yml
+# sets them for the api service over env_file. A line is read as compose reads
+# an env_file (`export ` prefix, quotes, ` #` comments, CRLF), the last
+# assignment of a name wins, and the value is trimmed as the API trims it
+# (quotes and spaces around a placeholder do not hide it; ANY assignment of a
+# placeholder is refused). No value is ever printed: only names and line
+# numbers. scripts/tests/deploy-sh.spec.mjs pins these lists to env.ts and
+# main.ts. A refusal the API makes later, inside Nest, is caught by the health
+# wait at the end of this script.
+DEPLOY_JWT_SECRET_PLACEHOLDERS=('your-supabase-jwt-signing-secret' 'your-jwt-secret')
+DEPLOY_S3_GROUP=('S3_BUCKET' 'S3_REGION' 'S3_ACCESS_KEY_ID' 'S3_SECRET_ACCESS_KEY' 'S3_ENDPOINT' 'S3_PUBLIC_URL' 'S3_FORCE_PATH_STYLE')
+DEPLOY_S3_REQUIRED=('S3_BUCKET' 'S3_REGION' 'S3_ACCESS_KEY_ID' 'S3_SECRET_ACCESS_KEY')
+DEPLOY_EMAIL_VERIFICATION_REQUIRED=('SUPABASE_SERVICE_ROLE_KEY' 'RESEND_API_KEY' 'EMAIL_FROM_ADDRESS')
+SERVER_ENV_TS="apps/server/src/core/config/env.ts"
+
+env_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# Whitespace and quote characters around a value, however nested.
+env_unwrap() {
+  local s="$1"
+  while :; do
+    s="$(env_trim "$s")"
+    case "$s" in
+      \"*|\'*) s="${s:1}" ;;
+      *\"|*\') s="${s%?}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$s"
+}
+
+# Reads an env file into ENV_KEYS / ENV_VALS / ENV_LINES, one entry per
+# assignment, in file order. The values stay in these arrays; nothing prints them.
+env_file_parse() {
+  local raw line key val n=0
+  ENV_KEYS=(); ENV_VALS=(); ENV_LINES=()
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    n=$((n + 1))
+    line="${raw%$'\r'}"
+    if [ "$n" -eq 1 ]; then line="${line#$'\xef\xbb\xbf'}"; fi
+    line="$(env_trim "$line")"
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in export[[:space:]]*) line="$(env_trim "${line#export}")" ;; esac
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="$(env_trim "${line%%=*}")"
+    val="$(env_trim "${line#*=}")"
+    case "$val" in
+      \"*) val="${val#\"}"; val="${val%%\"*}" ;;
+      \'*) val="${val#\'}"; val="${val%%\'*}" ;;
+      *) val="${val%%[[:space:]]#*}" ;;
+    esac
+    ENV_KEYS+=("$key")
+    ENV_VALS+=("$(env_unwrap "$val")")
+    ENV_LINES+=("$n")
+  done < "$1"
+}
+
+# The last assignment of a name: ENV_LAST_VAL (empty when unset) and ENV_LAST_LINE.
+env_last() {
+  local i
+  ENV_LAST_VAL=""
+  ENV_LAST_LINE=""
+  for i in "${!ENV_KEYS[@]}"; do
+    if [ "${ENV_KEYS[$i]}" = "$1" ]; then
+      ENV_LAST_VAL="${ENV_VALS[$i]}"
+      ENV_LAST_LINE="${ENV_LINES[$i]}"
+    fi
+  done
+}
+
+# The placeholder Set as the env.ts being deployed declares it (nothing when absent).
+env_ts_placeholders() {
+  [ -f "$SERVER_ENV_TS" ] || return 0
+  awk '/PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS[[:space:]]*=[[:space:]]*new Set\(\[/ { on = 1 }
+       on { print }
+       on && /\]\)/ { exit }' "$SERVER_ENV_TS" \
+    | tr '\n' ' ' \
+    | sed -n 's/.*new Set(\[\(.*\)\]).*/\1/p' \
+    | grep -oE "'[^']*'|\"[^\"]*\"" \
+    | sed "s/^['\"]//; s/['\"]\$//" || true
+}
+
+# Refuses (exit 1) when the env file holds a value the API refuses at boot.
+check_env_production() {
+  local file="$1" i p k flag skip=0 s3_any=0
+  local -a placeholders problems=() from_ts=()
+  mapfile -t from_ts < <(env_ts_placeholders)
+  placeholders=("${DEPLOY_JWT_SECRET_PLACEHOLDERS[@]}" ${from_ts[@]+"${from_ts[@]}"})
+  env_file_parse "$file"
+
+  for i in "${!ENV_KEYS[@]}"; do
+    if [ "${ENV_KEYS[$i]}" != SUPABASE_JWT_SECRET ] || [ -z "${ENV_VALS[$i]}" ]; then continue; fi
+    for p in "${placeholders[@]}"; do
+      if [ -n "$p" ] && [ "${ENV_VALS[$i]}" = "$p" ]; then
+        problems+=("SUPABASE_JWT_SECRET (line ${ENV_LINES[$i]}) is a public placeholder from .env.example or DEPLOYMENT.md: anyone can sign tokens the API verifies, and the API refuses to boot with it in production. For Release 0 leave it empty (docs/auth-pathway.md).")
+        break
+      fi
+    done
+  done
+
+  env_last KEYFLOW_SKIP_ENV_VALIDATION
+  case "$ENV_LAST_VAL" in 1|true) skip=1 ;; esac
+  if [ "$skip" -eq 0 ]; then
+    for k in "${DEPLOY_S3_GROUP[@]}"; do
+      env_last "$k"
+      if [ -n "$ENV_LAST_VAL" ]; then s3_any=1; fi
+    done
+    if [ "$s3_any" -eq 1 ]; then
+      for k in "${DEPLOY_S3_REQUIRED[@]}"; do
+        env_last "$k"
+        if [ -z "$ENV_LAST_VAL" ]; then
+          problems+=("$k is not set, and another S3_* variable is: the API requires the S3 config as a group (env.ts validateS3Group).")
+        fi
+      done
+      env_last S3_ENDPOINT
+      if [ -n "$ENV_LAST_VAL" ]; then
+        case "$ENV_LAST_VAL" in
+          [Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*) ;;
+          *) problems+=("S3_ENDPOINT (line $ENV_LAST_LINE) must start with http:// or https:// (env.ts validateS3Group).") ;;
+        esac
+      fi
+    fi
+  fi
+
+  env_last KEYFLOW_DEV_AUTH_BYPASS
+  case "$ENV_LAST_VAL" in
+    true|1) problems+=("KEYFLOW_DEV_AUTH_BYPASS (line $ENV_LAST_LINE) is on: the API exits at boot (main.ts assertNoDevAuthBypass). Remove the line.") ;;
+  esac
+
+  env_last AUTH_REQUIRE_EMAIL_VERIFICATION
+  flag="$(printf '%s' "$ENV_LAST_VAL" | tr '[:upper:]' '[:lower:]')"
+  case "$flag" in
+    true|1|'')
+      for k in "${DEPLOY_EMAIL_VERIFICATION_REQUIRED[@]}"; do
+        env_last "$k"
+        if [ -z "$ENV_LAST_VAL" ]; then
+          problems+=("$k is not set, and email verification is on (AUTH_REQUIRE_EMAIL_VERIFICATION ${flag:-unset}, on by default in production): the API refuses to start (main.ts).")
+        fi
+      done
+      ;;
+  esac
+
+  if [ "${#problems[@]}" -gt 0 ]; then
+    printf '\n\033[31mFAILED: %s would not boot the API (its own rules: %s, apps/server/src/main.ts):\033[0m\n' "$file" "$SERVER_ENV_TS" >&2
+    for p in "${problems[@]}"; do printf '  - %s\n' "$p" >&2; done
+    printf '     Nothing was backed up, built or restarted. Fix %s on this box and run this again.\n' "$file" >&2
+    exit 1
+  fi
+  printf '    %s passes the API boot checks (%d assignments read; no value printed)\n' "$file" "${#ENV_KEYS[@]}"
+}
+
+# One field of the /healthz body, read without jq or node (neither is on the box).
+health_string() {
+  printf '%s' "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 || true
+}
+health_bool() {
+  printf '%s' "$2" | grep -oE "\"$1\"[[:space:]]*:[[:space:]]*(true|false)" | head -n 1 | grep -oE '(true|false)$' || true
+}
 
 # --- preflight ---------------------------------------------------------------
 say "Preflight"
@@ -72,6 +265,13 @@ fi
 GIT_COMMIT="$(git rev-parse HEAD)"
 export GIT_COMMIT
 say "Deploying ${GIT_COMMIT:0:12} — $(git log -1 --format=%s)"
+
+# --- .env.production preflight -------------------------------------------------
+# After the checkout, so the rules are those of the code being deployed (its
+# env.ts); before the CI gate, the backup and the build, so a file the API would
+# refuse stops here with nothing touched. See check_env_production above.
+say "Checking $ENV_FILE against the API's boot rules"
+check_env_production "$ENV_FILE"
 
 # --- CI gate -----------------------------------------------------------------
 #
@@ -158,7 +358,9 @@ fi
 # --- backup ------------------------------------------------------------------
 say "Backing up the database"
 STAMP="$(date +%F-%H%M%S)"
-BACKUP="/root/keyflow-backup-${STAMP}.sql"
+BACKUP_DIR="${DEPLOY_BACKUP_DIR:-/root}"
+[ -d "$BACKUP_DIR" ] || die "backup directory $BACKUP_DIR does not exist — refusing to deploy without a backup"
+BACKUP="${BACKUP_DIR%/}/keyflow-backup-${STAMP}.sql"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
   sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$BACKUP" \
   || die "pg_dump failed — refusing to deploy without a backup"
@@ -219,20 +421,69 @@ say "Starting new containers"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d $SERVICES
 
 # --- verify ------------------------------------------------------------------
+#
+# Polled, bounded, and judged on the whole body. This step used to sleep 8 s,
+# read /healthz once and accept any body on the right commit, so on 2026-11-13
+# it printed DEPLOYED while the web answered {"status":"degraded",
+# "apiReachable":false} over a crash-looping API. Healthy is now all three of
+# status "ok", apiReachable true and the commit just built (the web.healthz
+# contract in scripts/verify-up-body.mjs, plus the commit), polled every
+# VERIFY_INTERVAL_SEC for at most VERIFY_TIMEOUT_SEC. Anything short of that
+# exits 1 with the rollback; DEPLOYED is printed only on a healthy body.
 say "Verifying"
-sleep 8
-HEALTH="$(curl -fsS --max-time 20 https://keyflowos.com/api/healthz || true)"
-printf '    %s\n' "$HEALTH"
+HEALTH_URL="https://keyflowos.com/api/healthz"
+VERIFY_TIMEOUT_SEC=90
+VERIFY_INTERVAL_SEC=5
+MAX_POLLS=$(( VERIFY_TIMEOUT_SEC / VERIFY_INTERVAL_SEC ))
+VERIFY_START=$SECONDS
+DEADLINE=$(( VERIFY_START + VERIFY_TIMEOUT_SEC ))
+EXPECTED="${GIT_COMMIT:0:12}"
+HEALTH="" H_STATUS="" H_API="" RUNNING="" HEALTHY=0 POLL=0
+while :; do
+  POLL=$((POLL + 1))
+  HEALTH="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null | tr '\n' ' ' || true)"
+  H_STATUS="$(health_string status "$HEALTH")"
+  H_API="$(health_bool apiReachable "$HEALTH")"
+  RUNNING="$(health_string commit "$HEALTH")"
+  if [ "$H_STATUS" = "ok" ] && [ "$H_API" = "true" ] && [ "$RUNNING" = "$EXPECTED" ]; then
+    HEALTHY=1
+    break
+  fi
+  printf '    %2d/%d  status=%s apiReachable=%s commit=%s\n' "$POLL" "$MAX_POLLS" "${H_STATUS:-none}" "${H_API:-none}" "${RUNNING:-none}"
+  if [ "$POLL" -ge "$MAX_POLLS" ] || [ "$SECONDS" -ge "$DEADLINE" ]; then break; fi
+  sleep "$VERIFY_INTERVAL_SEC"
+done
+printf '    %s\n' "${HEALTH:0:600}"
+WAITED="$POLL poll(s) over $(( SECONDS - VERIFY_START ))s"
 
-RUNNING="$(printf '%s' "$HEALTH" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
-if [ "$RUNNING" = "${GIT_COMMIT:0:12}" ]; then
-  printf '\n\033[32mDEPLOYED — /healthz reports %s, which is what we just built.\033[0m\n' "$RUNNING"
+if [ "$HEALTHY" -eq 1 ]; then
+  printf '\n\033[32mDEPLOYED — /healthz reports %s, status ok, API reachable: what we just built.\033[0m\n' "$RUNNING"
 else
-  printf '\n\033[31mMISMATCH — /healthz reports "%s", expected "%s".\033[0m\n' "$RUNNING" "${GIT_COMMIT:0:12}"
-  printf 'The containers may not have picked up the new image. Roll back with:\n'
+  if [ -z "$HEALTH" ]; then
+    printf '\n\033[31mNO ANSWER — %s did not answer (%s).\033[0m\n' "$HEALTH_URL" "$WAITED"
+  elif [ -n "$RUNNING" ] && [ "$RUNNING" != "$EXPECTED" ]; then
+    printf '\n\033[31mMISMATCH — after %s /healthz reports "%s", expected "%s".\033[0m\n' "$WAITED" "$RUNNING" "$EXPECTED"
+    printf 'The containers may not have picked up the new image.\n'
+  else
+    printf '\n\033[31mNOT HEALTHY — after %s /healthz (commit %s) reports status=%s, apiReachable=%s.\033[0m\n' "$WAITED" "${RUNNING:-none}" "${H_STATUS:-none}" "${H_API:-none}"
+    if [ "$H_API" != "true" ]; then
+      printf 'The new web build is serving, but it cannot reach the API: the API is down or\n'
+      printf 'restarting (a refusal at boot crash-loops it). This is not a deploy.\n'
+    else
+      printf 'The API answers, but the web reports itself degraded (its env field says why).\n'
+      printf 'This is not a deploy.\n'
+    fi
+  fi
+  printf 'See why:\n'
+  printf '  docker compose --env-file %s -f %s ps\n' "$ENV_FILE" "$COMPOSE_FILE"
+  printf '  docker compose --env-file %s -f %s logs --tail=100 api\n' "$ENV_FILE" "$COMPOSE_FILE"
+  printf 'Roll back with:\n'
   printf '  docker tag keyflowos-api:rollback keyflowos-api:latest\n'
   printf '  docker tag keyflowos-web:rollback keyflowos-web:latest\n'
   printf '  docker compose --env-file %s -f %s up -d %s\n' "$ENV_FILE" "$COMPOSE_FILE" "$SERVICES"
+  printf 'Database restore (only if a migration went wrong):\n'
+  printf '  docker compose --env-file %s -f %s exec -T db \\\n' "$ENV_FILE" "$COMPOSE_FILE"
+  printf '    sh -c '\''psql -U "$POSTGRES_USER" "$POSTGRES_DB"'\'' < %s\n' "$BACKUP"
   exit 1
 fi
 

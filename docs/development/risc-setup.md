@@ -73,7 +73,7 @@ pnpm backfill:google-identities           # dry run: prints counts, writes nothi
 pnpm backfill:google-identities --apply   # writes the missing rows
 ```
 
-It reads `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` from the repo-root `.env`, and:
+It reads `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` from the environment, else from the repo-root `.env` (a variable already set wins over the file). It imports server modules from `apps/server/src`, so run it from a checkout with `src/` (the production API image has only `dist/`; mounting `scripts/` alone, as `docs/development/owner-membership-backfill.md` does for the owner-membership script, is not enough for this one). It:
 
 - pages `GET /auth/v1/admin/users` with the service-role key (`SupabaseAdminService.listUsersPage`) only to enumerate the user ids; a page that fails stops the run with exit 1 (it is never read as the end of the list). GoTrue does not load identities on the list (`models.FindUsersInAudience` has no `Eager()`: every listed user carries `identities: null`; review CR-W9IBS-1);
 - reads each listed user's record, `GET /auth/v1/admin/users/{id}` (`SupabaseAdminService.getUserRecord`, identities eager-loaded: the record bootstrap reads), one request per user, one after another. A record that fails, names another id, or whose `identities` is not a list (not loaded) stops the run with exit 1: it is never counted as a user without a Google identity;

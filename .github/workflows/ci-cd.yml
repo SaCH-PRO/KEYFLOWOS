@@ -113,6 +113,15 @@ jobs:
       - name: Verify launch health contract
         run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
 
+      # scripts/deploy.sh: the .env.production preflight (the API's boot
+      # rules, before the backup and the build) and the bounded /healthz wait
+      # (DEPLOYED only on status ok, API reachable, new commit). Runs the real
+      # script against stand-ins for docker, curl, sleep and free: no network,
+      # no docker. Same command as `pnpm test:deploy`; explicit file, no env
+      # (see the step above).
+      - name: Deploy script contract
+        run: node --test scripts/tests/deploy-sh.spec.mjs
+
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
   # It used to be the first step of lint-and-typecheck, which every other job
