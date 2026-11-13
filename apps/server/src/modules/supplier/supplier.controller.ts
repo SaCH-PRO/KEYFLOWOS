@@ -2,6 +2,7 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards, Inject, ValidationPipe } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { SupplierService } from './supplier.service';
 import { CreateConnectionDto, UpdateConnectionDto } from './dto';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
@@ -34,7 +35,14 @@ export class SupplierController {
     return this.supplierService.getSupplierConnection(businessId, connectionId);
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): creating,
+   * changing and deactivating a supplier connection set, replace or clear its stored credentials
+   * (SupplierConnection.credentials), so each needs settings admin, as the connector credentials do.
+   */
   @CrmRateLimit(10, 60_000)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections')
   createConnection(
     @Param('businessId') businessId: string,
@@ -44,6 +52,8 @@ export class SupplierController {
   }
 
   @CrmRateLimit(10, 60_000)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/connections/:connectionId')
   updateConnection(
     @Param('businessId') businessId: string,
@@ -53,6 +63,8 @@ export class SupplierController {
     return this.supplierService.updateSupplierConnection(businessId, connectionId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/connections/:connectionId')
   deleteConnection(
     @Param('businessId') businessId: string,

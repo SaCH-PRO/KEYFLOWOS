@@ -17,6 +17,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
 import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
@@ -441,7 +442,12 @@ export class ConnectController {
       await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
       return this.contacts.disconnect(businessId);
     }
-    if (source === 'outlook_contacts') return this.outlook.disconnect(businessId);
+    if (source === 'outlook_contacts') {
+      // SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): it
+      // clears the business's Outlook contacts tokens, whose consent start is settings admin (SV-3).
+      await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
+      return this.outlook.disconnect(businessId);
+    }
     throw new BadRequestException(`Unknown source "${source}"`);
   }
 

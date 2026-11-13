@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
 import { CheckedAddress, PinnedDispatcher } from '../../core/security/outbound-address';
 import { checkWebhookUrl, WebhookUrlRefusedError } from './webhook-url';
+import { projectWebhookPayload } from './webhook-payload';
 import type {
   ContactCreatedPayload,
   ContactUpdatedPayload,
@@ -20,13 +21,6 @@ import type {
   StoreOrderDeliveredPayload,
   StoreOrderCancelledPayload,
 } from '../../core/event-bus/events.types';
-
-/**
- * SWEEP-P0-SCOPES second review repair (SV-1): the contact fields a booking event delivers, the
- * bookings read routes' contact select (BookingsService.listBookings and the status, notes and
- * location answers).
- */
-const BOOKING_CONTACT_FIELDS = ['id', 'firstName', 'lastName', 'email', 'phone'] as const;
 
 interface WebhookRecord {
   id: string;
@@ -118,17 +112,24 @@ export class WebhookDispatcherService {
     return logEntry;
   }
 
+  /**
+   * Every family's records are delivered through dispatch(), which projects the whole payload
+   * (webhook-payload.ts; round 1 class repair, CLASS A): a contact, wherever it sits (the contact.*
+   * subject, a booking's or an invoice's contact), is delivered as the fixed person view, a row of a
+   * module the subscriber was not checked for as its id, and no credential or private CRM field at
+   * any depth. The handlers below hand the payload's records over as the emitters read them.
+   */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
     await this.dispatch('contact.created', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
     });
   }
 
   @OnEvent('contact.updated')
   async onContactUpdated(payload: ContactUpdatedPayload) {
     await this.dispatch('contact.updated', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
       fromStatus: payload.fromStatus ?? null,
       toStatus: payload.toStatus ?? null,
     });
@@ -137,40 +138,37 @@ export class WebhookDispatcherService {
   @OnEvent('contact.merged')
   async onContactMerged(payload: ContactMergedPayload) {
     await this.dispatch('contact.merged', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
       mergedContactId: payload.duplicateId,
     });
   }
 
   /**
-   * SWEEP-P0-SCOPES second review repair (finding SV-1): a booking event carries the booking's contact
-   * as the bookings read routes answer it ({ id, firstName, lastName, email, phone }:
-   * BookingsService.listBookings), at data.contact and at data.booking.contact. A booking.* webhook
-   * needs bookings read only (webhook-events.ts), and BookingsService emits the booking read with
-   * include { contact: true }: the whole Contact row went out, a PRIVATE contact's visibility and owner,
-   * its internal note and its money signals (lifetimeValue, averageSpend, paymentReliability; D-100)
-   * included, to a member the crm and revenue routes refuse.
+   * SWEEP-P0-SCOPES second review repair (finding SV-1): BookingsService emits the booking read with
+   * include { contact: true }, and the whole Contact row went out (a PRIVATE contact's visibility,
+   * owner, internal note and money signals; D-100) to a bookings-read member. dispatch() delivers it
+   * as the fixed person view, at data.contact and at data.booking.contact.
    */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
     await this.dispatch('booking.created', payload.businessId, {
-      booking: this.bookingForWebhook(payload.booking),
-      contact: this.bookingContact(payload.contact),
+      booking: payload.booking,
+      contact: payload.contact ?? null,
     });
   }
 
   @OnEvent('booking.confirmed')
   async onBookingConfirmed(payload: BookingConfirmedPayload) {
     await this.dispatch('booking.confirmed', payload.businessId, {
-      booking: this.bookingForWebhook(payload.booking),
-      contact: this.bookingContact(payload.contact),
+      booking: payload.booking,
+      contact: payload.contact ?? null,
     });
   }
 
   @OnEvent('booking.completed')
   async onBookingCompleted(payload: BookingCompletedPayload) {
     await this.dispatch('booking.completed', payload.businessId, {
-      booking: this.bookingForWebhook(payload.booking),
+      booking: payload.booking,
     });
   }
 
@@ -277,6 +275,13 @@ export class WebhookDispatcherService {
   /**
    * `subscribedVia` lists the subscriptions that receive `event` (default: the
    * event itself); a webhook subscribed to several of them gets one delivery.
+   *
+   * Round 1 class repair (CLASS A; RC-1): the one door every delivery goes through. The data is
+   * projected here, whatever the family (projectWebhookPayload, webhook-payload.ts): person rows as
+   * the fixed person view, rows of a module the subscriber was not checked for as their id, no
+   * credential or contact-private key at any depth. invoice.* delivered the invoice's whole Contact
+   * row (InvoiceWorkflowService reads it with include { contact: true, booking: true }) after the
+   * SV-1 repair had projected booking.* only.
    */
   private async dispatch(
     event: string,
@@ -299,7 +304,7 @@ export class WebhookDispatcherService {
         event,
         timestamp: new Date().toISOString(),
         businessId,
-        data,
+        data: projectWebhookPayload(event, data),
       };
 
       const body = JSON.stringify(payload);
@@ -465,24 +470,4 @@ export class WebhookDispatcherService {
     }
   }
 
-  /** Second review SV-1: the booking's contact as the bookings routes answer it, or null. */
-  private bookingContact(contact: unknown): Record<string, unknown> | null {
-    if (!contact || typeof contact !== 'object') return null;
-    const row = contact as Record<string, unknown>;
-    return Object.fromEntries(BOOKING_CONTACT_FIELDS.map((key) => [key, row[key] ?? null]));
-  }
-
-  /** Second review SV-1: the booking with its contact (where it carries one) as the bookings routes answer it. */
-  private bookingForWebhook(booking: unknown): unknown {
-    if (!booking || typeof booking !== 'object' || !('contact' in booking)) return booking;
-    const { contact, ...rest } = booking as Record<string, unknown>;
-    return { ...rest, contact: this.bookingContact(contact) };
-  }
-
-  private sanitizeContact(contact: any) {
-    if (!contact) return null;
-    const { businessId: _businessId, ...rest } = contact;
-    void _businessId;
-    return rest;
-  }
 }

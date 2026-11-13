@@ -16,6 +16,12 @@ no row). CEN-09 holds every binding start, of any verb, to a gate: it may not be
 `deferred`. A GET whose write hides in a service under another name is still not visible to the
 reader; the binding start is the class the reviews found.
 
+Round 1 class repair (CLASS B): the census also reads the call graph (CEN-10, CEN-10b, CEN-10c). A
+route of any verb, and every KEY module action, whose handler reaches a provider credential write
+(through injected services, helpers, connector dispatch) must reach it through settings admin or the
+owner rule a ruling sets, and a member route that reaches one joins the population whatever its verb.
+See "Credential writers (round 1 class repair)" below.
+
 Source of the census: the 2026-11-13 browser sweep (BUG-001 webhooks and signing secrets, BUG-013
 API keys, BUG-014 projects, BUG-015 stock and warehouses) showed the class: a STAFF member with no
 access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard` only.
@@ -39,27 +45,35 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member routes without an enforced scope at this head: **766**: 763 write routes and 3
+- Member routes without an enforced scope at this head: **761**: 758 write routes and 3
   credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
   owner check). 760 write routes under modules/ at 2c49a539; the first review repair read core/
   too (+11 ConnectorController and GoogleSuiteController routes, -2 newly applied, +2 for the D-85
   plan doors that keep their service check alone): 771 at 6f4935f1; the second review repair
-  applied 8 (the channel and social connection writes, SV-2: -8) and added the binding GETs (+3).
+  applied 8 (the channel and social connection writes, SV-2: -8) and added the binding GETs (+3);
+  the round 1 class repair applied 5 credential writers the call graph found (-5: Shopify connect,
+  the three supplier connection writes, the channel sync from social).
   - exempt-check: 58
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
-  - deferred: 63
-  - open: 592
-- Routes gated by this packet (applied): **80**: 79 write routes and one credential-binding GET (the
-  Outlook contacts consent start, SV-3); and 20 reads of the same controllers.
+  - deferred: 63 (three of them `held:` credential writers, the bank connections)
+  - open: 587
+- Routes gated by this packet (applied): **85**: 84 write routes and one credential-binding GET (the
+  Outlook contacts consent start, SV-3); and 20 reads of the same controllers. Beside these, the
+  round 1 class repair added a settings admin check to routes that already enforced another scope
+  (IntegrationHubController connect and disconnect keep `connect:write` and check settings admin in
+  the handler) or a check (KeyConnectorController connect and disconnect, the Outlook branch of
+  ConnectController.disconnectSource); see "Credential writers".
 - Secret-bearing reads reviewed: **14**.
 
 Applied in this packet, with real-DB tests through the HTTP routes:
 
 | family | scope | suite |
 | --- | --- | --- |
-| webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2), and a contact event revenue read too (second review SV-1, D-100); a booking event carries its contact as the bookings routes answer it (SV-1); per webhook, the secret and the full URL go only to a reader who may receive its events (SV-5); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
+| webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2), and a contact event revenue read too (second review SV-1, D-100); per webhook, the secret and the full URL go only to a reader who may receive its events (SV-5); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
+| webhook deliveries, every family (round 1 class repair, CLASS A; RC-1 invoice.*) | one door projects every delivery (WebhookDispatcherService.dispatch, webhook-payload.ts): every person row is the fixed person view { id, firstName, lastName, email } (name for a member or staff row), a row of a module the subscriber was not checked for is its id, no credential or contact-private key at any depth; the events are derived from the dispatcher's @OnEvent metadata and the source's emitters, every family has a read rule | sweep-webhook-payload-projection |
+| provider credential writers the call graph found (round 1 class repair, CLASS B; RC-2 Shopify) | settings admin: Shopify connect; supplier connection create / update / deactivate; the channel sync from social; the Outlook contacts disconnect; the KEY action social.connect_account / disconnect_account; settings admin added to what was there: integration hub connect / disconnect and KEY settings.configure_integration (connect write kept), KEY connector connect / disconnect (D-111 role kept, settings admin by the map, D-114) | sweep-credential-writers-scope, sweep-channel-connections-scope, key-connector-authority, settings-adapter.service.spec, social-adapter.service.spec |
 | API keys (BUG-013) | settings read / admin (revoke: settings admin, review CR-3) | sweep-webhooks-api-keys-settings |
 | connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules); the handler checks read a stored JSON array as the guard does, every module none (second review SV-4) | sweep-connector-credentials-scope |
 | channel and social connections (second review SV-2), the Outlook contacts consent start (SV-3) | settings admin (communications connection create / update / delete and WhatsApp connect; social manual connect, OAuth start and callback, delete; GET connect/microsoft auth-url); a channel connection's create and update write its own fields only (a businessId in the body moved the connection to another business) | sweep-channel-connections-scope |
@@ -109,9 +123,26 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    creator's access is narrowed, until a member turns it off. Add a creator column and re-check
    at delivery? Contact events also carry contacts marked PRIVATE that a non-owner member cannot
    see (crm visibility); should contact webhooks be owner-only, or skip PRIVATE contacts? (Second
-   review repair SV-1: contact events now also need revenue read, as their rows carry the stored
-   money signals; booking events carry the booking's contact as the bookings routes answer it,
-   id, name, email and phone, whatever its visibility, as those routes do.)
+   review repair SV-1: contact events now also need revenue read, as their rows carried the stored
+   money signals. Round 1 class repair: every delivery is projected, so a contact event, a booking
+   event and an invoice event carry the contact as the fixed person view, id, name and email,
+   whatever its visibility.)
+10. Webhook person view (round 1 class repair, CLASS A): one view for every family, { id, firstName,
+   lastName, email }, what every subscriber may read (the invoice routes withhold the phone from
+   revenue readers). So booking events no longer carry the contact's phone (the bookings routes
+   show it), and contact events carry no phone, company or CRM status. Widen the view per family
+   (and the read rule with it), or keep it? The contact.* revenue-read rule (SV-1) is kept, though
+   the view carries no money signal: relax it?
+11. Integration hub (round 1 class repair): connect and disconnect (and the KEY action
+   settings.configure_integration) now need settings admin as well as `connect:write`. `connect` is
+   none for every role by deliberate decision, so on role defaults nobody binds an integration, as
+   before; an explicit grant of connect write alone no longer does either. Should the binding need
+   settings admin alone (then OWNER and ADMIN bind on role defaults), keeping `connect` for the
+   hub's sync runs?
+12. Bank connections (`FinanceController` create / update / delete, BankConnection.accessToken): a
+   provider credential written by any member (ensureAccess checks membership). finance.controller.ts
+   is held for the merge with pkt/PR195-JOURNAL-SCOPE, so they are `deferred` rows naming `held:`;
+   after the merge they need settings admin (the call graph, CEN-10b, names them).
 9. Connector authenticate (`ConnectorController.authenticate`) stays open, as do sync, test and
    smoke of non-Google connectors (existing tests pin them open). Second review repair SV-3 found
    its Outlook answer is only a pointer to the consent start, which now needs settings admin, as
@@ -165,6 +196,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunicationsController.connectWhatsApp` | POST | `/communications/businesses/:businessId/whatsapp/connect` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
 | `CommunicationsController.createConnection` | POST | `/communications/businesses/:businessId/connections` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only |
 | `CommunicationsController.deleteConnection` | DELETE | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
+| `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | applied | `settings:admin` (round 1 class repair, CLASS B, found by the call graph: it copies every social connection's token over the business's channel connection of that provider) |
 | `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only (a businessId or id in it moved or renamed the connection) |
 | `ConnectorController.saveCredentials` | POST | `/connectors/businesses/:businessId/credentials/:type` | applied | `settings:admin` (review repair SEC-1: it replaces the account a connector syncs with) |
 | `DeliveryNoteController.cancel` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/cancel` | applied | `storefront:write` |
@@ -182,8 +214,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `GoogleDriveController.pushInventoryToSheet` | POST | `/drive/businesses/:businessId/inventory-sheet/push` | applied | `storefront:write` |
 | `GoogleDriveController.unlinkInventorySheet` | DELETE | `/drive/businesses/:businessId/inventory-sheet/unlink` | applied | `storefront:write` |
 | `MarketplaceController.adjustInventory` | POST | `/marketplace/businesses/:businessId/inventory/adjust` | applied | `storefront:write` |
-| `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | applied | `projects:write` (review repair SEC-4: it creates a Project, the BUG-014 rule) |
 | `MarketplaceController.createListing` | POST | `/marketplace/businesses/:businessId/listings` | applied | `storefront:write` |
+| `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | applied | `projects:write` (review repair SEC-4: it creates a Project, the BUG-014 rule) |
 | `MarketplaceController.createShippingZone` | POST | `/marketplace/businesses/:businessId/shipping-zones` | applied | `storefront:write` |
 | `MarketplaceController.createWarehouse` | POST | `/marketplace/businesses/:businessId/warehouses` | applied | `storefront:write` |
 | `MarketplaceController.deleteListing` | DELETE | `/marketplace/businesses/:businessId/listings/:listingId` | applied | `storefront:write` |
@@ -222,6 +254,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `ProjectsController.updateProject` | PATCH | `/projects/businesses/:businessId/projects/:projectId` | applied | `projects:write` |
 | `ProjectsController.updateTask` | PATCH | `/projects/businesses/:businessId/tasks/:taskId` | applied | `projects:write` |
 | `ProjectsController.updateTaskStatus` | PATCH | `/projects/businesses/:businessId/tasks/:taskId/status` | applied | `projects:write` |
+| `ShopifyController.connect` | POST | `/shopify/businesses/:businessId/connect` | applied | `settings:admin` (round 1 class repair, finding RC-2: it stores the body's shop domain and access token as the business's Shopify credentials, ConnectorCredentialsService.setCredentials) |
 | `SocialController.deleteConnection` | DELETE | `/social/businesses/:businessId/connections/:platform` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
 | `SocialController.manualConnect` | POST | `/social/businesses/:businessId/connections/:platform/manual` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
 | `SocialController.oauthCallback` | POST | `/social/businesses/:businessId/connections/:platform/oauth/callback` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
@@ -230,6 +263,9 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `StockCountController.create` | POST | `/continental-ops/businesses/:businessId/stock-counts` | applied | `storefront:write` |
 | `StockCountController.remove` | DELETE | `/continental-ops/businesses/:businessId/stock-counts/:id` | applied | `storefront:write` |
 | `StockCountController.update` | PATCH | `/continental-ops/businesses/:businessId/stock-counts/:id` | applied | `storefront:write` |
+| `SupplierController.createConnection` | POST | `/supplier/businesses/:businessId/connections` | applied | `settings:admin` (round 1 class repair, CLASS B, found by the call graph: it stores the supplier's credentials, SupplierConnection.credentials) |
+| `SupplierController.deleteConnection` | DELETE | `/supplier/businesses/:businessId/connections/:connectionId` | applied | `settings:admin` (round 1 class repair, CLASS B: it deactivates the supplier connection) |
+| `SupplierController.updateConnection` | PATCH | `/supplier/businesses/:businessId/connections/:connectionId` | applied | `settings:admin` (round 1 class repair, CLASS B: it replaces the supplier's credentials) |
 | `WebhooksController.create` | POST | `/webhooks/businesses/:businessId/webhooks` | applied | `settings:write`; and read on every subscribed event's module (SEC-2), with every contact in view and revenue read for contact events (second review SV-1, D-100) |
 | `WebhooksController.remove` | DELETE | `/webhooks/businesses/:businessId/webhooks/:webhookId` | applied | `settings:write` |
 | `WebhooksController.testWebhook` | POST | `/webhooks/businesses/:businessId/webhooks/:webhookId/test` | applied | `settings:write` |
@@ -253,6 +289,94 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `FinanceController.listBankConnections` | GET | `/finance/businesses/:businessId/bank-connections` | secret-read | BankConnectionService.strip on every row (bank-connection-secret suite); deferred to pkt/PR195-JOURNAL-SCOPE for the scope |
 | `WhatsAppController.getConfig` | GET | `/whatsapp/businesses/:businessId/config` | secret-read | tokens masked (R0-SEC2, whatsapp-config-authority suite) |
 | `MarketplaceController.getOrderToken` | GET | `/marketplace/businesses/:businessId/orders/:orderId/token` | secret-read | the order's customer link token, answered to members by design (the link is shared with the customer) |
+
+## Credential writers (round 1 class repair, CLASS B)
+
+The reviews found the SEC-1 class one route at a time: connector credentials (SEC-1), channel and
+social connections (SV-2), the Outlook consent start (SV-3), Shopify connect (RC-2). Each was a
+route whose path and handler name said nothing about credentials. The census spec now finds them by
+what the handler does (`buildCredentialGraph` in rest-scope-census.spec.ts):
+
+- **What a credential write is.** A Prisma write on a model that stores a provider credential, when
+  its data names a credential column (in the call, or, when the data is built elsewhere, in the
+  method and the same-class helpers and file constants it uses). The models and columns:
+  - Business: the Google Suite and Outlook token columns (`*AccessToken`, `*RefreshToken`);
+  - ConnectorStatus: `metadata.encryptedCredentials` (ConnectorCredentialsService);
+  - ChannelConnection and SocialConnection: `token`, `refreshToken`;
+  - ConnectorAccount: `accessTokenEncrypted`, `refreshTokenEncrypted`;
+  - SupplierConnection: `credentials`;
+  - BankConnection: `accessToken`, `providerItemId`;
+  - IntegrationConnection: `authData`, `authDataRef`.
+  Deleting or deactivating such a row also counts. So do:
+  - a Business write whose `metaData` carries a credential key (WhatsApp, payment and SEO secrets);
+  - raw SQL that SETs a token column;
+  - a consent start: an OAuth state signer, or an OAuth session store.
+- **What it is not.** A writer that only stores the provider's answer for a binding that already
+  exists, or clears what no binding holds, is a refresh door, pinned by name with its reason (the
+  spec fails if one stops writing):
+  - the Drive, Calendar, Gmail, Google Suite and Outlook token refreshes;
+  - the expired-pending Gmail sweep;
+  - the orphaned Gmail token cleanup;
+  - the SEO sync stamps.
+  App-issued access tokens are not provider credentials: PaymentLink, PortalAccess, Quote.viewToken,
+  ContactExportJob, SitePageDraft.previewToken, DriveSyncCursor. Neither is PushSubscription.auth (the
+  caller's own device) or a webhook's signing secret (the server generates it at create, under
+  settings write and the event reads, SV-5).
+- **The graph.** It follows:
+  - calls on `this` (with superclasses);
+  - typed injected properties (constructor and property injection, `@Inject(X)`);
+  - top-level helper functions;
+  - connector dispatch: a call on a local of an interface several classes implement goes to every
+    implementation;
+  - a method name only one class defines.
+- **The rule (CEN-10b, CEN-10c).** Every route that reaches a credential write must reach it only
+  through:
+  - settings admin enforced on the route; or
+  - a pinned check that dominates the call. The check runs in an earlier statement of a block that
+    encloses the call, or in both branches of an `if`; a check in a sibling branch does not count.
+    The pinned checks:
+    - settings admin as ModuleScopeGuard reads it (assertMemberModuleLevel, and for a KEY command
+      assertCommandActorModuleLevel);
+    - assertConnectorSettingsAdmin;
+    - the Google owner rule (D-99);
+    - the Gmail owner rule (D-11, D-42);
+    - the business owner (D-11);
+    - the WhatsApp config owner (D-11);
+    - the SEO connector owner (D-94);
+    - for a public callback, the signed state its start minted (verifyState, consumeOAuthSession).
+  A role-only check does not count (D-114). This applies to member and public routes of every verb,
+  and to every KEY connector adapter's `execute`. The only exception is a route whose file another
+  branch holds, as a `deferred` row naming `held:`.
+
+What the graph found at c875b446 (beyond what the reviews had fixed). Each is fixed here with a
+real-DB test, except the bank connections:
+
+| route or action | wrote | now |
+| --- | --- | --- |
+| ShopifyController.connect (RC-2) | ConnectorStatus encrypted credentials (shop domain and token from the body) | settings admin |
+| SupplierController create / update / delete connection | SupplierConnection.credentials, its deactivation | settings admin |
+| IntegrationHubController connect / disconnect | IntegrationConnection.authDataRef, its deactivation (connect write alone) | connect write kept and settings admin (check:assertMemberModuleLevel in the handler) |
+| CommunicationsController.syncFromSocial | every social token copied over the channel connections | settings admin |
+| ConnectController.disconnectSource (outlook_contacts branch) | Business.msContacts tokens cleared (the Google branch had its owner rule) | settings admin in that branch |
+| KeyConnectorController connect / disconnect | IntegrationConnection.authData (OWNER or ADMIN by role only) | D-111 and settings admin by the map (D-114) |
+| KEY social.connect_account / disconnect_account (SocialAdapterService) | SocialConnection token (any member KEY admitted) | settings admin on the command's actor |
+| KEY settings.configure_integration (SettingsAdapterService) | IntegrationConnection (connect write alone) | connect write kept and settings admin on the command's actor |
+| FinanceController create / update / delete bank connection | BankConnection.accessToken (membership only) | held: finance.controller.ts belongs to the PR195 merge; settings admin after it |
+
+Every other route the graph reaches is guarded:
+- the connector credential routes and the channel and social connection writes (settings admin,
+  SEC-1, SV-2);
+- the Google consent starts, callbacks and disconnects (owner, D-99);
+- Gmail (owner, D-11, D-42);
+- the business profile's payment secrets (owner, D-11);
+- WhatsApp config (owner, D-11);
+- GA4 and Search Console (owner, D-94);
+- the Microsoft consent start (settings admin, SV-3) and its callback (signed state).
+Not covered by the reader:
+- tRPC routers, which are unmounted unless TRPC_ENABLED=1 (D-68);
+- WebSocket gateways and queue processors;
+- dynamic `moduleRef.get` resolution whose result is called through a local not named by a unique
+  method.
 
 ## Census by controller
 
@@ -645,7 +769,6 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunicationsController.retry` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/retry` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.retryAllFailed` | POST | `/communications/businesses/:businessId/content/:id/retry-all` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.schedule` | POST | `/communications/businesses/:businessId/content/:id/schedule` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.toggleDestination` | PATCH | `/communications/businesses/:businessId/destinations/:destId/toggle` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.updateContent` | PATCH | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.upsertVariant` | POST | `/communications/businesses/:businessId/content/:id/variants` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -772,7 +895,7 @@ Every other route is applied (above).
 | `ConnectController.deleteConnectorFormMapping` | DELETE | `/connect/businesses/:businessId/connector-forms/:source/:externalFormId/mapping` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.deleteForm` | DELETE | `/connect/businesses/:businessId/forms/:formId` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.deleteFormMapping` | DELETE | `/connect/businesses/:businessId/forms/:formId/mapping` | open | membership only; follow-up SWEEP-CENSUS: connect write |
-| `ConnectController.disconnectSource` | DELETE | `/connect/businesses/:businessId/contact-sources/:source` | exempt-check | check:assertGoogleConnectOwner (D-99) |
+| `ConnectController.disconnectSource` | DELETE | `/connect/businesses/:businessId/contact-sources/:source` | exempt-check | check:assertGoogleConnectOwner (google_contacts, D-99) and check:assertMemberModuleLevel (outlook_contacts: settings admin, it clears the Outlook tokens whose consent start is settings admin, SV-3; round 1 class repair, CEN-10b) |
 | `ConnectController.parseSignature` | POST | `/connect/businesses/:businessId/contact-sources/parse-signature` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.processNewFormResponses` | POST | `/connect/businesses/:businessId/forms/:formId/process-new` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.replyBpReview` | POST | `/connect/businesses/:businessId/business-profile/reviews/reply` | open | membership only; follow-up SWEEP-CENSUS: connect write |
@@ -963,7 +1086,7 @@ Every other route is applied (above).
 | `FinanceController.completeReconciliation` | POST | `/finance/businesses/:businessId/reconciliations/:id/complete` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createAccount` | POST | `/finance/businesses/:businessId/accounts` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createAccountingPeriod` | POST | `/finance/businesses/:businessId/accounting-periods` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.createBankConnection` | POST | `/finance/businesses/:businessId/bank-connections` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.createBankConnection` | POST | `/finance/businesses/:businessId/bank-connections` | deferred | held: finance.controller.ts is held for the merge with pkt/PR195-JOURNAL-SCOPE; after it, settings admin (round 1 class repair, CEN-10b: it stores a bank connection with its provider access token, BankConnection.accessToken, a provider credential); pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createBankRule` | POST | `/finance/businesses/:businessId/bank-rules` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createCoa` | POST | `/finance/businesses/:businessId/chart-of-accounts` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createExchangeRate` | POST | `/finance/businesses/:businessId/exchange-rates` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -974,7 +1097,7 @@ Every other route is applied (above).
 | `FinanceController.createReserve` | POST | `/finance/businesses/:businessId/reserves` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createTaxRate` | POST | `/finance/businesses/:businessId/tax-rates` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.deleteAccountingPeriod` | DELETE | `/finance/businesses/:businessId/accounting-periods/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.deleteBankConnection` | DELETE | `/finance/businesses/:businessId/bank-connections/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.deleteBankConnection` | DELETE | `/finance/businesses/:businessId/bank-connections/:id` | deferred | held: finance.controller.ts is held for the merge with pkt/PR195-JOURNAL-SCOPE; after it, settings admin (round 1 class repair, CEN-10b: it removes a bank connection and its provider access token, BankConnection.accessToken, a provider credential); pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.deleteBankRule` | DELETE | `/finance/businesses/:businessId/bank-rules/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.deleteExchangeRate` | DELETE | `/finance/businesses/:businessId/exchange-rates/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.deleteFixedAsset` | DELETE | `/finance/businesses/:businessId/fixed-assets/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1006,7 +1129,7 @@ Every other route is applied (above).
 | `FinanceController.unmatch` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/unmatch` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateAccount` | PATCH | `/finance/businesses/:businessId/accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateAccountingPeriod` | PATCH | `/finance/businesses/:businessId/accounting-periods/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.updateBankConnection` | PATCH | `/finance/businesses/:businessId/bank-connections/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.updateBankConnection` | PATCH | `/finance/businesses/:businessId/bank-connections/:id` | deferred | held: finance.controller.ts is held for the merge with pkt/PR195-JOURNAL-SCOPE; after it, settings admin (round 1 class repair, CEN-10b: it replaces a bank connection's provider access token, BankConnection.accessToken, a provider credential); pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateBankRule` | PATCH | `/finance/businesses/:businessId/bank-rules/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateCoa` | PATCH | `/finance/businesses/:businessId/chart-of-accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateFixedAsset` | PATCH | `/finance/businesses/:businessId/fixed-assets/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1114,8 +1237,8 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `KeyConnectorController.connectProvider` | POST | `/key-connector/providers/:key/connect` | exempt-check | check:requireConnectorWriter (OWNER or ADMIN, D-111) |
-| `KeyConnectorController.disconnectProvider` | DELETE | `/key-connector/connections/:id` | exempt-check | check:requireConnectorWriter (OWNER or ADMIN, D-111) |
+| `KeyConnectorController.connectProvider` | POST | `/key-connector/providers/:key/connect` | exempt-check | check:requireConnectorAdmin (OWNER or ADMIN, D-111, and settings admin by the explicit map, D-114: binding a provider connection stores its credentials; round 1 class repair, CEN-10b) |
+| `KeyConnectorController.disconnectProvider` | DELETE | `/key-connector/connections/:id` | exempt-check | check:requireConnectorAdmin (OWNER or ADMIN, D-111, and settings admin by the explicit map, D-114: removing a provider connection clears its credentials; round 1 class repair, CEN-10b) |
 | `KeyConnectorController.executeAiCommand` | POST | `/key-connector/ai/command` | exempt-check | check:requireConnectorWriter (OWNER or ADMIN, D-111) |
 | `KeyConnectorController.triggerSync` | POST | `/key-connector/sync/:id/trigger` | exempt-check | check:requireConnectorWriter (OWNER or ADMIN, D-111) |
 
@@ -1361,7 +1484,6 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `ShopifyController.connect` | POST | `/shopify/businesses/:businessId/connect` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ShopifyController.syncAll` | POST | `/shopify/businesses/:businessId/sync/all` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ShopifyController.syncCustomers` | POST | `/shopify/businesses/:businessId/sync/customers` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ShopifyController.syncOrders` | POST | `/shopify/businesses/:businessId/sync/orders` | open | membership only; follow-up SWEEP-CENSUS: connect write |
@@ -1432,16 +1554,13 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `SupplierController.createConnection` | POST | `/supplier/businesses/:businessId/connections` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.createProductFromSupplier` | POST | `/supplier/businesses/:businessId/supplier-products/:supplierProductId/create-product` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.createProductSourceLink` | POST | `/supplier/businesses/:businessId/products/:productId/source-links` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.createProductVariant` | POST | `/supplier/businesses/:businessId/products/:productId/variants` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.createSupplierProduct` | POST | `/supplier/businesses/:businessId/connections/:connectionId/products` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
-| `SupplierController.deleteConnection` | DELETE | `/supplier/businesses/:businessId/connections/:connectionId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.deleteProductSourceLink` | DELETE | `/supplier/businesses/:businessId/source-links/:linkId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.deleteProductVariant` | DELETE | `/supplier/businesses/:businessId/product-variants/:variantId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.deleteSupplierProduct` | DELETE | `/supplier/businesses/:businessId/supplier-products/:supplierProductId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
-| `SupplierController.updateConnection` | PATCH | `/supplier/businesses/:businessId/connections/:connectionId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.updateProductSourceLink` | PATCH | `/supplier/businesses/:businessId/source-links/:linkId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.updateProductVariant` | PATCH | `/supplier/businesses/:businessId/product-variants/:variantId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |
 | `SupplierController.updateSupplierProduct` | PATCH | `/supplier/businesses/:businessId/supplier-products/:supplierProductId` | open | membership only; follow-up SWEEP-CENSUS: storefront write; suppliers_ maps to storefront in the KEY member map |

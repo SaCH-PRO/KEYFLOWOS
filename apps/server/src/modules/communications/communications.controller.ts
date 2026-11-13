@@ -59,7 +59,14 @@ export class CommunicationsController {
     return this.connections.get(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): settings
+   * admin. It copies every social connection's token over the business's channel connection of that
+   * provider (ChannelConnectionService.syncFromSocial), replacing the channel credential the other
+   * connection writes need settings admin for (SV-2).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/sync-from-social')
   async syncFromSocial(@Param('businessId') businessId: string) {
     return this.connections.syncFromSocial(businessId);

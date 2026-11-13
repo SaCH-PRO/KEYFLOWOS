@@ -41,6 +41,24 @@ export async function memberModuleLevel(
 }
 
 /**
+ * SWEEP-P0-SCOPES round 1 class repair (CLASS B): the same rule for a KEY command, which carries its
+ * human actor as an id (`command.userId`: KeyCortexController takes it from the principal AuthGuard
+ * admitted, never from the request): the actor's User role is read as AuthMiddleware attaches it, so
+ * SUPER_ADMIN passes as ModuleScopeGuard passes it. A command with no human actor is refused.
+ */
+export async function assertCommandActorModuleLevel(
+  prisma: PrismaService,
+  businessId: string,
+  actorId: unknown,
+  module: string,
+  minLevel: 'read' | 'write' | 'admin',
+): Promise<AccessLevel> {
+  if (typeof actorId !== 'string' || actorId.length === 0) throw new ForbiddenException('Authentication required');
+  const user = await prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
+  return assertMemberModuleLevel(prisma, businessId, { id: actorId, role: user?.role ?? undefined }, module, minLevel);
+}
+
+/**
  * The same refusal ModuleScopeGuard answers (403, the same words), for a handler that applies a
  * module level itself (in order, after a stricter rule it must keep answering first). Returns the
  * member's level.
