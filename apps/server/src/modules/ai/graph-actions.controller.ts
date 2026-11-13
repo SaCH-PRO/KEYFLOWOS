@@ -176,10 +176,25 @@ export const GRAPH_ACTION_REFUSED: Readonly<Record<string, string>> = {
  * the ledger (Dr Payroll / Cr Bank or Cash) since the port, so beside its route's operations write it needs
  * expenses write, the scope bills/:id/pay needs to post a disbursement; PayrollService.markRunPaid holds the
  * REST route and every KEY surface to the same pair. Generating and approving a run stay operations write.
+ *
+ * PR195-KEY-GATES review repair (review finding SEC-P195KG-1; owner rulings D-57, D-146, read as D-131 reads a
+ * timeline read that derives money signals: its module's read and revenue read): the money reads KEY makes through
+ * Prisma, which no route governs, need the scopes REST asks for the same figures, beside their analytics floor.
+ * fetch_revenue_risk (overdue invoices with number, total, due date and contact; the month's revenue; the top
+ * client's share) and fetch_client_health (each client's total spend, the top spenders) carry receivables and
+ * revenue, which GET receivables/aging, customers/:contactId/balance and commerce invoices serve at revenue read;
+ * fetch_business_summary (the snapshot's revenue and expenses sections) and fetch_expense_pressure (the month's
+ * expenses beside its revenue) also carry the month's expenses, which GET expenses/summary serves at expenses
+ * read, so they need both. Member chat holds a member to exactly these (keyMemberToolScopes), the graph route, the
+ * plan queue and approved proposals to these beside the analytics floor.
  */
 const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActionScope>>> = {
   update_status_with_confirmation: [{ module: 'revenue', minLevel: 'write' }],
   payroll_mark_paid: [{ module: 'expenses', minLevel: 'write' }],
+  fetch_revenue_risk: [{ module: 'revenue', minLevel: 'read' }],
+  fetch_client_health: [{ module: 'revenue', minLevel: 'read' }],
+  fetch_business_summary: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
+  fetch_expense_pressure: [{ module: 'revenue', minLevel: 'read' }, { module: 'expenses', minLevel: 'read' }],
 };
 
 /**
@@ -202,6 +217,26 @@ export function graphActionExtraScopes(toolName: string): ReadonlyArray<GraphAct
  * (MarketplaceController.assertPurchaseOrderMember).
  */
 export const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid', 'inventory_advance_purchase_order']);
+
+/**
+ * PR195-KEY-GATES review repair (review finding SEC-P195KG-3; owner rulings D-104, D-46): KEY's Books reads whose web
+ * doors are FinanceController reads, which run ensureAccess beside ModuleScopeGuard: ensureAccess requires a
+ * Membership (D-104), so REST answers a platform SUPER_ADMIN who is not a member 403 'No access to this business'
+ * though the guard passes them. finance_view_receivables (GET receivables/aging), finance_customer_balance (GET
+ * customers/:contactId/balance), finance_list_bank_accounts (GET accounts), reconcile_list_unmatched (GET
+ * accounts/:accountId/bank-transactions) and finance_list_action_items (GET intelligence/actions). The money reports
+ * (finance_profit_and_loss and the other reports, ReportsController) run no membership check, so they keep
+ * ModuleScopeGuard's reading. Refused to that SUPER_ADMIN on member chat (plan-step-authority memberToolScopeReader)
+ * and on this route, the plan queue and approved proposals (assertMayRunGraphAction). flow-chat-member-scope.spec.ts
+ * KMS-09 pins the set.
+ */
+export const KEY_BOOKS_MEMBERSHIP_READ_TOOLS: ReadonlySet<string> = new Set([
+  'finance_view_receivables',
+  'finance_customer_balance',
+  'finance_list_bank_accounts',
+  'reconcile_list_unmatched',
+  'finance_list_action_items',
+]);
 
 /**
  * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's, an OWNER
@@ -469,6 +504,11 @@ export async function assertMayRunGraphAction(
     // ledger as the Books doors do (POST expenses, bills, bills/:id/pay refuse that SUPER_ADMIN now: BusinessMemberGuard).
     if (!membership && requirement.scopes.some((s) => s.module === 'expenses' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
       throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not post its expenses or pay its bills (D-46)');
+    }
+    // PR195-KEY-GATES review repair (SEC-P195KG-3, D-104): nor read the Books whose FinanceController doors require a
+    // membership (ensureAccess), in that door's words.
+    if (!membership && KEY_BOOKS_MEMBERSHIP_READ_TOOLS.has(toolName)) {
+      throw new ForbiddenException(`No access to this business: "${toolName}" is run only for a member of the business, as its finance door requires a membership (D-104)`);
     }
     return;
   }

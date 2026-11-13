@@ -4,6 +4,7 @@ import type { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
 import {
+  KEY_BOOKS_MEMBERSHIP_READ_TOOLS,
   NO_MEMBER_LEDGER_WRITE_TOOLS,
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
@@ -479,7 +480,12 @@ export async function memberRevenueWriteRefusal(
  */
 export function noMemberMoneyWriteRefusal(toolName: string, args?: unknown, surface = 'KEY'): string | null {
   const argumentBound = Object.prototype.hasOwnProperty.call(REVENUE_WRITE_ARGUMENTS, toolName);
-  let money = keyRevenueWriteLevel(toolName, args) !== null || NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName) || keyMemberExtraScopes(toolName).length > 0;
+  // An extra scope at write level (payroll_mark_paid's expenses write); a read beside the module (a money read's
+  // revenue or expenses read, SEC-P195KG-1) is no write.
+  let money =
+    keyRevenueWriteLevel(toolName, args) !== null ||
+    NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName) ||
+    keyMemberExtraScopes(toolName).some((s) => LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write);
   if (!money && !argumentBound) {
     const requirement = graphActionRequirement(toolName);
     money = Boolean(
@@ -662,8 +668,11 @@ function moneyWriteScope(toolName: string, scopes: ReadonlyArray<GraphActionScop
  *     reading, kept);
  *   - a platform SUPER_ADMIN who is not a member: passes what ModuleScopeGuard passes, but writes none of the
  *     business's money or Books, its expenses and bill payments included (D-46; review SEC-P195BW-7), as
- *     assertMayRunGraphAction refuses them.
- * The words start as ModuleScopeGuard's, so a member and the model read KEY's refusal as the route's.
+ *     assertMayRunGraphAction refuses them, and reads none of the Books whose FinanceController doors require a
+ *     Membership (KEY_BOOKS_MEMBERSHIP_READ_TOOLS: ensureAccess, D-104; review SEC-P195KG-3), in ensureAccess's
+ *     words.
+ * The words start as ModuleScopeGuard's (ensureAccess's for a Books read with no membership), so a member and the
+ * model read KEY's refusal as the route's.
  */
 export async function memberToolScopeReader(
   prisma: PrismaService,
@@ -682,6 +691,9 @@ export async function memberToolScopeReader(
   return (toolName, scopes) => {
     if (!scopes.length) return null;
     if (superAdmin && !membership) {
+      if (KEY_BOOKS_MEMBERSHIP_READ_TOOLS.has(toolName)) {
+        return `No access to this business: KEY runs "${toolName}" only for a member of the business, as its finance door requires a membership (D-104)`;
+      }
       const money = moneyWriteScope(toolName, scopes);
       if (!money) return null;
       return `Insufficient permissions: ${money.module} requires ${money.minLevel} access (you have none). Not a member of this business: a platform SUPER_ADMIN who is not a member writes none of its money or books (D-46)`;

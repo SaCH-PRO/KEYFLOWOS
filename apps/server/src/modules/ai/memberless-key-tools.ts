@@ -40,7 +40,7 @@ export const MEMBERLESS_KEY_TOOLS: Readonly<Record<string, MemberlessKeyTool>> =
     why: 'hands the conversation to a human: files a support ticket for the team (the action boundary still decides whether it is filed, sent for approval or refused on this surface)',
   },
   crm_create_contact: {
-    why: 'records the person writing as a new lead (status LEAD); reads no other contact',
+    why: 'records the person writing as a new lead (status LEAD); reads no other contact, and answers alike whether or not the email or phone is already on file (MEMBERLESS_CONTACT_ANSWER)',
     refuseArgs: (args) => {
       const status = args.status;
       if (status === undefined || status === null || status === '' || status === 'LEAD') return null;
@@ -54,6 +54,19 @@ export const MEMBERLESS_KEY_TOOLS: Readonly<Record<string, MemberlessKeyTool>> =
     why: 'whether a time is free: a turn with no member is answered free or busy, with the busy times only (no event, title, note or contact)',
   },
 };
+
+/**
+ * PR195-KEY-GATES review repair (review finding SEC-P195KG-5): what crm_create_contact answers a turn that names no
+ * member, for a new lead and for an email or phone already in the contact book alike. CrmService.createContact
+ * answers a clash with 409 'A contact with this email already exists in this business' (and, with no actor, the
+ * holder's id), and the model's reply goes to the customer, so the person writing could test any email or phone
+ * against the book. The answer names no contact and no id; a member's turn keeps the service's own answer.
+ */
+export const MEMBERLESS_CONTACT_ANSWER = Object.freeze({
+  received: true,
+  status: 'LEAD',
+  note: 'The details are with the team as a lead. On a turn that names no member KEY does not say whether this person was already on file.',
+});
 
 /** The allowlist's names, for the words of a refusal and the prompt that tells a model which tools it may name. */
 export const MEMBERLESS_KEY_TOOL_NAMES: readonly string[] = Object.keys(MEMBERLESS_KEY_TOOLS).sort();

@@ -29,6 +29,7 @@ import {
   type PayrollRunListItem,
 } from "@/lib/api/payroll";
 import { fetchFinanceAccounts, type FinancialAccountRow } from "@/lib/client";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 const DISBURSEMENT_METHODS = [
   { value: "bank_transfer", label: "Bank Transfer" },
@@ -56,6 +57,10 @@ export default function PayrollPage() {
   const [rates, setRates] = useState<PayRate[]>([]);
   const [runs, setRuns] = useState<PayrollRunListItem[]>([]);
   const [disbursementAccounts, setDisbursementAccounts] = useState<FinancialAccountRow[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-2): GET accounts needs revenue read (D-146), which the operator D-146
+  // authorises to pay payroll (operations and expenses write) may not hold. Mark paid then offers payment methods only,
+  // and says why its financial accounts are not listed.
+  const [accountsNotice, setAccountsNotice] = useState<string | null>(null);
   const [selectedDisbursement, setSelectedDisbursement] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -75,12 +80,21 @@ export default function PayrollPage() {
     else if (ratesRes.data) setRates(ratesRes.data);
     if (runsRes.error) toast.error(runsRes.error);
     else if (runsRes.data) setRuns(runsRes.data);
-    if (accountsRes?.data?.items) {
-      const eligible = accountsRes.data.items.filter(
-        (a: FinancialAccountRow) =>
-          a.isActive && ["CASH", "BANK", "PAYMENT_PROCESSOR"].includes(a.type),
+    if (accountsRes?.error) {
+      setDisbursementAccounts([]);
+      const refusal = moduleReadRefusal(accountsRes, "revenue", "the financial accounts");
+      setAccountsNotice(
+        `${refusal ?? `Couldn't load the financial accounts: ${accountsRes.error}`} Mark paid lists payment methods only: the run posts to that method's default account.`,
       );
-      setDisbursementAccounts(eligible);
+    } else {
+      setAccountsNotice(null);
+      if (accountsRes?.data?.items) {
+        const eligible = accountsRes.data.items.filter(
+          (a: FinancialAccountRow) =>
+            a.isActive && ["CASH", "BANK", "PAYMENT_PROCESSOR"].includes(a.type),
+        );
+        setDisbursementAccounts(eligible);
+      }
     }
     setLoading(false);
   }, [businessId]);
@@ -216,6 +230,9 @@ export default function PayrollPage() {
         </SectionCard>
 
         <SectionCard title="Payroll runs" subtitle="Click a run to see its line items" icon={Banknote} noPadding>
+          {accountsNotice && runs.some((r) => r.status === "APPROVED") && (
+            <p className="px-4 py-2 text-xs text-amber-500 border-b border-border/40" role="alert">{accountsNotice}</p>
+          )}
           {loading && runs.length === 0 ? (
             <div className="p-4">
               <SkeletonList rows={4} cols={4} />

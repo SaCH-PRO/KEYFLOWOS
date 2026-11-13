@@ -14,6 +14,7 @@ import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 import { fetchRoleFlowQueue, resolveFlowSignal, type FlowSignal } from "@/lib/api/flow-signal";
 import { apiPost } from "@/lib/api";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -46,6 +47,9 @@ export default function FinancialFlowPage() {
   const [safe, setSafe] = useState<SafeToSpend | null>(null);
   const [forecast, setForecast] = useState<{ days: number; expected: number; conservative: number; optimistic: number; dangerDate: string | null; recommendations: string[] } | null>(null);
   const [buckets, setBuckets] = useState<ReserveBucket[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-1): GET reserves needs revenue read (D-146); a refusal is said in the
+  // reserves card, never as "No reserve buckets yet".
+  const [bucketsRefusal, setBucketsRefusal] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPurpose, setNewPurpose] = useState("");
@@ -109,7 +113,10 @@ export default function FinancialFlowPage() {
         withTimeout(apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`), 'Safe-to-spend'),
         withTimeout(apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`), 'Forecast'),
         withTimeout(
-          fetchReserveBuckets(businessId).then(r => ({ error: r.error, data: r.data?.items ?? [] }) as { error: string | null; data: ReserveBucket[] }),
+          // An error answer is an error, never an empty list (CRR-P195KG-1): the refusal reaches the reserves card.
+          fetchReserveBuckets(businessId).then(
+            (r) => ({ error: r.error, status: r.status, data: r.error ? null : (r.data?.items ?? []) }) as { error: string | null; status?: number; data: ReserveBucket[] | null },
+          ),
           'Reserve buckets',
         ),
       ]);
@@ -117,7 +124,13 @@ export default function FinancialFlowPage() {
       if (ovRes.data) setOverview(ovRes.data); else failed.push(ovRes.label);
       if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
       if (fcRes.data) setForecast(fcRes.data); else failed.push(fcRes.label);
-      if (bucketRes.data) setBuckets(bucketRes.data); else failed.push(bucketRes.label);
+      const refusal = moduleReadRefusal(bucketRes, "revenue", "the reserve buckets");
+      setBucketsRefusal(refusal);
+      if (bucketRes.data) setBuckets(bucketRes.data);
+      else {
+        setBuckets([]);
+        if (!refusal) failed.push(bucketRes.label);
+      }
       if (failed.length > 0) setLoadErrors(failed);
     } catch {
       setLoadErrors(['financial data']);
@@ -398,7 +411,9 @@ export default function FinancialFlowPage() {
           </div>
         )}
 
-        {buckets.length === 0 && !showAdd ? (
+        {bucketsRefusal ? (
+          <p className="text-xs text-amber-500 py-2" role="alert">{bucketsRefusal}</p>
+        ) : buckets.length === 0 && !showAdd ? (
           <p className="text-xs text-muted-foreground py-2">No reserve buckets yet. Add one to track tax, payroll, or other cash allocations.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">

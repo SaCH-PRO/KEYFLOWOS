@@ -69,6 +69,18 @@ export class FinanceCoaService {
       throw new ForbiddenException('System accounts are read-only');
     }
 
+    // PR195-KEY-GATES review repair (review finding SEC-P195KG-4; as SEC-P195BW-6 did for financial accounts): a
+    // parent is this business's own chart row, as create() requires. Before, update() wrote any parentId: a row of
+    // another business linked under this one, and an id that exists nowhere answered a raw P2003 (a 500), so the
+    // two answers told a member which ids exist in other businesses. Both now answer create()'s words.
+    if (input.parentId) {
+      const parent = await this.prisma.client.chartOfAccount.findFirst({
+        where: { id: input.parentId, businessId },
+        select: { id: true },
+      });
+      if (!parent) throw new BadRequestException('Parent account not found in this business');
+    }
+
     const data: Record<string, unknown> = {};
     if (input.name != null) data.name = input.name.trim();
     if (input.subtype !== undefined) data.subtype = input.subtype;

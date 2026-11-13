@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { keyMemberMenuScopes, keyMemberToolScopes } from './plan-step-authority';
-import { graphActionExtraScopes, graphActionRequirement } from './graph-actions.controller';
+import { assertMayRunGraphAction, graphActionExtraScopes, graphActionRequirement } from './graph-actions.controller';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { FLOW_TOOLS } from './flow-tool-registry';
 
@@ -45,8 +45,9 @@ import { FLOW_TOOLS } from './flow-tool-registry';
  *                       its analytics floor (D-131's reading for money signals: module read and revenue read)
  *   KMS-09  RED-BEFORE  a platform SUPER_ADMIN who is not a member is refused the Books reads whose FinanceController
  *                       doors run ensureAccess, which requires a Membership (D-104): 'No access to this business',
- *                       as REST answers them; the money reports (ReportsController: no membership check) still pass
- *                       them as ModuleScopeGuard does, and a SUPER_ADMIN who is a member reads the Books
+ *                       as REST answers them, in member chat and on the graph route / plan queue / approved proposals
+ *                       (assertMayRunGraphAction); the money reports (ReportsController: no membership check) still
+ *                       pass them as ModuleScopeGuard does, and a SUPER_ADMIN who is a member reads the Books
  */
 
 const BIZ = 'biz_kms';
@@ -425,6 +426,16 @@ describe('KMS-09: a platform SUPER_ADMIN who is not a member and the Books reads
     expect(orchestrator.prisma.client.bankTransaction.findMany).not.toHaveBeenCalled();
     expect(orchestrator.prisma.client.financeActionItem.findMany).not.toHaveBeenCalled();
     await expect(run(orchestrator, 'finance_profit_and_loss', { surface: 'CHAT', principalUserId: 'saOutsider' })).resolves.toBeDefined();
+  });
+
+  it('KMS-09 RED-BEFORE: the graph route, the plan queue and approved proposals (assertMayRunGraphAction) refuse that SUPER_ADMIN the same; a member SUPER_ADMIN and the money reports pass', async () => {
+    const { orchestrator } = orchestratorFor();
+    const outsider = { id: 'saOutsider', role: 'SUPER_ADMIN' };
+    for (const t of BOOKS_READS) {
+      await expect(assertMayRunGraphAction(orchestrator.prisma, BIZ, outsider, t, null), t).rejects.toThrow(/^No access to this business/);
+      await expect(assertMayRunGraphAction(orchestrator.prisma, BIZ, { id: 'saMember', role: 'SUPER_ADMIN' }, t, null), t).resolves.toBeUndefined();
+    }
+    await expect(assertMayRunGraphAction(orchestrator.prisma, BIZ, outsider, 'finance_profit_and_loss', null)).resolves.toBeUndefined();
   });
 
   it('KMS-09 control: a SUPER_ADMIN who is a member reads them', async () => {

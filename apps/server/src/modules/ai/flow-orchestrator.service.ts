@@ -39,7 +39,7 @@ import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
-import { memberlessKeyToolRefusal } from './memberless-key-tools';
+import { MEMBERLESS_CONTACT_ANSWER, memberlessKeyToolRefusal } from './memberless-key-tools';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
@@ -2035,7 +2035,8 @@ export class FlowOrchestratorService {
 
     // PR195-PORT (owner PR #195 part 4): the standing context carries the treasury, pipeline and support
     // figures this member may read on REST (BusinessGraphService viewer projection); a turn with no member
-    // carries none.
+    // carries none. PR195-KEY-GATES review repair (SEC-P195KG-2): nor the revenue, receivable and expense
+    // figures, which it carries only at revenue read and expenses read (the Chatwoot support desk: none).
     const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
@@ -2487,7 +2488,8 @@ ${triage.standingContext}`;
       return;
     }
 
-    // PR195-PORT: as chat(), the figures this member may read (the viewer projection).
+    // PR195-PORT, PR195-KEY-GATES review repair (SEC-P195KG-2): as chat(), the figures this member may read (the
+    // viewer projection); a turn with no member, none.
     const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
     const memoryCtx = await this.memory.buildContextBlock(businessId);
@@ -3888,7 +3890,7 @@ ${triage.standingContext}`;
       }
 
       case 'crm_create_contact': {
-        const contact = await this.getCrm().createContact({
+        const created = this.getCrm().createContact({
           businessId,
           firstName: args.firstName ?? null,
           lastName: args.lastName ?? null,
@@ -3897,6 +3899,19 @@ ${triage.standingContext}`;
           companyName: args.companyName ?? null,
           status: args.status ?? 'LEAD',
         });
+        // PR195-KEY-GATES review repair (SEC-P195KG-5): a turn that names no member (a customer's DM, the support desk)
+        // is answered alike for a new lead and for an email or phone already on file, so the person writing cannot
+        // test the contact book with it: no "already exists", no contact or holder id. Any other failure still fails.
+        if (memberlessKeyTurn(action)) {
+          await created.catch((err: unknown) => {
+            if (!(err instanceof ConflictException)) throw err;
+            const body = err.getResponse() as { code?: unknown } | string | null;
+            const taken = typeof body === 'object' && body !== null && (body.code === 'contact_email_taken' || body.code === 'contact_phone_taken');
+            if (!taken) throw err;
+          });
+          return { ...MEMBERLESS_CONTACT_ANSWER };
+        }
+        const contact = await created;
         return { contact, id: contact.id };
       }
 

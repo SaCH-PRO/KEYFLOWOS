@@ -162,14 +162,46 @@ const OPEN_TICKET_STATUSES = ['OPEN', 'IN_PROGRESS', 'WAITING', 'open', 'in_prog
  *   - support (open tickets): operations read, KEY's helpdesk tools (the
  *     stricter of the two head rules: the REST ticket list checks membership
  *     only).
+ * PR195-KEY-GATES review repair (review finding SEC-P195KG-2; D-57, D-146):
+ *   - revenue (revenue collected and this month, outstanding and overdue
+ *     invoices, the overdue invoices themselves and the clients' revenue, the
+ *     overdue-invoice alert): revenue read, the gate of GET receivables/aging and
+ *     commerce invoices, which serve the same figures;
+ *   - expenses (the month's expenses, its top categories, the budget alert):
+ *     expenses read, the gate of GET expenses/summary;
+ *   - the expenses-against-revenue alert: both.
  */
 export interface KeyContextSight {
   treasury: boolean;
   pipeline: boolean;
   support: boolean;
+  revenue: boolean;
+  expenses: boolean;
 }
 
-const NO_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false };
+/** A KEY turn that names no member (the Chatwoot support desk, a customer's DM): none of the figures. */
+const NO_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false, revenue: false, expenses: false };
+
+/**
+ * The shared snapshot (no viewer option: the REST graph routes, the control tower, the other KEY services): its
+ * revenue and expenses sections as they have always been served, and none of the PR195-PORT sections.
+ */
+const SHARED_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false, revenue: true, expenses: true };
+
+/** The health-indicator areas each sight shows: revenue (the overdue alert), expenses (budget), profitability (both). */
+const REVENUE_AREA = 'revenue';
+const EXPENSES_AREA = 'expenses';
+const PROFITABILITY_AREA = 'profitability';
+
+/**
+ * PR195-KEY-GATES review repair (SEC-P195KG-2): a snapshot as KEY's standing context carries it for one viewer:
+ * the revenue and expenses sections are left out for a viewer who may not read them (KeyContextSight), so
+ * buildContextString prints no figure of theirs. The shared snapshot (BusinessGraphSnapshot) always carries both.
+ */
+export type KeyContextSnapshot = Omit<BusinessGraphSnapshot, 'revenue' | 'expenses'> & {
+  revenue?: BusinessGraphSnapshot['revenue'];
+  expenses?: BusinessGraphSnapshot['expenses'];
+};
 
 /**
  * PR195-PORT: `userId`'s KeyContextSight in `businessId`, read as ModuleScopeGuard
@@ -194,7 +226,7 @@ export async function keyContextSight(
   // Review SEC-P195-2 / CR-P195-2: ModuleScopeGuard's own reading (memberModuleLevel), so a stored array is
   // an explicit map in which every module is none, as the guard refuses it on REST; it was read as role defaults.
   const reads = (module: string) => rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
-  return { treasury: reads('revenue'), pipeline: reads('crm'), support: reads('operations') };
+  return { treasury: reads('revenue'), pipeline: reads('crm'), support: reads('operations'), revenue: reads('revenue'), expenses: reads('expenses') };
 }
 
 /** A money figure as the context string says it: the currency code and two decimals. */
@@ -247,33 +279,39 @@ export class BusinessGraphService {
   }
 
   /**
-   * The business snapshot. With no `opts.viewerId` it is the shared snapshot
+   * The business snapshot. With no viewer option it is the shared snapshot
    * every caller has always read (REST graph routes, the control tower, the
    * other KEY services): it carries no treasury, pipeline or support figures
-   * and no treasury alert. With `opts.viewerId` (KEY chat for the member
-   * talking to it) it carries those of them the member may read
-   * (keyContextSight). PR195-PORT (owner PR #195 part 4).
+   * and no treasury alert. With a viewer option (`opts.viewerId`, which KEY chat
+   * and its stream pass for the member talking to it) it is KEY's standing
+   * context for that viewer: the treasury, pipeline and support figures they
+   * may read (PR195-PORT, owner PR #195 part 4), and the revenue and expenses
+   * sections only at revenue read and expenses read (PR195-KEY-GATES review
+   * repair, SEC-P195KG-2). `viewerId: null` is a turn that names no member (the
+   * Chatwoot support desk): it carries none of them (keyContextSight).
    *
    * Cached for two minutes per business, and assembled afresh once a ledger
    * posting, a payroll run or a cash account changed the business's financial
    * snapshot revision (finance-accounting.util.ts).
    */
+  async getSnapshot(businessId: string, forceRefresh?: boolean): Promise<BusinessGraphSnapshot>;
+  async getSnapshot(businessId: string, forceRefresh: boolean, opts: { viewerId: string | null | undefined }): Promise<KeyContextSnapshot>;
   async getSnapshot(
     businessId: string,
     forceRefresh = false,
-    opts: { viewerId?: string | null } = {},
-  ): Promise<BusinessGraphSnapshot> {
+    opts?: { viewerId?: string | null },
+  ): Promise<BusinessGraphSnapshot | KeyContextSnapshot> {
     const full = await this.fullSnapshot(businessId, forceRefresh);
-    const sight = opts.viewerId ? await keyContextSight(this.prisma, businessId, opts.viewerId) : NO_SIGHT;
-    return this.project(full, sight);
+    if (!opts || !('viewerId' in opts)) return this.project(full, SHARED_SIGHT) as BusinessGraphSnapshot;
+    return this.project(full, await keyContextSight(this.prisma, businessId, opts.viewerId));
   }
 
-  /** getSnapshot projected for `viewerId` (no viewer: the shared snapshot). PR195-PORT. */
+  /** KEY's standing context for `viewerId` (no viewer: a turn that names no member, which sees no figure). */
   async getSnapshotForViewer(
     businessId: string,
     viewerId: string | null | undefined,
     forceRefresh = false,
-  ): Promise<BusinessGraphSnapshot> {
+  ): Promise<KeyContextSnapshot> {
     return this.getSnapshot(businessId, forceRefresh, { viewerId: viewerId ?? null });
   }
 
@@ -295,14 +333,26 @@ export class BusinessGraphService {
   }
 
   /** A copy of `full` holding only the sections `sight` allows; the cached object is never changed. */
-  private project(full: BusinessGraphSnapshot, sight: KeyContextSight): BusinessGraphSnapshot {
-    const { treasury, pipeline, support, healthIndicators, ...rest } = full;
+  private project(full: BusinessGraphSnapshot, sight: KeyContextSight): KeyContextSnapshot {
+    const { treasury, pipeline, support, healthIndicators, revenue, expenses, contacts, entities, links, ...rest } = full;
+    const hidden = new Set<string>([
+      ...(sight.treasury ? [] : [TREASURY_AREA]),
+      ...(sight.revenue ? [] : [REVENUE_AREA]),
+      ...(sight.expenses ? [] : [EXPENSES_AREA]),
+      ...(sight.revenue && sight.expenses ? [] : [PROFITABILITY_AREA]),
+    ]);
     return {
       ...rest,
+      // SEC-P195KG-2: the clients' revenue, the overdue invoices and the links between them are revenue figures too.
+      contacts: sight.revenue ? contacts : { ...contacts, topClients: [] },
+      entities: sight.revenue ? entities : { ...entities, topContacts: [], overdueInvoices: [] },
+      links: sight.revenue ? links : [],
+      ...(sight.revenue ? { revenue } : {}),
+      ...(sight.expenses ? { expenses } : {}),
       ...(sight.treasury && treasury ? { treasury } : {}),
       ...(sight.pipeline && pipeline ? { pipeline } : {}),
       ...(sight.support && support ? { support } : {}),
-      healthIndicators: sight.treasury ? healthIndicators : healthIndicators.filter((h) => h.area !== TREASURY_AREA),
+      healthIndicators: hidden.size ? healthIndicators.filter((h) => !hidden.has(h.area)) : healthIndicators,
     };
   }
 
@@ -865,21 +915,23 @@ export class BusinessGraphService {
     return `Pipeline: ${deals} (${money(p.currency, p.openPipelineValue)}${apart ? `; held apart, not converted: ${apart}` : ''})`;
   }
 
-  buildContextString(snapshot: BusinessGraphSnapshot): string {
+  buildContextString(snapshot: BusinessGraphSnapshot | KeyContextSnapshot): string {
     const b = snapshot.business;
+    const revenue = snapshot.revenue;
     const parts: string[] = [
       `Business: ${b.name}`,
       b.industry ? `Industry: ${b.industry}` : null,
       b.archetype ? `Type: ${b.archetype}` : null,
       `Currency: ${b.currency}`,
       `Contacts: ${snapshot.contacts.total} total (${snapshot.contacts.staleLeadCount} stale leads)`,
-      `Revenue: $${snapshot.revenue.totalCollected.toLocaleString()} collected, $${snapshot.revenue.monthlyRevenue.toLocaleString()} this month`,
-      `Outstanding: $${snapshot.revenue.outstandingAmount.toLocaleString()} (${snapshot.revenue.outstandingCount} invoices, ${snapshot.revenue.overdueCount} overdue)`,
+      // PR195-KEY-GATES review repair (SEC-P195KG-2): present only in a snapshot whose viewer may read them.
+      revenue ? `Revenue: $${revenue.totalCollected.toLocaleString()} collected, $${revenue.monthlyRevenue.toLocaleString()} this month` : null,
+      revenue ? `Outstanding: $${revenue.outstandingAmount.toLocaleString()} (${revenue.outstandingCount} invoices, ${revenue.overdueCount} overdue)` : null,
       // PR195-PORT: present only in a snapshot projected for a viewer who may read them (getSnapshot).
       snapshot.treasury ? this.treasuryLine(snapshot.treasury) : null,
       snapshot.pipeline ? this.pipelineLine(snapshot.pipeline) : null,
       `Bookings: ${snapshot.bookings.upcomingCount} upcoming, ${snapshot.bookings.completedThisMonth} completed this month`,
-      `Expenses: $${snapshot.expenses.totalThisMonth.toLocaleString()} this month`,
+      snapshot.expenses ? `Expenses: $${snapshot.expenses.totalThisMonth.toLocaleString()} this month` : null,
       `Projects: ${snapshot.projects.activeCount} active, ${snapshot.projects.overdueTaskCount} overdue tasks`,
       snapshot.support
         ? `Support: ${snapshot.support.openTicketCount} open ticket${snapshot.support.openTicketCount === 1 ? '' : 's'}`
