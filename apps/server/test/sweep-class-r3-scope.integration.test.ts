@@ -377,6 +377,32 @@ describe('CLASS A (WPH2-1): the Outlook account receives only what its binder ma
     }
   });
 
+  it('[R3O-07] RED-BEFORE (PR #209 review, Codex P2): a member whose settings admin is withdrawn between the consent start and the callback binds nothing: no token exchange, no stored tokens, no binder', async () => {
+    await resetOutlook();
+    const start = await send('get', `/connect/microsoft/businesses/${ID.bizA}/auth-url`, ID.admin);
+    expect(start.status).toBe(200);
+    const state = new URL(start.body.authUrl).searchParams.get('state');
+    // settings narrowed to write after the start; crm stays readable, so only the settings rule can refuse
+    await db.membership.update({
+      where: { userId_businessId: { userId: ID.admin, businessId: ID.bizA } },
+      data: { permissionScopes: { ...EVERY_MODULE_NONE, crm: 'write', settings: 'write' } },
+    });
+    try {
+      outbound.length = 0;
+      const done = await send('get', `/connect/microsoft/callback?code=${P}code&state=${encodeURIComponent(state ?? '')}`, undefined);
+      expect(done.status).toBe(302);
+      expect(done.headers.location).toContain('microsoft=error');
+      expect(decodeURIComponent(done.headers.location)).toMatch(/settings requires admin access/);
+      expect(outbound.filter((o) => o.url.endsWith('/oauth2/v2.0/token'))).toEqual([]);
+      const biz = await db.business.findUnique({ where: { id: ID.bizA }, select: { msContactsAccessToken: true, msContactsRefreshToken: true } });
+      expect(biz.msContactsAccessToken).toBeNull();
+      expect(biz.msContactsRefreshToken).toBeNull();
+      expect((await connectorMeta('outlook_contacts')).boundBy).toBeUndefined();
+    } finally {
+      await db.membership.update({ where: { userId_businessId: { userId: ID.admin, businessId: ID.bizA } }, data: { permissionScopes: null } });
+    }
+  });
+
   it('[R3O-06] RED-BEFORE: the owner\'s routine sync does not link (or write from the mailbox into) a contact the binder may not open: the owner\'s PRIVATE contact stays unlinked and unchanged; the TEAM contact is linked', async () => {
     await resetOutlook();
     await bindOutlookAs(ID.admin);
