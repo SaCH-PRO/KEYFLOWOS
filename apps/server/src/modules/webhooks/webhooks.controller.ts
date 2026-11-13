@@ -4,10 +4,27 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { PaymentsService, STRIPE_LEGACY_REFUSED_PROVIDER } from '../payments/payments.service';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { randomBytes } from 'crypto';
+import { checkWebhookUrl, WebhookUrlRefusedError } from './webhook-url';
+
+/**
+ * SWEEP-P0-SCOPES (BUG-001): the webhook fields a read answers. The signing secret is not one: it
+ * is answered once, in the create answer, and never read back.
+ */
+const WEBHOOK_PUBLIC_FIELDS = {
+  id: true,
+  businessId: true,
+  name: true,
+  url: true,
+  events: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 /** Every answer of the deprecated Stripe route names its replacement. */
 const LEGACY_STRIPE_HINT = { deprecated: true, use: '/payments/stripe/webhook' } as const;
@@ -165,41 +182,70 @@ export class WebhooksController {
     }
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES (browser sweep BUG-001, blocker): webhook configuration is settings territory.
+   * Every business route here ran AuthGuard and BusinessGuard only, so a STAFF member whose scope
+   * map said settings 'none' listed every webhook WITH its signing secret and registered a webhook
+   * sending invoice events to any URL. Now each route runs ModuleScopeGuard after BusinessGuard and
+   * names the settings module on its handler (the guard reads handler metadata only): read to list
+   * webhooks and read their delivery log, write to create, delete, enable/disable or test one. OWNER
+   * and ADMIN hold settings admin by role default, STAFF none; an explicit map binds every role
+   * (D-114, D-140).
+   *
+   * A signing secret is answered once, in the create answer, to the member who created the webhook;
+   * no read answers it again, to anyone (WEBHOOK_PUBLIC_FIELDS). Before, every list answered every
+   * secret to every reader, so the safer rule is kept.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'read')
   @Get('businesses/:businessId/webhooks')
   async list(@Param('businessId') businessId: string) {
     return this.prisma.client.webhook.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
+      select: WEBHOOK_PUBLIC_FIELDS,
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES (BUG-001): settings write; the URL goes through the outbound-address guard
+   * (checkWebhookUrl: http(s) to a public address only), and a refused URL or an empty event list
+   * is a 400 with nothing written (it was a 201 carrying an `error`). The answer is the only one
+   * that carries the new webhook's signing secret.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/webhooks')
   async create(
     @Param('businessId') businessId: string,
     @Body() body: { url: string; events: string[]; name?: string },
   ) {
-    if (!body.url || !body.url.startsWith('http')) {
-      return { error: 'A valid URL starting with http:// or https:// is required' };
+    let checkedUrl: string;
+    try {
+      checkedUrl = (await checkWebhookUrl(body?.url)).url.toString();
+    } catch (err) {
+      if (err instanceof WebhookUrlRefusedError) throw new BadRequestException(err.message);
+      throw err;
     }
-    if (!body.events || body.events.length === 0) {
-      return { error: 'At least one event must be selected' };
+    const events = Array.isArray(body?.events) ? body.events.filter((e): e is string => typeof e === 'string' && e.trim() !== '') : [];
+    if (events.length === 0) {
+      throw new BadRequestException('At least one event must be selected');
     }
     const secret = randomBytes(32).toString('hex');
     return this.prisma.client.webhook.create({
       data: {
         businessId,
-        url: body.url,
-        events: body.events,
-        name: body.name || 'Webhook',
+        url: checkedUrl,
+        events,
+        name: typeof body?.name === 'string' && body.name.trim() ? body.name : 'Webhook',
         secret,
         isActive: true,
       },
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Delete('businesses/:businessId/webhooks/:webhookId')
   async remove(
     @Param('businessId') businessId: string,
@@ -214,7 +260,9 @@ export class WebhooksController {
     return { success: true };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /** SWEEP-P0-SCOPES (BUG-001): settings write; the delivery is checked and pinned like every other (WebhookDispatcherService). */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/webhooks/:webhookId/test')
   async testWebhook(
     @Param('businessId') businessId: string,
@@ -224,7 +272,8 @@ export class WebhooksController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'read')
   @Get('businesses/:businessId/webhooks/:webhookId/deliveries')
   async deliveries(
     @Param('businessId') businessId: string,
@@ -235,7 +284,8 @@ export class WebhooksController {
     return this.dispatcher.getDeliveryLogs(businessId, webhookId, parsedLimit);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'write')
   @Post('businesses/:businessId/webhooks/:webhookId/toggle')
   async toggleWebhook(
     @Param('businessId') businessId: string,

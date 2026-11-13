@@ -246,7 +246,9 @@ const CONTACT_OF: Record<string, string> = {
 };
 
 /** FOLLOW3-A9 outbound webhooks: the dispatcher's fetch is recorded for these URLs; any other URL throws (no network). */
-const HOOK_BASE = `https://hooks.test.local/${P}`;
+// SWEEP-P0-SCOPES (BUG-001): a TEST-NET-3 address literal (documentation only, never routed): every delivery now
+// passes the outbound-address guard, which resolves a name; an IP literal is checked without DNS.
+const HOOK_BASE = `https://203.0.113.21/${P}`;
 const SECRET_A = `${P}whsec_a`;
 const SECRET_B = `${P}whsec_b`;
 const HOOK = {

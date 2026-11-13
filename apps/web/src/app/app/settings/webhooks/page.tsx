@@ -111,6 +111,9 @@ export default function WebhooksSettingsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deliveryLogs, setDeliveryLogs] = useState<Record<string, WebhookDeliveryLog[]>>({});
   const [loadingLogs, setLoadingLogs] = useState<string | null>(null);
+  // SWEEP-P0-SCOPES (BUG-001): the server's refusal of the list (settings read), shown instead of
+  // the empty state that would invite the member to add a webhook.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -127,6 +130,7 @@ export default function WebhooksSettingsPage() {
     try {
       const res = await fetchWebhooks(businessId);
       if (res.data) setWebhooks(res.data);
+      setLoadError(res.data ? null : res.error ?? null);
     } catch {}
     setLoading(false);
   }, [businessId]);
@@ -153,7 +157,8 @@ export default function WebhooksSettingsPage() {
         setWebhooks((prev) => [...prev, res.data!]);
         toast.success("Webhook created");
       } else {
-        toast.error("Failed to create webhook");
+        // SWEEP-P0-SCOPES (BUG-001): the server's reason (a refusal, a URL that is not public).
+        toast.error(res.error || "Failed to create webhook");
       }
     } catch {
       toast.error("Failed to create webhook");
@@ -166,7 +171,13 @@ export default function WebhooksSettingsPage() {
   const handleDelete = async (webhookId: string) => {
     if (!businessId) return;
     try {
-      await deleteWebhook(businessId, webhookId);
+      // SWEEP-P0-SCOPES (BUG-001): a refused delete keeps the row and says why; it was shown as deleted.
+      const res = await deleteWebhook(businessId, webhookId);
+      const failure = res.error ?? (res.data as { error?: string } | null)?.error ?? null;
+      if (failure) {
+        toast.error(failure);
+        return;
+      }
       setWebhooks((prev) => prev.filter((w) => w.id !== webhookId));
       toast.success("Webhook deleted");
     } catch {
@@ -180,6 +191,7 @@ export default function WebhooksSettingsPage() {
     setTestResults((prev) => { const n = { ...prev }; delete n[webhookId]; return n; });
     try {
       const res = await testWebhook(businessId, webhookId);
+      if (!res.data && res.error) toast.error(res.error);
       if (res.data) {
         setTestResults((prev) => ({ ...prev, [webhookId]: res.data! }));
         const logsRes = await fetchWebhookDeliveries(businessId, webhookId, 10);
@@ -200,7 +212,7 @@ export default function WebhooksSettingsPage() {
       );
       toast.success(!currentActive ? "Webhook enabled" : "Webhook disabled");
     } else {
-      toast.error("Failed to update webhook");
+      toast.error(res.error || "Failed to update webhook");
     }
   };
 
@@ -279,6 +291,12 @@ export default function WebhooksSettingsPage() {
       {loading ? (
         <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-12 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : loadError ? (
+        <div role="alert" className="bg-white/5 backdrop-blur border border-red-500/20 rounded-xl p-8 text-center">
+          <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-3" />
+          <h3 className="text-sm font-semibold mb-1">Webhooks are not available to you</h3>
+          <p className="text-sm text-muted-foreground">{loadError}</p>
         </div>
       ) : webhooks.length === 0 ? (
         <div className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-12 text-center">
@@ -395,7 +413,11 @@ export default function WebhooksSettingsPage() {
 
                   <div className="flex items-center justify-between">
                     {webhook.secret && (
-                      <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5 flex-1 mr-2">
+                      <div className="flex-1 mr-2 space-y-1">
+                      <p className="text-[11px] text-amber-400">
+                        Copy this signing secret now: it will not be shown again.
+                      </p>
+                      <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
                         <span className="text-xs text-muted-foreground shrink-0">Secret:</span>
                         <code className="text-xs font-mono flex-1 truncate">
                           {showSecrets.has(webhook.id)
@@ -418,6 +440,7 @@ export default function WebhooksSettingsPage() {
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </button>
+                      </div>
                       </div>
                     )}
                     <button

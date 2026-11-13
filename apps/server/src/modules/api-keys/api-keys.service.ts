@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHash, randomBytes } from 'crypto';
 
@@ -57,6 +57,27 @@ export class ApiKeysService {
         createdAt: apiKey.createdAt.toISOString(),
       },
     };
+  }
+
+  /**
+   * SWEEP-P0-SCOPES (browser sweep BUG-013): revoking an API key is the owner's. The owner is
+   * whoever holds an OWNER membership of this business (owner rulings D-116 / D-125: a co-owner
+   * holding OWNER is the owner; the recorded owner holding only ADMIN or STAFF is that role, and
+   * Business.ownerId grants nothing on its own). A SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard and ModuleScopeGuard grant it, as IdentityService.assertBusinessOwner (D-11) does.
+   * A key records no creator, so a member cannot be told their own key from the owner's: anyone
+   * below the owner is refused for every key.
+   */
+  async assertMayRevoke(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<void> {
+    if (!actor?.id) throw new ForbiddenException('Authentication required');
+    if (actor.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role !== 'OWNER') {
+      throw new ForbiddenException('Only the business owner can revoke an API key');
+    }
   }
 
   async revokeKey(businessId: string, keyId: string) {

@@ -146,7 +146,11 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   bookings: {
     calendar_create_event: 'write', calendar_list_events: 'read',
   },
-  projects: {},
+  // projects_*: every ProjectsController route requires projects (SWEEP-P0-SCOPES, browser sweep BUG-014)
+  projects: {
+    projects_complete_task: 'write', projects_create_task: 'write', projects_delete_task: 'write',
+    projects_get_budget: 'read', projects_get_timeline: 'read', projects_update_task: 'write',
+  },
   content: {
     assets_delete: 'write', assets_get: 'read', assets_list: 'read', assets_list_folders: 'read',
     assets_tag: 'write', assets_untag: 'write', assets_update: 'write',
@@ -156,7 +160,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     finance_list_bills: 'read', finance_pay_bill: 'write', finance_view_payables: 'read',
   },
   automations: {},
-  storefront: {},
+  // inventory_adjust_stock / inventory_transfer_stock: POST marketplace inventory/adjust and
+  // inventory/transfer require storefront write (SWEEP-P0-SCOPES, browser sweep BUG-015)
+  storefront: { inventory_adjust_stock: 'write', inventory_transfer_stock: 'write' },
   settings: {},
   ai: {},
   team: {

@@ -8745,7 +8745,11 @@ export interface WebhookConfig {
   name: string;
   url: string;
   events: string[];
-  secret: string;
+  /**
+   * SWEEP-P0-SCOPES (BUG-001): the signing secret is answered once, by the create route, to the
+   * member who created the webhook; no list answers it.
+   */
+  secret?: string;
   isActive: boolean;
   createdAt: string;
 }

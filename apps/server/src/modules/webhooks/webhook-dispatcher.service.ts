@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
+import { CheckedAddress, PinnedDispatcher } from '../../core/security/outbound-address';
+import { checkWebhookUrl, WebhookUrlRefusedError } from './webhook-url';
 import type {
   ContactCreatedPayload,
   ContactUpdatedPayload,
@@ -304,12 +306,44 @@ export class WebhookDispatcherService {
     }
   }
 
+  /**
+   * SWEEP-P0-SCOPES (browser sweep BUG-001): every delivery goes through the outbound-address guard
+   * first (checkWebhookUrl, the rule the create route applies): a URL whose host is not public (a
+   * row stored before the create check, or a name that now resolves to a private address) is
+   * logged failed and never connected to, and is not retried. A delivery connects only to the
+   * addresses that check answered (PinnedDispatcher: no second DNS answer is used) and does not
+   * follow a redirect (redirect 'manual': a 3xx is a failed delivery), so it cannot be bounced onto
+   * an address the check never saw.
+   */
   private async sendWithLogging(webhook: WebhookRecord, event: string, timestamp: string, body: string, businessId: string): Promise<WebhookDeliveryLog> {
     const startTime = Date.now();
+    let target: CheckedAddress;
+    try {
+      target = (await checkWebhookUrl(webhook.url)).target;
+    } catch (err) {
+      const reason = err instanceof WebhookUrlRefusedError ? err.message : `Webhook URL check failed: ${(err as Error).message}`;
+      this.logger.warn(`Webhook ${webhook.id} not delivered for ${event}: ${reason}`);
+      const refused: WebhookDeliveryLog = {
+        id: `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        webhookId: webhook.id,
+        businessId,
+        event,
+        url: webhook.url,
+        status: 'failed',
+        statusCode: null,
+        attempts: 0,
+        duration: Date.now() - startTime,
+        error: reason,
+        timestamp: new Date().toISOString(),
+      };
+      this.addLog(refused);
+      return refused;
+    }
     const signature = createHmac('sha256', webhook.secret).update(body).digest('hex');
     let lastStatusCode: number | null = null;
     let lastError: string | null = null;
     for (let attempt = 1; attempt <= WebhookDispatcherService.MAX_RETRIES; attempt++) {
+      const pinned = new PinnedDispatcher(target);
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
@@ -325,10 +359,13 @@ export class WebhookDispatcherService {
           },
           body,
           signal: controller.signal,
-        });
+          redirect: 'manual',
+          dispatcher: pinned,
+        } as RequestInit);
 
         clearTimeout(timeout);
         lastStatusCode = response.status;
+        await response.body?.cancel().catch(() => undefined);
 
         if (response.ok) {
           if (attempt > 1) {
@@ -360,6 +397,9 @@ export class WebhookDispatcherService {
         this.logger.warn(
           `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${lastError}`,
         );
+      } finally {
+        // close() lets the request in flight finish, then ends the pinned connection.
+        pinned.close().catch(() => undefined);
       }
 
       if (attempt < WebhookDispatcherService.MAX_RETRIES) {

@@ -306,7 +306,14 @@ export function InventoryCommandCenter({
     if (!adjustTarget) return;
     setAdjustSaving(true);
     try {
-      await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
+      // SWEEP-P0-SCOPES (BUG-015): adjusting stock needs storefront write; a refused adjustment
+      // says why and keeps the modal open (it closed as if applied).
+      const { error } = await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
+      if (error) {
+        toast.error(error);
+        setAdjustSaving(false);
+        return;
+      }
       setShowAdjustModal(false);
       setAdjustTarget(null);
       const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
@@ -320,7 +327,13 @@ export function InventoryCommandCenter({
   const handleTransfer = async () => {
     setTransferSaving(true);
     try {
-      await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
+      // SWEEP-P0-SCOPES (BUG-015): as an adjustment, a refused transfer says why and stays open.
+      const { error } = await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
+      if (error) {
+        toast.error(error);
+        setTransferSaving(false);
+        return;
+      }
       setShowTransferModal(false);
       const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);

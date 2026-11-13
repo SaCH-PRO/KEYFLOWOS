@@ -4,14 +4,30 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { MarketplaceService } from './marketplace.service';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 
+/**
+ * SWEEP-P0-SCOPES (browser sweep BUG-015): stock, warehouses and the store's configuration need
+ * the storefront module's write scope. This controller ran AuthGuard, BusinessGuard and
+ * CrmRateLimitGuard only, so a STAFF member on role defaults (storefront read) changed stock levels
+ * and created warehouses while POST products refused them. ModuleScopeGuard now runs after
+ * BusinessGuard (it admits a route whose handler names no module, so every other route is as it
+ * was), and each warehouse, stock (set, adjust, transfer, Excel import), listing, shipping-zone and
+ * delivery-config write names storefront write: the module KEY's member authority map already
+ * gives inventory_*, store_*, marketplace_* and suppliers_* (GRAPH_ACTION_TOOL_MODULES).
+ *
+ * Not changed here, and recorded in docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md: the
+ * purchase-order routes (gated by pkt/PR195-JOURNAL-SCOPE under expenses), the order fulfilment
+ * family (owner ruling D-112: fulfilment status changes stay open to every member; marking PAID
+ * has its own revenue door), and the cross-module order actions.
+ */
 @Controller('marketplace')
-@UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
+@UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard, ModuleScopeGuard)
 export class MarketplaceController {
   constructor(
     @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
@@ -35,11 +51,13 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/listings')
   createListing(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createListing(businessId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/listings/:listingId')
   updateListing(
     @Param('businessId') businessId: string,
@@ -49,6 +67,7 @@ export class MarketplaceController {
     return this.marketplaceService.updateListing(businessId, listingId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/listings/:listingId')
   deleteListing(
     @Param('businessId') businessId: string,
@@ -63,11 +82,13 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(10, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/shipping-zones')
   createShippingZone(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createShippingZone(businessId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/shipping-zones/:zoneId')
   updateShippingZone(
     @Param('businessId') businessId: string,
@@ -77,6 +98,7 @@ export class MarketplaceController {
     return this.marketplaceService.updateShippingZone(businessId, zoneId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/shipping-zones/:zoneId')
   deleteShippingZone(
     @Param('businessId') businessId: string,
@@ -91,11 +113,13 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(10, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/warehouses')
   createWarehouse(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.createWarehouse(businessId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Patch('businesses/:businessId/warehouses/:warehouseId')
   updateWarehouse(
     @Param('businessId') businessId: string,
@@ -105,6 +129,7 @@ export class MarketplaceController {
     return this.marketplaceService.updateWarehouse(businessId, warehouseId, body);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/warehouses/:warehouseId')
   deleteWarehouse(
     @Param('businessId') businessId: string,
@@ -122,6 +147,7 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory')
   upsertInventory(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.upsertInventory(businessId, body);
@@ -361,6 +387,7 @@ export class MarketplaceController {
     return this.marketplaceService.getDeliveryConfig(businessId);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Put('businesses/:businessId/delivery-config')
   updateDeliveryConfig(@Param('businessId') businessId: string, @Body() body: any) {
     return this.marketplaceService.updateDeliveryConfig(businessId, body);
@@ -435,6 +462,7 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory/adjust')
   adjustInventory(
     @Param('businessId') businessId: string,
@@ -447,6 +475,7 @@ export class MarketplaceController {
   }
 
   @CrmRateLimit(20, 60_000)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory/transfer')
   transferInventory(
     @Param('businessId') businessId: string,
@@ -475,6 +504,7 @@ export class MarketplaceController {
     res.send(buffer);
   }
 
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory/import-excel')
   @UseInterceptors(FileInterceptor('file'))
   importInventoryExcel(

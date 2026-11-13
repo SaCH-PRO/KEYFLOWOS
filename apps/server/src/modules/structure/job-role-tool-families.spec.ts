@@ -121,6 +121,9 @@
  *  payroll_approve_run          PayrollService           POST /payroll/businesses/:businessId/runs/:runId/approve     operations:write
  *  payroll_list_rates           PayrollService           GET /payroll/businesses/:businessId/rates                    operations:read
  *  performance_take_snapshot    StaffPerformanceService  POST /staff-performance/businesses/:businessId/snapshot      operations:write
+ *  projects_create_task         ProjectsService          POST /projects/businesses/:businessId/projects/:projectId/tasks  projects:write
+ *  projects_get_budget          ProjectsService          GET /projects/businesses/:businessId/projects/:projectId/budget  projects:read
+ *  inventory_adjust_stock       MarketplaceService       POST /marketplace/businesses/:businessId/inventory/adjust     storefront:write
  *
  * NOT GRANTED although their family is (rule 4; UNGRANTED below): among them
  * payroll_set_rate and payroll_generate_run (PayrollService.setRate / generateRun back no
@@ -129,7 +132,8 @@
  *
  * CANONICAL MODULES THAT GRANT NO KEY TOOL
  *
- *  projects, storefront, ai — no route in the app declares these scopes.
+ *  ai           — no route in the app declares this scope. (projects and storefront grant tools
+ *                 since SWEEP-P0-SCOPES gated ProjectsController and the marketplace stock routes.)
  *  connect      — integration-hub.controller only; no KEY tool calls IntegrationHubService.
  *  analytics    — analytics.controller only, and it does not run ModuleScopeGuard; no KEY
  *                 tool calls its service.
@@ -1241,6 +1245,12 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'assets_get', service: 'AssetService', route: 'GET /businesses/:businessId/assets/:assetId', scope: 'content:read', file: 'modules/assets/asset.controller.ts' },
   { tool: 'assets_tag', service: 'AssetService', route: 'POST /businesses/:businessId/assets/:assetId/tag', scope: 'content:write', file: 'modules/assets/asset.controller.ts' },
   { tool: 'assets_untag', service: 'AssetService', route: 'POST /businesses/:businessId/assets/:assetId/untag', scope: 'content:write', file: 'modules/assets/asset.controller.ts' },
+  // SWEEP-P0-SCOPES (browser sweep BUG-014): every ProjectsController route requires projects
+  { tool: 'projects_create_task', service: 'ProjectsService', route: 'POST /projects/businesses/:businessId/projects/:projectId/tasks', scope: 'projects:write', file: 'modules/projects/projects.controller.ts' },
+  { tool: 'projects_get_budget', service: 'ProjectsService', route: 'GET /projects/businesses/:businessId/projects/:projectId/budget', scope: 'projects:read', file: 'modules/projects/projects.controller.ts' },
+  // SWEEP-P0-SCOPES (browser sweep BUG-015): the marketplace stock writes require storefront write
+  { tool: 'inventory_adjust_stock', service: 'MarketplaceService', route: 'POST /marketplace/businesses/:businessId/inventory/adjust', scope: 'storefront:write', file: 'modules/marketplace/marketplace.controller.ts' },
+  { tool: 'inventory_transfer_stock', service: 'MarketplaceService', route: 'POST /marketplace/businesses/:businessId/inventory/transfer', scope: 'storefront:write', file: 'modules/marketplace/marketplace.controller.ts' },
   { tool: 'expenses_create', service: 'ExpensesService', route: 'POST /expenses/businesses/:businessId/expenses', scope: 'expenses:write', file: 'modules/expenses/expenses.controller.ts' },
   { tool: 'expenses_list', service: 'ExpensesService', route: 'GET /expenses/businesses/:businessId/expenses', scope: 'expenses:read', file: 'modules/expenses/expenses.controller.ts' },
   { tool: 'finance_create_bill', service: 'ExpensesService', route: 'POST /finance/businesses/:businessId/bills', scope: 'expenses:write', file: 'modules/expenses/bills.controller.ts' },
@@ -1284,14 +1294,14 @@ const UNMAPPED: Record<string, string> = {
   goals: 'key-cortex-goals.controller declares no module scope',
   governance: 'governance.controller declares no module scope',
   helpdesk: 'helpdesk.controller declares no module scope',
-  inventory: 'marketplace.controller declares no module scope',
+  // inventory: granted since SWEEP-P0-SCOPES (inventory_adjust_stock, inventory_transfer_stock: storefront write)
   keyflow: 'keyflow-command.controller declares no module scope',
   marketing: 'email-marketing.controller declares no module scope',
   marketplace: 'reads Prisma directly; no service call',
   people: 'StructureService.listPeople backs no route; TaskAssignmentService routes are unscoped',
   portal: 'portal.controller declares no module scope',
   present: 'renders an onboarding card; no service call',
-  projects: 'projects.controller declares no module scope (the legacy `projects` key still grants projects_*, time_*)',
+  // projects: granted since SWEEP-P0-SCOPES (every ProjectsController route requires projects)
   queue: 'EmailMarketingService.queueCampaign backs no route',
   reconcile: 'finance.controller declares no module scope',
   retainers: 'retainer.controller declares no module scope',
@@ -1310,7 +1320,7 @@ const UNMAPPED: Record<string, string> = {
 
 /** The governed tools in UNMAPPED families (rule 4: GOVERNED_UNGRANTED). */
 const UNMAPPED_GOVERNED: Record<string, string[]> = {
-  execute: ['bookings', 'content', 'crm', 'expenses', 'operations', 'revenue', 'team'],
+  execute: ['bookings', 'content', 'crm', 'expenses', 'operations', 'projects', 'revenue', 'storefront', 'team'],
   send: ['crm'],
   update: ['crm', 'revenue'],
 };
@@ -1340,6 +1350,20 @@ const UNGRANTED: Record<string, string> = {
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
   // FOLLOW3-D15, whose ProcurementService writes the request where { id, businessId }
   structure_find_person: 'StructureService.findPeople backs no route',
+  // SWEEP-P0-SCOPES: the inventory family grants a tool now (inventory_adjust_stock, inventory_transfer_stock:
+  // storefront write), so its other tools are listed here; the marketplace reads and the purchase-order routes
+  // stay unscoped (the purchase orders are pkt/PR195-JOURNAL-SCOPE's)
+  inventory_advance_purchase_order: 'MarketplaceService.advancePurchaseOrderStatus is reached by marketplace.controller, which is unscoped',
+  inventory_create_purchase_order: 'MarketplaceService.createPurchaseOrder is reached by marketplace.controller, which is unscoped',
+  inventory_list_movements: 'MarketplaceService.getInventoryMovements is reached by marketplace.controller, which is unscoped',
+  inventory_list_purchase_orders: 'MarketplaceService.getPurchaseOrders is reached by marketplace.controller, which is unscoped',
+  inventory_list_stock: 'MarketplaceService.getInventory is reached by marketplace.controller, which is unscoped',
+  inventory_list_warehouses: 'MarketplaceService.getWarehouses is reached by marketplace.controller, which is unscoped',
+  inventory_low_stock_alerts: 'MarketplaceService.getInventoryAlerts is reached by marketplace.controller, which is unscoped',
+  inventory_summary: 'MarketplaceService.getInventorySummary is reached by marketplace.controller, which is unscoped',
+  // SWEEP-P0-SCOPES: the projects family grants tools now; these two read Prisma directly
+  projects_list: 'reads Prisma directly; no service call',
+  projects_list_tasks: 'reads Prisma directly; no service call',
 };
 
 /** Why the derivation leaves a tool ungranted, in the words UNGRANTED uses. */
@@ -1510,7 +1534,15 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         calendar_create_event: 'write',
         calendar_list_events: 'read',
       },
-      projects: {},
+      // SWEEP-P0-SCOPES (browser sweep BUG-014): every ProjectsController route requires projects
+      projects: {
+        projects_complete_task: 'write',
+        projects_create_task: 'write',
+        projects_delete_task: 'write',
+        projects_get_budget: 'read',
+        projects_get_timeline: 'read',
+        projects_update_task: 'write',
+      },
       content: {
         assets_delete: 'write',
         assets_get: 'read',
@@ -1529,7 +1561,11 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         finance_view_payables: 'read',
       },
       automations: {},
-      storefront: {},
+      // SWEEP-P0-SCOPES (browser sweep BUG-015): POST marketplace inventory/adjust and inventory/transfer need storefront write
+      storefront: {
+        inventory_adjust_stock: 'write',
+        inventory_transfer_stock: 'write',
+      },
       settings: {},
       ai: {},
       team: {
