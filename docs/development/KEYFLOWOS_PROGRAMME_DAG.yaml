@@ -5,8 +5,10 @@
 #   on branch docs/keyflow-intelligence-foundation
 #
 # This file is the EXECUTABLE projection of that board. It is static topology
-# only. It holds no live packet state -- live state is owned solely by
-# .agent-control/programme-state.yaml (see AGENT_CONTROL_PLANE.md).
+# only. It holds no live packet state. Live state is the fold of issue #80
+# authority over the reviewed checkpoint in .agent-control/programme-state.yaml
+# (AGENT_CONTROL_PLANE.md, "Control-state precedence"); read it with
+# `node scripts/agent-control/status.mjs --verify`.
 #
 # ---------------------------------------------------------------------------
 # Phase model (resolves the wave-gate deadlock, F2)
