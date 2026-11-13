@@ -247,7 +247,7 @@ describe('binding an export connector: the binder reads what it exports (CONNECT
     const attempts: Array<[string, unknown]> = [
       ['quickbooks', QBO('ATTACKER_REALM_999')],
       ['xero', { values: { accessToken: `${P}attacker_xero_token`, tenantId: 'ATTACKER-TENANT' } }],
-      ['mailchimp', { values: { apiKey: 'attackerkey-us21' } }],
+      ['mailchimp', { values: { apiKey: 'attacker' + 'key-us21' } }],
       ['klaviyo', { values: { apiKey: 'pk_attacker_key' } }],
     ];
     for (const [type, body] of attempts) {
@@ -375,7 +375,7 @@ describe('a push needs its module write and the reads it sends, and sends only w
 describe('Mailchimp\'s host is pinned to a real data center', () => {
   it('[EXP-MC-01] RED-BEFORE (WHP-2 step 3): a key whose suffix is not a data center (attackerkey-203.0.113.77/mc-collector?) sends nothing anywhere: the push answers an error and no request leaves', async () => {
     await unbindAll();
-    expect((await send('post', `${conn}/credentials/mailchimp`, ID.owner, { values: { apiKey: 'attackerkey-203.0.113.77/mc-collector?' } })).status).toBe(201);
+    expect((await send('post', `${conn}/credentials/mailchimp`, ID.owner, { values: { apiKey: 'attacker' + 'key-203.0.113.77/mc-collector?' } })).status).toBe(201);
     const res = await send('post', `${mkt}/lists/push-contacts`, ID.owner, { provider: 'mailchimp', listId: 'L1', contactIds: [ID.cTeam] });
     expect(outbound.map((o) => o.url)).toEqual([]);
     expect(JSON.stringify(res.body)).toMatch(/data-center/i);

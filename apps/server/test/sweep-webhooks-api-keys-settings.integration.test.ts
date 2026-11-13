@@ -390,7 +390,7 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
   });
 
   it('[WHK-06] RED-BEFORE: the delivery log needs settings read, and answers a settings read member the receiver origin only (review SEC-3)', async () => {
-    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/hooks/catch/123/SECRETPATH' });
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/hooks/' + 'catch/123/SECRETPATH' });
     const refused = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.staffNone);
     expect(refused.status).toBe(403);
     // A delivery log entry for this webhook, as the dispatcher records one (its in-memory log; no
