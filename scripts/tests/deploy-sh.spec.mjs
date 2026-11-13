@@ -184,9 +184,10 @@ function serveHealth(sb, { sequence = [], fallback } = {}) {
 /**
  * Runs the sandbox's deploy.sh. `args` go to the script (a git ref),
  * `bashArgs` to bash before it (`-x`), `umask` is set before bash starts,
- * and `env` adds to the stand-in environment.
+ * and `env` adds to the stand-in environment. `relative` runs it as the
+ * runbook does, `./scripts/deploy.sh` from the checkout.
  */
-function runDeploy(sb, { args = [], bashArgs = [], umask = null, env: extraEnv = {} } = {}) {
+function runDeploy(sb, { args = [], bashArgs = [], umask = null, env: extraEnv = {}, relative = false } = {}) {
   return new Promise((resolve, reject) => {
     const env = {
       PATH: `${sb.bin}:${process.env.PATH}`,
@@ -196,7 +197,7 @@ function runDeploy(sb, { args = [], bashArgs = [], umask = null, env: extraEnv =
       DEPLOY_BACKUP_DIR: sb.state,
       ...extraEnv,
     };
-    const script = join(sb.root, 'scripts', 'deploy.sh');
+    const script = relative ? './scripts/deploy.sh' : join(sb.root, 'scripts', 'deploy.sh');
     const [cmd, argv] = umask === null
       ? ['bash', [...bashArgs, script, ...args]]
       : ['sh', ['-c', `umask ${umask} && exec bash "$@"`, 'sh', ...bashArgs, script, ...args]];
@@ -642,7 +643,7 @@ test('[DSH-R1] deploying a ref whose deploy.sh differs runs THAT deploy.sh: its 
     { envFile: BASE_ENV + `SUPABASE_JWT_SECRET=${PLACEHOLDER}\n`, boxScript: withoutPreflight(REAL_DEPLOY_SH), refScript: REAL_DEPLOY_SH },
     async (sb) => {
       serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
-      const result = await runDeploy(sb, { args: ['next'] });
+      const result = await runDeploy(sb, { args: ['next'], relative: true });
       assertRefusedBeforeBackup(sb, result, PLACEHOLDER_REASON);
       assert.equal(count(result.out, REEXEC_NOTICE), 1, result.out);
       assert.equal(git(sb.root, ['rev-parse', 'HEAD']), sb.next, 'the ref was not checked out');
@@ -652,7 +653,7 @@ test('[DSH-R1] deploying a ref whose deploy.sh differs runs THAT deploy.sh: its 
 test('[DSH-R2] after the re-run the deploy completes once: one fetch, one build, DEPLOYED on the ref', () =>
   withBox({ envFile: BASE_ENV, boxScript: withoutPreflight(REAL_DEPLOY_SH), refScript: REAL_DEPLOY_SH }, async (sb) => {
     serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
-    const result = await runDeploy(sb, { args: ['next'] });
+    const result = await runDeploy(sb, { args: ['next'], relative: true });
     assert.equal(result.code, 0, result.out);
     assert.match(result.out, new RegExp(`DEPLOYED — /healthz reports ${sb.commit}`));
     assert.equal(count(result.out, REEXEC_NOTICE), 1, result.out);
@@ -664,7 +665,7 @@ test('[DSH-R2] after the re-run the deploy completes once: one fetch, one build,
 test('[DSH-R3] a ref whose deploy.sh is the one running is deployed without a re-run', () =>
   withBox({ envFile: BASE_ENV, boxScript: REAL_DEPLOY_SH, refScript: REAL_DEPLOY_SH }, async (sb) => {
     serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
-    const result = await runDeploy(sb, { args: ['next'] });
+    const result = await runDeploy(sb, { args: ['next'], relative: true });
     assert.equal(result.code, 0, result.out);
     assert.match(result.out, new RegExp(`DEPLOYED — /healthz reports ${sb.commit}`));
     assert.equal(count(result.out, REEXEC_NOTICE), 0, result.out);
