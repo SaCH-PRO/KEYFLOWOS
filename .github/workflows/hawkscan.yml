@@ -27,6 +27,13 @@ concurrency:
   group: hawkscan-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege. The job runs the third-party stackhawk/hawkscan-action
+# (pinned by tag, so whoever moves the tag runs code here) with HAWK_API_KEY
+# and HAWK_TEST_JWT in reach. It needs only to read the code, so the job
+# token is read-only, and the checkout below does not persist it.
+permissions:
+  contents: read
+
 env:
   NODE_VERSION: '22.23.4'
   PNPM_VERSION: '9.15.0'
@@ -91,6 +98,10 @@ jobs:
       - name: Checkout
         if: steps.guard.outputs.run == 'true'
         uses: actions/checkout@v7
+        with:
+          # Keep the job token out of the checkout's git config, where every
+          # later step, the HawkScan action included, could read it.
+          persist-credentials: false
 
       - name: Setup pnpm
         if: steps.guard.outputs.run == 'true'
