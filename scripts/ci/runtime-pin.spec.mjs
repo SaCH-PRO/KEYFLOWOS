@@ -1013,6 +1013,16 @@ function mutate(source, from, to) {
   return source.replace(from, to);
 }
 
+/**
+ * The text a workflow spells for a step, found by pattern so an action's
+ * major-tag bump (actions/checkout@v4 -> @v7) does not move the anchor. When
+ * nothing matches it returns a marker the source cannot contain, so mutate()
+ * still fails loudly and the negative control never passes vacuously.
+ */
+function spelled(source, pattern) {
+  return pattern.exec(source)?.[0] ?? `<no match for ${pattern}>`;
+}
+
 describe('V1-39 runtime pin: one declared Node runtime (D-21)', () => {
   it('.nvmrc names one exact Node 22 version with require(esm) unflagged', () => {
     const pin = nvmrcPin();
@@ -1136,7 +1146,13 @@ describe('PIN-R3: CI comments and operator docs match D-68 and V1-30', () => {
 describe('V1-39 negative controls: review mutations are rejected', () => {
   const PIN_STEP = `      - name: Check the Node runtime pin\n        run: ${PIN_RUN}`;
   const JOB_HEAD = `  ${PIN_JOB}:\n    name: Type Check\n    runs-on: ubuntu-latest\n`;
-  const CHECKOUT = '      - name: Checkout\n        uses: actions/checkout@v4\n';
+  // The pin job's checkout (its first step), at whatever major tag it is on. The
+  // look-behind holds the match to that job, so the anchor can never land on
+  // another job's checkout; the pin job is the first job, so mutate() edits it.
+  const CHECKOUT = spelled(
+    workflow('ci-cd.yml'),
+    new RegExp(`(?<=^${JOB_HEAD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}    steps:\\n)      - name: Checkout\\n        uses: actions/checkout@v\\d+\\n`, 'm'),
+  );
 
   // SEC-V139-2: each leaves the step text unchanged and makes it pass without checking.
   const runnerMutations = {
@@ -1200,10 +1216,11 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
   });
   it('workflow pins: rejects agent-control-gate.yml changing its recorded runner-image Node', () => {
     const sources = allWorkflows();
+    const checkout = spelled(sources['agent-control-gate.yml'], /        uses: actions\/checkout@v\d+\n/);
     sources['agent-control-gate.yml'] = mutate(
       sources['agent-control-gate.yml'],
-      '        uses: actions/checkout@v4\n',
-      `        uses: actions/checkout@v4\n${SETUP}        with:\n          node-version: '${nvmrcPin()}'\n`,
+      checkout,
+      `${checkout}${SETUP}        with:\n          node-version: '${nvmrcPin()}'\n`,
     );
     assert.notDeepEqual(workflowPinProblems(sources, nvmrcPin()), []);
   });
