@@ -2869,7 +2869,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
     });
   });
 
-  it("RC-40 (W11-ORDER-CANCEL-RELEASE; packet case RC-21) PATCH /marketplace/.../status 'cancelled' while routeOrder is held where it reserves (RC-06's hold): the edit waits for the router, then releases; the order ends cancelled with its route CANCELLED, nothing reserved and no 'routed' written over it", async () => {
+  it("RC-40 (W11-ORDER-CANCEL-RELEASE; packet case RC-21) PATCH /marketplace/.../status 'cancelled' while routeOrder is held where it reserves (RC-06's hold): the edit waits for the router, then releases; the order ends cancelled with its route CANCELLED, nothing reserved and no 'routed' written over it (the router's 'routed' step comes before the cancelled one)", async () => {
     const order = await paidOrder([ID.productA]);
     const real = routing.routeLocalStock.bind(routing);
     let cancelDone!: () => void;
@@ -2902,7 +2902,8 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       routes: await routesOf(order.id),
       stockA: await stockOf(ID.stockA),
       cancelledEvents: cancelledEventsOf(order.id),
-      routedWritten: steps.includes('routed'),
+      // The router's 'routed' (it committed first, the order still paid) comes before the cancel, never after it.
+      routedBeforeCancelled: steps.lastIndexOf('routed') < steps.lastIndexOf('cancelled'),
       cancelledAfterRouting: steps.lastIndexOf('cancelled') > steps.indexOf('routes_created'),
     }).toEqual({
       answer: 'cancelled/PAID',
@@ -2910,7 +2911,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       routes: ['LOCAL_STOCK:CANCELLED'],
       stockA: `${IN_STOCK}/0`,
       cancelledEvents: ['cancelled'],
-      routedWritten: false,
+      routedBeforeCancelled: true,
       cancelledAfterRouting: true,
     });
   });
@@ -3000,7 +3001,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
         });
       }
 
-      // Control: a PENDING storefront order (not paid, not routed) is cancelled.
+      // Control: a PENDING storefront order (a CASH order not paid yet, PENDING / PENDING; not routed) is cancelled.
       const pending = await storeOrders.createOrder({
         businessId: ID.biz,
         cartItems: [{ productId: ID.productA, quantity: 1 }],
@@ -3009,8 +3010,8 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       });
       await drain();
       seen = [];
-      expect(await statusOf(pending.id)).toBe('PENDING/UNPAID');
-      expect(await statusAnswer(siteStatusByRoute(pending.id, 'cancelled'))).toBe('CANCELLED/UNPAID');
+      expect(await statusOf(pending.id)).toBe('PENDING/PENDING');
+      expect(await statusAnswer(siteStatusByRoute(pending.id, 'cancelled'))).toBe('CANCELLED/PENDING');
       expect(await routesOf(pending.id)).toEqual([]);
       expect(cancelledEventsOf(pending.id)).toEqual(['CANCELLED']);
     } finally {

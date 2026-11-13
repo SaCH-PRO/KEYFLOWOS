@@ -26,6 +26,8 @@ import {
 } from '../../core/connectors/implementations/wipay-merchant';
 import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
 import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
+import { ROUTING_CLAIM_TX_OPTIONS, releaseOrderFulfilmentForCancel } from '../marketplace/fulfillment-routing.service';
+import { appendOrderTimeline } from '../marketplace/order-metadata';
 import {
   normalizeStorefrontMethod,
   paypalConfigured,
@@ -878,6 +880,11 @@ export class StoreOrderService {
    * order's shipping fee once per order, and only for a member with revenue
    * write (CommerceIntegrationService.bookShippingExpenseOnce); the status
    * change itself stays open to every member and never fails on the booking.
+   * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): CANCELLED releases
+   * the order's fulfilment under its routing claim, as the marketplace cancel
+   * does (400 with nothing written for an order that can no longer be
+   * cancelled: SHIPPED, DELIVERED, COMPLETED, CANCELLED, REFUNDED). Every
+   * other status is written as before.
    */
   async updateOrderStatus(
     orderId: string,
@@ -906,11 +913,14 @@ export class StoreOrderService {
     });
     if (!existing) throw new NotFoundException('Order not found');
 
-    const order = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: { status: normalized },
-      include: { items: true },
-    });
+    const order =
+      normalized === 'CANCELLED'
+        ? await this.cancelReleasingFulfilment(businessId, orderId)
+        : await this.prisma.client.marketplaceOrder.update({
+            where: { id: orderId },
+            data: { status: normalized },
+            include: { items: true },
+          });
 
     // CONFIRMED is the merchant's fulfilment status, not money (V1-18, CF-45).
     // `store_order.paid` is emitted only by completeCheckout, after the
@@ -933,6 +943,26 @@ export class StoreOrderService {
     if (normalized === 'SHIPPED') await this.bookShippingExpenseOnce(businessId, orderId, actorId);
 
     return order;
+  }
+
+  /**
+   * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): updateOrderStatus's CANCELLED, in one transaction under the
+   * order's routing claim, as the marketplace status cancel (MarketplaceService.updateOrderStatus) and the fulfil
+   * 'cancel' action: releaseOrderFulfilmentForCancel waits for a router to commit, re-reads the status (400 with nothing
+   * written for an order that can no longer be cancelled; canTransitionOrder reads this vocabulary through
+   * LEGACY_STATUS_MAP), gives back what the order's LOCAL_STOCK routes reserved and cancels its routes; then the
+   * cancelled step and CANCELLED. It wrote CANCELLED alone: a routed order's reservations were held for good, an order
+   * being routed got its routes after the cancel, and a SHIPPED order was cancelled. It releases reservations only (what
+   * a paid checkout decremented is not restocked) and records no refund.
+   */
+  private cancelReleasingFulfilment(businessId: string, orderId: string) {
+    return this.prisma.client.$transaction(async (tx) => {
+      await releaseOrderFulfilmentForCancel(tx, businessId, orderId);
+      await appendOrderTimeline(tx, businessId, orderId, [
+        { status: 'cancelled', timestamp: new Date().toISOString(), note: 'Order cancelled' },
+      ]);
+      return tx.marketplaceOrder.update({ where: { id: orderId }, data: { status: 'CANCELLED' }, include: { items: true } });
+    }, ROUTING_CLAIM_TX_OPTIONS);
   }
 
   /**
