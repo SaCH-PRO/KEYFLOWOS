@@ -5,6 +5,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ConnectorActivityService } from '../../core/connectors/connector-activity.service';
 import { connectorExportReads } from '../../core/connectors/connector-exports';
 import { receiverReadRefusal } from '../../core/auth/receiver-reads';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
 
 interface OAuthState {
   businessId: string;
@@ -83,6 +84,14 @@ export class MicrosoftOAuthService {
       throw new BadRequestException('Microsoft OAuth not configured');
     }
     const binder = await this.prisma.client.user.findUnique({ where: { id: state.boundBy }, select: { role: true } });
+    // PR #209 review (Codex P2): the consent start needs settings admin (MicrosoftOAuthController), and a
+    // binder whose settings admin is withdrawn before the callback binds nothing, so the start's rule is
+    // checked again here, as ModuleScopeGuard reads it, before the code is exchanged.
+    await assertMemberModuleLevel(this.prisma, state.businessId, { id: state.boundBy, role: binder?.role ?? undefined }, 'settings', 'admin').catch(
+      (e: unknown) => {
+        throw new BadRequestException(e instanceof Error ? e.message : 'settings requires admin access');
+      },
+    );
     const refusal = await receiverReadRefusal(
       this.prisma,
       state.businessId,
