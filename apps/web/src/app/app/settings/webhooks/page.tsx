@@ -348,9 +348,10 @@ export default function WebhooksSettingsPage() {
                       </p>
                       {webhook.urlMasked && (
                         // SWEEP-P0-SCOPES review repair (SEC-3): a settings read member is answered the
-                        // receiver's origin only (the path is the credential of Slack, Zapier and Make hooks).
+                        // receiver's origin only (the path is the credential of Slack, Zapier and Make hooks);
+                        // second review SV-5: so is a member who cannot read the modules its events come from.
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          The full receiver URL is hidden: it needs settings write access.
+                          The full receiver URL is hidden: it needs settings write access and read access to the modules this webhook&apos;s events come from.
                         </p>
                       )}
                     </div>
@@ -422,7 +423,7 @@ export default function WebhooksSettingsPage() {
                     {webhook.secret && (
                       <div className="flex-1 mr-2 space-y-1">
                       <p className="text-[11px] text-amber-400">
-                        Signing secret: only members with settings admin can see it again.
+                        Signing secret: only members with settings admin can see it again, and only for a webhook whose events they can read.
                       </p>
                       <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
                         <span className="text-xs text-muted-foreground shrink-0">Secret:</span>

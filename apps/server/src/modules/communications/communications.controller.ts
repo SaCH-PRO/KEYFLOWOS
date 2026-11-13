@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patc
 import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
@@ -64,19 +65,32 @@ export class CommunicationsController {
     return this.connections.syncFromSocial(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES second review repair (finding SV-2, the SEC-1 credential class): a channel
+   * connection is the business's account credential (its token and refresh token, the mailbox or page
+   * every send goes from). Creating, changing and deleting one, and connecting WhatsApp, need settings
+   * admin, as the connector credentials do (SEC-1): OWNER and ADMIN by role default, STAFF none; an
+   * explicit map binds every role (D-114). They ran AuthGuard and BusinessGuard only: the sweep's STAFF
+   * member (settings none) replaced the owner's email connection's token and account, and a member of
+   * two businesses moved the connection into their own (ChannelConnectionService now writes only a
+   * connection's own fields). The reads stay open to members and answer no token (stripSecrets).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections')
   createConnection(@Param('businessId') businessId: string, @Body() body: any) {
     return this.connections.create(businessId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/connections/:id')
   updateConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
     return this.connections.update(businessId, id, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/connections/:id')
   deleteConnection(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.connections.delete(businessId, id);
@@ -146,7 +160,9 @@ export class CommunicationsController {
     return adapter.listPhoneNumbers(body.accessToken, body.waBusinessAccountId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /** SWEEP-P0-SCOPES second review repair (SV-2): stores the business's WhatsApp token: settings admin, as createConnection. */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/whatsapp/connect')
   async connectWhatsApp(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string; label?: string }) {
     return this.connections.connectWhatsApp(businessId, body);

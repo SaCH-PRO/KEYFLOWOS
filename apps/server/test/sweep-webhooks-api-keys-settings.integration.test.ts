@@ -611,7 +611,8 @@ describe('second review SV-5: a webhook\'s secret and full URL go only to a memb
       expect(row.url, actor).toBe('https://203.0.113.78/***');
       expect(row.urlMasked, actor).toBe(true);
       expect(JSON.stringify(res.body), actor).not.toContain(wh.secret);
-      expect(JSON.stringify(res.body), actor).not.toContain('XXXXSLACKTOKENXXXX');
+      // (other webhooks of this business may carry the same token path and be readable to this member)
+      expect(JSON.stringify(row), actor).not.toContain('XXXXSLACKTOKENXXXX');
       const log = await send('get', `${hooks()}/${wh.id}/deliveries`, actor);
       expect(log.status, actor).toBe(200);
       expect((log.body as any[]).length, actor).toBeGreaterThan(0);

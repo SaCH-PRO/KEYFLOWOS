@@ -10,9 +10,9 @@ import { PaymentsService, STRIPE_LEGACY_REFUSED_PROVIDER } from '../payments/pay
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { randomBytes } from 'crypto';
 import { checkWebhookUrl, WebhookUrlRefusedError } from './webhook-url';
-import { maskWebhookUrl, webhookEventModule } from './webhook-events';
+import { maskWebhookUrl, webhookEventModule, webhookEventReads } from './webhook-events';
 import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
-import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, type AccessLevel } from '../../core/authority/module-vocabulary';
 import { resolveCrmAccess } from '../crm/crm-permissions.helper';
 
 /** The member a webhook route acts for (AuthMiddleware attaches it; AuthGuard requires it). */
@@ -34,8 +34,21 @@ const WEBHOOK_PUBLIC_FIELDS = {
   updatedAt: true,
 } as const;
 
-/** SWEEP-P0-SCOPES review repair (CR-5): settings admin (the owner and ADMINs by role default) reads a webhook's signing secret again. */
+/**
+ * SWEEP-P0-SCOPES review repair (CR-5): settings admin (the owner and ADMINs by role default) reads a
+ * webhook's signing secret again, for a webhook whose events they may receive (second review SV-5).
+ */
 const WEBHOOK_ADMIN_FIELDS = { ...WEBHOOK_PUBLIC_FIELDS, secret: true } as const;
+
+/**
+ * The reads a member's webhook decisions take, memoised for one request: a module level (as
+ * ModuleScopeGuard reads it) and whether every contact is in their view.
+ */
+interface WebhookEventReader {
+  level(module: string): Promise<AccessLevel>;
+  /** Why the member may not receive these events (the refusal's words), or null when they may. Events that are not webhook events are skipped. */
+  refusal(events: readonly string[]): Promise<string | null>;
+}
 
 /** Every answer of the deprecated Stripe route names its replacement. */
 const LEGACY_STRIPE_HINT = { deprecated: true, use: '/payments/stripe/webhook' } as const;
@@ -208,19 +221,70 @@ export class WebhooksController {
    * again); settings write gets the full receiver URL and no secret; settings read gets the
    * receiver's origin only (`urlMasked`), since for Slack, Zapier and Make hooks the URL path is
    * itself the credential. Before this packet every list answered every secret to every member.
+   *
+   * Second review repair (SV-5): and, per webhook, only to a reader who could have created it: one
+   * who may receive its events (eventReader: the reads assertMayReceiveEvents requires). An ADMIN bound
+   * by D-114 (revenue none) is refused creating an invoice.paid webhook, and read the owner's
+   * invoice webhook's secret (signing forged invoice.paid deliveries to the owner's receiver with it)
+   * and its full URL. Such a reader now gets neither: no secret, the receiver's origin only.
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'read')
   @Get('businesses/:businessId/webhooks')
   async list(@Param('businessId') businessId: string, @Req() req: WebhookActorRequest) {
-    const level = await memberModuleLevel(this.prisma, businessId, req?.user, 'settings');
-    const rows = await this.prisma.client.webhook.findMany({
+    const reader = this.eventReader(businessId, req?.user);
+    const level = await reader.level('settings');
+    const rows: Array<{ url: string; events?: string[]; secret?: string }> = await this.prisma.client.webhook.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
       select: LEVEL_RANK[level] >= LEVEL_RANK.admin ? WEBHOOK_ADMIN_FIELDS : WEBHOOK_PUBLIC_FIELDS,
     });
-    if (LEVEL_RANK[level] >= LEVEL_RANK.write) return rows;
-    return rows.map((row: { url: string }) => ({ ...row, url: maskWebhookUrl(row.url), urlMasked: true }));
+    const answered = [];
+    for (const row of rows) {
+      const receives = (await reader.refusal(row.events ?? [])) === null;
+      const { secret, ...rest } = row;
+      const shown = LEVEL_RANK[level] >= LEVEL_RANK.admin && receives && secret !== undefined ? { ...rest, secret } : rest;
+      answered.push(LEVEL_RANK[level] >= LEVEL_RANK.write && receives ? shown : { ...shown, url: maskWebhookUrl(row.url), urlMasked: true });
+    }
+    return answered;
+  }
+
+  /**
+   * Second review repair (SV-1, SV-5): the reads a member's webhook decisions take, memoised for one
+   * request. A refusal names the first event whose records the member may not read: a module level
+   * below read (ModuleScopeGuard's reading: an explicit map binds an ADMIN too, D-114; a JSON array
+   * names no module, SV-4), for a crm event a view limited to their own contacts, and for a contact
+   * event no revenue read (a contact row carries the stored money signals, D-100).
+   */
+  private eventReader(businessId: string, actor: ModuleLevelActor): WebhookEventReader {
+    const levels = new Map<string, Promise<AccessLevel>>();
+    let viewAll: Promise<boolean> | null = null;
+    const level = (module: string) => {
+      if (!levels.has(module)) levels.set(module, memberModuleLevel(this.prisma, businessId, actor, module));
+      return levels.get(module)!;
+    };
+    const seesEveryContact = () => {
+      viewAll ??= actor?.id ? resolveCrmAccess(this.prisma, businessId, actor.id).then((access) => access.viewAll) : Promise.resolve(false);
+      return viewAll;
+    };
+    const refusal = async (events: readonly string[]): Promise<string | null> => {
+      const checked = new Set<string>();
+      for (const event of events) {
+        for (const module of webhookEventReads(event) ?? []) {
+          if (checked.has(module)) continue;
+          checked.add(module);
+          const held = await level(module);
+          if (LEVEL_RANK[held] < LEVEL_RANK.read) {
+            return `Insufficient permissions: a webhook sending ${event} needs ${module} read access (you have ${held})`;
+          }
+          if (module === 'crm' && !(await seesEveryContact())) {
+            return `Insufficient permissions: a webhook sending ${event} sends every contact; you have crm read access to your own contacts only`;
+          }
+        }
+      }
+      return null;
+    };
+    return { level, refusal };
   }
 
   /**
@@ -233,6 +297,9 @@ export class WebhooksController {
    * else's). An event that is not a webhook event is a 400 (`unknown: 'refuse'`, at create); a stored
    * one is ignored when a webhook is turned back on (nothing delivers it).
    *
+   * Second review repair (SV-1, D-100): a contact event also needs revenue read: the delivery is the
+   * stored contact row with its money signals (webhook-events.ts, WEBHOOK_EVENT_FAMILY_EXTRA_READS).
+   *
    * Not covered (no creator column; this packet makes no schema change): a webhook keeps delivering
    * after its creator's access is narrowed, until a member turns it off. Recorded in the census.
    */
@@ -242,27 +309,12 @@ export class WebhooksController {
     events: string[],
     unknown: 'refuse' | 'ignore',
   ): Promise<void> {
-    const modules = new Map<string, string>();
-    for (const event of events) {
-      const module = webhookEventModule(event);
-      if (!module) {
-        if (unknown === 'refuse') throw new BadRequestException(`Unknown webhook event: ${event}`);
-        continue;
-      }
-      if (!modules.has(module)) modules.set(module, event);
+    if (unknown === 'refuse') {
+      const notAnEvent = events.find((event) => !webhookEventModule(event));
+      if (notAnEvent !== undefined) throw new BadRequestException(`Unknown webhook event: ${notAnEvent}`);
     }
-    for (const [module, event] of modules) {
-      const level = await memberModuleLevel(this.prisma, businessId, actor, module);
-      if (LEVEL_RANK[level] < LEVEL_RANK.read) {
-        throw new ForbiddenException(`Insufficient permissions: a webhook sending ${event} needs ${module} read access (you have ${level})`);
-      }
-      if (module === 'crm' && actor?.id) {
-        const crm = await resolveCrmAccess(this.prisma, businessId, actor.id);
-        if (!crm.viewAll) {
-          throw new ForbiddenException(`Insufficient permissions: a webhook sending ${event} sends every contact; you have crm read access to your own contacts only`);
-        }
-      }
-    }
+    const refusal = await this.eventReader(businessId, actor).refusal(events);
+    if (refusal) throw new ForbiddenException(refusal);
   }
 
   /**
@@ -344,9 +396,17 @@ export class WebhooksController {
   ) {
     const parsedLimit = limit ? Math.min(parseInt(limit, 10) || 50, 100) : 50;
     const logs = await this.dispatcher.getDeliveryLogs(businessId, webhookId, parsedLimit);
-    // Review repair SEC-3: a settings read member sees each delivery's receiver origin only, as in the list.
-    const level = await memberModuleLevel(this.prisma, businessId, req?.user, 'settings');
-    if (LEVEL_RANK[level] >= LEVEL_RANK.write || !Array.isArray(logs)) return logs;
+    if (!Array.isArray(logs)) return logs;
+    // Review repair SEC-3: a settings read member sees each delivery's receiver origin only, as in the
+    // list; second review SV-5: so does a member who may not receive the webhook's events.
+    const reader = this.eventReader(businessId, req?.user);
+    const level = await reader.level('settings');
+    if (LEVEL_RANK[level] >= LEVEL_RANK.write) {
+      const [webhook] = (await this.prisma.client.webhook.findMany({ where: { id: webhookId, businessId }, select: { id: true, events: true } }))
+        .filter((w: { id: string }) => w.id === webhookId);
+      const events = webhook ? webhook.events ?? [] : logs.map((log) => log.event).filter((e): e is string => typeof e === 'string');
+      if ((await reader.refusal(events)) === null) return logs;
+    }
     return logs.map((log) => ({ ...log, url: log.url ? maskWebhookUrl(log.url) : log.url }));
   }
 

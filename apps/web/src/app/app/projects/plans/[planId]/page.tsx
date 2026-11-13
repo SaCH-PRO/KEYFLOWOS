@@ -17,6 +17,7 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { Button, Badge, Card } from "@keyflow/ui";
+import { toast } from "sonner";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { TabNav } from "@/components/ui/tab-nav";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -154,6 +155,8 @@ export default function PlanDetailPage() {
                     if (!businessId) return;
                     const res = await approvePlan(businessId, planId);
                     if (res.data) window.location.reload();
+                    // SWEEP-P0-SCOPES second review repair (CRV-2): a refused approve (D-85) says why.
+                    else if (res.error) toast.error(res.error);
                   }}
                 >
                   <CheckCircle2 className="w-4 h-4 mr-1" /> Approve & Create Project
@@ -164,7 +167,13 @@ export default function PlanDetailPage() {
                   onClick={async () => {
                     const { rejectPlan } = await import("@/lib/project-plans-api");
                     if (!businessId) return;
-                    await rejectPlan(businessId, planId);
+                    // SWEEP-P0-SCOPES second review repair (CRV-2): a refused reject (projects write)
+                    // stays on the plan and says why; it went back to the list as if rejected.
+                    const res = await rejectPlan(businessId, planId);
+                    if (res.error) {
+                      toast.error(res.error);
+                      return;
+                    }
                     router.push("/app/projects?tab=plans");
                   }}
                 >
@@ -177,7 +186,11 @@ export default function PlanDetailPage() {
                   onClick={async () => {
                     const { deletePlan } = await import("@/lib/project-plans-api");
                     if (!businessId) return;
-                    await deletePlan(businessId, planId);
+                    const res = await deletePlan(businessId, planId);
+                    if (res.error) {
+                      toast.error(res.error);
+                      return;
+                    }
                     router.push("/app/projects?tab=plans");
                   }}
                 >
@@ -199,18 +212,34 @@ export default function PlanDetailPage() {
                   events={plan.timelineEvents}
                   planStatus={plan.status}
                   onReorder={async (updates) => {
-                    await reorderEvents(updates);
+                    // SWEEP-P0-SCOPES second review repair (CRV-2): a refused reorder (projects write)
+                    // says why, and the timeline takes the move back (it stayed shown as applied).
+                    const res = await reorderEvents(updates);
+                    if (res.error) {
+                      toast.error(res.error);
+                      return false;
+                    }
+                    return true;
                   }}
                   onAnalyzeImpact={async (eventId, newSortOrder) => {
                     const res = await analyzeEventImpact(eventId, newSortOrder);
+                    if (res.error) toast.error(res.error);
                     return res.data;
                   }}
                   onExecute={async (eventId) => {
-                    await executeEvent(eventId);
+                    const res = await executeEvent(eventId);
+                    if (res.error) {
+                      toast.error(res.error);
+                      return;
+                    }
                     window.location.reload();
                   }}
                   onComplete={async (eventId) => {
-                    await completeEvent(eventId);
+                    const res = await completeEvent(eventId);
+                    if (res.error) {
+                      toast.error(res.error);
+                      return;
+                    }
                     window.location.reload();
                   }}
                 />

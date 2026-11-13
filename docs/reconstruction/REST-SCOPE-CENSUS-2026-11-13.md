@@ -7,6 +7,15 @@ membership and nothing else, with what this packet did about it. Pinned by
 there until it carries an enforced scope (`@RequireModuleScope` on the handler and
 `ModuleScopeGuard` in its chain) or gets a row here.
 
+A GET is in the census when it starts a credential binding (second review repair SV-3): its path
+names an OAuth consent start (`auth-url`, `authorize`, `oauth/start`, `oauth/url`) or its handler
+builds an auth URL. It signs a state naming the business, and the provider's callback stores the
+account of whoever completes the consent on that business: a write in effect, which the census
+did not see while it counted write verbs only (GET .../connect/microsoft/businesses/:b/auth-url had
+no row). CEN-09 holds every binding start, of any verb, to a gate: it may not be `open` or
+`deferred`. A GET whose write hides in a service under another name is still not visible to the
+reader; the binding start is the class the reviews found.
+
 Source of the census: the 2026-11-13 browser sweep (BUG-001 webhooks and signing secrets, BUG-013
 API keys, BUG-014 projects, BUG-015 stock and warehouses) showed the class: a STAFF member with no
 access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard` only.
@@ -30,25 +39,30 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member write routes without an enforced scope at this head: **771** (760 under modules/ at
-  2c49a539; the review repair reads core/ too: +11 ConnectorController and GoogleSuiteController
-  routes, -2 newly applied, +2 for the D-85 plan doors that now keep their service check alone).
-  - exempt-check: 55
+- Member routes without an enforced scope at this head: **766**: 763 write routes and 3
+  credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
+  owner check). 760 write routes under modules/ at 2c49a539; the first review repair read core/
+  too (+11 ConnectorController and GoogleSuiteController routes, -2 newly applied, +2 for the D-85
+  plan doors that keep their service check alone): 771 at 6f4935f1; the second review repair
+  applied 8 (the channel and social connection writes, SV-2: -8) and added the binding GETs (+3).
+  - exempt-check: 58
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 63
-  - open: 600
-- Write routes gated by this packet (applied): **71** (and 20 reads of the same controllers).
+  - open: 592
+- Routes gated by this packet (applied): **80**: 79 write routes and one credential-binding GET (the
+  Outlook contacts consent start, SV-3); and 20 reads of the same controllers.
 - Secret-bearing reads reviewed: **14**.
 
 Applied in this packet, with real-DB tests through the HTTP routes:
 
 | family | scope | suite |
 | --- | --- | --- |
-| webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
+| webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2), and a contact event revenue read too (second review SV-1, D-100); a booking event carries its contact as the bookings routes answer it (SV-1); per webhook, the secret and the full URL go only to a reader who may receive its events (SV-5); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
 | API keys (BUG-013) | settings read / admin (revoke: settings admin, review CR-3) | sweep-webhooks-api-keys-settings |
-| connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules) | sweep-connector-credentials-scope |
+| connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules); the handler checks read a stored JSON array as the guard does, every module none (second review SV-4) | sweep-connector-credentials-scope |
+| channel and social connections (second review SV-2), the Outlook contacts consent start (SV-3) | settings admin (communications connection create / update / delete and WhatsApp connect; social manual connect, OAuth start and callback, delete; GET connect/microsoft auth-url); a channel connection's create and update write its own fields only (a businessId in the body moved the connection to another business) | sweep-channel-connections-scope |
 | projects (BUG-014) | projects read / write on 33 routes (analyze-impact write, SEC-5); approve and delete a plan keep D-85's own check (CR-2) | sweep-projects-module-scope |
 | marketplace bundle-order project (review SEC-4) | projects write | sweep-inventory-storefront-scope |
 | marketplace stock, warehouses, listings, shipping zones, delivery config (BUG-015) | storefront write | sweep-inventory-storefront-scope |
@@ -94,7 +108,15 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    on. A webhook records no creator (no schema change here), so one keeps delivering after its
    creator's access is narrowed, until a member turns it off. Add a creator column and re-check
    at delivery? Contact events also carry contacts marked PRIVATE that a non-owner member cannot
-   see (crm visibility); should contact webhooks be owner-only, or skip PRIVATE contacts?
+   see (crm visibility); should contact webhooks be owner-only, or skip PRIVATE contacts? (Second
+   review repair SV-1: contact events now also need revenue read, as their rows carry the stored
+   money signals; booking events carry the booking's contact as the bookings routes answer it,
+   id, name, email and phone, whatever its visibility, as those routes do.)
+9. Connector authenticate (`ConnectorController.authenticate`) stays open, as do sync, test and
+   smoke of non-Google connectors (existing tests pin them open). Second review repair SV-3 found
+   its Outlook answer is only a pointer to the consent start, which now needs settings admin, as
+   the social one (a POST oauth/start) does; no connector's authenticate signs a state itself
+   today. Should authenticate also be settings admin, so a future connector that does is covered?
 
 ## KEY follow-ups and seams
 
@@ -113,12 +135,20 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 - Review repair: `MarketplaceController.createProjectForBundleOrder` now carries projects write on
   its handler (SEC-4), a decorator line away from the purchase-order handlers pkt/PR195-JOURNAL-SCOPE
   edits (no shared hunk).
-- Review repair CR-4, left for after pkt/PR195-JOURNAL-SCOPE lands: `commerce-inventory-wrapper.tsx`
-  and `marketplace/page.tsx` close the warehouse, stock-set and listing modals with no word on a
-  403 (the BUG-032 pattern). Both handlers are the ones that branch edits for its purchase-order
-  refusal (it adds `toast` and `moduleWriteRefusal` imports and a branch in the same save
-  function), so the same refusal read is applied to their other branches once it lands, with its
-  `moduleWriteRefusal` helper.
+- Review repair CR-4 had left `commerce-inventory-wrapper.tsx` and `marketplace/page.tsx` for after
+  pkt/PR195-JOURNAL-SCOPE, but that branch answers the purchase-order edit only (second review
+  CRV-3). The second review repair answers the rest here: a refused warehouse, stock-set or listing
+  save keeps its form open with the server's refusal in it, and a refused warehouse or listing
+  delete says the refusal on the page (commerce-inventory-wrapper-refusal,
+  marketplace-listing-refusal). The refusal is shown inline (role alert) and these files import
+  nothing new, so pkt/PR195-JOURNAL-SCOPE's `toast` and `moduleWriteRefusal` import lines and its
+  purchase-order branch merge as they are (`git merge-tree` clean on both files); after the merge
+  its purchase-order edit says its refusal by toast and the other saves inline.
+- Second review CRV-1 / CRV-2 (web): every screen whose writes this packet newly gated reads the
+  server's answer: no success toast and no row dropped on a 403 (project templates, plan detail
+  reorder / execute / complete / reject / delete / approve, plan generate, Continental Ops stock
+  counts / goods receipts / delivery notes, the Drive inventory-sheet link), and the connection
+  screens of SV-2 (Content Studio's social disconnect; the others already showed the server's error).
 
 ## Applied (this packet)
 
@@ -132,6 +162,10 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `AnalyticsController.markInsightRead` | POST | `/api/businesses/:businessId/analytics/insights/:id/read` | applied | `analytics:write` |
 | `ApiKeysController.create` | POST | `/api/businesses/:businessId/api-keys` | applied | `settings:admin` |
 | `ApiKeysController.revoke` | DELETE | `/api/businesses/:businessId/api-keys/:keyId` | applied | `settings:admin` |
+| `CommunicationsController.connectWhatsApp` | POST | `/communications/businesses/:businessId/whatsapp/connect` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
+| `CommunicationsController.createConnection` | POST | `/communications/businesses/:businessId/connections` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only |
+| `CommunicationsController.deleteConnection` | DELETE | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
+| `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only (a businessId or id in it moved or renamed the connection) |
 | `ConnectorController.saveCredentials` | POST | `/connectors/businesses/:businessId/credentials/:type` | applied | `settings:admin` (review repair SEC-1: it replaces the account a connector syncs with) |
 | `DeliveryNoteController.cancel` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/cancel` | applied | `storefront:write` |
 | `DeliveryNoteController.create` | POST | `/continental-ops/businesses/:businessId/delivery-notes` | applied | `storefront:write` |
@@ -162,6 +196,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `MarketplaceController.updateShippingZone` | PATCH | `/marketplace/businesses/:businessId/shipping-zones/:zoneId` | applied | `storefront:write` |
 | `MarketplaceController.updateWarehouse` | PATCH | `/marketplace/businesses/:businessId/warehouses/:warehouseId` | applied | `storefront:write` |
 | `MarketplaceController.upsertInventory` | POST | `/marketplace/businesses/:businessId/inventory` | applied | `storefront:write` |
+| `MicrosoftOAuthController.buildAuthUrl` | GET | `/connect/microsoft/businesses/:businessId/auth-url` | applied | `settings:admin` (second review repair SV-3: a credential-binding start: its signed state names the business, and the public callback stores the Outlook contacts tokens of whoever completes the consent on it) |
 | `ProjectsController.addTask` | POST | `/projects/businesses/:businessId/projects/:projectId/tasks` | applied | `projects:write` |
 | `ProjectsController.analyzeImpact` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/analyze-impact` | applied | `projects:write` (review repair SEC-5: a metered model call on the business's AI credits) |
 | `ProjectsController.completeOutAppEvent` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/complete` | applied | `projects:write` |
@@ -187,21 +222,25 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `ProjectsController.updateProject` | PATCH | `/projects/businesses/:businessId/projects/:projectId` | applied | `projects:write` |
 | `ProjectsController.updateTask` | PATCH | `/projects/businesses/:businessId/tasks/:taskId` | applied | `projects:write` |
 | `ProjectsController.updateTaskStatus` | PATCH | `/projects/businesses/:businessId/tasks/:taskId/status` | applied | `projects:write` |
+| `SocialController.deleteConnection` | DELETE | `/social/businesses/:businessId/connections/:platform` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
+| `SocialController.manualConnect` | POST | `/social/businesses/:businessId/connections/:platform/manual` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
+| `SocialController.oauthCallback` | POST | `/social/businesses/:businessId/connections/:platform/oauth/callback` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) |
+| `SocialController.oauthStart` | POST | `/social/businesses/:businessId/connections/:platform/oauth/start` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's social account credential; the SEC-1 class) (a credential-binding start, CEN-09) |
 | `StockCountController.adjust` | POST | `/continental-ops/businesses/:businessId/stock-counts/:id/adjust` | applied | `storefront:write` |
 | `StockCountController.create` | POST | `/continental-ops/businesses/:businessId/stock-counts` | applied | `storefront:write` |
 | `StockCountController.remove` | DELETE | `/continental-ops/businesses/:businessId/stock-counts/:id` | applied | `storefront:write` |
 | `StockCountController.update` | PATCH | `/continental-ops/businesses/:businessId/stock-counts/:id` | applied | `storefront:write` |
-| `WebhooksController.create` | POST | `/webhooks/businesses/:businessId/webhooks` | applied | `settings:write` |
+| `WebhooksController.create` | POST | `/webhooks/businesses/:businessId/webhooks` | applied | `settings:write`; and read on every subscribed event's module (SEC-2), with every contact in view and revenue read for contact events (second review SV-1, D-100) |
 | `WebhooksController.remove` | DELETE | `/webhooks/businesses/:businessId/webhooks/:webhookId` | applied | `settings:write` |
 | `WebhooksController.testWebhook` | POST | `/webhooks/businesses/:businessId/webhooks/:webhookId/test` | applied | `settings:write` |
-| `WebhooksController.toggleWebhook` | POST | `/webhooks/businesses/:businessId/webhooks/:webhookId/toggle` | applied | `settings:write` |
+| `WebhooksController.toggleWebhook` | POST | `/webhooks/businesses/:businessId/webhooks/:webhookId/toggle` | applied | `settings:write`; turning one back on takes create's event reads (SEC-2, SV-1) |
 
 ## Secret-bearing reads (reviewed)
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | settings:read; the signing secret is selected for settings admin only (review repair CR-5), and below settings write the receiver URL is its origin only (SEC-3: a Slack, Zapier or Make hook's path is its credential) |
-| `WebhooksController.deliveries` | GET | `/webhooks/businesses/:businessId/webhooks/:webhookId/deliveries` | secret-read | settings:read; each delivery's receiver URL is its origin only below settings write (review repair SEC-3) |
+| `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | settings:read; the signing secret is selected for settings admin only (review repair CR-5), and below settings write the receiver URL is its origin only (SEC-3: a Slack, Zapier or Make hook's path is its credential); per webhook, the secret and the full URL go only to a reader who may receive its events (second review repair SV-5: an ADMIN bound by D-114 read the owner's invoice webhook's secret and signed forged deliveries with it) |
+| `WebhooksController.deliveries` | GET | `/webhooks/businesses/:businessId/webhooks/:webhookId/deliveries` | secret-read | settings:read; each delivery's receiver URL is its origin only below settings write (review repair SEC-3), or for a reader who may not receive the webhook's events (SV-5) |
 | `ConnectorController.getWebhookInfo` | GET | `/connectors/businesses/:businessId/webhook-info/:type` | secret-read | settings:admin; the inbound form webhook's signing secret (created on the first read) is its whole authentication (review repair SEC-1: a STAFF member read it and forged submissions) |
 | `ConnectorController.getCredentials` | GET | `/connectors/businesses/:businessId/credentials/:type` | secret-read | secret fields answered masked (ConnectorCredentialsService.getMaskedCredentials, the last 4 only); the form schema stays open to members |
 | `ApiKeysController.list` | GET | `/api/businesses/:businessId/api-keys` | secret-read | settings:read; name, prefix and scopes only (the key is hashed; the raw key is answered once at create) |
@@ -388,6 +427,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
+| `BookingsController.getCalendarAuthUrl` | GET | `/bookings/businesses/:businessId/calendar/auth-url` | exempt-check | check:assertGoogleConnectOwner (a credential-binding start, CEN-09; the Google Calendar consent is the owner's, D-99) |
 | `BookingsController.addToWaitlist` | POST | `/bookings/businesses/:businessId/waitlist` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
 | `BookingsController.batchServices` | POST | `/bookings/businesses/:businessId/services/batch` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
 | `BookingsController.cancelWaitlistEntry` | POST | `/bookings/businesses/:businessId/waitlist/:entryId/cancel` | open | membership only; follow-up SWEEP-CENSUS: bookings write; STAFF default bookings is read, so gating takes booking handling from default staff (owner question) |
@@ -560,6 +600,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | --- | --- | --- | --- | --- |
 | `CommerceController.confirmGmailConnection` | POST | `/commerce/businesses/:businessId/gmail/confirm` | exempt-check | check:assertConnectAuthority (the mailbox is the owner's, D-42) |
 | `CommerceController.disconnectGmail` | DELETE | `/commerce/businesses/:businessId/gmail` | exempt-check | service-check:GMAIL_OWNER_ONLY (GmailService.disconnectGmail, D-42) |
+| `CommerceController.getGmailAuthUrl` | GET | `/commerce/businesses/:businessId/gmail/auth-url` | exempt-check | check:assertConnectAuthority (a credential-binding start, CEN-09; GMAIL_OWNER_ONLY, D-11, D-42) |
 | `CommerceController.setDocumentTemplate` | PATCH | `/commerce/businesses/:businessId/document-templates` | exempt-check | check:isProfileOwner (D-11, R0-09g) |
 
 ### DocumentTemplateController (`commerce/document-template/document-template.controller.ts`)
@@ -593,11 +634,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunicationsController.aiSuggestSubjects` | POST | `/communications/businesses/:businessId/content-ai/suggest-subjects` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.aiSuggestTime` | POST | `/communications/businesses/:businessId/content-ai/suggest-time` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.cancel` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/cancel` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.connectWhatsApp` | POST | `/communications/businesses/:businessId/whatsapp/connect` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.createConnection` | POST | `/communications/businesses/:businessId/connections` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.createContent` | POST | `/communications/businesses/:businessId/content` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.createDestination` | POST | `/communications/businesses/:businessId/connections/:connectionId/destinations` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.deleteConnection` | DELETE | `/communications/businesses/:businessId/connections/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.deleteContent` | DELETE | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.healthCheck` | POST | `/communications/businesses/:businessId/connections/:id/health-check` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -609,7 +647,6 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunicationsController.schedule` | POST | `/communications/businesses/:businessId/content/:id/schedule` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.toggleDestination` | PATCH | `/communications/businesses/:businessId/destinations/:destId/toggle` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.updateContent` | PATCH | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.upsertVariant` | POST | `/communications/businesses/:businessId/content/:id/variants` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.validateEmailSend` | POST | `/communications/businesses/:businessId/email/validate-send` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -1005,6 +1042,7 @@ Every other route is applied (above).
 | `GoogleDriveController.createFolder` | POST | `/drive/businesses/:businessId/folders` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.createSheet` | POST | `/drive/businesses/:businessId/sheets` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.deleteFile` | DELETE | `/drive/businesses/:businessId/files/:fileId` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
+| `GoogleDriveController.getAuthUrl` | GET | `/drive/businesses/:businessId/auth-url` | exempt-check | check:assertGoogleConnectOwner (a credential-binding start, CEN-09; D-99) |
 | `GoogleDriveController.disconnect` | DELETE | `/drive/businesses/:businessId/disconnect` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `GoogleDriveController.emailContent` | POST | `/drive/businesses/:businessId/email-content` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.exportHtml` | POST | `/drive/businesses/:businessId/export-html` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
@@ -1365,11 +1403,7 @@ Every other route is applied (above).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `SocialController.createPost` | POST | `/social/businesses/:businessId/posts` | open | membership only; follow-up SWEEP-CENSUS: content write |
-| `SocialController.deleteConnection` | DELETE | `/social/businesses/:businessId/connections/:platform` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `SocialController.deletePost` | DELETE | `/social/businesses/:businessId/posts/:postId` | open | membership only; follow-up SWEEP-CENSUS: content write |
-| `SocialController.manualConnect` | POST | `/social/businesses/:businessId/connections/:platform/manual` | open | membership only; follow-up SWEEP-CENSUS: content write |
-| `SocialController.oauthCallback` | POST | `/social/businesses/:businessId/connections/:platform/oauth/callback` | open | membership only; follow-up SWEEP-CENSUS: content write |
-| `SocialController.oauthStart` | POST | `/social/businesses/:businessId/connections/:platform/oauth/start` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `SocialController.postNow` | POST | `/social/businesses/:businessId/posts/now` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `SocialController.publish` | POST | `/social/businesses/:businessId/posts/:postId/publish` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `SocialController.schedulePost` | POST | `/social/businesses/:businessId/posts/schedule` | open | membership only; follow-up SWEEP-CENSUS: content write |

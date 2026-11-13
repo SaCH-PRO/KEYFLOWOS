@@ -16,6 +16,28 @@ function stripSecretsFromDestination(dest: Record<string, unknown>) {
   return dest;
 }
 
+/**
+ * SWEEP-P0-SCOPES second review repair (finding SV-2): the fields a create or an update of a channel
+ * connection may write. The controller hands the request body over whole (`@Body() body: any`, which
+ * the global ValidationPipe does not strip), and update ran prisma.channelConnection.update({ where:
+ * { id }, data }) with it: a body naming businessId moved the business's credentialed connection (its
+ * encrypted token and refresh token) into another business, and one naming id renamed its key. A key
+ * outside these lists is not written; the business is always the route's.
+ */
+const CONNECTION_CREATE_FIELDS = ['provider', 'label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'providerMeta'] as const;
+const CONNECTION_UPDATE_FIELDS = ['label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'healthState', 'healthMessage', 'lastCheckedAt', 'providerMeta'] as const;
+
+function pickFields<K extends string>(data: unknown, fields: readonly K[]): Partial<Record<K, unknown>> {
+  const out: Partial<Record<K, unknown>> = {};
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return out;
+  for (const key of fields) {
+    if (Object.prototype.hasOwnProperty.call(data, key) && (data as Record<string, unknown>)[key] !== undefined) {
+      out[key] = (data as Record<string, unknown>)[key];
+    }
+  }
+  return out;
+}
+
 @Injectable()
 export class ChannelConnectionService {
   private readonly logger = new Logger(ChannelConnectionService.name);
@@ -49,8 +71,9 @@ export class ChannelConnectionService {
     scopes?: string;
     providerMeta?: Record<string, unknown>;
   }) {
+    const fields = pickFields(data, CONNECTION_CREATE_FIELDS) as typeof data;
     const conn = await this.prisma.client.channelConnection.create({
-      data: { ...data, businessId },
+      data: { ...fields, businessId },
       include: { destinations: true },
     });
 
@@ -86,7 +109,7 @@ export class ChannelConnectionService {
     if (!existing) return null;
     const updated = await this.prisma.client.channelConnection.update({
       where: { id },
-      data,
+      data: pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data,
     });
 
     if (existing.provider?.toUpperCase() === 'EMAIL' && data.accountEmail) {

@@ -21,6 +21,13 @@ import type {
   StoreOrderCancelledPayload,
 } from '../../core/event-bus/events.types';
 
+/**
+ * SWEEP-P0-SCOPES second review repair (SV-1): the contact fields a booking event delivers, the
+ * bookings read routes' contact select (BookingsService.listBookings and the status, notes and
+ * location answers).
+ */
+const BOOKING_CONTACT_FIELDS = ['id', 'firstName', 'lastName', 'email', 'phone'] as const;
+
 interface WebhookRecord {
   id: string;
   name: string;
@@ -135,26 +142,35 @@ export class WebhookDispatcherService {
     });
   }
 
+  /**
+   * SWEEP-P0-SCOPES second review repair (finding SV-1): a booking event carries the booking's contact
+   * as the bookings read routes answer it ({ id, firstName, lastName, email, phone }:
+   * BookingsService.listBookings), at data.contact and at data.booking.contact. A booking.* webhook
+   * needs bookings read only (webhook-events.ts), and BookingsService emits the booking read with
+   * include { contact: true }: the whole Contact row went out, a PRIVATE contact's visibility and owner,
+   * its internal note and its money signals (lifetimeValue, averageSpend, paymentReliability; D-100)
+   * included, to a member the crm and revenue routes refuse.
+   */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
     await this.dispatch('booking.created', payload.businessId, {
-      booking: payload.booking,
-      contact: payload.contact ? this.sanitizeContact(payload.contact) : null,
+      booking: this.bookingForWebhook(payload.booking),
+      contact: this.bookingContact(payload.contact),
     });
   }
 
   @OnEvent('booking.confirmed')
   async onBookingConfirmed(payload: BookingConfirmedPayload) {
     await this.dispatch('booking.confirmed', payload.businessId, {
-      booking: payload.booking,
-      contact: payload.contact ? this.sanitizeContact(payload.contact) : null,
+      booking: this.bookingForWebhook(payload.booking),
+      contact: this.bookingContact(payload.contact),
     });
   }
 
   @OnEvent('booking.completed')
   async onBookingCompleted(payload: BookingCompletedPayload) {
     await this.dispatch('booking.completed', payload.businessId, {
-      booking: payload.booking,
+      booking: this.bookingForWebhook(payload.booking),
     });
   }
 
@@ -447,6 +463,20 @@ export class WebhookDispatcherService {
       this.logger.error(`store_order.paid stored-order read failed for ${orderId}: ${(err as Error).message}`);
       return false;
     }
+  }
+
+  /** Second review SV-1: the booking's contact as the bookings routes answer it, or null. */
+  private bookingContact(contact: unknown): Record<string, unknown> | null {
+    if (!contact || typeof contact !== 'object') return null;
+    const row = contact as Record<string, unknown>;
+    return Object.fromEntries(BOOKING_CONTACT_FIELDS.map((key) => [key, row[key] ?? null]));
+  }
+
+  /** Second review SV-1: the booking with its contact (where it carries one) as the bookings routes answer it. */
+  private bookingForWebhook(booking: unknown): unknown {
+    if (!booking || typeof booking !== 'object' || !('contact' in booking)) return booking;
+    const { contact, ...rest } = booking as Record<string, unknown>;
+    return { ...rest, contact: this.bookingContact(contact) };
   }
 
   private sanitizeContact(contact: any) {

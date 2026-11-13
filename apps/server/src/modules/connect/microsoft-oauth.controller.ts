@@ -11,6 +11,7 @@ import {
 import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { MicrosoftOAuthService } from './microsoft-oauth.service';
 
 @Controller('connect/microsoft')
@@ -23,8 +24,18 @@ export class MicrosoftOAuthController {
   // membership; we deliberately do NOT expose a query-only variant since
   // that would allow IDOR (any authenticated user binding OAuth to any
   // businessId they can guess).
+  //
+  // SWEEP-P0-SCOPES second review repair (finding SV-3, the SEC-1 credential
+  // class): membership is not enough. The signed state names the business
+  // only, and the public callback stores the Outlook contacts tokens of
+  // whoever completes the consent on that business, so a member who started
+  // it with their own Microsoft account replaced the owner's connection.
+  // Starting it needs settings admin, as the connector credentials do (OWNER
+  // and ADMIN by role default, STAFF none; an explicit map binds every role,
+  // D-114). The Google connections keep their owner rule (D-99).
   @Get('businesses/:businessId/auth-url')
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   buildAuthUrl(@Param('businessId') businessId: string): { authUrl: string } {
     return { authUrl: this.svc.buildAuthUrl(businessId) };
   }

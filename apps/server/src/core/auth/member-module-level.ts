@@ -13,6 +13,12 @@ export type ModuleLevelActor = { id?: string; role?: string } | null | undefined
  * The membership's explicit permissionScopes map, where a missing key is none
  * (EXPLICIT_MAP_MISSING_KEY), else its role's defaults; no membership is none. A platform
  * SUPER_ADMIN is admin, as ModuleScopeGuard passes them.
+ *
+ * Second review repair (SV-4): any stored JSON object is the explicit map, a JSON array included,
+ * as the guard reads it (`typeof scopes === 'object'`): an array names no module, so every module
+ * is none. This read had sent an array to the role defaults, and the owner's team route stores one
+ * without complaint (PATCH .../team/:m/permissions { scopes: [] }), so an ADMIN the guard refuses
+ * everywhere passed the handler checks that use this helper alone (clearing connector credentials).
  */
 export async function memberModuleLevel(
   prisma: PrismaService,
@@ -27,10 +33,9 @@ export async function memberModuleLevel(
     select: { role: true, permissionScopes: true },
   });
   if (!membership) return 'none';
+  const stored = membership.permissionScopes;
   const scopes: Record<string, unknown> =
-    membership.permissionScopes && typeof membership.permissionScopes === 'object' && !Array.isArray(membership.permissionScopes)
-      ? (membership.permissionScopes as Record<string, unknown>)
-      : defaultScopesForRole(membership.role);
+    stored && typeof stored === 'object' ? (Array.isArray(stored) ? {} : (stored as Record<string, unknown>)) : defaultScopesForRole(membership.role);
   const level = scopes[module];
   return isAccessLevel(level) ? level : 'none';
 }

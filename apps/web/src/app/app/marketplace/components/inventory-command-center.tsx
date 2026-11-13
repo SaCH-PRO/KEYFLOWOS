@@ -697,11 +697,17 @@ export function InventoryCommandCenter({
                   else toast.error(res.error || "Could not start Google Drive sign-in");
                 } catch {}
               }}
-              onLinkSheet={(sheetId: string, sheetName: string) =>
-                apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } })
-                  .then(() => apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`))
-                  .then(r => { if (r.data) setSheetStatus(r.data); })
-              }
+              onLinkSheet={async (sheetId: string, sheetName: string) => {
+                // SWEEP-P0-SCOPES second review repair (CRV-2): a refused link (storefront write) says
+                // why; the chain dropped the POST's answer and reloaded the status with no word.
+                const linked = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } });
+                if (linked.error) {
+                  toast.error(linked.error);
+                  return;
+                }
+                const r = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+                if (r.data) setSheetStatus(r.data);
+              }}
             />
           )}
         </motion.div>

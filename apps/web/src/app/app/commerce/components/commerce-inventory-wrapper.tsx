@@ -37,6 +37,13 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
   const [form, setForm] = useState<FormState>({});
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: "warehouse"; id: string } | null>(null);
+  /**
+   * SWEEP-P0-SCOPES second review repair (CRV-3): the server's refusal of a save (shown in the open
+   * form) or of a warehouse delete (shown above the command centre). Shown inline, so this file adds
+   * no import beside pkt/PR195-JOURNAL-SCOPE's.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -58,6 +65,7 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
   }, [load]);
 
   const openModal = (kind: Exclude<ModalKind, null>, defaults: FormState = {}, id: string | null = null) => {
+    setSaveError(null);
     setModal(kind);
     setEditingId(id);
     setForm(defaults);
@@ -67,14 +75,24 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
     if (!modal) return;
     setSaving(true);
     try {
+      // SWEEP-P0-SCOPES second review repair (CRV-3): the api client answers a refusal (storefront
+      // write) as { error } and does not throw; a refused warehouse or stock save keeps the form open
+      // with the server's words. It closed the form and reloaded as if saved.
+      let refusal: string | null = null;
       if (modal === "warehouse") {
-        if (editingId) await apiPatch(`${basePath}/warehouses/${editingId}`, form);
-        else await apiPost({ path: `${basePath}/warehouses`, body: form });
+        const res = editingId ? await apiPatch(`${basePath}/warehouses/${editingId}`, form) : await apiPost({ path: `${basePath}/warehouses`, body: form });
+        refusal = res.error ?? null;
       } else if (modal === "inventory") {
-        await apiPost({ path: `${basePath}/inventory`, body: form });
+        refusal = (await apiPost({ path: `${basePath}/inventory`, body: form })).error ?? null;
       } else if (modal === "purchase-order") {
         if (editingId) await apiPatch(`${basePath}/purchase-orders/${editingId}`, form);
         else await apiPost({ path: `${basePath}/purchase-orders`, body: form });
+      }
+
+      if (refusal) {
+        setSaveError(refusal);
+        setSaving(false);
+        return;
       }
       setModal(null);
       await load();
@@ -83,15 +101,23 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
   };
 
   const handleDeleteWarehouse = async (id: string) => {
+    setDeleteError(null);
     try {
-      await apiDelete(`${basePath}/warehouses/${id}`);
-      await load();
+      // SWEEP-P0-SCOPES second review repair (CRV-3): a refused delete says why (it reloaded with no word).
+      const res = await apiDelete(`${basePath}/warehouses/${id}`);
+      if (res.error) setDeleteError(res.error);
+      else await load();
     } catch {}
     setConfirmDelete(null);
   };
 
   return (
     <>
+      {deleteError && (
+        <div role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          {deleteError}
+        </div>
+      )}
       <InventoryCommandCenter
         businessId={businessId}
         basePath={basePath}
@@ -203,6 +229,12 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
                 </>
               )}
             </div>
+
+            {saveError && (
+              <p role="alert" className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-xs text-red-400">
+                {saveError}
+              </p>
+            )}
 
             <div className="flex justify-end gap-2 mt-5">
               <button
