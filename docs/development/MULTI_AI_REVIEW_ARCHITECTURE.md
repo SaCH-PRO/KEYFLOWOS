@@ -4,6 +4,8 @@ Status: PROPOSAL for independent review. Nothing here is implemented or in
 force. Operator directives of 2026-10-12; the decisions they settled are in
 section 8. Read from `main` `98ee0202`.
 
+> **Historical note (2026-11-12, convergence tie-off).** Brought to main as the proposal of record, unchanged. Gap G8 (finding F9) is closed on main: since `b1948d27`, `scripts/agent-control/lib/merge-grant.mjs` requires a separate #80 merge grant, and `ACCEPT_FOR_ADMISSION` alone is not merge authority (`scripts/agent-control/lib/admission.mjs`). The rest of the design is still unimplemented. The 2026-10-12 decisions in section 8 (risk-adaptive review, no self-authorized critical merge, Kimi Code excluded from development and review) are recorded only here: at `f5d58ef7`, `AGENTS.md` and `docs/development/EXECUTION_CONTROL_STANDARD.md` still list Kimi Code. Applying sections 3 and 7 is separate control-plane work (D-32 family in `docs/reconstruction/BUILD-MAP-001.md`).
+
 This document does four things: says what already exists and what is missing,
 gives the smallest design that puts GPT-6 review into the existing control
 plane, specifies the review evidence record and the gate that reads it, and
