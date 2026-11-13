@@ -247,7 +247,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, onTestFinished, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -1328,11 +1328,28 @@ describe('G6PUB-R3-STORE-ORDER-DOORS review repairs: an order created paid (D-77
   });
 });
 
+/**
+ * W11-STORE-OWN-PAYMENT-KEYS (owner ruling D-138): a storefront takes PayPal only with the store's own pair in its
+ * settings; the platform env no longer stands in. V87-16 and V87-16b give the USD store (their PayPal control) its own
+ * pair for the case, restored when the case finishes. What they assert is unchanged.
+ */
+async function giveUsdStoreOwnPaypal(): Promise<void> {
+  const metaData = (await db.business.findUnique({ where: { id: ID.bizUsd }, select: { metaData: true } })).metaData;
+  onTestFinished(async () => {
+    await db.business.update({ where: { id: ID.bizUsd }, data: { metaData: metaData ?? {} } });
+  });
+  await db.business.update({
+    where: { id: ID.bizUsd },
+    data: { metaData: { ...(metaData ?? {}), paypalClientId: `${P}own_paypal_client_16`, paypalClientSecret: `${P}own_paypal_secret_16` } },
+  });
+}
+
 describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106)', () => {
   it('V87-16 (W10-PAYPAL-CURRENCY, D-106): GET /site/storefront/public/:slug/gateways offers no PayPal for a TTD amount (nor JMD, BBD, GYD, XCD, nor a TTD business with no cart currency), and the PayPal checkout of a TTD cart is refused 400 PAYPAL_CURRENCY_UNSUPPORTED before PayPal is called; control: a USD cart is offered PayPal in USD and its PayPal checkout makes a USD order', async () => {
     const paypalEnv = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
     const previous = Object.fromEntries(Object.keys(paypalEnv).map((k) => [k, process.env[k]]));
     Object.assign(process.env, paypalEnv);
+    await giveUsdStoreOwnPaypal();
     // The PayPal SDK client (the provider edge), stubbed: it records the orders it is asked for.
     const ordered: any[] = [];
     const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
@@ -1390,6 +1407,7 @@ describe('W10-PAYPAL-CURRENCY: PayPal only for a currency PayPal supports (D-106
     const paypalEnv = { PAYPAL_CLIENT_ID: `${P}paypal_client_fake`, PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake` };
     const previous = Object.fromEntries(Object.keys(paypalEnv).map((k) => [k, process.env[k]]));
     Object.assign(process.env, paypalEnv);
+    await giveUsdStoreOwnPaypal();
     const ordered: any[] = [];
     const clientSpy = vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
       client: {},
