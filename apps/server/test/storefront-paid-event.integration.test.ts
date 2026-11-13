@@ -265,6 +265,32 @@
  *           store fulfillment panel's Complete offline action posts to that route
  *           (web spec fulfillment-panel-complete-offline FPO-01..04)
  *
+ *           W11-CHECKOUT-PAIR-SCOPE (wave 11a seam review W11SEAM-SM-CR-1; D-137
+ *           leaves planted cross-business stock rows for an operator), red at
+ *           9831c217. inventory_stocks is unique on (product, warehouse) across
+ *           every business, so a row of another business (B) can hold the pair
+ *           of this business's product in this business's default warehouse.
+ *           The paid door read the pair with findUnique and decremented B's row
+ *           without holding its lock (its locks and the COGS read are
+ *           business-scoped), wrote its own 'sale' movement for it and posted no
+ *           COGS; and it counted B's row as stock kept for the product, so a
+ *           product with no inventoryMode was sold as tracked. These cases go
+ *           through the HTTP route POST /site/businesses/:businessId/orders/
+ *           :orderId/complete-offline (SiteController behind its real guards)
+ *           and through a provider settlement (updatePaymentStatus):
+ *   V18-T4  a tracked line whose pair is held by B's planted row is the
+ *           business's own missing stock: refused 400 with the refusal its
+ *           twin with no stock row gets, the order still unpaid with no
+ *           invoice, payment or posting, B's row untouched and no movement for
+ *           the product in any business. Control: a line with the business's
+ *           own row in that warehouse is decremented once, with one 'sale'
+ *           movement and one cogs posting at the own row's cost
+ *   V18-T4b a line of a product with no inventoryMode whose only stock row is
+ *           B's planted row is sold as untracked, as with no row at all: the
+ *           order is paid, B's row untouched, no movement and no cogs for it;
+ *           the order's own-stock line beside it is decremented once with one
+ *           movement and the cogs of that line alone
+ *
  * Nothing on the money path is mocked: PrismaService, StoreOrderService
  * (createOrder's server-side pricing, completeCheckout's transaction),
  * InvoiceWorkflowService, RevenueAttributionService, RevenuePostingService,
@@ -346,6 +372,8 @@ async function cleanup() {
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_listings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V18-T4: the paid door's 'sale' movements (the business delete cascades them too).
+    `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -3397,5 +3425,263 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(panel).toContain('path: `/site/businesses/${businessId}/orders/${order.id}/complete-offline`');
     expect(panel).toMatch(/OFFLINE_PAYMENT_METHODS = new Set\(\["CASH", "MANUAL"\]\)/);
     expect(fs.existsSync(path.resolve(__dirname, '../../web/src/app/app/store/components/__tests__/fulfillment-panel-complete-offline.test.tsx'))).toBe(true);
+  });
+
+  /**
+   * W11-CHECKOUT-PAIR-SCOPE (wave 11a seam review W11SEAM-SM-CR-1; D-137, D-127, D-112): the paid door
+   * (StoreOrderService.completeCheckout) reads and writes only the business's own stock row. inventory_stocks is
+   * unique on (product, warehouse) across every business, and D-137 leaves a planted row of another business for an
+   * operator to repair, so business B's row can hold the pair of business A's product in A's default warehouse. At
+   * 9831c217 the door read that pair with findUnique and decremented B's row (lockStockRowsInOrder, business-scoped,
+   * had locked nothing for it), wrote A's 'sale' movement for it, and posted no COGS (onProductSold reads A's rows);
+   * and it counted B's row as stock kept for the product, so a product with no inventoryMode was sold as tracked.
+   *
+   * The offline completion goes through the HTTP route POST /site/businesses/:businessId/orders/:orderId/
+   * complete-offline: SiteController behind its real guards (AuthGuard, BusinessGuard, ModuleScopeGuard revenue
+   * write; the signed-in member from a test identity header, as storefront-order-doors does), over the suite's real
+   * StoreOrderService. A provider settlement goes through updatePaymentStatus, as the provider callbacks call it.
+   *
+   * The fixture: in A's default warehouse (the first active one, where the door decrements), B's planted rows hold
+   * the pairs of `tracked` (inventoryMode tracked) and `unset` (no inventoryMode, no other stock row); `own` has A's
+   * own costed row there; `missing` (tracked) has no stock row anywhere, the business's own missing stock.
+   */
+  describe('W11-CHECKOUT-PAIR-SCOPE the paid door reads and writes only the business\'s own stock row', () => {
+    const CPS = {
+      tracked: `${P}cps_tracked`,
+      missing: `${P}cps_missing`,
+      own: `${P}cps_own`,
+      unset: `${P}cps_unset`,
+      plantedTracked: `${P}cps_planted_tracked`,
+      plantedUnset: `${P}cps_planted_unset`,
+      ownStock: `${P}cps_own_stock`,
+      warehouse: `${P}cps_wh`,
+    };
+    const PLANTED_QTY = 10;
+    const PLANTED_COST = 9;
+    const OWN_QTY = 10;
+    const OWN_COST = 12.5;
+    let http: any;
+    let request: any;
+    let warehouseId: string;
+
+    beforeAll(async () => {
+      const found = await db.warehouse.findFirst({ where: { businessId: ID.biz, isActive: true }, orderBy: { createdAt: 'asc' } });
+      warehouseId = found?.id ?? (await db.warehouse.create({ data: { id: CPS.warehouse, businessId: ID.biz, name: 'V18A CPS Warehouse' } })).id;
+      for (const [id, name, inventoryMode] of [
+        [CPS.tracked, 'V18A Pair Held', 'tracked'],
+        [CPS.missing, 'V18A No Stock Row', 'tracked'],
+        [CPS.own, 'V18A Own Stock', 'tracked'],
+        [CPS.unset, 'V18A Mode Unset', null],
+      ] as const) {
+        await db.product.create({
+          data: { id, businessId: ID.biz, name, price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode },
+        });
+      }
+      // B's planted rows (D-137): B's business id on the pair of A's product in A's warehouse.
+      for (const [id, productId] of [[CPS.plantedTracked, CPS.tracked], [CPS.plantedUnset, CPS.unset]] as const) {
+        await db.inventoryStock.create({
+          data: { id, businessId: ID.bizB, productId, warehouseId, quantity: PLANTED_QTY, reserved: 0, costPerUnit: PLANTED_COST },
+        });
+      }
+      await db.inventoryStock.create({
+        data: { id: CPS.ownStock, businessId: ID.biz, productId: CPS.own, warehouseId, quantity: OWN_QTY, reserved: 0, costPerUnit: OWN_COST },
+      });
+
+      request = (await import('supertest')).default;
+      const { Test } = await import('@nestjs/testing');
+      const { ValidationPipe } = await import('@nestjs/common');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+      const { HoneypotGuard } = await import('../src/core/guards/honeypot.guard');
+      const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+      const { SiteController } = await import('../src/modules/site/site.controller');
+      const { SiteService } = await import('../src/modules/site/site.service');
+      const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+      const { PromoCodeService } = await import('../src/modules/site/promo-code.service');
+      const { IntakeService } = await import('../src/modules/site/intake.service');
+      const { QualificationService } = await import('../src/modules/site/qualification.service');
+      const { StorefrontConversionService } = await import('../src/modules/site/storefront-conversion.service');
+      const { CustomerReferralService } = await import('../src/modules/site/customer-referral.service');
+      const { CaseStudyService } = await import('../src/modules/site/case-study.service');
+      const { PaymentsService } = await import('../src/modules/payments/payments.service');
+      // The services the complete-offline route does not call are stand-ins; the public routes (rate limit) are not called.
+      const stub = {};
+      const moduleRef = await Test.createTestingModule({
+        controllers: [SiteController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          PublicRateLimitGuard,
+          HoneypotGuard,
+          { provide: REDIS_CLIENT, useValue: stub },
+          { provide: StoreOrderService, useValue: storeOrders },
+          { provide: SiteService, useValue: stub },
+          { provide: PromoCodeService, useValue: stub },
+          { provide: IntakeService, useValue: stub },
+          { provide: QualificationService, useValue: stub },
+          { provide: StorefrontConversionService, useValue: stub },
+          { provide: CustomerReferralService, useValue: stub },
+          { provide: CaseStudyService, useValue: stub },
+          { provide: PaymentsService, useValue: stub },
+        ],
+      }).compile();
+      http = moduleRef.createNestApplication();
+      // Identity attachment only, for seeded v18a_ users. No guard is overridden.
+      http.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers['x-test-user'];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      // Same filter and pipe as app-bootstrap.ts, so status codes are the production ones.
+      http.useGlobalFilters(new GlobalHttpExceptionFilter());
+      http.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+      await http.init();
+    }, 60_000);
+
+    afterAll(async () => {
+      await http?.close();
+    });
+
+    /** POST /site/businesses/:businessId/orders/:orderId/complete-offline as the signed-in member. */
+    const completeOffline = (orderId: string, actor = ID.owner) =>
+      request(http.getHttpServer()).post(`/site/businesses/${ID.biz}/orders/${orderId}/complete-offline`).set('x-test-user', actor).send({});
+
+    /** A storefront order of A placed through the public checkout path (server-side pricing). */
+    async function orderOf(lines: Array<{ productId: string; quantity: number }>, paymentMethod = 'CASH') {
+      const order = await storeOrders.createOrder({
+        businessId: ID.biz,
+        cartItems: lines,
+        customerInfo: { name: 'Vee Eighteen', email: CUSTOMER_EMAIL },
+        paymentMethod,
+      });
+      await settle();
+      return order;
+    }
+
+    const stockRow = (id: string) => db.inventoryStock.findUnique({ where: { id } });
+    /** Every stock movement of these products, in every business, as business:warehouse:product:change:type:reference. */
+    const movementsOf = async (productIds: string[]) =>
+      (
+        await db.stockMovement.findMany({ where: { productId: { in: productIds } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+      ).map((m: any) => `${m.businessId}:${m.warehouseId}:${m.productId}:${m.quantityChange}:${m.type}:${m.referenceId}`);
+    const noStockRow = (productId: string) => `Cannot finalize checkout: tracked product ${productId} has no stock row in the default warehouse.`;
+    /** One cogs posting of the order: Dr COGS / Cr INVENTORY_ASSET of `amount`. */
+    async function expectCogs(orderId: string, amount: number) {
+      const cogs = await cogsOf(orderId);
+      expect(cogs.map((t: any) => `${t.externalRef}:${t.status}:${Number(t.amount)}`), 'one cogs posting').toEqual([
+        `MarketplaceOrder:${orderId}:cogs:POSTED:${amount}`,
+      ]);
+      const legs = cogs[0].entries.map((e: any) => `${e.account?.systemKey}:${money(Number(e.debit))}:${money(Number(e.credit))}`).sort();
+      expect(legs, 'Dr COGS / Cr Inventory').toEqual([`COGS:${amount}:0`, `INVENTORY_ASSET:0:${amount}`].sort());
+    }
+    /** The refused completion wrote nothing: the order as it was, no invoice, payment, posting or cogs, no store_order.paid. */
+    async function expectNothingWritten(order: { id: string; orderNumber: string }, shape: unknown, before: unknown) {
+      expect(await orderShape(order.id), 'the order as it was').toEqual(shape);
+      expect(await invoicesOf(order), 'no INV-<orderNumber>').toEqual([]);
+      expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+      expect(await cogsOf(order.id), 'no cogs posting').toEqual([]);
+      expect(storeEvents(), 'no store_order.paid').not.toContain('store_order.paid');
+    }
+
+    it('V18-T4 (W11-CHECKOUT-PAIR-SCOPE, W11SEAM-SM-CR-1; D-137, D-127) a paid storefront checkout whose (product, warehouse) pair is held by a planted row of another business treats the line as the business\'s own missing stock: the offline completion (HTTP POST .../complete-offline) and a provider settlement are refused 400 with the refusal of a twin product with no stock row, the order unpaid with no invoice, payment, posting or cogs, the other business\'s row untouched and no stock movement for the product in any business; control: a line with the business\'s own row in that warehouse is decremented once, with one \'sale\' movement and one cogs posting at the own row\'s cost', async () => {
+      const planted = await stockRow(CPS.plantedTracked);
+      expect(`${planted.businessId}:${planted.productId}:${planted.warehouseId}`, 'the pair held by B').toBe(`${ID.bizB}:${CPS.tracked}:${warehouseId}`);
+
+      // The twin: the business's own missing stock (a tracked product with no stock row at all).
+      const twin = await orderOf([{ productId: CPS.missing, quantity: QUANTITY }]);
+      const twinShape = await orderShape(twin.id);
+      const twinBefore = await counts();
+      seen = [];
+      const twinRes = await completeOffline(twin.id);
+      await settle();
+      expect(`${twinRes.status} ${twinRes.body?.message}`, 'the own missing stock is refused').toBe(`400 ${noStockRow(CPS.missing)}`);
+      await expectNothingWritten(twin, twinShape, twinBefore);
+
+      // The pair held by B's planted row: the same path. At 9831c217: 201, B's row 10 -> 8 and A's 'sale' movement.
+      const order = await orderOf([{ productId: CPS.tracked, quantity: QUANTITY }]);
+      const shape = await orderShape(order.id);
+      const before = await counts();
+      seen = [];
+      const res = await completeOffline(order.id);
+      await settle();
+      expect(`${res.status} ${res.body?.message}`, 'the pair held by another business is the own missing stock').toBe(`400 ${noStockRow(CPS.tracked)}`);
+      await expectNothingWritten(order, shape, before);
+      expect(await stockRow(CPS.plantedTracked), 'B\'s planted row untouched').toEqual(planted);
+      expect(await movementsOf([CPS.tracked, CPS.missing]), 'no movement for the product in any business').toEqual([]);
+
+      // A provider settlement of the same pair (the WiPay callback's updatePaymentStatus): the same refusal.
+      const settledOrder = await orderOf([{ productId: CPS.tracked, quantity: QUANTITY }], 'WIPAY');
+      const settledShape = await orderShape(settledOrder.id);
+      const settledBefore = await counts();
+      seen = [];
+      const settled = await storeOrders.updatePaymentStatus(settledOrder.id, 'PAID', `${P}wtx_cps_t4`, 'wipay').then(
+        () => 'settled',
+        (err: any) => `${typeof err?.getStatus === 'function' ? err.getStatus() : err?.name} ${err?.message}`,
+      );
+      await settle();
+      expect(settled, 'the settlement of the pair held by another business').toBe(`400 ${noStockRow(CPS.tracked)}`);
+      await expectNothingWritten(settledOrder, settledShape, settledBefore);
+      expect(await stockRow(CPS.plantedTracked), 'B\'s planted row untouched by the settlement').toEqual(planted);
+      expect(await movementsOf([CPS.tracked]), 'no movement for the product in any business').toEqual([]);
+
+      // Control: the business's own row in the same warehouse is decremented once, with one movement and its cogs.
+      const ownBefore = await stockRow(CPS.ownStock);
+      const control = await orderOf([{ productId: CPS.own, quantity: QUANTITY }]);
+      seen = [];
+      const ok = await completeOffline(control.id);
+      await settle();
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      expect(ok.body.paymentStatus).toBe('PAID');
+      await expectOnePaidInvoice(control);
+      expect((await stockRow(CPS.ownStock)).quantity, 'the own row decremented once').toBe(ownBefore.quantity - QUANTITY);
+      expect(await movementsOf([CPS.own]), 'one sale movement of the own row').toEqual([
+        `${ID.biz}:${warehouseId}:${CPS.own}:${-QUANTITY}:sale:${control.orderNumber}`,
+      ]);
+      await expectCogs(control.id, OWN_COST * QUANTITY);
+      expect(storeEvents().filter((n) => n === 'store_order.paid'), 'one store_order.paid').toHaveLength(1);
+      expect(await stockRow(CPS.plantedTracked), 'B\'s planted row still untouched').toEqual(planted);
+    });
+
+    it('V18-T4b (W11-CHECKOUT-PAIR-SCOPE, W11SEAM-SM-CR-1; D-137, D-127) a product with no inventoryMode whose only stock row is another business\'s planted row at its pair is sold as untracked, as with no stock row at all: the offline completion (HTTP POST .../complete-offline) of an order with that line and an own-stock line is paid with one invoice, payment and posting, the other business\'s row untouched with no movement and no cogs for the line, and the own-stock line decremented once with one \'sale\' movement and the cogs of that line alone', async () => {
+      const planted = await stockRow(CPS.plantedUnset);
+      expect(`${planted.businessId}:${planted.productId}:${planted.warehouseId}`, 'the pair held by B').toBe(`${ID.bizB}:${CPS.unset}:${warehouseId}`);
+      const ownBefore = await stockRow(CPS.ownStock);
+      const ownMovements = await movementsOf([CPS.own]);
+
+      // One unit of each at UNIT_PRICE: the order totals ORDER_TOTAL.
+      const order = await orderOf([
+        { productId: CPS.unset, quantity: 1 },
+        { productId: CPS.own, quantity: 1 },
+      ]);
+      expect(Number(order.total)).toBe(ORDER_TOTAL);
+      seen = [];
+      const res = await completeOffline(order.id);
+      await settle();
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.paymentStatus).toBe('PAID');
+      await expectOnePaidInvoice(order);
+
+      // At 9831c217: B's row 10 -> 9 and A's 'sale' movement for it (B's row counted as stock kept for the product).
+      expect(await stockRow(CPS.plantedUnset), 'B\'s planted row untouched').toEqual(planted);
+      expect(await movementsOf([CPS.unset]), 'no movement for the untracked line in any business').toEqual([]);
+      expect((await stockRow(CPS.ownStock)).quantity, 'the own row decremented once').toBe(ownBefore.quantity - 1);
+      expect(await movementsOf([CPS.own]), 'one sale movement of the own row').toEqual([
+        ...ownMovements,
+        `${ID.biz}:${warehouseId}:${CPS.own}:-1:sale:${order.orderNumber}`,
+      ]);
+      // The cogs of the own line alone (B's cost is not A's).
+      await expectCogs(order.id, OWN_COST);
+      expect(storeEvents().filter((n) => n === 'store_order.paid'), 'one store_order.paid').toHaveLength(1);
+    });
   });
 });
