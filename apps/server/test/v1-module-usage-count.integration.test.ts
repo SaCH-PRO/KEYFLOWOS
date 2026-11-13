@@ -388,8 +388,8 @@ describe('V61-02 exact counts per live business', () => {
     expect(r.liveBusinesses).toBeGreaterThanOrEqual(3);
 
     expect(ours(r, 'projects')).toEqual({
-      [ID.bizA]: { rows: { projects: 1, tasks: 3, plans: 0, deliverables: 0 } },
-      [ID.bizB]: { rows: { projects: 1, tasks: 0, plans: 0, deliverables: 0 } },
+      [ID.bizA]: { rows: { projects: 1, tasks: 3, plans: 0, deliverables: 0, templates: 0 } },
+      [ID.bizB]: { rows: { projects: 1, tasks: 0, plans: 0, deliverables: 0, templates: 0 } },
     });
     expect(ours(r, 'payroll')).toEqual({
       [ID.bizA]: { rows: { payroll_runs: 3, pay_rates: 0 }, facets: { runs_reserving_safe_to_spend: 2 } },
@@ -595,7 +595,7 @@ describe('V61-05 an older schema', () => {
         tables: [{ name: 'rows', table: 'projects', businessColumn: 'business_id', whereColumns: ['v61a_flag'], where: 't."v61a_flag" = true' }] },
     ];
     const report = await runReadOnly(db, (tx: any) => countModuleUsage(tx, modules, new Date('2026-11-13T00:00:00Z')));
-    expect(ours(report as Report, 'projects')[ID.bizA]).toEqual({ rows: { projects: 1, tasks: 3, plans: 0, deliverables: 0 } });
+    expect(ours(report as Report, 'projects')[ID.bizA]).toEqual({ rows: { projects: 1, tasks: 3, plans: 0, deliverables: 0, templates: 0 } });
     expect((report as Report).modules.find((m) => m.key === 'later')).toMatchObject({ measured: true, businessCount: 0, absent: ['rows: v61a_not_in_this_schema'] });
     expect((report as Report).modules.find((m) => m.key === 'later_column')).toMatchObject({ businessCount: 0, absent: ['rows: projects.v61a_flag'] });
     expect((report as Report).generatedAt).toBe('2026-11-13T00:00:00.000Z');

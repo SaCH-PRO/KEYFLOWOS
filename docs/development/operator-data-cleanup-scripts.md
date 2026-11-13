@@ -30,6 +30,10 @@ Neither has been run against a real database. Running them in production is an
 operator decision: take a backup first and run the dry run against that
 database before `--apply`.
 
+Section 3 is a different kind of script: a **read-only** count the owner runs
+against production before v1 hides its deferred modules. It has no `--apply`
+and no write path at all.
+
 ## 1. Cross-tenant custom-field values (SF-1)
 
 ```bash
@@ -184,6 +188,117 @@ and `intake_approved_no_contact`. A dry run adds
 set the row's `module` and `category` back from `data.d115` and remove that key.
 Then re-run the script so it can link the row.
 
+## 3. Read-only usage count of the modules v1 hides (USAGE-COUNT-SCRIPT, D-152)
+
+```bash
+cd apps/server
+pnpm usage:v1-modules > v1-module-usage.json     # JSON on stdout, one summary line on stderr
+```
+
+**Why.** v1 hides about 45 screens (owner ruling D-152, from the product
+audit). A business that already keeps records in one of them must not find
+those records apparently gone: NAV-B-HIDE shows such a module read-only to that
+business instead, and keeps the WhatsApp auto-confirm listener working for a
+business with a WhatsApp setup (D-153). This script tells the owner which live
+businesses have rows in which hidden module. The owner runs it against
+production (D-148) and posts the JSON to #80 three times: now, immediately
+before NAV-B-HIDE starts, and before the redeploy (GATE-OWNER-TEST).
+
+**What it counts.** The modules, their tables, routes and KEY tools are one
+list, `packages/shared/src/v1-modules.ts` (exported from `@keyflow/shared`),
+which NAV-B-LEGACY-SERVER, NAV-B-HIDE and the KEY tool allowlist also read. For
+every table entry of every module it runs one statement:
+
+```sql
+SELECT t."<business column>" AS business_id, count(*)::int AS n
+  FROM "<table>" t JOIN "businesses" b ON b."id" = t."<business column>"
+ WHERE b."deleted_at" IS NULL
+   [AND t."<soft-delete column>" IS NULL] [AND (<the entry's fixed filter>)]
+ GROUP BY t."<business column>";
+```
+
+A soft-deleted business or row is not counted. A few entries carry a fixed
+filter, because some rows are created for every business and mean nothing:
+
+- `automations`: only *enabled* autopilot loops (opening Automations creates
+  them all, disabled);
+- `presence_pages`: only *saved* website drafts (version 2 and up; opening the
+  builder creates version 1);
+- `connectors` and `accounting_sync`: only `connected` connector rows, and
+  `connectors` leaves out Gmail (v1), the payment keys (Getting paid) and
+  WhatsApp (its own module);
+- `whatsapp.config`: a business whose `meta_data` holds a `whatsapp` object
+  (the Twilio or Meta setup the listener sends with). Only the key's presence is
+  tested; no value is read out.
+
+Rows that are seeded or created on first view, such as deal stages, are not
+counted at all. Modules with no records of their own
+(dashboards and hubs such as Intelligence, Operations or the flow hubs) are
+listed with `measured: false`.
+
+**Safety.** There is no write path:
+
+- Everything runs in **one transaction** whose first statement is
+  `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`. Postgres itself
+  refuses any write inside it (SQLSTATE 25006), and every count sees the same
+  snapshot. The script reads back `transaction_read_only` and refuses to count
+  unless it is `on` (exit 1, nothing printed on stdout).
+- Each statement is bounded: `statement_timeout` 60 s, `lock_timeout` 5 s.
+- It reads only the business column, the soft-delete markers and the status
+  flags a filter names: never a name, an email, a phone number, an amount or
+  free text. The JSON carries module metadata, business ids and counts only.
+- It makes no network call other than the database connection, and on a
+  failure prints only the error's class and code, never the database's message.
+- A table or column this database does not have (production on an older
+  schema) is listed under the module's `absent`, not a failure. `schema` gives
+  the latest applied migration, so an `absent` entry can be read against it.
+
+**Output.** One JSON object:
+
+| Field | Meaning |
+|---|---|
+| `report`, `formatVersion`, `generatedAt` | `v1-module-usage-count`, `1`, the run's time (UTC) |
+| `transaction` | `{ "readOnly": true, "isolation": "repeatable read" }` as Postgres reported it |
+| `schema` | `latestMigration` and `appliedMigrations` from `_prisma_migrations` (null if absent) |
+| `liveBusinesses` | businesses with no `deleted_at` |
+| `summary` | module key -> how many live businesses use it (`null`: nothing to count) |
+| `modules[]` | per module, in list order: `key`, `label`, `treatment`, `returnsIn`, `measured`, `businessCount`, `businesses` and `absent` |
+| `modules[].businesses[]` | sorted by id: `businessId`, `rows` (every count of the module, 0 included) and, where the module has them, `facets` |
+
+A business is on a module's list when any of its `rows` is above zero.
+`facets` are informative sub-counts that never decide use: `payroll`
+`runs_reserving_safe_to_spend` (DRAFT and APPROVED runs, which D-144 reserves in
+safe-to-spend, so Money > Overview must say so), `api_keys` and `webhooks`
+`active`, and `presence_pages` `published_live` (served at `/site/<slug>` today).
+Exit status: `0` done, `1` the read failed (nothing is written either way),
+`2` bad arguments (it takes none). Like the other scripts, the process lingers
+about 30 seconds after printing (the `@keyflow/db` pool's idle timeout).
+
+**On the production box.** The API image has no `scripts/` directory, and its
+`@keyflow/shared` build predates the module list, so the script imports the
+list by relative path and both files are mounted read-only into the API
+container. Take them from the commit that carries this packet without touching
+the deploy checkout's working tree (`<ref>`: that commit, or `origin/main`
+once it is merged):
+
+```bash
+cd /opt/keyflowos
+git fetch origin
+mkdir -p /tmp/v1-usage/apps/server/scripts /tmp/v1-usage/packages/shared/src
+git show <ref>:apps/server/scripts/v1-module-usage-count.ts > /tmp/v1-usage/apps/server/scripts/v1-module-usage-count.ts
+git show <ref>:packages/shared/src/v1-modules.ts > /tmp/v1-usage/packages/shared/src/v1-modules.ts
+
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T \
+  -v /tmp/v1-usage/apps/server/scripts:/app/apps/server/scripts:ro \
+  -v /tmp/v1-usage/packages/shared/src:/app/packages/shared/src:ro \
+  -w /app/apps/server api npx tsx scripts/v1-module-usage-count.ts > v1-module-usage.json
+```
+
+The JSON holds business ids and counts only, so it can be posted to #80 as it
+is. The script needs nothing but `DATABASE_URL`, which the `api` service
+already has. For belt and braces the operator may point it at a database role
+granted only `SELECT`; the read-only transaction does not depend on that.
+
 ## Proof
 
 `apps/server/test/data-cleanup-scripts.integration.test.ts` (prefix `v96o_`)
@@ -220,3 +335,30 @@ runs both scripts' `main()` in process against Postgres. It covers:
   `src/modules/timeline/timeline-visibility.spec.ts` (TV-10) pins the rule:
   `name_mismatch`, a missing or an unknown reason are owner-only, and
   `source_gone` stays OWNER and ADMIN.
+
+`apps/server/test/v1-module-usage-count.integration.test.ts` (prefix `v61a_`)
+proves section 3 against Postgres:
+
+- V61-01, the list: unique keys; every table and column it names exists in the
+  migrated database; every column a count reads is an id, a soft-delete marker
+  or a status flag; every route is an `apps/web` page; every KEY tool is a
+  registered FLOW tool, in one module only; every route NAV-B-HIDE and
+  NAV-B-HIDE-2 gate resolves to a module, and v1 routes to none;
+- V61-02, exact counts for two live tenants with rows in projects, payroll
+  (with the D-144 facet) and the WhatsApp setup, plus contracts and autopilot
+  loops; a soft-deleted business, project or task, a disabled loop, an unsaved
+  website draft and an empty business are not counted;
+- V61-03, read only: the run's first statement makes the transaction READ ONLY
+  and REPEATABLE READ; an UPDATE and an INSERT inside it are refused (25006)
+  and change nothing; a run writes no row; a transaction that is not read only
+  is refused by the self-check;
+- V61-04, no PII: every SELECT projects only a business id and a count; the
+  JSON carries none of the seeded names, emails, titles, amounts or WhatsApp
+  credentials; a database role granted `SELECT` on only the columns the list
+  names gets the same answer, and is refused `businesses.name` (42501); no
+  `fetch` is made;
+- V61-05, an absent table or column is reported, not fatal; unknown arguments
+  exit 2 without touching the database;
+- V61-06, `pnpm usage:v1-modules` (with only `DATABASE_URL`) and the production
+  image shape above (the script and the list alone, no `tsconfig.json`,
+  `@keyflow/db` through `node_modules`) print the JSON and exit 0.
