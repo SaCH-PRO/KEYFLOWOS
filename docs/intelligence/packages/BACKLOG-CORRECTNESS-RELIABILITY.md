@@ -3,6 +3,17 @@
 Status: **backlog of candidate packets. Read-only findings. No item is released, and nothing here authorizes implementation.**
 Derived: 2026-10-11, by reading `main` `98ee0202499ba87fa4ee13d58a2a9075016225bd`. Nothing was executed against the application or a database.
 
+> **Historical note (2026-11-12, convergence tie-off).** The status line above was true on 2026-10-11 and is no longer current. Every finding listed in this file has since been fixed on main (`f5d58ef7`) by a packet of `docs/reconstruction/BUILD-MAP-001.md`, each with a real-database test. Do not reopen them from this file.
+>
+> | Findings | Fixed by | Proof on main (`apps/server/test/`) |
+> |---|---|---|
+> | REL-01, REL-02 | V1-35 (ruling D-29): the poller reads only its own job types and claims each job before any effect | `cross-module-job-poller.integration.test.ts` |
+> | REL-03, REL-04 | V1-12: the run flag is released in `finally`; schedule advance, invoice create and SENT commit in one transaction | `recurring-invoice-run.integration.test.ts` |
+> | KEY-01, KEY-02 | V1-10 (atomic plan claim; approval pause recorded as `waiting_approval`), with R0-09e (plans act for the authenticated member) | `key-cortex-plan-execution.integration.test.ts` |
+> | KEY-03, KEY-04 | V1-19 (insert claim with `requestHash` comparison) and V1-19b (registry honours the claim) | `key-idempotency-claim.integration.test.ts`, `plan-executor-approval-resume.integration.test.ts` |
+>
+> AC-01 and AC-02 stay withheld from this public repository, as the paragraph below says. Their routing is owner decision D-24, which had no recorded ruling in BUILD-MAP-001 at `f5d58ef7`: closing PR #174 must not drop D-24 from tracking.
+
 Each item is small enough to be one bounded packet, and none needs a schema change or a migration. Paths are under `apps/server/src/modules/` unless rooted.
 
 Confidence: **confirmed** means the quoted lines were read on that commit. **Likely** means the code was read and the failing path depends on a condition not exercised. Four items (REL-01, REL-03, KEY-01 and one withheld item) were read a second time by a different session before this file was written.
