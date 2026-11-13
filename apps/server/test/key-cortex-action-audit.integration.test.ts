@@ -172,6 +172,13 @@
  * KEY tool-call record of the business-wide stores, reads no per-member memory for a turn with no reader (a non-member
  * SUPER_ADMIN, the Chatwoot support desk), and asks for the same headroom so the reader's own rows still fill it.
  *
+ * Its review repair (SEC-W11FPS-1, SEC-W11FPS-2, CR-W11FPS-1) drives the real writers of the business-wide records the
+ * review found still reaching another reader: KEY's own records of a member's turn (KeyCortexLifecycleService through the
+ * real bus: what they typed, KEY's whole answer), the legacy action route's action.<status> (KeyCortexActionsService:
+ * the tool's answer), and the copies of a tool call's ledger row EventEmitterFlowBridgeService republishes; none reaches
+ * another reader of the perception block, buildMemoryContext's block or POST /cortex/chat's own memory read. A turn with
+ * no reader still perceives the business (an overdue invoice's business event).
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -1352,12 +1359,15 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
    * the turn runs on (the requester's own by default; the WS key:chat handler hands the pipeline the client's
    * session id unchecked), and `realMemoryContext` runs the real KeyCortexPromptContextService over the real
    * memory store and the real learning service instead of the stand-in.
+   * W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2): `businessId` names the business the turn is in (ID.memBiz unless
+   * named).
    */
   async function chatTurnFor(
     userId: string | undefined,
     path: 'processQuery' | 'streamQuery',
-    opts: { sessionUserId?: string; realMemoryContext?: boolean } = {},
+    opts: { sessionUserId?: string; realMemoryContext?: boolean; businessId?: string } = {},
   ): Promise<{ prompt: string; memoryContext: { aiMemory?: string; lessons?: string } }> {
+    const businessId = opts.businessId ?? ID.memBiz;
     const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
     const { KeyCortexMemoryRetrievalService } = await import('../src/modules/key-cortex/key-cortex-memory-retrieval.service');
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
@@ -1367,7 +1377,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     const prompts: string[] = [];
     const memoryContexts: Array<{ aiMemory?: string; lessons?: string }> = [];
     const sessionUserId = 'sessionUserId' in opts ? opts.sessionUserId : userId;
-    const session = { id: `${P}sess_chat_prompt`, businessId: ID.memBiz, userId: sessionUserId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const session = { id: `${P}sess_chat_prompt`, businessId, userId: sessionUserId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
     const realPromptContext = opts.realMemoryContext
       ? new (KeyCortexPromptContextService as any)(
@@ -1397,7 +1407,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
         classifyPersona: async () => undefined,
         selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
       } as any,
-      { buildContextSnapshot: async () => ({ businessId: ID.memBiz, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
+      { buildContextSnapshot: async () => ({ businessId, genomeStage: 'startup', executiveReadiness: 50 }), formatContextForPrompt: () => '' } as any,
       { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
       {
         getOrCreateSession: async () => session,
@@ -1430,7 +1440,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       memory,
       { route: async () => route } as any,
     );
-    const query = { text: 'what happened lately', businessId: ID.memBiz, userId } as any;
+    const query = { text: 'what happened lately', businessId, userId } as any;
     const flags = { integrationV2Enabled: false, genomeV3Enabled: false };
     if (path === 'processQuery') await pipeline.processQuery(query, flags);
     else for await (const chunk of pipeline.streamQuery(query, flags)) void chunk;
@@ -2854,7 +2864,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     async function removeFpsRows() {
       for (const table of [
         'cortex_action_logs', 'ai_execution_logs', 'business_events', 'cognitive_events', 'cognition_memories',
-        'tool_outcome_scores', 'ai_memories', 'memberships',
+        'tool_outcome_scores', 'ai_memories', 'key_commands', 'cortex_sessions', 'memberships',
       ]) {
         await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE business_id = $1`, FPS.biz);
       }
@@ -3035,6 +3045,286 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
         await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
         await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
         await db.$executeRawUnsafe('DELETE FROM ai_execution_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, FPS.admin);
+      }
+    }, 60_000);
+
+    // W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1, SEC-W11FPS-2, CR-W11FPS-1). The cases below drive the real writers of
+    // the records the review found still reaching another reader, through the real bus (KeyCortexEventBusService with the
+    // cognitive store: each publish is one business_events row and one cognitive_events row, both read business-wide).
+    const fpsStubs = {
+      safety: { check: async () => ({ allowed: true }), recordExecution: async () => undefined },
+      saga: { addStep: async () => undefined, completeStep: async () => undefined, failStep: async () => undefined, compensate: async () => [] },
+      redis: { get: async () => null, set: async () => 'OK', setex: async () => 'OK', del: async () => 1 },
+    };
+    async function fpsBus() {
+      const { KeyCortexEventBusService } = await import('../src/modules/key-cortex/key-cortex-event-bus.service');
+      const { CognitiveEventBusService } = await import('../src/modules/key-cortex/cognitive-event-bus.service');
+      return new KeyCortexEventBusService(prisma, new CognitiveEventBusService(prisma));
+    }
+    /** A line of KEY's own record of a turn (cortex.turn_*, cortex.session_started, cortex.command_status_changed, and their KeyCommand / CortexSession business_events rows). */
+    const keyTurnRecordLines = (prompt: string) =>
+      observed(prompt).filter(
+        (l) => /^- \[(cognitive_event|business_event)\] cortex\.(turn_|session_started|command_status_changed)/.test(l) || /\bKeyCommand\b|\bCortexSession\b/.test(l),
+      );
+    /** A line of a KEY action's record (KeyCortexActionsService.emitActionEvent: action.<status>) or of a ledger row (ACTION_*), in either business-wide store. */
+    const keyActionRecordLines = (prompt: string) =>
+      observed(prompt).filter((l) => /^- \[(cognitive_event|business_event)\] (action\.|ACTION_)/.test(l) || /Tool_execution/.test(l));
+    /** POST /cortex/chat's own memory read (key-cortex-query-pipeline.service.ts chatMemoryFragments) for `userId` in FPS.biz. */
+    const fpsCortexChat = (userId: string | undefined, path: 'processQuery' | 'streamQuery') =>
+      chatTurnFor(userId, path, { businessId: FPS.biz }).then((t) => t.prompt);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1: KEY's own records of the owner's turn, written by the real KeyCortexLifecycleService through the real bus (cortex.turn_started carries what the owner typed, cortex.turn_completed KEY's whole answer; cortex.session_started and cortex.command_status_changed; their KeyCommand and CortexSession business_events rows), reach no reader: not the perception block over POST .../flow/chat and its stream of a STAFF member, the owner, a non-member SUPER_ADMIN or the support desk, nor buildMemoryContext's block or POST /cortex/chat's own memory read (processQuery and its stream) for the member", async () => {
+      const OWNER_TYPED = 'V19C-FPS-TURN-OWNER-TYPED fire Bob, salary 85000';
+      const KEY_ANSWERED = 'V19C-FPS-TURN-KEY-ANSWERED net profit 48213';
+      const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
+      const { KeyCortexConversationService } = await import('../src/modules/key-cortex/key-cortex-conversation.service');
+      const lifecycle = new KeyCortexLifecycleService(
+        prisma,
+        fpsStubs.redis as any,
+        await fpsBus(),
+        new KeyCortexConversationService(prisma, fpsStubs.redis as any),
+      );
+      const types = ['cortex.turn_started', 'cortex.session_started', 'cortex.command_status_changed', 'cortex.turn_completed'];
+      try {
+        // The owner's turn as processQuery runs it (POST /cortex/chat): startTurn with what they typed, completeTurn with KEY's answer.
+        const { identity } = await lifecycle.startTurn({ businessId: FPS.biz, userId: ID.owner, rawInput: OWNER_TYPED, mode: 'ask' });
+        await lifecycle.completeTurn(identity, { responseText: KEY_ANSWERED, actionsExecuted: 0, actionsFailed: 0, autonomyApproved: 0 });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: { in: types } } })).toBe(4);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: { in: types } } })).toBe(4);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['owner', await flow!.turn(ID.owner, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+            expect(prompt, label).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+            expect(keyTurnRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+        expect(block).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+        expect(block).toContain(FPS.fact);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
+          expect(prompt, path).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
+          expect(prompt, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM key_commands WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_sessions WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-2: the owner's KEY action through the real KeyCortexActionsService.executeActions (POST /cortex/chat's legacy action route) and its real bus records action.success with the tool's answer; that record reaches no reader other than through the owner's own action rows: not the perception block of a STAFF member, a non-member SUPER_ADMIN or the support desk, nor the owner's as a business-wide record, nor buildMemoryContext's block or POST /cortex/chat's own memory read for the member", async () => {
+      const OWNER_ANSWER = 'V19C-FPS-ACTION-OWNER-ANSWER revenue 48213, Privett owes 9100';
+      const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
+      const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
+      // Positionally, as Nest constructs them: the registry with no ledger sinks of its own (its tool.* records are
+      // isToolCallRecord's case above), and the legacy facade over it with the business at autonomy level 2 and the bus.
+      const reg = new KeyCortexToolRegistryService(prisma, fpsStubs.safety as any, {} as any, fpsStubs.saga as any, undefined, undefined, undefined, undefined);
+      const legacy = new KeyCortexActionsService(
+        prisma,
+        undefined,
+        {} as any,
+        reg,
+        undefined,
+        undefined,
+        { resolve: async () => ({ level: 2 }) } as any,
+        await fpsBus(),
+      );
+      legacy.onModuleInit();
+      // A stand-in for the data organ cortex.analyze_data runs (no ledger read here): it answers the owner's figures.
+      reg.register({
+        name: 'cortex.analyze_data',
+        module: 'data',
+        description: 'v19c: a stand-in data organ',
+        parameters: { type: 'object', properties: { dataSource: { type: 'string' } }, required: ['dataSource'] },
+        riskTier: 1,
+        requiresApproval: false,
+        handler: async () => ({ success: true, data: { sample: [{ note: OWNER_ANSWER }] } }),
+      });
+      const session = { id: `${P}sess_fps_action_owner`, businessId: FPS.biz, userId: ID.owner, messages: [] } as any;
+      try {
+        const results = await legacy.executeActions(
+          [{ actionType: 'ANALYZE_DATA', status: 'success', description: 'v19c fps: analyze the invoices', result: { dataSource: 'invoices' } }],
+          session,
+        );
+        expect(results).toMatchObject([{ status: 'success', result: { sample: [{ note: OWNER_ANSWER }] } }]);
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: 'action.success' } })).toBe(1);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'action.success' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+            expect(keyActionRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+          // The owner reads their own action on their own rows only, never as a business-wide record.
+          expect(keyActionRecordLines(await flow!.turn(ID.owner, path)), `owner (${path})`).toEqual([]);
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+        expect(block).toContain(FPS.fact);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
+          expect(prompt, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND user_id = $2', FPS.biz, ID.owner);
+      }
+    }, 60_000);
+
+    // Found while repairing SEC-W11FPS-2 (the same record class): in the app, BusinessEventService has the EventEmitter2,
+    // emits business_event.created for every ledger row it writes, and EventEmitterFlowBridgeService (KeyCortexModule)
+    // forwards that to the KEY bus, which persists a second copy of the registry's ACTION_EXECUTED ledger row: a
+    // business_events row of subject 'Tool_execution' (the bridge capitalises the subject) and a cognitive_events row
+    // 'ACTION_EXECUTED', each carrying the whole ledger input, the tool's answer in it.
+    it("W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-2 class): the bridged copies of the owner's real KEY tool call's ledger row (BusinessEventService with the real EventEmitter2, the real EventEmitterFlowBridgeService and bus) reach no other reader: not the perception block of a STAFF member, a non-member SUPER_ADMIN or the support desk, nor buildMemoryContext's block or POST /cortex/chat's own memory read for the member", async () => {
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { EventEmitterFlowBridgeService } = await import('../src/modules/key-cortex/event-emitter-flow-bridge.service');
+      const { KeyCortexToolRegistryService } = await import('../src/modules/key-cortex/key-cortex-tool-registry.service');
+      const { KeyCortexAuditService } = await import('../src/modules/key-cortex/key-cortex-audit.service');
+      const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+      const events = new EventEmitter2();
+      const bus = await fpsBus();
+      new EventEmitterFlowBridgeService(events, bus).onModuleInit();
+      const bridged = new KeyCortexToolRegistryService(
+        prisma,
+        fpsStubs.safety as any,
+        {} as any,
+        fpsStubs.saga as any,
+        undefined,
+        new KeyCortexAuditService(new BusinessEventService(prisma, events)),
+        bus,
+        undefined,
+      );
+      bridged.register({
+        name: TOOL_ORGAN_THREAD,
+        module: 'v19c',
+        description: 'v19c: an audited tool',
+        parameters: { type: 'object', properties: {}, required: [] },
+        riskTier: 1,
+        requiresApproval: false,
+        handler: async () => ({ success: true, data: { thread: { body: OWNER_THREAD_SECRET } } }),
+      });
+      try {
+        const result = await bridged.execute(
+          TOOL_ORGAN_THREAD,
+          { businessId: FPS.biz, userId: ID.owner, autonomyLevel: 2, ...thread('fps_bridged') },
+          { threadId: `${P}thread_fps_bridged`, note: FPS.OWNER_NOTE },
+        );
+        expect(result).toMatchObject({ success: true });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, subjectType: 'Tool_execution', eventType: 'ACTION_EXECUTED' } })).toBe(1);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'ACTION_EXECUTED' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain(OWNER_THREAD_SECRET);
+            expect(prompt, label).not.toContain(FPS.OWNER_NOTE);
+            expect(keyActionRecordLines(prompt), label).toEqual([]);
+            expect(toolCallRecordLines(prompt), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain(OWNER_THREAD_SECRET);
+        expect(block).not.toContain(FPS.OWNER_NOTE);
+        for (const path of ['processQuery', 'streamQuery'] as const) {
+          const prompt = await fpsCortexChat(ID.member, path);
+          expect(prompt, path).not.toContain(OWNER_THREAD_SECRET);
+          expect(prompt, path).not.toContain(FPS.OWNER_NOTE);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', FPS.biz, TOOL_ORGAN_THREAD);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a turn with no reader still perceives the business: a non-member SUPER_ADMIN over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk's chat() and streamChat(), as the staff bridge calls chat()), get the business-wide business event (an overdue invoice, written by the real BusinessEventService) as the STAFF member does, and still no member's cognition, CortexActionLog or AiExecutionLog row", async () => {
+      const INVOICE = 'V19C-FPS-INV-OVERDUE-0042';
+      const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+      await new BusinessEventService(prisma).emit({
+        businessId: FPS.biz,
+        eventType: 'invoice.overdue',
+        subjectType: 'invoice',
+        subjectId: `${P}fps_inv_0042`,
+        actorType: 'system',
+        actorId: 'invoice_overdue_watcher',
+        action: 'OVERDUE',
+        source: 'worker',
+        after: { number: INVOICE, daysOverdue: 21 },
+      });
+      await db.cognitionMemory.createMany({ data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID)] });
+      try {
+        expect(await db.businessEvent.count({ where: { businessId: FPS.biz, eventType: 'invoice.overdue' } })).toBe(1);
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['STAFF member', await flow!.turn(ID.member, path)],
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(observed(prompt).filter((l) => l.startsWith('- [business_event] invoice.overdue: ') && l.includes(INVOICE)), label).toHaveLength(1);
+            expect(prompt, label).toContain(FPS.fact);
+            if (who === 'STAFF member') continue;
+            expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
+            expect(prompt, label).not.toContain('v19c.fps.owner_');
+            expect(prompt, label).not.toContain('v19c.fps.member_');
+            expect(prompt, label).not.toContain(FPS.OWNER_SAID);
+            expect(prompt, label).not.toContain(FPS.MEMBER_SAID);
+          }
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
       }
     }, 60_000);
 

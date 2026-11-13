@@ -49,9 +49,26 @@ type Fragment = {
   entityType?: string | null;
 };
 
+/** The stores UnifiedMemoryRetrievalService does not read when handed includeEpisodic false. */
+const EPISODIC_STORES = ['business_event', 'ai_execution_log', 'cortex_action_log'];
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-2: answers as the real retrieval service answers the options it is handed
+ * (pinned against its source in 'the real retrieval service behaves as the stub assumes'): includeEpisodic false reads
+ * no business event and no personal store, and sourceTypes keeps only the stores it names. A stub that ignored them
+ * passed a case the real code failed (a turn with no reader lost every business event).
+ */
 class MemoryStub {
   fragments: Fragment[] = [];
-  retrieveContext = vi.fn(() => Promise.resolve(this.fragments));
+  retrieveContext = vi.fn((_businessId?: string, opts: { includeEpisodic?: boolean; sourceTypes?: string[] } = {}) =>
+    Promise.resolve(
+      this.fragments.filter(
+        (f) =>
+          !(opts.includeEpisodic === false && EPISODIC_STORES.includes(f.sourceType)) &&
+          (!opts.sourceTypes || opts.sourceTypes.includes(f.sourceType)),
+      ),
+    ),
+  );
 }
 
 /**
@@ -106,6 +123,25 @@ function makeOrchestrator(memory: MemoryStub) {
     buildPerceptionSection: (b: string, q: string, t?: string, u?: string) =>
       impl.call(instance, b, q, t, u),
   };
+}
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: the read a turn with no reader makes: nobody's userId, episodic stores
+ * not turned off, and sourceTypes naming the business-wide stores (business events included) and no personal one.
+ */
+function expectNoReaderRead(memory: MemoryStub, label: string) {
+  const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
+    string,
+    { userId?: string; includeEpisodic?: boolean; sourceTypes?: string[] },
+  ])[1];
+  expect(opts.userId, label).toBeUndefined();
+  expect(opts.includeEpisodic, label).not.toBe(false);
+  expect(opts.sourceTypes, label).toEqual(
+    expect.arrayContaining(['business_event', 'cognitive_event', 'ai_memory', 'genome_memory_event', 'temporal_flow_memory']),
+  );
+  for (const personal of ['ai_execution_log', 'cortex_action_log', 'cognition_memory']) {
+    expect(opts.sourceTypes, `${label}: ${personal}`).not.toContain(personal);
+  }
 }
 
 describe('perception reaches the prompt', () => {
@@ -276,15 +312,15 @@ describe('personal memory stays personal', () => {
 
   // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the reader is the caller only while they are a member of
   // the business (buildMemoryContext's rule). A turn with no member (the Chatwoot support desk, the staff bridge) and
-  // a caller who is no member (a platform SUPER_ADMIN) read no per-member memory: no episodic store at all, rather than
+  // a caller who is no member (a platform SUPER_ADMIN) read no per-member memory: no personal store at all, rather than
   // every member's rows (an absent userId used to leave AiExecutionLog and CortexActionLog unnarrowed).
-  it('a turn with no member, or a caller who is no member, reads no episodic memory: the stores are asked for none, and for nobody\'s', async () => {
+  // Review CR-W11FPS-1: but the business-wide stores, business events included (an overdue invoice), are still read:
+  // the read names the business-wide stores (sourceTypes) instead of turning off every episodic store.
+  it('a turn with no member, or a caller who is no member, reads no member\'s personal memory: no userId, and only the business-wide stores, business events included', async () => {
     for (const userId of [undefined, 'user_9']) {
       memory.retrieveContext.mockClear();
       await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
-      const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string; includeEpisodic?: boolean }])[1];
-      expect(opts.includeEpisodic, String(userId)).toBe(false);
-      expect(opts.userId, String(userId)).toBeUndefined();
+      expectNoReaderRead(memory, String(userId));
     }
   });
 
@@ -391,8 +427,48 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
     prismaStub.client.business.findFirst.mockRejectedValueOnce(new Error('connection reset'));
     const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
     expect(out).not.toContain('[cognition_memory]');
-    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { includeEpisodic?: boolean }])[1];
-    expect(opts.includeEpisodic).toBe(false);
+    expectNoReaderRead(memory, 'check failed');
+    expect(out).toContain('INV-014 overdue');
+  });
+});
+
+describe("no business-wide record of one person's KEY turn or KEY action, for any reader (W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1, SEC-W11FPS-2)", () => {
+  // The bus persists every KEY event to business_events and cognitive_events, both read business-wide. KEY's own turn
+  // records carry what a member typed (cortex.turn_started rawInput) and KEY's whole answer (cortex.turn_completed
+  // responseText); KeyCortexActionsService's action.<status> carries the tool's answer; the ledger's ACTION_* rows carry
+  // it too, also as the copies EventEmitterFlowBridgeService republishes (subject 'Tool_execution') and the approval
+  // orchestrator's execution row (subject key_action_proposal, its executionResult).
+  let memory: MemoryStub;
+  const MARKERS = [
+    'TURN-TYPED', 'TURN-ANSWER', 'TURN-FAILED', 'SESSION-PERSONA', 'STATUS-CHANGE', 'ACTION-ANSWER', 'ACTION-ERROR-ANSWER',
+    'BRIDGED-LEDGER-ANSWER', 'BRIDGED-COGNITIVE-ANSWER', 'PROPOSAL-EXECUTION-RESULT',
+  ];
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'ce_turn', sourceType: 'cognitive_event', title: 'cortex.turn_started', content: 'cortex.turn_started: {"rawInput":"TURN-TYPED"}' },
+      { id: 'be_turn', sourceType: 'business_event', title: 'cortex.turn_completed', entityType: 'KeyCommand', content: 'key_cortex PUBLISHED KeyCommand: {"responseText":"TURN-ANSWER"}' },
+      { id: 'ce_turn_failed', sourceType: 'cognitive_event', title: 'cortex.turn_failed', content: 'cortex.turn_failed: {"error":"TURN-FAILED"}' },
+      { id: 'be_session', sourceType: 'business_event', title: 'cortex.session_started', entityType: 'CortexSession', content: 'key_cortex PUBLISHED CortexSession: SESSION-PERSONA' },
+      { id: 'ce_status', sourceType: 'cognitive_event', title: 'cortex.command_status_changed', content: 'STATUS-CHANGE' },
+      { id: 'ce_action', sourceType: 'cognitive_event', title: 'action.success', content: 'action.success: {"result":"ACTION-ANSWER"}' },
+      { id: 'be_action', sourceType: 'business_event', title: 'action.error', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: ACTION-ERROR-ANSWER' },
+      { id: 'be_bridged', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'Tool_execution', content: 'ai PUBLISHED Tool_execution: BRIDGED-LEDGER-ANSWER' },
+      { id: 'ce_bridged', sourceType: 'cognitive_event', title: 'ACTION_EXECUTED', content: 'ACTION_EXECUTED: BRIDGED-COGNITIVE-ANSWER' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'key_action_proposal', content: 'ai execute key_action_proposal: PROPOSAL-EXECUTION-RESULT' },
+      { id: 'be_insight', sourceType: 'business_event', title: 'insight.generated', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: CASHFLOW-DIP' },
+      { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+    ];
+  });
+
+  it('leaves them out for a member, the owner, a caller who is no member and a turn with no member; the business events that are not one stay', async () => {
+    for (const userId of ['user_1', 'user_2', 'user_9', undefined]) {
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate', userId);
+      for (const marker of MARKERS) expect(out, `${String(userId)}: ${marker}`).not.toContain(marker);
+      expect(out, String(userId)).toContain('INV-014 overdue');
+      expect(out, String(userId)).toContain('CASHFLOW-DIP');
+    }
   });
 });
 
@@ -407,6 +483,19 @@ describe('the real retrieval service behaves as the stub assumes', () => {
 
   it('still runs semantic search only when a query is supplied', () => {
     expect(unified).toMatch(/options\.query \? this\.loadSemanticMemory\(/);
+  });
+
+  // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-2: what MemoryStub mirrors. includeEpisodic false skips the business
+  // events query, and sourceTypes drops what it does not name before the limit is cut (so naming the stores costs no
+  // fragment of the window). That a read naming its stores does not query the personal ones it leaves out is pinned at
+  // runtime in unified-memory-retrieval.service.spec.ts.
+  it('includeEpisodic false reads no business event; sourceTypes filters before the limit', () => {
+    const fn = unified.slice(unified.indexOf('private async loadStructuredMemory('));
+    const body = fn.slice(0, fn.indexOf('\n  private '));
+    expect(body).toMatch(/includeEpisodic\s*\?\s*this\.prisma\.client\.businessEvent\.findMany/);
+    const filterAt = unified.indexOf('options.sourceTypes && !options.sourceTypes.includes(f.sourceType)');
+    expect(filterAt).toBeGreaterThan(0);
+    expect(unified.indexOf('filtered.slice(0, limit)')).toBeGreaterThan(filterAt);
   });
 
   it('its semantic path really does embed — this is why we omit the query', () => {
