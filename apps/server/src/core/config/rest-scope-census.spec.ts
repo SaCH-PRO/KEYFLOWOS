@@ -1440,19 +1440,118 @@ const HUNT_EXPECTED_UNGUARDED = [
   'Cen10dHuntController.r3g12CheckOtherBusiness', // CM-1 settings admin checked on another business than the one written
   'Cen10dHuntController.r3g13ConnectedLift', // CM-3 g13 connectorStatus.update({ status: 'connected' })
   'Cen10dHuntController.r3g14ChannelHealthState', // CM-3 g14 channelConnection.updateMany({ healthState: 'Disabled' })
+  // SWEEP-P0-FOLLOWUP (round 3 rechecks CW3-1, CW3-2, CW3-3): the shapes the round 3 mutation check passed through the
+  // reader (11 of 12 scratch handlers left all 19 CEN cases green), and the read-modify-write of a credential-holding
+  // JSON column that let a backfill undo a revoke.
+  'Cen10dHuntController.r4bResourceIdBinding', // CW3-1 / mB business.update({ inventoryLinkedSheetId }): the sheet the owner's Drive token reads and clears
+  'Cen10dHuntController.r4cCheckCaught', // CW3-3 mC await assertMemberModuleLevel(...).catch(() => undefined)
+  'Cen10dHuntController.r4dCheckVoid', // CW3-3 mD void assertMemberModuleLevel(...)
+  'Cen10dHuntController.r4eCheckShortCircuit', // CW3-3 mE body.strict && (await assertMemberModuleLevel(...))
+  'Cen10dHuntController.r4eCheckTernary', // CW3-3 mE twin: body.strict ? await assertMemberModuleLevel(...) : undefined
+  'Cen10dHuntController.r4fCheckForOwner', // CW3-3 mF the check made for the business owner ({ id: biz.ownerId })
+  'Cen10dHuntController.r4gDtoData', // CW3-3 mG socialConnection.updateMany({ data: dto }), the DTO typed in another file
+  'Cen10dHuntController.r4hQueueWorker', // CW3-3 mH the route enqueues; a BullMQ Worker writes the credential
+  'Cen10dHuntController.r4iConcatSql', // CW3-3 mI $executeRawUnsafe('UPDATE ' + TABLE + ' SET token = $1 ...')
+  'Cen10dHuntController.r4jConstDelegate', // CW3-3 mJ (this.prisma.client as any)[MODEL_CONST].deleteMany(...)
+  'Cen10dHuntController.r4kCheckForBodyActor', // CW3-3 mK the check made for an actor the request body names
+  'Cen10dHuntController.r4lCheckAllSettled', // CW3-3 mL await Promise.allSettled([assertMemberModuleLevel(...)])
+  'Cen10dHuntController.r4mMetadataFromRead', // CW3-2 connectorStatus metadata written back from an earlier read of itself ({ ...meta, ...next })
 ];
 const HUNT_EXPECTED_GUARDED = [
   'Cen10dHuntController.g1SettingsAdminCheck', // the M1 write after assertMemberModuleLevel(settings, admin)
   'Cen10dHuntController.g2SettingsAdminRoute', // the M5 write under an enforced settings admin scope
   'Cen10dHuntController.r3t11VerifyStateGated', // the g11 write after `if (!state) throw` on the pinned verifyState's result
   'Cen10dHuntController.r3t12CheckSameBusiness', // the g12 write after settings admin on the route's own :businessId
+  // SWEEP-P0-FOLLOWUP twins: the same writes behind a check that guards (awaited, its refusal propagating, for the request's principal).
+  'Cen10dHuntController.r4tCheckAwaitedLocal', // const level = await assertMemberModuleLevel(..., req.user, 'settings', 'admin'); then the write
+  'Cen10dHuntController.r4tQueueWorkerChecked', // settings admin checked before the route enqueues for the worker that writes
+  'Cen10dHuntController.r4tCheckInPromiseAll', // await Promise.all([assertMemberModuleLevel(..., req.user, 'settings', 'admin')]): a refusal rejects the await
 ];
+/**
+ * SWEEP-P0-FOLLOWUP (CW3-3 mG, mH): the shapes that need a second file: a DTO type declared elsewhere (so no column is
+ * named where the write is), and a service whose BullMQ Worker writes what the route only enqueues for.
+ */
+function HUNT_SHAPES_R4(): Parsed[] {
+  const types = `
+/** A DTO declared in another file: the writer names none of its fields. */
+export interface Cen10dConnectionPatch {
+  token?: string;
+  refreshToken?: string;
+  accountName?: string;
+}
+`;
+  const service = `
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Queue, Worker } from 'bullmq';
+import type { Cen10dConnectionPatch } from './cen10d-hunt.types';
+
+const CEN10D_MODEL = 'socialConnection';
+const CEN10D_TABLE = 'social_connections';
+const CEN10D_QUEUE = 'cen10d-r4-bind';
+
+@Injectable()
+export class Cen10dR4Service implements OnModuleInit {
+  private queue!: Queue;
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ConnectorCredentialsService) private readonly creds: ConnectorCredentialsService,
+  ) {}
+
+  onModuleInit() {
+    this.queue = new Queue(CEN10D_QUEUE, { connection: {} });
+    new Worker(CEN10D_QUEUE, async (job) => {
+      await this.creds.setCredentials(job.data.businessId, 'quickbooks', job.data.values);
+    });
+  }
+
+  patchConnection(businessId: string, id: string, dto: Cen10dConnectionPatch) {
+    return this.prisma.client.socialConnection.updateMany({ where: { id, businessId }, data: dto });
+  }
+
+  enqueueBind(businessId: string, values: Record<string, string>) {
+    return this.queue.add('bind', { businessId, values });
+  }
+
+  rawConcat(businessId: string, token: string) {
+    return this.prisma.client.$executeRawUnsafe('UPDATE ' + CEN10D_TABLE + ' SET token = $1 WHERE business_id = $2', token, businessId);
+  }
+
+  dynamicDelegate(businessId: string) {
+    return (this.prisma.client as any)[CEN10D_MODEL].deleteMany({ where: { businessId } });
+  }
+
+  pointOwnerDriveAt(businessId: string, sheetId: string) {
+    return this.prisma.client.business.update({ where: { id: businessId }, data: { inventoryLinkedSheetId: sheetId } });
+  }
+
+  async writeMappings(businessId: string, next: Record<string, unknown>) {
+    const existing = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'typeform' } },
+      select: { metadata: true },
+    });
+    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
+    const merged = { ...meta, ...next };
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'typeform' } },
+      create: { businessId, connectorType: 'typeform', status: 'disconnected', metadata: merged },
+      update: { metadata: merged },
+    });
+  }
+}
+`;
+  const at = (name: string, text: string): Parsed => {
+    const file = join(SRC, `modules/cen10d-hunt/${name}`);
+    return { file, text, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
+  };
+  return [at('cen10d-hunt.types.ts', types), at('cen10d-r4.service.ts', service)];
+}
 function HUNT_SHAPES(): Parsed {
   const text = `
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
+import type { Cen10dConnectionPatch } from './cen10d-hunt.types';
 
 export const CEN10D_CRED_STORE = 'CEN10D_CRED_STORE';
 export const CEN10D_BOUND_STORE = 'CEN10D_BOUND_STORE';
@@ -1491,7 +1590,103 @@ export class Cen10dHuntController {
     @Inject(ChannelConnectionService) private readonly channelConnections: ChannelConnectionService,
     @Inject(CalendarService) private readonly calendar: CalendarService,
     @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
+    @Inject(Cen10dR4Service) private readonly r4: Cen10dR4Service,
   ) {}
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
+  @Post('businesses/:businessId/r4b')
+  async r4bResourceIdBinding(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.pointOwnerDriveAt(businessId, body.sheetId);
+  }
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
+  @Post('businesses/:businessId/r4c')
+  async r4cCheckCaught(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin').catch(() => undefined);
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4d')
+  async r4dCheckVoid(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    void assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4e')
+  async r4eCheckShortCircuit(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    body.strict && (await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin'));
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4e2')
+  async r4eCheckTernary(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    body.strict ? await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin') : undefined;
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4f')
+  async r4fCheckForOwner(@Param('businessId') businessId: string, @Body() body: any) {
+    const biz = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+    await assertMemberModuleLevel(this.prisma, businessId, { id: biz?.ownerId ?? undefined, role: 'USER' }, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4g/:id')
+  async r4gDtoData(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: Cen10dConnectionPatch) {
+    return this.r4.patchConnection(businessId, id, body);
+  }
+
+  @Post('businesses/:businessId/r4h')
+  async r4hQueueWorker(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.enqueueBind(businessId, body.values);
+  }
+
+  @Post('businesses/:businessId/r4i')
+  async r4iConcatSql(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.rawConcat(businessId, body.token);
+  }
+
+  @Post('businesses/:businessId/r4j')
+  async r4jConstDelegate(@Param('businessId') businessId: string) {
+    return this.r4.dynamicDelegate(businessId);
+  }
+
+  @Post('businesses/:businessId/r4k')
+  async r4kCheckForBodyActor(@Param('businessId') businessId: string, @Body() body: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, { id: body.actingFor }, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Get('businesses/:businessId/r4l')
+  async r4lCheckAllSettled(@Param('businessId') businessId: string, @Query('v') v: string, @Req() req: any) {
+    await Promise.allSettled([assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin')]);
+    return this.credentials.setCredentials(businessId, 'quickbooks', { accessToken: v, realmId: v });
+  }
+
+  @Post('businesses/:businessId/r4m')
+  async r4mMetadataFromRead(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.writeMappings(businessId, { formMappings: body.formMappings });
+  }
+
+  @Post('businesses/:businessId/r4t1')
+  async r4tCheckAwaitedLocal(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    const level = await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return { level, done: await this.credentials.setCredentials(businessId, 'quickbooks', body.values) };
+  }
+
+  @Post('businesses/:businessId/r4t2')
+  async r4tQueueWorkerChecked(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return this.r4.enqueueBind(businessId, body.values);
+  }
+
+  @Post('businesses/:businessId/r4t3')
+  async r4tCheckInPromiseAll(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await Promise.all([assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin')]);
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
 
   @Get('businesses/:businessId/r3g01')
   async r3g01InterfaceToken(@Param('businessId') businessId: string, @Query('t') t: string) {
@@ -1866,6 +2061,15 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       'SupplierController.createConnection', // RC-2 sibling: SupplierConnection.credentials
       'FinanceController.createBankConnection', // BankConnection.accessToken
       'MicrosoftOAuthController.callback', // a public callback storing the Outlook tokens
+      // SWEEP-P0-FOLLOWUP CW3-1: the spreadsheet the owner's Drive token reads and clears is a binding (Business.inventoryLinkedSheetId)
+      'GoogleDriveController.linkInventorySheet',
+      'GoogleDriveController.unlinkInventorySheet',
+      'GoogleDriveController.createInventorySheet',
+      // SWEEP-P0-FOLLOWUP CW3-2: the connector form mappings wrote connector_statuses.metadata back from an earlier read of it
+      // (the stored encryptedCredentials and boundBy with it), over a revoke that committed in between
+      'ConnectController.saveConnectorFormMapping',
+      'ConnectController.deleteConnectorFormMapping',
+      'ConnectController.backfillConnectorForm',
     ]));
     // a read that writes nothing is not a writer
     for (const key of ['WebhooksController.list', 'CommunicationsController.listConnections', 'ShopifyController.test']) expect(g.reaches.has(key), key).toBe(false);
@@ -1904,7 +2108,7 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
   });
   it('[CEN-10d] (round 2, CW-5; round 3, CM-1..CM-3) guards the guard: the reader reports, as unguarded, a membership-only handler for every credential-writer shape the round 2 and round 3 hunts passed through it, and not its guarded twin', () => {
     const synthetic = HUNT_SHAPES();
-    const g = buildCredentialGraph([...parsed(), synthetic]);
+    const g = buildCredentialGraph([...parsed(), synthetic, ...HUNT_SHAPES_R4()]);
     const hunt = routes([synthetic]);
     expect(hunt.map((r) => r.key).sort()).toEqual([...HUNT_EXPECTED_UNGUARDED, ...HUNT_EXPECTED_GUARDED].sort());
     // a route is unguarded as CEN-10b reads it: an unguarded path, and no settings admin enforced on the route
@@ -1930,6 +2134,8 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(problems).toEqual([]);
     // guards the guard: the schema reader sees the credential columns the reviews found by hand
     expect(models.business).toEqual(expect.arrayContaining(['gmailRefreshToken', 'msContactsAccessToken', 'bpRefreshToken', 'bpAccountId', 'bpLocationId', 'calendarId']));
+    // SWEEP-P0-FOLLOWUP CW3-1: the inventory spreadsheet the owner's Drive token reads and clears
+    expect(models.business).toEqual(expect.arrayContaining(['inventoryLinkedSheetId']));
     expect(models.channelConnection).toEqual(expect.arrayContaining(['token', 'refreshToken']));
     expect(models.supplierConnection).toEqual(expect.arrayContaining(['credentials']));
     expect(models.integrationConnection).toEqual(expect.arrayContaining(['authData', 'authDataRef']));
@@ -1955,7 +2161,10 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     const file = join(SRC, 'core/connectors/connector-binding.ts');
     const named = existsSync(file) ? new Set([...readFileSync(file, 'utf8').matchAll(/new Set\(\[([^\]]*)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]))) : new Set<string>();
     const binding = [...g.reaches.keys()].filter((id) => id.endsWith('.smokeTest')).map((id) => id.slice(0, -'.smokeTest'.length));
-    expect(binding, 'guards the guard: the WhatsApp check records a binding').toContain('WhatsAppConnector');
+    // whatsappsmoke ruling (SWEEP-P0-FOLLOWUP, recommended option): the WhatsApp test only reports its result and never
+    // switches WhatsApp back on, so its smoke test reaches no binding write and it is no longer a binding-on-check connector.
+    expect(binding, 'the WhatsApp check records nothing (whatsappsmoke)').not.toContain('WhatsAppConnector');
+    expect([...named], 'no connector binds on its check today').toEqual([]);
     const problems: string[] = [];
     for (const cls of binding) {
       const text = readFileSync(join(SRC, g.classes.get(cls)!.file), 'utf8');
@@ -1963,6 +2172,16 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       if (!type || !named.has(type)) problems.push(`${cls} (${type ?? 'no type'}): its smoke test reaches ${g.reaches.get(`${cls}.smokeTest`)!.join(' -> ')}`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('[CEN-10i] (SWEEP-P0-FOLLOWUP, census owner question 12) the PR195 merge has landed: no census row is held for another branch, and the bank connection writes (BankConnection.accessToken) need settings admin', () => {
+    const held = censusRows().filter((r) => /\bheld:/.test(r.reason)).map((r) => `line ${r.line}: ${r.key} (${r.disposition})`);
+    expect(held).toEqual([]);
+    const byKey = new Map(routes().map((r) => [r.key, r]));
+    for (const key of ['FinanceController.createBankConnection', 'FinanceController.updateBankConnection', 'FinanceController.deleteBankConnection']) {
+      const r = byKey.get(key);
+      expect(r && settingsAdminEnforced(r), `${key} enforces settings admin`).toBe(true);
+    }
   });
 
   it('[CEN-10h] (round 3, CM-3 g13) a status door lifts no disconnect: it still writes a status lift, and its connector\'s disconnect removes the credentials (a credential write that is no deactivation, or clearCredentials) or its connectedness is read from the credentials, never from the stored status', () => {
@@ -2003,6 +2222,10 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     for (const key of ['AccountingController.pushInvoice', 'AccountingController.pushCustomers', 'MarketingSyncController.pushContacts']) expect(g.reaches.has(key), key).toBe(true);
     // round 3: every edit of a contact reaches the Outlook push (contact.updated -> ContactSyncService.onContactUpdated), and the Drive share route reaches its grant
     for (const key of ['CrmController.updateContact', 'GoogleDriveController.share']) expect(g.reaches.has(key), key).toBe(true);
+    // SWEEP-P0-FOLLOWUP WH3-1: an audience send through a channel connection (an EMAIL or WhatsApp account a settings
+    // admin binds) is an export of the business's contacts to that account; publish, schedule and KEY's broadcast reach it.
+    for (const key of ['CommunicationsController.publishNow', 'CommunicationsController.schedule']) expect(g.reaches.has(key), `${key} reaches the audience export`).toBe(true);
+    expect(g.keyEntries.filter((k) => g.reaches.has(k)), 'KEY comms_send_broadcast reaches the audience export').toContain('CommunicationsAdapterService.execute');
     const problems: string[] = [];
     for (const [door, why] of Object.entries(OUTBOUND_DESTINATIONS)) {
       if (!why.trim()) problems.push(`${door} names no reason`);

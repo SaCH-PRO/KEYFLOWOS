@@ -873,6 +873,16 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES round 3 class repair, CLASS A Outlook push and Drive share receivers, CLASS B channel health lift)"
     },
     {
+      "prefix": "v99a_",
+      "owner": "apps/server/test/sweep-followup-bindings-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP: CW3-1, CW3-2, bank connections, integration hub binding, staffbookings, staffkeyplans, byokkeys, whatsappsmoke)"
+    },
+    {
+      "prefix": "v99b_",
+      "owner": "apps/server/test/sweep-followup-audience-export.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP: WH3-1 audience export through channel connections, owner question 16)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"
