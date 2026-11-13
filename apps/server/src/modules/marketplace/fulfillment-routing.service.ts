@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException, ConflictException, Inject, NotFoundException } from '@nestjs/common';
-import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
+import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -617,9 +617,13 @@ export class FulfillmentRoutingService {
     listing: ListingShape | null,
     lockedStockIds: readonly string[],
   ): Promise<FulfillmentRouteShape> {
+    // W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-3, CPS-COR-1; D-137): only the business's own stock rows count as stock
+    // kept for the product (ownStockRows), as at the paid door: another business's planted row made a no-mode line the
+    // door had sold as untracked read as tracked here, and it was failed for stock (this routing reserves from the
+    // business's own rows only).
     const product = await tx.product.findUnique({
       where: { id: item.productId },
-      select: { inventoryMode: true, _count: { select: { inventoryStocks: true } } },
+      select: { inventoryMode: true, _count: { select: { inventoryStocks: { where: ownStockRows(businessId) } } } },
     });
 
     // See core/inventory/inventory-mode.ts. Resolving NULL to 'tracked' routed
