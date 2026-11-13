@@ -41,8 +41,9 @@ describe('SettingsAdapterService', () => {
 
     prisma = {
       client: {
-        // The command's actor holds connect:write, which configure_integration needs (R0-09c review ST-6).
-        membership: { findFirst: vi.fn(), findUnique: vi.fn().mockResolvedValue({ role: 'ADMIN', permissionScopes: { connect: 'write' } }) },
+        // The command's actor holds connect:write (R0-09c review ST-6) and settings admin (round 1 class
+        // repair, CLASS B), which configure_integration needs.
+        membership: { findFirst: vi.fn(), findUnique: vi.fn().mockResolvedValue({ role: 'ADMIN', permissionScopes: { connect: 'write', settings: 'admin' } }) },
         user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER' }) },
       },
     } as unknown as PrismaService;
@@ -323,6 +324,11 @@ describe('SettingsAdapterService — a team command names its target member (R0-
  * integrations with no authority check, while the HTTP routes admit only
  * connect:write (ModuleScopeGuard; connect is 'none' for every role by
  * default). The adapter applies ModuleScopeGuard's rule on the command actor.
+ *
+ * SWEEP-P0-SCOPES round 1 class repair (CLASS B): binding an integration is a
+ * credential binding, so it also needs settings admin, as the HTTP routes now
+ * do. The members granted connect write below hold settings admin too, and a
+ * member granted connect write without it is refused (stricter).
  */
 describe('SettingsAdapterService — configure_integration needs connect:write, as the HTTP route does (R0-09c review ST-6)', () => {
   const BIZ = 'biz_st6';
@@ -332,8 +338,11 @@ describe('SettingsAdapterService — configure_integration needs connect:write, 
     staff_default: { role: 'STAFF', permissionScopes: null },
     admin_settings_write: { role: 'ADMIN', permissionScopes: { settings: 'write' } },
     staff_connect_read: { role: 'STAFF', permissionScopes: { connect: 'read' } },
-    staff_connect_write: { role: 'STAFF', permissionScopes: { connect: 'write' } },
-    admin_connect_admin: { role: 'ADMIN', permissionScopes: { connect: 'admin' } },
+    staff_connect_write: { role: 'STAFF', permissionScopes: { connect: 'write', settings: 'admin' } },
+    admin_connect_admin: { role: 'ADMIN', permissionScopes: { connect: 'admin', settings: 'admin' } },
+    // Round 1 class repair: connect write without settings admin.
+    staff_connect_only: { role: 'STAFF', permissionScopes: { connect: 'write' } },
+    admin_connect_settings_write: { role: 'ADMIN', permissionScopes: { connect: 'admin', settings: 'write' } },
   };
   const USERS: Record<string, string> = {
     ...Object.fromEntries(Object.keys(MEMBERSHIPS).map((id) => [id, 'USER'])),
@@ -379,6 +388,18 @@ describe('SettingsAdapterService — configure_integration needs connect:write, 
     expect(integrations.disconnect).not.toHaveBeenCalled();
   });
 
+  it('RED-BEFORE (round 1 class repair, CLASS B): a member granted connect write or admin without settings admin is refused both connect and disconnect, and the integration hub is never called', async () => {
+    for (const actor of ['staff_connect_only', 'admin_connect_settings_write']) {
+      for (const parameters of [CONNECT, DISCONNECT]) {
+        const result = await service.execute(cmd(actor, parameters));
+        expect(result, `${actor} ${JSON.stringify(parameters)}`).toMatchObject({ success: false });
+        expect(String(result.error)).toMatch(/^Insufficient permissions: settings requires admin access \(you have (none|write)\)$/);
+      }
+    }
+    expect(integrations.createConnection).not.toHaveBeenCalled();
+    expect(integrations.disconnect).not.toHaveBeenCalled();
+  });
+
   it("RED-BEFORE: a non-member and a command with no human actor (missing, empty, 'system', 'key_ai') are refused", async () => {
     for (const actor of ['outsider', undefined, '', 'system', 'key_ai']) {
       const result = await service.execute(cmd(actor, DISCONNECT));
@@ -387,6 +408,8 @@ describe('SettingsAdapterService — configure_integration needs connect:write, 
     expect(integrations.disconnect).not.toHaveBeenCalled();
   });
 
+  // Round 1 class repair: these members hold settings admin too (MEMBERSHIPS above); the case keeps its pinned name
+  // (scripts/proof-admission/manifests/key-cortex-actor-binding.json).
   it('a member granted connect write or admin, and SUPER_ADMIN, connect and disconnect', async () => {
     for (const actor of ['staff_connect_write', 'admin_connect_admin', 'platform']) {
       expect((await service.execute(cmd(actor, CONNECT))).success, actor).toBe(true);

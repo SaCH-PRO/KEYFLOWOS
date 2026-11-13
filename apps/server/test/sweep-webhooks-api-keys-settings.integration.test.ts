@@ -27,9 +27,10 @@
  *     bookings for booking.*, storefront for store_order.*, ...; review SEC-2, D-114, D-100); an
  *     event the server does not know is a 400; a contact row carries the stored money signals, so
  *     contact.* also needs revenue read (second review SV-1, D-100);
- *   - a booking event carries the booking's contact as the bookings routes answer it (id, name,
- *     email, phone), never the whole row (second review SV-1: a PRIVATE contact's owner, internal
- *     note and money signals went to a bookings-read member's URL);
+ *   - a booking event carries the booking's contact as the fixed person view (id, name, email;
+ *     round 1 class repair, CLASS A: the phone too is withheld, as the invoice routes withhold it),
+ *     never the whole row (second review SV-1: a PRIVATE contact's owner, internal note and money
+ *     signals went to a bookings-read member's URL);
  *   - a webhook's signing secret and full URL go only to a reader who could have created it: the
  *     settings level above and the reads its events need (second review SV-5: an ADMIN bound by
  *     D-114 read the owner's invoice webhook's secret and signed forged invoice.paid deliveries);
@@ -480,13 +481,19 @@ describe('review SEC-2: a webhook delivers only what its creator may read', () =
  * contact whole (BookingsService reads the booking with include { contact: true }; the dispatcher
  * stripped businessId only), at data.contact and again at data.booking.contact. The bookings read
  * routes answer that contact as { id, firstName, lastName, email, phone }. A delivery now carries the
- * same: no visibility or ownerId (a PRIVATE contact), no notesInternal, no money signals (D-100).
+ * fixed person view, { id, firstName, lastName, email } (round 1 class repair: one view for every
+ * family, sweep-webhook-payload-projection): no visibility or ownerId (a PRIVATE contact), no
+ * notesInternal, no money signals (D-100).
  *
  * The deliveries are read from the dispatcher's own send step (sendWithLogging, replaced for these
  * cases by a recorder): what it would sign and POST. Nothing leaves the machine.
  */
-describe('second review SV-1: a booking event carries the booking\'s contact as the bookings routes answer it', () => {
-  const CONTACT_KEYS = ['email', 'firstName', 'id', 'lastName', 'phone'];
+// Round 1 class repair (CLASS A): every delivery is projected at one choke point, and a person row
+// is delivered as the fixed person view (id, firstName, lastName, email; name for a member or staff
+// row), whatever the family: the view every subscriber may read (the invoice routes withhold the phone
+// from revenue readers). Booking deliveries lose the phone the bookings routes show (stricter).
+describe('second review SV-1: a booking event carries the booking\'s contact as the fixed person view', () => {
+  const CONTACT_KEYS = ['email', 'firstName', 'id', 'lastName'];
   /** Contact fields the bookings routes do not answer (a Booking row has none of these keys of its own). */
   const HIDDEN = ['visibility', 'ownerId', 'notesInternal', 'lifetimeValue', 'averageSpend', 'paymentReliability', 'riskFlags', 'leadScore'];
 
@@ -533,7 +540,7 @@ describe('second review SV-1: a booking event carries the booking\'s contact as 
     return sent;
   }
 
-  it('[WHK-BK-01] RED-BEFORE: booking.created and booking.confirmed deliveries carry the contact as { id, firstName, lastName, email, phone } at data.contact and data.booking.contact; no visibility, owner, internal note or money signal of a PRIVATE contact', async () => {
+  it('[WHK-BK-01] RED-BEFORE: booking.created and booking.confirmed deliveries carry the contact as { id, firstName, lastName, email } (round 1: the fixed person view, no phone) at data.contact and data.booking.contact; no visibility, owner, internal note or money signal of a PRIVATE contact', async () => {
     const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/bookadmin-collector', events: ['booking.created', 'booking.confirmed', 'booking.completed'] });
     const { contact, booking } = await seedPrivateBooking();
     expect(booking.contact.notesInternal, 'the stand-in reads the contact whole, as BookingsService does').toContain('Owner-only note');
@@ -548,7 +555,7 @@ describe('second review SV-1: a booking event carries the booking\'s contact as 
       const { data } = delivery.body;
       for (const [label, shown] of [['data.contact', data.contact], ['data.booking.contact', data.booking?.contact]] as const) {
         expect(Object.keys(shown ?? {}).sort(), `${delivery.event} ${label}`).toEqual(CONTACT_KEYS);
-        expect(shown, `${delivery.event} ${label}`).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email, phone: contact.phone });
+        expect(shown, `${delivery.event} ${label}`).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email });
       }
       const text = JSON.stringify(delivery.body);
       expect(text, delivery.event).not.toContain('Owner-only note');
@@ -561,7 +568,7 @@ describe('second review SV-1: a booking event carries the booking\'s contact as 
     }
   });
 
-  it('[WHK-BK-02] RED-BEFORE: a booking.completed delivery, and any booking event whose booking carries the contact whole, delivers the same five contact fields; a booking with no contact delivers contact null', async () => {
+  it('[WHK-BK-02] RED-BEFORE: a booking.completed delivery, and any booking event whose booking carries the contact whole, delivers the same four contact fields (round 1: no phone); a booking with no contact delivers contact null', async () => {
     const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/bookadmin-collector-2', events: ['booking.completed', 'booking.created'] });
     const { contact, booking } = await seedPrivateBooking();
     const sent = await capture(async () => {
@@ -570,7 +577,7 @@ describe('second review SV-1: a booking event carries the booking\'s contact as 
     });
     const mine = sent.filter((s) => s.webhookId === wh.id);
     expect(mine.map((s) => s.event)).toEqual(['booking.completed', 'booking.created']);
-    expect(mine[0].body.data.booking.contact).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email, phone: contact.phone });
+    expect(mine[0].body.data.booking.contact).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email });
     expect(JSON.stringify(mine[0].body)).not.toContain('Owner-only note');
     expect(mine[1].body.data.contact).toBeNull();
   });

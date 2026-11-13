@@ -848,6 +848,16 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES second review repair SV-2, SV-3, channel and account credentials)"
     },
     {
+      "prefix": "v99p_",
+      "owner": "apps/server/test/sweep-webhook-payload-projection.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS A webhook payload projection)"
+    },
+    {
+      "prefix": "v99q_",
+      "owner": "apps/server/test/sweep-credential-writers-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS B credential writers)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"

@@ -273,7 +273,8 @@ const BELOW_SETTINGS_ADMIN = [ID.staffNone, ID.setRead, ID.adminSetNone, ID.dual
 
 describe('route census: the credential-binding routes of communications, social and connect/microsoft', () => {
   const GATED: Record<string, string[]> = {
-    CommunicationsController: ['createConnection', 'updateConnection', 'deleteConnection', 'connectWhatsApp'],
+    // Round 1 class repair (CLASS B): syncFromSocial copies the social tokens over the business's channel connections.
+    CommunicationsController: ['createConnection', 'updateConnection', 'deleteConnection', 'connectWhatsApp', 'syncFromSocial'],
     SocialController: ['manualConnect', 'oauthStart', 'oauthCallback', 'deleteConnection'],
     MicrosoftOAuthController: ['buildAuthUrl'],
   };
@@ -306,6 +307,22 @@ describe('route census: the credential-binding routes of communications, social 
 });
 
 describe('SV-2: a channel connection is the business\'s credential (communications)', () => {
+  it("[CHN-SYNC-01] RED-BEFORE (round 1 class repair): POST connections/sync-from-social copies every social connection's token over the business's channel connection of that provider; a member below settings admin is refused with 403 and no channel connection is created or overwritten", async () => {
+    await db.socialConnection.create({ data: { id: `${P}sc_sync`, businessId: ID.bizA, platform: 'LINKEDIN', platformId: `${P}li_page`, accountName: 'Owner LinkedIn', token: `${P}owner_li_token_SECRET`, status: 'CONNECTED' } });
+    const before = await channelRows();
+    for (const actor of BELOW_SETTINGS_ADMIN) {
+      const res = await send('post', `${comms()}/connections/sync-from-social`, actor, {});
+      expect(res.status, actor).toBe(403);
+      expect(String(res.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
+    }
+    expect(await channelRows()).toEqual(before);
+    const ok = await send('post', `${comms()}/connections/sync-from-social`, ID.settingsAdmin, {});
+    expect([200, 201]).toContain(ok.status);
+    await db.$executeRawUnsafe(`DELETE FROM channel_destinations WHERE business_id LIKE ${sqlLikePrefix(P)} AND connection_id IN (SELECT id FROM channel_connections WHERE provider = 'LINKEDIN' AND business_id LIKE ${sqlLikePrefix(P)})`).catch(() => undefined);
+    await db.$executeRawUnsafe(`DELETE FROM channel_connections WHERE provider = 'LINKEDIN' AND business_id LIKE ${sqlLikePrefix(P)}`);
+    await db.socialConnection.delete({ where: { id: `${P}sc_sync` } });
+  });
+
   it("[CHN-01] RED-BEFORE: a member below settings admin is refused PATCH of the owner's connection with 403 (a new token and account), and the row (its encrypted token included) is unchanged", async () => {
     const id = await ownerConnection();
     const before = await channelRows();
