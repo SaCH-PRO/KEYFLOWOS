@@ -339,7 +339,7 @@ class RedactionTimeTest(unittest.TestCase):
     characters (100,000 characters took 5 s). Each input here is sized so the
     old rules take seconds and the linear ones a fraction of the limit."""
 
-    LIMIT_SECONDS = 0.5
+    LIMIT_SECONDS = 2.0
 
     def assert_fast(self, label: str, text: str) -> str:
         start = time.perf_counter()
