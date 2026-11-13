@@ -27,12 +27,20 @@
  *           is refused too (the list is read from the code being deployed). Empty, unset, commented-out and
  *           real-looking values pass. The server's other boot refusals
  *           (KEYFLOW_DEV_AUTH_BYPASS, the S3 group, the email-verification
- *           trio in main.ts) are refused too. No value is ever printed.
+ *           trio in main.ts) are refused too. No value is ever printed,
+ *           not even under `bash -x` (P12). For a name the preflight reads,
+ *           a line compose reads differently from KEY=value (YAML-style
+ *           `KEY: value`, `${VAR}` or `$VAR` outside single quotes) cannot
+ *           be verified and is refused (P13).
  *   DSH-V*  verify: /healthz is polled (bounded: 18 polls 5 s apart, 90 s)
  *           until it reports status ok, apiReachable true and the commit just
  *           built; DEPLOYED only then. Degraded for the whole window, an old
  *           commit, or no answer at all exits 1 with the rollback
  *           instructions and never prints DEPLOYED.
+ *   DSH-B*  the pre-deploy dump is created owner-only (0600) under umask 022.
+ *   DSH-R*  `deploy.sh <ref>` from a box whose deploy.sh differs from the
+ *           ref's: after the checkout the ref's deploy.sh is run (once),
+ *           so its preflight and health wait apply on that deploy.
  *   DSH-S*  the script's mirror of the server rules is pinned to the server
  *           source: its built-in placeholder list equals env.ts's Set, its S3
  *           keys equal env.ts's required group, and main.ts still requires
@@ -42,7 +50,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -173,7 +181,12 @@ function serveHealth(sb, { sequence = [], fallback } = {}) {
   if (fallback !== undefined) writeFileSync(join(sb.state, 'health.default'), fallback);
 }
 
-function runDeploy(sb) {
+/**
+ * Runs the sandbox's deploy.sh. `args` go to the script (a git ref),
+ * `bashArgs` to bash before it (`-x`), `umask` is set before bash starts,
+ * and `env` adds to the stand-in environment.
+ */
+function runDeploy(sb, { args = [], bashArgs = [], umask = null, env: extraEnv = {} } = {}) {
   return new Promise((resolve, reject) => {
     const env = {
       PATH: `${sb.bin}:${process.env.PATH}`,
@@ -181,8 +194,13 @@ function runDeploy(sb) {
       STUB_STATE: sb.state,
       DEPLOY_SKIP_CI_CHECK: '1',
       DEPLOY_BACKUP_DIR: sb.state,
+      ...extraEnv,
     };
-    const child = spawn('bash', [join(sb.root, 'scripts', 'deploy.sh')], { cwd: sb.root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const script = join(sb.root, 'scripts', 'deploy.sh');
+    const [cmd, argv] = umask === null
+      ? ['bash', [...bashArgs, script, ...args]]
+      : ['sh', ['-c', `umask ${umask} && exec bash "$@"`, 'sh', ...bashArgs, script, ...args]];
+    const child = spawn(cmd, argv, { cwd: sb.root, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
@@ -367,6 +385,103 @@ test('[DSH-P11] AUTH_REQUIRE_EMAIL_VERIFICATION=false lifts the email trio, as m
     assert.equal(result.code, 0, result.out);
   }));
 
+// An operator debugging a deploy runs `bash -x scripts/deploy.sh`, and deploy
+// output gets pasted into chats and issues. The preflight is the one part of
+// the script that holds .env.production values in shell variables; traced,
+// every one of them was printed (each sentinel 20+ times).
+function traceSentinels() {
+  const tag = randomBytes(8).toString('hex');
+  return {
+    POSTGRES_PASSWORD: `dsh-trace-pg-${tag}`,
+    SUPABASE_SERVICE_ROLE_KEY: `dsh-trace-srk-${tag}`,
+    RESEND_API_KEY: `dsh-trace-resend-${tag}`,
+    STRIPE_SECRET_KEY: `dsh-trace-stripe-${tag}`,
+    SUPABASE_JWT_SECRET: `dsh-trace-jwt-${tag}`,
+    S3_SECRET_ACCESS_KEY: `dsh-trace-s3-${tag}`,
+  };
+}
+
+function traceEnvFile(sentinels) {
+  return [
+    '# test fixture: every value below is a per-run sentinel',
+    'EMAIL_FROM_ADDRESS=ops@example.invalid',
+    'S3_BUCKET=b',
+    'S3_REGION=us-east-1',
+    'S3_ACCESS_KEY_ID=stub-access-id',
+    'S3_ENDPOINT=http://minio:9000',
+    ...Object.entries(sentinels).map(([k, v], i) => (i % 2 ? `${k}="${v}"` : `export ${k}=${v} # inline`)),
+    '',
+  ].join('\n');
+}
+
+function assertNoSentinel(result, sentinels) {
+  assert.match(result.out, /^\++ /m, `the run was not traced:\n${result.out}`);
+  for (const [k, v] of Object.entries(sentinels)) {
+    const n = result.out.split(v).length - 1;
+    assert.equal(n, 0, `${k}'s value appears ${n} time(s) in the bash -x output`);
+  }
+}
+
+test('[DSH-P12] under bash -x a deploy that passes the preflight traces no .env.production value', () => {
+  const sentinels = traceSentinels();
+  return withSandbox({ envFile: traceEnvFile(sentinels) }, async (sb) => {
+    serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+    const result = await runDeploy(sb, { bashArgs: ['-x'] });
+    assert.equal(result.code, 0, result.out);
+    assert.match(result.out, /DEPLOYED/);
+    assertNoSentinel(result, sentinels);
+  });
+});
+
+test('[DSH-P12b] under bash -x a refused .env.production traces no value either', () => {
+  const sentinels = traceSentinels();
+  return withSandbox({ envFile: traceEnvFile(sentinels) + 'KEYFLOW_DEV_AUTH_BYPASS=true\n' }, async (sb) => {
+    const result = await runDeploy(sb, { bashArgs: ['-x'] });
+    assertRefusedBeforeBackup(sb, result, /KEYFLOW_DEV_AUTH_BYPASS/);
+    assertNoSentinel(result, sentinels);
+  });
+});
+
+// Compose reads more than KEY=value: a YAML-style `KEY: value` line, and
+// `${VAR}` / `$VAR` interpolation outside single quotes (from the file or the
+// shell that runs compose). The preflight did not model either, so
+// `SUPABASE_JWT_SECRET: your-jwt-secret` or `RESEND_API_KEY=${UNSET}` passed it
+// and the API crash-looped after the backup, the build and the restart. For a
+// name the preflight reads, a line it cannot read as compose does is refused.
+const unverifiable = [
+  ['SUPABASE_JWT_SECRET', 'a YAML-style placeholder', `SUPABASE_JWT_SECRET: ${PLACEHOLDER}\n`],
+  ['SUPABASE_JWT_SECRET', 'a YAML-style placeholder behind export', `export SUPABASE_JWT_SECRET:${PLACEHOLDER}\n`],
+  ['RESEND_API_KEY', 'an interpolated ${VAR} (compose fills it from the shell)', 'RESEND_API_KEY=${RESEND_KEY_FROM_SHELL}\n'],
+  ['SUPABASE_JWT_SECRET', 'an interpolated ${VAR} in double quotes', 'OLD_SECRET=x\nSUPABASE_JWT_SECRET="${OLD_SECRET}"\n'],
+  ['KEYFLOW_DEV_AUTH_BYPASS', 'an interpolated bare $VAR', 'KEYFLOW_DEV_AUTH_BYPASS=$BYPASS\n'],
+  ['S3_ENDPOINT', 'a YAML-style S3 value', 'S3_BUCKET=b\nS3_REGION=r\nS3_ACCESS_KEY_ID=a\nS3_SECRET_ACCESS_KEY=s\nS3_ENDPOINT: minio:9000\n'],
+];
+
+for (const [key, label, line] of unverifiable) {
+  test(`[DSH-P13] ${key} written as ${label} cannot be verified and is refused before the backup`, () =>
+    withSandbox({ envFile: BASE_ENV + line }, async (sb) => {
+      serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+      const result = await runDeploy(sb, { env: { RESEND_KEY_FROM_SHELL: 'stub-from-shell', BYPASS: 'false' } });
+      assertRefusedBeforeBackup(sb, result, new RegExp(`${key} \\(line \\d+\\)[^\\n]*cannot be verified`));
+      assert.ok(!result.out.includes(PLACEHOLDER), `printed a value:\n${result.out}`);
+    }));
+}
+
+const verifiable = [
+  ['a $ inside single quotes (compose reads it literally)', `SUPABASE_JWT_SECRET='${randomBytes(12).toString('hex')}$x'\n`],
+  ['interpolation and YAML style on names the preflight does not read', 'POSTGRES_PASSWORD="pa$$word"\nAPP_NAME: KEYFLOW\nDOCS_NOTE=see ${DOCS}\n'],
+];
+
+for (const [label, line] of verifiable) {
+  test(`[DSH-P13b] ${label} passes the preflight`, () =>
+    withSandbox({ envFile: BASE_ENV + line }, async (sb) => {
+      serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+      const result = await runDeploy(sb);
+      assert.equal(result.code, 0, result.out);
+      assert.match(result.out, /DEPLOYED/);
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // DSH-V: the bounded health wait
 // ---------------------------------------------------------------------------
@@ -435,6 +550,133 @@ test('[DSH-V6] /healthz never answers: exit 1, never DEPLOYED', () =>
     assert.equal(result.code, 1, result.out);
     assert.doesNotMatch(result.out, /DEPLOYED/);
     assert.equal(lines(sb, 'curl.log').length, 18, result.out);
+  }));
+
+// ---------------------------------------------------------------------------
+// DSH-B: the pre-deploy dump
+// ---------------------------------------------------------------------------
+
+test('[DSH-B1] the dump (every tenant\'s data) is written owner-only, whatever the umask and DEPLOY_BACKUP_DIR', () =>
+  withSandbox({ envFile: BASE_ENV }, async (sb) => {
+    serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+    const result = await runDeploy(sb, { umask: '022' });
+    assert.equal(result.code, 0, result.out);
+    const dumps = readdirSync(sb.state).filter((f) => /^keyflow-backup-.*\.sql$/.test(f));
+    assert.equal(dumps.length, 1, `expected one dump in DEPLOY_BACKUP_DIR: ${dumps}`);
+    const mode = statSync(join(sb.state, dumps[0])).mode & 0o777;
+    assert.equal(mode & 0o077, 0, `the dump is mode ${mode.toString(8)}: readable beyond its owner`);
+  }));
+
+// ---------------------------------------------------------------------------
+// DSH-R: `deploy.sh <ref>` runs the deploy.sh of the ref it deploys
+// ---------------------------------------------------------------------------
+//
+// Bash reads a script through an open file. `git checkout` replaces
+// scripts/deploy.sh with a new file, so the running bash went on reading the
+// copy the box had BEFORE the checkout: the first deploy of a changed
+// deploy.sh ran the previous one's logic from start to finish (no preflight,
+// the old health check). Here the box is a single-branch clone of a local
+// origin, as production is, and `next` on origin carries a different deploy.sh.
+
+const REAL_DEPLOY_SH = readFileSync(DEPLOY_SH, 'utf8');
+
+/** The real deploy.sh without its .env.production preflight: a box still on an older copy. */
+function withoutPreflight(src) {
+  const out = src.replace(/^check_env_production "\$ENV_FILE"\n/m, '');
+  assert.notEqual(out, src, 'deploy.sh no longer calls check_env_production "$ENV_FILE" on a line of its own');
+  return out;
+}
+
+/**
+ * A box: a single-branch clone, at main, of an origin whose main holds
+ * `boxScript` as scripts/deploy.sh and whose `next` holds `refScript`.
+ */
+function boxSandbox({ envFile, boxScript, refScript }) {
+  const dir = mkdtempSync(join(tmpdir(), 'deploy-sh-box-'));
+  const origin = join(dir, 'origin');
+  const root = join(dir, 'checkout');
+  const bin = join(dir, 'bin');
+  const state = join(dir, 'state');
+  const config = join(origin, 'apps', 'server', 'src', 'core', 'config');
+  for (const d of [join(origin, 'scripts'), config, bin, state]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(origin, 'scripts', 'deploy.sh'), boxScript);
+  writeFileSync(join(origin, 'docker-compose.production.yml'), 'services: {}\n');
+  writeFileSync(join(config, 'env.ts'), readFileSync(ENV_TS, 'utf8'));
+  writeFileSync(join(origin, '.gitignore'), '.env.production\n');
+  git(origin, ['init', '-q']);
+  git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  git(origin, ['add', '-A']);
+  git(origin, ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'what the box runs today']);
+  git(origin, ['checkout', '-q', '-b', 'next']);
+  writeFileSync(join(origin, 'scripts', 'deploy.sh'), refScript);
+  writeFileSync(join(origin, 'RELEASE'), 'next\n');
+  git(origin, ['add', '-A']);
+  git(origin, ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'the ref being deployed']);
+  const next = git(origin, ['rev-parse', 'HEAD']);
+  git(origin, ['checkout', '-q', 'main']);
+  git(dir, ['clone', '-q', '--single-branch', '--branch', 'main', origin, root]);
+  writeFileSync(join(root, '.env.production'), envFile);
+  for (const [name, body] of Object.entries(STUBS)) {
+    writeFileSync(join(bin, name), body);
+    chmodSync(join(bin, name), 0o755);
+  }
+  return { dir, root, bin, state, next, commit: next.slice(0, 12) };
+}
+
+async function withBox(opts, fn) {
+  const sb = boxSandbox(opts);
+  try {
+    return await fn(sb);
+  } finally {
+    rmSync(sb.dir, { recursive: true, force: true });
+  }
+}
+
+const count = (text, re) => (text.match(new RegExp(re.source, 'g')) || []).length;
+const REEXEC_NOTICE = /re-running the checked-out copy/;
+
+test('[DSH-R1] deploying a ref whose deploy.sh differs runs THAT deploy.sh: its preflight refuses a placeholder the box\'s copy would ship', () =>
+  withBox(
+    { envFile: BASE_ENV + `SUPABASE_JWT_SECRET=${PLACEHOLDER}\n`, boxScript: withoutPreflight(REAL_DEPLOY_SH), refScript: REAL_DEPLOY_SH },
+    async (sb) => {
+      serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+      const result = await runDeploy(sb, { args: ['next'] });
+      assertRefusedBeforeBackup(sb, result, PLACEHOLDER_REASON);
+      assert.equal(count(result.out, REEXEC_NOTICE), 1, result.out);
+      assert.equal(git(sb.root, ['rev-parse', 'HEAD']), sb.next, 'the ref was not checked out');
+    },
+  ));
+
+test('[DSH-R2] after the re-run the deploy completes once: one fetch, one build, DEPLOYED on the ref', () =>
+  withBox({ envFile: BASE_ENV, boxScript: withoutPreflight(REAL_DEPLOY_SH), refScript: REAL_DEPLOY_SH }, async (sb) => {
+    serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+    const result = await runDeploy(sb, { args: ['next'] });
+    assert.equal(result.code, 0, result.out);
+    assert.match(result.out, new RegExp(`DEPLOYED — /healthz reports ${sb.commit}`));
+    assert.equal(count(result.out, REEXEC_NOTICE), 1, result.out);
+    assert.equal(count(result.out, /==> Fetching next/), 1, result.out);
+    assert.match(result.out, /Checking \.env\.production against the API's boot rules/);
+    assert.equal(lines(sb, 'docker.log').filter((l) => / build /.test(` ${l} `)).length, 1, result.out);
+  }));
+
+test('[DSH-R3] a ref whose deploy.sh is the one running is deployed without a re-run', () =>
+  withBox({ envFile: BASE_ENV, boxScript: REAL_DEPLOY_SH, refScript: REAL_DEPLOY_SH }, async (sb) => {
+    serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+    const result = await runDeploy(sb, { args: ['next'] });
+    assert.equal(result.code, 0, result.out);
+    assert.match(result.out, new RegExp(`DEPLOYED — /healthz reports ${sb.commit}`));
+    assert.equal(count(result.out, REEXEC_NOTICE), 0, result.out);
+    assert.equal(count(result.out, /==> Fetching next/), 1, result.out);
+  }));
+
+test('[DSH-R4] a run that is already a re-run never goes on with a copy that is not the deployed one', () =>
+  withBox({ envFile: BASE_ENV, boxScript: withoutPreflight(REAL_DEPLOY_SH), refScript: REAL_DEPLOY_SH }, async (sb) => {
+    serveHealth(sb, { fallback: healthBody({ commit: sb.commit }) });
+    const result = await runDeploy(sb, { args: ['next'], env: { DEPLOY_REEXEC: '1' } });
+    assert.equal(result.code, 1, result.out);
+    assert.match(result.out, /deploy\.sh/);
+    assert.deepEqual(lines(sb, 'docker.log'), [], `docker was called:\n${result.out}`);
+    assert.doesNotMatch(result.out, /DEPLOYED/);
   }));
 
 // ---------------------------------------------------------------------------
