@@ -193,12 +193,15 @@ export function graphActionExtraScopes(toolName: string): ReadonlyArray<GraphAct
 }
 
 /**
- * PR195-PORT (D-73, D-46): tools that write the ledger though their own module scope is neither revenue nor
- * expenses. A KEY plan or monitor with no member principal runs none of them (noMemberToolRefusal), and a
- * platform SUPER_ADMIN who is not a member of the business runs none of them (assertMayRunGraphAction; review
- * SEC-P195-1), as neither writes the business's invoices.
+ * PR195-PORT (D-73, D-46): tools that write the ledger though their own module scope is not revenue. A KEY
+ * plan or monitor with no member principal runs none of them (noMemberToolRefusal), and a platform
+ * SUPER_ADMIN who is not a member of the business runs none of them (assertMayRunGraphAction; review
+ * SEC-P195-1), as neither writes the business's invoices. payroll_mark_paid (operations, beside expenses
+ * write); PR195-BOOKS-DOORS (SEC-P195JS-1): inventory_advance_purchase_order (expenses write), whose receipt
+ * posts the purchase and whose web doors now refuse a SUPER_ADMIN who is not a member
+ * (MarketplaceController.assertPurchaseOrderMember).
  */
-export const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid']);
+export const NO_MEMBER_LEDGER_WRITE_TOOLS: ReadonlySet<string> = new Set(['payroll_mark_paid', 'inventory_advance_purchase_order']);
 
 /**
  * W11-GOOGLE-STATEMENT-SOURCE-OWNER (owner ruling D-132, applying D-99; the owner is D-125's, an OWNER

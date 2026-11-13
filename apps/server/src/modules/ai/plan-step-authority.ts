@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { LEVEL_RANK, defaultScopesForRole, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
@@ -378,20 +378,70 @@ function revenueWriteLevelOfTool(toolName: string): 'write' | 'admin' | null {
  * W8-KEY-REVENUE-GATE (D-98): `userId`'s revenue level in `businessId`, read as the routes' money
  * writes read it (CommerceService.assertActorMayWriteRevenue, behind ModuleScopeGuard revenue write on
  * PATCH .../paid): the membership's explicit permissionScopes map, where a missing key is none, else
- * its role's defaults (OWNER and ADMIN admin, STAFF read). No membership is none, a platform
- * SUPER_ADMIN included (D-46: one who is not a member does not write the business's invoices).
+ * its role's defaults (OWNER and ADMIN admin, STAFF read); one helper with ModuleScopeGuard
+ * (memberModuleLevel). No membership is none, a platform SUPER_ADMIN included (D-46: one who is not a
+ * member does not write the business's invoices). This is the membership's own level: what KEY does for
+ * a SUPER_ADMIN who IS a member depends on the tool's web door (memberRevenueReader).
  */
 export async function memberRevenueLevel(prisma: PrismaService, businessId: string, userId: string): Promise<string> {
   const membership = await prisma.client.membership.findUnique({
     where: { userId_businessId: { userId, businessId } },
     select: { role: true, permissionScopes: true },
   });
-  if (!membership) return 'none';
-  const scopes: Record<string, string> =
-    membership.permissionScopes && typeof membership.permissionScopes === 'object'
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-  return scopes.revenue || 'none';
+  return membership ? memberModuleLevel(membership, 'revenue') : 'none';
+}
+
+/**
+ * PR195-BOOKS-DOORS (review findings SEC-P195JS-5, CRR-P195JS-1): KEY's revenue-write tools whose web
+ * door is a Books write on FinanceController: ModuleScopeGuard revenue write, which admits a platform
+ * SUPER_ADMIN whatever its membership's scopes, and ensureAccess, which requires a membership (D-46). So
+ * a SUPER_ADMIN who IS a member posts a journal or matches a bank line over REST whatever its own
+ * revenue scope, and KEY admits them to these tools as the route does (memberRevenueReader), as
+ * memberExtraScopeReader admits them to payroll_mark_paid as PayrollService does. Every other revenue
+ * write (the invoice, quote and payment tools) keeps D-98's reading: their web doors hold a SUPER_ADMIN
+ * member to its membership's revenue write (FOLLOW3-A1/A2: CommerceController and PaymentsOpsController
+ * assertSuperAdminMayWriteRevenue, CommerceService.assertActorMayWriteRevenue), so KEY does too.
+ * flow-chat-books-gate.spec.ts pins the partition: every revenue write of the derived table is either
+ * here (a finance.controller door) or a commerce or payments door.
+ */
+export const KEY_BOOKS_REVENUE_TOOLS: ReadonlySet<string> = new Set([
+  'finance_post_journal_entry',
+  'finance_auto_match_bank',
+  'reconcile_run_auto_match',
+  'reconcile_match_line',
+]);
+
+/**
+ * PR195-BOOKS-DOORS: reads `userId`'s membership of `businessId` (and whether they are a platform
+ * SUPER_ADMIN) once, and answers, for a tool and the revenue level it requires, why KEY may not run it
+ * for them, or null. A membership's level is memberRevenueLevel's; no membership is none (D-46); a
+ * SUPER_ADMIN who is a member passes a Books tool (KEY_BOOKS_REVENUE_TOOLS), as ModuleScopeGuard and
+ * PayrollService pass them, and is held to its membership's level for every other tool, as the invoice
+ * and payment doors hold them. The words start as ModuleScopeGuard's, so a member and the model read
+ * KEY's refusal as the route's. Used for the FLOW chat menu (one read per turn) and each call.
+ */
+export async function memberRevenueReader(
+  prisma: PrismaService,
+  businessId: string,
+  userId: string,
+): Promise<(toolName: string, required: 'write' | 'admin' | null) => string | null> {
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  const level = membership ? memberModuleLevel(membership, 'revenue') : 'none';
+  // The platform role matters only to a member whose own level reaches less than every revenue write
+  // (admin); the user row is read then alone, so a member at admin costs no second query.
+  const user = membership && rankOf(level) < LEVEL_RANK.admin
+    ? await prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } })
+    : null;
+  const superAdminMember = Boolean(membership) && user?.role === 'SUPER_ADMIN';
+  return (toolName, required) => {
+    if (!required) return null;
+    if (superAdminMember && KEY_BOOKS_REVENUE_TOOLS.has(toolName)) return null;
+    if (rankOf(level) >= LEVEL_RANK[required]) return null;
+    return `Insufficient permissions: revenue requires ${required} access (you have ${level}); KEY runs "${toolName}" for a member only with the revenue access the routes require (D-98)`;
+  };
 }
 
 /**
@@ -399,7 +449,8 @@ export async function memberRevenueLevel(prisma: PrismaService, businessId: stri
  * in `businessId`, or null when it may (or this call writes no money: keyRevenueWriteLevel, judged with
  * the call's `args` for a tool whose money write depends on them; review CR-W8KRG-1). The answer starts
  * with the words ModuleScopeGuard and the service answer the same member's PATCH .../paid with, so a
- * member and the model read KEY's refusal as the route's.
+ * member and the model read KEY's refusal as the route's. PR195-BOOKS-DOORS: through memberRevenueReader,
+ * so a SUPER_ADMIN who is a member is held as the tool's web door holds them.
  */
 export async function memberRevenueWriteRefusal(
   prisma: PrismaService,
@@ -410,9 +461,35 @@ export async function memberRevenueWriteRefusal(
 ): Promise<string | null> {
   const required = keyRevenueWriteLevel(toolName, args);
   if (!required) return null;
-  const level = await memberRevenueLevel(prisma, businessId, memberId);
-  if (rankOf(level) >= LEVEL_RANK[required]) return null;
-  return `Insufficient permissions: revenue requires ${required} access (you have ${level}); KEY runs "${toolName}" for a member only with the revenue access the routes require (D-98)`;
+  return (await memberRevenueReader(prisma, businessId, memberId))(toolName, required);
+}
+
+/**
+ * PR195-BOOKS-DOORS (review finding SEC-P195JS-4; D-73: KEY writes money only for a member): why a
+ * member-driven surface (member chat, a plan run over HTTP, a KEY-cortex turn's bridged call) that names
+ * no member may not run `toolName`, or null. A chat turn with no principal is real: the Chatwoot support
+ * desk calls FlowOrchestratorService.chat with no user, so customer-written text drives it, and the
+ * revenue gate (memberRevenueWriteRefusal) and the extra-scope gate (memberExtraScopeRefusal) both need a
+ * member to read. Refused, fail closed: a revenue write (keyRevenueWriteLevel with the call's arguments,
+ * so a contact move of update_status_with_confirmation still runs), a tool whose authority map entry
+ * names an extra scope (keyMemberExtraScopes: payroll_mark_paid), a tool that posts the ledger outside
+ * the revenue scope (NO_MEMBER_LEDGER_WRITE_TOOLS), and any other tool the authority map holds at
+ * revenue or expenses write (finance_pay_bill, expenses_create: what noMemberToolRefusal refuses a plan
+ * with no member for the same reason). `args` omitted (the menu) reads every such tool as a money write.
+ */
+export function noMemberMoneyWriteRefusal(toolName: string, args?: unknown, surface = 'KEY'): string | null {
+  const argumentBound = Object.prototype.hasOwnProperty.call(REVENUE_WRITE_ARGUMENTS, toolName);
+  let money = keyRevenueWriteLevel(toolName, args) !== null || NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName) || keyMemberExtraScopes(toolName).length > 0;
+  if (!money && !argumentBound) {
+    const requirement = graphActionRequirement(toolName);
+    money = Boolean(
+      requirement &&
+        !('refused' in requirement) &&
+        requirement.scopes.some((s) => (s.module === 'revenue' || s.module === 'expenses') && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write),
+    );
+  }
+  if (!money) return null;
+  return `"${toolName}" writes the business's money or books, and this ${surface} turn names no member it runs for, so KEY does not run it (D-73)`;
 }
 
 /**
@@ -433,7 +510,9 @@ export function keyMemberExtraScopes(toolName: string): ReadonlyArray<GraphActio
  * KEY may not run it for them for want of an extra scope (keyMemberExtraScopes), or null. The rule is
  * PayrollService.markRunPaid's for the member a run is for: a Membership of this business (D-46: a
  * platform SUPER_ADMIN who is not a member is refused; one who is a member passes, as ModuleScopeGuard
- * lets one through), and each extra scope at its level, read as ModuleScopeGuard reads a membership
+ * lets one through, and as memberRevenueReader passes one to the Books tools: PR195-BOOKS-DOORS, review
+ * SEC-P195JS-5 / CRR-P195JS-1, each reader following its tools' web doors), and each extra scope at its
+ * level, read as ModuleScopeGuard reads a membership
  * (memberModuleLevel: the explicit map, a missing key being none, else the role's defaults). The words
  * are the guard's, so a member and the model read KEY's refusal as the service's. Used for the FLOW
  * chat menu (FlowOrchestratorService.selectToolsForRequest), so one turn reads the membership once.

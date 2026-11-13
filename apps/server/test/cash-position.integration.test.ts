@@ -1155,7 +1155,19 @@ describe('V1-37b review repairs: account opening balances', () => {
   }, 60_000);
 
   it('CP-13 (review SEC-V37b-2) RED-BEFORE: an account create writes a finance audit row naming the member and the opening posting, or why it was not posted', async () => {
-    // A STAFF member whose every module scope is none: the route is membership-only (residual).
+    // PR195-BOOKS-DOORS (review SEC-P195JS-1): the route is no longer membership-only. A create posts the
+    // opening balance into the books, so it needs revenue write: a STAFF member whose every module scope is
+    // none is refused 403 before the handler, and no account, opening or audit row is written.
+    const refused = await request(financeApp.getHttpServer())
+      .post(`/finance/businesses/${ID.bizH}/accounts`)
+      .set(HEADER, ID.staffH)
+      .send({ name: 'V34A Staff Bank H', type: 'BANK', openingBalance: 1000 });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ message: 'Insufficient permissions: revenue requires write access (you have none)' });
+    expect(await db.financialAccount.count({ where: { businessId: ID.bizH, name: 'V34A Staff Bank H' } })).toBe(0);
+    expect(await db.teamActivityLog.count({ where: { businessId: ID.bizH, module: 'finance', userId: ID.staffH } })).toBe(0);
+    // The same STAFF member granted revenue write creates it, and the audit names them.
+    await db.membership.update({ where: { id: `${ID.staffH}_m` }, data: { permissionScopes: { ...ALL_SCOPES_NONE, revenue: 'write' } } });
     const res = await request(financeApp.getHttpServer())
       .post(`/finance/businesses/${ID.bizH}/accounts`)
       .set(HEADER, ID.staffH)

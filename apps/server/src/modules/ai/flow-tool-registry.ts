@@ -4465,14 +4465,16 @@ export const FLOW_TOOLS: FlowTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', description: 'Entry type: INCOME, EXPENSE, TRANSFER, REFUND, TAX, ADJUSTMENT, OPENING_BALANCE' },
+        // PR195-BOOKS-DOORS (review SEC-P195JS-3): the General Journal's post, as POST journal-entries makes it:
+        // an ADJUSTMENT (any other type is refused), its amount the lines' debits.
+        type: { type: 'string', description: 'ADJUSTMENT, the only type the General Journal posts (optional; any other is refused)' },
         date: { type: 'string', description: 'Posting date (ISO)' },
-        amount: { type: 'number', description: 'Total entry amount (each side)' },
+        amount: { type: 'number', description: 'Total entry amount (each side; the posted amount is the sum of the debits)' },
         currency: { type: 'string', description: 'Currency code (optional)' },
         description: { type: 'string', description: 'Narration/memo' },
         entries: { type: 'array', description: 'Lines: [{ accountId, debit?, credit?, memo? }] — debits must equal credits' },
       },
-      required: ['type', 'date', 'amount', 'entries'],
+      required: ['date', 'entries'],
     },
     outputSchema: { type: 'object', description: 'Posted journal entry', fields: { id: { type: 'string', description: 'Journal entry ID' }, status: { type: 'string', description: 'Posting status' } } },
   },

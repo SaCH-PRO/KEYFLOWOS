@@ -471,6 +471,15 @@ function memberRevenueGateMember(action?: KeyDispatchAction): string | null {
   return null;
 }
 
+/**
+ * PR195-BOOKS-DOORS (review SEC-P195JS-4): the surfaces memberRevenueGateMember reads a member from. One
+ * that names none (memberRevenueGateMember null) is refused every money write (noMemberMoneyWriteRefusal,
+ * D-73), not waved through: the Chatwoot support desk runs chat with no user, on customer-written text.
+ */
+function memberDrivenSurface(action: KeyDispatchAction): boolean {
+  return MEMBER_CHAT_SURFACES.has(action.surface) || action.surface === 'PLAN_HTTP' || action.surface === 'CORTEX_BRIDGE';
+}
+
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
 function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
   if (!ctx || typeof ctx !== 'object') return ctx;
@@ -1682,13 +1691,18 @@ export class FlowOrchestratorService {
     // and a tool whose authority map entry names an extra scope beside its own module (keyMemberExtraScopes:
     // payroll_mark_paid's expenses write) is offered only when the member holds it, as memberScopeRefusal refuses
     // its call.
+    // PR195-BOOKS-DOORS (review SEC-P195JS-5 / CRR-P195JS-1): the revenue rule reads memberRevenueReader, so a
+    // platform SUPER_ADMIN who is a member is offered a Books tool (KEY_BOOKS_REVENUE_TOOLS) as its web door
+    // admits them, and an invoice or payment tool only with its membership's revenue write, as theirs do.
+    // And (review SEC-P195JS-4) a member chat turn that names no member, the Chatwoot support desk's, is
+    // offered no money write at all (noMemberMoneyWriteRefusal, D-73), as memberScopeRefusal refuses its call.
     if (!envelope && principalUserId) {
       const level = await this.memberOperationsLevel(businessId, principalUserId);
       // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-      const { keyMemberExtraScopes, keyRevenueMenuLevel, memberExtraScopeReader, memberRevenueLevel } = await import('./plan-step-authority');
-      const revenue = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
-        ? await memberRevenueLevel(this.prisma, businessId, principalUserId)
-        : 'none';
+      const { keyMemberExtraScopes, keyRevenueMenuLevel, memberExtraScopeReader, memberRevenueReader } = await import('./plan-step-authority');
+      const revenueRefusal = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
+        ? await memberRevenueReader(this.prisma, businessId, principalUserId)
+        : () => null;
       const extraRefusal = candidates.some((t) => keyMemberExtraScopes(t.function.name).length > 0)
         ? await memberExtraScopeReader(this.prisma, businessId, principalUserId)
         : () => null;
@@ -1696,9 +1710,11 @@ export class FlowOrchestratorService {
         const required = operationsLevelFor(t.function.name);
         if (required && rankOf(level) < LEVEL_RANK[required]) return false;
         if (extraRefusal(t.function.name)) return false;
-        const money = keyRevenueMenuLevel(t.function.name);
-        return !money || rankOf(revenue) >= LEVEL_RANK[money];
+        return !revenueRefusal(t.function.name, keyRevenueMenuLevel(t.function.name));
       });
+    } else if (!envelope) {
+      const { noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
+      candidates = candidates.filter((t) => !noMemberMoneyWriteRefusal(t.function.name));
     }
 
     // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
@@ -3536,10 +3552,13 @@ ${triage.standingContext}`;
    * over HTTP (review SEC-W8KRG-1), the member a KEY-cortex turn's bridged call runs for (review
    * SEC-W8KRG-2). `args`: the call's arguments, so a tool whose money write depends on them
    * (update_status_with_confirmation moving contacts) is judged by them (review CR-W8KRG-1). null for
-   * every other tool, for a member whose scopes reach it, and for a call with no such member: the staff
-   * bridge (its issued envelope already bounds the holder), the support desk and the system surfaces
-   * are unchanged; the plan queue, an approved proposal and the monitor are held before dispatch
-   * (memberToolRunAuthority, D-71), and a plan or a monitor with no member writes no money (D-73).
+   * every other tool and for a member whose scopes reach it. PR195-BOOKS-DOORS (review SEC-P195JS-4): a
+   * member-driven surface (member chat, PLAN_HTTP, CORTEX_BRIDGE) that names no member, the Chatwoot
+   * support desk's chat among them, is refused every money write (noMemberMoneyWriteRefusal, D-73); the
+   * surfaces that are not member-driven are unchanged: the staff bridge (its issued envelope already
+   * bounds the holder) and the system surfaces; the plan queue, an approved proposal and the monitor are
+   * held before dispatch (memberToolRunAuthority, D-71), and a plan or a monitor with no member writes no
+   * money (D-73).
    * Checked when the call runs (executeTool), before it is proposed (governToolCall), for each inner
    * call of an execute_custom_logic snippet, and on the tool menu (selectToolsForRequest).
    */
@@ -3552,9 +3571,16 @@ ${triage.standingContext}`;
     const operations = await this.operationsScopeRefusal(businessId, toolName, action);
     if (operations) return operations;
     const memberId = memberRevenueGateMember(action);
-    if (!memberId) return null;
     // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-    const { memberExtraScopeRefusal, memberRevenueWriteRefusal } = await import('./plan-step-authority');
+    const { memberExtraScopeRefusal, memberRevenueWriteRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
+    if (!memberId) {
+      // PR195-BOOKS-DOORS (review SEC-P195JS-4; D-73): a member-driven surface that names no member (the
+      // Chatwoot support desk calls chat with no user; a PLAN_HTTP or CORTEX_BRIDGE call with none) writes
+      // no money and no books: the gates below need a member to read, so it is refused, fail closed. The
+      // other surfaces (the staff bridge, the plan queue, proposals, the monitor, the system) are held as
+      // before.
+      return action && memberDrivenSurface(action) ? noMemberMoneyWriteRefusal(toolName, args, action.surface) : null;
+    }
     // PR195-JOURNAL-SCOPE (the PR195-PORT repair's open item; SEC-P195-3): and the authority map's extra
     // scope a money write needs beside its own module (payroll_mark_paid: expenses write), refused here,
     // before dispatch, for the same member, as PayrollService would refuse it inside dispatch.
@@ -6858,19 +6884,42 @@ ${triage.standingContext}`;
       case 'finance_post_journal_entry': {
         // PR195-JOURNAL-SCOPE (CR-P195-4): who may run this at all is held before dispatch, as for the other
         // revenue writes: its route (POST finance journal-entries) needs revenue write, so the derived table
-        // holds it there and the revenue gate refuses a member-driven call below it (memberScopeRefusal); the
-        // plan queue, approved proposals and the graph route hold the member to it (memberToolRunAuthority,
-        // assertMayRunGraphAction; D-46), and a run with no member is refused (noMemberToolRefusal, D-73).
+        // holds it there. On a member-driven surface (member chat, PLAN_HTTP, CORTEX_BRIDGE) the revenue gate
+        // refuses a member below it, and a turn that names no member is refused it (memberScopeRefusal,
+        // noMemberMoneyWriteRefusal; PR195-BOOKS-DOORS review SEC-P195JS-4: the support desk's chat names
+        // none); the plan queue, approved proposals and the graph route hold the member to it
+        // (memberToolRunAuthority, assertMayRunGraphAction; D-46), and a plan or monitor with no member is
+        // refused it (noMemberToolRefusal, D-73).
+        // PR195-BOOKS-DOORS (review SEC-P195JS-3): the post is the General Journal's, as POST journal-entries
+        // makes it: an ADJUSTMENT (any other type is refused before the door, so KEY posts nothing the
+        // General Journal does not list), its amount the lines' debits, and the member KEY runs it for
+        // recorded as its author (contactBindMember: the chat turn's or PLAN_HTTP's principal, the member a
+        // bridged or queued run is for).
+        const type = args.type === undefined || args.type === null ? 'ADJUSTMENT' : args.type;
+        if (type !== 'ADJUSTMENT') {
+          throw new BadRequestException(
+            `finance_post_journal_entry posts ADJUSTMENT journals only, as the General Journal does; ${JSON.stringify(type)} is not posted`,
+          );
+        }
+        if (!Array.isArray(args.entries) || args.entries.length < 2) {
+          throw new BadRequestException('Journal entry requires at least 2 lines');
+        }
+        const lines = (args.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>).map((e) => ({
+          accountId: e.accountId,
+          debit: Number(e.debit) || 0,
+          credit: Number(e.credit) || 0,
+          memo: e.memo,
+        }));
+        const author = (await this.contactBindMember(businessId, action)) ?? null;
         const result = await this.getPosting().post({
           businessId,
-          type: args.type,
+          type: 'ADJUSTMENT',
           date: new Date(args.date),
-          amount: args.amount,
+          amount: lines.reduce((sum, e) => sum + e.debit, 0),
           currency: args.currency,
           description: args.description,
-          entries: (args.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>).map(
-            (e) => ({ accountId: e.accountId, debit: e.debit, credit: e.credit, memo: e.memo }),
-          ),
+          entries: lines,
+          createdById: author,
         });
         return result;
       }

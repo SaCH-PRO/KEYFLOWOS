@@ -345,8 +345,16 @@ describe('V1-31 — a quick-confirm turn binds the call on the server and hands 
   it('a turn with no authenticated requester binds nothing, so nothing it shows can be confirmed', async () => {
     const h = makeHarness();
     const turn = await h.ask(null);
-    expect(turn.pendingConfirmations![0].confirmationId).toBeUndefined();
+    // PR195-BOOKS-DOORS (review SEC-P195JS-4; D-73): a member chat turn that names no member is refused every
+    // money write, so commerce_create_invoice is no longer proposed for confirmation at all: governToolCall
+    // hands it to the executor, which refuses it (memberScopeRefusal), as it does any call the member's scopes
+    // do not reach. This harness stands in for the executor, so the refusal is asserted on the gate itself.
+    // Either way, nothing is bound and nothing shown can be confirmed.
+    expect(turn.pendingConfirmations ?? []).toEqual([]);
     expect(h.store.all()).toEqual([]);
+    await expect(
+      (h.orchestrator as any).memberScopeRefusal(BIZ, TOOL, { surface: 'CHAT', principalUserId: null }, ARGS),
+    ).resolves.toMatch(/names no member it runs for, so KEY does not run it \(D-73\)/);
   });
 
   it('a store that cannot record the binding fails closed: no id is issued and the client body still executes nothing', async () => {

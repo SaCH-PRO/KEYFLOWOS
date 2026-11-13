@@ -141,6 +141,11 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // finance_post_journal_entry: POST finance journal-entries requires revenue write (PR195-JOURNAL-SCOPE,
     // review finding CR-P195-4), so the legacy `finance` key no longer reaches it
     finance_post_journal_entry: 'write',
+    // finance_auto_match_bank, reconcile_run_auto_match, reconcile_match_line: the statement import, the
+    // auto-match (which applies the bank rules, so posts) and the manual match require revenue write, the
+    // Books' module (PR195-BOOKS-DOORS, review finding SEC-P195JS-1), so the legacy `finance` key no longer
+    // reaches finance_auto_match_bank (D-35's narrowing)
+    finance_auto_match_bank: 'write', reconcile_match_line: 'write', reconcile_run_auto_match: 'write',
     payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',
@@ -157,6 +162,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   expenses: {
     expenses_create: 'write', expenses_list: 'read', finance_create_bill: 'write',
     finance_list_bills: 'read', finance_pay_bill: 'write', finance_view_payables: 'read',
+    // inventory_advance_purchase_order: POST marketplace purchase-orders/:poId/advance requires expenses write,
+    // since a purchase order's receipt posts the purchase (PR195-BOOKS-DOORS, review finding SEC-P195JS-1)
+    inventory_advance_purchase_order: 'write',
   },
   automations: {},
   storefront: {},

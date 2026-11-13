@@ -33,6 +33,11 @@ import { CANONICAL_MODULE_TOOLS } from '../structure/job-role-policy.service';
  *                      reads the revenue ones as money writes
  *   FB-06  RED-BEFORE  a revenue:read member's chat call to a bank match or auto-match is refused before
  *                      BankMatchingService is called; the OWNER's runs
+ *   FB-07  pin         (added with the fix) the partition KEY_BOOKS_REVENUE_TOOLS draws: every revenue write
+ *                      of the derived table is a Books tool (its route is a finance.controller door, which
+ *                      admits a SUPER_ADMIN member) or an invoice, quote or payment tool (whose doors hold a
+ *                      SUPER_ADMIN member to its own revenue write); a new revenue write fails here until it
+ *                      is placed on purpose
  */
 
 const BIZ = 'biz_1';
@@ -235,5 +240,23 @@ describe('FB-05/06 (SEC-P195JS-1): the KEY tools whose routes moved', () => {
     }
     expect(manualMatch).toHaveBeenCalledTimes(1);
     expect(autoMatch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('FB-07: which revenue writes admit a SUPER_ADMIN member (the doors they copy)', () => {
+  it('FB-07 pin: every revenue write of the derived table is a Books tool or an invoice, quote or payment tool', () => {
+    const writes = Object.entries(CANONICAL_MODULE_TOOLS.revenue)
+      .filter(([, level]) => level === 'write' || level === 'admin')
+      .map(([tool]) => tool)
+      .sort();
+    const books = writes.filter((t) => KEY_BOOKS_REVENUE_TOOLS.has(t));
+    const doorsHoldingMembers = writes.filter((t) => !KEY_BOOKS_REVENUE_TOOLS.has(t));
+    expect(books).toEqual(['finance_auto_match_bank', 'finance_post_journal_entry', 'reconcile_match_line', 'reconcile_run_auto_match']);
+    expect(doorsHoldingMembers).toEqual([
+      'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
+      'commerce_mark_invoice_paid', 'commerce_update_invoice', 'payments_create_link', 'payments_refund_charge', 'payments_revoke_link',
+    ]);
+    // The set names nothing outside the table.
+    for (const t of KEY_BOOKS_REVENUE_TOOLS) expect(writes, t).toContain(t);
   });
 });

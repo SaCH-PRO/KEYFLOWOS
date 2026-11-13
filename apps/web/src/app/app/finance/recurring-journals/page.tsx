@@ -9,6 +9,7 @@ import { InlineLineItemBuilder, type LineItem } from "@/components/finance/inlin
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal, deleteRecurringJournal, runRecurringJournal, fetchChartOfAccounts, type RecurringJournalEntry, type ChartOfAccount } from "@/lib/api/finance";
 import { fetchFinanceSettings } from "@/lib/client";
+import { isModuleScopeRefusal } from "@/lib/module-access";
 
 /**
  * PR195-JOURNAL-SCOPE (CR-P195-4): a template's writes need revenue write on the server, as POST
@@ -18,8 +19,19 @@ import { fetchFinanceSettings } from "@/lib/client";
  */
 function writeRefusal(res: { error?: string | null; status?: number } | null | undefined, fallback: string): string | null {
   if (!res || !res.error) return null;
-  if (res.status === 403) return `You can't change recurring journals in this business: they post to the books, which needs revenue write access. ${res.error}`;
+  // PR195-BOOKS-DOORS (CRR-P195JS-2): only ModuleScopeGuard's revenue refusal says the member lacks revenue
+  // write; any other 403 (BusinessGuard's transient "Unable to verify business access") is said as the server said it.
+  if (isModuleScopeRefusal(res, "revenue")) return `You can't change recurring journals in this business: they post to the books, which needs revenue write access. ${res.error}`;
   return res.error || fallback;
+}
+
+/**
+ * PR195-BOOKS-DOORS (SEC-P195JS-2): a template carries its accounts and amounts, so the list needs revenue
+ * read on the server (D-57). A refused read is said as a refusal, not shown as an empty list.
+ */
+function readRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!isModuleScopeRefusal(res, "revenue")) return null;
+  return `You don't have access to recurring journals in this business. ${res!.error}`;
 }
 
 export default function RecurringJournalsPage() {
@@ -27,6 +39,10 @@ export default function RecurringJournalsPage() {
   const [entries, setEntries] = useState<RecurringJournalEntry[]>([]);
   const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The server refused this member the template list (revenue read, D-57): no list, no Add Entry. */
+  const [refusal, setRefusal] = useState<string | null>(null);
+  /** The list could not be loaded (any other error): no list, so nothing reads as "none yet". */
+  const [listFailed, setListFailed] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
@@ -51,7 +67,11 @@ export default function RecurringJournalsPage() {
         fetchChartOfAccounts(businessId),
         fetchFinanceSettings(businessId).catch(() => ({ data: null, error: null })),
       ]);
-      setEntries(Array.isArray(entriesRes.data?.items) ? entriesRes.data.items : []);
+      const refused = readRefusal(entriesRes);
+      setRefusal(refused);
+      setListFailed(!refused && Boolean(entriesRes.error));
+      if (!refused && entriesRes.error) setError(entriesRes.error);
+      setEntries(!entriesRes.error && Array.isArray(entriesRes.data?.items) ? entriesRes.data.items : []);
       setAccounts(Array.isArray(accountsRes.data?.items) ? accountsRes.data.items : []);
       if (typeof settingsRes.data?.currency === "string" && settingsRes.data.currency.trim()) {
         setBusinessCurrency(settingsRes.data.currency.trim().toUpperCase());
@@ -186,23 +206,30 @@ export default function RecurringJournalsPage() {
       icon={Repeat}
       maxWidth="5xl"
       headerActions={
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
-        >
-          <Plus className="w-3 h-3" />
-          Add Entry
-        </button>
+        refusal ? undefined : (
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-3 h-3" />
+            Add Entry
+          </button>
+        )
       }
     >
       <div className="space-y-4">
+        {refusal && (
+          <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300">
+            {refusal}
+          </div>
+        )}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
             <button onClick={load} className="ml-2 underline">Retry</button>
           </div>
         )}
-        {showAdd && (
+        {!refusal && showAdd && (
           <div className="kf-card p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
@@ -275,6 +302,7 @@ export default function RecurringJournalsPage() {
           </div>
         )}
 
+        {!refusal && !listFailed && (
         <DataTable
           data={entries as unknown as Record<string, unknown>[]}
           keyField="id"
@@ -329,6 +357,7 @@ export default function RecurringJournalsPage() {
           ]}
           emptyMessage="No recurring journal entries yet."
         />
+        )}
       </div>
     </UnifiedPageShell>
   );

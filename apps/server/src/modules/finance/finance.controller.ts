@@ -49,6 +49,26 @@ import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.con
  * FIN5 — Unified controller fanning out to the Finance Overview / Settings
  * sub-services. Mirrors the access-check pattern used in
  * RevenueActionController (owner OR member of the business).
+ *
+ * PR195-BOOKS-DOORS (review finding SEC-P195JS-1, a class main had too): who may write the Books.
+ * Membership alone (ensureAccess) let any member post: a revenue:read STAFF member imported a
+ * statement line, wrote a bank rule naming OWNER_EQUITY and applied it, and an ADJUSTMENT of any
+ * amount authored by them appeared in the General Journal. The rule (books-write-scope.spec.ts pins
+ * it, and lists the write routes that keep no scope, each with its reason; an owner can change it):
+ *   - a write of the Books needs revenue write, the module of the Books (D-57: "No new module key";
+ *     their reads are revenue read, their manual writes, the journal and the credit notes, revenue
+ *     write): a bank or cash account (create posts its opening balance), a bank rule and its apply,
+ *     a statement import and its column profile, an auto-match (it applies the rules first, so it
+ *     posts), a match, unmatch or ignore, a reconciliation and its completion (which locks the
+ *     period's ledger lines), a tax liability's recompute and filing, a fixed asset and its
+ *     depreciation or disposal (which post), an accounting period and its close or reopen (which
+ *     stamp every transaction of the month);
+ *   - a payment out of the business that is an expense by nature needs expenses write, the scope
+ *     bills/:id/pay needs: a tax liability's pay (and its FIN7 alias, a handler of its own);
+ *   - a door that is both would need both (as payroll mark-paid does); none here is.
+ * ModuleScopeGuard refuses below it with 403 before the handler, so a refused call reads and writes
+ * nothing. ensureAccess stays on every route: the guard passes a platform SUPER_ADMIN, and one who is
+ * not a member writes none of the business's Books (D-46).
  */
 @Controller('finance/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -428,6 +448,8 @@ export class FinanceController {
     const items = await this.accounts.list(businessId);
     return { items };
   }
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounts')
   async createAccount(
     @Param('businessId') businessId: string,
@@ -439,6 +461,8 @@ export class FinanceController {
     // the ledger door; the caller is recorded as its author.
     return this.accounts.create(businessId, body, { userId: req.user.id });
   }
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('accounts/:id')
   async updateAccount(
     @Param('businessId') businessId: string,
@@ -449,6 +473,8 @@ export class FinanceController {
     await this.ensureAccess(req.user.id, businessId);
     return this.accounts.update(businessId, id, body);
   }
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('accounts/:id')
   async archiveAccount(
     @Param('businessId') businessId: string,
@@ -562,6 +588,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('bank-rules')
   async createBankRule(
     @Param('businessId') businessId: string,
@@ -582,6 +610,8 @@ export class FinanceController {
     return this.bankRules.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('bank-rules/:id')
   async updateBankRule(
     @Param('businessId') businessId: string,
@@ -593,6 +623,8 @@ export class FinanceController {
     return this.bankRules.update(businessId, id, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('bank-rules/:id')
   async deleteBankRule(
     @Param('businessId') businessId: string,
@@ -603,6 +635,8 @@ export class FinanceController {
     return this.bankRules.remove(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('bank-rules/apply')
   async applyBankRules(
     @Param('businessId') businessId: string,
@@ -613,6 +647,8 @@ export class FinanceController {
     return this.bankRules.applyRules(businessId, body.bankTransactionIds ?? [], { userId: req.user.id });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounts/:accountId/bank-rules/apply')
   async applyBankRulesToAccount(
     @Param('businessId') businessId: string,
@@ -632,7 +668,11 @@ export class FinanceController {
   // PR195-JOURNAL-SCOPE (CR-P195-4): a template is a manual journal that posts itself (run posts one
   // ADJUSTMENT at once, the scheduler posts the rest), so every write of one needs revenue write, as
   // POST journal-entries does; otherwise a member below it creates a template and runs it. ensureAccess
-  // stays (D-46). The reads are unchanged.
+  // stays (D-46). PR195-BOOKS-DOORS (review SEC-P195JS-2): a template carries its accounts and amounts, so
+  // its reads need revenue read, as GET journal-entries does (D-57, D-100), and a template naming another
+  // business's chart rows is refused 404 (RecurringJournalEntryService.assertOwnChartRows, SEC-P195JS-6).
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('recurring-journal-entries')
   async listRecurringJournals(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -652,6 +692,8 @@ export class FinanceController {
     return this.recurringJournals.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('recurring-journal-entries/:id')
   async getRecurringJournal(
     @Param('businessId') businessId: string,
@@ -721,6 +763,8 @@ export class FinanceController {
    * correctly. Route name and field kept for compatibility with the existing
    * client; it is no longer CSV-only.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounts/:accountId/bank-transactions/import')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
@@ -755,6 +799,8 @@ export class FinanceController {
    * failing silently. Map it once here and every later import — including an
    * automated one — is deterministic.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounts/:accountId/import-profile')
   async saveImportProfile(
     @Param('businessId') businessId: string,
@@ -827,6 +873,8 @@ export class FinanceController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounts/:accountId/bank-transactions/auto-match')
   async runAutoMatch(
     @Param('businessId') businessId: string,
@@ -842,6 +890,8 @@ export class FinanceController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('bank-transactions/:bankTransactionId/match')
   async manualMatch(
     @Param('businessId') businessId: string,
@@ -854,6 +904,8 @@ export class FinanceController {
     return this.bankMatch.manualMatch(businessId, bankTransactionId, body.transactionId, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('bank-transactions/:bankTransactionId/unmatch')
   async unmatch(
     @Param('businessId') businessId: string,
@@ -864,6 +916,8 @@ export class FinanceController {
     return this.bankMatch.unmatch(businessId, bankTransactionId, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('bank-transactions/:bankTransactionId/ignore')
   async ignoreBankRow(
     @Param('businessId') businessId: string,
@@ -885,6 +939,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('reconciliations')
   async createReconciliation(
     @Param('businessId') businessId: string,
@@ -913,6 +969,8 @@ export class FinanceController {
     return this.reconciliation.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('reconciliations/:id/complete')
   async completeReconciliation(
     @Param('businessId') businessId: string,
@@ -959,6 +1017,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('tax-liabilities/recompute')
   async recomputeTaxLiabilities(
     @Param('businessId') businessId: string,
@@ -994,6 +1054,8 @@ export class FinanceController {
     return this.taxLiability.getFilingCalendar(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('tax-liabilities/:id/file')
   async fileTaxLiability(
     @Param('businessId') businessId: string,
@@ -1010,6 +1072,8 @@ export class FinanceController {
     );
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('tax-liabilities/:id/pay')
   async payTaxLiability(
     @Param('businessId') businessId: string,
@@ -1036,6 +1100,8 @@ export class FinanceController {
     @Req() req: any,
   ) { return this.listTaxLiabilities(businessId, status, req); }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('tax/liabilities/recompute')
   recomputeTaxLiabilitiesAlias(
     @Param('businessId') businessId: string,
@@ -1056,6 +1122,8 @@ export class FinanceController {
     @Req() req: any,
   ) { return this.taxContributingInvoices(businessId, id, req); }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('tax/liabilities/:id/file')
   fileTaxLiabilityAlias(
     @Param('businessId') businessId: string,
@@ -1064,6 +1132,8 @@ export class FinanceController {
     @Req() req: any,
   ) { return this.fileTaxLiability(businessId, id, body, req); }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('tax/liabilities/:id/pay')
   payTaxLiabilityAlias(
     @Param('businessId') businessId: string,
@@ -1392,6 +1462,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounting-periods')
   async createAccountingPeriod(
     @Param('businessId') businessId: string,
@@ -1408,6 +1480,8 @@ export class FinanceController {
     return this.accountingPeriods.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('accounting-periods/:id')
   async updateAccountingPeriod(
     @Param('businessId') businessId: string,
@@ -1420,6 +1494,8 @@ export class FinanceController {
     return this.accountingPeriods.update(businessId, id, body, { actorId: req.user?.id });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounting-periods/:id/close')
   async closeAccountingPeriod(
     @Param('businessId') businessId: string,
@@ -1431,12 +1507,16 @@ export class FinanceController {
     return this.accountingPeriods.close(businessId, id, { closedById: req.user?.id });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('accounting-periods/:id/reopen')
   async reopenAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.reopen(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('accounting-periods/:id')
   async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1532,6 +1612,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('fixed-assets')
   async createFixedAsset(@Param('businessId') businessId: string, @Body() body: CreateFixedAssetInput, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1544,12 +1626,16 @@ export class FinanceController {
     return this.fixedAssets.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('fixed-assets/:id')
   async updateFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: UpdateFixedAssetInput, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.fixedAssets.update(businessId, id, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('fixed-assets/:id/depreciate')
   async depreciateFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: { asOf?: string }, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1571,6 +1657,8 @@ export class FinanceController {
     return this.fixedAssets.calculateDepreciation(businessId, id, asOf ? new Date(asOf) : undefined);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('fixed-assets/:id/dispose')
   async disposeFixedAsset(
     @Param('businessId') businessId: string,
@@ -1582,6 +1670,8 @@ export class FinanceController {
     return this.fixedAssets.dispose(businessId, id, body.proceeds, body.disposalDate);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('fixed-assets/:id')
   async deleteFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);

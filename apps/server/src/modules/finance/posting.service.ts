@@ -318,11 +318,10 @@ export class PostingService {
       //
       // __skipTenantIsolation is load-bearing, not decoration. ChartOfAccount is
       // in BUSINESS_ID_MODELS, so without it the extension would add
-      // `businessId: <ambient>` here — a foreign account would vanish from the
-      // result set, the length check below would fire first with the misleading
-      // "Unknown chart-of-account id(s)", and the cross-business throw that
-      // follows it would become unreachable dead code. This query must SEE the
-      // foreign row in order to reject it.
+      // `businessId: <ambient>` here, and the rows the check below judges would
+      // be the ambient business's, not the posting's. This query sees every
+      // row and the check compares each with the posting's business itself (a
+      // foreign row is refused in the words an unknown id gets: SEC-P195JS-6).
       //
       // V1-37: each row also carries its business's currency, so the D-13
       // currency check below reads it in the same query.
@@ -333,16 +332,13 @@ export class PostingService {
           select: { id: true, businessId: true, business: { select: { currency: true } } },
         }),
       );
-      if (accounts.length !== accountIds.length) {
-        const found = new Set(accounts.map((a) => a.id));
-        const missing = accountIds.filter((id) => !found.has(id));
-        throw new BadRequestException(`Unknown chart-of-account id(s): ${missing.join(', ')}`);
-      }
-      const wrongBusiness = accounts.filter((a) => a.businessId !== input.businessId);
-      if (wrongBusiness.length > 0) {
-        throw new BadRequestException(
-          `Cross-business posting blocked: ${wrongBusiness.map((a) => a.id).join(', ')}`,
-        );
+      // PR195-BOOKS-DOORS (review SEC-P195JS-6): an id of another business's chart is refused in the
+      // words an id that exists nowhere gets, so the door is no oracle of which ids other businesses
+      // hold. The query still sees the foreign row (above), so it is still refused, never posted.
+      const ownIds = new Set(accounts.filter((a) => a.businessId === input.businessId).map((a) => a.id));
+      const notOwn = accountIds.filter((id) => !ownIds.has(id));
+      if (notOwn.length > 0) {
+        throw new BadRequestException(`Unknown chart-of-account id(s) for this business: ${notOwn.join(', ')}`);
       }
 
       // V1-37 (CF-38, D-13): the posting's one currency. Every account is the

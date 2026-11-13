@@ -18,6 +18,10 @@
  *     answers the caller's own module levels; the team list needs team read,
  *     which STAFF lacks), so a refused post (403) is said as a refusal: an
  *     alert, the form closed and New Entry withdrawn, never a silent toast.
+ *     PR195-BOOKS-DOORS (CRR-P195JS-2): only ModuleScopeGuard's revenue
+ *     refusal is that; any other 403 (BusinessGuard's transient "Unable to
+ *     verify business access") is a toast in the server's words, the form
+ *     and New Entry kept for a retry.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -42,6 +46,7 @@ import {
   type ChartOfAccountRow,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
+import { isModuleScopeRefusal } from "@/lib/module-access";
 
 interface JournalFormLine {
   accountId: string;
@@ -52,10 +57,13 @@ interface JournalFormLine {
 
 const emptyLine = (): JournalFormLine => ({ accountId: "", debit: "", credit: "", memo: "" });
 
-/** Why a journal post was refused, as the member should hear it, when the refusal is the member's access (403); else null. */
+/**
+ * Why a journal post was refused, as the member should hear it, when the refusal is the member's revenue
+ * access (ModuleScopeGuard's 403 naming revenue); else null, and the caller toasts the server's words.
+ */
 function postRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
-  if (!res || !res.error || res.status !== 403) return null;
-  return `You can't post journal entries in this business: posting to the books needs revenue write access. ${res.error}`;
+  if (!isModuleScopeRefusal(res, "revenue")) return null;
+  return `You can't post journal entries in this business: posting to the books needs revenue write access. ${res!.error}`;
 }
 
 /** Why the journal could not be read, as the member should hear it; null when it was read. */

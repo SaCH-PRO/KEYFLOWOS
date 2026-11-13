@@ -109,3 +109,19 @@ export function filterByOperationsAccess<T extends { href: string }>(items: read
 export function canOfferOperationsActions(access: OperationsAccess): boolean {
   return access !== "denied";
 }
+
+/**
+ * PR195-BOOKS-DOORS (review finding CRR-P195JS-2): whether a refused request is ModuleScopeGuard's
+ * refusal of `module` ("Insufficient permissions: revenue requires write access (you have read)"), the
+ * one answer that says the member lacks that module's access. Any other 403 (BusinessGuard's transient
+ * "Unable to verify business access" or "Service unavailable", "No access to this business", another
+ * module's refusal) says nothing about it, so a screen must not tell the member they lack the module.
+ */
+export function isModuleScopeRefusal(
+  res: { error?: string | null; status?: number } | null | undefined,
+  module: string,
+): boolean {
+  if (!res || res.status !== 403 || !res.error) return false;
+  const named = /\b([a-z]+) requires (?:none|read|write|admin) access \(you have (?:none|read|write|admin)\)/.exec(res.error);
+  return Boolean(named) && named![1] === module && /^Insufficient permissions: /.test(res.error);
+}
