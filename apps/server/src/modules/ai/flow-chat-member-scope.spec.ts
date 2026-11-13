@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { keyMemberMenuScopes, keyMemberToolScopes } from './plan-step-authority';
-import { graphActionRequirement } from './graph-actions.controller';
+import { graphActionExtraScopes, graphActionRequirement } from './graph-actions.controller';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { FLOW_TOOLS } from './flow-tool-registry';
 
@@ -33,6 +33,20 @@ import { FLOW_TOOLS } from './flow-tool-registry';
  *                       every scope but the invoice, quote and payment writes (held to its own revenue write,
  *                       FOLLOW3-A2); one who is not a member is refused every money write, the expenses ones
  *                       included (D-46, SEC-P195BW-7), and passes the rest as ModuleScopeGuard passes them
+ *
+ * PR195-KEY-GATES review repair (review findings SEC-P195KG-1, SEC-P195KG-3; owner rulings D-57, D-146, D-104):
+ *   KMS-08  RED-BEFORE  the money reads KEY makes through Prisma, which no route governs (fetch_revenue_risk:
+ *                       overdue invoices and the month's revenue; fetch_client_health: each client's spend;
+ *                       fetch_business_summary and fetch_expense_pressure: the month's revenue and expenses), need
+ *                       the scopes REST asks for the same figures: revenue read (receivables aging, GET commerce
+ *                       invoices), and expenses read beside it where the month's expenses are carried (GET
+ *                       expenses/summary). A revenue-none member is offered none of them and is refused each on
+ *                       every member surface before anything is read; the graph route holds the same pair beside
+ *                       its analytics floor (D-131's reading for money signals: module read and revenue read)
+ *   KMS-09  RED-BEFORE  a platform SUPER_ADMIN who is not a member is refused the Books reads whose FinanceController
+ *                       doors run ensureAccess, which requires a Membership (D-104): 'No access to this business',
+ *                       as REST answers them; the money reports (ReportsController: no membership check) still pass
+ *                       them as ModuleScopeGuard does, and a SUPER_ADMIN who is a member reads the Books
  */
 
 const BIZ = 'biz_kms';
@@ -50,6 +64,8 @@ const MEMBERS: Record<string, Member | null> = {
   // a platform SUPER_ADMIN who holds a STAFF membership with read scopes
   saMember: { role: 'STAFF', permissionScopes: { revenue: 'read', expenses: 'read', operations: 'read', crm: 'read' } },
   saOutsider: null,
+  // a revenue-read member with no expenses access
+  revenueNoExpenses: { role: 'STAFF', permissionScopes: { revenue: 'read', crm: 'read', analytics: 'read' } },
 };
 const SUPER_ADMINS = ['saMember', 'saOutsider'];
 
@@ -63,6 +79,18 @@ function orchestratorFor() {
         }),
       },
       user: { findUnique: vi.fn(async ({ where }: any) => ({ role: SUPER_ADMINS.includes(where.id) ? 'SUPER_ADMIN' : 'USER' })) },
+      // the money reads KEY makes through Prisma (KMS-08): figures no refused member may see
+      invoice: {
+        findMany: vi.fn(async () => [{ id: 'inv_9', invoiceNumber: 'INV-9', total: 4200, dueDate: new Date('2026-01-01'), contactId: 'c1' }]),
+        aggregate: vi.fn(async () => ({ _sum: { total: 9999 }, _count: 3 })),
+        groupBy: vi.fn(async () => [{ contactId: 'c1', _sum: { total: 9000 } }]),
+      },
+      expense: {
+        aggregate: vi.fn(async () => ({ _sum: { amount: 3210 }, _count: 2 })),
+        groupBy: vi.fn(async () => [{ categoryId: 'cat_1', _sum: { amount: 3210 } }]),
+      },
+      bankTransaction: { findMany: vi.fn(async () => []) },
+      financeActionItem: { findMany: vi.fn(async () => []) },
     },
   };
   const rec = {
@@ -76,14 +104,24 @@ function orchestratorFor() {
     markInvoicePaid: vi.fn(async () => ({ id: 'inv_1', status: 'PAID' })),
     post: vi.fn(async () => ({ transactionId: 'tx_1', alreadyPosted: false })),
     markRunPaid: vi.fn(async () => ({ id: 'run_1', status: 'PAID' })),
+    getSnapshot: vi.fn(async () => ({
+      business: { name: 'KMS Co', industry: null },
+      momentumScore: 50,
+      contacts: { total: 1 },
+      revenue: { totalCollected: 123456, monthlyRevenue: 7890 },
+      bookings: { upcomingCount: 0 },
+      expenses: { totalThisMonth: 3210 },
+    })),
+    listAccounts: vi.fn(async () => [{ id: 'fa_1', name: 'Operating', currentBalance: 12345 }]),
   };
   const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     prisma,
     logger: quiet,
     governance: { getToolTier: () => 2 },
     executionLog: { logToolExecution: async () => 'log_1' },
-    businessGraph: { invalidateCache() {} },
+    businessGraph: { invalidateCache() {}, getSnapshot: rec.getSnapshot },
     attributeExecutionLog: async () => undefined,
+    getFinanceAccounts: () => ({ list: rec.listAccounts }),
     getExpenses: () => ({ createExpense: rec.createExpense, markBillPaid: rec.markBillPaid }),
     getMarketplace: () => ({ advancePurchaseOrderStatus: rec.advancePurchaseOrderStatus }),
     getLedgerReporting: () => ({ getPnl: rec.getPnl }),
@@ -112,6 +150,14 @@ const CALLS: Record<string, Record<string, unknown>> = {
   inventory_advance_purchase_order: { purchaseOrderId: 'po_1', status: 'RECEIVED' },
   finance_profit_and_loss: { from: '2026-01-01', to: '2026-11-01' },
   finance_view_receivables: {},
+  finance_list_bank_accounts: {},
+  finance_customer_balance: { contactId: 'c1' },
+  reconcile_list_unmatched: { accountId: 'fa_1' },
+  finance_list_action_items: {},
+  fetch_revenue_risk: {},
+  fetch_client_health: {},
+  fetch_business_summary: {},
+  fetch_expense_pressure: {},
   deals_list_stages: {},
   contracts_create: { title: 'MSA', contractType: 'SERVICE_AGREEMENT' },
   commerce_mark_invoice_paid: { invoiceId: 'inv_1' },
@@ -129,6 +175,21 @@ const SURFACES = (userId: string) => [
 async function run(orchestrator: any, tool: string, action: Record<string, unknown>) {
   return orchestrator.executeToolDirectly(BIZ, tool, { ...CALLS[tool] }, undefined, { ...action });
 }
+
+const REV_READ = { module: 'revenue', minLevel: 'read' } as const;
+const EXP_READ = { module: 'expenses', minLevel: 'read' } as const;
+
+/**
+ * KMS-08 (SEC-P195KG-1): the money reads KEY makes through Prisma, by the figures each answers with, and the scopes
+ * REST asks for those figures (D-57: receivables and revenue at revenue read; the month's expenses at expenses read,
+ * GET expenses/summary; D-146: a door that carries both needs both).
+ */
+const KEY_MONEY_READS: Readonly<Record<string, ReadonlyArray<{ module: string; minLevel: string }>>> = {
+  fetch_revenue_risk: [REV_READ], // overdue invoices (number, total, due date, contact), overdue total, this month's revenue
+  fetch_client_health: [REV_READ], // each client's total spend, the top spenders
+  fetch_business_summary: [REV_READ, EXP_READ], // the snapshot's revenue and expenses sections
+  fetch_expense_pressure: [REV_READ, EXP_READ], // the month's expenses beside the month's revenue
+};
 
 describe('KMS-01: the gate is derived from the canonical tool table', () => {
   it('KMS-01 RED-BEFORE: every canonical tool needs its table module at its table level, on the menu and at a call', () => {
@@ -164,9 +225,9 @@ describe('KMS-01: the gate is derived from the canonical tool table', () => {
     expect(keyMemberToolScopes('execute_custom_logic', {})).toEqual([]);
   });
 
-  it('KMS-01: a tool no route governs needs no scope in member chat (D-98\'s narrowest reading; the plan queue keeps its prefix floor)', () => {
+  it('KMS-01: a tool no route governs needs no scope in member chat (D-98\'s narrowest reading; the plan queue keeps its prefix floor), but the money reads (KMS-08)', () => {
     const governed = new Set([...Object.values(CANONICAL_MODULE_TOOLS).flatMap((t) => Object.keys(t)), ...Object.keys(GOVERNED_UNGRANTED)]);
-    const ungoverned = FLOW_TOOLS.map((t) => t.name).filter((t) => !governed.has(t));
+    const ungoverned = FLOW_TOOLS.map((t) => t.name).filter((t) => !governed.has(t) && !Object.prototype.hasOwnProperty.call(KEY_MONEY_READS, t));
     expect(ungoverned.length).toBeGreaterThan(50);
     for (const tool of ungoverned) expect(keyMemberToolScopes(tool, {}), tool).toEqual([]);
   });
@@ -282,5 +343,97 @@ describe('KMS-07: a platform SUPER_ADMIN, as ModuleScopeGuard and each door hold
     expect(rec.post).not.toHaveBeenCalled();
     expect(names).toContain('finance_profit_and_loss');
     expect(names).toContain('contracts_create');
+  });
+});
+
+describe('KMS-08: the money reads KEY makes through Prisma (SEC-P195KG-1; D-57, D-146)', () => {
+  const TOOLS = Object.keys(KEY_MONEY_READS);
+  const READS = (rec: any, prisma: any) =>
+    [prisma.client.invoice.findMany, prisma.client.invoice.aggregate, prisma.client.invoice.groupBy, prisma.client.expense.aggregate, prisma.client.expense.groupBy, rec.getSnapshot].reduce(
+      (n: number, f: any) => n + f.mock.calls.length,
+      0,
+    );
+
+  it('KMS-08 RED-BEFORE: each needs the scopes REST asks for its figures, on the menu and at a call; the graph route holds the same beside its analytics floor', () => {
+    for (const [tool, scopes] of Object.entries(KEY_MONEY_READS)) {
+      expect(keyMemberToolScopes(tool, {}), tool).toEqual(scopes);
+      expect(keyMemberMenuScopes(tool), tool).toEqual(scopes);
+      expect(graphActionExtraScopes(tool), tool).toEqual(scopes);
+      expect((graphActionRequirement(tool) as { scopes: unknown[] }).scopes, tool).toEqual([{ module: 'analytics', minLevel: 'read' }, ...scopes]);
+    }
+  });
+
+  it('KMS-08 RED-BEFORE: a revenue-none member is offered none of them and is refused each on every member surface before anything is read', async () => {
+    const { orchestrator, rec } = orchestratorFor();
+    const names = await menu(orchestrator, 'crmOnly', TOOLS);
+    for (const t of TOOLS) expect(names, t).not.toContain(t);
+    for (const action of SURFACES('crmOnly')) {
+      for (const t of TOOLS) {
+        await expect(run(orchestrator, t, action), `${action.surface} ${t}`).rejects.toThrow(/^Insufficient permissions: revenue requires read access \(you have none\)/);
+      }
+    }
+    expect(READS(rec, orchestrator.prisma)).toBe(0);
+  });
+
+  it('KMS-08 RED-BEFORE: a revenue-read member with no expenses access reads the revenue risk, not the month\'s expenses', async () => {
+    const { orchestrator, rec } = orchestratorFor();
+    const names = await menu(orchestrator, 'revenueNoExpenses', TOOLS);
+    expect(names).toEqual(expect.arrayContaining(['fetch_revenue_risk', 'fetch_client_health']));
+    expect(names).not.toContain('fetch_business_summary');
+    expect(names).not.toContain('fetch_expense_pressure');
+    const as = { surface: 'CHAT', principalUserId: 'revenueNoExpenses' };
+    for (const t of ['fetch_business_summary', 'fetch_expense_pressure']) {
+      await expect(run(orchestrator, t, as), t).rejects.toThrow(/^Insufficient permissions: expenses requires read access \(you have none\)/);
+    }
+    expect(rec.getSnapshot).not.toHaveBeenCalled();
+    expect(orchestrator.prisma.client.expense.aggregate).not.toHaveBeenCalled();
+    await expect(run(orchestrator, 'fetch_revenue_risk', as)).resolves.toMatchObject({ overdueTotal: 4200 });
+  });
+
+  it('KMS-08 control: STAFF defaults (revenue and expenses read) and the OWNER are offered and run them', async () => {
+    const { orchestrator } = orchestratorFor();
+    for (const who of ['staffDefault', 'owner']) {
+      expect(await menu(orchestrator, who, TOOLS), who).toEqual(expect.arrayContaining(TOOLS));
+      const as = { surface: 'CHAT', principalUserId: who };
+      await expect(run(orchestrator, 'fetch_revenue_risk', as), who).resolves.toMatchObject({ overdueTotal: 4200 });
+      await expect(run(orchestrator, 'fetch_business_summary', as), who).resolves.toMatchObject({ revenue: { totalCollected: 123456 } });
+      await expect(run(orchestrator, 'fetch_expense_pressure', as), who).resolves.toMatchObject({ currentMonthTotal: 3210 });
+    }
+  });
+});
+
+describe('KMS-09: a platform SUPER_ADMIN who is not a member and the Books reads whose doors need a membership (SEC-P195KG-3; D-104, D-46)', () => {
+  // FinanceController's doors for them run ensureAccess (a Membership, D-104): GET receivables/aging and
+  // customers/:contactId/balance, GET accounts, GET accounts/:accountId/bank-transactions, GET intelligence/actions
+  const BOOKS_READS = ['finance_view_receivables', 'finance_list_bank_accounts', 'finance_customer_balance', 'reconcile_list_unmatched', 'finance_list_action_items'];
+
+  it('KMS-09 pin: each is a revenue read of the canonical table', () => {
+    for (const t of BOOKS_READS) expect((CANONICAL_MODULE_TOOLS.revenue as Record<string, string>)[t], t).toBe('read');
+  });
+
+  it('KMS-09 RED-BEFORE: is offered none of them and is refused each before dispatch, in ensureAccess\'s words; the money reports still pass as ModuleScopeGuard passes them', async () => {
+    const { orchestrator, rec } = orchestratorFor();
+    const names = await menu(orchestrator, 'saOutsider', [...BOOKS_READS, 'finance_profit_and_loss']);
+    for (const t of BOOKS_READS) expect(names, t).not.toContain(t);
+    expect(names).toContain('finance_profit_and_loss');
+    for (const t of BOOKS_READS) {
+      await expect(run(orchestrator, t, { surface: 'CHAT', principalUserId: 'saOutsider' }), t).rejects.toThrow(/^No access to this business/);
+    }
+    expect(rec.getAging).not.toHaveBeenCalled();
+    expect(rec.listAccounts).not.toHaveBeenCalled();
+    expect(orchestrator.prisma.client.invoice.aggregate).not.toHaveBeenCalled();
+    expect(orchestrator.prisma.client.bankTransaction.findMany).not.toHaveBeenCalled();
+    expect(orchestrator.prisma.client.financeActionItem.findMany).not.toHaveBeenCalled();
+    await expect(run(orchestrator, 'finance_profit_and_loss', { surface: 'CHAT', principalUserId: 'saOutsider' })).resolves.toBeDefined();
+  });
+
+  it('KMS-09 control: a SUPER_ADMIN who is a member reads them', async () => {
+    const { orchestrator, rec } = orchestratorFor();
+    const names = await menu(orchestrator, 'saMember', BOOKS_READS);
+    for (const t of BOOKS_READS) expect(names, t).toContain(t);
+    await expect(run(orchestrator, 'finance_view_receivables', { surface: 'CHAT', principalUserId: 'saMember' })).resolves.toBeDefined();
+    await expect(run(orchestrator, 'finance_list_bank_accounts', { surface: 'CHAT', principalUserId: 'saMember' })).resolves.toMatchObject({ accounts: [{ id: 'fa_1' }] });
+    expect(rec.getAging).toHaveBeenCalledTimes(1);
+    expect(rec.listAccounts).toHaveBeenCalledTimes(1);
   });
 });

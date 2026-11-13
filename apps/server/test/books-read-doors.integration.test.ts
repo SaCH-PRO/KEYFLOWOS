@@ -24,6 +24,11 @@
  *   BRD-05  RED-BEFORE  ...and on KEY: the graph route's authority (assertMayRunGraphAction, which the plan
  *                       queue and approved proposals share) refuses that SUPER_ADMIN expenses_create,
  *                       finance_create_bill and finance_pay_bill; a SUPER_ADMIN who is a member passes
+ *   BRD-06  RED-BEFORE  review repair SEC-P195KG-4: the chart of accounts, as SEC-P195BW-6 did for financial
+ *                       accounts: FinanceCoaService.update (PATCH chart-of-accounts/:id) refuses a parentId that
+ *                       is not this business's row in create()'s words, for another business's row and for an id
+ *                       that exists nowhere (it answered a raw P2003, a 500: an existence oracle); nothing is
+ *                       written; the business's own parent, and clearing the parent, still work
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * BusinessMemberGuard, TenantInterceptor, TeamAuditInterceptor, FinanceController, ExpensesController,
@@ -451,5 +456,50 @@ describe('BRD-04/05: a SUPER_ADMIN who is not a member posts none of the busines
     }
     // a read stays open to the platform role, as ModuleScopeGuard leaves it
     await expect(assertMayRunGraphAction(prismaSvc, ID.biz, { id: ID.superAdmin, role: 'SUPER_ADMIN' }, 'expenses_list', null)).resolves.toBeUndefined();
+  });
+});
+
+describe('BRD-06: a chart row names only this business\'s parent (SEC-P195KG-4)', () => {
+  const PARENT_REFUSAL = 'Parent account not found in this business';
+  let coaSvc: any;
+  let child = '';
+  let ownParent = '';
+  let foreign = '';
+  const parentOf = async (id: string) => (await db.chartOfAccount.findUnique({ where: { id }, select: { parentId: true } }))?.parentId ?? null;
+
+  beforeAll(async () => {
+    const { FinanceCoaService } = await import('../src/modules/finance/finance-coa.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    coaSvc = new FinanceCoaService(prismaSvc, new ChartOfAccountsSeederService(prismaSvc));
+    child = (await coaSvc.create(ID.biz, { name: 'v98k child', type: 'EXPENSE', code: '6901' })).id;
+    ownParent = (await coaSvc.create(ID.biz, { name: 'v98k parent', type: 'EXPENSE', code: '6900' })).id;
+    foreign = (await coaSvc.create(ID.bizB, { name: 'v98k B secret parent', type: 'EXPENSE', code: '9999' })).id;
+  });
+
+  it('BRD-06 control: create() already refuses another business\'s parent', async () => {
+    await expect(coaSvc.create(ID.biz, { name: 'v98k x', type: 'EXPENSE', parentId: foreign })).rejects.toThrow(PARENT_REFUSAL);
+  });
+
+  it('BRD-06 RED-BEFORE: update() refuses another business\'s row and an id that exists nowhere, in the same words; the link is unchanged', async () => {
+    for (const parentId of [foreign, `${P}does_not_exist_anywhere`]) {
+      let err: any = null;
+      try {
+        await coaSvc.update(ID.biz, child, { parentId });
+      } catch (e) {
+        err = e;
+      }
+      expect(err, parentId).not.toBeNull();
+      expect(err.constructor?.name, parentId).toBe('BadRequestException');
+      expect(err.message, parentId).toBe(PARENT_REFUSAL);
+      expect(err.code, parentId).toBeUndefined();
+      expect(await parentOf(child), parentId).toBeNull();
+    }
+  });
+
+  it('BRD-06 control: the business\'s own parent links, and clearing the parent unlinks', async () => {
+    await coaSvc.update(ID.biz, child, { parentId: ownParent });
+    expect(await parentOf(child)).toBe(ownParent);
+    await coaSvc.update(ID.biz, child, { parentId: null });
+    expect(await parentOf(child)).toBeNull();
   });
 });

@@ -20,6 +20,23 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../../core/auth/module-scope
  *     other KEY services read) carries none of them; getSnapshotForViewer()
  *     carries the sections that viewer may see; buildContextString() prints
  *     what the snapshot it is given carries.
+ *
+ * PR195-KEY-GATES review repair (review finding SEC-P195KG-2; owner rulings D-57,
+ * D-146, D-73): KEY's standing context (getSnapshot with a viewer option, the call
+ * chat() and streamChat() make, and getSnapshotForViewer) carries the revenue and
+ * receivable figures (revenue collected and this month, outstanding and overdue
+ * invoices, the overdue-invoice alert) only to a viewer with revenue read, the
+ * month's expenses (and the budget alert) only with expenses read, and the
+ * expenses-against-revenue alert only with both. A turn that names no member (the
+ * Chatwoot support desk: viewerId null) carries none of them, as it runs none of
+ * the tools that read them. The shared snapshot (no viewer option: REST graph
+ * routes, the other KEY services) is unchanged.
+ *
+ *   BG-15  RED-BEFORE  no member (viewerId null, a viewer with no membership): no
+ *                      revenue, outstanding or expenses line, figure or alert
+ *   BG-16  RED-BEFORE  revenue none (expenses read): the month's expenses, nothing of revenue
+ *   BG-17  RED-BEFORE  revenue read (expenses none): revenue and outstanding, nothing of expenses
+ *   BG-18  control     STAFF defaults and the OWNER see every line; the shared snapshot is unchanged
  */
 
 type Scopes = Record<string, string> | unknown[] | null;
@@ -31,6 +48,7 @@ function makeStubs(opts: {
   payrollRuns?: Array<{ totalGross: number; currency: string }>;
   deals?: Array<{ value: number | null; currency: string }>;
   openTickets?: number;
+  expensesThisMonth?: number;
 } = {}) {
   const membership = opts.membership === undefined ? { role: 'OWNER', permissionScopes: null } : opts.membership;
   const cash = opts.cash ?? { cashBalance: 18_500 };
@@ -61,7 +79,7 @@ function makeStubs(opts: {
       },
       booking: { count: vi.fn(async () => 3) },
       expense: {
-        aggregate: vi.fn(async () => ({ _sum: { amount: 3_000 } })),
+        aggregate: vi.fn(async () => ({ _sum: { amount: opts.expensesThisMonth ?? 3_000 } })),
         groupBy: vi.fn(async () => []),
         findMany: vi.fn(async () => opts.bills ?? [
           { amount: 3_000, currency: 'TTD' },
@@ -251,9 +269,9 @@ describe('BusinessGraphService: KEY treasury, pipeline and support sight (PR195-
 
   it('BG-10 role defaults apply when the membership has no explicit map (STAFF: revenue, crm and operations read)', async () => {
     const sight = await keyContextSight(makeStubs({ membership: { role: 'STAFF', permissionScopes: null } }).prisma, 'biz_1', 'u_staff');
-    expect(sight).toEqual({ treasury: true, pipeline: true, support: true });
+    expect(sight).toEqual({ treasury: true, pipeline: true, support: true, revenue: true, expenses: true });
     const none = await keyContextSight(makeStubs({ membership: { role: 'OWNER', permissionScopes: { revenue: 'none' } } }).prisma, 'biz_1', 'u_co_owner');
-    expect(none).toEqual({ treasury: false, pipeline: false, support: false });
+    expect(none).toEqual({ treasury: false, pipeline: false, support: false, revenue: false, expenses: false });
   });
 
   it('BG-11 the per-viewer projection never leaks into the shared cache', async () => {
@@ -278,7 +296,7 @@ describe('BusinessGraphService: KEY treasury, pipeline and support sight (PR195-
 
   it('BG-13 (review SEC-P195-2 / CR-P195-2) a membership whose permissionScopes is [] is an explicit map in which every module is none: no treasury, pipeline or support', async () => {
     const { svc, prisma } = makeStubs({ membership: { role: 'STAFF', permissionScopes: [] } });
-    expect(await keyContextSight(prisma, 'biz_1', 'u_arr')).toEqual({ treasury: false, pipeline: false, support: false });
+    expect(await keyContextSight(prisma, 'biz_1', 'u_arr')).toEqual({ treasury: false, pipeline: false, support: false, revenue: false, expenses: false });
     const snapshot = await svc.getSnapshotForViewer('biz_1', 'u_arr', true);
     expect(snapshot.treasury).toBeUndefined();
     expect(snapshot.pipeline).toBeUndefined();
@@ -306,6 +324,94 @@ describe('BusinessGraphService: KEY treasury, pipeline and support sight (PR195-
       treasury: await guardAllows('revenue'),
       pipeline: await guardAllows('crm'),
       support: await guardAllows('operations'),
+      revenue: await guardAllows('revenue'),
+      expenses: await guardAllows('expenses'),
     });
+  });
+});
+
+describe('BusinessGraphService: KEY context revenue and expense figures (SEC-P195KG-2)', () => {
+  /** The money lines and alerts of the context string, and the figures the stubs answer with. */
+  const REVENUE_LINES = /Revenue: |Outstanding: |overdue invoice\(s\) totaling/;
+  const EXPENSE_LINES = /Expenses: |Budget utilization/;
+  const BOTH_LINES = /Expenses consuming/;
+  const FIGURES = /25,000|30,000|5,000\b/;
+  // 25,000 collected and this month, 2 overdue; 30,000 of expenses against a 10,000 budget: every money alert raised
+  const stubs = (membership: { role: string; permissionScopes: Scopes } | null) => makeStubs({ membership, expensesThisMonth: 30_000 });
+  const areas = (snapshot: { healthIndicators: Array<{ area: string }> }) => snapshot.healthIndicators.map((h) => h.area);
+
+  it('BG-15 RED-BEFORE: a KEY turn that names no member (the Chatwoot desk: viewerId null) carries no revenue, receivable or expense figure, line or alert', async () => {
+    const { svc } = stubs(null);
+    const snapshots = [
+      await svc.getSnapshot('biz_1', true, { viewerId: null }),
+      await svc.getSnapshotForViewer('biz_1', undefined, true),
+      await svc.getSnapshotForViewer('biz_1', 'u_outsider', true),
+    ];
+    for (const snapshot of snapshots) {
+      expect(snapshot.revenue).toBeUndefined();
+      expect(snapshot.expenses).toBeUndefined();
+      expect(snapshot.entities.overdueInvoices).toEqual([]);
+      expect(snapshot.entities.topContacts).toEqual([]);
+      for (const a of ['revenue', 'expenses', 'profitability', 'treasury']) expect(areas(snapshot), a).not.toContain(a);
+      const context = svc.buildContextString(snapshot);
+      expect(context).not.toMatch(REVENUE_LINES);
+      expect(context).not.toMatch(EXPENSE_LINES);
+      expect(context).not.toMatch(BOTH_LINES);
+      expect(context).not.toMatch(FIGURES);
+      expect(context).toContain('Business: KeyFlow Demo Co');
+    }
+  });
+
+  it('BG-16 RED-BEFORE: a member with no revenue access (expenses read) sees the month\'s expenses and nothing of revenue', async () => {
+    const { svc } = stubs({ role: 'STAFF', permissionScopes: { crm: 'read', operations: 'read', expenses: 'read' } });
+    const snapshot = await svc.getSnapshotForViewer('biz_1', 'u_staff', true);
+    expect(snapshot.revenue).toBeUndefined();
+    expect(snapshot.expenses).toMatchObject({ totalThisMonth: 30_000 });
+    expect(areas(snapshot)).not.toContain('revenue');
+    expect(areas(snapshot)).not.toContain('profitability');
+    expect(areas(snapshot)).toContain('expenses');
+    const context = svc.buildContextString(snapshot);
+    expect(context).not.toMatch(REVENUE_LINES);
+    expect(context).not.toMatch(BOTH_LINES);
+    expect(context).not.toMatch(/25,000/);
+    expect(context).toContain('Expenses: $30,000 this month');
+  });
+
+  it('BG-17 RED-BEFORE: a member with revenue read and no expenses access sees revenue and outstanding, nothing of expenses', async () => {
+    const { svc } = stubs({ role: 'STAFF', permissionScopes: { revenue: 'read', crm: 'read' } });
+    const snapshot = await svc.getSnapshotForViewer('biz_1', 'u_staff', true);
+    expect(snapshot.revenue).toMatchObject({ totalCollected: 25_000 });
+    expect(snapshot.expenses).toBeUndefined();
+    expect(areas(snapshot)).toContain('revenue');
+    expect(areas(snapshot)).not.toContain('expenses');
+    expect(areas(snapshot)).not.toContain('profitability');
+    const context = svc.buildContextString(snapshot);
+    expect(context).toContain('Revenue: $25,000 collected');
+    expect(context).toContain('Outstanding: $25,000 (2 invoices, 2 overdue)');
+    expect(context).not.toMatch(EXPENSE_LINES);
+    expect(context).not.toMatch(BOTH_LINES);
+    expect(context).not.toMatch(/30,000/);
+  });
+
+  it('BG-18 control: STAFF defaults and the OWNER see every line and alert; the shared snapshot (no viewer option) is unchanged', async () => {
+    for (const membership of [{ role: 'STAFF', permissionScopes: null }, { role: 'OWNER', permissionScopes: null }]) {
+      const { svc } = stubs(membership);
+      const snapshot = await svc.getSnapshotForViewer('biz_1', 'u_m', true);
+      expect(snapshot.revenue).toBeDefined();
+      expect(snapshot.expenses).toBeDefined();
+      expect(areas(snapshot)).toEqual(expect.arrayContaining(['revenue', 'expenses', 'profitability']));
+      const context = svc.buildContextString(snapshot);
+      expect(context).toMatch(REVENUE_LINES);
+      expect(context).toMatch(EXPENSE_LINES);
+      expect(context).toMatch(BOTH_LINES);
+    }
+    const { svc } = stubs(null);
+    const shared = await svc.getSnapshot('biz_1', true);
+    expect(shared.revenue).toMatchObject({ totalCollected: 25_000 });
+    expect(shared.expenses).toMatchObject({ totalThisMonth: 30_000 });
+    expect(areas(shared)).toEqual(expect.arrayContaining(['revenue', 'expenses', 'profitability']));
+    const context = svc.buildContextString(shared);
+    expect(context).toContain('Revenue: $25,000 collected');
+    expect(context).toContain('Expenses: $30,000 this month');
   });
 });
