@@ -107,10 +107,15 @@ export const COPILOT_UNAVAILABLE = /\bunable to review\b/i;
  * The machine reason each known "unable to review" body carries. Only bodies
  * GitHub has actually posted are listed. PR 103 and every PR 104 head: "...
  * because the user who requested the review has reached their quota limit."
- * Any other unavailable body derives no reason, and so authorizes no fallback.
+ * PR 155 reviews 5636247931 and 5636727516 (2026-10-24): "... because the
+ * user who requested the review has insufficient remaining quota."
+ * (KF-META-AI-REVIEW-QUOTA-WORDING-001.) Each entry is one exact phrase the
+ * bot has used; a keyword such as "quota" alone is never a reason. Any other
+ * unavailable body derives no reason, and so authorizes no fallback.
  */
 export const COPILOT_NOT_RUN_REASONS = Object.freeze([
   Object.freeze({ pattern: /\breached their quota limit\b/i, reason: 'quota_exhausted' }),
+  Object.freeze({ pattern: /\binsufficient remaining quota\b/i, reason: 'quota_exhausted' }),
 ]);
 
 /** The finding count in a Copilot review overview ("**Findings:** 1"). */

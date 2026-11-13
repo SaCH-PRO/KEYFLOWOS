@@ -75,10 +75,10 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20.18.1'
       - name: Run control-plane proofs
@@ -101,10 +101,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20.18.1'
 
@@ -160,6 +160,14 @@ jobs:
               return;
             }
 
+            // This comment is posted by the workflow token, an author the
+            // AUTO_MERGE recorder and audit trust, and any commenter's RETURN
+            // wakes it with its packet_id copied verbatim. Echo a packet_id
+            // only when it reads as one, so a stranger cannot put text (a
+            // merge marker, say) into a trusted comment. (SECOPS-2)
+            const PACKET_ID = /^[A-Z0-9][A-Z0-9_.-]{0,80}$/;
+            const packetId = typeof event.packet_id === 'string' && PACKET_ID.test(event.packet_id) ? event.packet_id : 'null';
+
             const body = [
               marker,
               '```yaml',
@@ -168,7 +176,7 @@ jobs:
               'sender: github-autopilot',
               'kind: ' + event.kind,
               'idempotency_key: ' + event.idempotency_key,
-              'packet_id: ' + (event.packet_id || 'null'),
+              'packet_id: ' + packetId,
               'pr_number: ' + (event.pr_number ?? 'null'),
               'workflow: ' + (event.workflow || 'null'),
               'conclusion: ' + (event.conclusion || 'null'),
@@ -197,10 +205,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20.18.1'
 
@@ -289,10 +297,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout trusted main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20.18.1'
 
@@ -307,7 +315,9 @@ jobs:
           # A failed listing is not "no open PRs": inside a process
           # substitution its status was lost and the job passed having
           # reconciled nothing.
-          if ! listing="$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("impl/")) | .number')"; then
+          # Candidates come from a paged GraphQL enumeration, not `gh pr list`, whose default page of 30 hid 14 of the 21 open impl/* PRs on 2026-10-24 while this job reported a clean sweep.
+          # The lister prints nothing unless its enumeration is complete and internally consistent, and exits 2 otherwise.
+          if ! listing="$(node scripts/agent-control/list-open-impl-prs.mjs)"; then
             echo "::error::could not list open pull requests; nothing was reconciled"
             exit 1
           fi
@@ -349,3 +359,27 @@ jobs:
             echo "::error::$failures reconciliation(s) failed unexpectedly"
             exit 1
           fi
+
+      # The recorder runs in the job that merges. If that job dies between the
+      # merge and the record, nothing looks again: the PR is closed and nothing
+      # reads AUTO_MERGE. This step looks again, on every sweep, for every
+      # merge the workflow token ever made, and posts a record that is missing
+      # through the same recorder. It runs even when the sweep above failed,
+      # because a failed record is exactly what it exists to repair. It holds
+      # the job's mutation lock, never merges, and cannot resolve a conflict.
+      - name: Audit AUTO_MERGE records
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          audited=0
+          node scripts/agent-control/audit-merge-records.mjs --reconcile || audited=$?
+          case "$audited" in
+            0) echo "every autopilot merge has its AUTO_MERGE record" ;;
+            5) echo "::error::an autopilot merge still has no AUTO_MERGE record after reconciliation"; exit 1 ;;
+            4) echo "::error::a trusted control-room comment contradicts an AUTO_MERGE record; a person must look"; exit 1 ;;
+            *) echo "::error::the AUTO_MERGE audit did not complete (status $audited)"; exit 1 ;;
+          esac

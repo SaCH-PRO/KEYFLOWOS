@@ -30,6 +30,7 @@
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts",
     "verify:up": "bash scripts/verify-up.sh",
     "test:verify-up": "node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs",
+    "test:deploy": "node --test scripts/tests/deploy-sh.spec.mjs",
     "monitor:uptime": "bash scripts/uptime-monitor.sh",
     "start:prod": "bash scripts/start-prod.sh"
   },

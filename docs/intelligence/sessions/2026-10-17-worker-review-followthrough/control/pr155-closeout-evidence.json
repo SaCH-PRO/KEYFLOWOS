@@ -1,0 +1,1027 @@
+{
+  "kind": "CURATED_EXACT_ARTIFACT_CLOSEOUT_AND_UNPOSTED_CANDIDATE",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "pr": {
+    "number": 155,
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155",
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+  },
+  "observation": "Read-only closeout composed from the saved actual API responses; not an atomic network snapshot.",
+  "observation_times": {
+    "other_runs": "evidence/runs-201429.json",
+    "ci_observed_by_utc": "2026-10-17T20:19:42Z",
+    "worker_observed_by_utc": "2026-10-17T20:24:01Z"
+  },
+  "workflow_runs": [
+    {
+      "id": 39065401472,
+      "name": "Agent Control Gate",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065401472",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:46Z",
+      "updated_at": "2026-10-17T20:07:56Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065353307,
+      "name": "DAST (HawkScan)",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353307",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:05Z",
+      "updated_at": "2026-10-17T20:07:39Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065353315,
+      "name": "Agent Control Gate",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353315",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:05Z",
+      "updated_at": "2026-10-17T20:07:17Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065353286,
+      "name": "Agent Control Worker Proof",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353286",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "in_progress",
+      "conclusion": null,
+      "created_at": "2026-10-17T20:07:05Z",
+      "updated_at": "2026-10-17T20:07:09Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065353328,
+      "name": "Branch divergence",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353328",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:05Z",
+      "updated_at": "2026-10-17T20:07:28Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065353293,
+      "name": "CI/CD Pipeline",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065353293",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:05Z",
+      "updated_at": "2026-10-17T20:17:39Z",
+      "run_attempt": 1
+    },
+    {
+      "id": 39065349377,
+      "name": "Branch divergence",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39065349377",
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_branch": "impl/kf-exec-auth-fail-closed-001",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-17T20:07:02Z",
+      "updated_at": "2026-10-17T20:07:25Z",
+      "run_attempt": 1
+    }
+  ],
+  "comparisons": {
+    "compare-base.json": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/98ee0202499ba87fa4ee13d58a2a9075016225bd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/98ee0202499ba87fa4ee13d58a2a9075016225bd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "status": "ahead",
+      "ahead_by": 7,
+      "behind_by": 0,
+      "total_commits": 7,
+      "base_commit_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "merge_base_commit_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "files": [
+        {
+          "filename": ".agent-control/active-packet.yaml",
+          "status": "modified",
+          "sha": "551b94f2aa00badde4f595eacfb367a2d4aebc04"
+        },
+        {
+          "filename": ".agent-control/claude-return.yaml",
+          "status": "modified",
+          "sha": "c17375994395ea4ca6d3b32cdc0d1e11d9e3f508"
+        },
+        {
+          "filename": "apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts",
+          "status": "modified",
+          "sha": "0ec7bd0cbae6b85a7b362b765f8ad2b962a746e5"
+        },
+        {
+          "filename": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+          "status": "modified",
+          "sha": "4847aa7a79893a2b4c52e444a34947b0706214b1"
+        },
+        {
+          "filename": "scripts/proof-admission/manifests/auth-fail-closed-001-negative-controls.json",
+          "status": "added",
+          "sha": "96bb8105b97fce961fe9a16d1674bed21e810d21"
+        }
+      ]
+    },
+    "compare-semantic.json": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "status": "ahead",
+      "ahead_by": 2,
+      "behind_by": 0,
+      "total_commits": 2,
+      "base_commit_sha": "fe79181638e373584c3ca3184a39343a132040cd",
+      "merge_base_commit_sha": "fe79181638e373584c3ca3184a39343a132040cd",
+      "files": [
+        {
+          "filename": ".agent-control/active-packet.yaml",
+          "status": "modified",
+          "sha": "551b94f2aa00badde4f595eacfb367a2d4aebc04"
+        },
+        {
+          "filename": ".agent-control/claude-return.yaml",
+          "status": "modified",
+          "sha": "c17375994395ea4ca6d3b32cdc0d1e11d9e3f508"
+        }
+      ]
+    },
+    "compare-parent.json": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/a597c692fcb102de558dd832d88738c0402f69a2...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/a597c692fcb102de558dd832d88738c0402f69a2...b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "status": "ahead",
+      "ahead_by": 1,
+      "behind_by": 0,
+      "total_commits": 1,
+      "base_commit_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "merge_base_commit_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "files": [
+        {
+          "filename": ".agent-control/active-packet.yaml",
+          "status": "modified",
+          "sha": "551b94f2aa00badde4f595eacfb367a2d4aebc04"
+        },
+        {
+          "filename": ".agent-control/claude-return.yaml",
+          "status": "modified",
+          "sha": "c17375994395ea4ca6d3b32cdc0d1e11d9e3f508"
+        }
+      ]
+    },
+    "compare-reviewhead.json": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...a597c692fcb102de558dd832d88738c0402f69a2",
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/fe79181638e373584c3ca3184a39343a132040cd...a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "ahead",
+      "ahead_by": 1,
+      "behind_by": 0,
+      "total_commits": 1,
+      "base_commit_sha": "fe79181638e373584c3ca3184a39343a132040cd",
+      "merge_base_commit_sha": "fe79181638e373584c3ca3184a39343a132040cd",
+      "files": [
+        {
+          "filename": ".agent-control/active-packet.yaml",
+          "status": "modified",
+          "sha": "283016cc2c946f5d02d83e415b9ebd8391dc667d"
+        },
+        {
+          "filename": ".agent-control/claude-return.yaml",
+          "status": "modified",
+          "sha": "e3de3d0d70e01b8881745e1fcf9350edba73c702"
+        }
+      ]
+    }
+  },
+  "admission_candidate": {
+    "preparation_only": true,
+    "not_authority": true,
+    "not_posted": true,
+    "packet_id": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+    "current_pr_number": 155,
+    "current_artifact_head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+    "semantic_head": "fe79181638e373584c3ca3184a39343a132040cd",
+    "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "proposed_review_status": "ACCEPT_FOR_ADMISSION",
+    "required_guards": {
+      "pr_remains_draft": true,
+      "merge_authority": false,
+      "no_new_worker_assignment": true,
+      "no_production_or_provider_effects": true
+    },
+    "activation_conditions": [
+      "All required workflow runs on the actual current artifact head are completed and their latest conclusions are successful; no required run remains unresolved.",
+      "Root explicitly dispositions all observed skipped or unavailable proof and the non-blocking security diagnostics within the narrow packet boundary.",
+      "The separate authority decision is published only at a safe worker handoff; recipient or NO_STATE_CHANGE does not suppress selector displacement.",
+      "Any admission artifact is control-only; record its new Git identity after commit, then validate actual new-head lineage and checks.",
+      "No ready transition or merge follows from this preparation or admission-only status."
+    ],
+    "semantic_review": {
+      "implementer": "claude",
+      "reviews": [
+        {
+          "provider": "copilot",
+          "reviewer": "copilot-pull-request-reviewer[bot]",
+          "reviewed_head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+          "outcome": "NOT_RUN",
+          "reason": "quota_exhausted",
+          "unresolved_substantive_findings": [],
+          "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5559828652"
+        },
+        {
+          "provider": "chatgpt",
+          "reviewer": "chatgpt",
+          "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+          "outcome": "PASS",
+          "reason": null,
+          "unresolved_substantive_findings": [],
+          "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+        }
+      ]
+    },
+    "future_artifact_head": null,
+    "future_head_lineage_contract": "At a later artifact, prove b30acfa7 is a descendant of fe791816, an ancestor of that actual head, and carries only .agent-control differences. No future SHA or CI result is asserted here."
+  },
+  "security_disposition_candidate": {
+    "decision_status": "RECOMMENDATION_ONLY_NOT_ADMITTED",
+    "bounded_packet_recommendation": "Do not make the inherited dependency/scanner cleanup a new blanket prerequisite to #155. A narrow admission may proceed after exact-head required workflows complete successfully and root explicitly retains these proof limits and existing remediation homes. Do not claim clean supply-chain, executed secret scanning, dynamic-security qualification, programme completion or production readiness.",
+    "scope_proof": {
+      "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "artifact": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "base_compare_file_count": 5,
+      "application_and_proof_delta": "one KeyCortex parsed-command implementation file, focused spec, and packet mutation manifest",
+      "artifact_delta": "two .agent-control records",
+      "dependency_or_workflow_changes": false
+    },
+    "obligations": [
+      {
+        "id": "dependency_audit",
+        "evidence_state": "FAILED",
+        "evidence": "Job117491746503: pnpm audit --audit-level high exited1; reported260 total,12 critical,107 high,118 moderate,23 low. These are scanner-reported advisories, not a verified count of exploitable paths.",
+        "policy": "Main ci-cd.yml audit step has continue-on-error:true. PRODUCTION_READINESS.md#13-security still requires high/critical issues addressed.",
+        "introduced_by_155": false,
+        "existing_home": "PR114 KF-META-PROOF-INTEGRITY-001 blocking audit scope; main P3/Partial release-engineering debt",
+        "remediation_trigger": "Before production qualification or any dependency/supply-chain clearance claim; triage actual applicable advisories and fix or explicitly resolve them.",
+        "packet_admission_effect": "Inherited non-blocking diagnostic under current main workflow; retain as FAILED for the audit property, never call it a passed audit."
+      },
+      {
+        "id": "verified_secret_scan",
+        "evidence_state": "NOT_RUN",
+        "evidence": "Job117491746503: TruffleHog could not resolve base main;0 chunks,0 bytes. Separate GitGuardian check117491764521 succeeded.",
+        "policy": "Main TruffleHog step has continue-on-error:true. A different scanner's result does not make this scan executed.",
+        "introduced_by_155": false,
+        "existing_home": "PR114 KF-META-PROOF-INTEGRITY-001 verified-secret scan scope; historical finding#80comment5917557490",
+        "remediation_trigger": "Before claiming executed verified-secret scanning: repair base/head resolution and prove nonempty intended scan with negative controls.",
+        "packet_admission_effect": "Retain the execution gap. Do not disable GitGuardian or substitute its result as TruffleHog proof."
+      },
+      {
+        "id": "dynamic_security",
+        "evidence_state": "NOT_RUN",
+        "evidence": "HawkScan39065353307/job117491746345: HAWK_API_KEY absent; checkout through scan steps skipped; workflow conclusion success.",
+        "policy": "Main intentionally supplies dormant HawkScan scaffolding. #80comment5847737255 forbids using unavailable proof as security clearance.",
+        "introduced_by_155": false,
+        "existing_home": "PR114 native DAST migration; issue115 KF-META-NATIVE-DAST-001 route coverage expansion; existing DAST setup docs/PR61 are historical account-dependent scaffolding",
+        "remediation_trigger": "Before dynamic-security clearance: execute real API probes with meaningful route coverage and reject guard-removal/404-as-pass/5xx outcomes; no paid scanner or production activation is authorized here.",
+        "packet_admission_effect": "Workflow-name requirement can have a success conclusion while dynamic-security property remains NOT_RUN; keep the distinction explicit."
+      },
+      {
+        "id": "hosted_cursor_proof",
+        "evidence_state": "NOT_RUN",
+        "evidence": "Portable job117491746470:491 passed,0 failed,1 skipped of492; skipped cursor/idempotency test requires authenticated gh. Windows exact counts still pending.",
+        "introduced_by_155": false,
+        "existing_home": "PR114 KF-META-PROOF-INTEGRITY-001 authenticated read-only worker proof scope",
+        "remediation_trigger": "Before full cross-platform cursor/idempotency qualification; do not credit skipped hosted test as executed.",
+        "packet_admission_effect": "Named inherited host skip outside the changed parsed-command semantics; retain concrete test and reason."
+      }
+    ],
+    "ownership_limit": "PR114 is open/draft/unmerged at4d66a0e34a15eef24f1c9ece5790778b9c29c295. Issue115 is open with no assigned user. These are existing remediation scopes; no current dedicated implementation assignment for them was found in the1436-comment authority cache. F9 remains the active worker assignment. Programme authority owns later release/disposition; no new implementation owner or packet is invented.",
+    "authority_sources": [
+      "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5847737255",
+      "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5917557490",
+      "https://github.com/SaCH-PRO/KEYFLOWOS/pull/114",
+      "https://github.com/SaCH-PRO/KEYFLOWOS/issues/115"
+    ]
+  },
+  "validation": {
+    "runtime": "v24.19.0",
+    "observation": "Read-only evaluation of saved actual GitHub snapshots. No status, draft flag, authority or remote record was changed.",
+    "workflow_observations": {
+      "other_runs": "evidence/runs-201429.json",
+      "ci_observed_by_utc": "2026-10-17T20:19:42Z",
+      "worker_observed_by_utc": "2026-10-17T20:24:01Z"
+    },
+    "identity": {
+      "number": 155,
+      "state": "open",
+      "draft": true,
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_ref": "impl/kf-exec-auth-fail-closed-001",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "artifactBindingProblems": [],
+    "preReturnEvidenceProblems": [],
+    "currentRecordedSemanticEvidence": {
+      "satisfied": true,
+      "reason": "independent_semantic_review_satisfied",
+      "detail": null,
+      "evidence": {
+        "implementer": "claude",
+        "primary": "NOT_RUN",
+        "passing": [
+          {
+            "provider": "chatgpt",
+            "reviewer": "chatgpt",
+            "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+            "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+          }
+        ]
+      }
+    },
+    "proposedAdmissionSemanticEvidence": {
+      "satisfied": true,
+      "reason": "independent_semantic_review_satisfied",
+      "detail": null,
+      "evidence": {
+        "implementer": "claude",
+        "primary": "NOT_RUN",
+        "passing": [
+          {
+            "provider": "chatgpt",
+            "reviewer": "chatgpt",
+            "reviewed_head": "fe79181638e373584c3ca3184a39343a132040cd",
+            "evidence_location": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804"
+          }
+        ]
+      }
+    },
+    "actualAdmission": {
+      "eligible": false,
+      "reason": "pr_is_draft",
+      "detail": null
+    },
+    "proposedAdmissionWithDraftPreserved": {
+      "eligible": false,
+      "reason": "pr_is_draft",
+      "detail": null
+    },
+    "diagnosticOnlyAfterSimulatedStatusAndDraftChange": {
+      "eligible": false,
+      "reason": "required_check_pending_at_head",
+      "detail": [
+        {
+          "workflow": "Agent Control Worker Proof",
+          "status": "in_progress",
+          "run_id": 39065353286
+        }
+      ]
+    },
+    "diagnosticLimit": "The third result identifies remaining mechanical evidence conditions under hypothetical status/draft changes. It is not authority, a permitted transition, a new-head verdict or a full security proof.",
+    "observedTransitionEvents": [],
+    "futureArtifactHead": null,
+    "no_application_suites_rerun": true
+  },
+  "ci_checkout_tree_equivalence": {
+    "commits": [
+      {
+        "sha": "36ee4f6be1696dad2080a5d3ac4c8d081774b576",
+        "tree_sha": "aacb9a1b5d8cba6dbf2a4cdca11fbabf6f4db504",
+        "parents": [
+          "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+          "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+        ]
+      },
+      {
+        "sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+        "tree_sha": "aacb9a1b5d8cba6dbf2a4cdca11fbabf6f4db504",
+        "parents": [
+          "a597c692fcb102de558dd832d88738c0402f69a2"
+        ]
+      }
+    ],
+    "meaning": "The K12 evaluator self-test names the synthetic PR merge checkout; its tree equals the published b30acfa7 artifact tree."
+  },
+  "log_excerpts": {
+    "log-build-server-excerpts.json": [
+      {
+        "line": 328,
+        "text": "2026-10-17T20:13:13.1959306Z Server compiled successfully"
+      },
+      {
+        "line": 344,
+        "text": "2026-10-17T20:13:13.5059609Z Server loaded its module graph successfully"
+      }
+    ],
+    "log-build-web-excerpts.json": [
+      {
+        "line": 285,
+        "text": "2026-10-17T20:11:34.6058999Z  Tasks:    1 successful, 1 total"
+      },
+      {
+        "line": 341,
+        "text": "2026-10-17T20:12:36.6340860Z \u2713 Compiled successfully in 37.7s"
+      },
+      {
+        "line": 347,
+        "text": "2026-10-17T20:13:55.9520797Z   Generating static pages using 3 workers (0/218) ..."
+      },
+      {
+        "line": 348,
+        "text": "2026-10-17T20:13:57.5601961Z   Generating static pages using 3 workers (54/218) "
+      },
+      {
+        "line": 349,
+        "text": "2026-10-17T20:13:58.1259331Z   Generating static pages using 3 workers (108/218) "
+      },
+      {
+        "line": 350,
+        "text": "2026-10-17T20:13:58.6202040Z   Generating static pages using 3 workers (163/218) "
+      },
+      {
+        "line": 351,
+        "text": "2026-10-17T20:13:59.0907105Z \u2713 Generating static pages using 3 workers (218/218) in 3.1s"
+      },
+      {
+        "line": 352,
+        "text": "2026-10-17T20:13:59.1039532Z   Finalizing page optimization ..."
+      }
+    ],
+    "log-divergence-pr-excerpts.json": [
+      {
+        "line": 261,
+        "text": "2026-10-17T20:07:22.8947501Z Branch divergence: origin/main  <->  b30acfa7dcd4fdf96c67747ff8c4a66e4026937e"
+      },
+      {
+        "line": 264,
+        "text": "2026-10-17T20:07:22.8951055Z   commits unique to A:             0"
+      },
+      {
+        "line": 265,
+        "text": "2026-10-17T20:07:22.8951772Z   commits unique to B:             7"
+      },
+      {
+        "line": 266,
+        "text": "2026-10-17T20:07:22.8952436Z   files changed:                   5"
+      },
+      {
+        "line": 267,
+        "text": "2026-10-17T20:07:22.8953222Z   diff lines:                      +1266 / -711 (= 1977 lines)"
+      },
+      {
+        "line": 268,
+        "text": "2026-10-17T20:07:22.8954187Z   thresholds:                      commits=25 files=50 lines=0"
+      }
+    ],
+    "log-hawkscan-excerpts.json": [
+      {
+        "line": 207,
+        "text": "2026-10-17T20:07:36.5371402Z   echo \"HAWK_API_KEY not set \u2014 DAST is dormant. Add the secret to activate (docs/SECURITY_DAST_SETUP.md).\""
+      },
+      {
+        "line": 223,
+        "text": "2026-10-17T20:07:36.5747181Z HAWK_API_KEY not set \u2014 DAST is dormant. Add the secret to activate (docs/SECURITY_DAST_SETUP.md)."
+      }
+    ],
+    "log-lint-excerpts.json": [
+      {
+        "line": 238,
+        "text": "2026-10-17T20:07:37.9782006Z ##[group]Run pnpm --filter server lint --max-warnings 3343"
+      },
+      {
+        "line": 239,
+        "text": "2026-10-17T20:07:37.9782376Z pnpm --filter server lint --max-warnings 3343"
+      },
+      {
+        "line": 248,
+        "text": "2026-10-17T20:07:38.3219263Z > eslint src --ext .ts \"--max-warnings\" \"3343\""
+      },
+      {
+        "line": 4722,
+        "text": "2026-10-17T20:07:54.1731588Z \u2716 3341 problems (0 errors, 3341 warnings)"
+      },
+      {
+        "line": 4725,
+        "text": "2026-10-17T20:07:54.1768637Z ##[group]Run pnpm --filter web lint --max-warnings 26"
+      },
+      {
+        "line": 4726,
+        "text": "2026-10-17T20:07:54.1768797Z pnpm --filter web lint --max-warnings 26"
+      },
+      {
+        "line": 4735,
+        "text": "2026-10-17T20:07:54.5120474Z > eslint \"--max-warnings\" \"26\""
+      },
+      {
+        "line": 4813,
+        "text": "2026-10-17T20:09:14.8993610Z \u2716 26 problems (0 errors, 26 warnings)"
+      }
+    ],
+    "log-run-tests-excerpts.json": [
+      {
+        "line": 2583,
+        "text": "2026-10-17T20:17:20.8883141Z  Test Files  451 passed (451)"
+      },
+      {
+        "line": 2584,
+        "text": "2026-10-17T20:17:20.8909281Z       Tests  4428 passed (4428)"
+      },
+      {
+        "line": 2586,
+        "text": "2026-10-17T20:17:20.8935110Z    Duration  198.89s (transform 15.84s, setup 0ms, collect 365.37s, tests 94.97s, environment 134ms, prepare 51.68s)"
+      },
+      {
+        "line": 2601,
+        "text": "2026-10-17T20:17:21.4885109Z > node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json"
+      },
+      {
+        "line": 2605,
+        "text": "2026-10-17T20:17:22.9216585Z {\"status\":\"SATISFIED_AT_DECLARED_SCOPE\",\"reasons\":[],\"packageId\":\"KF-EXEC-K12-001\",\"proofScope\":\"proof-admission-evaluator-self-test\",\"requiredCaseCount\":16,\"discoveredCaseCount\":16,\"reportAgeMs\":1080,\"sourceSha\":\"36ee4f6be1696dad2080a5d3ac4c8d081774b576\",\"runId\":\"39065353293\",\"reportStartTime\":1792268241839}"
+      },
+      {
+        "line": 2902,
+        "text": "2026-10-17T20:17:35.7614218Z  Test Files  22 passed (22)"
+      },
+      {
+        "line": 2903,
+        "text": "2026-10-17T20:17:35.7635256Z       Tests  210 passed (210)"
+      },
+      {
+        "line": 2905,
+        "text": "2026-10-17T20:17:35.7640240Z    Duration  12.05s (transform 3.66s, setup 2.28s, collect 3.58s, tests 7.71s, environment 14.44s, prepare 2.50s)"
+      }
+    ],
+    "log-security-excerpts.json": [
+      {
+        "line": 238,
+        "text": "2026-10-17T20:07:40.3808985Z ##[group]Run pnpm audit --audit-level high"
+      },
+      {
+        "line": 239,
+        "text": "2026-10-17T20:07:40.3809603Z pnpm audit --audit-level high"
+      },
+      {
+        "line": 2826,
+        "text": "2026-10-17T20:09:13.2885230Z 260 vulnerabilities found"
+      },
+      {
+        "line": 2827,
+        "text": "2026-10-17T20:09:13.2885440Z Severity: 23 low | 118 moderate | 107 high | 12 critical"
+      },
+      {
+        "line": 2828,
+        "text": "2026-10-17T20:09:13.5101865Z ##[error]Process completed with exit code 1."
+      },
+      {
+        "line": 2962,
+        "text": "2026-10-17T20:09:18.9735182Z 2026-10-17T20:09:18Z\terror\ttrufflehog\tencountered errors during scan\t{\"job\": 1, \"source_name\": \"trufflehog - git\", \"errors\": [\"error chunking dir \\\"/tmp/trufflehog-18-3553190076\\\": unable to resolve ref: no base refs succeeded for base: \\\"main\\\"\"]}"
+      },
+      {
+        "line": 2963,
+        "text": "2026-10-17T20:09:18.9737328Z 2026-10-17T20:09:18Z\tinfo-0\ttrufflehog\tfinished scanning\t{\"chunks\": 0, \"bytes\": 0, \"verified_secrets\": 0, \"unverified_secrets\": 0, \"scan_duration\": \"1.567523943s\", \"trufflehog_version\": \"3.99.2\", \"verification_caching\": {\"Hits\":0,\"Misses\":0,\"HitsWasted\":0,\"AttemptsSaved\":0,\"VerificationTimeSpentMS\":0}}"
+      }
+    ],
+    "log-typecheck-excerpts.json": [
+      {
+        "line": 302,
+        "text": "2026-10-17T20:08:14.5908080Z ##[group]Run cd apps/server && npx tsc --noEmit"
+      },
+      {
+        "line": 326,
+        "text": "2026-10-17T20:09:28.6150777Z ##[group]Run cd apps/web && npx tsc --noEmit"
+      }
+    ],
+    "log-worker-ubuntu-excerpts.json": [
+      {
+        "line": 2476,
+        "text": "2026-10-17T20:08:05.8866554Z ok 466 - the cursor makes directive processing idempotent # SKIP needs PowerShell and an authenticated gh"
+      },
+      {
+        "line": 2611,
+        "text": "2026-10-17T20:08:05.8912822Z # tests 492"
+      },
+      {
+        "line": 2613,
+        "text": "2026-10-17T20:08:05.8913209Z # pass 491"
+      },
+      {
+        "line": 2614,
+        "text": "2026-10-17T20:08:05.8913391Z # fail 0"
+      },
+      {
+        "line": 2616,
+        "text": "2026-10-17T20:08:05.8913767Z # skipped 1"
+      }
+    ]
+  },
+  "semantic_review": {
+    "id": 6240050804,
+    "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+    "body": "message_id: CG-REVIEW-KF155-006\nmessage_type: REVIEW\npacket_id: KF-EXEC-AUTH-FAIL-CLOSED-001\nsender: chatgpt\nrecipient: claude\nin_reply_to: CC-RETURN-GENAI-AUTH-FAIL-CLOSED-003\nreturn_comment_id: 6112455909\nsource_main: 98ee0202499ba87fa4ee13d58a2a9075016225bd\nsource_head: fe79181638e373584c3ca3184a39343a132040cd\npr_head: a597c692fcb102de558dd832d88738c0402f69a2\nimplementation_branch: impl/kf-exec-auth-fail-closed-001\npr_number: 155\nstate: PROVING\nhealth: YELLOW\nscope_changed: false\nproduction_touched: false\nprovider_traffic: false\nmerge_authority: false\nprogramme_credit: ZERO\ncontrol_effect: NO_STATE_CHANGE\nreview_status: SEMANTIC_PASS\nreceipt_status: RETURN_REVIEWED\nreviewed_head: fe79181638e373584c3ca3184a39343a132040cd\nsemantic_review_outcome: PASS\nunresolved_substantive_findings: 0\ndecision: SEMANTIC_PASS_AND_REANCHOR_CONTRADICTION_SETTLED\n\n## Exact semantic review and return consumption\n\nThe completed independent review at https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#issuecomment-6230567346 is now recorded through the required typed control-room review. It covers the parsed-command fail-closed boundary at the semantic head above. PR #155 remains draft and unmerged, with no merge grant. This comment consumes RETURN 6112455909 and formalizes the independently reproduced evidence; it does not claim that H1, Flow, F9, the whole request, or the programme is complete.\n\nThe original focused suite passed 27/27, the original eight mutation controls were LIVE with zero vacuous, and the historical fail-open mutation failed the expected executor-call assertion. The local review runtime was Node 24.19.0 with isolated dependency resolution, qualified separately from the repository's Node 20/pnpm CI. The three semantic/proof files retain the reviewed behavior. The final artifact is an ancestor-preserving control-only descendant of the semantic head.\n\nAll five required workflow names have successful evidence at a597c692. The non-draft admission step was skipped; HawkScan ran no scan; the hosted authenticated-gh cursor skip remains disclosed. Copilot was NOT_RUN due to quota exhaustion at a597c692, https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5484373795 . It is not counted as a passing review. The full report, evidence and limits are at https://github.com/SaCH-PRO/KEYFLOWOS/blob/11971802fdada7e0e41fac39e178f1e441c4e882/docs/intelligence/sessions/2026-10-17-p0-safety-review/README.md .\n\n## Explicit disposition of the old re-anchor order\n\nThe blocking condition in CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005, comment 6023054785, no longer exists: merged PR #159 gives the two historical valid effect spellings their canonical meaning, and the recorded checkpoint-plus-replay through generation 116 is CONSISTENT with no unapplied effects. The newer non-authority comments and H1 RETURN do not change that authority history.\n\nThe instruction in 6023054785 to re-anchor programme-state.yaml on this packet is superseded as unnecessary. CC-CONTRADICTION-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005, comment 6023151885, is settled by the separately implemented and merged alias repair and this ruling. Its scope objection was valid: no re-anchor, reducer-fixture edit, gate weakening or semantic scope expansion is required or authorized on PR #155. Preserve both historical comments as evidence. This ruling does not pretend the out-of-scope work was performed.\n\nThe user-authorized main integration documented in RETURN 6112455909 is accepted as the current review baseline. The absent prior #80 ACK/directive remains an explicit historical process deviation; this review does not retroactively fabricate one.\n\n## Remaining boundaries and next step\n\nThe request-wide effect paths, existing real executor-result/pipeline mismatch, cross-field supervised-policy behavior, and separately owned Flow defects remain explicit follow-on obligations. None is silently credited as corrected by this narrow review. This safety intervention is outside the 35-packet DAG and earns ZERO programme credit.\n\nChatGPT owns the next control-only admission record. It must retain the exact semantic head, current base, packet/branch/PR binding, semantic-review evidence, honest skipped-proof disclosures, and this contradiction disposition. Admission status, ready-for-review transition and any merge require their applicable current checks and a distinct later exact-head decision. F9 is not an added blanket prerequisite to independent review or admission of #155.\n\nNo Claude branch mutation or separate worker assignment is requested by this REVIEW. Do not perform the obsolete re-anchor. The derived active application state remains FIXING_PROOF_FAILURES until an applicable typed state transition; NO_STATE_CHANGE preserves it deliberately. A later bounded directive will identify the next worker task.\n",
+    "created_at": "2026-10-17T19:59:24Z",
+    "updated_at": "2026-10-17T19:59:24Z"
+  },
+  "copilot_reviews": [
+    {
+      "id": 5424906620,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5424906620",
+      "commit_id": "65706fcc52f440f9225223040e2ee0ee738e04bb",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-06T07:04:07Z"
+    },
+    {
+      "id": 5425457324,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5425457324",
+      "commit_id": "8987f6db21a839f90c88e33479768d81cef508e9",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-06T08:00:50Z"
+    },
+    {
+      "id": 5430020110,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5430020110",
+      "commit_id": "26111633bf8ad3245a9f0abc90c75d1f87e1d564",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-06T14:35:27Z"
+    },
+    {
+      "id": 5432625910,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5432625910",
+      "commit_id": "fdc900b72062391189d31c6994af353ce9dc4e9c",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-06T18:01:02Z"
+    },
+    {
+      "id": 5484373795,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5484373795",
+      "commit_id": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-11T18:13:01Z"
+    },
+    {
+      "id": 5559828652,
+      "html_url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5559828652",
+      "commit_id": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "state": "COMMENTED",
+      "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+      "submitted_at": "2026-10-17T20:07:05Z"
+    }
+  ],
+  "security_policy_and_existing_tracking": {
+    "sources": [
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.github/workflows/ci-cd.yml",
+        "fact": "Audit dependencies and Secret scanning steps both have continue-on-error: true."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/feature-inventory.md",
+        "fact": "Security scan row is P3 / Partial / continue-on-error: true."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/SECURITY_DAST_SETUP.md",
+        "fact": "HawkScan is deliberately dormant without the key; account activation, coverage, baseline triage and gate promotion remain separate work."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/61",
+        "fact": "Existing merged DAST scaffolding / setup source."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/PRODUCTION_READINESS.md#13-security",
+        "fact": "Production-readiness checklist still requires high/critical dependency audit issues to be addressed."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/CRITICAL_ANALYSIS_2026-08.md",
+        "fact": "Section 5.5 already identifies audit and secret scan as continue-on-error release-engineering gaps."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/c04c71e00d818d4a58abae11e8c1dec7fb5118c6/docs/intelligence/packages/BACKLOG-CORRECTNESS-RELIABILITY.md",
+        "fact": "PR174 backlog has no audit/TruffleHog/DAST item; its two withheld application access-control findings must not be repurposed as scanner ownership."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/114",
+        "fact": "Existing open/draft/unmerged KF-META-PROOF-INTEGRITY-001 remediation scope covers blocking audit, verified-secret scan, authenticated worker proof and Native DAST; it is not current main policy or the active F9 assignment."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/115",
+        "fact": "Existing open KF-META-NATIVE-DAST-001 work tracks dynamic-security route coverage expansion; no assigned user is reported."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5847737255",
+        "fact": "The programme evidence standard forbids unsupported security/production claims while permitting unrelated bounded product work to continue."
+      },
+      {
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5917557490",
+        "fact": "Historical PROGRESS already records audit/TruffleHog failures in PR114 work; those findings are not new obligations introduced by the b30 control-record delta."
+      }
+    ],
+    "owner_conclusion": "Existing remediation homes are PR114 KF-META-PROOF-INTEGRITY-001 and issue115 KF-META-NATIVE-DAST-001. No currently released dedicated scanner worker was established in the searched authority history. Programme authority owns later release/disposition; F9 is the active worker. Do not invent a new active owner or mark production security complete."
+  },
+  "root_disposition": {
+    "status": "PREPARATION_ONLY_NOT_AUTHORITY",
+    "narrow_scope_candidate_accepted_for_preparation": true,
+    "windows_exact_proof_required_before_admission": true,
+    "retain_failed_audit": true,
+    "retain_unexecuted_secret_scan_and_dast": true,
+    "retain_hosted_cursor_skip": true,
+    "no_blanket_scanner_dependency_added_to_155": true,
+    "production_security_unqualified": true,
+    "current_f9_assignment_preserved": true,
+    "next_step": "At a safe worker handoff, after actual remaining proof and log inspection, publish a separate narrowly bound admission decision and actual control artifact. No ready transition or merge grant follows from this preparation."
+  },
+  "original_preparation_file_inventory": [
+    {
+      "path": "FILES.txt",
+      "bytes": 1720,
+      "sha256": "ffe7a1a6dad3f8a386c96bfb0a58a23cc4188dfd750644e9e624e61a3d8abb94"
+    },
+    {
+      "path": "README.md",
+      "bytes": 12184,
+      "sha256": "db3b399e844962e4ebbc54d2b6b5ca028c69610f182be2b6def8a9d0a5f3e26d"
+    },
+    {
+      "path": "admission-candidate.json",
+      "bytes": 2387,
+      "sha256": "7b0828e5e0ab8d6c7bfe40746d79edec745817847b7c9be92ab748481e6eba6a"
+    },
+    {
+      "path": "evidence/check-runs-2017.json",
+      "bytes": 122442,
+      "sha256": "d5072b423d104b52994475847bdacfc98e71b14285591762fb3d34b3d4a16003"
+    },
+    {
+      "path": "evidence/ci-checkout-tree-equivalence.json",
+      "bytes": 631,
+      "sha256": "0edd2eec6765aaa5c4b802ab04f5e5f9421bb5cfc2e4507448e96e8c8f82a9b8"
+    },
+    {
+      "path": "evidence/ci-jobs-201704.json",
+      "bytes": 26322,
+      "sha256": "7d0bce728c7afff8e2fba54b2155405e8c0165deeb7daf7892127f0b29cae2a9"
+    },
+    {
+      "path": "evidence/ci-jobs-final.json",
+      "bytes": 26866,
+      "sha256": "b068d35e7c320f07e28fd99be60fa85c023e8159edefcfe7ae2eb6f5de3d91e9"
+    },
+    {
+      "path": "evidence/ci-run-final.json",
+      "bytes": 14352,
+      "sha256": "7574b611283b049c33c8bed50126910878070b2d467176ef7da174e5be0a258f"
+    },
+    {
+      "path": "evidence/combined-status-2017.json",
+      "bytes": 5493,
+      "sha256": "63861e7e42db98bacef963ec69d455922c1a1ca58a3461bbb61c2bfffeefedd0"
+    },
+    {
+      "path": "evidence/compare-base.json",
+      "bytes": 7467,
+      "sha256": "65445d390d2aa75993c872c6494a976fe43c6b3d150279669dd1b5cb9a427b47"
+    },
+    {
+      "path": "evidence/compare-parent.json",
+      "bytes": 1611,
+      "sha256": "39deaa2b6f911e989b085706dd04f5c4826b043d8051509ea524d83d4ed5271a"
+    },
+    {
+      "path": "evidence/compare-reviewhead.json",
+      "bytes": 1612,
+      "sha256": "bf67259be3fa9c2fc8f896b4ef5690ffbc968c2826a0e22ea3c3eb78b94abc37"
+    },
+    {
+      "path": "evidence/compare-semantic.json",
+      "bytes": 2205,
+      "sha256": "2d0c79f1e47cb17929106788d429337663abbf145566e7b20da0577ac8b63f68"
+    },
+    {
+      "path": "evidence/historical-comment-5847737255.json",
+      "bytes": 12718,
+      "sha256": "b4fd7681c15be5b8e4855a6723aed6304497b9583d164e51578dae82b51a1d3e"
+    },
+    {
+      "path": "evidence/historical-comment-5917557490.json",
+      "bytes": 6239,
+      "sha256": "efd1536eef795d6551d06a5295d4c5cf20cc47b2901cf38197259c55b1dc595b"
+    },
+    {
+      "path": "evidence/historical-comment-6109741134.json",
+      "bytes": 8955,
+      "sha256": "32f3185b17a3036f20b2729b9ed9b251a8e6a6329241680037bc313d477fd3e3"
+    },
+    {
+      "path": "evidence/historical-scanner-mentions.json",
+      "bytes": 23995,
+      "sha256": "a25e324f891d22d18915fe884bd277e9eb63d85367228110be30653af6e62877"
+    },
+    {
+      "path": "evidence/issue115.json",
+      "bytes": 5749,
+      "sha256": "294f0193da8f50075379f45f2dd4dbba16d36dddf7d1f8259af4a52e4c166f71"
+    },
+    {
+      "path": "evidence/jobs-39065349377.json",
+      "bytes": 9500,
+      "sha256": "66c0556122e6cc4e7085e95c8547bf6ca9fc2966c9cbbdd77df5bdd9d6f6222a"
+    },
+    {
+      "path": "evidence/jobs-39065353286.json",
+      "bytes": 6094,
+      "sha256": "3a93f9ef6b35e6f5e8e909b6303b8b36c8f82f9beb502da63401d907ad1b5722"
+    },
+    {
+      "path": "evidence/jobs-39065353293.json",
+      "bytes": 25864,
+      "sha256": "249958a0d44f478f07c4d92c604e702578a3c86a558932d3a2dfc441d5e62023"
+    },
+    {
+      "path": "evidence/jobs-39065353307.json",
+      "bytes": 5133,
+      "sha256": "0ad4d7b1848a319a510db23d79d8ab69bedf731d376d6f9be5831eb2044a4181"
+    },
+    {
+      "path": "evidence/jobs-39065353315.json",
+      "bytes": 3207,
+      "sha256": "95853f0d055bc6fcc5c67e29480a90ad822640d19da72a9817264329f4f3011d"
+    },
+    {
+      "path": "evidence/jobs-39065353328.json",
+      "bytes": 9522,
+      "sha256": "0c54c9256f29bd21cb73f198f43151599be0c67ddbac7f8cee551e6ff0ea2b30"
+    },
+    {
+      "path": "evidence/jobs-39065401472.json",
+      "bytes": 3207,
+      "sha256": "52c6e4c4265a115f782abaa97a56383fc900c980e90522fe2dec4e3d22bd3eec"
+    },
+    {
+      "path": "evidence/log-build-server-excerpts.json",
+      "bytes": 214,
+      "sha256": "b4f6d41b73fda4a434366a9e9bce6d46efdd05a6b09b64236299d094e8c4a5db"
+    },
+    {
+      "path": "evidence/log-build-web-excerpts.json",
+      "bytes": 932,
+      "sha256": "4b4b600cf3c15b710caa36bb59f158c53a83a0444945a1defb65bc73ec59532d"
+    },
+    {
+      "path": "evidence/log-divergence-pr-excerpts.json",
+      "bytes": 732,
+      "sha256": "7c42f90a9eb586c551add6641c91136b3c99c6c80680fb314c506cb739517365"
+    },
+    {
+      "path": "evidence/log-hawkscan-excerpts.json",
+      "bytes": 352,
+      "sha256": "dec3732657fa65fc765249ea1698539b8c3651779dc72913e0ecedf45ec323aa"
+    },
+    {
+      "path": "evidence/log-lint-excerpts.json",
+      "bytes": 930,
+      "sha256": "ec75877158c3b5f5e6d0f4f9d1d30cdea35b9fb594999544193da6f38b7ae122"
+    },
+    {
+      "path": "evidence/log-run-tests-excerpts.json",
+      "bytes": 1623,
+      "sha256": "2eaab4d6252db7823a33653bfec0766e68b7d265cdc545209672b77925b1aa93"
+    },
+    {
+      "path": "evidence/log-security-excerpts.json",
+      "bytes": 1299,
+      "sha256": "e207c78f7400842fe1725c55745428f71c2251248263a5ce90231842f47bf3a9"
+    },
+    {
+      "path": "evidence/log-typecheck-excerpts.json",
+      "bytes": 234,
+      "sha256": "3a083abe0f4f85a90cfa5d0e7fb441806db17f39dddbca7b021b55a62a3b4b5f"
+    },
+    {
+      "path": "evidence/log-worker-ubuntu-excerpts.json",
+      "bytes": 503,
+      "sha256": "219cffb243fc83f327b9b319bab869623a8d46030fc2cc5914056d420c7a276b"
+    },
+    {
+      "path": "evidence/main-ref.json",
+      "bytes": 373,
+      "sha256": "5b35ab744e4afcac48e1dfc1e32a33a4da3aab8d346d12cac15c2a8224c7b024"
+    },
+    {
+      "path": "evidence/pr114.json",
+      "bytes": 19178,
+      "sha256": "a680856aefcb1fe46ddf3634ab29214a177556f71ae7a5b94a61b770bfcda42e"
+    },
+    {
+      "path": "evidence/pr155.json",
+      "bytes": 21300,
+      "sha256": "4adce1a20c7f2ba3679e3986ce4f11166c32d731b3634a2b638eec958fbaf795"
+    },
+    {
+      "path": "evidence/prior-worker-duration.json",
+      "bytes": 6466,
+      "sha256": "2332997598e31b93af0fcd5b652dba6a26043be97b55878e57e8f09176fb9e1c"
+    },
+    {
+      "path": "evidence/proof-integrity-history-index.json",
+      "bytes": 400,
+      "sha256": "766293ce8235b1609ddfab219d98448a7f2339dd4e8ddcf50a4aed700f7f005d"
+    },
+    {
+      "path": "evidence/review6240050804.json",
+      "bytes": 8815,
+      "sha256": "ca0aede388210029b967d442dbca7c14d5d18636ed9db0cfdb39731d1f35e3cb"
+    },
+    {
+      "path": "evidence/reviews.json",
+      "bytes": 13527,
+      "sha256": "40f71e11be42414d881f97c776b5d8b6b81656467e0984cc8281308c266f6b6e"
+    },
+    {
+      "path": "evidence/ruleset-active.json",
+      "bytes": 877,
+      "sha256": "4b0a6569269c4b5a98d28e7b2e7bd3ec5b684416e116d1a42465271b04f55ea2"
+    },
+    {
+      "path": "evidence/rulesets.json",
+      "bytes": 1140,
+      "sha256": "48e790c02d106cb9286cab8e39bb0552d8b4b2b620182cf4c32797ccaeae3e33"
+    },
+    {
+      "path": "evidence/runs-201429.json",
+      "bytes": 107558,
+      "sha256": "816cfd6688343c1274f3b8ef2e88483b7b00c11812b4b4e91d7e21a92f256952"
+    },
+    {
+      "path": "evidence/runs-closeout.json",
+      "bytes": 107853,
+      "sha256": "ea64ee757be8ae39ab42e1a757439dc0e549b8be01bac324cdbe552c8751ec2c"
+    },
+    {
+      "path": "evidence/security-policy-and-existing-tracking.json",
+      "bytes": 3233,
+      "sha256": "aa89e51caa3122415a2b10ef0f2fd97c6fe14c3819dcb256f9e633b645742fff"
+    },
+    {
+      "path": "evidence/timeline.json",
+      "bytes": 250888,
+      "sha256": "730f132e7949d2c74e75a97493dfc928359d9c52ccad6b8664681e76016403b2"
+    },
+    {
+      "path": "evidence/worker-jobs-201704.json",
+      "bytes": 6094,
+      "sha256": "3a93f9ef6b35e6f5e8e909b6303b8b36c8f82f9beb502da63401d907ad1b5722"
+    },
+    {
+      "path": "evidence/worker-run-pending-202401.json",
+      "bytes": 14382,
+      "sha256": "5b54cf52bc8052831dbb91c84a64e687c4e83f346d58c789d89e080295cb0ea6"
+    },
+    {
+      "path": "published/.agent-control/active-packet.yaml",
+      "bytes": 11305,
+      "sha256": "bee36c90985840d5f04f67066a020a05217e7c861b2512f4a88551d820df82a2"
+    },
+    {
+      "path": "published/.agent-control/claude-return.yaml",
+      "bytes": 34276,
+      "sha256": "c85ed76f24dd54637f20de86439da97c497b13747f0072038cd1a4dd247f0ca3"
+    },
+    {
+      "path": "security-disposition-candidate.json",
+      "bytes": 5106,
+      "sha256": "3f7a7a62b364444207fdc7accd56c4ea3fc8d5af663c75c83cde519c2f641093"
+    },
+    {
+      "path": "validate-closeout.mjs",
+      "bytes": 5190,
+      "sha256": "cec94dcd4f2eff94bdb012dd41536571c6a730fa2577e4de35b42df1588fc418"
+    },
+    {
+      "path": "validation.json",
+      "bytes": 2528,
+      "sha256": "0cc4356a142770121006277cd147c4584a0d689b15a92bb6df0082bd0c89b7ec"
+    }
+  ],
+  "inventory_limit": "Inventory hashes identify the 54 original local preparation files. Large raw API envelopes are curated here; original remote API/run URLs and unchanged review/commit identities remain the sources. No claim that every raw response is embedded."
+}

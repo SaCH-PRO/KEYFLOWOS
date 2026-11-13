@@ -48,6 +48,109 @@ function methodBody(src: string, name: string): string {
   throw new Error(`could not find the end of ${name}()`);
 }
 
+/** The text of a brace-balanced `{ ... }` starting at src[open]. */
+function balanced(src: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  throw new Error('unbalanced braces');
+}
+
+/** The top-level comma-separated entries of an object literal's text. */
+function entries(objectText: string): string[] {
+  const inner = objectText.slice(1, -1);
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(inner.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(inner.slice(start).trim());
+  return out.filter(Boolean);
+}
+
+/** The parameter list of a named async method. */
+function methodParams(src: string, name: string): string {
+  const at = src.indexOf(`async ${name}(`);
+  expect(at, `${name}() not found — was it renamed?`).toBeGreaterThan(-1);
+  return src.slice(at + `async ${name}(`.length, src.indexOf(')', at));
+}
+
+/**
+ * Every BusinessGoal write a where clause can scope (update, updateMany,
+ * upsert, delete, deleteMany) in the named method must:
+ *   - be a direct call on the delegate (`businessGoal.updateMany(` or
+ *     `businessGoal?.updateMany(`). Any other use of `businessGoal` in the
+ *     method fails: an alias (`const goals = ...businessGoal`) or an indexed
+ *     access hides its writes from this check;
+ *   - take an object literal, so its where clause can be read here (a
+ *     variable argument hides it);
+ *   - name `businessId` in that where clause as the shorthand `businessId` or
+ *     as `businessId: businessId`, i.e. bound to the method's own parameter.
+ *     `businessId: undefined` is not a scope: Prisma drops an undefined
+ *     filter, so the write reaches every tenant whenever no tenant context is
+ *     set (a job or scheduler calling the service). Any other value is not
+ *     the caller's tenant;
+ *   - have nothing after that entry that could replace it: no spread
+ *     (`...({ businessId: undefined } as any)` overrides it), no computed key
+ *     and no second businessId key.
+ * The method must also take `businessId: string` and never rebind it.
+ * Returns one line per violation; empty means scoped.
+ */
+function unscopedGoalWrites(src: string, name: string): string[] {
+  const problems: string[] = [];
+  if (!/\bbusinessId\s*:\s*string\b/.test(methodParams(src, name))) {
+    problems.push(`${name} does not take businessId: string`);
+  }
+  const body = methodBody(src, name);
+  if (/\b(?:const|let|var)\s+(?:\{[^}]*\b)?businessId\b|(?<![.\w])businessId\s*=(?![=>])/.test(body)) {
+    problems.push(`${name} rebinds businessId, so the where clause no longer names the caller's tenant`);
+  }
+  for (const use of body.matchAll(/\bbusinessGoal\b(?!\s*\??\.\s*\w+\s*\()/g)) {
+    const around = body.slice(Math.max(0, use.index! - 30), use.index! + 40).replace(/\s+/g, ' ');
+    problems.push(`${name}: the BusinessGoal delegate is used other than as a direct call (…${around}…), so its writes cannot be checked`);
+  }
+  const writes = [...body.matchAll(/\bbusinessGoal\s*\??\.\s*(update|updateMany|upsert|delete|deleteMany)\s*\(\s*/g)];
+  if (writes.length === 0) problems.push(`${name} has no BusinessGoal write to check`);
+  for (const write of writes) {
+    const method = write[1];
+    const argAt = write.index! + write[0].length;
+    if (body[argAt] !== '{') {
+      problems.push(`${name}: businessGoal.${method} takes a non-literal argument; its where clause cannot be checked`);
+      continue;
+    }
+    const arg = balanced(body, argAt);
+    const whereAt = /\bwhere\s*:\s*\{/.exec(arg);
+    if (!whereAt) {
+      problems.push(`${name}: businessGoal.${method} has no where object`);
+      continue;
+    }
+    const where = entries(balanced(arg, whereAt.index + whereAt[0].length - 1));
+    const at = where.findIndex((e) => e === 'businessId' || /^businessId\s*:\s*businessId$/.test(e));
+    if (at < 0) {
+      problems.push(`${name}: businessGoal.${method} where { ${where.join(', ')} } does not bind businessId to the parameter`);
+      continue;
+    }
+    // A later spread, computed key or businessId key can replace the scope.
+    const override = where.slice(at + 1).find((e) => e.startsWith('...') || e.startsWith('[') || /^['"]?businessId['"]?\s*:/.test(e));
+    if (override) {
+      problems.push(`${name}: businessGoal.${method} where { ${where.join(', ')} } can override businessId after binding it (${override})`);
+    }
+  }
+  return problems;
+}
+
 describe('a record id from a request is not a tenant scope', () => {
   it('goal-tracker updateGoal scopes its write by businessId', () => {
     const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'updateGoal');
@@ -65,6 +168,82 @@ describe('a record id from a request is not a tenant scope', () => {
         /businessId/.test(body.slice(body.indexOf('businessGoal.'))),
       'the write in updateGoal must carry businessId',
     ).toBe(true);
+  });
+
+  it('goal-tracker updateProgress keeps every BusinessGoal mutation tenant-scoped', () => {
+    expect(unscopedGoalWrites(read('modules/ai/goal-tracker.service.ts'), 'updateProgress')).toEqual([]);
+  });
+
+  it('goal-tracker suggestActions keeps every BusinessGoal mutation tenant-scoped', () => {
+    expect(unscopedGoalWrites(read('modules/ai/goal-tracker.service.ts'), 'suggestActions')).toEqual([]);
+  });
+
+  // The guard above must fail on the shapes that look scoped but are not.
+  // Each mutant is the real method with one write changed.
+  it('the BusinessGoal scope guard rejects writes that only look scoped', () => {
+    const src = read('modules/ai/goal-tracker.service.ts');
+    const progressWrite = 'where: { id: goalId, businessId },\n      data: { currentValue }';
+    const actionsWrite = 'where: { id: goalId, businessId },\n      data: { actions';
+    const achievedWhere = "where: { id: goalId, businessId, status: 'active' }";
+    for (const needle of [progressWrite, actionsWrite, achievedWhere]) {
+      expect(src.includes(needle), `goal-tracker changed shape; update this guard's mutants (${needle})`).toBe(true);
+    }
+    const mutants: Array<[string, string, string]> = [
+      ['updateProgress', 'undefined tenant filter', src.replace(progressWrite, progressWrite.replace('businessId }', 'businessId: undefined }'))],
+      ['suggestActions', 'undefined tenant filter', src.replace(actionsWrite, actionsWrite.replace('businessId }', 'businessId: undefined }'))],
+      ['updateProgress', 'another value as the tenant', src.replace(achievedWhere, "where: { id: goalId, businessId: goal.businessId, status: 'active' }")],
+      ['updateProgress', 'tenant only in a comment', src.replace(achievedWhere, "where: { id: goalId /* businessId */, status: 'active' }")],
+      [
+        'updateProgress',
+        'arguments passed as a variable',
+        src.replace(
+          'const progressUpdate = await this.prisma.client.businessGoal.updateMany({',
+          'const progressArgs = { where: { id: goalId }, data: { currentValue } };\n    const progressUpdate = await this.prisma.client.businessGoal.updateMany(progressArgs);\n    void ({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'an unscoped upsert',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'await this.prisma.client.businessGoal.upsert({ where: { id: goalId }, update: {}, create: {} as any });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'businessId rebound',
+        src.replace(
+          'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {',
+          'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {\n    businessId = undefined as any;',
+        ),
+      ],
+      // SEC-CONV1-3-R1: three more that look scoped and are not.
+      [
+        'updateProgress',
+        'a later spread that overrides the tenant',
+        src.replace(progressWrite, progressWrite.replace('businessId }', 'businessId, ...({ businessId: undefined } as any) }')),
+      ],
+      [
+        'suggestActions',
+        'a write through an aliased delegate',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'const goals = this.prisma.client.businessGoal;\n    await goals.updateMany({ where: { id: goalId }, data: {} });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'a write through an optional-chained delegate',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'await this.prisma.client.businessGoal?.updateMany({ where: { id: goalId }, data: {} });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
+        ),
+      ],
+    ];
+    for (const [method, label, mutant] of mutants) {
+      expect(mutant, `mutant "${label}" did not apply`).not.toBe(src);
+      expect(unscopedGoalWrites(mutant, method).length, `the guard accepted ${method} with ${label}`).toBeGreaterThan(0);
+    }
   });
 
   it('project-planner updatePlan cannot be handed a new tenant by the body', () => {

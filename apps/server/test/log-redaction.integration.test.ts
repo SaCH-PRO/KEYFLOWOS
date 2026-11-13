@@ -1942,7 +1942,8 @@ describe('agent control gate: pkt/* heads are packet PRs (D-22)', () => {
     expect(gate).toMatch(/^on:\n\s+pull_request:\n/m);
     expect(gate).not.toContain('pull_request_target');
     // The checkout takes the PR merge ref (no `ref:`), and the grant step runs the checked-out copy.
-    expect(gate).toMatch(/- name: Checkout PR\n\s+uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth: 0\n/);
+    // Any major tag of actions/checkout (Dependabot moves it); the step shape is what is pinned.
+    expect(gate).toMatch(/- name: Checkout PR\n\s+uses: actions\/checkout@v\d+\n\s+with:\n\s+fetch-depth: 0\n/);
     expect(gate).toContain('node scripts/agent-control/auto-merge-admitted.mjs --grant-only');
     // The scope step's comment states where pkt/* stops and the self-modification limit, not "cannot pass".
     const step = gate.slice(gate.indexOf('- name: Determine whether packet controls apply'), gate.indexOf('- name: Validate control artifacts'));

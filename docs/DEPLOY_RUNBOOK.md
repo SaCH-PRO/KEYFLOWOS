@@ -7,8 +7,27 @@
 > `/opt/keyflowos`. The Render workspace was deleted on 2026-08-08.
 >
 > **To deploy:** `ssh` to the box, then `./scripts/deploy.sh <git-ref>`.
-> It backs up, verifies the dump, tags rollback images, builds, migrates before
-> traffic, and asserts `/healthz` reports the hash it just built.
+> It refuses an `.env.production` the API would refuse at boot, backs up,
+> verifies the dump, tags rollback images, builds, migrates before traffic, and
+> waits (up to 90 s) for `/healthz` to report status ok, the API reachable and
+> the hash it just built; otherwise it exits 1 with the rollback.
+>
+> **First deploy of a changed deploy.sh.** Bash keeps reading the deploy.sh it
+> started with, and the script's own `git checkout` replaces that file under
+> it, so `./scripts/deploy.sh <git-ref>` used to run the box's *previous*
+> deploy.sh to the end: the ref's changes to deploy.sh (the `.env.production`
+> preflight and the bounded `/healthz` wait among them) did not apply to the
+> deploy that shipped them. deploy.sh now re-runs the ref's own copy after the
+> checkout, but only a copy that already has that step can do it. If the box's
+> copy does not (`grep -q DEPLOY_REEXEC scripts/deploy.sh` fails), update the
+> checkout by hand and run with no ref:
+>
+> ```bash
+> cd /opt/keyflowos
+> git status --porcelain | grep -v '^??'   # must print nothing: tracked edits exist only on this box
+> git fetch origin main && git checkout -B main FETCH_HEAD
+> ./scripts/deploy.sh                       # no ref: it deploys this checkout
+> ```
 >
 > **The banner that used to be here is itself a lesson.** It said production had
 > **29 tables** as of 2026-08-03 and a schema frozen since 2025-11-30. A `pg_dump`

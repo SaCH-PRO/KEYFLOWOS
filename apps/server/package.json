@@ -18,10 +18,10 @@
     "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json",
     "proof:manifests": "node ../../scripts/proof-admission/run-manifests.mjs",
     "proof:release0": "node ../../scripts/proof-admission/release0.mjs",
-    "backfill:google-identities": "tsx --env-file ../../.env scripts/backfill-google-identities.ts",
-    "cleanup:custom-field-values": "tsx --env-file ../../.env scripts/cleanup-cross-tenant-custom-field-values.ts",
-    "backfill:timeline-contacts": "tsx --env-file ../../.env scripts/backfill-timeline-contact-links.ts",
-    "backfill:owner-memberships": "tsx --env-file ../../.env scripts/backfill-owner-memberships.ts"
+    "backfill:google-identities": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-google-identities.ts",
+    "cleanup:custom-field-values": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/cleanup-cross-tenant-custom-field-values.ts",
+    "backfill:timeline-contacts": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-timeline-contact-links.ts",
+    "backfill:owner-memberships": "tsx --tsconfig scripts/tsconfig.json --env-file-if-exists=../../.env scripts/backfill-owner-memberships.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

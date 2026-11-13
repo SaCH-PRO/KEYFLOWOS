@@ -1,0 +1,277 @@
+{
+ "W10-CLAIM-LEASE": [
+  {
+   "lens": "security-tenancy",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "SEC-W10CL-1",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/key-cortex/key-idempotency.service.ts",
+     "line": 181,
+     "claim": "A caller that presents no request hash can take over a stranded claim that is bound to a member's hash (line 181: !isOtherRequest is true when either side has no hash). It then runs, and line 277 (requestHash: req.requestHash ?? staleHash) keeps the member's hash, so the hashless caller's outcome is stored under the member's actor-bound request. The member's retry is then answered with another request's outcome, the SEC-V19b-4 cross-actor class. Before this packet, the same hashless caller on a pending claim was answered 'pending' and could not run (the existing test 'Without a hash on the late caller ... still the open claim'). Reachability is limited: the only consumer, the tool registry, always hashes, and no production caller sets ctx.idempotencyKey today. Fix: take a claim over only when the caller presents a hash, and only when it equals the stored hash if one is stored.",
+     "repro": "Scratch integration probe on keyflowos_w4, since deleted. check({biz,key,requestHash:H=fingerprint(TOOL,input,owner)}) gives 'new'. Age the row 16 minutes. check({biz,key}) with no hash gives {status:'new', claimId:<uuid>}. complete({biz,key,claimId}, {data:{secret:'other-request-outcome'}}) returns true. check({biz,key,requestHash:H}) gives {status:'completed', response:{data:{secret:'other-request-outcome'}}}. The stored row keeps requestHash H. Control: a fresh (not aged) pending claim answers the hashless check 'pending'.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10CL-2",
+     "severity": "nit",
+     "file": "apps/server/src/modules/key-cortex/key-idempotency.service.ts",
+     "line": 281,
+     "claim": "The takeover audit row names no actor, command or correlation: userId, commandId and correlationId are all null, and sessionId is the synthetic 'idempotency:<key>'. The registry's business event for the run that follows is a plain ACTION_EXECUTED whose metadata.idempotency is {key} with no answer, so the canonical ledger does not mark that run as a takeover. The two can be linked only through the key text. D-103 'audited' is met, but the attribution is weak. The registry already holds ctx.userId, correlationId and commandId and could pass them to check().",
+     "repro": "Scratch probe: stranded claim aged 16 minutes, then registry.execute(TOOL, {businessId, userId:owner, idempotencyKey:key, correlationId, commandId, sessionId}, input). The takeover CortexActionLog row is {userId:null, commandId:null, correlationId:null, sessionId:'idempotency:<key>', status:'success'}. The business event is {ACTION_EXECUTED, actorType:'human', actorId:owner, idempotency:{key}}.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10CL-3",
+     "severity": "nit",
+     "file": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
+     "line": 548,
+     "claim": "The registry's invariant comment on the approval path ('a key that cannot be settled stays claimed (a retry is refused, it files nothing)') is false once D-103 applies. When fail() cannot settle the claim after a proposal is filed, or the process crashes right after filing, a retry 15 minutes later takes the claim over and files a second proposal. That is the SEC-V19b-2 class: one proposal per retry, and approving each one runs the tool each time. The second proposal still needs a human approval, and D-103 allows taking over an unfinished claim. The comment, which is outside the write set, should be updated, or this recorded as a residual.",
+     "repro": "Scratch probe: registry with a tier-3 tool at autonomyLevel 2 and service.fail made to throw once. The first execute filed proposal 1, and the key stayed pending. An immediate retry was refused IN_FLIGHT, with 1 proposal. After aging the claim 16 minutes, the retry returned requiresApproval with proposalId prop_2, so 2 proposals were filed.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10CL-4",
+     "severity": "nit",
+     "file": "apps/server/src/modules/key-cortex/key-idempotency.service.ts",
+     "line": 227,
+     "claim": "isStranded measures only the claim's age. Nothing fences the side effects of a holder that is still alive, and no handler deadline is shorter than the lease. A tool still running after 15 minutes is run a second time by a retry. Both callers are answered success, the slow holder's complete() silently returns false, and the stored outcome is the retry's. D-103 sanctions taking over an unfinished claim, so record this as a residual, not a defect.",
+     "repro": "Scratch probe: registry.execute with a handler parked on a promise. Age the claim 16 minutes, then registry.execute again with the same ctx and input, then release the parked run. The tool ran twice for the one key and request (runs=2). The row ends 'completed' under the retry's new claim id.",
+     "confirmed_by_running": true
+    }
+   ]
+  },
+  {
+   "lens": "correctness-regression",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "CR-W10CL-1",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
+     "line": 547,
+     "claim": "The packet breaks an assumption in the one caller and changes nothing in that caller. On the approval-proposal path, the registry settles the key with fail(claim, ..., proposed) and catches any error. Its comment (lines 546-548) says that if this settle fails, 'a key that cannot be settled stays claimed (a retry is refused, it files nothing)'. Under D-103 that holds only for 15 minutes. After that, the next retry takes the still-'pending' claim over, runs checkRisk again and files a second proposal for the same request. This is the SEC-V19b-2 problem coming back in the settle-failure case: approving each proposal runs the tool, because the approved run is preApproved and has no key. D-103 accepts re-running a claim whose holder crashed. But this claim's effect (the proposal) already exists, and the caller's comment and tests still claim the old guarantee. Fix options: (a) update the registry comment and pin the new behaviour with a test; or (b) make the proposal path fence against a second filing, for example by settling inside the proposal write or by checking for an existing proposal for the request before filing.",
+     "repro": "Scratch case appended to a copy of test/key-idempotency-claim.integration.test.ts and deleted afterwards (DB keyflowos_w5). (1) service.fail was stubbed to throw. (2) registry.execute(TOOL_TIER3, ctxFor(key), input) filed v19a_proposal_1; the row stayed 'pending'. (3) An immediate retry was refused IN_FLIGHT. (4) ageClaim(key, 16) aged the claim. (5) A second retry returned requiresApproval with proposalId v19a_proposal_2. Proposals filed for this one request: 2. The final row is 'failed' and holds proposal_2. For the record, the rest was also run: the tests-first commit c7895eb5 is red as reported (integration 2 failed / 48 passed; spec 3 failed / 18 passed). At HEAD, the 2 packet suites, 3 registry specs and 12 static gate specs pass (250/250). The D-103 cases passed 3 out of 3 repeat runs. tsc showed only the 2 known TS2307 errors. eslint reported 0 warnings on the service, at HEAD and at base.",
+     "confirmed_by_running": true
+    }
+   ]
+  }
+ ],
+ "W10-REOPEN-REVERSALS": [
+  {
+   "lens": "security-tenancy",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "SEC-RR-1",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/conversion/referral-reward.service.ts",
+     "line": 95,
+     "claim": "reverseRewardOfInvoice reverses whatever any contact's free-form Contact.custom says. It looks up any contact in the business whose custom.referralRewardInvoiceId names the reopened invoice, not the invoice's own contact. It then trusts custom.referralRewardReferrerId (the target) and custom.referralRewardReferrerAmount (the amount). The contact PATCH stores custom verbatim (crm.service.ts:1108-1137, UpdateContactDto.custom: Record<string, any>). So a member who can edit one visible contact can wipe the credit balance of any referrer in the business, including contacts outside their visibility, as soon as any invoice they name is refunded. The invoice never has to have earned an award. Fix: bind the reversal to invoice.contactId, require the stored referrer to equal that contact's referralSourceId, and use the configured referrerReward (or a server-owned record), not a custom value.",
+     "repro": "Probe in invoice-status-events.integration.test.ts (since reverted). Victim V has custom {referralRewardBalance:50, referralRewardsEarned:5}. Contact F has custom {referralRewardInvoiceId: invPrTenant, referralRewardReferrerId: V, referralRewardReferrerAmount: 1000}, which is what PATCH custom stores. invPrTenant belongs to an unreferred contact. paid(invPrTenant,100), then a full refund. Result: V custom = {referralRewardBalance:0, referralRewardsEarned:4}. Expected: unchanged.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-RR-2",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/conversion/referral-reward.service.ts",
+     "line": 124,
+     "claim": "The referrer debit is a read-modify-write of the whole custom JSON, with no row lock or compare-and-set. Two reopens of two different invoices credited to the same referrer, running at the same time, lose one debit. Both referred contacts' marks are cleared, so the leftover credit can never be reversed by a re-delivery. The same stale-snapshot write (both here and in the claim at line 109) also clobbers concurrent edits to other custom keys. The builder's report flags only the paid-side read-modify-write. Fix: an atomic jsonb UPDATE, or SELECT ... FOR UPDATE on the referrer as crm-network does.",
+     "repro": "Referrer X with referred contacts A and B, each with an invoice. Pay both, so X = {balance:20, earned:2}. Set both invoices to SENT, then Promise.all([onInvoiceReopened(A inv), onInvoiceReopened(B inv)]). Result: X = {balance:10, earned:1}, with the marks on A and B both cleared. Expected {0,0}. Reproduced on 2 of 2 runs.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-RR-3",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 464,
+     "claim": "The reversal takes SELECT ... FOR UPDATE, but the paid-side bumpLeadScore (line 377-385) does an unlocked findFirst then update. A paid bump read before the lock waits, then writes its stale value plus 15 over the reversal. So a reopen racing another invoice's paid bump on the same referrer is silently erased. The lock only serializes reversals with each other. Fix: an atomic SQL update (lead_score = GREATEST(0, LEAST(100, lead_score +/- n))) on both sides, or the paid side takes the same lock.",
+     "repro": "Referrer R (score 20) with referred_by edges from D1 and D2. Loop 6 times: onInvoicePaid(i1, D1); then Promise.all([onInvoiceReopened(i1), onInvoicePaid(i2, D2)]); then onInvoiceReopened(i2). Expected final score 20. Got 85, with a lost write in 5 of 6 iterations.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-RR-4",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/conversion/review-solicitation.service.ts",
+     "line": 109,
+     "claim": "The re-arm (CANCELLED to PENDING) keeps the job payload from the first payment: contactId, contactEmail, contactName. It ignores the contact that the new invoice.paid names. A reopened (SENT) invoice can be re-billed to another contact through PATCH (commerce.service.ts updateInvoice only blocks PAID and PARTIALLY_PAID). The revived review request then goes to the former contact, with the order number of an invoice that is no longer theirs. The same happens if the contact's email changed in between. Fix: refresh the payload from the contact argument when re-arming.",
+     "repro": "Pay invPrReview (contact RevA), so the job is PENDING with RevA's email. Full refund, so the job is CANCELLED. PATCH the invoice with contactId RevB (200). Pay again: invoice.paid carries RevB's email and the job is re-armed. Set scheduledFor to the past and run processPendingJobs(). review_request was sent to v42c_prreva@test.local (contactId RevA). Expected RevB.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-RR-5",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 469,
+     "claim": "Each reopen takes back only one bump (deal_won count > deal_reopened count, then minus 15 once). A partial refund (PAID to PARTIALLY_PAID) emits invoice.payment_recorded, not a reopen. Paying again emits a second invoice.paid, which bumps again and writes a second deal_won note. The final full refund then takes back only 15. A fully refunded invoice therefore leaves the referrer at +15, contrary to D-102 and to the handler's own comment that a re-pay's bump is taken back by its own reopen.",
+     "repro": "Referrer at score 20. Pay 60 then 40 (PAID, score 35). Refund the 40 (PARTIALLY_PAID). Pay 40 again (PAID, score 50). Refund the 60 and then the new 40 (SENT, one invoice.reopened). Notes on the referrer: [deal_won, deal_won, deal_reopened]. Final score 35. Expected 20.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-RR-6",
+     "severity": "nit",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 455,
+     "claim": "The won/reopened note counts match any note.created event with data.kind referral.deal_won or referral.deal_reopened, whatever its source or actor. POST businesses/:id/contacts/:contactId/events (crm.controller.ts:1590) lets a crm:write member log note.created with arbitrary body.data, so they can forge a deal_won (causing a 15-point debit) or a deal_reopened (blocking a real reversal) on a contact they can see. Filter on source 'crm-network' and actorType SYSTEM.",
+     "repro": "By reading only: createEvent spreads body.data into ContactEvent.data with source 'crm'. The reversal queries at lines 455 and 467 have no source or actorType filter.",
+     "confirmed_by_running": false
+    },
+    {
+     "id": "SEC-RR-7",
+     "severity": "nit",
+     "file": "apps/server/test/invoice-status-events.integration.test.ts",
+     "line": 1025,
+     "claim": "None of the five D-102 reversal cases has a cross-tenant negative control. The handlers do deny: a probe with a foreign businessId payload, a foreign contact with a forged mark naming this tenant's invoice, and a foreign PENDING job on the same entityId all stayed untouched. But no test pins this. The referral reversal also writes no audit or timeline record of the credit debit (only a logger line), unlike the crm-network note and the project business_events.",
+     "repro": "The probe passed: business B's referrer {balance:10, earned:1}, B's forged mark and B's PENDING job were unchanged after the refund of the A invoice. Each of the five handlers was called with {businessId: B, invoice: A's id} and changed nothing, with 0 contact events in B.",
+     "confirmed_by_running": true
+    }
+   ]
+  },
+  {
+   "lens": "correctness-regression",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "CR-W10RR-1",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 469,
+     "claim": "D-102 (should-fix): the CRM network reversal takes back only one bump per reopen. An invoice can be paid more times than it is reopened: a partial refund moves PAID to PARTIALLY_PAID and emits invoice.payment_recorded, not invoice.reopened. So pay, partial refund, pay again, then a full refund leaves +15 on the referrer of a fully refunded (SENT) invoice. The handler compares the deal_won count with the deal_reopened count, then subtracts one REFERRER_BUMP_ON_DEAL_WON. It should take back all the outstanding bumps (won minus reopened) under the lock, or the paid side should not bump again while an unreversed deal_won note exists.",
+     "repro": "Temporary case added to invoice-status-events.integration.test.ts using the suite's real HTTP helpers. Referrer leadScore 20 with a referred_by edge. Pay 60 + 40 (PAID, score 35). Refund the 40 (PARTIALLY_PAID). Pay 40 again (PAID, a second invoice.paid, score 50). Refund the 60, then the second 40: SENT, with exactly one invoice.reopened. Result: 'RVW7 afterRepay=50 final=35 notes=[referral.deal_won, referral.deal_won, referral.deal_reopened]'. Expected 20. The temporary case was removed afterwards.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "CR-W10RR-2",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 470,
+     "claim": "D-102 (should-fix): the reversal subtracts a fixed 15, but the paid bump is capped at 100 (bumpLeadScore, line 384). A referrer near the cap therefore ends below its original score. The builder lists this as a known limit 'outside the write set', but bumpLeadScore and onInvoicePaid (lines 377-419) are in the same file this packet edits. The paid side can record the bump it actually applied (next - prev) in the deal_won note data, and the reversal can subtract exactly that.",
+     "repro": "Standalone real-DB check (temporary, removed). CrmNetworkService over the real PrismaService, with a timeline stub that writes contactEvent through tx. Referrer leadScore 95 with a referred_by edge. onInvoicePaid takes it to 100; onInvoiceReopened takes it to 85. Log: 'REPRO-CAP before=95 afterPaid=100 afterReopen=85'.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "CR-W10RR-3",
+     "severity": "nit",
+     "file": "apps/server/src/modules/crm/crm-network.service.ts",
+     "line": 464,
+     "claim": "D-102 (nit): for a soft-deleted referrer, the paid-side bumpLeadScore skips the score (contactWhereWithId filters deletedAt: null), but onInvoicePaid still writes the deal_won note (line 413). The reversal's row lock has no deleted_at filter, so it subtracts 15 that was never added. If that contact is later restored from trash, its score is 15 low.",
+     "repro": "By reading the code, not run. Soft-delete the referrer, pay the referred contact's invoice (no score change, but a deal_won note is written), then fully refund it. The reversal's SELECT ... FOR UPDATE finds the deleted row and writes lead_score - 15.",
+     "confirmed_by_running": false
+    },
+    {
+     "id": "CR-W10RR-4",
+     "severity": "nit",
+     "file": "apps/server/src/modules/conversion/referral-reward.service.ts",
+     "line": 199,
+     "claim": "D-102 (nit): three new internal bookkeeping keys are written into the referred contact's Contact.custom: referralRewardInvoiceId, referralRewardReferrerId and referralRewardReferrerAmount. The web contact detail renders every non-reserved custom key as a user custom field (apps/web/src/components/contacts/contact-detail-info.tsx:107; database-table.tsx:60), so an invoice id and a referrer id now appear on the contact card. An operator edit that rewrites custom can also drop the keys, and then the reversal silently does nothing. This follows the existing referralRewardEarned pattern, so it is low impact.",
+     "repro": "By reading the code, not run. After a referred contact's first paid invoice, GET the contact: custom contains the three keys, and contact-detail-info's arbitraryCustomFields lists them.",
+     "confirmed_by_running": false
+    }
+   ]
+  }
+ ],
+ "W10-RISC-RESET": [
+  {
+   "lens": "security-tenancy",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "SEC-W10RR-1",
+     "severity": "blocking",
+     "file": "apps/server/src/modules/identity/identity-password.service.ts",
+     "line": 360,
+     "claim": "completeReset writes both passwordResetAfterCutoffAt and signInCutoffClearedAt (D-113) for any session that assertResetSessionAllowed accepts. That includes an implicit-flow 'otp' session belonging to a user with a phone identity. GoTrue stamps an SMS-code sign-in 'otp' as well. D-101's own rule (sessionSignedInWithGoogleOrEmailLink, emailOtpOnly in sign-in-cutoff.ts:117) refuses that session as a bearer. The reset's otp binding only checks that the session opened inside the window of a recovery request for the email, and anyone can create that request anonymously with POST /identity/forgot-password. So an attacker who holds a phone identity on the account can do this: request a reset for the victim's address, sign in by SMS, then post that session to /identity/reset-password. Result: the attacker's own password is set, the D-113 reset is recorded, the D-101 restriction is cleared, and after the cutoff both password and SMS sessions are admitted. Precondition: phone sign-in is enabled at GoTrue, so the attacker could add a phone through the pre-event session. This contradicts the comment 'as AuthMiddleware would had it arrived as a bearer' and docs/auth-pathway.md, which says 'a user with a phone identity clears with Google or a PKCE emailed link, not an implicit-flow otp'. The underlying weakness, that an SMS-otp session is accepted for a reset at all, predates this packet. This packet turns it into a bypass of the RISC cutoff. Fix: write both records only when sessionSignedInWithGoogleOrEmailLink(accessToken) holds, and add a negative-control test.",
+     "repro": "Temporary vitest spec, since deleted, using the real IdentityPasswordService, signInCutoffVerdict and updateUserMetaLocked. GoTrue, Redis and Prisma were mocked; the user row was {signInCutoffAt: now-600}. Token used: app_metadata.providers ['email','phone'] and amr [{otp, ts}]. (1) signInCutoffVerdict(meta, smsOtp(now-5)) returned {admitted:false, refusal:'google_or_email_link_required'}. (2) svc.requestReset('victim@...') then svc.completeReset(smsOtp(now+1), 'AttackerChosen9!Pass') succeeded and logged 'reset recorded, clearing cleared'. The row then held passwordResetAfterCutoffAt and signInCutoffClearedAt. (3) signInCutoffVerdict for a password token and for an SMS-otp token, each at resetAt+5, returned {admitted:true}. The test passed.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10RR-2",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/risc/risc.service.ts",
+     "line": 583,
+     "claim": "A new session-ending RISC event deletes signInCutoffClearedAt but leaves passwordResetAfterCutoffAt in place. Re-arming depends on the new cutoff, which is server time now, being later than the stored reset time. recordPasswordResetAfterCutoff (auth.middleware.ts:246) dates the reset at max(provider authenticatedAt, now), and completeReset accepts recovery times up to 60s ahead (identity-password.service.ts:419). So an event handled inside that window leaves a reset marker later than the new cutoff. Password sessions after the marker are then admitted without a new reset, which contradicts the docs: 'a later session-ending event requires a new reset'. The same happens when a recorded cutoff stays higher because server instances' clocks disagree. Fix: in recordSignInCutoff, delete PASSWORD_RESET_AFTER_CUTOFF_META_KEY together with the clearing marker (risc.service.ts is in the write set), or cap the record at server now.",
+     "repro": "Temporary vitest spec, since deleted. Row {signInCutoffAt: now-600}. recordPasswordResetAfterCutoff(client, 'u1', now+50) returned 'recorded'. The real RiscService.prototype.recordSignInCutoff, called with cutoff now+10 against the same row, returned 'held'. The row then held {signInCutoffAt: now+10, passwordResetAfterCutoffAt: now+50}, with the clearing removed. signInCutoffVerdict(meta, password token at now+55) returned {admitted:true, clearingAt:null}. The test passed. Separately, the builder's suites (risc-signin-cutoff.integration 14/14, auth.middleware.spec 102/102) are green on the branch.",
+     "confirmed_by_running": true
+    }
+   ]
+  },
+  {
+   "lens": "correctness-regression",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "CR-W10RR-1",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/identity/identity-password.service.ts",
+     "line": 367,
+     "claim": "completeReset is a new caller of recordSignInCutoffCleared, but it does not check that the session qualifies, which that function's contract requires. It clears the D-101 restriction (and records passwordResetAfterCutoffAt) for any session that assertResetSessionAllowed accepts. That includes an implicit-flow 'otp' session of a user with a phone identity, which could be an SMS code. AuthMiddleware refuses to count that session as an emailed link (emailOtpOnly in sign-in-cutoff.ts), and docs/auth-pathway.md says such a user 'clears with Google or a PKCE emailed link, not an implicit-flow otp'. So the comment at line 354 ('as AuthMiddleware would had it arrived as a bearer') is false. Today this is latent because phone sign-in is not offered. Fix: record the clearing only when sessionSignedInWithGoogleOrEmailLink(accessToken) holds, or for 'recovery', or for 'otp' with emailOtpOnly.",
+     "repro": "Temporary copy of risc-signin-cutoff.integration.test.ts with an app_metadata override in accessToken. After an account-disabled/hijacking event, an 'otp' bearer with providers ['email','phone'] gets GET /identity/me 401 and no clearing is written. Then POST /identity/forgot-password and POST /identity/reset-password with the same kind of 'otp' token return 201, and metaData gains signInCutoffClearedAt and passwordResetAfterCutoffAt. After that, an sso/saml session gets 200 and a password session gets 200. The probe file was deleted afterwards.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "CR-W10RR-2",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/risc/risc.service.ts",
+     "line": 583,
+     "claim": "A new session-ending event does not always re-arm D-113. recordSignInCutoff deletes only signInCutoffClearedAt, so a stale passwordResetAfterCutoffAt survives whenever it is dated after the new cutoff. recordPasswordResetAfterCutoff (auth.middleware.ts:246) dates the reset at max(provider authentication time, now), which can be up to CLOCK_SKEW_SECONDS=60 ahead of this server's clock. A reset can also be recorded between the event's `now` and the event's commit. The surviving marker admits every later password session under the new cutoff, with no reset after that cutoff. This contradicts auth.middleware.ts:198 ('a later session-ending event re-arms the requirement'). Fix: delete PASSWORD_RESET_AFTER_CUTOFF_META_KEY in the same locked write, and include it in the early-return check at line 580.",
+     "repro": "Temporary copy of supabase-admin.service.test.ts with one extra case. metaData starts as {signInCutoffAt: now-600}. recordPasswordResetAfterCutoff(client, USER, now+20) returns 'recorded'. A TOKEN_REVOKED event is then received (202), and metaData becomes {signInCutoffAt: now, passwordResetAfterCutoffAt: now+20}. A password session authenticated at now+21 is ADMITTED by the real AuthMiddleware. The probe file was deleted afterwards.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "CR-W10RR-3",
+     "severity": "nit",
+     "file": "apps/server/test/supabase-admin.service.test.ts",
+     "line": 1491,
+     "claim": "The tests-first commit 073ac175 left this suite unchanged. Its 3 amended D-101 cases (4 runs, counting the it.each rows) were changed only in the fix commit, so they were never shown red before the fix. The amendments are the intended D-113 change, and no manifest binds these titles (release0-edited-suites has allowAdditionalCases true, and none of the D-101 titles are required).",
+     "repro": "At 073ac175, supabase-admin.service.test.ts passes 68/68. The base (d08eff32) version of the file run against fix head 668b01ce gives 4 failed and 64 passed, all D-101 password-after-clearing cases. The other suites were red at 073ac175 as the builder reported: middleware spec 10 failed of 102, risc-signin-cutoff 4 failed of 14, web login-reset-required 1 failed of 2. All are green at head.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "CR-W10RR-4",
+     "severity": "nit",
+     "file": "apps/server/src/core/auth/sign-in-cutoff.ts",
+     "line": 14,
+     "claim": "Comments here are now false: lines 14-19 say that after the clearing any method is admitted and that D-101 does not close SEC-W8RSC-4, and lines 60-66 say that completeReset records no clearing. The builder flagged this; the file is outside the write set, so the integrator should fix it.",
+     "repro": "Compare the comment text with signInCutoffVerdict (auth.middleware.ts) and completeReset (identity-password.service.ts, lines 352 to 368).",
+     "confirmed_by_running": false
+    }
+   ]
+  }
+ ],
+ "W10-CORTEX-CHAT-SCOPE": [
+  {
+   "lens": "security-tenancy",
+   "verdict": "accept-with-fixes",
+   "findings": [
+    {
+     "id": "SEC-W10CCS-1",
+     "severity": "blocking",
+     "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+     "line": 617,
+     "claim": "The packet's new gate (memberCommandRefusals) covers only parsed and detected connector commands. The other way the same chat route runs registry actions is the model's tool calls, and those are still ungated. processQuery (lines 617 and 625) and the stream path (lines 1301 and 1378) offer the unfiltered buildGatewayDefinitions() list, and then KeyCortexToolLoopService.handleToolCalls (key-cortex-tool-loop.service.ts:140) runs the calls through registry.execute without reading the member's membership or scopes. The bridged flow tools then run on CORTEX_BRIDGE with no principal. memberScopeRefusal there checks only money writes (D-98). Its operations gate needs a principal, and contactReadAccess has none to read. Result: on POST /cortex/chat, a STAFF member with revenue 'none' gets the P&L (finance_profit_and_loss is revenue:read under D-57), and crm_list_contacts reads the whole book with no visibility clause. The plan path refuses both (memberToolRunAuthority, D-71). So the packet title ('gates every registry action like plans do') and the D-57 closure claimed for SEC-W9MRK-3 are not met on this route, and the builder did not list it as a deviation. The pipeline is in the write set, so it can screen completionResult.toolCalls before handleToolCalls. Otherwise this must be recorded as a deviation with a live it.todo.",
+     "repro": "Scratch spec (saved at /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/review-w10-chat/zz-review-w10-toolloop.spec.ts). It uses the real KeyCortexToolLoopService, the real KeyCortexToolRegistryService and the real KeyCortexEfferentBridgeService.onModuleInit. FlowOrchestratorService runs on its prototype with the real executeToolDirectly, executeTool, memberScopeRefusal and executeToolAction; only getLedgerReporting().getPnl and the log sinks are stubbed. The membership is STAFF with {revenue:'none'} and autonomy level 2. handleToolCalls is called with a finance_profit_and_loss tool call: getPnl runs, the action status is 'success', and netProfit 98765 is sent back to the model for the member's reply. membership.findUnique is never called. In the same test, cortexCommandRefusal(...,'finance','generate_pnl') returns 'Insufficient permissions: revenue requires read access (you have none)'. A crm_list_contacts call reaches contact.findMany with no AND visibility clause. The test passed.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10CCS-2",
+     "severity": "should-fix",
+     "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+     "line": 1916,
+     "claim": "chatMemoryFragments narrows only AiExecutionLog and CortexActionLog to the reader and drops tool-call records (isToolCallRecord). CognitionMemory is still read across the whole business: unified-memory-retrieval.service.ts:197 uses whereBase {businessId}, and the row is rendered as 'Query: <typed text> Recommendation: <KEY answer>'. processQuery writes one of these rows on every turn (line 722, learningService.recordObservation with query.text and assistantMessage.content). So another member's typed chat text, and KEY's full answer to them (which can carry tool answers such as inbox thread content or P&L figures), still reach a member's chat system prompt. That is the disclosure SEC-W9KCA-2 is about, and it contradicts the title 'KEY chat reads only the member's memory'. W9's buildMemoryContext rule has the same gap, so this is not a regression. A fix inside the write set would drop cognition_memory fragments in chatMemoryFragments, or record the gap as a deviation.",
+     "repro": "Scratch real-database suite on keyflowos_w14 (saved at /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/review-w10-chat/zz-review-w10-cognition.integration.test.ts). Fixtures: an owner with an OWNER membership, a member with a STAFF membership, and one cognition_memories row {userId: owner, query: 'ZZRV10-OWNER-TYPED\u2026', recommendation: 'ZZRV10-KEY-ANSWER\u2026'}, which is what recordObservation writes. The pipeline is the one from chatPromptFor in key-cortex-action-audit.integration.test.ts with real UnifiedMemoryRetrievalService and KeyCortexMemoryRetrievalService. Running processQuery and streamQuery as the member, the system prompt in both paths contains both owner strings. The test passed, and its fixtures were removed afterwards.",
+     "confirmed_by_running": true
+    },
+    {
+     "id": "SEC-W10CCS-3",
+     "severity": "nit",
+     "file": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
+     "line": 299,
+     "claim": "No test pins the correlation guard in auditCommandId: a nested call should take the enclosing call's commandId only when both are on the same correlation. A mutation that always inherits the commandId passes every suite. Related: auditActor (line 269) gives a nested call the enclosing actor with no thread check at all, only a business match. That row then joins the enclosing member's episodic memory. This affects the audit row only, but the inconsistency should be pinned or documented.",
+     "repro": "Replaced the body of auditCommandId's return with `return enclosing?.commandId ?? null;` and ran test/key-cortex-action-audit.integration.test.ts plus both key-cortex-tool-registry.service.spec.ts files: 3 of 3 files and 67 of 67 tests passed (1 todo). The source was restored afterwards.",
+     "confirmed_by_running": true
+    }
+   ]
+  }
+ ]
+}

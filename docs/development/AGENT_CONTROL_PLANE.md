@@ -570,7 +570,7 @@ READY_TO_MERGE after #87 and #89 had merged.
 | repository, PR and CI evidence | **implementation truth** | what actually exists: merged or open PRs, branches, main, exact-head CI |
 | newest valid ChatGPT `DIRECTIVE` / `REVIEW` / `HOLD` / `RESUME` on issue #80 | **execution authority** | what may happen now. #80 is append-only; its history is the authority record |
 | `.agent-control/programme-state.yaml` | **derived machine projection** | a summary of the two above that may be stale; it may accelerate a decision, never override one |
-| `docs/keyflow-intelligence-foundation` | durable intent and checkpoint history | packet topology, admitted evidence, durable checkpoints |
+| `docs/intelligence/` (in main since the 2026-11-13 tie-off, D-141; formerly branch `docs/keyflow-intelligence-foundation`) | durable intent and checkpoint history, now a dated historical record | packet topology, admitted evidence, durable checkpoints as of their dates; the current plan is `docs/reconstruction/BUILD-MAP-001.md` |
 | `.agent-control/active-packet.yaml`, `.agent-control/claude-return.yaml` | per-packet PR admission artifacts | this packet's scope, proof and review status |
 
 A valid authority message has `sender: chatgpt` exactly, a GitHub author in

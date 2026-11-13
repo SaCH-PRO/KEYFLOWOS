@@ -195,6 +195,23 @@ test('a conflict whose true record also cannot be posted reports both', async ()
   });
 });
 
+test('a trusted comment that carries the marker anywhere but its first line is not a claim about the merge', async () => {
+  // The workflow token also posts AUTO_EVENT wake comments, and those echo
+  // text from any commenter (a packet_id). A marker there is a stranger's,
+  // whoever posted the comment. (SECOPS-2)
+  const echoes = [
+    ['<!-- keyflow-autopilot-event:issue_comment:555:created -->', '```yaml', 'message_type: AUTO_EVENT', `packet_id: ${mergeMarker(MERGE_SHA)}`, '```'].join('\n'),
+    `Recorded below.\n${RECORD.body}`,
+    `note ${mergeMarker(MERGE_SHA)}`,
+  ];
+  for (const body of echoes) {
+    const f = fakes([{ id: 41, body, user: BOT, html_url: 'https://example.invalid/c/41' }]);
+    const r = await recordMerge(mergedResult(), f);
+    assert.equal(r.outcome, RECORD_OUTCOMES.RECORDED, body);
+    assert.deepEqual(f.posted, [RECORD.body], body);
+  }
+});
+
 test('a contradictory marker comment from an untrusted author is ignored, not a conflict', async () => {
   const f = fakes([{ id: 41, body: withLine('pr_number', '160'), user: { login: 'someone-else' } }]);
   const r = await recordMerge(mergedResult(), f);

@@ -66,11 +66,14 @@
  * order, a page at a time, with raw SQL (no tenant extension and no default
  * row cap applies).
  *
- * Usage (from apps/server; reads DATABASE_URL from the repo-root .env):
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts                       # dry run: counts only
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --list-conflicting    # dry run + the ids to review
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply               # write the plain class
- *   pnpm exec tsx --env-file ../../.env scripts/backfill-owner-memberships.ts --apply --include-conflicting  # after review
+ * Usage (from apps/server; DATABASE_URL from the environment, else from the
+ * repo-root .env; the package.json script runs tsx with scripts/tsconfig.json,
+ * never apps/server/tsconfig.json, whose paths point '@keyflow/db' at a .d.ts):
+ *   pnpm backfill:owner-memberships                                      # dry run: counts only
+ *   pnpm backfill:owner-memberships --list-conflicting                   # dry run + the ids to review
+ *   pnpm backfill:owner-memberships --apply                              # write the plain class
+ *   pnpm backfill:owner-memberships --apply --include-conflicting        # after review
+ * On the production box (the API image has no scripts/): see the operator note.
  *
  * Exit status: 0 done, 1 the scan or a write failed, 2 bad arguments.
  * docs/development/owner-membership-backfill.md is the operator note.

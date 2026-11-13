@@ -81,6 +81,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   async create(businessId: string, input: CreateRecurringJournalEntryInput) {
     this.validateFrequency(input.frequency);
     this.validateEntries(input.entries);
+    await this.assertOwnChartRows(businessId, input.entries);
     const nextRunDate = new Date(input.nextRunDate);
     if (isNaN(nextRunDate.getTime())) throw new BadRequestException('Invalid nextRunDate');
 
@@ -100,7 +101,10 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   async update(businessId: string, id: string, input: UpdateRecurringJournalEntryInput) {
     const existing = await this.get(businessId, id);
     if (input.frequency) this.validateFrequency(input.frequency);
-    if (input.entries) this.validateEntries(input.entries);
+    if (input.entries) {
+      this.validateEntries(input.entries);
+      await this.assertOwnChartRows(businessId, input.entries);
+    }
 
     return this.prisma.client.recurringJournalEntry.update({
       where: { id },
@@ -245,6 +249,26 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   private validateFrequency(frequency: string) {
     if (!VALID_FREQUENCIES.includes(frequency as (typeof VALID_FREQUENCIES)[number])) {
       throw new BadRequestException(`Invalid frequency: ${frequency}. Must be one of: ${VALID_FREQUENCIES.join(', ')}`);
+    }
+  }
+
+  /**
+   * PR195-BOOKS-DOORS (review SEC-P195JS-6): a template names only this business's chart rows. It stored
+   * any id, so a template could name another business's rows: never posted (the ledger door refuses
+   * them), but each scheduled run failed on them until the template was deactivated. Refused 404 before
+   * anything is written, in one message for an id of another business and an id that exists nowhere
+   * (no existence oracle), naming only the ids the caller sent.
+   */
+  private async assertOwnChartRows(businessId: string, entries: Array<{ accountId: string }>) {
+    const ids = Array.from(new Set(entries.map((e) => (typeof e?.accountId === 'string' ? e.accountId : String(e?.accountId)))));
+    const own = await this.prisma.client.chartOfAccount.findMany({
+      where: { id: { in: ids }, businessId },
+      select: { id: true },
+    });
+    const found = new Set(own.map((a) => a.id));
+    const missing = ids.filter((id) => !found.has(id));
+    if (missing.length) {
+      throw new NotFoundException(`Chart-of-account id(s) not found in this business: ${missing.join(', ')}`);
     }
   }
 

@@ -314,11 +314,18 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizB, name: 'V84G Biz B', ownerId: ID.ownerB } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_admin`, userId: ID.admin, businessId: ID.bizA, role: 'ADMIN' } });
+  // PR195-KEY-GATES (review SEC-P195BW-3/5): member chat now holds a member to the module scope of each tool's routes
+  // (calendar_list_events: GET calendar events, bookings read), so the two STAFF members whose calendar view KC-02a
+  // pins hold bookings read, as the route needs; the visibility rules under test are unchanged.
+  // PR195-KEY-GATES review repair (SEC-P195KG-1, D-57): fetch_client_health answers each client's spend, which REST
+  // serves at revenue read, so member chat needs revenue read for it now (flow-chat-member-scope.spec.ts KMS-08
+  // pins the refusal); the two STAFF members whose client-health view KC-02c and KC-04b pin hold it, and the
+  // visibility rules under test are unchanged.
   await db.membership.create({
-    data: { id: `${P}m_staffOwned`, userId: ID.staffOwned, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned' } },
+    data: { id: `${P}m_staffOwned`, userId: ID.staffOwned, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned', bookings: 'read', revenue: 'read' } },
   });
   await db.membership.create({
-    data: { id: `${P}m_staffAll`, userId: ID.staffAll, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read' } },
+    data: { id: `${P}m_staffAll`, userId: ID.staffAll, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'read', bookings: 'read', revenue: 'read' } },
   });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
 

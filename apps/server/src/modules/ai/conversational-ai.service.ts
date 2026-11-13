@@ -14,6 +14,7 @@ import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { UnifiedInboxService } from './unified-inbox.service';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { AiUsageService } from './ai-usage.service';
+import { MEMBERLESS_KEY_TOOLS, MEMBERLESS_KEY_TOOL_NAMES, memberlessKeyToolRefusal } from './memberless-key-tools';
 
 export interface ConversationalContext {
   businessId: string;
@@ -101,6 +102,14 @@ export class ConversationalAIService {
     // Execute actions if auto-approved
     const executedActions: ConversationalAction[] = [];
     for (const action of analysis.actions) {
+      // PR195-KEY-GATES (review SEC-P195BW-1, D-73): the message is a customer's, and the turn names no member, so
+      // KEY runs only the customer-safe allowlist (memberless-key-tools.ts); anything else the model names is left
+      // for a human (requiresConfirmation), never run. executeTool refuses it too (memberScopeRefusal), before
+      // dispatch: this is the menu, that is the door.
+      if (action.toolName && memberlessKeyToolRefusal(action.toolName, action.payload, 'INBOUND_CONVERSATION')) {
+        executedActions.push({ ...action, requiresConfirmation: true });
+        continue;
+      }
       // Filter actions by role
       if (action.toolName && !this.roleEngine.isToolAllowed(detectedRole, action.toolName)) {
         executedActions.push({ ...action, requiresConfirmation: true });
@@ -219,7 +228,9 @@ RULES:
 4. If the customer sends a complaint, flag as urgent and empathetic
 5. If the customer sends a receipt/invoice image, acknowledge and process
 6. Always suggest a clear next step
-${roleDef ? '7. Always sign off with: ' + roleDef.signOff : ''}
+7. The only tools you may name in "actions" are these (anything else is left for a human teammate, not run):
+${MEMBERLESS_KEY_TOOL_NAMES.map((name) => `   - ${name}: ${MEMBERLESS_KEY_TOOLS[name].why}`).join('\n')}
+${roleDef ? '8. Always sign off with: ' + roleDef.signOff : ''}
 
 Respond with JSON only:
 {
@@ -235,7 +246,7 @@ Respond with JSON only:
     "issue": "..."
   },
   "actions": [
-    { "action": "create_booking", "toolName": "bookings_create_booking", "description": "...", "payload": {}, "confidence": 0.9, "requiresConfirmation": false }
+    { "action": "hand_off", "toolName": "helpdesk_create_ticket", "description": "...", "payload": { "title": "..." }, "confidence": 0.9, "requiresConfirmation": false }
   ]
 }`;
 

@@ -56,3 +56,16 @@ screenshot-home.png
 
 # agent-control worker runtime state (locks, logs, processed-directive cursor)
 .agent-control/.worker/
+
+# Local artifact directories, at any depth. The project thread harvester
+# (scripts/intelligence/README-project-thread-harvester.md) writes exported
+# conversation text, and inside the work tree it writes only under the
+# top-level .artifacts/ covered here: being ignored is not enough elsewhere
+# (apps/web/public/.artifacts/ is ignored but still served and shipped).
+**/.artifacts/
+
+# Python bytecode. CPython folds constant expressions when it compiles, so the
+# harvester test's fixture fragments ("sk_" + "live_" + ...) become whole
+# secret-shaped literals in its .pyc: never commit one.
+__pycache__/
+*.py[cod]

@@ -343,6 +343,296 @@ negative_controls:
     proof_command: node --test --test-name-pattern="unreadable output is not a decision" scripts/agent-control/tests/windows/worker-code-missing.spec.mjs
     timeout_ms: 300000
 
+  - id: NC-WORKER-WORKTREE-PATH-BUDGET
+    claim: >
+      A worktree is named after its directive, and a long id put the
+      repository's longest tracked path past what Windows allows, so the worker
+      could not deliver the directive at all (2026-10-11). The defect names the
+      worktree after the whole id whatever its length.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($safe.Length -le $room) { return $safe }"
+      replace: "  if ($true) { return $safe }"
+    proof_command: node --test --test-name-pattern="a long directive id still gets a worktree" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-NAME-STABLE
+    claim: >
+      A shortened worktree name is derived from the message id alone, so a retry
+      resumes where the last attempt stopped. The defect derives it from
+      something that changes on every tick.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($MessageId))"
+      replace: "$digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes([guid]::NewGuid().ToString()))"
+    proof_command: node --test --test-name-pattern="a retry resumes in the same worktree" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-NAME-DISTINCT
+    claim: >
+      Two long ids that share a head get two worktrees. The defect drops the
+      digest, so a second directive would run in the first one's worktree.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return $safe.Substring(0, $room - 9) + '-' + $tag"
+      replace: "  return $safe.Substring(0, $room - 9) + '-00000000'"
+    proof_command: node --test --test-name-pattern="another long id gets its own" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-FULL-ID-REUSED
+    claim: >
+      A worktree made under the whole id by an earlier attempt is found again,
+      so its partial work is not stranded beside a new shortened one.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if (-not (Test-Path $path)) {"
+      replace: "  if ($true) {"
+    proof_command: node --test --test-name-pattern="one made under the whole id is found again" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-EARLIER-ATTEMPT-FOUND-BY-TAG
+    claim: >
+      A retry runs in the shortened worktree its first attempt was given, even
+      when the base's longest path has changed since. Recomputing the name
+      gives a different directory and strands the first attempt's work
+      (review of 2d012625).
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    if ($earlier) { $path = $earlier }"
+      replace: "    if ($false) { $path = $earlier }"
+    proof_command: node --test --test-name-pattern="after the base loses its longest path" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-AMBIGUOUS-TAG-NOT-GUESSED
+    claim: >
+      Two directories carrying one directive's tag are a counted failure. The
+      worker does not pick one and run beside the wrong partial work.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($found.Count -gt 1) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="two directories carrying one directive" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-WORKTREE-FAILURE-COUNTED
+    claim: >
+      A worktree that cannot be made is a failed attempt. Thrown before the
+      ledger it was retried every interval for ever and never reached the
+      control room. The defect stops recording it.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    $entry = Register-FailedAttempt -Directive $directive -Reason $reason"
+      replace: "    $entry = [pscustomobject]@{ held = $false }"
+    proof_command: node --test --test-name-pattern="a worktree that cannot be made is counted" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-FETCH-FAILURE-NOT-COUNTED
+    claim: >
+      A failed fetch is an outage, not a defect of the directive. Counting it
+      against the two-strike budget would hold a directive after four minutes
+      offline until an operator released it. (It is counted, but under the
+      network bound: see the controls below.)
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "throw (New-NetworkUnavailable 'git fetch origin failed; not waking claude on a stale base')"
+      replace: "throw (New-WorktreeUnavailable 'git fetch origin failed; not waking claude on a stale base')"
+    proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  # --- every failure before the wake is counted ------------------------------
+
+  - id: NC-WORKER-NETWORK-FAILURE-LEAVES-A-TRACE
+    claim: >
+      A fetch failure is recorded in the directive's ledger entry on every
+      tick. The defect is what shipped: it was thrown past the ledger, logged
+      every interval for ever, and never held or escalated.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "      $entry = Register-NetworkFailure -Directive $directive -Reason $reason"
+      replace: "      throw"
+    proof_command: node --test --test-name-pattern="a failed fetch is the network" scripts/agent-control/tests/windows/worker-worktree-path.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-OUTAGE-HELD
+    claim: >
+      A fetch that keeps failing past the network bound holds the directive
+      and escalates once. The defect counts the failures and never acts on
+      the count.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($entry.network_failures -ge $MaxNetworkFailures -and $minutes -ge $MinNetworkOutageMinutes) {"
+      replace: "  if ($false) {"
+    proof_command: node --test --test-name-pattern="a fetch that keeps failing" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-HOLD-NEEDS-DURATION
+    claim: >
+      Enough consecutive fetch failures do not hold a directive until they
+      also span the outage time. The defect holds on the count alone, which a
+      worker run at a short interval reaches in seconds.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: " -and $minutes -ge $MinNetworkOutageMinutes) {"
+      replace: ") {"
+    proof_command: node --test --test-name-pattern="a fetch that keeps failing" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-HOLD-NEEDS-COUNT
+    claim: >
+      A long gap between two fetch failures does not hold a directive. The
+      defect holds on elapsed time alone, so two failures either side of a
+      night asleep would count as an outage.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($entry.network_failures -ge $MaxNetworkFailures -and "
+      replace: "  if ("
+    proof_command: node --test --test-name-pattern="an hour apart" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-COUNT-RESETS
+    claim: >
+      A tick that gets past the fetch ends the outage: the network count
+      starts again. The defect never resets it, so short outages days apart
+      add up to a hold.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  Clear-NetworkFailures -MessageId $Directive.message_id"
+      replace: "  # the network count is never reset"
+    proof_command: node --test --test-name-pattern="gets past the fetch" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-NETWORK-FAILURES-SPARE-THE-ATTEMPT-BUDGET
+    claim: >
+      Network failures never add to a directive's attempts. The defect counts
+      each one as an attempt, so the total-attempt backstop holds a healthy
+      directive after five failed fetches.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  $entry.network_failures = [int]$entry.network_failures + 1"
+      replace: "  $entry.network_failures = [int]$entry.network_failures + 1; $entry.attempts = [int]$entry.attempts + 1"
+    proof_command: node --test --test-name-pattern="more fetch failures than the attempt budget" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-SETUP-FAILURE-COUNTED
+    claim: >
+      A failure before the wake that nothing classified (the worktree root
+      cannot be made) is a counted attempt. The defect is what shipped: it
+      was rethrown past the ledger and logged every interval for ever.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return @{ network = $false; reason = 'wake_setup_failed: ' + (Get-FaultText $Failure) }"
+      replace: "  throw $Failure"
+    proof_command: node --test --test-name-pattern="a worktree root that cannot be made" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-SETUP-FAILURE-REASON-HAS-NO-BACKSLASH
+    claim: >
+      The reason of an unclassified failure is quoted into the YAML
+      escalation, and it can name a Windows path. The defect posts the
+      backslashes, which a YAML reader takes as escapes.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  return $text.Replace("
+      replace: "  return $text #.Replace("
+    proof_command: node --test --test-name-pattern="a worktree root inside the checkout is a counted failure" scripts/agent-control/tests/windows/worker-prewake.spec.mjs
+    timeout_ms: 300000
+
+  # --- one worker per repository and control issue on a machine --------------
+
+  - id: NC-WORKER-LOCK-SPANS-CHECKOUTS
+    claim: >
+      A second worker for the same repository and control issue refuses to
+      start from any checkout. The defect keeps the machine lock in the
+      checkout, which is how two workers served issue 80 for days.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$MachineLockFile = Join-Path $LockRoot $MachineLockName"
+      replace: "$MachineLockFile = Join-Path $StateDir $MachineLockName"
+    proof_command: node --test --test-name-pattern="two checkouts, one issue" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-KEYED-BY-ISSUE
+    claim: >
+      The machine lock is keyed by repository AND control issue. The defect
+      drops the issue, so a worker for one issue shuts out every other.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "$MachineLockName = 'worker-{0}-issue-{1}.lock' -f"
+      replace: "$MachineLockName = 'worker-{0}.lock' -f"
+    proof_command: node --test --test-name-pattern="a different issue number is a different lock" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-OWNER-IS-PID-AND-START-TIME
+    claim: >
+      A lock is owned by a PID and a process start time. The defect trusts any
+      live process with the recorded PID, so after an unclean stop and PID
+      reuse the worker refuses to start.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  $owner.live = ([Math]::Abs(($actual - $recorded).TotalSeconds) -le $LockStartToleranceSeconds)"
+      replace: "  $owner.live = $true"
+    proof_command: node --test --test-name-pattern="PID reuse" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-MACHINE-LOCK-DEAD-OWNER-RECLAIMED
+    claim: >
+      A machine lock whose owner has died is reclaimed. The defect lets a dead
+      PID hold it, and no worker could start again until the file was deleted
+      by hand.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($null -eq $process) { $owner.stale ="
+      replace: "  if ($false) { $owner.stale ="
+    proof_command: node --test --test-name-pattern="a stale machine lock from a dead process" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-OLD-FORMAT-LOCK-RESPECTED
+    claim: >
+      A checkout lock written before start times were recorded still holds
+      while its PID lives. The defect treats it as stale, so a new worker
+      would start beside the old one that is still running.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "    $owner.live = ($owner.pid -ne $PID)"
+      replace: "    $owner.live = $false"
+    proof_command: node --test --test-name-pattern="written before start times were recorded" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-MACHINE-LOCK-RELEASED-ON-EXIT
+    claim: >
+      A worker that exits releases the machine lock. The defect leaves it
+      behind on every exit.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  Exit-LockFile -Path $MachineLockFile"
+      replace: "  # the machine lock is left behind"
+    proof_command: node --test --test-name-pattern="both locks are released on a normal exit" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-LOCK-RELEASED-ONLY-BY-OWNER
+    claim: >
+      A process releases only a lock it owns. The defect removes whatever
+      lock is there, so a dry run from another checkout would delete the
+      running worker's machine lock.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($owner -and $owner.mine) { Remove-Item"
+      replace: "  if ($owner) { Remove-Item"
+    proof_command: node --test --test-name-pattern="the modes that never wake claude" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
+  - id: NC-WORKER-DRY-RUN-TAKES-NO-MACHINE-LOCK
+    claim: >
+      A dry run wakes nobody and takes no machine lock, so it still runs
+      beside the worker that serves the issue from another checkout. The
+      defect makes it compete for the lock and be refused.
+    mutation:
+      file: scripts/agent-control/claude-worker.ps1
+      find: "  if ($DryRun) { return $true }"
+      replace: "  if ($false) { return $true }"
+    proof_command: node --test --test-name-pattern="the modes that never wake claude" scripts/agent-control/tests/windows/worker-lock.spec.mjs
+    timeout_ms: 300000
+
   - id: NC-AUTOPILOT-HOURLY-STATUS-UNDER-ERREXIT
     claim: >
       The hourly sweep reads the evaluator's status where `bash -e` cannot end
@@ -383,8 +673,8 @@ negative_controls:
       that reconciled nothing.
     mutation:
       file: .github/workflows/agent-control-autopilot.yml
-      find: "| .number')\"; then"
-      replace: "| .number' || true)\"; then"
+      find: "list-open-impl-prs.mjs)\"; then"
+      replace: "list-open-impl-prs.mjs || true)\"; then"
     proof_command: node --test --test-name-pattern="a failed PR listing" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
@@ -584,6 +874,111 @@ negative_controls:
               cancel-in-progress: false
       replace: "# run beside a per-PR event-driven merge."
     proof_command: node --test --test-name-pattern="holds the one mutation lock" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  # --- the audit that looks again for a missing AUTO_MERGE record -------------
+
+  - id: NC-MERGE-AUDIT-MISSING-DETECTED
+    claim: >
+      An autopilot merge with no record on the control room is reported as
+      missing. An audit that calls everything recorded audits nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    const state = conflicts.length ? AUDIT_STATES.CONFLICT : records.length ? AUDIT_STATES.RECORDED : AUDIT_STATES.MISSING;"
+      replace: "    const state = AUDIT_STATES.RECORDED;"
+    proof_command: node --test --test-name-pattern="with no record is MISSING" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-ONLY-AUTOPILOT-MERGES
+    claim: >
+      Only a merge the workflow token made owes a record. Treating a person's
+      merge as the autopilot's would post AUTO_MERGE records for merges the
+      autopilot never made.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    && String(pr?.merged_by?.login || '') === AUTOPILOT_MERGER"
+      replace: "    && true"
+    proof_command: node --test --test-name-pattern="a merge by a person, or of a non-implementation branch" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-DETECTION-NEVER-WRITES
+    claim: >
+      Without --reconcile the audit only reads.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "  if (reconcile && audit.missing.length) {"
+      replace: "  if (audit.missing.length) {"
+    proof_command: node --test --test-name-pattern="without --reconcile, nothing is posted" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-READS-EVERY-PAGE
+    claim: >
+      The audit reads every page of closed PRs and of the control room. One
+      page would miss an old merge, or miss its record and post a second.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    if (batch.length < PER_PAGE) return items;"
+      replace: "    return items;"
+    proof_command: node --test --test-name-pattern="beyond the first page of closed PRs" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-EXIT-STATUS
+    claim: >
+      A missing record or a conflict leaves the audit with a failing status.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    process.exit(report.clean ? 0 : report.conflicts.length ? 4 : 5);"
+      replace: "    process.exit(0);"
+    proof_command: node --test --test-name-pattern="a missing record is exit 5" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-RUNS-AFTER-A-FAILED-SWEEP
+    claim: >
+      The audit step runs when the sweep before it failed. A sweep that failed
+      because a record could not be posted is the case the audit repairs.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "        if: ${{ !cancelled() }}"
+      replace: "        if: ${{ success() }}"
+    proof_command: node --test --test-name-pattern="even when the sweep failed" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-STEP-FAILS-THE-JOB
+    claim: >
+      A record still missing after reconciliation fails the job.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "after reconciliation\"; exit 1 ;;"
+      replace: "after reconciliation\"; exit 0 ;;"
+    proof_command: node --test --test-name-pattern="the audit step fails the job" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  # A merge marker anywhere but the start of a trusted comment is a stranger's
+  # text: the workflow token's AUTO_EVENT echoed the packet_id of any
+  # commenter's RETURN, and every merge SHA is public (SECOPS-2). Each control
+  # below restores one half of that path.
+
+  - id: NC-MERGE-RECORD-MARKER-MUST-OPEN-THE-COMMENT
+    claim: >
+      Only a trusted comment that opens with a merge's marker is a statement
+      about that merge. Counted anywhere, a marker echoed into a trusted
+      comment makes the hourly audit fail for any past merge, permanently.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "[0].startsWith(record.marker);"
+      replace: "[0].startsWith(record.marker) || body.includes(record.marker);"
+    proof_command: node --test --test-name-pattern="neither a record nor a conflict" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-WAKE-EVENT-ECHOES-ONLY-A-PACKET-ID
+    claim: >
+      The wake comment, posted as the workflow token, echoes a packet_id only
+      when it reads as one.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "              'packet_id: ' + packetId,"
+      replace: "              'packet_id: ' + (event.packet_id || 'null'),"
+    proof_command: node --test --test-name-pattern="wake event" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
@@ -1369,6 +1764,23 @@ negative_controls:
       replace: |-
         export const COPILOT_UNAVAILABLE = /(?!)/;
     proof_command: node --test --test-name-pattern="real PR 103 Copilot reviews" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-COPILOT-INSUFFICIENT-QUOTA-UNRECOGNIZED
+    claim: >
+      The bot's current unavailable wording, "insufficient remaining quota"
+      (PR 155 reviews 5636247931 and 5636727516), derives the machine reason
+      quota_exhausted, so a truthfully recorded quota NOT_RUN is evidenced
+      live and the approved fallback can be judged
+      (KF-META-AI-REVIEW-QUOTA-WORDING-001). With the entry removed the body
+      is NOT_RUN with no reason, as it was before the correction.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+        Object.freeze({ pattern: /\binsufficient remaining quota\b/i, reason: 'quota_exhausted' }),
+      replace: |-
+        // (entry removed by the negative control)
+    proof_command: node --test --test-name-pattern="PR 155 Copilot wording" scripts/agent-control/tests/semantic-review.spec.mjs
     timeout_ms: 120000
 
   - id: NC-SR-STALE-HEAD
@@ -3604,3 +4016,213 @@ negative_controls:
       replace: "if (process.argv[1].endsWith('auto-merge-admitted.mjs') && (!token || !repo || !prNumber)) {"
     proof_command: node --test --test-name-pattern="NC CLI load" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
+
+  # --- the hourly sweep's candidate list (KF-META-AUTOPILOT-SWEEP-COVERAGE-001)
+
+  - id: NC-SWEEP-DEFAULT-LIMIT-RESTORED
+    claim: >
+      The hourly sweep lists its candidates through the paged lister, never
+      through `gh pr list`, whose default page of 30 hid 14 of the 21 open
+      impl/* PRs on 2026-10-24 while the sweep reported a clean run.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "if ! listing=\"$(node scripts/agent-control/list-open-impl-prs.mjs)\"; then"
+      replace: "if ! listing=\"$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith(\"impl/\")) | .number')\"; then"
+    proof_command: node --test --test-name-pattern="the candidates come from the paged lister" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-TOTALCOUNT-UNCHECKED
+    claim: >
+      An enumeration that collected fewer pull requests than the API's own
+      totalCount is incomplete and fails. Without the check, a short read is a
+      shorter candidate list and the sweep is clean having missed PRs.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (nodes.length !== totalCount) {"
+      replace: "if (false) {"
+    proof_command: node --test --test-name-pattern="fewer nodes than totalCount" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-PAGE-ERROR-PARTIAL
+    claim: >
+      A failed page after a successful one fails the whole listing. Nothing
+      collected so far is printed: a partial list would reconcile the first
+      page and silently skip the rest.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "const page = await fetchPage(fetchImpl, { token, owner, name, cursor });"
+      replace: |-
+        let page;
+            try { page = await fetchPage(fetchImpl, { token, owner, name, cursor }); } catch { return { totalCount: nodes.length, nodes, pages }; }
+    proof_command: node --test --test-name-pattern="HTTP failure on the second page" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-DUPLICATES-COUNTED
+    claim: >
+      A pull request number seen twice is churn or a re-read page and fails
+      the enumeration. Skipping the repeat instead would let a duplicated page
+      deduplicate to exactly totalCount and pass as complete.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (seenNumbers.has(node.number)) throw new ListingError(LISTING_ERRORS.DUPLICATE, `PR #${node.number} listed twice`);"
+      replace: "if (seenNumbers.has(node.number)) continue;"
+    proof_command: node --test --test-name-pattern="duplicated page cannot be deduplicated" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT
+    claim: >
+      The lister ends by natural termination (process.exitCode), so the
+      candidate list it wrote drains into the stdout pipe before the process
+      ends. A forced process.exit right after the write can end the process
+      with part of the list unwritten and exit 0 (SWEEP-IO-001; 65,536 of
+      85,000 bytes on Linux). On Windows the native stdout pipe is blocking
+      and cannot show the loss, so there this control is live through the
+      test's modeled asynchronous stdout leg; on Linux both legs fail with
+      the defect restored.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "main().then((code) => { process.exitCode = code; });"
+      replace: "main().then((code) => process.exit(code));"
+    proof_command: node --test --test-name-pattern="drains its stdout pipe before it exits" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 180000
+
+  # --- observability: the worker's queue, and gates main has moved under ------
+
+  - id: NC-OBSERVE-REPEATING-ERROR-REPORTED
+    claim: >
+      The same error ending tick after tick is reported. This is the signal
+      that was missing while a dead worker logged 1,650 identical errors.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  return count >= REPEATING_ERROR_TICKS ? {"
+      replace: "  return false ? {"
+    proof_command: node --test --test-name-pattern="the same error ending tick after tick" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-SILENT-LOOP-REPORTED
+    claim: >
+      A directive that is offered every tick and fails before it is counted
+      shows as queued but not delivered.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  if (queued.length && repeating) attention.push("
+      replace: "  if (false) attention.push("
+    proof_command: node --test --test-name-pattern="the silent loop" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-STOPPED-WORKER-REPORTED
+    claim: >
+      A worker that has stopped ticking is flagged.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  else if (!running && tickAge > STALE_TICK_SECONDS) attention.push("
+      replace: "  else if (false) attention.push("
+    proof_command: node --test --test-name-pattern="stopped ticking, is paused" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-UNREADABLE-STATE-NOT-EMPTY
+    claim: >
+      State that cannot be parsed is reported as unreadable. Read as empty, a
+      truncated cursor or ledger would look like a worker with nothing wrong.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "    return { present: true, value: null, error: error.message };"
+      replace: "    return { present: true, value: null, error: null };"
+    proof_command: node --test --test-name-pattern="state it cannot read is reported" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ORCHESTRATOR-WAIT-NAMES-ITS-PACKET
+    claim: >
+      A wait for a builder names the packet and the step that is waiting.
+      Published from a runner, the bare probe text hid both.
+    mutation:
+      file: scripts/agent-control/lib/orchestrator.mjs
+      find: "          packet_id: p.active_packet || null,"
+      replace: "          packet_id: null,"
+    proof_command: node --test --test-name-pattern="still names the packet, its state" scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-BEHIND-MAIN-DETECTED
+    claim: >
+      An impl PR behind main by a non-control file is reported stale, whatever
+      colour its last gate run shows.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "  const behind = f.compare.behind_by > 0 && (nonControl.length > 0 || f.compare.truncated);"
+      replace: "  const behind = false;"
+    proof_command: node --test --test-name-pattern="behind main by a non-control file" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-FAILED-READ-IS-NOT-CURRENT
+    claim: >
+      A PR whose facts could not be read is never reported as not stale.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "        throw error;"
+      replace: "        return null;"
+    proof_command: node --test --test-name-pattern="any other failed read fails the whole report" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-REPAIR-KEEPS-FRESH-REVIEW
+    claim: >
+      The repair the detector names always owes a fresh independent review of
+      the new head.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "a FRESH independent semantic review of the new head is then owed before admission"
+      replace: "the existing review carries over"
+    proof_command: node --test --test-name-pattern="the only repair it names keeps the fresh review" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  # --- branch divergence: a captured failure is re-raised (#114 part 1) -------
+  # The divergence check is continue-on-error so its summary and report still
+  # render; "Fail when thresholds exceeded" re-raises it. Proof:
+  # tests/workflow-integrity.spec.mjs, read per job from the parsed workflow.
+
+  - id: NC-DIVERGENCE-PUSH-RERAISE-NEUTRALIZED
+    claim: >
+      Each job that captures the divergence status re-raises it itself. The
+      push job's re-raise exiting 0 lets a drifted branch push go green, and
+      the PR job's intact re-raise must not cover for it.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 1
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+      replace: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 0
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-RERAISE-FAIL-OPEN
+    claim: >
+      The re-raise fails closed: it runs on any recorded status but 0, an
+      empty one included. A condition that runs only on status 1 lets a check
+      that crashed (status 2, or no status recorded) conclude green.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "if: steps.check.outputs.status != '0'"
+      replace: "if: steps.check.outputs.status == '1'"
+      # Both capturing jobs carry this condition and the claim covers both.
+      replace_all: true
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-JOB-SOFT-GATE
+    claim: >
+      No job that captures the divergence status is itself continue-on-error;
+      a job-level continue-on-error swallows the re-raise and the PR check
+      concludes green past the thresholds.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "name: Check divergence vs main (PR)"
+      replace: "name: Check divergence vs main (PR)\n    continue-on-error: true"
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000

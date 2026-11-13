@@ -14,6 +14,7 @@ import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 import { fetchRoleFlowQueue, resolveFlowSignal, type FlowSignal } from "@/lib/api/flow-signal";
 import { apiPost } from "@/lib/api";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -30,8 +31,12 @@ interface SafeToSpend {
   cashBalance: number;
   taxReserved: number;
   billsDueNext30Days: number;
+  payrollReserved?: number;
+  debtPaymentsDue?: number;
   operatingBuffer: number;
+  otherReserves?: number;
   currency: string;
+  explanation?: string[];
 }
 
 export default function FinancialFlowPage() {
@@ -42,6 +47,9 @@ export default function FinancialFlowPage() {
   const [safe, setSafe] = useState<SafeToSpend | null>(null);
   const [forecast, setForecast] = useState<{ days: number; expected: number; conservative: number; optimistic: number; dangerDate: string | null; recommendations: string[] } | null>(null);
   const [buckets, setBuckets] = useState<ReserveBucket[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-1): GET reserves needs revenue read (D-146); a refusal is said in the
+  // reserves card, never as "No reserve buckets yet".
+  const [bucketsRefusal, setBucketsRefusal] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPurpose, setNewPurpose] = useState("");
@@ -105,7 +113,10 @@ export default function FinancialFlowPage() {
         withTimeout(apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`), 'Safe-to-spend'),
         withTimeout(apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`), 'Forecast'),
         withTimeout(
-          fetchReserveBuckets(businessId).then(r => ({ error: r.error, data: r.data?.items ?? [] }) as { error: string | null; data: ReserveBucket[] }),
+          // An error answer is an error, never an empty list (CRR-P195KG-1): the refusal reaches the reserves card.
+          fetchReserveBuckets(businessId).then(
+            (r) => ({ error: r.error, status: r.status, data: r.error ? null : (r.data?.items ?? []) }) as { error: string | null; status?: number; data: ReserveBucket[] | null },
+          ),
           'Reserve buckets',
         ),
       ]);
@@ -113,7 +124,13 @@ export default function FinancialFlowPage() {
       if (ovRes.data) setOverview(ovRes.data); else failed.push(ovRes.label);
       if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
       if (fcRes.data) setForecast(fcRes.data); else failed.push(fcRes.label);
-      if (bucketRes.data) setBuckets(bucketRes.data); else failed.push(bucketRes.label);
+      const refusal = moduleReadRefusal(bucketRes, "revenue", "the reserve buckets");
+      setBucketsRefusal(refusal);
+      if (bucketRes.data) setBuckets(bucketRes.data);
+      else {
+        setBuckets([]);
+        if (!refusal) failed.push(bucketRes.label);
+      }
       if (failed.length > 0) setLoadErrors(failed);
     } catch {
       setLoadErrors(['financial data']);
@@ -165,6 +182,7 @@ export default function FinancialFlowPage() {
         { id: "revenue", label: "Revenue", icon: Receipt, href: "/app/commerce", tone: "orange" },
         { id: "expenses", label: "Expenses", icon: Wallet, href: "/app/expenses", tone: "gold" },
         { id: "ledger", label: "Ledger", icon: BookOpen, href: "/app/finance/ledger", tone: "teal" },
+        { id: "journal", label: "Journal", icon: BookOpen, href: "/app/finance/journal", tone: "sky" },
         { id: "reports", label: "Reports", icon: FileText, href: "/app/finance/reports", tone: "violet" },
       ],
     },
@@ -186,6 +204,7 @@ export default function FinancialFlowPage() {
     { label: "Accounts", href: "/app/finance/settings#accounts", icon: Landmark, desc: "Bank, cash, reconciliation" },
     { label: "Reports", href: "/app/finance/reports", icon: FileText, desc: "P&L, balance sheet, tax" },
     { label: "General Ledger", href: "/app/finance/ledger", icon: BookOpen, desc: "Detailed transaction history" },
+    { label: "Journal Entries", href: "/app/finance/journal", icon: BookOpen, desc: "Post manual double-entry journals" },
     { label: "Trial Balance", href: "/app/finance/trial-balance", icon: Scale, desc: "Account balances summary" },
     { label: "Bank Rules", href: "/app/finance/bank-rules", icon: ListFilter, desc: "Auto-categorize transactions" },
     { label: "Recurring Journals", href: "/app/finance/recurring-journals", icon: Repeat, desc: "Scheduled journal entries" },
@@ -242,6 +261,42 @@ export default function FinancialFlowPage() {
           </>
         )}
       </div>
+
+      {/* Safe-to-Spend Breakdown */}
+      {safe && (
+        <SectionCard title="Safe-to-Spend Breakdown" icon={ShieldCheck} compact>
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold">{currency} {(safe.cashBalance ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Cash Balance</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.taxReserved ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Tax Reserved</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.billsDueNext30Days ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Bills Due (30d)</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-amber-500">− {currency} {(safe.payrollReserved ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Committed Payroll</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.operatingBuffer ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Operating Buffer</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.otherReserves ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Other Reserves</p>
+            </div>
+            <div className="kf-card p-2.5 border-emerald-500/30">
+              <p className="text-sm font-semibold text-emerald-500">{currency} {(safe.safeToSpend ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Safe to Spend</p>
+            </div>
+          </div>
+        </SectionCard>
+      )}
 
       {/* Cashflow Forecast */}
       {forecast && (
@@ -356,7 +411,9 @@ export default function FinancialFlowPage() {
           </div>
         )}
 
-        {buckets.length === 0 && !showAdd ? (
+        {bucketsRefusal ? (
+          <p className="text-xs text-amber-500 py-2" role="alert">{bucketsRefusal}</p>
+        ) : buckets.length === 0 && !showAdd ? (
           <p className="text-xs text-muted-foreground py-2">No reserve buckets yet. Add one to track tax, payroll, or other cash allocations.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">

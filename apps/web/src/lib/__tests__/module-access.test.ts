@@ -15,6 +15,7 @@ vi.mock("../client", () => ({ fetchProcurementStats }));
 
 import {
   OPERATIONS_GATED_HREFS,
+  isModuleScopeRefusal,
   canOfferOperationsActions,
   commandActionsDisabledReason,
   filterByOperationsAccess,
@@ -112,5 +113,25 @@ describe("entry points", () => {
     expect(canOfferOperationsActions("denied")).toBe(false);
     expect(canOfferOperationsActions("granted")).toBe(true);
     expect(canOfferOperationsActions("unknown")).toBe(true);
+  });
+});
+
+describe("isModuleScopeRefusal (PR195-BOOKS-DOORS, CRR-P195JS-2)", () => {
+  it("is ModuleScopeGuard's 403 naming that module, and nothing else", () => {
+    const guard = (module: string, need = "write", have = "read") => ({
+      error: `Insufficient permissions: ${module} requires ${need} access (you have ${have})`,
+      status: 403,
+    });
+    expect(isModuleScopeRefusal(guard("revenue"), "revenue")).toBe(true);
+    expect(isModuleScopeRefusal(guard("revenue", "read", "none"), "revenue")).toBe(true);
+    expect(isModuleScopeRefusal(guard("operations"), "revenue")).toBe(false);
+    expect(isModuleScopeRefusal(guard("expenses"), "expenses")).toBe(true);
+    // BusinessGuard's transient refusals, a non-member, another status: not the member's module access.
+    for (const error of ["Unable to verify business access", "Service unavailable", "No access to this business"]) {
+      expect(isModuleScopeRefusal({ error, status: 403 }, "revenue"), error).toBe(false);
+    }
+    expect(isModuleScopeRefusal({ ...guard("revenue"), status: 400 }, "revenue")).toBe(false);
+    expect(isModuleScopeRefusal(null, "revenue")).toBe(false);
+    expect(isModuleScopeRefusal({ error: null, status: 403 }, "revenue")).toBe(false);
   });
 });

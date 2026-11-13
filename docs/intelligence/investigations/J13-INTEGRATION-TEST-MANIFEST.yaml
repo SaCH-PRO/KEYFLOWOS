@@ -1,0 +1,123 @@
+schema_version: 1
+kind: design_test_inventory
+project: KEYFLOWOS
+checkpoint_id: J13-ACM-2026-09-16-01
+updated_at: 2026-09-16
+status: DESIGNED_MAPPED_NOT_IMPLEMENTED_NOT_EXECUTED
+repository: SaCH-PRO/KEYFLOWOS
+canonical_branch: docs/keyflow-intelligence-foundation
+input_intelligence_head: 2b177c772036eee83c24b79ee649d99fd3a2dba1
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+contract: docs/intelligence/investigations/J13-LIFECYCLE-AUTHORITY-CONTRACT-CANDIDATE.md
+conformance_map: docs/intelligence/investigations/J13-ADAPTER-CONFORMANCE-AND-MIGRATION-MAP.md
+implementation_authorized: false
+runtime_proof_executed: false
+harness_implemented_by_this_manifest: false
+all_case_runtime_status: NOT_EXECUTED
+all_case_analytical_status: MAPPED_NOT_BASELINE_PASS
+expected_case_count: 44
+runner_bindings: {}
+unbound_case_is_not_proof: true
+case_groups:
+  P: [P01, P02, P03, P04, P05, P06, P07, P08, P09, P10, P11, P12]
+  M004: [M004-01, M004-02, M004-03, M004-04, M004-05, M004-06]
+  N: [N01, N02, N03, N04, N05, N06]
+  A: [A01, A02, A03, A04, A05, A06, A07, A08]
+  R: [R01, R02, R03, R04, R05, R06, R07, R08, R09, R10, R11, R12]
+new_cases:
+  R01: add_enable_disable_reenable_remove_without_resurrection_or_duplicate_effect
+  R02: mixed_binary_schema_versions_and_safe_rollback_floor
+  R03: nonempty_discovery_complete_bindings_no_required_skips_negative_control
+  R04: reject_wrong_shared_or_production_environment_before_writes
+  R05: concurrent_runs_cannot_touch_each_others_resources
+  R06: pure_shadow_has_no_live_credential_provider_domain_or_event_effect
+  R07: flag_outage_invalid_value_or_stale_cache_cannot_bypass_safety_stop
+  R08: mode_switch_keeps_effect_identity_and_one_owner_current_revocation_applies
+  R09: optional_removal_is_explicit_required_dependency_removal_rejects_activation
+  R10: rollback_cleanup_cannot_remove_sibling_or_new_grant_registration
+  R11: rollback_preserves_history_external_compensation_requires_new_authority
+  R12: reviewed_requirement_supersession_not_weakening_failing_safety_gate
+slices:
+  I0:
+    title: environment_and_proof_isolation
+    requires: []
+    cases: [R03, R04, R05, R06, R12]
+    withdrawal: dispose_only_verified_run_owned_resources_keep_evidence
+  I1:
+    title: compatible_storage_and_receipts
+    requires: [I0]
+    cases: [R02, R11]
+    withdrawal: keep_expanded_schema_tombstones_receipts_compatible_reader_only
+  I2:
+    title: lifecycle_and_credential_authority
+    requires: [I1]
+    cases: [P01, P02, P03, P07, P08, P09, P10, P11, M004-01, M004-02, M004-03, M004-04, M004-05, M004-06, N01, N02, N03, N05, N06, A01, A02, A03, A04, A05, A07, R01, R07, R08]
+    withdrawal: disabled_safe_or_proven_conforming_reference_never_unfenced_baseline
+  I3:
+    title: local_consumers_and_projections
+    requires: [I2]
+    cases: [P01, P02, P03, P04, P05, P06, P07, P09, N01, N02, N04, A08, R01, R06, R08, R09]
+    withdrawal: stop_new_claims_preserve_applied_work_receipts_and_review
+  I4:
+    title: external_effects_and_scoped_cleanup
+    requires: [I2, I3]
+    cases: [P05, P06, P11, P12, N06, A04, A05, A06, R01, R06, R08, R10, R11]
+    withdrawal: block_new_admissions_reconcile_admitted_attempts_retain_cleanup_barrier
+  I5:
+    title: ux_and_integrated_rollout
+    requires: [I3, I4]
+    cases: [N03, N05, R01, R02, R07, R09, R12]
+    withdrawal: disable_optional_behavior_keep_truthful_status_and_safe_recovery
+modes:
+  default: DISABLED_SAFE
+  supported: [DISABLED_SAFE, SAFE_REFERENCE, SHADOW_COMPARE, CANDIDATE_SANDBOX, CONTROLLED_CANARY]
+  safe_reference_requires_independent_conformance: true
+  shadow_live_effects_allowed: false
+  candidate_requires_isolated_environment: true
+  canary_currently_authorized: false
+  variant_selection_source_candidate: existing_GrowthBookService
+  flag_is_authority_or_revocation_gate: false
+  instant_flag_propagation_proven: false
+  operation_variant_is_recorded: true
+  current_safety_admission_overrides_sticky_variant: true
+  unsupported_dependency_combinations: REJECT
+mandatory_invariants:
+  - tenant_account_isolation
+  - current_authority_and_monotonic_revocation
+  - one_effect_owner_and_stable_logical_identity
+  - secret_protection
+  - truthful_outcomes_and_retained_evidence
+  - historical_reconciliation_not_fresh_effect_authority
+  - scoped_remote_cleanup_and_shared_dependency_safety
+  - no_production_resources_for_unapproved_tests
+  - no_weakening_gates_to_manufacture_green
+required_run_metadata:
+  - implementation_commit
+  - build_artifact_identity
+  - verified_environment_identity_without_secrets
+  - unique_run_resource_ownership
+  - configuration_and_contract_versions
+  - discovered_and_executed_case_ids
+  - failure_skip_and_setup_results
+  - assertions_outputs_and_negative_controls
+  - deterministic_seed_and_clock_policy
+  - cleanup_result
+resource_namespaces: [database, tenant_fixtures, queues, storage, callback_destination, provider_sandbox_account]
+not_proof_conditions:
+  - no_runner_binding
+  - empty_discovery
+  - missing_required_case
+  - skipped_required_case
+  - failed_setup_or_assertion
+  - wrong_environment
+  - exit_code_without_case_results
+  - mock_only_result_claimed_as_database_or_provider_proof
+  - documentation_or_git_validation_claimed_as_application_test
+change_policy:
+  optional_behavior_variants: ADD_DISABLE_REPLACE_REMOVE_WITH_CONTRACT_AND_DEPENDENCY_CHECKS
+  mandatory_safety_obligations: PRESERVE_OR_EXPLICITLY_REVIEW_SUPERSESSION
+  case_retirement: reviewed_requirement_and_superseding_coverage_required
+  expected_count_is_permanent_ceiling: false
+  test_source_changes_in_this_tranche: false
+remaining_evidence_debts: [ED1_schema_and_claim_reuse_DDL, ED2_unmapped_adapter_worker_coverage, ED3_remote_registration_configuration, ED4_harness_bindings_and_runtime_proof, ED5_later_baseline_revalidation]
+next_programme_stage: J24_ENGINEERING_SAFETY_AND_REVERSIBLE_TESTING_ACTIVATION

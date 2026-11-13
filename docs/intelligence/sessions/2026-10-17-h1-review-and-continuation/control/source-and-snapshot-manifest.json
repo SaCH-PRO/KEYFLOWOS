@@ -1,0 +1,86 @@
+{
+  "report_kind": "continuation_publication_source_and_snapshot_manifest",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "source_files": [
+    {
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/truth.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/reconcile.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/authority-effects.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/control-envelope.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/yaml.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/dag.mjs"
+    },
+    {
+      "path": "scripts/agent-control/select-directive.mjs",
+      "sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/select-directive.mjs"
+    },
+    {
+      "path": ".agent-control/programme-state.yaml",
+      "sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.agent-control/programme-state.yaml"
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml"
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state-machine.mjs"
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/events.mjs"
+    }
+  ],
+  "comment_snapshot": {
+    "collection_completed_at_utc": "2026-10-17T20:01:43.158Z",
+    "count": 1436,
+    "latest_comment_id": 6240077811,
+    "latest_comment_created_at": "2026-10-17T20:01:38Z",
+    "normalized_sha256": "9e6cc4d0dbc726b15b13cac29f53c7d9734d2ef392b9cd5f25f0781d8b89f667",
+    "hash_method": "SHA-256(JSON.stringify(canonicalComments(...))); the exact canonicalization function is exported by replay-authority.mjs. Full comments are supplied separately.",
+    "known_local_snapshot": "/tmp/keyflow-live-authority-20261017/comments.json",
+    "included_in_package": false
+  },
+  "repository_snapshot": {
+    "filename": "repository-truth.json",
+    "normalized_sha256": "dd5169bfc74418025fdf345883dabe09665c3693585deffe7711f16ced3e0a5d",
+    "hash_method": "SHA-256(JSON.stringify(repository-truth.json.snapshot))"
+  },
+  "limits": [
+    "Evidence only; no admission or execution authority.",
+    "Pinned Git blob hashes cover all replay source modules, checkpoint and DAG; no repository files are modified."
+  ]
+}

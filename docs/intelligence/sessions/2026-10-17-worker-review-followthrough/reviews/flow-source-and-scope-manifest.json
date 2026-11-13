@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "purpose": "Read-only existing-owner and review-readiness preparation; no new packet or worker assignment.",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "live_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "prs": [
+    {
+      "number": 146,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146",
+      "title": "KF-MISSION-CONTROL-ATLAS-READMODEL-001: build the owner Atlas control panel foundation",
+      "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+      "branch": "impl/kf-mission-control-atlas-readmodel-001",
+      "base": "impl/kf-atlas-code-links-001",
+      "base_sha": "75ee19c7593b73012b9d43d8430b70459c44ed93",
+      "draft": true,
+      "merged": false,
+      "state": "open",
+      "mergeable": false
+    },
+    {
+      "number": 172,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/172",
+      "title": "feat(agent-control): see what the worker is doing, and which gates main has moved under",
+      "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+      "branch": "fix/agent-control-observability-001",
+      "base": "main",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "draft": true,
+      "merged": false,
+      "state": "open",
+      "mergeable": true
+    },
+    {
+      "number": 155,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155",
+      "title": "KF-EXEC-AUTH-FAIL-CLOSED-001: parsed-command autonomy fails closed",
+      "head": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "branch": "impl/kf-exec-auth-fail-closed-001",
+      "base": "main",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "draft": true,
+      "merged": false,
+      "state": "open",
+      "mergeable": true
+    }
+  ],
+  "live_tail": {
+    "page": 15,
+    "per_page": 100,
+    "count": 45,
+    "last_id": 6240437264,
+    "cached_tail_id_matches": true
+  },
+  "open_pr_metadata_count": 50,
+  "proof_review_sources": [
+    {
+      "pr": 146,
+      "reviews": [
+        {
+          "id": 5419298635,
+          "head": "54529c4a29795161aaea3e97e3c57c01b881cc5e",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146#pullrequestreview-5419298635"
+        },
+        {
+          "id": 5419303395,
+          "head": "c9a0cf3abda41f9026668bf8881f358e12116f1a",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146#pullrequestreview-5419303395"
+        },
+        {
+          "id": 5419304879,
+          "head": "e422cb4f26ffe3c504c9411c88b7193a30106e39",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146#pullrequestreview-5419304879"
+        },
+        {
+          "id": 5419537932,
+          "head": "55126330e654310bf068cba7ce5521dc60ce371d",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146#pullrequestreview-5419537932"
+        },
+        {
+          "id": 5419540521,
+          "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/146#pullrequestreview-5419540521"
+        }
+      ],
+      "runs": [
+        {
+          "id": 37367612980,
+          "name": "Branch divergence",
+          "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+          "conclusion": "cancelled",
+          "event": "push",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37367612980"
+        },
+        {
+          "id": 37363519134,
+          "name": "Agent Control Gate",
+          "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+          "conclusion": "failure",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37363519134"
+        },
+        {
+          "id": 37363519167,
+          "name": "Agent Control Worker Proof",
+          "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+          "conclusion": "failure",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37363519167"
+        },
+        {
+          "id": 37363512999,
+          "name": "Branch divergence",
+          "head": "1190c2236011452485d7575668ad0407c7ca43c5",
+          "conclusion": "failure",
+          "event": "push",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/37363512999"
+        }
+      ]
+    },
+    {
+      "pr": 172,
+      "reviews": [
+        {
+          "id": 5484359190,
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "user": "copilot-pull-request-reviewer[bot]",
+          "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/172#pullrequestreview-5484359190"
+        }
+      ],
+      "runs": [
+        {
+          "id": 38162542893,
+          "name": "Branch divergence",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542893"
+        },
+        {
+          "id": 38162542950,
+          "name": "Agent Control Gate",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542950"
+        },
+        {
+          "id": 38162542896,
+          "name": "DAST (HawkScan)",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542896"
+        },
+        {
+          "id": 38162542872,
+          "name": "KEYFLOWOS Agent Autopilot",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542872"
+        },
+        {
+          "id": 38162542891,
+          "name": "CI/CD Pipeline",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542891"
+        },
+        {
+          "id": 38162542894,
+          "name": "Agent Control Worker Proof",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "pull_request",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162542894"
+        },
+        {
+          "id": 38162506245,
+          "name": "Branch divergence",
+          "head": "49c85968b283062c442eaeb6e8e2f62cadf3b540",
+          "conclusion": "success",
+          "event": "push",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162506245"
+        }
+      ]
+    }
+  ],
+  "scope_boundaries": {
+    "f9_remains_sole_worker_assignment": true,
+    "new_flow_packet_created": false,
+    "source_changes": false,
+    "remote_posts": false,
+    "application_runs": false,
+    "database_runs": false,
+    "provider_runs": false,
+    "existing_characterization_reused": true,
+    "formal_admission_claimed": false
+  },
+  "finding_homes": [
+    {
+      "concern": "selective_primary_policy_read_failure",
+      "owner": "AiOversightService.getAutonomySettings",
+      "proof_owner": "apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts",
+      "existing_record": "PR180 P0 flow peer-review section 1",
+      "released_repair_found": false
+    },
+    {
+      "concern": "client_supplied_role_authority",
+      "owner": "AiFlowController and FlowOrchestratorService authority propagation; existing Flow-to-CRM actor path",
+      "existing_identity": "docs/CAPABILITY_MAP_2026-08-09.md section 32; ACTION characterization D3",
+      "control_disposition": "5998711588 Q6: AUTH/TENANT backward re-audit with ACTION cross-reference",
+      "released_repair_found": false
+    },
+    {
+      "concern": "cortex_executor_result_shape",
+      "owner": "KeyCortexQueryPipelineService and KeyCortexExecutorService BatchResult contract",
+      "existing_record": "PR155 claude-return.yaml open_findings.executor_result_shape; formal review 6240050804",
+      "released_repair_found": false
+    }
+  ],
+  "comment_collection": {
+    "path": "/tmp/kf-followthrough-20261017/comments.json",
+    "sha256": "375b5113a85a6e737be3a98908d220d98d34241753e32b19f4e4de09b8b9fb31",
+    "count": 1445,
+    "last_id": 6240437264,
+    "last_created_at": "2026-10-17T20:22:42Z",
+    "full_collection_searched": true
+  },
+  "reused_flow_sources": [
+    {
+      "path": "apps/server/src/modules/ai/ai-oversight.service.ts",
+      "sha256": "68a9899dce573b336d964ec145c01a9da901ec9dc5ac99f1b497f8d96f3b9d88",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/ai-oversight.service.ts"
+    },
+    {
+      "path": "apps/server/src/modules/ai/flow-tool-registry.ts",
+      "sha256": "74eca72477f5de8174f6c206c68efac82890cfa4513c4d9c2d023a3728b83787",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/flow-tool-registry.ts"
+    },
+    {
+      "path": "apps/server/src/modules/ai/role-engine.service.ts",
+      "sha256": "338f84a37896675c5eabd5c553b477b43e83670dda2461e60e02b1b914fb964c",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/role-engine.service.ts"
+    },
+    {
+      "path": "apps/server/src/modules/structure/job-role-policy.service.ts",
+      "sha256": "b4bb5230b73cb70fcb6829722c2fefadd14537ae2f31bc994e7b00fb4ca9ae66",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/structure/job-role-policy.service.ts"
+    },
+    {
+      "path": "apps/server/src/core/authority/approval-tier.ts",
+      "sha256": "4bbf0e5cd7b686b19876fc4fcd7db7e39e9c01ec149c67f9e649e5d75fb34c2f",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/core/authority/approval-tier.ts"
+    },
+    {
+      "path": "apps/server/src/core/authority/module-vocabulary.ts",
+      "sha256": "912dc91a62b79e9f3c651a19d49442e94e3f68dd94b74a1b3405fa5d65207ae4",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/core/authority/module-vocabulary.ts"
+    },
+    {
+      "path": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+      "sha256": "04ae839df25e515a40ba15a636b0678c706ee451896d715faf54cbe2cebe3464",
+      "main_and_local_hashes_verified_equal": true,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/flow-orchestrator.service.ts"
+    }
+  ],
+  "additional_source_urls": [
+    {
+      "path": "apps/server/src/modules/ai/flow.controller.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/flow.controller.ts"
+    },
+    {
+      "path": "apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/ai/ai-oversight-fails-closed.spec.ts"
+    },
+    {
+      "path": "apps/server/src/modules/structure/staff-chat-bridge.service.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/structure/staff-chat-bridge.service.ts"
+    },
+    {
+      "path": "apps/server/src/modules/crm/crm.service.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/crm/crm.service.ts"
+    },
+    {
+      "path": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts"
+    },
+    {
+      "path": "apps/server/src/modules/key-cortex/key-cortex-executor.service.ts",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/apps/server/src/modules/key-cortex/key-cortex-executor.service.ts"
+    },
+    {
+      "path": "docs/CAPABILITY_MAP_2026-08-09.md",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/CAPABILITY_MAP_2026-08-09.md"
+    }
+  ],
+  "reused_reviews": [
+    {
+      "path": "flow/peer-review.md",
+      "sha256": "47e2bc34d30a2c1a0089f2e8aeb29a672c1d93f81ee871eb87bfacb4b3e9371f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/e8905778afb58ddb52bc9b5e857bc6daae0657ae/docs/intelligence/sessions/2026-10-17-p0-safety-review/flow/peer-review.md"
+    },
+    {
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+      "kind": "PR155 formal narrow semantic review; separate Flow and Cortex follow-ons preserved"
+    },
+    {
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5998711588",
+      "kind": "ACTION characterization review Q6; D3/D4/D6 existing AUTH/TENANT backward re-audit ownership"
+    }
+  ],
+  "review_readiness": "Existing characterization and scope charter only; no released Flow repair found; no new worker assignment."
+}

@@ -147,6 +147,29 @@ export function defaultScopesForRole(role: string): Record<CanonicalModule, Acce
 export const EXPLICIT_MAP_MISSING_KEY: AccessLevel = 'none';
 
 /**
+ * A membership's level in `module`, by ModuleScopeGuard's rule, shared so the readers
+ * that must agree with it cannot drift (PR195-PORT review SEC-P195-2 / CR-P195-2):
+ * its stored `permissionScopes` when that is any non-null object, an ARRAY INCLUDED,
+ * which is then an explicit map in which every module is absent (EXPLICIT_MAP_MISSING_KEY);
+ * else its role's defaults. `permissionScopes` is a Json column, so an array can be
+ * stored in it; reading one as "use the role defaults" lets a reader allow what the
+ * guard denies (effective-authority.resolver's toExplicitScopeMap says the same).
+ * Read by ModuleScopeGuard, the D-128 genome helper, KEY's standing-context sight and
+ * payroll mark-paid.
+ */
+export function memberModuleLevel(
+  membership: { role: string; permissionScopes: unknown },
+  module: string,
+): string {
+  const scopes: Record<string, unknown> =
+    membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, unknown>)
+      : defaultScopesForRole(membership.role);
+  const level = scopes[module];
+  return typeof level === 'string' && level ? level : EXPLICIT_MAP_MISSING_KEY;
+}
+
+/**
  * Approval tiers by role. Unchanged, and deliberately separate from module levels:
  * approval tier and execution permission are distinct outputs and must not be merged.
  */

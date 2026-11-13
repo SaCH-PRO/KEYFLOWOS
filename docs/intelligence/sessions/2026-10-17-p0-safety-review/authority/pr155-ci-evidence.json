@@ -1,0 +1,821 @@
+{
+  "report_kind": "pr155_ci_evidence_summary",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "pr_number": 155,
+  "associated_head": "a597c692fcb102de558dd832d88738c0402f69a2",
+  "collection_completed_at_utc": "2026-10-17 06:02:54 UTC",
+  "coverage": {
+    "workflow_runs_total": 6,
+    "workflow_runs_retrieved": 6,
+    "workflow_pagination_complete": true,
+    "all_jobs_complete": true,
+    "check_runs_total": 23,
+    "check_runs_retrieved": 23,
+    "check_pagination_complete": true,
+    "remote_reruns_requested": false,
+    "remote_mutations": false
+  },
+  "required_workflows": {
+    "source_url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/a597c692fcb102de558dd832d88738c0402f69a2/scripts/agent-control/lib/events.mjs",
+    "source_blob_sha": "0fb689e93894e0621859db7dc867c629df01a372",
+    "names": [
+      "CI/CD Pipeline",
+      "Agent Control Gate",
+      "Branch divergence",
+      "DAST (HawkScan)",
+      "Agent Control Worker Proof"
+    ],
+    "missing": [],
+    "all_required_pr_runs_completed_success": true
+  },
+  "check_status_counts": {
+    "success": 16,
+    "skipped": 7
+  },
+  "workflow_job_status_counts": {
+    "success": 14,
+    "skipped": 6
+  },
+  "workflows": [
+    {
+      "id": 38162875351,
+      "name": "Agent Control Gate",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875351",
+      "event": "pull_request",
+      "workflow_path": ".github/workflows/agent-control-gate.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:13:00Z",
+      "updated_at": "2026-10-11T18:13:10Z",
+      "jobs": [
+        {
+          "id": 114539284014,
+          "name": "agent-control",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875351/job/114539284014",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 7,
+            "skipped": 1
+          },
+          "skipped_or_non_success_steps": [
+            {
+              "number": 5,
+              "name": "Require ChatGPT admission before non-draft merge readiness",
+              "status": "completed",
+              "conclusion": "skipped"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 38162875391,
+      "name": "Branch divergence",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391",
+      "event": "pull_request",
+      "workflow_path": ".github/workflows/branch-divergence.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:13:00Z",
+      "updated_at": "2026-10-11T18:13:22Z",
+      "jobs": [
+        {
+          "id": 114539284669,
+          "name": "Threshold resolver tests",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539284669",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 5
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539316022,
+          "name": "Check divergence vs main (PR)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316022",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 9,
+            "skipped": 1
+          },
+          "skipped_or_non_success_steps": [
+            {
+              "number": 8,
+              "name": "Fail when thresholds exceeded",
+              "status": "completed",
+              "conclusion": "skipped"
+            }
+          ]
+        },
+        {
+          "id": 114539316840,
+          "name": "Check branch vs origin/main",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316840",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539316973,
+          "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316973",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539317277,
+          "name": "Nightly sweep of all branches",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539317277",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        }
+      ]
+    },
+    {
+      "id": 38162875383,
+      "name": "DAST (HawkScan)",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875383",
+      "event": "pull_request",
+      "workflow_path": ".github/workflows/hawkscan.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:13:00Z",
+      "updated_at": "2026-10-11T18:13:33Z",
+      "jobs": [
+        {
+          "id": 114539284303,
+          "name": "HawkScan",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875383/job/114539284303",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 5,
+            "skipped": 11
+          },
+          "skipped_or_non_success_steps": [
+            {
+              "number": 4,
+              "name": "Checkout",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 5,
+              "name": "Setup pnpm",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 6,
+              "name": "Setup Node",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 7,
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 8,
+              "name": "Generate Prisma client",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 9,
+              "name": "Build workspace packages + server",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 10,
+              "name": "Apply migrations",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 11,
+              "name": "Start the API",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 12,
+              "name": "Wait for /healthz",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 13,
+              "name": "Run HawkScan",
+              "status": "completed",
+              "conclusion": "skipped"
+            },
+            {
+              "number": 14,
+              "name": "Stop the API",
+              "status": "completed",
+              "conclusion": "skipped"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 38162875348,
+      "name": "CI/CD Pipeline",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348",
+      "event": "pull_request",
+      "workflow_path": ".github/workflows/ci-cd.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:13:00Z",
+      "updated_at": "2026-10-11T18:23:15Z",
+      "jobs": [
+        {
+          "id": 114539284206,
+          "name": "Type Check",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284206",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 14
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539284421,
+          "name": "Lint (debt ratchet — blocks nothing)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284421",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 11
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539284453,
+          "name": "Security Scan",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284453",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 11
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114540050304,
+          "name": "Build Web",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050304",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 12
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114540050309,
+          "name": "Build Server",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050309",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 14
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114540050439,
+          "name": "Run Tests",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050439",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 19
+          },
+          "skipped_or_non_success_steps": []
+        }
+      ]
+    },
+    {
+      "id": 38162875434,
+      "name": "Agent Control Worker Proof",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434",
+      "event": "pull_request",
+      "workflow_path": ".github/workflows/agent-control-worker-proof.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:13:00Z",
+      "updated_at": "2026-10-11T18:48:06Z",
+      "jobs": [
+        {
+          "id": 114539284539,
+          "name": "Windows worker proof",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284539",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 8
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539284718,
+          "name": "Portable proof (ubuntu)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284718",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 8
+          },
+          "skipped_or_non_success_steps": []
+        }
+      ]
+    },
+    {
+      "id": 38162871838,
+      "name": "Branch divergence",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838",
+      "event": "push",
+      "workflow_path": ".github/workflows/branch-divergence.yml",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "created_at": "2026-10-11T18:12:57Z",
+      "updated_at": "2026-10-11T18:13:19Z",
+      "jobs": [
+        {
+          "id": 114539273825,
+          "name": "Threshold resolver tests",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539273825",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 5
+          },
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539307397,
+          "name": "Check branch vs origin/main",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539307397",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "success",
+          "run_attempt": 1,
+          "step_status_counts": {
+            "success": 9,
+            "skipped": 1
+          },
+          "skipped_or_non_success_steps": [
+            {
+              "number": 8,
+              "name": "Fail when thresholds exceeded",
+              "status": "completed",
+              "conclusion": "skipped"
+            }
+          ]
+        },
+        {
+          "id": 114539308211,
+          "name": "Nightly sweep of all branches",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308211",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539308468,
+          "name": "Check divergence vs main (PR)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308468",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        },
+        {
+          "id": 114539308488,
+          "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+          "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308488",
+          "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+          "status": "completed",
+          "conclusion": "skipped",
+          "run_attempt": 1,
+          "step_status_counts": {},
+          "skipped_or_non_success_steps": []
+        }
+      ]
+    }
+  ],
+  "check_runs": [
+    {
+      "id": 114540050439,
+      "name": "Run Tests",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050439",
+      "app": "github-actions"
+    },
+    {
+      "id": 114540050309,
+      "name": "Build Server",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050309",
+      "app": "github-actions"
+    },
+    {
+      "id": 114540050304,
+      "name": "Build Web",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050304",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539368081,
+      "name": "Vercel Preview Comments",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/runs/114539368081",
+      "app": "vercel"
+    },
+    {
+      "id": 114539317277,
+      "name": "Nightly sweep of all branches",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539317277",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539316973,
+      "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316973",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539316840,
+      "name": "Check branch vs origin/main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316840",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539316022,
+      "name": "Check divergence vs main (PR)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539316022",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539308488,
+      "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308488",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539308468,
+      "name": "Check divergence vs main (PR)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308468",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539308211,
+      "name": "Nightly sweep of all branches",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539308211",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539307397,
+      "name": "Check branch vs origin/main",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539307397",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284718,
+      "name": "Portable proof (ubuntu)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284718",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284669,
+      "name": "Threshold resolver tests",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875391/job/114539284669",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284539,
+      "name": "Windows worker proof",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284539",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284453,
+      "name": "Security Scan",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284453",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284421,
+      "name": "Lint (debt ratchet — blocks nothing)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284421",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284303,
+      "name": "HawkScan",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875383/job/114539284303",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284206,
+      "name": "Type Check",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114539284206",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539284014,
+      "name": "agent-control",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875351/job/114539284014",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539281350,
+      "name": "GitGuardian Security Checks",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/runs/114539281350",
+      "app": "gitguardian"
+    },
+    {
+      "id": 114539273825,
+      "name": "Threshold resolver tests",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162871838/job/114539273825",
+      "app": "github-actions"
+    },
+    {
+      "id": 114539273537,
+      "name": "Supabase Preview",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/runs/114539273537",
+      "app": "supabase"
+    }
+  ],
+  "logs_inspected": [
+    {
+      "label": "dast",
+      "job_id": 114539284303,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875383/job/114539284303",
+      "logs_retrieved_and_inspected": true,
+      "excerpts": [
+        "2026-10-11T18:13:30.0378224Z HAWK_API_KEY not set — DAST is dormant. Add the secret to activate (docs/SECURITY_DAST_SETUP.md)."
+      ],
+      "checkout": []
+    },
+    {
+      "label": "windows",
+      "job_id": 114539284539,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284539",
+      "logs_retrieved_and_inspected": true,
+      "excerpts": [
+        "2026-10-11T18:14:59.9825073Z ok 490 - the cursor makes directive processing idempotent # SKIP needs PowerShell and an authenticated gh",
+        "2026-10-11T18:14:59.9885845Z # tests 516",
+        "2026-10-11T18:14:59.9886186Z # pass 515",
+        "2026-10-11T18:14:59.9886351Z # fail 0",
+        "2026-10-11T18:14:59.9886511Z # cancelled 0",
+        "2026-10-11T18:14:59.9886682Z # skipped 1",
+        "2026-10-11T18:14:59.9886842Z # todo 0",
+        "2026-10-11T18:47:52.8684577Z 193/193 negative controls are live"
+      ],
+      "checkout": [
+        "2026-10-11T18:13:13.2821690Z [command]\"C:\\Program Files\\Git\\bin\\git.exe\" log -1 --format=%H",
+        "2026-10-11T18:13:13.3079735Z a597c692fcb102de558dd832d88738c0402f69a2"
+      ]
+    },
+    {
+      "label": "ubuntu",
+      "job_id": 114539284718,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875434/job/114539284718",
+      "logs_retrieved_and_inspected": true,
+      "excerpts": [
+        "2026-10-11T18:13:59.1598390Z ok 466 - the cursor makes directive processing idempotent # SKIP needs PowerShell and an authenticated gh",
+        "2026-10-11T18:13:59.1644662Z # tests 492",
+        "2026-10-11T18:13:59.1645047Z # pass 491",
+        "2026-10-11T18:13:59.1645237Z # fail 0",
+        "2026-10-11T18:13:59.1645422Z # cancelled 0",
+        "2026-10-11T18:13:59.1645616Z # skipped 1",
+        "2026-10-11T18:13:59.1645802Z # todo 0",
+        "2026-10-11T18:13:59.2244108Z DAG OK: 35 packets / 37 phases, fully drainable in wave order."
+      ],
+      "checkout": [
+        "2026-10-11T18:13:07.2431371Z [command]/usr/bin/git log -1 --format=%H",
+        "2026-10-11T18:13:07.2458917Z a597c692fcb102de558dd832d88738c0402f69a2"
+      ]
+    },
+    {
+      "label": "tests",
+      "job_id": 114540050439,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/38162875348/job/114540050439",
+      "logs_retrieved_and_inspected": true,
+      "excerpts": [
+        "2026-10-11T18:22:57.4300940Z  Test Files  451 passed (451)",
+        "2026-10-11T18:22:57.4307019Z       Tests  4428 passed (4428)",
+        "2026-10-11T18:22:59.4540749Z {\"status\":\"SATISFIED_AT_DECLARED_SCOPE\",\"reasons\":[],\"packageId\":\"KF-EXEC-K12-001\",\"proofScope\":\"proof-admission-evaluator-self-test\",\"requiredCaseCount\":16,\"discoveredCaseCount\":16,\"reportAgeMs\":1067,\"sourceSha\":\"002b44f09f5ec238cb5cb0a7c1e06648f551cdc2\",\"runId\":\"38162875348\",\"reportStartTime\":1791742978384}",
+        "2026-10-11T18:23:11.9343333Z  Test Files  22 passed (22)",
+        "2026-10-11T18:23:11.9344577Z       Tests  210 passed (210)"
+      ],
+      "checkout": [
+        "2026-10-11T18:17:12.4008641Z [command]/usr/bin/git log -1 --format=%H",
+        "2026-10-11T18:17:12.4036947Z 002b44f09f5ec238cb5cb0a7c1e06648f551cdc2"
+      ]
+    }
+  ],
+  "test_evidence": {
+    "server": {
+      "passed": 4428,
+      "files_passed": 451,
+      "log_job_id": 114540050439,
+      "scope": "CI server suite; count taken from inspected Vitest summary"
+    },
+    "web": {
+      "passed": 210,
+      "files_passed": 22,
+      "log_job_id": 114540050439,
+      "scope": "CI web suite; count taken from inspected Vitest summary"
+    },
+    "k12_evaluator": {
+      "required": 16,
+      "discovered": 16,
+      "outcome": "SATISFIED_AT_DECLARED_SCOPE",
+      "scope": "proof-admission-evaluator-self-test",
+      "log_job_id": 114540050439
+    },
+    "windows": {
+      "total": 516,
+      "passed": 515,
+      "failed": 0,
+      "skipped": 1,
+      "skip": "the cursor makes directive processing idempotent — needs PowerShell and an authenticated gh",
+      "log_job_id": 114539284539
+    },
+    "ubuntu": {
+      "total": 492,
+      "passed": 491,
+      "failed": 0,
+      "skipped": 1,
+      "skip": "the cursor makes directive processing idempotent — needs PowerShell and an authenticated gh",
+      "log_job_id": 114539284718
+    },
+    "control_plane_negative_controls": {
+      "live": 193,
+      "total": 193,
+      "log_job_id": 114539284539,
+      "scope": "agent-control controls, not the separate application packet manifest"
+    },
+    "application_packet_negative_controls": {
+      "independently_inspected_in_this_ci_read": false,
+      "claim": "The separate 8/8 application manifest count from Claude RETURN is not independently established by these retrieved CI logs."
+    }
+  },
+  "source_checkout": {
+    "run_tests_checkout_sha": "002b44f09f5ec238cb5cb0a7c1e06648f551cdc2",
+    "pr_head": "a597c692fcb102de558dd832d88738c0402f69a2",
+    "merge_parents": [
+      "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "a597c692fcb102de558dd832d88738c0402f69a2"
+    ],
+    "merge_tree": "f6eda347f98a6f46bc6e842e9b579502c6d33059",
+    "pr_head_tree": "f6eda347f98a6f46bc6e842e9b579502c6d33059",
+    "tree_identical": true,
+    "merge_commit_url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/git/commits/002b44f09f5ec238cb5cb0a7c1e06648f551cdc2",
+    "head_commit_url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/git/commits/a597c692fcb102de558dd832d88738c0402f69a2",
+    "explanation": "CI Run Tests checked the synthetic PR merge commit; observed Git trees prove it byte-identical to the associated PR head. Worker proofs checked the PR head explicitly."
+  },
+  "copilot": {
+    "review_id": 5484373795,
+    "author": "copilot-pull-request-reviewer[bot]",
+    "state": "COMMENTED",
+    "commit_id": "a597c692fcb102de558dd832d88738c0402f69a2",
+    "submitted_at": "2026-10-11T18:13:01Z",
+    "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155#pullrequestreview-5484373795",
+    "body": "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.",
+    "assessment": "NOT_RUN",
+    "machine_reason": "quota_exhausted",
+    "head_matches": true,
+    "counted_as_pass": false
+  },
+  "commit_status": {
+    "state": "success",
+    "statuses": [
+      {
+        "context": "Vercel",
+        "state": "success",
+        "description": "Deployment has completed",
+        "target_url": "https://vercel.com/sachs-projects-434206a0/keyflowos-web/A7otkcnnDA4S4GiPQuRvMQiW7EUY"
+      }
+    ]
+  },
+  "material_caveats": [
+    "All required workflow conclusions succeeded, but that is not an admission or independent semantic/security review.",
+    "Agent Control Gate validated artifacts on the draft PR. Its step 'Require ChatGPT admission before non-draft merge readiness' was skipped; no non-draft admission pass is established.",
+    "DAST HawkScan guard completed successfully while HAWK_API_KEY was unset. Checkout through Run HawkScan and cleanup API step were skipped. No API was started by scan steps and no HawkScan ran; dynamic security NOT_RUN.",
+    "Windows and Ubuntu each explicitly skipped the authenticated-gh cursor idempotency proof. These skips are not counted as passes.",
+    "Security Scan and Lint report successful job/step conclusions. Their detailed logs and security findings were not independently inspected in this read; no broader security guarantee is inferred.",
+    "Six skipped branch-divergence jobs were alternate event/manual/scheduled modes; the applicable PR and push divergence jobs ran successfully. Supabase Preview was skipped.",
+    "Current-head CI association and tree equality do not grant production readiness, merge authority, checkpoint credit or workflow rerun authorization.",
+    "Copilot quota evidence establishes unavailability only; it is not review approval."
+  ]
+}

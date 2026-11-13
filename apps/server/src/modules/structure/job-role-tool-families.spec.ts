@@ -112,6 +112,15 @@
  *  finance_pay_bill             ExpensesService          POST /finance/businesses/:businessId/bills/:billId/pay       expenses:write
  *  finance_view_payables        ExpensesService          GET /finance/businesses/:businessId/payables/aging           expenses:read
  *  finance_view_receivables     ReceivablesService       GET /finance/businesses/:businessId/receivables/aging        revenue:read
+ *  finance_post_journal_entry   PostingService           POST /finance/businesses/:businessId/journal-entries         revenue:write
+ *  finance_auto_match_bank      BankMatchingService      POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match  revenue:write
+ *  reconcile_run_auto_match     BankMatchingService      POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match  revenue:write
+ *  reconcile_match_line         BankMatchingService      POST /finance/businesses/:businessId/bank-transactions/:bankTransactionId/match  revenue:write
+ *  inventory_advance_purchase_order MarketplaceService   POST /marketplace/businesses/:businessId/purchase-orders/:poId/advance  expenses:write
+ *  finance_list_bank_accounts   FinanceAccountsService   GET /finance/businesses/:businessId/accounts                 revenue:read
+ *  finance_customer_balance (eq.) ReceivablesService     GET /finance/businesses/:businessId/customers/:contactId/balance  revenue:read
+ *  finance_list_action_items (eq.) FinanceIntelligenceService GET /finance/businesses/:businessId/intelligence/actions  revenue:read
+ *  reconcile_list_unmatched (eq.) BankMatchingService    GET /finance/businesses/:businessId/accounts/:accountId/bank-transactions  revenue:read
  *  structure_create_delegation_rule StructureService     POST /structure/businesses/:businessId/delegation-rules      team:write
  *  contracts_create             ContractsService         POST /contracts/businesses/:businessId                       operations:write
  *  contracts_acknowledge_alert  ContractsService         POST /contracts/businesses/:businessId/:contractId/acknowledge-alert/:alertId  operations:write
@@ -649,6 +658,13 @@ const READ_EQUIVALENTS: Record<string, { method: string; model: string }> = {
   crm_search_contacts: { method: 'CrmService.listContacts', model: 'contact' },
   crm_list_deals: { method: 'CrmDealsService.listDeals', model: 'deal' },
   calendar_list_events: { method: 'CalendarQueryService.listEvents', model: 'calendarEvent' },
+  // PR195-KEY-GATES (review SEC-P195BW-5, SEC-P195BW-4; D-57, D-146): Books reads KEY makes through Prisma
+  // that stand in for the FinanceController read serving the same rows, now revenue read: a customer's
+  // balance (GET customers/:contactId/balance, its invoices summed), the finance action items (GET
+  // intelligence/actions) and a bank account's unmatched statement lines (GET accounts/:accountId/bank-transactions)
+  finance_customer_balance: { method: 'ReceivablesService.getCustomerBalance', model: 'invoice' },
+  finance_list_action_items: { method: 'FinanceIntelligenceService.list', model: 'financeActionItem' },
+  reconcile_list_unmatched: { method: 'BankMatchingService.getSplitView', model: 'bankTransaction' },
 };
 
 /** Every tool's calls: dispatcher (with helpers), bridged organ, and the read equivalents. */
@@ -1247,7 +1263,26 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'finance_list_bills', service: 'ExpensesService', route: 'GET /finance/businesses/:businessId/bills', scope: 'expenses:read', file: 'modules/expenses/bills.controller.ts' },
   // FOLLOW3-A6 (D-57): every member route to ReceivablesService (aging, customer balance) needs revenue:read
   { tool: 'finance_view_receivables', service: 'ReceivablesService', route: 'GET /finance/businesses/:businessId/receivables/aging', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
+  // PR195-JOURNAL-SCOPE (CR-P195-4): the manual journal composer's route needs revenue write, the scope of
+  // the Books (D-57: their reads are revenue read; the credit-note writes beside it are revenue write)
+  { tool: 'finance_post_journal_entry', service: 'PostingService', route: 'POST /finance/businesses/:businessId/journal-entries', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
+  // PR195-BOOKS-DOORS (SEC-P195JS-1): every member route to BankMatchingService's auto-match (the statement
+  // import and the auto-match itself, which applies the bank rules and so posts) and its manual match needs
+  // revenue write, the Books' module (D-57)
+  { tool: 'finance_auto_match_bank', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
+  { tool: 'reconcile_run_auto_match', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
+  { tool: 'reconcile_match_line', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/bank-transactions/:bankTransactionId/match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
+  // PR195-BOOKS-DOORS (SEC-P195JS-1): a purchase order's advance (its receipt posts the purchase) needs
+  // expenses write, the scope a payment out needs (bills/:id/pay)
+  { tool: 'inventory_advance_purchase_order', service: 'MarketplaceService', route: 'POST /marketplace/businesses/:businessId/purchase-orders/:poId/advance', scope: 'expenses:write', file: 'modules/marketplace/marketplace.controller.ts' },
   { tool: 'finance_pay_bill', service: 'ExpensesService', route: 'POST /finance/businesses/:businessId/bills/:billId/pay', scope: 'expenses:write', file: 'modules/expenses/bills.controller.ts' },
+  // PR195-KEY-GATES (SEC-P195BW-4/5; D-57, D-146): the Books reads on FinanceController need revenue read, so the KEY
+  // tools that make or stand in for them follow (the account list with its balances; a customer's balance; the
+  // finance action items; a bank account's statement lines)
+  { tool: 'finance_list_bank_accounts', service: 'FinanceAccountsService', route: 'GET /finance/businesses/:businessId/accounts', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
+  { tool: 'finance_customer_balance', service: 'ReceivablesService', route: 'GET /finance/businesses/:businessId/customers/:contactId/balance', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
+  { tool: 'finance_list_action_items', service: 'FinanceIntelligenceService', route: 'GET /finance/businesses/:businessId/intelligence/actions', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
+  { tool: 'reconcile_list_unmatched', service: 'BankMatchingService', route: 'GET /finance/businesses/:businessId/accounts/:accountId/bank-transactions', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
   { tool: 'finance_view_payables', service: 'ExpensesService', route: 'GET /finance/businesses/:businessId/payables/aging', scope: 'expenses:read', file: 'modules/expenses/bills.controller.ts' },
   { tool: 'structure_create_delegation_rule', service: 'StructureService', route: 'POST /structure/businesses/:businessId/delegation-rules', scope: 'team:write', file: 'modules/structure/structure.controller.ts' },
   { tool: 'contracts_create', service: 'ContractsService', route: 'POST /contracts/businesses/:businessId', scope: 'operations:write', file: 'modules/contracts/contracts.controller.ts' },
@@ -1284,7 +1319,7 @@ const UNMAPPED: Record<string, string> = {
   goals: 'key-cortex-goals.controller declares no module scope',
   governance: 'governance.controller declares no module scope',
   helpdesk: 'helpdesk.controller declares no module scope',
-  inventory: 'marketplace.controller declares no module scope',
+  // inventory: granted since PR195-BOOKS-DOORS (inventory_advance_purchase_order, expenses write)
   keyflow: 'keyflow-command.controller declares no module scope',
   marketing: 'email-marketing.controller declares no module scope',
   marketplace: 'reads Prisma directly; no service call',
@@ -1293,7 +1328,7 @@ const UNMAPPED: Record<string, string> = {
   present: 'renders an onboarding card; no service call',
   projects: 'projects.controller declares no module scope (the legacy `projects` key still grants projects_*, time_*)',
   queue: 'EmailMarketingService.queueCampaign backs no route',
-  reconcile: 'finance.controller declares no module scope',
+  // reconcile: granted since PR195-BOOKS-DOORS (reconcile_run_auto_match, reconcile_match_line, revenue write)
   retainers: 'retainer.controller declares no module scope',
   save: 'onboarding-concierge.controller declares no module scope',
   segment: 'reads Prisma directly; no service call',
@@ -1327,19 +1362,36 @@ const UNGRANTED: Record<string, string> = {
   commerce_create_product: 'CatalogService.createProduct is reached by catalog.controller, which is unscoped',
   commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
-  finance_auto_match_bank: 'BankMatchingService.autoMatch is reached by finance.controller, which is unscoped',
+  // finance_auto_match_bank: granted (revenue write) since PR195-BOOKS-DOORS (SEC-P195JS-1) gated the statement
+  // import and the auto-match, the member routes to BankMatchingService.autoMatch
   finance_create_coa_account: 'FinanceCoaService is reached by finance.controller, which is unscoped',
-  finance_customer_balance: 'reads Prisma directly; no service call',
   finance_expense_breakdown: 'LedgerReportingService.getExpenseBy is reached by GET reports/expense-by, which is unscoped (it carries no revenue; V1-81 D-57)',
-  finance_list_action_items: 'reads Prisma directly; no service call',
-  finance_list_bank_accounts: 'FinanceAccountsService is reached by finance.controller, which is unscoped',
+  // finance_customer_balance, finance_list_action_items, finance_list_bank_accounts: granted (revenue read) since
+  // PR195-KEY-GATES (SEC-P195BW-4/5) gated the FinanceController reads they stand in for (D-57, D-146)
   finance_list_coa: 'FinanceCoaService is reached by finance.controller, which is unscoped',
-  finance_post_journal_entry: 'PostingService.post is reached by finance.controller, which is unscoped',
+  // finance_post_journal_entry: granted (revenue write) since PR195-JOURNAL-SCOPE (CR-P195-4) gated POST
+  // finance journal-entries, the one member route to PostingService.post
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
   // FOLLOW3-D15, whose ProcurementService writes the request where { id, businessId }
   structure_find_person: 'StructureService.findPeople backs no route',
+  // PR195-BOOKS-DOORS: the inventory and reconcile families grant a tool now (inventory_advance_purchase_order;
+  // reconcile_run_auto_match, reconcile_match_line), so their other tools are listed here
+  inventory_adjust_stock: 'MarketplaceService.adjustInventory is reached by marketplace.controller, which is unscoped',
+  inventory_create_purchase_order: 'MarketplaceService.createPurchaseOrder is reached by marketplace.controller, which is unscoped',
+  inventory_list_movements: 'MarketplaceService.getInventoryMovements is reached by marketplace.controller, which is unscoped',
+  inventory_list_purchase_orders: 'MarketplaceService.getPurchaseOrders is reached by marketplace.controller, which is unscoped',
+  inventory_list_stock: 'MarketplaceService.getInventory is reached by marketplace.controller, which is unscoped',
+  inventory_list_warehouses: 'MarketplaceService.getWarehouses is reached by marketplace.controller, which is unscoped',
+  inventory_low_stock_alerts: 'MarketplaceService.getInventoryAlerts is reached by marketplace.controller, which is unscoped',
+  inventory_summary: 'MarketplaceService.getInventorySummary is reached by marketplace.controller, which is unscoped',
+  inventory_transfer_stock: 'MarketplaceService.transferInventory is reached by marketplace.controller, which is unscoped',
+  reconcile_connect_statement_source:
+    "StatementSourceService.setSources is reached by finance.controller's statement-sources route, which is unscoped (the business owner's, D-132; GRAPH_ACTION_OWNER_ONLY)",
+  reconcile_list_statement_sources: 'reads Prisma directly; no service call',
+  // reconcile_list_unmatched: granted (revenue read) since PR195-KEY-GATES gated GET accounts/:accountId/bank-transactions
+  reconcile_sweep_statements: "reads Prisma directly; no service call (its sweep is the business owner's, D-132; GRAPH_ACTION_OWNER_ONLY)",
 };
 
 /** Why the derivation leaves a tool ungranted, in the words UNGRANTED uses. */
@@ -1492,6 +1544,14 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         // the report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
         finance_balance_sheet: 'read',
         finance_cashflow: 'read',
+        // PR195-BOOKS-DOORS (SEC-P195JS-1): the statement import and the auto-match need revenue write
+        finance_auto_match_bank: 'write',
+        // PR195-KEY-GATES (SEC-P195BW-4/5; D-57, D-146): the FinanceController Books reads they stand in for need revenue read
+        finance_customer_balance: 'read',
+        finance_list_action_items: 'read',
+        finance_list_bank_accounts: 'read',
+        // PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries needs revenue write
+        finance_post_journal_entry: 'write',
         finance_profit_and_loss: 'read',
         finance_revenue_breakdown: 'read',
         finance_tax_summary: 'read',
@@ -1504,6 +1564,11 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         payments_refund_charge: 'write',
         payments_revoke_link: 'write',
         payments_search_transactions: 'read',
+        // PR195-BOOKS-DOORS (SEC-P195JS-1): the auto-match and the manual match need revenue write
+        // PR195-KEY-GATES (SEC-P195BW-4): GET accounts/:accountId/bank-transactions needs revenue read
+        reconcile_list_unmatched: 'read',
+        reconcile_match_line: 'write',
+        reconcile_run_auto_match: 'write',
         reports_generate: 'read',
       },
       bookings: {
@@ -1527,6 +1592,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         finance_list_bills: 'read',
         finance_pay_bill: 'write',
         finance_view_payables: 'read',
+        // PR195-BOOKS-DOORS (SEC-P195JS-1): a purchase order's advance (its receipt posts the purchase) needs expenses write
+        inventory_advance_purchase_order: 'write',
       },
       automations: {},
       storefront: {},
@@ -1780,7 +1847,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       expect(dispatcherCalls().get(tool), `${tool} makes no service call of its own`).toEqual([]);
       const prisma = [...body.matchAll(/this\.prisma\.client\.([a-zA-Z]+)\.([a-zA-Z]+)\(/g)].map((m) => `${m[1]}.${m[2]}`);
       expect(prisma.length).toBeGreaterThan(0);
-      for (const p of prisma) expect(p, tool).toMatch(new RegExp(`^${model}\\.(findMany|findFirst|findUnique|count)$`));
+      for (const p of prisma) expect(p, tool).toMatch(new RegExp(`^${model}\\.(findMany|findFirst|findUnique|count|aggregate)$`));
       const rs = derived.byMethod.get(method) ?? [];
       expect(rs.length, `${method} backs a member route`).toBeGreaterThan(0);
       expect(rs.every((r) => r.scope?.endsWith(':read')), `${method} is a read route`).toBe(true);

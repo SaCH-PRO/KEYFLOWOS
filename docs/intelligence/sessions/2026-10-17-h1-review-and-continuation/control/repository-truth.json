@@ -1,0 +1,31 @@
+{
+  "collection_completed_at_utc": "2026-10-17T20:03:41.758Z",
+  "snapshot": {
+    "verified": true,
+    "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "source_main_on_main": true,
+    "pr": {
+      "number": 155,
+      "state": "open",
+      "merged": false,
+      "head_ref": "impl/kf-exec-auth-fail-closed-001"
+    }
+  },
+  "source_evidence": {
+    "main": {
+      "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/branches/main",
+      "sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "pr155": {
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155",
+      "head_sha": "a597c692fcb102de558dd832d88738c0402f69a2",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "draft": true
+    },
+    "ancestry": {
+      "method": "offline git merge-base ancestor check against fetched main",
+      "source_main": "ac3a6384417093f198bcc7d672b0dbc295db137c",
+      "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    }
+  }
+}

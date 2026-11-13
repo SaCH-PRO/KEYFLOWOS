@@ -15,7 +15,17 @@ follow the same contract:
   message.
 - Exit status: `0` done, `1` a database read or write failed, `2` bad arguments.
 
-They read `DATABASE_URL` from the repo-root `.env` (`tsx --env-file ../../.env`).
+They read `DATABASE_URL` from the environment, else from the repo-root `.env`
+(`tsx --env-file-if-exists=../../.env`; a variable already set wins over the
+file). The package.json scripts run tsx with `scripts/tsconfig.json`, which has
+no `paths`: under `apps/server/tsconfig.json` tsx resolved `@keyflow/db` to a
+`.d.ts` and every run died with `Cannot read properties of undefined (reading
+'$disconnect')`. `@keyflow/db` must be built (`pnpm --filter @keyflow/db
+build`). Proof: `apps/server/test/backfill-scripts-cli.integration.test.ts`
+runs each package.json script's dry run (BSC-01..04). On the production box,
+where the API image has no `scripts/` directory, mount it as
+`docs/development/owner-membership-backfill.md` describes; both scripts here
+import only `@keyflow/db`, so the same command works with their file names.
 Neither has been run against a real database. Running them in production is an
 operator decision: take a backup first and run the dry run against that
 database before `--apply`.

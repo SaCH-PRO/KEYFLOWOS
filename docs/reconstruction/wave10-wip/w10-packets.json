@@ -1,0 +1,524 @@
+{
+ "groups": {
+  "W10-A": [
+   [
+    {
+     "id": "W10-REOPEN-REVERSALS",
+     "title": "A reopened (refunded) invoice undoes its money effects and messages no one (D-102)",
+     "domain": "commerce",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-102: when a paid invoice is reopened (a full refund or reversal moves PAID/PARTIALLY_PAID back, the invoice.reopened path built in V1-29/VR-05; read test/invoice-status-events.integration.test.ts and its ten 'VR-05 census' it.todo cases first), undo its money effects: ReferralRewardService (conversion/referral-reward.service.ts) reverses the referrer's custom.referralRewardBalance and referralRewardsEarned credit and the referred contact's referralRewardEarned mark; CrmNetworkService (crm/crm-network.service.ts) reverses the referrer lead-score bump (and logs a referral.deal_reopened entry, no message); ProjectRevenueListener (projects/project-revenue.listener.ts) steps the invoice's projects back to the status they left (only if they are still in the status the paid move set); MarginOnPaymentListener (commerce/margin-on-payment.listener.ts) marks the margin snapshot reversed (no delete; no schema change: use an existing status/metadata field, or keep a reversal row if the model has one); ReviewSolicitationService (conversion/review-solicitation.service.ts) cancels a review-request job not yet sent. KEEP (live pins titled D-102): messages already sent (InvoiceReceiptListener, WhatsappNotificationsListener: the reopen messages no one), attribution history (StorefrontInvoiceAttributionListener, JourneyListenerService), GamificationListener's firstSaleMade, FlowListener's booking confirmation and notifications, and AiListener/AgentTriggerService (no invoice.reopened trigger fires a message). Every reversal is idempotent (a reopen event redelivered or a second reopen reverses once) and is skipped when the paid effect never ran. Listen on the existing reopen event; add none. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/conversion/referral-reward.service.ts",
+      "apps/server/src/modules/crm/crm-network.service.ts (reopen handler only)",
+      "apps/server/src/modules/projects/project-revenue.listener.ts",
+      "apps/server/src/modules/commerce/margin-on-payment.listener.ts",
+      "apps/server/src/modules/conversion/review-solicitation.service.ts",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "test/invoice-status-events.integration.test.ts: the ten VR-05 census it.todo cases become live (reversals RED on the base; keep-pins green, titled D-102)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: invoice-status-events, payments-refund suites, referral, crm-network, projects, margin and review-solicitation specs"
+     ],
+     "prefix": "v96a_"
+    },
+    {
+     "id": "W10-REFUND-CHARGE-DOOR",
+     "title": "An operator or KEY refund posts through the refund door (SOT-10b, V1-29 refund convention)",
+     "domain": "payments",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "V1 scope item SOT-10b (it.todo in test/stripe-ops-tenancy.integration.test.ts) and the money-state-writer-inventory 'unposted' entry for payments-ops.service.ts#refundCharge (owner V1-29-DM-REFUND-CONVENTION): refundCharge writes a negative REFUNDED row after the provider refunded, with no reversal of the original posting, and Stripe's refund.created webhook then finds the row by its refund id and posts nothing. Route refundCharge through the refund door: row + onPaymentRefunded posting in one transaction, as PaymentsService.createRefundWithPosting does, and make the webhook's later refund.created idempotent against it (posts once in total). The invoice reopens per D-14 / D-102 through the same path. Update money-state-writer-inventory.spec.ts: refundCharge moves from 'unposted' (with its todo) to the door. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/payments/payments-ops.service.ts (refundCharge only)",
+      "apps/server/src/modules/payments/payments.service.ts (refund door reuse only)",
+      "apps/server/src/modules/commerce/money-state-writer-inventory.spec.ts (that entry)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "stripe-ops-tenancy SOT-10b live; a case that refund.created after refundCharge posts nothing more (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: stripe-ops-tenancy, money-state-writer-inventory.spec, payments refund suites, invoice-status-events"
+     ],
+     "prefix": "v96g_"
+    },
+    {
+     "id": "W10-STORE-PAYMENT-INTENT",
+     "title": "A cash or manual storefront checkout intent no longer writes an order id into invoice_id (writer inventory)",
+     "domain": "payments",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "money-state-writer-inventory 'no-money' todo for payments.service.ts#createStorePayment (owner V1-33-PUB-CHECKOUT-RETRY-OFFLINE): the PENDING checkout intent of a CASH / MANUAL storefront order puts the MarketplaceOrder id in payments.invoice_id, which has a foreign key to invoices, so the generic checkout with a cash or manual gateway answers 500, and nothing settles or retires a PENDING intent. Fix without a schema change: write no Payment intent for a storefront order (the order row already carries its payment state; StoreOrderService.completeCheckout writes the settled row through the door), or bind it through an existing order-reference field if Payment has one; make the generic cash/manual checkout answer success (or a clean 400 if the gateway cannot serve it), never 500. Update money-state-writer-inventory.spec.ts. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/payments/payments.service.ts (createStorePayment and its caller only)",
+      "apps/server/src/modules/commerce/money-state-writer-inventory.spec.ts (that entry)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "a case in storefront-checkout-retry or a new suite: the generic checkout with a CASH gateway for a storefront order does not 500 and writes no orphan PENDING row; the offline completion still settles once (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: storefront-checkout-retry, storefront-paid-event, money-state-writer-inventory.spec"
+     ],
+     "prefix": "v96h_"
+    },
+    {
+     "id": "W10-WIPAY-KEY",
+     "title": "WiPay only with the business's own key, and every WiPay success is keyed (D-105, SEC-V33-2, PC-11b)",
+     "domain": "payments",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-105: WiPay checkout is offered only to a business that has connected its own WiPay key; tenants no longer share the platform's WiPay account. (1) Wherever WiPay is offered or a WiPay checkout starts (invoice pay links, storefront checkout, generic checkout; locate in payments.service.ts and the storefront/marketplace checkout), refuse WiPay (400 with a clear code, nothing written) for a business with no WiPay key of its own, and stop the platform-key fallback; the payment-method lists the payer sees omit WiPay for such a business. (2) SEC-V33-2 (it.todo in test/storefront-checkout-retry.integration.test.ts): the storefront WiPay success callback (payments.service.ts handleWipayCallback, storefront_order branch) accepts md5(transaction_id+order_id+total+status) with no secret, so a forged success settles an order: verify it with the same keyed proof the invoice path uses (md5(transaction_id + total + the BUSINESS's API key), V1-05), refuse otherwise. (3) PC-11b (it.todo in test/payments-provider-callbacks.integration.test.ts): with no shared key, a verified success can only be booked against a payable of the business whose key proved it; make that case live (a success proved with business A's key is refused for business B's payable). Update the payment settings copy if it promised the platform account. No real WiPay calls. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/payments/payments.service.ts (WiPay paths only)",
+      "the storefront / marketplace checkout WiPay offer (locate)",
+      "the payment-method list builders that offer WiPay (locate)",
+      "apps/web payment settings copy and method pickers (only if they assume the platform account)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "storefront-checkout-retry SEC-V33-2 live; payments-provider-callbacks PC-11b live; a case that a keyless business is not offered WiPay and a WiPay checkout for it is refused (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: storefront-checkout-retry, payments-provider-callbacks, pay-link-token-gate, storefront suites, web payment settings tests"
+     ],
+     "prefix": "v96d_"
+    },
+    {
+     "id": "W10-PAYPAL-CURRENCY",
+     "title": "PayPal is not offered for currencies PayPal does not support (D-106, PC-08b)",
+     "domain": "payments",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-106 (closes PC-08b in test/payments-provider-callbacks.integration.test.ts): PayPal does not support TTD, JMD, BBD, GYD or XCD (and any currency outside PayPal's documented list: keep one named constant of the supported codes, from PayPal's documentation, no API call). Do not offer PayPal for an invoice, pay link or storefront order in an unsupported currency: the server's payment-method lists omit it, a PayPal order/capture for one is refused 400 before PayPal is called, and the payer page shows which methods can pay it; the web payment settings say why PayPal is missing for the business currency when it is unsupported. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/payments/ PayPal order/capture paths (locate)",
+      "the payment-method list builders (locate)",
+      "apps/web pay page and payment settings (PayPal availability copy only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "payments-provider-callbacks PC-08b live; a case per surface that a TTD payable is not offered PayPal and a PayPal order for it is refused before any call; USD control unchanged (RED on the base); a web case for the settings note"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: payments-provider-callbacks, pay-link suites, storefront suites, the web pay page and settings tests"
+     ],
+     "prefix": "v96e_"
+    }
+   ],
+   [
+    {
+     "id": "W10-CLAIM-LEASE",
+     "title": "A stranded KEY idempotency claim is taken over after 15 minutes (D-103)",
+     "domain": "key",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-103 (closes V1-19 review CR-V19-2; it.todo in test/key-idempotency-claim.integration.test.ts 'a claim stranded by a crash between check() and complete()/fail() is held for good'): in key-idempotency.service.ts a claim still open (not completed, failed or released) 15 minutes after it was taken can be taken over by the next check() for the same business and idempotency key: the takeover is atomic (a conditional update on the claim row so two retries cannot both take it), the new holder gets a new claimId (the old holder's complete()/fail() then binds to nothing and reports so), and the takeover writes an audit entry (the existing KEY audit/execution log; name the old claim and its age). A completed claim is never re-run (check() keeps answering its stored result). The 15 minutes is a named constant; no schema change (use the claim row's existing created/updated timestamp). Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/key-cortex/key-idempotency.service.ts",
+      "its callers only if the takeover result needs handling (locate)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "test/key-idempotency-claim.integration.test.ts: the stranded-claim todo live (a claim older than 15 min is taken over once under two concurrent retries; a 14-minute claim is not; a completed claim is never re-run; the stale holder's complete() binds nothing) (RED on the base); key-idempotency.service.spec.ts cases"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: key-idempotency-claim, key-idempotency.service.spec, key-plan-authority"
+     ],
+     "prefix": "v96b_"
+    },
+    {
+     "id": "W10-MARKPAID-ACTOR-REQUIRED",
+     "title": "markInvoicePaid refuses a call with no actor and no tenant (RA-G16-01 service half)",
+     "domain": "commerce",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "RA-G16-01 (service half; DEFERRED to INGRESS-001 under D-05, it.todo in test/revenue-authorization.integration.test.ts): commerce.markInvoicePaid called directly with no actor and no tenant still resolves. The RA-G16-01 census shows no production caller needs that; make the service refuse a call that names neither (throw before any read or write), keeping the legacy /webhooks/stripe path D-05 authorized (it passes through the audited mark-paid door with its system actor: confirm it names one) and every existing caller unchanged. The RA-G16-01 census case (RA-G16-01 in the same suite) must stay green. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/commerce/commerce.service.ts (markInvoicePaid entry guard only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "revenue-authorization RA-G16-01 (service half) live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: revenue-authorization (manifest), payments-actor, mark-paid suites, d46-write-routes.spec, key-dispatcher-tenant"
+     ],
+     "prefix": "v96j_"
+    },
+    {
+     "id": "W10-STORE-ORDER-PAID",
+     "title": "A storefront order is marked paid only by revenue write through the paid door (D-112, V18-T2b, V18-T2c)",
+     "domain": "commerce",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-112 (it.todo V18-T2c in test/storefront-paid-event.integration.test.ts; review STL-SEC-1): a STANDARD storefront order not created paid may be marked PAID (PATCH .../status with paymentStatus, and the fulfilment mark_paid action) only by a member with revenue write, and only through the audited paid door (payment row through the ledger door, posting, actor named; reuse what StoreOrderService.completeCheckout / the offline completion uses); anyone else gets 403 with nothing written. Fulfilment status changes stay open. Classify any new revenue:write handler in d46-write-routes.spec.ts. Also V18-T2b (STL-SEC-2 / CR-W9SPL-1): CommerceIntegrationService.handleOrderPaid (STANDARD branch), ai.listener, journey-listener.service and the calendar orders.listener act on store_order.paid without reading the stored paymentStatus: confirm PAID before acting, as W9 made the three other listeners do. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/marketplace/marketplace.service.ts and marketplace.controller.ts (paid transitions only)",
+      "the four store_order.paid listeners named (locate; handlers only)",
+      "apps/server/src/modules/commerce/d46-write-routes.spec.ts (classification only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "storefront-paid-event V18-T2b and V18-T2c live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: storefront-paid-event, storefront suites, marketplace suites, d46-write-routes.spec, revenue-authorization (manifest)"
+     ],
+     "prefix": "v96p_"
+    }
+   ],
+   [
+    {
+     "id": "W10-OWNER-MEMBERSHIP",
+     "title": "Membership is the one access rule; an operator backfill creates missing OWNER rows (D-104)",
+     "domain": "identity",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-104 (closes [BRS-12] in test/books-read-scope.integration.test.ts): membership is the single rule for business access. Today userCanAccessBusiness (core/auth/business.guard.ts) admits Business.ownerId OR a Membership, and ensureAccess-style helpers (locate every 'ownerId: userId' access predicate: about 21 non-spec sites) do the same, while ModuleScopeGuard and D-73 refuse an ownerId-only owner. (1) Build an OPERATOR script (beside the other operator scripts; dry-run by default, --apply writes; idempotent; prints counts only) that creates the missing OWNER Membership for every business whose ownerId user has none (same row shape the identity bootstrap writes). (2) Align the access predicates to membership only. (3) Census the test fixtures that create a business with ownerId and no Membership and rely on being admitted: update each fixture to create the OWNER membership too (a fixture change, never a weakened assertion; list them in deviations). Check the bootstrap/onboarding path always writes the OWNER membership (it should: if a path creates a business without one, fix that path in this packet). BRS-12 becomes a live case: the ownerId-only owner is refused on the Books reads and everywhere else, and is admitted after the backfill. Run every suite whose fixtures you change and the suites that use BusinessGuard most (contacts-visibility, identity-boundary, revenue-authorization) \u2014 this packet has a wide blast radius: also run apps/server/test/*.integration.test.ts files that grep shows creating businesses with ownerId and no membership. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/core/auth/business.guard.ts",
+      "the other ownerId access predicates (locate; predicate lines only)",
+      "the new operator script",
+      "test fixtures that need the OWNER membership (fixture setup only)",
+      "docs/development (operator script note)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "test/books-read-scope.integration.test.ts [BRS-12] live; a new suite with this packet's prefix for the backfill script (dry-run writes nothing, --apply creates exactly the missing OWNER rows, idempotent) and the guard (an ownerId-only owner is refused by BusinessGuard, admitted after the backfill) (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: books-read-scope, the new suite, contacts-visibility (manifest), identity-boundary, revenue-authorization, and every suite whose fixture changed"
+     ],
+     "prefix": "v96c_"
+    }
+   ]
+  ],
+  "W10-B": [
+   [
+    {
+     "id": "W10-RISC-RESET",
+     "title": "A password reset is the only way back to password sign-in after a cutoff (D-113)",
+     "domain": "identity",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-113 (extends D-101; reviews SEC-W9RPC-1/2, CR-W9RPC-2): after a sign-in cutoff, a password session is refused until the user completes a password reset through KEYFLOW after the cutoff, even after a Google/emailed-link sign-in cleared the rest; Google and emailed-link sessions are admitted meanwhile. (1) IdentityPasswordService.completeReset (identity-password.service.ts) records, under the User row lock, that the password was reset after the cutoff (e.g. User.metaData.passwordResetAfterCutoffAt; no schema change) and also clears the cutoff restriction (recordSignInCutoffCleared, exported from auth.middleware.ts); (2) auth.middleware.ts admits a post-cutoff password session only if its authentication time is after that reset record; (3) CR-W9RPC-2: the login/refresh response for a refused password session names a code the web can show ('password reset required after a security event'), in identity.controller.ts, and the web sign-in shows it with the reset link (reuse the existing reset page). (4) Fix the stale 'there is no backfill' comments in risc.service.ts (W9-IDENTITY-BACKFILL-SCRIPT exists) and export RiscService's endsSessions classification so the backfill script imports it instead of copying. Update docs/auth-pathway.md. The it.todo cases W9 left in test/risc-signin-cutoff.integration.test.ts become live. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/identity/identity-password.service.ts (completeReset only)",
+      "apps/server/src/core/auth/auth.middleware.ts",
+      "apps/server/src/modules/identity/identity.controller.ts (refusal code only)",
+      "apps/server/src/modules/risc/risc.service.ts (comments and the endsSessions export only)",
+      "the W9 backfill script (import only)",
+      "apps/web sign-in page (refusal message only)",
+      "docs/auth-pathway.md (RISC section)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "risc-signin-cutoff.integration.test.ts: the W9 it.todo cases live; a password session after a Google clearing but before a reset is refused, after the reset admitted (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: risc-signin-cutoff, supabase-admin.service.test, auth.middleware specs, identity-password suites, identity-boundary, the web sign-in tests"
+     ],
+     "prefix": "v96q_"
+    },
+    {
+     "id": "W10-GOOGLE-DOORS-REST",
+     "title": "The last Google sync doors are owner-only (D-99: V94D-T05, T06, T07)",
+     "domain": "connectors",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-99 (every Google connection is started, synced and disconnected only by the business owner). W9-GOOGLE-DOORS-SERVER left three it.todo cases in test/google-consent-owner.integration.test.ts: [V94D-T05] POST /connect/businesses/:b/contacts/sync (Google Contacts) is not gated: gate it with assertGoogleConnectOwner AND, in the same change, re-point the five STAFF Google Contacts cases in test/connect-sync-actor.integration.test.ts (SEC-D92R-2 x2, SEC-W6CTM-2 x2, CR-CTM-3) to the owner or to the Outlook source, keeping their ids and what they prove (retitle naming D-99; update any manifest that lists them); [V94D-T06] drive-intake.controller.ts (the Drive intake scan) and the KEY tool connect.scanDrive (key-tool-registry.service.ts) start a Google Drive sync for any member: owner-only (KEY: the driving member must be the owner; a refusal envelope like the other KEY refusals); [V94D-T07] POST /calendar/businesses/:b/sync/google/temporal-flow syncs Google Calendar: owner-only (PATCH sync/settings stays open). Check the web callers show the refusal (W9-GOOGLE-WEB-403 pattern). Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/connect/connect.controller.ts (contacts/sync only)",
+      "apps/server/test/connect-sync-actor.integration.test.ts (the five cases' actor only)",
+      "the drive intake controller (locate: drive-intake.controller.ts)",
+      "the KEY tool registry connect.scanDrive entry (locate: key-tool-registry.service.ts)",
+      "apps/server/src/modules/calendar/calendar.controller.ts (temporal-flow only)",
+      "apps/web callers of those routes (refusal display only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "google-consent-owner [V94D-T05], [V94D-T06], [V94D-T07] live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: google-consent-owner, connect-sync-actor, gmail-connect-binding (manifest), job-role-tool-families.spec, calendar suites"
+     ],
+     "prefix": "v96l_"
+    }
+   ],
+   [
+    {
+     "id": "W10-CORTEX-CHAT-SCOPE",
+     "title": "KEY chat reads only the member's memory and gates every registry action like plans do (W9 cortex residuals)",
+     "domain": "key",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Residuals of W9-KEY-CORTEX-AUDIT and W9-MONEY-REPORTS-KEY (read the it.todo cases they left in test/key-cortex-action-audit.integration.test.ts and money-reports-key-parity.spec.ts): (1) key-cortex-query-pipeline.service.ts processQuery and its stream path call memoryRetrieval.retrieveContext with no userId and render the result into the POST /cortex/chat system prompt: pass the member so episodic memory is the member's own (the rule W9 applied in buildMemoryContext); (2) SEC-W9MRK-3: the chat path runs registry actions without the module-scope check plans use (cortexCommandRefusal / memberPlanStepScopeRefusal): apply the same refusal on the chat path; (3) CR-W9KCA-3: carry the session and correlation ids through key-cortex-efferent-bridge.service.ts so the CortexActionLog row names the command thread; (4) SEC-W9KCA-3 / CR-W9KCA-2: name the plan-queue or on-behalf-of member on the organ CortexActionLog row with an audit-only actor field in key-cortex-tool-registry.service.ts, without making the ledger record it as a human action. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+      "apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts",
+      "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts (audit actor only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "the W9 residual it.todo cases in key-cortex-action-audit and money-reports-key-parity live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: key-cortex-action-audit, money-reports-key-parity.spec, key-dispatcher-tenant, key-plan-authority, job-role-tool-families.spec"
+     ],
+     "prefix": "v96r_"
+    },
+    {
+     "id": "W10-KEY-PLAN-SCOPE",
+     "title": "Explicit revenue none binds ADMIN plan steps; execution logs follow the plan read rule (D-114, SEC-W9MRK-1/2)",
+     "domain": "key",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-114 (amends D-71 for explicit 'none' only): (SEC-W9MRK-1) key-cortex-plan-authority.ts memberPlanStepScopeRefusal and KeyCortexPlannerService.assertMemberSteps refuse money steps (finance.generate_pnl, analytics.create_report / export_report, invoice actions) to an ADMIN whose revenue scope is explicitly 'none'; ADMINs with default scopes keep D-71. (SEC-W9MRK-2) graph-actions.controller.ts planStepReadRule, which GET ai/execution-logs reuses through visibleExecutionLogs, must apply the same money rule so a revenue-none member is not served money step logs. Turn the it.todo cases W9-MONEY-REPORTS-KEY left in money-reports-key-parity.spec.ts live. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/key-cortex/key-cortex-plan-authority.ts",
+      "the planner service assertMemberSteps (locate)",
+      "the graph actions controller planStepReadRule only (locate: graph-actions.controller.ts)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "money-reports-key-parity.spec.ts residual it.todo cases live; a key-plan-authority case for the ADMIN explicit-none refusal and a default-scope ADMIN control (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: money-reports-key-parity.spec, key-plan-authority, key-dispatcher-tenant"
+     ],
+     "prefix": "v96s_"
+    },
+    {
+     "id": "W10-DISPATCH-STATUS",
+     "title": "KEY tool refusals keep their HTTP status through the orchestrator (SEC-W9DC-1, QW-07b)",
+     "domain": "key",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "SEC-W9DC-1 (it.todo QW-07b in test/key-plan-authority.integration.test.ts): through FlowOrchestratorService.executeToolDirectly (and executeTool), a tool's refusal reaches ActionDispatcherService as a plain Error and its status is lost, so a member's 404/403 refusals still count toward its own business's circuit. Make both rethrow an HttpException carrying the refusal's status (keep the envelope callers see unchanged), so W9's non-retryable-4xx rule runs in production. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/flow/flow-orchestrator.service.ts (executeTool / executeToolDirectly error mapping only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "key-plan-authority QW-07b live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: key-plan-authority, action dispatcher specs, key-dispatcher-tenant, flow-orchestrator specs"
+     ],
+     "prefix": "v96t_"
+    }
+   ],
+   [
+    {
+     "id": "W10-MONEY-SIGNALS-REST",
+     "title": "The remaining money-signal and visibility leaks in CRM AI and highlights (SEC-W9MR-2/3/4, D-100, D-63)",
+     "domain": "crm",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Residuals of W9-MONEY-RANKING (read the it.todo cases it left in test/money-signals.integration.test.ts): (SEC-W9MR-3) CrmAiService.revenueOpportunityScan and its crm-ai.controller.ts route serve money signals to a member without revenue read: withhold (D-100) as GET contacts does; (SEC-W9MR-4) bulkReengagementSuggestions ranks/serves by money terms for that member: money-free ordering, withheld fields; (highlights) the highlights segments (contacts and counts) and timeline are read for the whole business, and a revenue reader's cards and actions name contacts they may not open: apply the D-63 contact rule (visibilityClause) to every card, count and timeline entry served; (SEC-W9MR-2 remainder) buildTimeline's own take:10 events query lets money-type ContactEvent rows take places for a revenue-none member: filter them in the query (crm-timeline.service.ts buildTimeline only). OWNER output unchanged. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/crm/crm-ai.service.ts (revenueOpportunityScan, bulkReengagementSuggestions)",
+      "apps/server/src/modules/crm/crm-ai.controller.ts (pass the viewer only)",
+      "apps/server/src/modules/crm/crm-stats.service.ts (highlights only)",
+      "apps/server/src/modules/crm/crm-timeline.service.ts (buildTimeline only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "money-signals.integration.test.ts: the W9 residual it.todo cases live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: money-signals, crm.e2e, contacts-visibility (manifest), crm-contact-routes-visibility, evidence-feed"
+     ],
+     "prefix": "v96m_"
+    },
+    {
+     "id": "W10-ADVISOR-TIMELINE",
+     "title": "The AI advisor chat reads only the timeline the member is served (TS-13e, D-63)",
+     "domain": "ai",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "SEC-W9TO-2 (it.todo TS-13e in test/timeline-scope.integration.test.ts): AiAdvisorService.chat / getBusinessContext and AiController.chat build the prompt from the business's timeline rows and figures for any member. Pass a TimelineViewer and filter the prompt's rows and figures with the timeline rule, as W7-BRIEFINGS-REST did for generateDailyBriefing (revenue figures withheld from a revenue-none member; rows naming a contact the member may not open left out). OWNER unchanged. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "the AI advisor service (locate: AiAdvisorService chat / getBusinessContext)",
+      "apps/server/src/modules/ai/ai.controller.ts (chat: pass the viewer only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "timeline-scope TS-13e live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: timeline-scope, ai suites"
+     ],
+     "prefix": "v96v_"
+    }
+   ]
+  ],
+  "W10-C": [
+   [
+    {
+     "id": "W10-LOW-RUNWAY",
+     "title": "The low-runway warning names other-currency cash (D-107, CP-18)",
+     "domain": "finance",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Owner ruling D-107 (closes CP-18 in test/cash-position.integration.test.ts): the LOW_RUNWAY action (finance-overview.service.ts and the OS command center / safe-to-spend that compute it: locate) stays computed from business-currency cash, and its text states when other-currency cash exists, listing each currency's amount unconverted (no exchange rate), or says that figure is withheld when the viewer may not read it. Never a silent low-runway alarm beside foreign reserves. Wave 9's W9-FINANCE-OVERVIEW (CP-17) already reports other-currency cash apart on the overview: reuse its fields. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/finance/finance-overview.service.ts (LOW_RUNWAY only)",
+      "the other LOW_RUNWAY producers (locate)",
+      "apps/web readers of the action text (only if typed)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "cash-position CP-18 live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: cash-position, timeline-scope, finance suites"
+     ],
+     "prefix": "v96f_"
+    },
+    {
+     "id": "W10-BOOKS-EXPORTS",
+     "title": "Accountant pack and Books view handle every currency apart (CR-BSX-03, BS-CUR-03)",
+     "domain": "reports",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "(CR-BSX-03, it.todo in test/commerce-currency.integration.test.ts) the accountant pack's balance-sheet.pdf adds currencies together (357 = USD 277 + TTD 80), and its P&L, cashflow and trial balance group by account only: report each currency apart, as the on-screen statements and the W9 balance-sheet exports do (D-13), in finance/accountant-export.service.ts. (BS-CUR-03) apps/web/src/app/app/reports/components/BooksReportView.tsx (about lines 226-229) says 'The CSV and PDF exports carry the {currency} sheet only', which W9-BALANCE-SHEET-EXPORT made false: reword it to what the exports now carry and update its pin BS-CUR-03 in books-balance-sheet-currency.test.tsx. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/finance/accountant-export.service.ts",
+      "apps/web/src/app/app/reports/components/BooksReportView.tsx (that note only)",
+      "the BS-CUR-03 web test",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "commerce-currency CR-BSX-03 live (RED on the base); BS-CUR-03 updated"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: commerce-currency, accountant export suites, the books web tests"
+     ],
+     "prefix": "v96n_"
+    }
+   ],
+   [
+    {
+     "id": "W10-QUALIFICATION-PUBLIC",
+     "title": "The public qualification recommender 404s a closed store and returns only the public product projection (SEC-V123-3)",
+     "domain": "catalog",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "V1 scope item (it.todo in test/public-catalog-projection.integration.test.ts, review SEC-V123-3): the public qualification-recommend route (qualification.service.ts scoreAndRecommend) lists a closed store's active products with executionMeta. Make it answer 404 for a closed store (as the other public catalog routes V1-23 bound do) and return each product through the same public product projection the storefront routes use (which leaves out executionMeta and other internal fields). If the recommender needs executionMeta to score, read it server-side and never return it. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "the qualification service and its public controller (locate: qualification.service.ts)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "public-catalog-projection: that todo live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: public-catalog-projection, qualification specs, storefront suites"
+     ],
+     "prefix": "v96i_"
+    },
+    {
+     "id": "W10-BOOKING-BUFFER",
+     "title": "Slots, booking and reschedule agree on the buffer (CR-W9KAT-1)",
+     "domain": "bookings",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "CR-W9KAT-1 (W9-KEY-AVAILABILITY-TZ fixed only the KEY adapter): BookingsService.getAvailableSlots ignores the service buffer when fitting a start into business hours, createBooking counts it and rescheduleBooking does not, and the public slots route has the same mismatch. Make the picker, createBooking, rescheduleBooking and the public slots route use one buffer rule, then remove the adapter-side filter W9 added (the adapter reads the corrected picker). Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/server/src/modules/bookings/bookings.service.ts (slot, create and reschedule buffer handling only)",
+      "the public slots route (locate)",
+      "apps/server/src/modules/key-cortex/adapters/bookings-adapter.service.ts (remove the W9 filter only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "a case in booking-concurrency or bookings suites: a slot the picker offers is bookable and reschedulable, and none it refuses is offered, with a buffer at the end of hours (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: booking-concurrency, bookings suites, public booking suites, key adapter specs"
+     ],
+     "prefix": "v96u_"
+    },
+    {
+     "id": "W10-WEB-CLIENT-MISSING-ID",
+     "title": "The web client refuses a missing contact id before fetching (api-empty-id-segment)",
+     "domain": "web",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "DEFERRED it.todo in apps/web/src/lib/__tests__/api-empty-id-segment.test.ts: fetchContactDetail('.', 'b1') (or '') sends through lib/client.ts's private schema apiGet, which calls fetch itself and checks only namesNoBusiness, never namesMissingId, so a missing contact id reaches the list route. Add the namesMissingId check there (the same refusal the other lib callers use). Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "apps/web/src/lib/client.ts (the private apiGet only)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "api-empty-id-segment.test.ts that todo live (RED on the base)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: api-empty-id-segment and the lib client tests, web tsc"
+     ],
+     "prefix": "v96k_"
+    }
+   ],
+   [
+    {
+     "id": "W10-DATA-CLEANUP-SCRIPTS",
+     "title": "Operator scripts: cross-tenant custom-field values and pre-W9 timeline rows (SF-1, D-115)",
+     "domain": "data",
+     "wave": "W10 (FOLLOW11)",
+     "rationale": "Two operator scripts (beside the other operator scripts; dry-run by default printing counts only, --apply writes, idempotent; NOT run against any real database in this packet): (1) SF-1 from W9-CUSTOM-FIELDS-TENANT: delete contact_custom_field_values rows whose contact and definition belong to different businesses (DELETE FROM contact_custom_field_values v USING contacts c, custom_field_definitions d WHERE v.contact_id=c.id AND v.definition_id=d.id AND c.business_id<>d.business_id); (2) owner ruling D-115 (SEC-W9TO-1, it.todo TS-13d in test/timeline-scope.integration.test.ts): backfill activities.contact_id for the pre-W9 rows of the two text-only writers (KEY send_invoice 'Invoice <n> sent to <name>', entity invoice; message_intake.approved, entity message_intake) from the invoice's or intake's contact in the SAME business; a row whose source is gone is marked so the timeline serves it only to OWNER and ADMIN (use an existing column/metadata the timeline rule already reads for that; if none exists, read timeline-visibility.ts and report the smallest rule change in deviations without making it). Document both in docs/development. Turning an it.todo live: keep its id at the start of the title and add '(<packet id>, <ruling>, was it.todo)'; a todo that a later packet already satisfied becomes a live regression pin with no source change (say so). A todo whose behaviour the ruling keeps as it is becomes a live pin of that behaviour titled with the ruling. Do NOT edit scripts/proof-admission/release0-index.json (the integrator does).",
+     "write_set": [
+      "the two new operator scripts",
+      "apps/server/package.json (scripts entries only)",
+      "docs/development (operator notes)",
+      "scripts/proof-admission/manifests/*.json (only to declare or retitle cases, see the manifest rule)"
+     ],
+     "tests_first": [
+      "a new suite with this packet's prefix: seed cross-bound values and old text-only rows; dry-run writes nothing; --apply fixes exactly them, idempotently; a same-business control is untouched; TS-13d live (RED by absence)"
+     ],
+     "proof": [
+      "RED then green (or green-on-base pin, stated)",
+      "Green: the new suite, timeline-scope, contact-custom-field-names-tenant, fixture-prefix-registry.spec"
+     ],
+     "prefix": "v96o_"
+    }
+   ]
+  ]
+ },
+ "pools": {
+  "W10-A": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8
+  ],
+  "W10-B": [
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16
+  ],
+  "W10-C": [
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24
+  ]
+ }
+}

@@ -10,7 +10,9 @@
  *   - .agent-control/programme-state.yaml   THIS FILE'S SUBJECT. A derived
  *     machine projection of the two above. It may be stale. `authority_basis`
  *     names the newest authority message it incorporates.
- *   - docs/keyflow-intelligence-foundation  durable intent/checkpoint history.
+ *   - docs/intelligence/                    durable intent/checkpoint history,
+ *     in main since the 2026-11-13 tie-off (D-141) as a dated historical
+ *     record; formerly branch docs/keyflow-intelligence-foundation.
  *   - active-packet.yaml / claude-return.yaml   per-packet PR admission artifacts.
  *
  * The projection may summarize and accelerate a decision; it may never

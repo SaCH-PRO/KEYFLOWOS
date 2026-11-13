@@ -12,6 +12,7 @@ import {
   type TaxLiabilityRow, type TaxContributingInvoice,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 type Liab = TaxLiabilityRow;
 
@@ -52,6 +53,11 @@ export default function FinanceTaxPage() {
   const [exporting, setExporting] = useState(false);
   const [emailModal, setEmailModal] = useState<{ start: string; end: string } | null>(null);
   const [defaultAccountantEmail, setDefaultAccountantEmail] = useState<string | null>(null);
+  /**
+   * PR195-KEY-GATES (review finding SEC-P195BW-4; D-146): the tax liabilities are a Books read, revenue read on the
+   * server. A refused read is a refusal, not "No tax periods yet".
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
@@ -67,6 +73,13 @@ export default function FinanceTaxPage() {
 
   const load = useCallback(async (bid: string) => {
     const r = await fetchTaxLiabilities(bid);
+    const refused = moduleReadRefusal(r, "revenue", "the tax centre");
+    setRefusal(refused);
+    if (refused) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     if (r.error) {
       toast.error(r.error);
       setLoading(false);
@@ -208,6 +221,10 @@ export default function FinanceTaxPage() {
 
       {loading ? (
         <p className="text-sm text-muted-foreground p-4">Loading tax periods…</p>
+      ) : refusal ? (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {refusal}
+        </div>
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/50 bg-card/30 p-8 text-center">
           <Calculator className="w-8 h-8 mx-auto text-muted-foreground mb-2" />

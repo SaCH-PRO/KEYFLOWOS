@@ -1,0 +1,75 @@
+{
+  "purpose": "ONCE_SUCCESSFUL_PORTABILITY_RUN_PER_EXISTING_DIAGNOSTIC_NOT_A_FIX",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "node": "v24.19.0",
+  "source_pin": "HEAD and all 12 inspected source-file hashes verified before each successful diagnostic execution",
+  "successful_runs": [
+    {
+      "script": "probe.mjs",
+      "diagnostic_executions": 1,
+      "exit_code": 0,
+      "launch": "direct tool execution"
+    },
+    {
+      "script": "run-cli-probe.mjs",
+      "source_cli_executions": 1,
+      "exit_code": 0,
+      "launch": "approved subprocess-enabled tool execution, original full wrapper flow"
+    },
+    {
+      "script": "gate-step-probe.mjs",
+      "diagnostic_executions": 1,
+      "exit_code": 0,
+      "launch": "approved subprocess-enabled tool execution"
+    }
+  ],
+  "launch_failures_before_source_execution": [
+    {
+      "stage": "extra Node launcher",
+      "attempted_entrypoint": "probe.mjs",
+      "error": "spawnSync bundled Node EPERM",
+      "diagnostic_executed": false
+    },
+    {
+      "stage": "default-sandbox run-cli-probe.mjs",
+      "attempted_entrypoint": "auto-merge-admitted.mjs",
+      "error": "spawnSync bundled Node EPERM",
+      "source_cli_executed": false
+    }
+  ],
+  "original_result_comparisons": [
+    {
+      "file": "probe-result.json",
+      "matches_original_recorded_json": true
+    },
+    {
+      "file": "cli-probe-result.json",
+      "matches_original_recorded_json": true
+    },
+    {
+      "file": "cli-request-trace.json",
+      "matches_original_recorded_json": true
+    },
+    {
+      "file": "cli-source-result.json",
+      "matches_original_recorded_json": true
+    },
+    {
+      "file": "gate-step-result.json",
+      "matches_original_recorded_json": true
+    }
+  ],
+  "unsafe_cases_still_eligible": 12,
+  "preserved_boundary_controls_still_rejected": 6,
+  "mocked_cli_requests": 15,
+  "mocked_merge_requests": 1,
+  "gate_step_exit_codes": [
+    0,
+    0,
+    1
+  ],
+  "network_boundary": "Source CLI preloaded with global fetch replacement; every response synthetic, unexpected requests rejected, no passthrough; child receives only fake GitHub credentials and probe paths.",
+  "archived_admission_suite": "Original 39-pass, zero-skipped log copied unchanged; suite not rerun during packaging.",
+  "product_mutations": false,
+  "remote_mutations": false
+}

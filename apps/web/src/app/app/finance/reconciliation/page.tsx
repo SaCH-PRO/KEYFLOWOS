@@ -26,6 +26,7 @@ import {
   type ReconciliationRow,
 } from "@/lib/client";
 import { SkeletonGrid } from "../_overview-client";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 export default function FinanceReconciliationPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -45,10 +46,17 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
   const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
   const [showSession, setShowSession] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  /**
+   * PR195-KEY-GATES (review finding SEC-P195BW-4; D-146): the accounts and their statement lines are Books reads,
+   * revenue read on the server. A refused read is a refusal, not "No bank accounts yet".
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadAccounts = useCallback(async () => {
     const r = await fetchFinanceAccounts(businessId);
+    const refused = moduleReadRefusal(r, "revenue", "bank reconciliation");
+    if (refused) { setRefusal(refused); return; }
     if (r.error) { toast.error(r.error); return; }
     if (r.data) {
       const banky = r.data.items.filter((a) => ["BANK", "CASH", "PAYMENT_PROCESSOR", "CREDIT_CARD"].includes(a.type));
@@ -60,6 +68,8 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
   const loadSplit = useCallback(async (id: string) => {
     if (!id) return;
     const r = await fetchBankSplitView(businessId, id);
+    const refused = moduleReadRefusal(r, "revenue", "bank reconciliation");
+    if (refused) { setRefusal(refused); return; }
     if (r.error) { toast.error(r.error); return; }
     if (r.data) setSplit(r.data);
   }, [businessId]);
@@ -147,6 +157,14 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
   );
 
   if (loading) return <SkeletonGrid />;
+
+  if (refusal) {
+    return (
+      <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        {refusal}
+      </div>
+    );
+  }
 
   if (accounts.length === 0) {
     return (

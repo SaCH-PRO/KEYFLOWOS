@@ -1,5 +1,29 @@
 "use client";
 
+/**
+ * The General Journal (owner PR #195 part 3, PR195-PORT): manual double-entry
+ * adjustments, mounted at /app/finance/journal.
+ *
+ * Held to the head's rules (docs/reconstruction/BUILD-MAP-001.md):
+ *   - one currency per business (D-13): amounts are in the business currency
+ *     the settings name, and nothing else is offered; the posting door refuses
+ *     a manual journal in any other currency (V1-37), so the PR's currency
+ *     picker and exchange-rate check are not ported;
+ *   - the ledger keeps cash per chart row (V1-34): the door takes no
+ *     FinancialAccount, so the PR's per-line account picker is not ported;
+ *   - a refused journal read (403: revenue read, D-57; 503) says so, rather
+ *     than showing an empty journal, and offers no New Entry;
+ *   - posting needs revenue write (PR195-JOURNAL-SCOPE, CR-P195-4). The client
+ *     cannot know the member's scopes cheaply before it posts (no route
+ *     answers the caller's own module levels; the team list needs team read,
+ *     which STAFF lacks), so a refused post (403) is said as a refusal: an
+ *     alert, the form closed and New Entry withdrawn, never a silent toast.
+ *     PR195-BOOKS-DOORS (CRR-P195JS-2): only ModuleScopeGuard's revenue
+ *     refusal is that; any other 403 (BusinessGuard's transient "Unable to
+ *     verify business access") is a toast in the server's words, the form
+ *     and New Entry kept for a retry.
+ */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -9,6 +33,7 @@ import {
   BookOpen,
   Loader2,
   ArrowRightLeft,
+  ShieldAlert,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { formatCurrency } from "@/lib/currency";
@@ -16,10 +41,38 @@ import {
   fetchJournalEntries,
   createJournalEntry,
   fetchFinanceCoa,
+  fetchFinanceSettings,
   type JournalEntryRow,
   type ChartOfAccountRow,
 } from "@/lib/client";
 import { EmptyState } from "@/components/ui/empty-state";
+import { isModuleScopeRefusal } from "@/lib/module-access";
+
+interface JournalFormLine {
+  accountId: string;
+  debit: string;
+  credit: string;
+  memo: string;
+}
+
+const emptyLine = (): JournalFormLine => ({ accountId: "", debit: "", credit: "", memo: "" });
+
+/**
+ * Why a journal post was refused, as the member should hear it, when the refusal is the member's revenue
+ * access (ModuleScopeGuard's 403 naming revenue); else null, and the caller toasts the server's words.
+ */
+function postRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!isModuleScopeRefusal(res, "revenue")) return null;
+  return `You can't post journal entries in this business: posting to the books needs revenue write access. ${res!.error}`;
+}
+
+/** Why the journal could not be read, as the member should hear it; null when it was read. */
+function journalRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!res || !res.error) return null;
+  if (res.status === 403) return `You don't have access to the journal in this business. ${res.error}`;
+  if (res.status === 503) return `The journal is unavailable right now. ${res.error}`;
+  return `The journal could not be loaded. ${res.error}`;
+}
 
 export function BooksJournalTab() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -32,6 +85,10 @@ export function BooksJournalTab() {
 function JournalBody({ businessId }: { businessId: string }) {
   const [entries, setEntries] = useState<JournalEntryRow[]>([]);
   const [accounts, setAccounts] = useState<ChartOfAccountRow[]>([]);
+  const [currency, setCurrency] = useState<string>("TTD");
+  const [refusal, setRefusal] = useState<string | null>(null);
+  /** The server refused this member's post (403): they may read the journal, not write it. */
+  const [writeRefusal, setWriteRefusal] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,38 +96,34 @@ function JournalBody({ businessId }: { businessId: string }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [description, setDescription] = useState("");
   const [reference, setReference] = useState("");
-  const [lines, setLines] = useState<Array<{ accountId: string; debit: string; credit: string; memo: string }>>([
-    { accountId: "", debit: "", credit: "", memo: "" },
-    { accountId: "", debit: "", credit: "", memo: "" },
-  ]);
+  const [lines, setLines] = useState<JournalFormLine[]>([emptyLine(), emptyLine()]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [eRes, aRes] = await Promise.all([
+    const [eRes, aRes, settingsRes] = await Promise.all([
       fetchJournalEntries(businessId),
       fetchFinanceCoa(businessId),
+      fetchFinanceSettings(businessId).catch(() => ({ data: null, error: null })),
     ]);
-    if (eRes.data) setEntries(eRes.data.items);
-    if (aRes.data) setAccounts(aRes.data.items);
+    const refused = journalRefusal(eRes as { error?: string | null; status?: number });
+    setRefusal(refused);
+    setEntries(!refused && Array.isArray(eRes.data?.items) ? eRes.data.items : []);
+    if (Array.isArray(aRes.data?.items)) setAccounts(aRes.data.items);
+    const businessCurrency = typeof settingsRes.data?.currency === "string" ? settingsRes.data.currency.trim().toUpperCase() : "";
+    if (businessCurrency) setCurrency(businessCurrency);
     setLoading(false);
   }, [businessId]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
-  const totalDebit = useMemo(
-    () => lines.reduce((sum, l) => sum + (parseFloat(l.debit) || 0), 0),
-    [lines],
-  );
-  const totalCredit = useMemo(
-    () => lines.reduce((sum, l) => sum + (parseFloat(l.credit) || 0), 0),
-    [lines],
-  );
+  const totalDebit = useMemo(() => lines.reduce((sum, l) => sum + (parseFloat(l.debit) || 0), 0), [lines]);
+  const totalCredit = useMemo(() => lines.reduce((sum, l) => sum + (parseFloat(l.credit) || 0), 0), [lines]);
   const balanced = Math.abs(totalDebit - totalCredit) < 0.001;
 
-  const addLine = () => setLines((prev) => [...prev, { accountId: "", debit: "", credit: "", memo: "" }]);
+  const addLine = () => setLines((prev) => [...prev, emptyLine()]);
   const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i));
-  const updateLine = (i: number, patch: Partial<typeof lines[0]>) =>
+  const updateLine = (i: number, patch: Partial<JournalFormLine>) =>
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
   const handleSave = async () => {
@@ -80,6 +133,7 @@ function JournalBody({ businessId }: { businessId: string }) {
     if (activeLines.length < 2) { toast.error("At least 2 lines required"); return; }
 
     setSaving(true);
+    // No currency is sent: the posting door posts the business currency (D-13).
     const res = await createJournalEntry(businessId, {
       date,
       description: description.trim(),
@@ -93,6 +147,12 @@ function JournalBody({ businessId }: { businessId: string }) {
     });
     setSaving(false);
 
+    const refusedPost = postRefusal(res as { error?: string | null; status?: number });
+    if (refusedPost) {
+      setWriteRefusal(refusedPost);
+      setShowForm(false);
+      return;
+    }
     if (res.error) {
       toast.error(res.error);
       return;
@@ -101,10 +161,7 @@ function JournalBody({ businessId }: { businessId: string }) {
     setShowForm(false);
     setDescription("");
     setReference("");
-    setLines([
-      { accountId: "", debit: "", credit: "", memo: "" },
-      { accountId: "", debit: "", credit: "", memo: "" },
-    ]);
+    setLines([emptyLine(), emptyLine()]);
     load();
   };
 
@@ -125,30 +182,47 @@ function JournalBody({ businessId }: { businessId: string }) {
           <h2 className="text-sm font-semibold">General Journal</h2>
           <p className="text-xs text-muted-foreground">Manual double-entry adjustments</p>
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80"
-        >
-          <Plus className="w-3.5 h-3.5" /> {showForm ? "Cancel" : "New Entry"}
-        </button>
+        {!refusal && !writeRefusal && (
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80"
+          >
+            <Plus className="w-3.5 h-3.5" /> {showForm ? "Cancel" : "New Entry"}
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {refusal && (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{refusal}</span>
+        </div>
+      )}
+
+      {!refusal && writeRefusal && (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{writeRefusal}</span>
+        </div>
+      )}
+
+      {!refusal && !writeRefusal && showForm && (
         <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
-              <label className="text-[10px] font-medium uppercase text-muted-foreground">Date</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
+              <label htmlFor="journal-date" className="text-[10px] font-medium uppercase text-muted-foreground">Date</label>
+              <input id="journal-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
             </div>
             <div className="sm:col-span-2">
-              <label className="text-[10px] font-medium uppercase text-muted-foreground">Description</label>
-              <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Adjust prepaid insurance" className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
+              <label htmlFor="journal-description" className="text-[10px] font-medium uppercase text-muted-foreground">Description</label>
+              <input id="journal-description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Adjust prepaid insurance" className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
             </div>
           </div>
           <div>
-            <label className="text-[10px] font-medium uppercase text-muted-foreground">Reference #</label>
-            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional journal reference" className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
+            <label htmlFor="journal-reference" className="text-[10px] font-medium uppercase text-muted-foreground">Reference #</label>
+            <input id="journal-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional journal reference" className="w-full rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm" />
           </div>
+          <p className="text-[11px] text-muted-foreground">Amounts in {currency} (the business currency).</p>
 
           <div className="space-y-2">
             <div className="grid grid-cols-[1fr_100px_100px_1fr_auto] gap-2 text-[10px] font-medium uppercase text-muted-foreground">
@@ -161,6 +235,7 @@ function JournalBody({ businessId }: { businessId: string }) {
             {lines.map((line, i) => (
               <div key={i} className="grid grid-cols-[1fr_100px_100px_1fr_auto] gap-2 items-center">
                 <select
+                  aria-label={`Line ${i + 1} chart of account`}
                   value={line.accountId}
                   onChange={(e) => updateLine(i, { accountId: e.target.value })}
                   className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
@@ -171,6 +246,7 @@ function JournalBody({ businessId }: { businessId: string }) {
                   ))}
                 </select>
                 <input
+                  aria-label={`Line ${i + 1} debit`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -180,6 +256,7 @@ function JournalBody({ businessId }: { businessId: string }) {
                   className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm tabular-nums"
                 />
                 <input
+                  aria-label={`Line ${i + 1} credit`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -189,12 +266,17 @@ function JournalBody({ businessId }: { businessId: string }) {
                   className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm tabular-nums"
                 />
                 <input
+                  aria-label={`Line ${i + 1} memo`}
                   value={line.memo}
                   onChange={(e) => updateLine(i, { memo: e.target.value })}
                   placeholder="Memo"
                   className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
                 />
-                <button onClick={() => removeLine(i)} className="p-1.5 rounded-lg hover:bg-rose-500/10 text-muted-foreground hover:text-rose-500 transition-colors">
+                <button
+                  aria-label={`Remove line ${i + 1}`}
+                  onClick={() => removeLine(i)}
+                  className="p-1.5 rounded-lg hover:bg-rose-500/10 text-muted-foreground hover:text-rose-500 transition-colors"
+                >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -206,9 +288,9 @@ function JournalBody({ businessId }: { businessId: string }) {
 
           <div className="flex items-center justify-between pt-2 border-t border-border/30">
             <div className={`text-xs font-medium ${balanced ? "text-emerald-500" : "text-rose-500"}`}>
-              <span className="tabular-nums">Debits: {formatCurrency(totalDebit, "TTD")}</span>
+              <span className="tabular-nums">Debits: {formatCurrency(totalDebit, currency)}</span>
               <span className="mx-2">·</span>
-              <span className="tabular-nums">Credits: {formatCurrency(totalCredit, "TTD")}</span>
+              <span className="tabular-nums">Credits: {formatCurrency(totalCredit, currency)}</span>
               {!balanced && <span className="ml-2">(Unbalanced)</span>}
             </div>
             <button
@@ -223,7 +305,7 @@ function JournalBody({ businessId }: { businessId: string }) {
         </div>
       )}
 
-      {entries.length === 0 ? (
+      {refusal ? null : entries.length === 0 ? (
         <EmptyState icon={BookOpen} title="No journal entries yet" description="Manual adjustments, accruals, and corrections appear here." />
       ) : (
         <div className="space-y-2">
@@ -242,7 +324,7 @@ function JournalBody({ businessId }: { businessId: string }) {
                   <div key={e.id} className="flex items-center justify-between rounded-lg bg-background/60 px-2 py-1.5">
                     <span className="truncate">{e.account.name}</span>
                     <span className="tabular-nums font-medium">
-                      {e.debit > 0 ? `Dr ${formatCurrency(e.debit, entry.currency || "TTD")}` : `Cr ${formatCurrency(e.credit, entry.currency || "TTD")}`}
+                      {e.debit > 0 ? `Dr ${formatCurrency(e.debit, entry.currency || currency)}` : `Cr ${formatCurrency(e.credit, entry.currency || currency)}`}
                     </span>
                   </div>
                 ))}

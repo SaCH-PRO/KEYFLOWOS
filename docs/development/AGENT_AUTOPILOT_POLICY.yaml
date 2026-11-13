@@ -7,7 +7,11 @@ purpose: unattended packet progression without silent architectural decisions
 
 control_issue: 80
 derived_programme_state: .agent-control/programme-state.yaml
-canonical_intelligence_branch: docs/keyflow-intelligence-foundation
+# The intelligence corpus has been in main under docs/intelligence/ since the
+# 2026-11-13 open-PR tie-off (D-141), as a dated historical record. It was on
+# branch docs/keyflow-intelligence-foundation, which the tie-off archives and
+# deletes. The current plan is docs/reconstruction/BUILD-MAP-001.md.
+canonical_intelligence_branch: docs/intelligence/
 programme_dag: docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
 
@@ -17,7 +21,7 @@ state_authority:
   implementation_truth: repository, PR and CI evidence
   execution_authority: newest valid ChatGPT DIRECTIVE, REVIEW, HOLD or RESUME on github_issue_80
   derived_projection: .agent-control/programme-state.yaml
-  intent_and_checkpoint_history: docs/keyflow-intelligence-foundation
+  intent_and_checkpoint_history: docs/intelligence/   # in main since the 2026-11-13 tie-off (D-141); historical record
   packet_admission_artifacts:
     - .agent-control/active-packet.yaml
     - .agent-control/claude-return.yaml

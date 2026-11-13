@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { fromCents, toCents } from '../commerce/money';
 import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import { normalizeCurrency } from './posting.service';
 
 export interface SafeToSpendDto {
   /**
@@ -17,6 +18,12 @@ export interface SafeToSpendDto {
    * added to cashBalance nor counted in safeToSpend; empty when there is none.
    */
   otherCurrencyCash: OtherCurrencyCash[];
+  /**
+   * PR195-PORT (D-13): committed payroll (DRAFT and APPROVED runs) in another
+   * currency, by currency. Never added to payrollReserved nor counted in
+   * safeToSpend; empty when there is none.
+   */
+  otherCurrencyPayroll: OtherCurrencyCash[];
   taxReserved: number;
   billsDueNext30Days: number;
   payrollReserved: number;
@@ -42,7 +49,7 @@ export class SafeToSpendService {
 
     // V1-34 (CF-41): cash is the ledger's. FinancialAccount.currentBalance is
     // an opening snapshot that no payment, refund or expense ever moves.
-    const [cashPosition, taxPayableAccount, billsDue, reserveBuckets] = await Promise.all([
+    const [cashPosition, taxPayableAccount, billsDue, reserveBuckets, committedRuns] = await Promise.all([
       this.cashPosition.getCashPosition(businessId),
       this.coaSeeder.getBySystemKey(businessId, 'TAX_PAYABLE'),
       this.prisma.client.expense.findMany({
@@ -56,6 +63,14 @@ export class SafeToSpendService {
       this.prisma.client.cashReserveBucket.findMany({
         where: { businessId, status: 'ACTIVE' },
         select: { currentAmount: true, name: true },
+      }),
+      // PR195-PORT (owner PR #195 part 1): committed payroll, the runs approved or
+      // about to be and not yet paid. A PAID run's money has already left the
+      // ledger cash through its posting (mark-paid), so it is not reserved twice.
+      this.prisma.client.payrollRun.findMany({
+        where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+        select: { totalGross: true, currency: true, status: true },
+        orderBy: { periodStart: 'asc' },
       }),
     ]);
 
@@ -77,9 +92,33 @@ export class SafeToSpendService {
 
     const billsDueNext30Days = billsDue.reduce((sum, b) => sum + Number(b.amount ?? 0), 0);
 
-    // Payroll and debt schedules are not yet modeled; reserve these as 0 and
-    // surface that fact in the explanation so the KPI is not overstated.
-    const payrollReserved = 0;
+    // PR195-PORT (owner PR #195 part 1): the committed payroll reserve, in the
+    // business currency (integer cents, D-13). A run in another currency is
+    // named apart (otherCurrencyPayroll), never added or converted (D-13,
+    // V1-37c), as other-currency cash is. Debt schedules are not yet modeled;
+    // reserved as 0 and said so, so the KPI is not overstated.
+    const payrollCentsByCurrency = new Map<string, number>();
+    const payrollRunsByCurrency = new Map<string, number>();
+    // Review CR-P195-3: the DRAFT runs among them, in the business currency, named apart in the explanation
+    // (a draft is reserved but not yet approved; nothing voids one today, an owner question).
+    let draftCents = 0;
+    let draftRuns = 0;
+    for (const run of committedRuns) {
+      const code = normalizeCurrency(run.currency) || currency;
+      const cents = toCents(Number(run.totalGross ?? 0));
+      payrollCentsByCurrency.set(code, (payrollCentsByCurrency.get(code) ?? 0) + cents);
+      payrollRunsByCurrency.set(code, (payrollRunsByCurrency.get(code) ?? 0) + 1);
+      if (code === currency && run.status === 'DRAFT') {
+        draftCents += cents;
+        draftRuns += 1;
+      }
+    }
+    const payrollReserved = fromCents(payrollCentsByCurrency.get(currency) ?? 0);
+    const payrollRuns = payrollRunsByCurrency.get(currency) ?? 0;
+    const otherPayroll: OtherCurrencyCash[] = [...payrollCentsByCurrency.entries()]
+      .filter(([code, cents]) => code !== currency && cents !== 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([code, cents]) => ({ currency: code, amount: fromCents(cents) }));
     const debtPaymentsDue = 0;
 
     // Operating buffer: minimum 10% of cash or 500 currency units (in cents, D-13).
@@ -118,7 +157,22 @@ export class SafeToSpendService {
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,
     ];
 
-    explanation.push(`Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (not yet modeled)`);
+    explanation.push(
+      payrollRuns > 0
+        ? `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (${payrollRuns} committed run${payrollRuns === 1 ? '' : 's'})`
+        : `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (no unpaid runs)`,
+    );
+    if (draftRuns > 0) {
+      explanation.push(
+        `  - includes ${draftRuns} draft run${draftRuns === 1 ? '' : 's'} not yet approved: ${currency} ${fromCents(draftCents).toFixed(2)}`,
+      );
+    }
+    for (const o of otherPayroll) {
+      const runs = payrollRunsByCurrency.get(o.currency) ?? 0;
+      explanation.push(
+        `Payroll committed in ${o.currency}, not included (never added to ${currency}): ${o.currency} ${o.amount.toFixed(2)} (${runs} run${runs === 1 ? '' : 's'})`,
+      );
+    }
     explanation.push(`Debt payments due: ${currency} ${debtPaymentsDue.toFixed(2)} (not yet modeled)`);
     if (otherReserves > 0) explanation.push(`Other reserves: ${currency} ${otherReserves.toFixed(2)}`);
     if (reserveBuckets.length > 0) {
@@ -133,6 +187,7 @@ export class SafeToSpendService {
       cashBalance,
       cashBasis: cashPosition.basis,
       otherCurrencyCash: otherCash,
+      otherCurrencyPayroll: otherPayroll,
       taxReserved,
       billsDueNext30Days,
       payrollReserved,

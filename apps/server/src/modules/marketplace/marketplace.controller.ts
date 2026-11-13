@@ -1,9 +1,10 @@
 // @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Req, Res, UseGuards, Inject, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Req, Res, UseGuards, Inject, UploadedFile, UseInterceptors, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { MarketplaceService } from './marketplace.service';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
@@ -265,14 +266,36 @@ export class MarketplaceController {
     return this.marketplaceService.createPurchaseOrder(businessId, body);
   }
 
+  /**
+   * PR195-BOOKS-DOORS (review finding SEC-P195JS-1): a purchase order's lifecycle ends in the books. Its
+   * receipt (status RECEIVED, through this PATCH's status or POST .../advance) posts the stock bought
+   * (FulfillmentRoutingService -> ExpensePostingService.onPurchaseOrderReceived: DR inventory, CR payables,
+   * or CR bank when the order is paid), a payment out that is an expense by nature, so moving or editing
+   * one needs expenses write, the scope bills/:id/pay needs (ModuleScopeGuard, 403 before the handler).
+   * The guard passes a platform SUPER_ADMIN, and one who is not a member posts none of the business's
+   * money (D-46): assertPurchaseOrderMember refuses them, as FinanceController.ensureAccess does.
+   */
   @CrmRateLimit(10, 60_000)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Patch('businesses/:businessId/purchase-orders/:poId')
-  updatePurchaseOrder(
+  async updatePurchaseOrder(
     @Param('businessId') businessId: string,
     @Param('poId') poId: string,
     @Body() body: any,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertPurchaseOrderMember(req, businessId);
     return this.marketplaceService.updatePurchaseOrder(businessId, poId, body);
+  }
+
+  /** PR195-BOOKS-DOORS (D-46): the caller holds a Membership of the business (the purchase-order doors post its money). */
+  private async assertPurchaseOrderMember(req: { user?: { id?: string } } | undefined, businessId: string): Promise<void> {
+    const userId = req?.user?.id;
+    const member = userId
+      ? await this.prisma.client.membership.findUnique({ where: { userId_businessId: { userId, businessId } }, select: { id: true } })
+      : null;
+    if (!member) throw new ForbiddenException('No access to this business');
   }
 
   /**
@@ -328,13 +351,18 @@ export class MarketplaceController {
     return this.marketplaceService.getInventoryAlerts(businessId);
   }
 
+  /** PR195-BOOKS-DOORS (SEC-P195JS-1): expenses write, as PATCH purchase-orders/:poId (see updatePurchaseOrder). */
   @CrmRateLimit(10, 60_000)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'write')
   @Post('businesses/:businessId/purchase-orders/:poId/advance')
-  advancePurchaseOrderStatus(
+  async advancePurchaseOrderStatus(
     @Param('businessId') businessId: string,
     @Param('poId') poId: string,
     @Body() body: { status: 'SUBMITTED' | 'ACKNOWLEDGED' | 'SHIPPED' | 'RECEIVED' },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertPurchaseOrderMember(req, businessId);
     return this.marketplaceService.advancePurchaseOrderStatus(businessId, poId, body);
   }
 

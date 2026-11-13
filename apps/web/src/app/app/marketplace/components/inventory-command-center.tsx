@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { apiGet, apiPost, apiDelete, getAuthHeaders, API_BASE } from "@/lib/api";
 import { toast } from "sonner";
+import { moduleWriteRefusal } from "@/lib/module-access";
 import { saveAs } from "@/lib/download";
 import { EmptyState, usePagination, PaginationBar, formatCurrency, formatDate } from "./marketplace-utils";
 import type {
@@ -501,7 +502,15 @@ export function InventoryCommandCenter({
 
   const handleAdvancePO = async (poId: string, status: string) => {
     try {
-      await apiPost({ path: `${basePath}/purchase-orders/${poId}/advance`, body: { status } });
+      // PR195-KEY-GATES (review finding CRR-P195BD-1): moving a purchase order needs expenses write on the server
+      // (its receipt posts the purchase; PR195-BOOKS-DOORS). The api client answers a refusal as { error, status }
+      // and does not throw, so the answer is read: a refusal is said, and nothing is reloaded as though it moved.
+      const advanced = await apiPost({ path: `${basePath}/purchase-orders/${poId}/advance`, body: { status } });
+      const refused = moduleWriteRefusal(advanced, "expenses", "move purchase orders");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       const res = await apiGet<PurchaseOrderDto[] | { data: PurchaseOrderDto[] }>(`${basePath}/purchase-orders`);
       if (res.data) setPurchaseOrders(Array.isArray(res.data) ? res.data : (res.data.data ?? []));
       onRefresh();

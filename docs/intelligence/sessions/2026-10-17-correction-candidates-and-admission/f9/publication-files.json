@@ -1,0 +1,69 @@
+{
+  "status": "LOCAL_CORRECTION_AND_EVIDENCE_NOT_AUTHORITY",
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6827,
+      "sha256": "7e647765697fa08d9e7cd8eeb6ebbcd599fb75202047eac0ae97492f140cc197"
+    },
+    {
+      "path": "correction.patch",
+      "bytes": 7980,
+      "sha256": "9d296effe62897ae2f7f5ea3f3d23bbfdf4422d701423dad794685c7c1d4c3aa"
+    },
+    {
+      "path": "independent-extra-checks-result.json",
+      "bytes": 2376,
+      "sha256": "d3b69f3e08a26f29ab90ffdb34b18f7c8d67789076e50802ed88859ff527038f"
+    },
+    {
+      "path": "independent-extra-checks.mjs",
+      "bytes": 4652,
+      "sha256": "3281fc9ad2ca6bfcdbc3d76dae63f030e401b9c45c51d0ed1ade9a8dd53baa52"
+    },
+    {
+      "path": "independent-inline-cli-result.json",
+      "bytes": 737,
+      "sha256": "17656afa9745cfbbd82c197331de4bc2f35ee471fe2b44dec0a62a75288120d2"
+    },
+    {
+      "path": "independent-inline-cli.mjs",
+      "bytes": 4617,
+      "sha256": "3e3430e32a01a06deef2ac9da833576095172936bd7105762d5fe40c7e457e99"
+    },
+    {
+      "path": "independent-review.md",
+      "bytes": 5706,
+      "sha256": "287143edbb5d786ea04dae3961bdcec609d777da3bcd69a64ee9cde468b053bb"
+    },
+    {
+      "path": "portability-evidence.json",
+      "bytes": 4362,
+      "sha256": "fe3763c9868112c02b01b668b488cc45e4d806f275b4ed4c6c802cbc6fc0a778"
+    },
+    {
+      "path": "prepare-workspace.py",
+      "bytes": 7208,
+      "sha256": "c8618a9d4e9e95e27f6f46c67f1de72dac070d12024f7dccc71a66bfed1b377e"
+    },
+    {
+      "path": "proof-summary.json",
+      "bytes": 3321,
+      "sha256": "1e9f01f3c14841f7286f018169fcf933f785cb2ea72d864155b72d8c19b654a1"
+    },
+    {
+      "path": "run-proof.py",
+      "bytes": 6538,
+      "sha256": "56620ca11c2e322a19881bc12d37754831f40ce04e3593af36ee32503b9d5d92"
+    },
+    {
+      "path": "source-manifest.json",
+      "bytes": 9134,
+      "sha256": "556477692c6977441d67fa466ffd286f72aa4e16821008d2af20b878fe51c35d"
+    }
+  ],
+  "payload_total_bytes": 63458,
+  "manifest_self": "publication-files.json is additional; excluded from its own hash list to avoid circularity",
+  "no_source_copies_or_raw_tap_or_archives": true
+}

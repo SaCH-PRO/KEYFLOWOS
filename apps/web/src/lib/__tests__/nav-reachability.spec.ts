@@ -95,7 +95,6 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/finance/actions":                'detail-route-of:/app/money',
   "/app/finance/cashflow":               'deliberately-unlinked',
   "/app/finance/expenses":               'deliberately-unlinked',
-  "/app/finance/journal":                'deliberately-unlinked',
   "/app/finance/reports":                'deliberately-unlinked',
   "/app/finance/revenue":                'deliberately-unlinked',
   "/app/governance-flow":                'todo-connect',

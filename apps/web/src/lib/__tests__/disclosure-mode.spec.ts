@@ -209,3 +209,16 @@ describe('enterprise is complete, even though the filter skips it', () => {
     expect(missing, `enterprise omits: ${missing.join(', ')}`).toEqual([]);
   });
 });
+
+/**
+ * PR195-PORT (owner PR #195 part 3): the General Journal (/app/finance/journal)
+ * is a nav destination labelled "Journal entries" beside the General ledger,
+ * shown where the ledger is (growth and enterprise), not in startup's short list.
+ */
+describe('the General Journal is offered where the ledger is (PR195-PORT)', () => {
+  it('growth and enterprise list "Journal entries"; startup does not', () => {
+    expect(MODE_OPERATE_ITEMS.growth).toContain('Journal entries');
+    expect(MODE_OPERATE_ITEMS.enterprise).toContain('Journal entries');
+    expect(MODE_OPERATE_ITEMS.startup).not.toContain('Journal entries');
+  });
+});

@@ -7,12 +7,23 @@ import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchBankRules, createBankRule, updateBankRule, deleteBankRule, applyBankRules, type BankRule } from "@/lib/api/finance";
+import { moduleReadRefusal, moduleWriteRefusal } from "@/lib/module-access";
+
+/**
+ * PR195-KEY-GATES (review finding CRR-P195BD-1): the bank rules' writes need revenue write on the server (they post to
+ * the books when applied; PR195-BOOKS-DOORS), and their list revenue read (D-146). The api helpers answer a refusal as
+ * { error, status } rather than throwing, so each write reads its answer: a refusal is said, and nothing claims
+ * success or drops a row the server kept; a refused list is a refusal, not "No bank rules yet".
+ */
+const WRITE = "change bank rules";
 
 export default function BankRulesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [rules, setRules] = useState<BankRule[]>([]);
   const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The server refused this member the rule list (revenue read, D-146): no list, no Add Rule or Run Rules. */
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -30,7 +41,10 @@ export default function BankRulesPage() {
     setError(null);
     try {
       const res = await fetchBankRules(businessId);
-      setRules(res.data?.items ?? []);
+      const refused = moduleReadRefusal(res, "revenue", "bank rules");
+      setRefusal(refused);
+      if (!refused && res.error) setError(res.error);
+      setRules(!res.error ? (res.data?.items ?? []) : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load bank rules");
     } finally {
@@ -54,6 +68,11 @@ export default function BankRulesPage() {
         expenseCategoryId: expenseCategoryId || null,
         priority: Number(priority) || 0,
       });
+      const refused = moduleWriteRefusal(res, "revenue", WRITE);
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       const created = res.data;
       if (created) {
         setRules((prev) => [...prev, created]);
@@ -76,6 +95,11 @@ export default function BankRulesPage() {
     if (!businessId) return;
     try {
       const res = await updateBankRule(businessId, rule.id, { isActive: !rule.isActive });
+      const refused = moduleWriteRefusal(res, "revenue", WRITE);
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       const updated = res.data;
       if (updated) {
         setRules((prev) => prev.map((r) => (r.id === rule.id ? updated : r)));
@@ -90,7 +114,12 @@ export default function BankRulesPage() {
     if (!businessId) return;
     if (!window.confirm("Are you sure? This cannot be undone.")) return;
     try {
-      await deleteBankRule(businessId, id);
+      const res = await deleteBankRule(businessId, id);
+      const refused = moduleWriteRefusal(res, "revenue", WRITE);
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       setRules((prev) => prev.filter((r) => r.id !== id));
       toast.success("Bank rule deleted");
     } catch (e) {
@@ -102,7 +131,12 @@ export default function BankRulesPage() {
     if (!businessId) return;
     setApplying(true);
     try {
-      await applyBankRules(businessId);
+      const res = await applyBankRules(businessId);
+      const refused = moduleWriteRefusal(res, "revenue", "run bank rules");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       toast.success("Bank rules applied");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to apply rules");
@@ -118,7 +152,7 @@ export default function BankRulesPage() {
       icon={ListFilter}
       maxWidth="5xl"
       headerActions={
-        <div className="flex items-center gap-2">
+        refusal ? undefined : <div className="flex items-center gap-2">
           <button
             onClick={handleApply}
             disabled={applying}
@@ -138,13 +172,18 @@ export default function BankRulesPage() {
       }
     >
       <div className="space-y-4">
+        {refusal && (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {refusal}
+          </div>
+        )}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
             <button onClick={load} className="ml-2 underline">Retry</button>
           </div>
         )}
-        {showAdd && (
+        {showAdd && !refusal && (
           <div className="kf-card p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
@@ -215,7 +254,7 @@ export default function BankRulesPage() {
           </div>
         )}
 
-        <DataTable
+        {!refusal && <DataTable
           data={rules as unknown as Record<string, unknown>[]}
           keyField="id"
           pageSize={25}
@@ -256,7 +295,7 @@ export default function BankRulesPage() {
             }},
           ]}
           emptyMessage="No bank rules yet. Add one to auto-categorize transactions."
-        />
+        />}
       </div>
     </UnifiedPageShell>
   );

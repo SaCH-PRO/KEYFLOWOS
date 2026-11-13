@@ -1,0 +1,83 @@
+{
+  "observed_at_utc": "2026-10-17T22:11:20.433008+00:00",
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "node": "v24.19.0",
+  "platform": "posix",
+  "source_files_verified": 39,
+  "scope": "Isolated candidate only. Every CLI request and merge call is answered by the synthetic preload; no live credentials, network request, provider traffic or real merge. Node20 hosted, Windows, mutation-control and full-project proof remain outstanding.",
+  "runs": [
+    {
+      "name": "original-suites",
+      "exit_code": 1,
+      "counts": {
+        "tests": 77,
+        "pass": 76,
+        "fail": 1,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "failures": [
+        "NC CLI: the \\#80 read follows pagination, so a grant on a later page is found and a revocation there is not missed"
+      ],
+      "tap_sha256": "4ec547a14432f378941e204187226689a5c84d2e4303074a9228e596cb2c76cc",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "new-cli-requirements-on-original-source",
+      "exit_code": 1,
+      "counts": {
+        "tests": 17,
+        "pass": 12,
+        "fail": 5,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "failures": [
+        "NC CLI hold release: missing effect cannot clear an active hold before an exact grant",
+        "NC CLI hold release: wrong effect cannot clear an active hold before an exact grant",
+        "NC CLI hold release: unknown effect cannot clear an active hold before an exact grant",
+        "NC CLI hold release: production touched cannot clear an active hold before an exact grant",
+        "NC CLI hold release: invalid health cannot clear an active hold before an exact grant"
+      ],
+      "tap_sha256": "74c650ba87c0dc6da2ec953f8cd31df91e34bcad465fa91201da89bcb9ef2165",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "candidate-suites",
+      "exit_code": 0,
+      "counts": {
+        "tests": 84,
+        "pass": 84,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "failures": [],
+      "tap_sha256": "363680670a1d2739b670c37bffb3b0d49e8898ad14463030132c032b7a55f6a2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "scripts/agent-control/lib/merge-grant.mjs",
+      "before_git_blob": "1f6c3b275737ed3b351557e7c0b91af28194b1c8",
+      "after_git_blob": "97c7e07a309d643b640a950064740c2ed916639e",
+      "after_sha256": "5117a5ca06bc61ab8013c1a77fed8ab131abb6c491cf681478a4dce81cdf0712"
+    },
+    {
+      "path": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "before_git_blob": "333b491c196c68501eb938d268354bdeb8be66b1",
+      "after_git_blob": "08d1d30d8e500a5eac8fbb7ef71e4cfac39354e8",
+      "after_sha256": "5cd686d7038aeba135ec9b673ea65fa1a4fc5cc7d82c3f85c0d94c214388edeb"
+    },
+    {
+      "path": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "before_git_blob": "6638127154bd4e95b2adf110799932d13263a501",
+      "after_git_blob": "51d1d9bf7ebf7cf8f260a3c1e664c47c9d5a1495",
+      "after_sha256": "1070ca93610c22a50961dcd0f508314f5daaf5eebcc9f36eaa2e46a94102eced"
+    }
+  ]
+}

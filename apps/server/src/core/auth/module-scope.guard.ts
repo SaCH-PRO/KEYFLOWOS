@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, Optional, ForbiddenException, Logger, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf, isCanonicalModule } from '../authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf, isCanonicalModule } from '../authority/module-vocabulary';
 import { EffectiveAuthorityResolver } from '../authority/effective-authority.resolver';
 import { resolveRequestBusinessId } from './request-business-id';
 
@@ -77,14 +77,10 @@ export class ModuleScopeGuard implements CanActivate {
 
     if (!membership) throw new ForbiddenException('Not a member of this business');
 
-    let scopes: Record<string, string>;
-    if (membership.permissionScopes && typeof membership.permissionScopes === 'object') {
-      scopes = membership.permissionScopes as Record<string, string>;
-    } else {
-      scopes = defaultScopesForRole(membership.role);
-    }
-
-    const memberLevel = scopes[requirement.module] || 'none';
+    // The explicit map (any non-null object, an array included) else the role's defaults; a
+    // missing key is 'none'. One helper, shared with the readers that must agree with this guard
+    // (PR195-PORT review SEC-P195-2: KEY's standing context had read an array as role defaults).
+    const memberLevel = memberModuleLevel(membership, requirement.module);
     const memberRank = rankOf(memberLevel);
     const requiredRank = LEVEL_RANK[requirement.minLevel] ?? 1;
 

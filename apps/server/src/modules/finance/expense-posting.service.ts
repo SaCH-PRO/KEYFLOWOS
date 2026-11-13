@@ -47,6 +47,27 @@ export function paymentMethodToCoaSystemKey(method?: string | null): string {
   return 'CASH';
 }
 
+/**
+ * PR195-PORT: the payment methods a payroll run may be marked paid by, each a
+ * cash-class disbursement (paymentMethodToCoaSystemKey: CASH, BANK or
+ * PAYMENT_PROCESSOR). A card is a liability, not a disbursement account, and an
+ * unknown word would fall back to CASH there, so neither is accepted.
+ */
+export const PAYROLL_DISBURSEMENT_METHODS: ReadonlySet<string> = new Set([
+  'cash',
+  'bank',
+  'bank_transfer',
+  'transfer',
+  'wire',
+  'ach',
+  'cheque',
+  'check',
+  'wipay',
+  'paypal',
+  'stripe',
+  'processor',
+]);
+
 @Injectable()
 export class ExpensePostingService {
   private readonly logger = new Logger(ExpensePostingService.name);
@@ -113,7 +134,11 @@ export class ExpensePostingService {
     paymentMethod: string | null | undefined,
   ): Promise<string> {
     const key = paymentMethodToCoaSystemKey(paymentMethod);
-    const row = await this.coa.getBySystemKey(businessId, key);
+    let row = await this.coa.getBySystemKey(businessId, key);
+    if (!row) {
+      await this.coa.ensureDefaults(businessId);
+      row = await this.coa.getBySystemKey(businessId, key);
+    }
     if (!row) {
       const cash = await this.coa.getBySystemKey(businessId, 'CASH');
       if (!cash) {
@@ -127,7 +152,11 @@ export class ExpensePostingService {
   }
 
   async resolveSystemCoa(businessId: string, systemKey: string): Promise<string> {
-    const row = await this.coa.getBySystemKey(businessId, systemKey);
+    let row = await this.coa.getBySystemKey(businessId, systemKey);
+    if (!row) {
+      await this.coa.ensureDefaults(businessId);
+      row = await this.coa.getBySystemKey(businessId, systemKey);
+    }
     if (!row) {
       throw new BadRequestException(
         `No ${systemKey} COA for business ${businessId} — chart of accounts not seeded`,
@@ -479,6 +508,93 @@ export class ExpensePostingService {
         entries: [
           { accountId: cogsCoaId, debit: Number(totalCogs.toFixed(4)), memo: 'Cost of goods sold' },
           { accountId: inventoryCoaId, credit: Number(totalCogs.toFixed(4)), memo: 'Inventory consumed' },
+        ],
+      },
+      txClient,
+    );
+  }
+
+  /**
+   * PR195-PORT (owner PR #195 part 2): a payroll run paid. Dr Payroll &
+   * Contractors (EXPENSE_PAYROLL, 6400) / Cr the cash-class chart row the money
+   * left (CASH, BANK or PAYMENT_PROCESSOR), through the one ledger door (V1-15):
+   * idempotent on PayrollRun:<id>:paid, dated `paidAt` and refused there in a
+   * CLOSED period, the actor named. `txClient` is the run's transaction
+   * (PayrollService.markRunPaid), so the run's move to PAID and this posting
+   * commit or roll back together.
+   *
+   * The credit row is `paymentCoaId` (the chart row of the payment account the
+   * caller validated) or the system row for a cash-class `paymentMethod`; a run
+   * with neither, or a method that is not a cash-class disbursement (a card),
+   * is refused before anything is written.
+   *
+   * Not ported from the PR (head rulings win): the FinancialAccount balance
+   * target (V1-34: cash is the ledger's; the account is recorded in the
+   * posting's metadata only) and any conversion (D-13: the posting is in the
+   * run's currency, which the door holds to D-13). On KEY the posting is KEY's
+   * (`actorId` the system actor) and names the member it ran for as
+   * `initiatedBy` (audit data, never authority), as commerce mark-paid does.
+   */
+  async onPayrollRunPaid(
+    run: {
+      id: string;
+      businessId: string;
+      totalGross: number | string | Prisma.Decimal;
+      currency: string;
+      paidAt: Date;
+      periodStart: Date;
+      periodEnd: Date;
+      paymentMethod?: string | null;
+      paymentCoaId?: string | null;
+      paymentAccountId?: string | null;
+      actorId?: string | null;
+      initiatedBy?: string | null;
+      notes?: string | null;
+    },
+    txClient?: Prisma.TransactionClient,
+  ) {
+    const gross = Math.round(Number(String(run.totalGross ?? 0)) * 100) / 100;
+    if (!(gross > 0)) return null;
+
+    let paymentCoaId = run.paymentCoaId ?? null;
+    if (!paymentCoaId) {
+      const method = (run.paymentMethod ?? '').toLowerCase().trim();
+      if (!method || !PAYROLL_DISBURSEMENT_METHODS.has(method)) {
+        throw new BadRequestException(
+          `Payroll disbursement requires an explicit valid paymentAccountId or paymentMethod (${[...PAYROLL_DISBURSEMENT_METHODS].join(', ')})`,
+        );
+      }
+      paymentCoaId = await this.resolvePaymentCoa(run.businessId, method);
+    }
+    const payrollCoaId = await this.resolveSystemCoa(run.businessId, 'EXPENSE_PAYROLL');
+
+    const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} to ${run.periodEnd.toISOString().slice(0, 10)}`;
+    const description = run.notes ? `Payroll run (${periodLabel}): ${run.notes}` : `Payroll run (${periodLabel})`;
+
+    return this.posting.post(
+      {
+        businessId: run.businessId,
+        type: 'EXPENSE',
+        date: run.paidAt,
+        amount: gross,
+        currency: run.currency,
+        description,
+        sourceType: 'PayrollRun',
+        sourceId: run.id,
+        kind: 'paid',
+        reference: periodLabel,
+        createdById: run.actorId ?? null,
+        metadata: {
+          payrollRunId: run.id,
+          periodStart: run.periodStart.toISOString(),
+          periodEnd: run.periodEnd.toISOString(),
+          ...(run.paymentAccountId ? { paymentAccountId: run.paymentAccountId } : {}),
+          ...(run.paymentMethod ? { paymentMethod: run.paymentMethod.toLowerCase().trim() } : {}),
+          ...(run.initiatedBy ? { initiatedBy: run.initiatedBy } : {}),
+        },
+        entries: [
+          { accountId: payrollCoaId, debit: gross, credit: 0, memo: description },
+          { accountId: paymentCoaId, debit: 0, credit: gross, memo: `Payroll disbursement (${periodLabel})` },
         ],
       },
       txClient,

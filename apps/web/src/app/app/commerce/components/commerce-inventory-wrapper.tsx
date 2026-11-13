@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { toast } from "sonner";
+import { moduleWriteRefusal } from "@/lib/module-access";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InventoryCommandCenter } from "../../marketplace/components/inventory-command-center";
 import type {
@@ -73,8 +75,17 @@ export function CommerceInventoryWrapper({ businessId }: { businessId: string })
       } else if (modal === "inventory") {
         await apiPost({ path: `${basePath}/inventory`, body: form });
       } else if (modal === "purchase-order") {
-        if (editingId) await apiPatch(`${basePath}/purchase-orders/${editingId}`, form);
-        else await apiPost({ path: `${basePath}/purchase-orders`, body: form });
+        if (editingId) {
+          // PR195-KEY-GATES (review finding CRR-P195BD-1): an edit can move the order (a status in the body), so it
+          // needs expenses write on the server; a refusal is said and the form stays open, nothing claimed.
+          const res = await apiPatch(`${basePath}/purchase-orders/${editingId}`, form);
+          const refused = moduleWriteRefusal(res, "expenses", "change purchase orders");
+          if (refused) {
+            toast.error(refused);
+            setSaving(false);
+            return;
+          }
+        } else await apiPost({ path: `${basePath}/purchase-orders`, body: form });
       }
       setModal(null);
       await load();

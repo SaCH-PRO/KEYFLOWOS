@@ -226,6 +226,7 @@ export const operateSections: NavSection[] = [
       { label: "Tax", href: "/app/finance/tax", icon: Scale },
       { label: "Close the month", href: "/app/finance/accounting-periods", icon: CalendarDays },
       { label: "General ledger", href: "/app/finance/ledger", icon: BookOpen },
+      { label: "Journal entries", href: "/app/finance/journal", icon: BookOpen },
       { label: "Trial balance", href: "/app/finance/trial-balance", icon: BarChart3 },
       { label: "Recurring journals", href: "/app/finance/recurring-journals", icon: RefreshCw },
       { label: "Assets & depreciation", href: "/app/finance/fixed-assets", icon: Building },

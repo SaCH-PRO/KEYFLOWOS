@@ -6,8 +6,8 @@ Before substantial work, read:
 1. `AGENTS.md`
 2. `docs/development/EXECUTION_CONTROL_STANDARD.md`
 3. `docs/development/AGENT_CONTROL_PLANE.md`
-4. `docs/intelligence/execution/MULTI-AGENT-EXECUTION-PROTOCOL.md` when available on the working base
-5. `docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md` when available
+4. `docs/intelligence/execution/MULTI-AGENT-EXECUTION-PROTOCOL.md` (in main since the 2026-11-13 tie-off, D-141, as a dated historical record, not live state)
+5. `docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md` (in main since the 2026-11-13 tie-off, as a dated historical record; the current plan is `docs/reconstruction/BUILD-MAP-001.md`)
 6. canonical handoff/current-state files
 7. the active packet and latest ChatGPT DIRECTIVE in GitHub issue #80
 
