@@ -1,0 +1,153 @@
+package_id: KF-EXEC-EXTFX-001
+characterization_level: L3
+characterized_main: ebbe8862fa4b7e6ec968db193620ac53f38cd5ff
+characterized_at: '2026-09-18'
+implementation_branch: impl/kf-exec-extfx-001-resend-certainty
+implementation_pr: 76
+current_defect:
+  summary: provider call and post-provider local consequences share one broad catch
+  failure_sequence:
+    - Resend accepts email
+    - local provider-success persistence or later consequence throws
+    - catch normalizes error as provider failure
+    - delivery may become RetryPending or Failed
+    - retry can call Resend again
+writers:
+  outbound_delivery_mutation:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+  outbound_delivery_creation:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+    - apps/server/src/modules/flow/automation-executor.service.ts
+    - apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+  delivery_event_writer:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+readers:
+  delivery_events:
+    - apps/server/src/modules/communications/communications.controller.ts
+  external_post_and_status:
+    - apps/server/src/modules/communications/delivery-queue.service.ts
+  result_snapshot_engagement:
+    - apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+system_email_callers:
+  - apps/server/src/modules/ai/approval-routing.service.ts
+  - apps/server/src/modules/ai/ai-message-sender.service.ts
+  - apps/server/src/modules/ai/ai-usage-alert-scheduler.service.ts
+  - apps/server/src/modules/communications/adapters/resend-email-adapter.ts
+  - apps/server/src/modules/finance/accountant-export-email.service.ts
+  - apps/server/src/modules/identity/identity-signup.service.ts
+  - apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts
+provider_contract:
+  provider: Resend
+  node_signature: "resend.emails.send(payload, { idempotencyKey })"
+  key_retention_hours: 24
+  same_key_same_payload: returns_same_email_id
+  same_key_different_payload: rejected_409_invalid_idempotent_request
+  concurrent_same_key: retryable_409_concurrent_idempotent_requests
+schema_decision:
+  strategy: additive_nullable_then_cutover
+  outbound_delivery_fields:
+    - effectFingerprint
+    - effectSnapshot
+    - attemptSequence
+    - currentAttemptId
+    - attemptStartedAt
+    - attemptLeaseExpiresAt
+    - providerOutcome
+    - providerFirstAttemptAt
+    - providerIdempotencyKey
+    - consequenceState
+  delivery_event_fields:
+    - attemptId
+effect_snapshot_material:
+  - businessId
+  - destinationId
+  - connectionId
+  - recipient
+  - exact_sender_identity
+  - subject
+  - html
+  - text
+manual_retry_finding:
+  current_behavior: every Failed row is requeueable
+  target_behavior:
+    - FAILED_CONFIRMED may be retried by policy
+    - OUTCOME_UNKNOWN may only same-key replay inside provider safe window
+    - legacy ambiguous Resend rows are not assumed resend-safe
+event_consumer_characterization:
+  content_published: AI listener observation
+  delivery_completed: AI listener observation
+  material_hidden_side_effect_found: false
+stop_condition_triggered: false
+implementation_slices:
+  commit_a:
+    status: ADMITTED_FULL_CI_RUN_35331516602
+    scope:
+      - additive schema
+      - effect fingerprint/snapshot helper
+      - optional ProviderEffectContext
+      - SystemEmailService idempotency support
+      - adapter outcome certainty
+  commit_b:
+    status: IMPLEMENTED_ON_PR76_UNPROVEN_TYPECHECK_RED
+    scope:
+      - provider/local phase split
+      - pre-provider durable attempt
+      - monotonic provider outcome
+      - consequence repair
+      - bounded unknown replay
+      - manual retry guard
+
+implementation_admission:
+  branch_head: 42177f5639345d29448c50375c0c05b133c076b5
+  pull_request: 76
+  pull_request_state: MERGED
+  merge_commit: dc913c3942c3a2899b31fbbbf7cc7a7da5f78316
+  final_ci_run: 35469579096
+  final_ci_status: SUCCESS
+  server_test_files: 433
+  server_tests: 4033
+  web_test_files: 22
+  web_tests: 210
+  migration_application: SUCCESS
+  build_server: SUCCESS
+  build_web: SUCCESS
+  typecheck_server: SUCCESS
+  typecheck_web: SUCCESS
+  lint: SUCCESS
+  security: SUCCESS
+  branch_divergence_run: 35469579079
+  branch_divergence: SUCCESS
+  dast_run: 35469579109
+  dast_workflow: SUCCESS
+  dast_scan_configured: false
+  k12_proof:
+    verdict: SATISFIED_AT_DECLARED_SCOPE
+    required_cases: 16
+    discovered_cases: 16
+  extfx_proof_review:
+    verdict: ADMITTED_AT_DECLARED_SCOPE
+    obligations_reviewed: P01-P16
+    deterministic_provider_simulator:
+      cases: 5
+      result: PASS
+      real_provider_traffic: false
+    explicit_additions:
+      - P01 stable delivery effect identity across attempts
+      - P16 historical one-argument SystemEmailService call remains supported
+      - accept + provider id
+      - reject before effect
+      - accept with response lost
+      - same key + same payload returns same provider object
+      - same key + different payload is conflict
+  typecheck_fix:
+    commit: 87d1014cbf7adfbeac6040a9bed422c4c3eb4a1c
+    semantics:
+      - normalize nullable PublishPayload fields to undefined
+      - default optional legacy retryCount to zero on non-Resend execution path
+      - narrow consequence repair input to delivery id only
+  proof_completion_commits:
+    - 4eef7972be91979ea7a5ff0d3ea476cf9a194045
+    - 29b0189e917342e3dd3dcee47f3c6de3bbf8d089
+    - 42177f5639345d29448c50375c0c05b133c076b5
+  merge_allowed: true
+  merged: true

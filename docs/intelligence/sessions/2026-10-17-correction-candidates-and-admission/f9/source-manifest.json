@@ -1,0 +1,239 @@
+{
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "sha": "973b8c6a465177e2ec1941af0bade11428cf7ac9",
+      "sha256": "ed8ea47291ae585c4594cad508228036dfe8b7f4e165cfc993749c15d3e3c9b5",
+      "size": 13942
+    },
+    {
+      "path": "docs/development/AGENT_CONTROL_PLANE.md",
+      "sha": "34379c011c652d505f99b63e415f13ca37ece730",
+      "sha256": "2606339feee2f3baccdffd22a38cb2773bb28fafae387325c50dc2be4eb7a3a8",
+      "size": 39924
+    },
+    {
+      "path": "docs/development/EXECUTION_CONTROL_STANDARD.md",
+      "sha": "6ab97a792c16d24ac1501a1ce6e006e4d8d33359",
+      "sha256": "88d32d9c167ea6ea33724def209056a967483b82d08393eb6a882419f10bfee1",
+      "size": 12691
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PLATFORM_DAG.yaml",
+      "sha": "3c6774f2ae50079162ea35b10963b7f8cbea5a0f",
+      "sha256": "54f38361ca3dfaf925c976270941a1337f429cea6f16517441c08a1e2bd5f510",
+      "size": 17788
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "sha256": "6de953246095b966b4939c9bf2bf9d82ae807c114cb64869fec66ef103ca39ab",
+      "size": 10617
+    },
+    {
+      "path": "scripts/agent-control/auto-merge-admitted.mjs",
+      "sha": "4c8e5b731346c0fe0dc3edc608301fe0cdd5e4ec",
+      "sha256": "4a740affe58a7c24757b09a55b0cca1155eceb4b67b156baf37f6f3fa2f58e63",
+      "size": 11411
+    },
+    {
+      "path": "scripts/agent-control/lib/adapters.mjs",
+      "sha": "10bd53544d0b5c585dd2da95caafb89bfe3324ab",
+      "sha256": "a0eea6f2d6f566cc06c7d055935a79e6a7b5cc31fc4969549e79462beea9adb1",
+      "size": 7865
+    },
+    {
+      "path": "scripts/agent-control/lib/admission.mjs",
+      "sha": "0decba62d8dd3b9cb4a3d063906e035ec6efd789",
+      "sha256": "d884560a29f6a0ae933496baadcb90798748f96e5f88f79cceaa5265350cde69",
+      "size": 17190
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "sha256": "a9315d67a83b5db78193428cade678770cafa3e04867d8edd2dbf7f62e3124ae",
+      "size": 20857
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "sha256": "e852d145ae6fa71a997bc0672036142a4b5687a2cb8c0c38c4473bacc91b57c2",
+      "size": 17914
+    },
+    {
+      "path": "scripts/agent-control/lib/correction.mjs",
+      "sha": "4dd8537967eeb7b1d69e26fb139ceb1788e5cf1f",
+      "sha256": "5af2d22b669dd8d4232e399cbfd5c2e218e16207099e2e0cf8ad86fe78110948",
+      "size": 3459
+    },
+    {
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "sha256": "a3e52ef983411cf0fb538fc5a80cb5b3b792e44fc2ff495cfd83d1a9e09485aa",
+      "size": 8384
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "sha256": "d1f4b1e17190145f659716c6575c54c0721e20ee5d48f8813728eac09e2ebcb8",
+      "size": 13471
+    },
+    {
+      "path": "scripts/agent-control/lib/merge-grant.mjs",
+      "sha": "1f6c3b275737ed3b351557e7c0b91af28194b1c8",
+      "sha256": "d141af0eed46a4a98860adca5293a5da8bbf319a008890ad2684de44f1ab34b2",
+      "size": 13028
+    },
+    {
+      "path": "scripts/agent-control/lib/merge-record.mjs",
+      "sha": "55ece9066dc3cccf61aee0093eafa33a6701a217",
+      "sha256": "1943b0d0761381ca3cfe9afd1f3464f278a2e7b387ffc8dd768c115e781fa6c8",
+      "size": 8560
+    },
+    {
+      "path": "scripts/agent-control/lib/momentum.mjs",
+      "sha": "79de77ee7a0ec6ec368f21adb9076e8aa6bb4130",
+      "sha256": "4876561e81aec4ee70a6935aedfbcaf8edde5c0d882de7d3a64d2e05e7949f02",
+      "size": 4564
+    },
+    {
+      "path": "scripts/agent-control/lib/orchestrator.mjs",
+      "sha": "ff19aac85f4b3b87ad7a0f865a6ca6c07a529fec",
+      "sha256": "d1ca6e46f83b2ddd34412691b27281e62709f64c8f4f07080d69315949b58b01",
+      "size": 8790
+    },
+    {
+      "path": "scripts/agent-control/lib/platform-dag.mjs",
+      "sha": "b31f7c3cfb894f99918fb718e8cacad7c3e3e1a2",
+      "sha256": "d22f5915aa31b4e23bdd5c4792948856ae7f749ed74ef84709db3c70df354781",
+      "size": 18676
+    },
+    {
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "sha256": "9516bc871a6c58947f2192df98fdeba3c89281f2e5202d05ed5f65f5e8f81f6b",
+      "size": 10894
+    },
+    {
+      "path": "scripts/agent-control/lib/return-evidence.mjs",
+      "sha": "beefccb0b1f36b380ae74ced7f5f777e04f109f6",
+      "sha256": "7e3d0ddfda04faef2a51ee32713fface9fcc93d6f8187556aa6a670c17b10c8d",
+      "size": 8876
+    },
+    {
+      "path": "scripts/agent-control/lib/semantic-review.mjs",
+      "sha": "3d95ba7737602ef5acda809e1803fdac0a0ce4ad",
+      "sha256": "c1932178b4ddc76434395e975db24b708ee5c7604ed14620cf51f7f66eacd5a0",
+      "size": 19513
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "sha256": "d18a193cc1cb701020347d66e0d63e2a6bc87f8276b49a2382cb04888e8ca4f7",
+      "size": 4342
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "sha256": "1937d42bd0c08127bbc5e0ca29615be941e964584fa3d9e99e829af67c7a6232",
+      "size": 13917
+    },
+    {
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "sha256": "c0e704a10b0d005c00d3d7b5379028ae9593c84e1a6eb876d530235b4b04e46d",
+      "size": 5169
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "sha256": "6f39df92fffb0ad0342b8323b364e0f9ccf5908d0e67968b20f250db56c35159",
+      "size": 13753
+    },
+    {
+      "path": "scripts/agent-control/tests/admission.spec.mjs",
+      "sha": "eb56cd3a28c4a0e5fca15ff58b8956c9d6ff7fdc",
+      "sha256": "d2528afba9e74020fcb0e529d2a0ab6e185823d827ef9e51fde195810797c729",
+      "size": 41811
+    },
+    {
+      "path": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "sha": "6f0184ffe9d8207587adec9ae27f0e58fde84f51",
+      "sha256": "1d05e32a966fba8fa3a0668ef04428837a7ac076c4898e0da1d6da4fc1a0345f",
+      "size": 4627
+    },
+    {
+      "path": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "sha": "333b491c196c68501eb938d268354bdeb8be66b1",
+      "sha256": "90d40d61e50add5cb9b1f6ff7918a6b698055d8d318cab40bdb42eaab57fd265",
+      "size": 3705
+    },
+    {
+      "path": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "sha": "6638127154bd4e95b2adf110799932d13263a501",
+      "sha256": "aedaed8081d98f1b25156b60cf4fde6425d08f482b037e7529350900e1c55e46",
+      "size": 9331
+    },
+    {
+      "path": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "sha": "88a7cd80ed50c59d4b5b8de4cc7afc88bbaa129e",
+      "sha256": "2f9991b3c9fd6195b217b8be8705f255a2184e5a629aa284d60cebae2bef3046",
+      "size": 15410
+    },
+    {
+      "path": ".github/workflows/agent-control-autopilot.yml",
+      "sha": "eb2c0c2e47c0a4fe9bc3287d68e7c5169dc8f73f",
+      "sha256": "fcef2db6af8adb17e216788bc36ddc8070d7a7fdfc95ca8f4a8db736363a7b23",
+      "size": 13906
+    },
+    {
+      "path": ".github/workflows/agent-control-gate.yml",
+      "sha": "151b8474d5e6605c0eaaf65526505666a7d519d3",
+      "sha256": "5b710ed244e7a802dc8b5b1db97f829bc2f9b0a20c2da60794ca3736f87bcfcf",
+      "size": 6460
+    },
+    {
+      "path": ".github/workflows/agent-control-worker-proof.yml",
+      "sha": "0007a809204927a60b1c74b70908e61155858022",
+      "sha256": "7691fe00f58e0b2bf8d98fe5079bb536305ccd0d37dc95ffa4de8f343fac699f",
+      "size": 2514
+    },
+    {
+      "path": ".github/workflows/branch-divergence.yml",
+      "sha": "4df2d442763d325f74b0e074f367518fe08d902f",
+      "sha256": "867e4626d2019ff93909fe8e1b19f62bcd9dc8fba13cadea47d837fae8cf349d",
+      "size": 12089
+    },
+    {
+      "path": ".github/workflows/ci-cd.yml",
+      "sha": "d50571fe50ac74bc28944d7296b8de8ff00247f2",
+      "sha256": "25414599132840b46eb8768ae65027447718db0b44f7be9fd31ae84fae8b14f9",
+      "size": 21131
+    },
+    {
+      "path": ".github/workflows/deploy-drift.yml",
+      "sha": "89dc4e03b3dca0cb37e5d35c30a44110b31da25d",
+      "sha256": "97c7ebabc1b780f379f6a93c0933cf17a545db98daef722dccec8d6af846e833",
+      "size": 2712
+    },
+    {
+      "path": ".github/workflows/hawkscan.yml",
+      "sha": "29b368fe9cee8c6bfa1559bc495652c2a39f4e39",
+      "sha256": "7ad35c4e1e8f2fbbfc0c47e0a896810ce170f7e9ffe0730070a4b78b234223b9",
+      "size": 6384
+    },
+    {
+      "path": ".github/workflows/uptime-monitor.yml",
+      "sha": "7d54471b4181eb27d84c68e067a42938edfe5c7a",
+      "sha256": "1ca1c20a39b59aabd9234f0506703452dc6b6af74ee049ba7646144e6bf1e28e",
+      "size": 2277
+    },
+    {
+      "path": "docs/development/AGENT_AUTOPILOT_POLICY.yaml",
+      "sha": "6029adc2bf0229bfe5874f6ca687c7dc8c755176",
+      "sha256": "ac02980a5da9e5c529ae4184bc003803ab9c4beee77209e7548daca7ece5ed04",
+      "size": 8580
+    }
+  ]
+}

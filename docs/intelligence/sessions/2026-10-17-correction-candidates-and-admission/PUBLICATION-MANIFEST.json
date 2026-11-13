@@ -1,0 +1,415 @@
+{
+  "kind": "Reviewed public-source correction candidates and evidence; not active implementation or authority",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "publication_parent": "d8962fda26a55f64b4727b8798b8bb3340ba5391",
+  "base_tree": "572dee9afb2c9c47bd0e7d5e43f493dce137d42f",
+  "scope": "New session text plus two existing navigation paragraphs; all paths under docs/intelligence. Active implementation branches and authority unchanged.",
+  "payload_count": 60,
+  "payload_bytes": 492263,
+  "files": [
+    {
+      "path": "docs/intelligence/00-START-HERE.md",
+      "bytes": 3745,
+      "sha256": "281fabe348474b2ccb3ec6e8446070194bcda9b5f7d948ba98ae2347dabb002c",
+      "git_blob": "eb50922cab5ff28f68efd414421a74ffedc0e921"
+    },
+    {
+      "path": "docs/intelligence/handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+      "bytes": 9659,
+      "sha256": "b3cfbb3df6169b029620c6b76c0946fc162b60fc7a1676e369ae0e43af183801",
+      "git_blob": "f572b5d65db4b4cef4a6140ea43d168c6177a30a"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/README.md",
+      "bytes": 15988,
+      "sha256": "66e77b877d76775b341615288331e2cf2245167573ff99689a44f8c5841c9384",
+      "git_blob": "cf3e0e81ec756154033366eb7c869f1365baa8b3"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/README.md",
+      "bytes": 7193,
+      "sha256": "df3969f9fb69bbd10196faf9b5ecce4ed75742c0baad9c3592122ce8ecd5fc36",
+      "git_blob": "9eca63b597600b0d435eb2c8b8d9c571f4ce3cd5"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/authority-replay-result.json",
+      "bytes": 25374,
+      "sha256": "669a40ad610264b711dada4cde667c0f70fa129e68c18d721e75753f05850f4d",
+      "git_blob": "ebd6fe49e7cb96fdfa8458caa434a8438a118208"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/collection.json",
+      "bytes": 1431,
+      "sha256": "3e7e0e5b5376570a511620f48e318cec2e20af7b9b8d43d6b2edd2b01635ac39",
+      "git_blob": "7e556c778b0c5d1b697caa9e56935a3d451fbcde"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/method/docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/control/replay-publication.mjs",
+      "bytes": 2386,
+      "sha256": "a22fb445c71fad4f9c1d68eb7c1e980cec400c97d39ed3732158a29189a4cbbb",
+      "git_blob": "1a44c305759af4ab222735b4b884b214c3c64f2c"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/method/docs/intelligence/sessions/2026-10-17-p0-safety-review/authority/replay-authority.mjs",
+      "bytes": 9232,
+      "sha256": "ee2a5989cef91478e3d6edecf2b45c33695a141e2ff1a483015be02a7e0f1290",
+      "git_blob": "488939cd3c5d52dc9bbcbdda58965001f5f02e55"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/method-files.expected.json",
+      "bytes": 391,
+      "sha256": "a02b710a4d7545d2e44031d285dc03ef26d8db1cfe5f7f966eccecef879e50fc",
+      "git_blob": "3a8b4d3cfea2c39638765ff8c8a29e69754d35a8"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/prepare-and-check.mjs",
+      "bytes": 9831,
+      "sha256": "8b54c2e75347c7b3462a7efca9e50a11363d35c89fbf93f4940b6c20b948545e",
+      "git_blob": "3a6c3222e13c0295c5b207edfb2d87f3840631a5"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/repository-truth.json",
+      "bytes": 1303,
+      "sha256": "9581bc7f94ba95335470a0c9c46d81e12f65bc3987007ffb0d47b833656fe3ba",
+      "git_blob": "8d1214fda608175f8d10f1623f5d4ef18ca4f2ea"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/source-and-snapshot-manifest.json",
+      "bytes": 10196,
+      "sha256": "2f39b0fc6db4448045ab5fd1a52a23ef76dd6574fa9d3e5a78556ee1fe11e18b",
+      "git_blob": "1ed6e22ce3d9fa52f6aabb2b067e765712d7a52e"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/source-files.expected.json",
+      "bytes": 6299,
+      "sha256": "4eb00fa9cfbc88d4c2d140c9c93410219d62285d14d07c1c0775516244ff6ff8",
+      "git_blob": "70b99e765007ea1e711be6aee219bba0d175ad18"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/source-verification-final.json",
+      "bytes": 6558,
+      "sha256": "714104e16794dfc60be7e6e83f570dfd6743da5d659c41a096950beb285719c0",
+      "git_blob": "42a72d3d5f35534fc672f0d700d4b607eb70ad79"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/status-and-platform-result.json",
+      "bytes": 16772,
+      "sha256": "47497ba9f5e6724bff069f6d857760346e4504e4f70068f38be23432a9a87f22",
+      "git_blob": "d12ae724ba25d3c55dc961cf23c1d7796cac6bb8"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/authority/verification.json",
+      "bytes": 1270,
+      "sha256": "b16629518d8e0bab4c2d85b48ce37c109dbd97ea92d6e5ca0fee6ed0daae8c78",
+      "git_blob": "661f323bd1be5d02cfc34fffbf106e00f89fad9c"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/README.md",
+      "bytes": 6827,
+      "sha256": "7e647765697fa08d9e7cd8eeb6ebbcd599fb75202047eac0ae97492f140cc197",
+      "git_blob": "aa6524b3ab53160dc05533bfa372b89c33f31d7f"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/correction.patch",
+      "bytes": 7980,
+      "sha256": "9d296effe62897ae2f7f5ea3f3d23bbfdf4422d701423dad794685c7c1d4c3aa",
+      "git_blob": "d2440f905d4621c5a54df2efccb09d569069161e"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/independent-extra-checks-result.json",
+      "bytes": 2376,
+      "sha256": "d3b69f3e08a26f29ab90ffdb34b18f7c8d67789076e50802ed88859ff527038f",
+      "git_blob": "7989f94e357df83eaadb850f1b0bb953f13c1d5a"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/independent-extra-checks.mjs",
+      "bytes": 4652,
+      "sha256": "3281fc9ad2ca6bfcdbc3d76dae63f030e401b9c45c51d0ed1ade9a8dd53baa52",
+      "git_blob": "a5f786c1299d236168dba6ca4a5c5ddfd9bbb2bd"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/independent-inline-cli-result.json",
+      "bytes": 737,
+      "sha256": "17656afa9745cfbbd82c197331de4bc2f35ee471fe2b44dec0a62a75288120d2",
+      "git_blob": "28a3561320fa12a33cecef1e526a2cc7a89c3ab8"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/independent-inline-cli.mjs",
+      "bytes": 4617,
+      "sha256": "3e3430e32a01a06deef2ac9da833576095172936bd7105762d5fe40c7e457e99",
+      "git_blob": "9be63a88c9d040e4916e76a7210013e52c20aa3c"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/independent-review.md",
+      "bytes": 5706,
+      "sha256": "287143edbb5d786ea04dae3961bdcec609d777da3bcd69a64ee9cde468b053bb",
+      "git_blob": "54aa3b0cb83b781445ac77efe436ead15e3a62bb"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/portability-evidence.json",
+      "bytes": 4362,
+      "sha256": "fe3763c9868112c02b01b668b488cc45e4d806f275b4ed4c6c802cbc6fc0a778",
+      "git_blob": "e4d140fcc673a147d46bc56f5c8f30579b352ddb"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/prepare-workspace.py",
+      "bytes": 7208,
+      "sha256": "c8618a9d4e9e95e27f6f46c67f1de72dac070d12024f7dccc71a66bfed1b377e",
+      "git_blob": "a0d017a94c99242c19ca8c11a020117dc6f3d62c"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/proof-summary.json",
+      "bytes": 3321,
+      "sha256": "1e9f01f3c14841f7286f018169fcf933f785cb2ea72d864155b72d8c19b654a1",
+      "git_blob": "60839d783e85e9b2f273d5eefea776715fc65090"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/publication-files.json",
+      "bytes": 2217,
+      "sha256": "6bcf3046e281cb27e85135ba609f3e05818692511c966c904aa784b2900a04b8",
+      "git_blob": "e7130173c3046e5cb22524911c6f29334e7c6837"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/run-proof.py",
+      "bytes": 6538,
+      "sha256": "56620ca11c2e322a19881bc12d37754831f40ce04e3593af36ee32503b9d5d92",
+      "git_blob": "bbc22bf8605b39a7e2eaff885cb57df15bd35ddf"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/f9/source-manifest.json",
+      "bytes": 9134,
+      "sha256": "556477692c6977441d67fa466ffd286f72aa4e16821008d2af20b878fe51c35d",
+      "git_blob": "a71723412f2c7c1bb6ff609a551018c725159c86"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/README.md",
+      "bytes": 9290,
+      "sha256": "3e0bc4716973b7e0e748cbbe65d35558fdb8473919d51149a123513e63743a01",
+      "git_blob": "b2f7a8902b635e66ac3328033421f6870d0e2cfc"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/candidate-manifest.json",
+      "bytes": 1018,
+      "sha256": "80fc5d9419484b615754cf98c1a1a1b90fb48621dc5605c2e253a0709735fa32",
+      "git_blob": "d981c12305da8d2a114b36a34c700878ff7f1d9d"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/flow-policy-candidate.patch",
+      "bytes": 8271,
+      "sha256": "0b01e17b62207cbbbb1763dff025fc73710e558977db0f015f755bcf300f0104",
+      "git_blob": "e4564ac11ef2adb199d8fe1bd40d6fa20a96c53a"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/flow-vitest.config.mjs",
+      "bytes": 806,
+      "sha256": "e91ef1e3170df77da7e9ce4e247a083f77c027850b115a438379a32acdb1fe52",
+      "git_blob": "803857d959d1ae71b5dba44a2238bd0590e58ca5"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/independent-review.md",
+      "bytes": 3153,
+      "sha256": "7ac415ab7853e56f9b72d821e74ab2dfef1aa4f1df7ae4167d9723cdc7d403ba",
+      "git_blob": "88996ae49bc9fa284ace1c880d27b7d5433de7b9"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/materialize-source.py",
+      "bytes": 3112,
+      "sha256": "f29997174320afa99e3a1fac1e92199466456ce88ac5bfe042100eb7c5f7770c",
+      "git_blob": "ad67ad5a936a1871cd040c5295113b1b19a31d91"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/prepare-vitest-proof.py",
+      "bytes": 4088,
+      "sha256": "d4fd220f53b627e0d989985985c4eed8785df7b7c268d6a626854b4dab1f0504",
+      "git_blob": "a292fa691bfddb5ce83649467dce3a2c7d2fa7d0"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/proof-deps/package-lock.json",
+      "bytes": 52797,
+      "sha256": "965c71a1dc940bd707dac6f329d196f30034ee5878244ca4368965a30c07c075",
+      "git_blob": "78e2de805cb9c0a3875f09bbd3dda4a371ab9171"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/proof-deps/package.json",
+      "bytes": 164,
+      "sha256": "e553ea4d8c003891630a7d9e2156c089424d34d6f08b8c70e3f0fa3aaa88b05d",
+      "git_blob": "45666201c8afa478357b4b8742cbc077fad73db4"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/results/compact-proof.json",
+      "bytes": 14065,
+      "sha256": "49853321394b2351945893754cf6d06a90b8613cba75a706be615f1127d78056",
+      "git_blob": "957a648264cc360c9e7300a4aec7484a2fbe3eb3"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/run-flow-safety-proof.cjs",
+      "bytes": 15681,
+      "sha256": "9399c19d296a3cf374af73c36777c895a8fd31f236d87d95721dec7d0494f721",
+      "git_blob": "2cad41d3b2d9d7ae9ab3ca1d86e2e08df35bb811"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/source-manifest.json",
+      "bytes": 2220,
+      "sha256": "5b69814bfe8f549298d668450364f5a4205df9f12112509d37de303f6a46bd8b",
+      "git_blob": "314933bdb452a6d90d04d64323d40d19503887e7"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/flow/verification.json",
+      "bytes": 788,
+      "sha256": "1a24c119e3f8761be71094e31bf87603edc7c6b1e2e34d336d890c33262ceaef",
+      "git_blob": "5cad17843486edec9f8525c4e7c4c6ce24f50346"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/README.md",
+      "bytes": 8595,
+      "sha256": "207b764ed339be8ec0ea638ade90f310502d1baa0775023e9cfe6e69700c86d6",
+      "git_blob": "6588ede2f5ce558e3e813ea404e7c8d0c885a535"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/admission-candidate.patch",
+      "bytes": 19039,
+      "sha256": "236e08e1f3b039efa2aae87fb6f3a9f66a642a32c0dc449c063e2eb25c2378fc",
+      "git_blob": "e542cf63a36a2d00a7b6d64e86c0e5c119511c5f"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/admission-review.DRAFT.md",
+      "bytes": 4311,
+      "sha256": "1fbfb3a305abd84bf9ad36cd7735def13d2e56ad6130642f068f3a5934d95851",
+      "git_blob": "e0c216806d4dfefaf548bf7331dc10aed8bcbbb7"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/admission-tools.mjs",
+      "bytes": 8641,
+      "sha256": "75778e36535e4ab9819f73b7aa31ae8760ac4887549d0ec595129f1dd4ea19fa",
+      "git_blob": "09157ae2e759fd3d11b4292b3020258bfb2d56df"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/bind-admission.mjs",
+      "bytes": 1618,
+      "sha256": "d20347eea1b98ca60bfc8bbd3b8a61d8168ac0eef4d6d4f8adbe7b1c97c4a517",
+      "git_blob": "f9c8f3a12b79a496f36955884ebd6f31b0d190e6"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/candidate/.agent-control/active-packet.yaml",
+      "bytes": 12605,
+      "sha256": "d4744fc37e8527f2befb835b3b6680152e7b9eff9896198f7b765e29a0131e81",
+      "git_blob": "b796aede48e1a6e6fadf2e314cfb3460b4d07104"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/candidate/.agent-control/claude-return.yaml",
+      "bytes": 37665,
+      "sha256": "1dc6fa56d4daff3913cd662e847da0b6ff9f409d5e35adcd2149a6bce5ad6645",
+      "git_blob": "74d53eb509cc34b28f24de1d06e9c6c2210f6068"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/evidence/validation-input.json",
+      "bytes": 14451,
+      "sha256": "1d829966d77fe303c71a14e3761cd753541d955c05dbeccc6cfc8581563c2224",
+      "git_blob": "9ef0f6480011d4d9aae890b932d78f71742ca7cd"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/export-and-verify-source.py",
+      "bytes": 4028,
+      "sha256": "500469803849970cb06a423d778d3ab4b1b795390a5ba978881d252630893b74",
+      "git_blob": "38c1c78fa49b2b156101a2cc1cf5f1999f111b87"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/independent-review-checks.json",
+      "bytes": 2998,
+      "sha256": "2b76ac994579360c1fa2814254a24ade1cac42381950b1865333dd0b778bf821",
+      "git_blob": "9eb709d7ce9533831026a4c53ec3cc299b7c197e"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/independent-review.md",
+      "bytes": 4947,
+      "sha256": "2979ac8d9f719ac960b861a206e0943abca34fd111510021e8a9bc3540ca4e4d",
+      "git_blob": "dea86341e754d52e83fc7a2b9b5f29418b14a25d"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/prepare-candidate.py",
+      "bytes": 14952,
+      "sha256": "f317cb2ede5ca9f56695ffed5738020e3f2493f3efb4945024b34d4c98c7961e",
+      "git_blob": "20a3de2cdb1c98125d311c7c2a46ddab0386fc92"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/results/validation.json",
+      "bytes": 11082,
+      "sha256": "464249ad293137ff256d04188bca3fd83b93d7d410b6a1b158782dc76e958179",
+      "git_blob": "a0df7384859d80cffd79df93d46c0dd09ba37e8e"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/results/verification-summary.json",
+      "bytes": 750,
+      "sha256": "38620ee37b4f05c9b6f13dbea8887409c514e4d808c4aebea791bf377713d83d",
+      "git_blob": "ff5325b538dd484f7c2696793f5b1df1efadbaf5"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/source-manifest.json",
+      "bytes": 4488,
+      "sha256": "1a23bc3d7d02979284d60ceff83da3c31b658813d25b449f38816eebb129c1cf",
+      "git_blob": "74cd24adc1d703e968f88c2f8836d4b824b9679a"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/pr155/validate-candidate.mjs",
+      "bytes": 9991,
+      "sha256": "9471dbd09285f5fcb6286ed99c10f3d1adcbb60319f9b8d533b91f0fba1dc07f",
+      "git_blob": "fdfb407e6709ef504720147c57225b56fe6baafd"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/readback/readback.json",
+      "bytes": 20430,
+      "sha256": "1f64a58760941a30711fe7fbafd7b60b416353ef4fc668e797886c0ac3afe3dc",
+      "git_blob": "89d471a29d23ed2ea37c6c529944ca5283f331bd"
+    },
+    {
+      "path": "docs/intelligence/sessions/2026-10-17-correction-candidates-and-admission/readback/windows-proof-summary.json",
+      "bytes": 2916,
+      "sha256": "b8bd7670ba174bd442477f2eaacda8d2276c099120cdbdee7efe4298b49c41bc",
+      "git_blob": "343a6dc8a9333d88e36676423277a697215509a8"
+    }
+  ],
+  "manifest_self": "PUBLICATION-MANIFEST.json is additional and excluded from its own hash list",
+  "verification": {
+    "all_utf8_text": true,
+    "json_payload_files_parsed": 28,
+    "python_files_syntax_parsed": 6,
+    "markdown_relative_links_verified": 41,
+    "external_parent_targets": {
+      "ref": "d8962fda26a55f64b4727b8798b8bb3340ba5391",
+      "files": [
+        {
+          "path": "docs/intelligence/sessions/2026-10-17-f9-review-and-proof-closeout/README.md",
+          "sha": "3d951bf34affdcc672cc32aa7d2e7b757d884c52"
+        },
+        {
+          "path": "docs/intelligence/sessions/2026-10-17-worker-review-followthrough/README.md",
+          "sha": "16b1149f09ed8b86c3c05d7fa96fccb17c863424"
+        },
+        {
+          "path": "docs/intelligence/sessions/2026-10-17-h1-review-and-continuation/README.md",
+          "sha": "5851c0585f603fe5d6c9db3cf08ce0c27df13fad"
+        },
+        {
+          "path": "docs/intelligence/AGENT-CONTINUITY.md",
+          "sha": "786f4c4c2b0801bfd5e9aa458f10e96c0079025d"
+        }
+      ]
+    },
+    "independent_content_review": "No substantive blocker; both wording clarifications applied before publication",
+    "candidate_proofs": "F9 84/84 focused; Flow13/13 actual-service and12/12 Vitest; #15525/25 validators and50/50 original contract tests; independent reviews retained",
+    "new_authority_or_product_credit": false
+  },
+  "excluded": [
+    "full raw API/comment/log payloads",
+    "raw TAP transcripts",
+    "complete source exports",
+    "installed dependencies",
+    "archives",
+    "historical DOCX binaries"
+  ],
+  "limitations": [
+    "Candidate patches are not applied to live implementation branches by this evidence publication.",
+    "Authority replay requires separate pinned source and original raw snapshot inputs.",
+    "Existing PR180 branch divergence/file-count debt remains an integration obligation."
+  ]
+}

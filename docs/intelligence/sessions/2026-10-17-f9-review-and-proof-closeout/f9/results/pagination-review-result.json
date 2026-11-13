@@ -1,0 +1,146 @@
+{
+  "artifact": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+  "node": "v24.19.0",
+  "platform": "linux",
+  "original_transport": {
+    "status": null,
+    "signal": null,
+    "error": {
+      "name": "Error",
+      "code": "E2BIG",
+      "errno": -7,
+      "syscall": "spawnSync /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "message": "spawnSync /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node E2BIG"
+    },
+    "trace_exists": false,
+    "scenario_bytes": 174434,
+    "environment_entry_bytes": 174455
+  },
+  "adapter_transport": [
+    {
+      "name": "pagination-file-adapter-grant",
+      "code": 0,
+      "out": {
+        "eligible": true,
+        "reason": "all_admission_contracts_satisfied",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "merge_grant": {
+          "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+          "comment_id": 7000000001,
+          "created_at": "2026-10-17T12:00:01Z",
+          "url": "https://api.github.com/repos/o/r/issues/comments/7000000001",
+          "effect": "NO_STATE_CHANGE",
+          "binding": {
+            "repository": "o/r",
+            "pr_number": 87,
+            "packet_id": "KF-X-001",
+            "implementation_branch": "impl/x",
+            "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+            "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        "evidence": {
+          "review_status": "ACCEPT_FOR_ADMISSION",
+          "semantic_review": {
+            "implementer": "claude",
+            "primary": "PASS",
+            "passing": [
+              {
+                "provider": "copilot",
+                "reviewer": "copilot-pull-request-reviewer[bot]",
+                "reviewed_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "evidence_location": "https://github.com/o/r/pull/87#pullrequestreview-1"
+              }
+            ]
+          },
+          "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+          "workflows": [
+            {
+              "workflow": "CI/CD Pipeline",
+              "run_id": 100,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Gate",
+              "run_id": 101,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Branch divergence",
+              "run_id": 102,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "DAST (HawkScan)",
+              "run_id": 103,
+              "conclusion": "success"
+            },
+            {
+              "workflow": "Agent Control Worker Proof",
+              "run_id": 104,
+              "conclusion": "success"
+            }
+          ],
+          "merge_grant": {
+            "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+            "comment_id": 7000000001,
+            "created_at": "2026-10-17T12:00:01Z",
+            "url": "https://api.github.com/repos/o/r/issues/comments/7000000001",
+            "effect": "NO_STATE_CHANGE",
+            "binding": {
+              "repository": "o/r",
+              "pr_number": 87,
+              "packet_id": "KF-X-001",
+              "implementation_branch": "impl/x",
+              "source_head": "cccccccccccccccccccccccccccccccccccccccc",
+              "pr_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        },
+        "title": "synthetic",
+        "pr": 87,
+        "merge": {
+          "merged": true,
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "message": "SYNTHETIC: answered in-process; no merge was sent"
+        }
+      },
+      "merge_puts": 1,
+      "comment_reads": 4,
+      "snapshots": 2
+    },
+    {
+      "name": "pagination-file-adapter-revocation",
+      "code": 3,
+      "out": {
+        "eligible": false,
+        "reason": "merge_grant_not_satisfied",
+        "detail": {
+          "reason": "merge_grant_superseded",
+          "detail": {
+            "grant": {
+              "message_id": "CG-REVIEW-SYNTHETIC-MERGE-AUTH-001",
+              "comment_id": 7000000001
+            },
+            "superseded_by": {
+              "message_id": "CG-REVIEW-SYNTHETIC-LATER-001",
+              "comment_id": 7000000152,
+              "message_type": "REVIEW"
+            }
+          }
+        },
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "synthetic",
+        "pr": 87
+      },
+      "merge_puts": 0,
+      "comment_reads": 2,
+      "snapshots": 1
+    }
+  ],
+  "scope": "Review-only file adapter, original source and fetch preload unchanged. No real credential, network or merge call. Adapter success is characterization, not a committed correction or original-test PASS."
+}

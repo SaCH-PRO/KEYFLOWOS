@@ -1,0 +1,502 @@
+{
+  "report_kind": "bounded_public_github_readback",
+  "observation_window_utc": {
+    "from": "2026-10-17T22:15:39Z",
+    "to": "2026-10-17T22:16:49Z"
+  },
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "no_remote_mutations": true,
+  "no_polling_or_reruns": true,
+  "f9": {
+    "pr": {
+      "number": 181,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+      "base": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "head_ref": "impl/kf-meta-merge-authority-001",
+      "commits": 3,
+      "changed_files": 15,
+      "updated_at": "2026-10-17T21:44:24Z"
+    },
+    "public_head_changed_since_previous_snapshot": false,
+    "commits": [
+      {
+        "sha": "57bc45408baa87aa53113c05053c56bcbfb2434a",
+        "date": "2026-10-17T20:23:32Z",
+        "message": "KF-META-MERGE-AUTHORITY-001: require a distinct #80 grant before any merge (F9)"
+      },
+      {
+        "sha": "739414da0c5faeed1bbaf4a20deab27b9cfa18f1",
+        "date": "2026-10-17T20:50:43Z",
+        "message": "KF-META-MERGE-AUTHORITY-001: keep NC-ADMISSION-ARTIFACTS-UNBOUND's target unique"
+      },
+      {
+        "sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "date": "2026-10-17T21:35:59Z",
+        "message": "KF-META-MERGE-AUTHORITY-001: packet artifacts for PR 181 (control-only)"
+      }
+    ],
+    "reviews": [
+      {
+        "id": 5560029945,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#pullrequestreview-5560029945",
+        "commit_id": "739414da0c5faeed1bbaf4a20deab27b9cfa18f1",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-17T20:51:06Z",
+        "outcome": "NOT_RUN / quota_exhausted"
+      },
+      {
+        "id": 5560210648,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#pullrequestreview-5560210648",
+        "commit_id": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-17T21:36:07Z",
+        "outcome": "NOT_RUN / quota_exhausted"
+      },
+      {
+        "id": 5560243413,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#pullrequestreview-5560243413",
+        "commit_id": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "state": "COMMENTED",
+        "submitted_at": "2026-10-17T21:44:23Z",
+        "outcome": "CHANGES_REQUIRED"
+      }
+    ],
+    "inline_comments": [
+      {
+        "id": 4304638418,
+        "review_id": 5560243413,
+        "path": "scripts/agent-control/lib/merge-grant.mjs",
+        "line": 233,
+        "created_at": "2026-10-17T21:44:23Z",
+        "updated_at": "2026-10-17T21:44:23Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#discussion_r4304638418",
+        "body": "[P1] Require an effect-valid HOLD_CLEAR before clearing the hold. AUTHORITY-profile validity is weaker than readEffect validity: HOLD_SET → RESUME/NO_STATE_CHANGE → exact grant currently returns granted:true, and the actual mocked --merge CLI makes one SHA-pinned synthetic PUT after two snapshots, even though readEffect rejects the RESUME as CONTROL_EFFECT_TYPE_MISMATCH. Missing/unknown effects and invalid safety/health values reproduce the same pure-predicate defect. Preserve the active hold unless a valid target HOLD_CLEAR releases it, and add a live distinguishing control."
+      },
+      {
+        "id": 4304638419,
+        "review_id": 5560243413,
+        "path": "scripts/agent-control/tests/merge-cli.spec.mjs",
+        "line": 80,
+        "created_at": "2026-10-17T21:44:23Z",
+        "updated_at": "2026-10-17T21:44:23Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/181#discussion_r4304638419",
+        "body": "[P2] Move the large pagination fixture out of a single environment variable. The two-snapshot scenario serializes to about 174 KB here; on Node 20/Linux spawnSync fails with E2BIG before starting the CLI, so the pagination test gets status null and never reads #80. The same null-status assertion fails in current artifact Ubuntu Worker Proof and Autopilot self-test. Use a bounded file/stream fixture transport and expose child.error while preserving multi-page grant/revocation and two-snapshot coverage."
+      }
+    ],
+    "top_level_comments": [
+      {
+        "id": 6240848865,
+        "created_at": "2026-10-17T20:51:06Z",
+        "updated_at": "2026-10-17T20:51:06Z",
+        "kind": "deployment bot; no worker response"
+      },
+      {
+        "id": 6240849000,
+        "created_at": "2026-10-17T20:51:06Z",
+        "updated_at": "2026-10-17T21:36:37Z",
+        "kind": "deployment bot; no worker response"
+      }
+    ],
+    "workflows": [
+      {
+        "id": 39071628897,
+        "name": "CI/CD Pipeline",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "success",
+        "updated_at": "2026-10-17T21:45:31Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897"
+      },
+      {
+        "id": 39071628951,
+        "name": "Branch divergence",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "success",
+        "updated_at": "2026-10-17T21:36:28Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951"
+      },
+      {
+        "id": 39071628885,
+        "name": "Agent Control Gate",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "success",
+        "updated_at": "2026-10-17T21:36:16Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628885"
+      },
+      {
+        "id": 39071628881,
+        "name": "DAST (HawkScan)",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "success",
+        "updated_at": "2026-10-17T21:36:41Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628881"
+      },
+      {
+        "id": 39071628877,
+        "name": "KEYFLOWOS Agent Autopilot",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "failure",
+        "updated_at": "2026-10-17T21:37:00Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628877"
+      },
+      {
+        "id": 39071628867,
+        "name": "Agent Control Worker Proof",
+        "event": "pull_request",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "failure",
+        "updated_at": "2026-10-17T22:10:38Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628867"
+      },
+      {
+        "id": 39071626166,
+        "name": "Branch divergence",
+        "event": "push",
+        "head_sha": "ff49859e70cee65e31c09277b05aca4144ff77ea",
+        "status": "completed",
+        "conclusion": "success",
+        "updated_at": "2026-10-17T21:36:25Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166"
+      }
+    ],
+    "checks": [
+      {
+        "id": 117510831465,
+        "name": "Build Server",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:41:30Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510831465"
+      },
+      {
+        "id": 117510831459,
+        "name": "Build Web",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:42:09Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510831459"
+      },
+      {
+        "id": 117510831432,
+        "name": "Run Tests",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:45:30Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510831432"
+      },
+      {
+        "id": 117510380696,
+        "name": "Vercel Preview Comments",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:38Z",
+        "url": "https://vercel.com/github"
+      },
+      {
+        "id": 117510308965,
+        "name": "Check branch vs origin/main",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:16Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951/job/117510308965"
+      },
+      {
+        "id": 117510308830,
+        "name": "Nightly sweep of all branches",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:16Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951/job/117510308830"
+      },
+      {
+        "id": 117510308797,
+        "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:16Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951/job/117510308797"
+      },
+      {
+        "id": 117510307936,
+        "name": "Check divergence vs main (PR)",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:27Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951/job/117510307936"
+      },
+      {
+        "id": 117510301103,
+        "name": "Nightly sweep of all branches",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:14Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166/job/117510301103"
+      },
+      {
+        "id": 117510300992,
+        "name": "Check ${{ (inputs.branch || 'all branches') }} (manual)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:14Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166/job/117510300992"
+      },
+      {
+        "id": 117510300676,
+        "name": "Check divergence vs main (PR)",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:14Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166/job/117510300676"
+      },
+      {
+        "id": 117510299977,
+        "name": "Check branch vs origin/main",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:24Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166/job/117510299977"
+      },
+      {
+        "id": 117510296398,
+        "name": "Supabase Preview",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:03Z",
+        "url": "https://supabase.com/dashboard/project/osbfsyetfhlgxebyjsly/branches"
+      },
+      {
+        "id": 117510276455,
+        "name": "GitGuardian Security Checks",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:08Z",
+        "url": "https://dashboard.gitguardian.com"
+      },
+      {
+        "id": 117510275433,
+        "name": "exact-head-auto-merge",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:06Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628877/job/117510275433"
+      },
+      {
+        "id": 117510275177,
+        "name": "normalize-event",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:06Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628877/job/117510275177"
+      },
+      {
+        "id": 117510275167,
+        "name": "hourly-reconcile-open-prs",
+        "status": "completed",
+        "conclusion": "skipped",
+        "completed_at": "2026-10-17T21:36:06Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628877/job/117510275167"
+      },
+      {
+        "id": 117510274643,
+        "name": "Threshold resolver tests",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:16Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628951/job/117510274643"
+      },
+      {
+        "id": 117510274568,
+        "name": "Lint (debt ratchet — blocks nothing)",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:38:49Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510274568"
+      },
+      {
+        "id": 117510274534,
+        "name": "Security Scan",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:37:50Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510274534"
+      },
+      {
+        "id": 117510274426,
+        "name": "Type Check",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:38:49Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628897/job/117510274426"
+      },
+      {
+        "id": 117510274365,
+        "name": "Portable proof (ubuntu)",
+        "status": "completed",
+        "conclusion": "failure",
+        "completed_at": "2026-10-17T21:37:10Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628867/job/117510274365"
+      },
+      {
+        "id": 117510274323,
+        "name": "self-test",
+        "status": "completed",
+        "conclusion": "failure",
+        "completed_at": "2026-10-17T21:36:59Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628877/job/117510274323"
+      },
+      {
+        "id": 117510274313,
+        "name": "HawkScan",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:40Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628881/job/117510274313"
+      },
+      {
+        "id": 117510274230,
+        "name": "Windows worker proof",
+        "status": "completed",
+        "conclusion": "failure",
+        "completed_at": "2026-10-17T22:10:37Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628867/job/117510274230"
+      },
+      {
+        "id": 117510274201,
+        "name": "agent-control",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:15Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071628885/job/117510274201"
+      },
+      {
+        "id": 117510266155,
+        "name": "Threshold resolver tests",
+        "status": "completed",
+        "conclusion": "success",
+        "completed_at": "2026-10-17T21:36:14Z",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/actions/runs/39071626166/job/117510266155"
+      }
+    ],
+    "worker_momentum": {
+      "id": 6242027082,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6242027082",
+      "created_at": "2026-10-17T22:12:37Z",
+      "updated_at": "2026-10-17T22:12:37Z",
+      "message_id": "CC-MOMENTUM-F9-001",
+      "message_type": "MOMENTUM",
+      "reported_source_head": "b0377a4ca97c8d1f24e75fb7e30036b5bb4fbcb4",
+      "worker_reported_correction": "File-based pagination scenario transport and explicit child-launch errors; next artifact planned to restore the unchanged mutation target sentence.",
+      "source_quote": "Fixed in `b0377a4c`: the scenario goes in a file, and a child that fails to start now throws instead of reading as a denial.",
+      "verification_limit": "b0377a4c is a worker-reported local semantic commit in this observation. Public PR181 still points to ff49859e and no source for b0377a4c was independently fetched in this bounded read.",
+      "p1_mentioned": false,
+      "is_return": false,
+      "is_typed_authority": false
+    },
+    "disposition": "CHANGES_REQUIRED. Public head is unchanged; the P1 invalid RESUME / HOLD_CLEAR defect remains unresolved in the public source. The new MOMENTUM report neither repairs the public head nor consumes a RETURN.",
+    "windows_completed_proof": "See windows-proof-summary.json for independently read final Node20.18.1 logs: 554 ordinary tests (553 pass,0 fail,1 skip),208/209 live controls and one named vacuous artifact target. Every manifest control ID occurs once."
+  },
+  "control_issue": {
+    "reported_comment_count": 1464,
+    "tail_page": 15,
+    "tail_count": 64,
+    "latest_comment": {
+      "id": 6242044042,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6242044042",
+      "created_at": "2026-10-17T22:13:39Z",
+      "updated_at": "2026-10-17T22:13:39Z",
+      "message_id": "AUTO-EVENT-issue_comment:6242027082:created",
+      "message_type": "AUTO_EVENT",
+      "sender": "github-autopilot",
+      "packet_id": "KF-META-MERGE-AUTHORITY-001",
+      "in_reply_to": null
+    },
+    "previous_frozen_replay": {
+      "count": 1461,
+      "last_comment_id": 6241787171
+    },
+    "added_since_frozen_replay": [
+      {
+        "id": 6242013757,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6242013757",
+        "created_at": "2026-10-17T22:11:49Z",
+        "updated_at": "2026-10-17T22:11:49Z",
+        "message_id": "AUTO-EVENT-workflow_run:39071628867:1",
+        "message_type": "AUTO_EVENT",
+        "sender": "github-autopilot",
+        "packet_id": "null",
+        "in_reply_to": null
+      },
+      {
+        "id": 6242027082,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6242027082",
+        "created_at": "2026-10-17T22:12:37Z",
+        "updated_at": "2026-10-17T22:12:37Z",
+        "message_id": "CC-MOMENTUM-F9-001",
+        "message_type": "MOMENTUM",
+        "sender": "claude",
+        "packet_id": "KF-META-MERGE-AUTHORITY-001",
+        "in_reply_to": "CG-DIR-F9-001"
+      },
+      {
+        "id": 6242044042,
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6242044042",
+        "created_at": "2026-10-17T22:13:39Z",
+        "updated_at": "2026-10-17T22:13:39Z",
+        "message_id": "AUTO-EVENT-issue_comment:6242027082:created",
+        "message_type": "AUTO_EVENT",
+        "sender": "github-autopilot",
+        "packet_id": "KF-META-MERGE-AUTHORITY-001",
+        "in_reply_to": null
+      }
+    ],
+    "added_typed_authority": [],
+    "returns_since_f9_directive": [],
+    "f9_return_observed": false,
+    "interpretation": "The three new comments are AUTO_EVENT, MOMENTUM, AUTO_EVENT. None is typed authority or a RETURN. The 1,461-comment frozen replay remains separately identified; this is an incremental tail observation, not a relabelled full 1,464-comment replay."
+  },
+  "publication": {
+    "pr_number": 180,
+    "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/180",
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "head": "d8962fda26a55f64b4727b8798b8bb3340ba5391",
+    "head_ref": "docs/kf-p0-safety-review-20261017",
+    "base": "f406d15c12d56e3758b517161f8e7c2ddc30424a",
+    "base_ref": "docs/keyflow-intelligence-foundation",
+    "commits": 5,
+    "changed_files": 105,
+    "next_commit_parent": "d8962fda26a55f64b4727b8798b8bb3340ba5391",
+    "base_tree_sha": "572dee9afb2c9c47bd0e7d5e43f493dce137d42f",
+    "current_head_parent": [
+      "9e222e8e3b739fafa539ac0d6f5ff834d4858492"
+    ],
+    "nav_exact_files": [
+      "docs/intelligence/00-START-HERE.md",
+      "docs/intelligence/handoff/ACCEPTED-CAPABILITY-ROADMAP-2026-10-17.md",
+      "README.md",
+      "docs/intelligence/sessions/2026-10-17-f9-review-and-proof-closeout/README.md"
+    ],
+    "nav_absent": {
+      "docs_intelligence_readme": true,
+      "any_active_session_path": true,
+      "tree_truncated": false
+    },
+    "note": "The current complete PR180 tree contains no docs/intelligence/README.md and no ACTIVE_SESSION path. Preserve the existing 00-START-HERE and accepted-roadmap navigation; the current session README and root README are saved exactly as additional reference.",
+    "pr_body_file": "nav/pr180-body.md"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "report_kind": "fresh_frozen_repository_truth",
+  "collected_at_utc": "2026-10-17 22:10:54 UTC",
+  "snapshot": {
+    "verified": true,
+    "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "source_main_on_main": true,
+    "pr": {
+      "number": 155,
+      "state": "open",
+      "merged": false,
+      "head_ref": "impl/kf-exec-auth-fail-closed-001"
+    }
+  },
+  "evidence": {
+    "main": {
+      "sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/commit/98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "source_main_comparison": {
+      "source_main": "ac3a6384417093f198bcc7d672b0dbc295db137c",
+      "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "status": "ahead",
+      "ahead_by": 5,
+      "behind_by": 0,
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd"
+    },
+    "pr": {
+      "number": 155,
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_sha": "b30acfa7dcd4fdf96c67747ff8c4a66e4026937e",
+      "head_ref": "impl/kf-exec-auth-fail-closed-001",
+      "base_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/pull/155"
+    }
+  }
+}

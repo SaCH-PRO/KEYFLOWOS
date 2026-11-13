@@ -1,0 +1,549 @@
+{
+  "report_kind": "frozen_continuation_publication_authority_replay",
+  "executed_at_utc": "2026-10-17T20:05:46.432Z",
+  "snapshot_collected_at_utc": "2026-10-17T20:01:43.158Z",
+  "repository": "SaCH-PRO/KEYFLOWOS",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "source_verification": [
+    {
+      "path": "scripts/agent-control/lib/truth.mjs",
+      "sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/truth.mjs",
+      "actual_sha": "e293a345874b776431b9c343efa3072519f6a8e6",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/reconcile.mjs",
+      "sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/reconcile.mjs",
+      "actual_sha": "8d3c01d1a9c61d823b5839c1609a92112b2d8230",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/authority-effects.mjs",
+      "sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/authority-effects.mjs",
+      "actual_sha": "8a4f68dc4000c709f5b99db670306dbb5e2aaed9",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/control-envelope.mjs",
+      "sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/control-envelope.mjs",
+      "actual_sha": "bb51643e3aa5554aba2466d709ed61800a5ce88f",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/state.mjs",
+      "sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state.mjs",
+      "actual_sha": "805406412b59e30e3e0ae068b9ae9ab55a18d519",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/yaml.mjs",
+      "sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/yaml.mjs",
+      "actual_sha": "0e6b22f1a64980ac065e73a0797ce1929c34aee0",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/dag.mjs",
+      "sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/dag.mjs",
+      "actual_sha": "4c602406aa90077cffb07adaccd631d6b09d7119",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/select-directive.mjs",
+      "sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/select-directive.mjs",
+      "actual_sha": "05e1cfd9fd57e54583b85829d0449c7029384a9d",
+      "matched": true
+    },
+    {
+      "path": ".agent-control/programme-state.yaml",
+      "sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/.agent-control/programme-state.yaml",
+      "actual_sha": "11c1185cdf6ae7e01d7953a74e419854979c961f",
+      "matched": true
+    },
+    {
+      "path": "docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/docs/development/KEYFLOWOS_PROGRAMME_DAG.yaml",
+      "actual_sha": "d3ce1c298f0764ecf67c298bb099d79ec27d2d17",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/state-machine.mjs",
+      "sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/state-machine.mjs",
+      "actual_sha": "fe3c9948e89bdde2f7069053f19f68222a985eea",
+      "matched": true
+    },
+    {
+      "path": "scripts/agent-control/lib/events.mjs",
+      "sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/blob/98ee0202499ba87fa4ee13d58a2a9075016225bd/scripts/agent-control/lib/events.mjs",
+      "actual_sha": "0fb689e93894e0621859db7dc867c629df01a372",
+      "matched": true
+    }
+  ],
+  "comments": {
+    "count": 1436,
+    "normalized_sha256": "9e6cc4d0dbc726b15b13cac29f53c7d9734d2ef392b9cd5f25f0781d8b89f667"
+  },
+  "authority": {
+    "verified": true,
+    "candidates": 118,
+    "valid_messages": 111,
+    "malformed": [
+      {
+        "message_id": "CG-REVIEW-META-STATE-RECONCILE-001",
+        "comment_id": 5826124586,
+        "problems": [
+          "merge_authority (repeated; ambiguous)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5826124586"
+      },
+      {
+        "message_id": "CG-HOLD-ACTION-CONTROLLER-BRIDGE-001",
+        "comment_id": 5826612913,
+        "problems": [
+          "implementation_branch (absent)",
+          "scope_changed (absent)",
+          "production_touched (absent)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5826612913"
+      },
+      {
+        "message_id": "CG-PLAN-PLATFORM-CONVERGENCE-001",
+        "comment_id": 5826799265,
+        "problems": [
+          "message_type (PLAN is not DIRECTIVE/REVIEW/HOLD/RESUME)",
+          "packet_id (absent or null)",
+          "packet_id (absent)",
+          "implementation_branch (absent)",
+          "state (absent)",
+          "health (absent)",
+          "scope_changed (absent)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5826799265"
+      },
+      {
+        "message_id": "CG-REVIEW-META-CONTROL-PARSER-ADMIT-001",
+        "comment_id": 5875440129,
+        "problems": [
+          "merge_authority (repeated; ambiguous)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5875440129"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004",
+        "comment_id": 5964575594,
+        "problems": [
+          "Required (repeated; ambiguous)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5964575594"
+      },
+      {
+        "message_id": "CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001",
+        "comment_id": 5982337036,
+        "problems": [
+          "Required (repeated; ambiguous)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5982337036"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020",
+        "comment_id": 5985754624,
+        "problems": [
+          "Reason (repeated; ambiguous)"
+        ],
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5985754624"
+      }
+    ],
+    "rejected": 2,
+    "rejections": [
+      {
+        "message_id": "TEST-WAKE-PROOF-001",
+        "comment_id": 5817864286,
+        "author": "SaCH-PRO",
+        "sender": null,
+        "reason": "sender_not_chatgpt:",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5817864286"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-ADMISSION-025",
+        "comment_id": 5997061944,
+        "author": "Agence-IA-Toulouse",
+        "sender": "chatgpt",
+        "reason": "author_not_authorized:Agence-IA-Toulouse",
+        "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5997061944"
+      }
+    ],
+    "newest": {
+      "message_id": "CG-DIR-F9-001",
+      "comment_id": 6240051686,
+      "message_type": "DIRECTIVE",
+      "packet_id": "KF-META-MERGE-AUTHORITY-001",
+      "created_at": "2026-10-17T19:59:30Z",
+      "url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240051686"
+    }
+  },
+  "checkpoint_validation": {
+    "ok": true,
+    "problems": []
+  },
+  "consistent": true,
+  "findings": [],
+  "reduction": {
+    "started": true,
+    "reason": null,
+    "checkpoint": {
+      "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021",
+      "comment_id": 5993146604
+    },
+    "checkpoint_problems": [],
+    "generation": 118,
+    "checkpoint_generation": 87,
+    "observed_generation": 118,
+    "applied": [
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-PASS-022",
+        "comment_id": 5994182518,
+        "generation": 88,
+        "coordinate": "2026-10-05T12:11:40Z#5994182518",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-REWRITE-023",
+        "comment_id": 5994568448,
+        "generation": 89,
+        "coordinate": "2026-10-05T12:36:08Z#5994568448",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024",
+        "comment_id": 5995818004,
+        "generation": 90,
+        "coordinate": "2026-10-05T13:49:40Z#5995818004",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026",
+        "comment_id": 5998474832,
+        "generation": 91,
+        "coordinate": "2026-10-05T16:18:03Z#5998474832",
+        "effect": "CHECKPOINT",
+        "declared_effect": "CHECKPOINT"
+      },
+      {
+        "message_id": "CG-REVIEW-ACTION-001-CHARACTERIZATION-ACCEPT-001",
+        "comment_id": 5998711588,
+        "generation": 92,
+        "coordinate": "2026-10-05T16:32:02Z#5998711588",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-RESUME-ACTION-001-IMPLEMENTATION-001",
+        "comment_id": 5998716917,
+        "generation": 93,
+        "coordinate": "2026-10-05T16:32:22Z#5998716917",
+        "effect": "HOLD_CLEAR",
+        "declared_effect": "HOLD_CLEAR"
+      },
+      {
+        "message_id": "CG-DIRECTIVE-ACTION-001-IMPLEMENT-001",
+        "comment_id": 5998725089,
+        "generation": 94,
+        "coordinate": "2026-10-05T16:32:51Z#5998725089",
+        "effect": "PACKET_RELEASE",
+        "declared_effect": "PACKET_RELEASE"
+      },
+      {
+        "message_id": "CG-REVIEW-ACTION-001-SEMANTIC-PASS-002",
+        "comment_id": 6002264461,
+        "generation": 95,
+        "coordinate": "2026-10-05T20:22:43Z#6002264461",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-ATLAS-001-SEMANTIC-PASS-001",
+        "comment_id": 6003918300,
+        "generation": 96,
+        "coordinate": "2026-10-05T21:59:43Z#6003918300",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-ATLAS-MATERIALIZER-001-WINDOWS-PROOF-CORRECTION-001",
+        "comment_id": 6003934022,
+        "generation": 97,
+        "coordinate": "2026-10-05T22:00:29Z#6003934022",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-PR-UNLOCK-CONTRACT-001-SEMANTIC-PASS-001",
+        "comment_id": 6004083773,
+        "generation": 98,
+        "coordinate": "2026-10-05T22:08:06Z#6004083773",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-ACTION-001-ADMISSION-003",
+        "comment_id": 6010505575,
+        "generation": 99,
+        "coordinate": "2026-10-06T06:12:15Z#6010505575",
+        "effect": "PACKET_ADMISSION",
+        "declared_effect": "PACKET_ADMISSION"
+      },
+      {
+        "message_id": "CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004",
+        "comment_id": 6010515405,
+        "generation": 100,
+        "coordinate": "2026-10-06T06:13:05Z#6010515405",
+        "effect": "CHECKPOINT",
+        "declared_effect": "CHECKPOINT"
+      },
+      {
+        "message_id": "CG-DIRECTIVE-GENAI-AUTH-FAIL-CLOSED-001",
+        "comment_id": 6010541876,
+        "generation": 101,
+        "coordinate": "2026-10-06T06:15:16Z#6010541876",
+        "effect": "PACKET_RELEASE",
+        "declared_effect": "PACKET_RELEASE"
+      },
+      {
+        "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-CORRECTION-001",
+        "comment_id": 6011507550,
+        "generation": 102,
+        "coordinate": "2026-10-06T07:27:11Z#6011507550",
+        "effect": "PACKET_CORRECTION",
+        "declared_effect": "BOUNDED_CORRECTION"
+      },
+      {
+        "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-003",
+        "comment_id": 6018421547,
+        "generation": 103,
+        "coordinate": "2026-10-06T14:26:14Z#6018421547",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "AUTHORIZE_CONTROL_BINDING"
+      },
+      {
+        "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-SEMANTIC-PASS-004",
+        "comment_id": 6022210803,
+        "generation": 104,
+        "coordinate": "2026-10-06T17:54:31Z#6022210803",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-GENAI-AUTH-FAIL-CLOSED-ADMISSION-PREP-005",
+        "comment_id": 6023054785,
+        "generation": 105,
+        "coordinate": "2026-10-06T18:42:31Z#6023054785",
+        "effect": "PACKET_CORRECTION",
+        "declared_effect": "PACKET_CORRECTION"
+      },
+      {
+        "message_id": "CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001",
+        "comment_id": 6025258558,
+        "generation": 106,
+        "coordinate": "2026-10-06T20:54:06Z#6025258558",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-ACK-002",
+        "comment_id": 6025392698,
+        "generation": 107,
+        "coordinate": "2026-10-06T21:02:41Z#6025392698",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-AUTHORITY-EFFECT-COMPAT-SEMANTIC-PASS-003",
+        "comment_id": 6051089263,
+        "generation": 108,
+        "coordinate": "2026-10-08T02:42:56Z#6051089263",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-META-CONTROL-LOOP-RECOVERY-SEMANTIC-PASS-001",
+        "comment_id": 6092797415,
+        "generation": 109,
+        "coordinate": "2026-10-10T02:33:45Z#6092797415",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-INTEGRATION-CORRECTION-004",
+        "comment_id": 6108531988,
+        "generation": 110,
+        "coordinate": "2026-10-11T11:27:17Z#6108531988",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-KF159-INTEGRATED-001",
+        "comment_id": 6109079503,
+        "generation": 111,
+        "coordinate": "2026-10-11T12:35:30Z#6109079503",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-KF159-ADMISSION-RECORD-001",
+        "comment_id": 6109741134,
+        "generation": 112,
+        "coordinate": "2026-10-11T13:53:05Z#6109741134",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-KF159-EXACT-HEAD-MERGE-AUTH-001",
+        "comment_id": 6111001643,
+        "generation": 113,
+        "coordinate": "2026-10-11T16:12:24Z#6111001643",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-DIRECTIVE-KF159-POSTMERGE-001",
+        "comment_id": 6111022026,
+        "generation": 114,
+        "coordinate": "2026-10-11T16:14:32Z#6111022026",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-DIR-IRP177-REVIEW-001",
+        "comment_id": 6229439023,
+        "generation": 115,
+        "coordinate": "2026-10-17T04:06:38Z#6229439023",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-DIR-HANDOFF-UI-001",
+        "comment_id": 6229570731,
+        "generation": 116,
+        "coordinate": "2026-10-17T04:21:06Z#6229570731",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-REVIEW-KF155-006",
+        "comment_id": 6240050804,
+        "generation": 117,
+        "coordinate": "2026-10-17T19:59:24Z#6240050804",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      },
+      {
+        "message_id": "CG-DIR-F9-001",
+        "comment_id": 6240051686,
+        "generation": 118,
+        "coordinate": "2026-10-17T19:59:30Z#6240051686",
+        "effect": "NO_STATE_CHANGE",
+        "declared_effect": "NO_STATE_CHANGE"
+      }
+    ],
+    "blocked": null,
+    "unapplied": []
+  },
+  "effective_programme": {
+    "packets_total": 35,
+    "checkpointed": [
+      "KF-EXEC-K12-001",
+      "KF-EXEC-EXTFX-001",
+      "KF-EXEC-TENANT-001",
+      "KF-EXEC-AUTH-001",
+      "KF-EXEC-ACTION-001"
+    ],
+    "active_packet": "KF-EXEC-AUTH-FAIL-CLOSED-001",
+    "active_phase": null,
+    "state": "FIXING_PROOF_FAILURES",
+    "health": "YELLOW",
+    "source_main": "ac3a6384417093f198bcc7d672b0dbc295db137c",
+    "implementation_branch": "impl/kf-exec-auth-fail-closed-001",
+    "pr_number": 155,
+    "merge_authority": false,
+    "production_touched": false,
+    "application_frontier": "KF-EXEC-ACTION-001"
+  },
+  "authority_basis": {
+    "message_id": "CG-DIR-F9-001",
+    "comment_id": 6240051686
+  },
+  "active_holds": [],
+  "hold_history": [
+    {
+      "packet_id": "KF-EXEC-ACTION-001",
+      "active": false,
+      "hold_message_id": "CG-HOLD-ACTION-CONTROLLER-BRIDGE-001",
+      "hold_comment_id": 5826612913,
+      "released_by": "CG-RESUME-ACTION-001-IMPLEMENTATION-001",
+      "released_comment_id": 5998716917,
+      "release_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-5998716917"
+    }
+  ],
+  "retained_checkpoint_descriptions": {
+    "updated_at": "2026-10-05T11:30:00Z",
+    "next_legal_action": {
+      "action": "WAIT_AUTHORITY",
+      "reason": "ACTION-001 is held; release is a ChatGPT authority action",
+      "derived_at": "2026-10-05T11:30:00Z"
+    },
+    "application_frontier": "KF-EXEC-ACTION-001",
+    "warning": "These descriptive fields are retained from the checkpoint, not re-derived by applyEffect. The held-ACTION reason is historical and contradicts the current inactive hold. CONSISTENT does not establish freshness of every retained field."
+  },
+  "formal_contradiction_ruling": {
+    "still_owed_at_snapshot": false,
+    "ruling_id": 6240050804,
+    "ruling_url": "https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6240050804",
+    "settled_review_id": 6023054785,
+    "settled_contradiction_id": 6023151885,
+    "interpretation": "The valid typed ruling records narrow semantic PASS, settles the obsolete re-anchor demand and preserves NO_STATE_CHANGE. It grants neither admission nor merge."
+  },
+  "selector_with_empty_cursor": {
+    "code": 0,
+    "output": {
+      "selected": {
+        "message_id": "CG-DIR-F9-001",
+        "message_type": "DIRECTIVE",
+        "packet_id": "KF-META-MERGE-AUTHORITY-001",
+        "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+        "implementation_branch": "impl/kf-meta-merge-authority-001",
+        "created_at": "2026-10-17T19:59:30Z",
+        "url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/comments/6240051686",
+        "author": "SaCH-PRO"
+      },
+      "reason": "selected",
+      "rejected": []
+    }
+  },
+  "direct_reduce_matches_reconcile": true,
+  "scope_limits": [
+    "No live API or local-worker observation is performed by this runner.",
+    "The empty selector cursor identifies authority eligibility only; it is not the installed worker cursor or proof of worker liveness.",
+    "The complete raw issue history is supplied separately and is not embedded in this evidence package.",
+    "A changed snapshot or source must receive a new separately identified observation, not be labelled as this frozen replay.",
+    "No current REVIEW, checkpoint mutation, packet release, admission, merge, production access or programme credit results from this replay."
+  ],
+  "worker_observation": {
+    "directive_id": 6240051686,
+    "acknowledgement_in_snapshot": false,
+    "limit": "Issue-history observation only. No installed worker cursor, process or liveness probe is performed."
+  }
+}

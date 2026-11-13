@@ -1,0 +1,126 @@
+{
+  "purpose": "READ_ONLY_DEFECT_CHARACTERIZATION_NOT_FIXED",
+  "source_main": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "runtime": "v24.19.0",
+  "typescript": "5.9.3",
+  "policy_reads": [
+    {
+      "name": "primary advisory policy overrides permissive legacy",
+      "observedSettings": {
+        "mode": "advisory",
+        "degraded": false
+      },
+      "verdict": {
+        "allowed": false,
+        "requiresQuickConfirm": false,
+        "requiresFormalApproval": false,
+        "requiresAdminApproval": false,
+        "tier": 1,
+        "reason": "AI is in advisory mode — suggestions only, no execution"
+      }
+    },
+    {
+      "name": "primary read failure promotes permissive legacy",
+      "observedSettings": {
+        "mode": "pro_auto",
+        "degraded": false
+      },
+      "verdict": {
+        "allowed": true,
+        "requiresQuickConfirm": false,
+        "requiresFormalApproval": false,
+        "requiresAdminApproval": false,
+        "tier": 1,
+        "reason": "Tier 1 auto-approved (autonomy level 3)"
+      }
+    },
+    {
+      "name": "both policy reads fail closed",
+      "observedSettings": {
+        "mode": "restricted",
+        "degraded": true
+      },
+      "verdict": {
+        "allowed": false,
+        "requiresQuickConfirm": false,
+        "requiresFormalApproval": false,
+        "requiresAdminApproval": false,
+        "tier": 1,
+        "reason": "AI is in restricted mode — no actions allowed"
+      }
+    },
+    {
+      "name": "confirmed absent primary permits supported legacy policy",
+      "observedSettings": {
+        "mode": "pro_auto",
+        "degraded": false
+      },
+      "verdict": {
+        "allowed": true,
+        "requiresQuickConfirm": false,
+        "requiresFormalApproval": false,
+        "requiresAdminApproval": false,
+        "tier": 1,
+        "reason": "Tier 1 auto-approved (autonomy level 3)"
+      }
+    },
+    {
+      "name": "failed primary and malformed legacy fail closed",
+      "observedSettings": {
+        "mode": "restricted",
+        "degraded": true
+      },
+      "verdict": {
+        "allowed": false,
+        "requiresQuickConfirm": false,
+        "requiresFormalApproval": false,
+        "requiresAdminApproval": false,
+        "tier": 1,
+        "reason": "AI is in restricted mode — no actions allowed"
+      }
+    }
+  ],
+  "untrusted_position_envelope": {
+    "capability": "crm_delete_contact",
+    "granting_builtin_roles": [],
+    "ordinary_governance": {
+      "allowed": false,
+      "requiresQuickConfirm": false,
+      "requiresFormalApproval": false,
+      "requiresAdminApproval": false,
+      "tier": 3,
+      "reason": "Tool \"crm_delete_contact\" is not available to the general role"
+    },
+    "client_claimed_governance": {
+      "allowed": true,
+      "requiresQuickConfirm": false,
+      "requiresFormalApproval": false,
+      "requiresAdminApproval": false,
+      "tier": 3,
+      "reason": "Tier 3 auto-approved (max auto tier: 4)"
+    },
+    "ordinary_menu_contains_capability": false,
+    "client_claimed_menu_contains_capability": true,
+    "business_blocklist_still_refuses": true,
+    "advisory_mode_still_refuses": true,
+    "role_database_lookups": 0
+  },
+  "source_sha256": {
+    "apps/server/src/modules/ai/ai-oversight.service.ts": "68a9899dce573b336d964ec145c01a9da901ec9dc5ac99f1b497f8d96f3b9d88",
+    "apps/server/src/modules/ai/flow-tool-registry.ts": "74eca72477f5de8174f6c206c68efac82890cfa4513c4d9c2d023a3728b83787",
+    "apps/server/src/modules/ai/role-engine.service.ts": "338f84a37896675c5eabd5c553b477b43e83670dda2461e60e02b1b914fb964c",
+    "apps/server/src/modules/structure/job-role-policy.service.ts": "b4bb5230b73cb70fcb6829722c2fefadd14537ae2f31bc994e7b00fb4ca9ae66",
+    "apps/server/src/core/authority/approval-tier.ts": "4bbf0e5cd7b686b19876fc4fcd7db7e39e9c01ec149c67f9e649e5d75fb34c2f",
+    "apps/server/src/core/authority/module-vocabulary.ts": "912dc91a62b79e9f3c651a19d49442e94e3f68dd94b74a1b3405fa5d65207ae4",
+    "apps/server/src/modules/ai/flow-orchestrator.service.ts": "04ae839df25e515a40ba15a636b0678c706ee451896d715faf54cbe2cebe3464"
+  },
+  "external_requests": 0,
+  "real_data_writes": 0,
+  "limitations": [
+    "Actual oversight, role engine, job-role policy and registry source loaded; only dependency-injection tokens and database return values mocked.",
+    "Menu test executes the exact AST-selected source method. It is not a complete Flow chat or HTTP integration test.",
+    "No production reachability, real caller privilege, real policy values, provider action or data deletion was exercised.",
+    "Primary-failure case contrasts authoritative typed policy with a permissive legacy record; the implementation provides no freshness/equivalence proof for that fallback.",
+    "Characterization assertions intentionally describe observed unsafe results; their pass does not mean security is fixed."
+  ]
+}

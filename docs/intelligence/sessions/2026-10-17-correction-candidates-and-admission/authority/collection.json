@@ -1,0 +1,39 @@
+{
+  "report_kind": "fresh_authority_collection",
+  "collected_from_utc": "2026-10-17T22:09:12Z",
+  "collected_through_utc": "2026-10-17 22:10:54 UTC",
+  "main_sha": "98ee0202499ba87fa4ee13d58a2a9075016225bd",
+  "main_commit_api_url": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/commits/main",
+  "page_sizes": [
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    100,
+    61
+  ],
+  "original_total": 1461,
+  "unique_ids": 1461,
+  "overlap_since": "2026-10-17T22:09:12Z",
+  "overlap_count": 0,
+  "collection_end_comment_count": 1461,
+  "collection_start_comment_count": 1461,
+  "complete_at_collection": true,
+  "limit": "API observations are not an atomic server snapshot. Full pagination, count/uniqueness and updated-since overlap checks establish this recorded collection.",
+  "query_sources": {
+    "comments": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&page={1..15}",
+    "updated_since": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&since=2026-10-17T22%3A09%3A12Z",
+    "main": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/commits/main",
+    "ancestry": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/compare/ac3a6384417093f198bcc7d672b0dbc295db137c...98ee0202499ba87fa4ee13d58a2a9075016225bd",
+    "pr": "https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/pulls/155"
+  }
+}

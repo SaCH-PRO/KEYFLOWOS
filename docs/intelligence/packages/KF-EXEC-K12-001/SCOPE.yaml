@@ -1,0 +1,28 @@
+package_id: KF-EXEC-K12-001
+package_version: 1
+hardening_level: L2
+status: PRE_IMPLEMENTATION_NO_CODE_AUTHORIZATION
+owner_kernel: K12
+primary_journeys: [J24]
+secondary_journeys: [J13, J18, J23, J2, J15]
+dependencies: []
+blocks: [ALL_DOWNSTREAM_PROOF_CLAIMS]
+forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
+source_families_expected:
+  - package.json
+  - turbo.json
+  - .github/workflows/ci-cd.yml
+  - apps/server/vitest*.ts
+  - apps/server/src/core/config/*gate*.spec.ts
+  - apps/server/test/*integration.test.ts
+  - future narrow scripts/tools proof evaluator location
+forbidden_without_separate_authorization:
+  - architecture/os/**
+  - production provider credentials
+  - production databases
+  - production queues
+schema_migration_expected: false
+external_effects_expected: false
+test_resource_effects_expected: true
+rollout_class: TOOLING_PROOF_INFRA
+debug_contract: docs/intelligence/packages/DEBUGGABILITY-CONTRACT.md
