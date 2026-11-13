@@ -15,7 +15,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -427,6 +431,56 @@ def excerpt(text: str, limit: int = 1200) -> str:
     return compact if len(compact) <= limit else compact[: limit - 3] + "..."
 
 
+OUTPUT_FILES = ("threads.jsonl", "messages.jsonl", "candidates.jsonl", "coverage.json", "review-queue.md")
+
+# Exit status when --output is a path git would offer to commit.
+EXIT_UNSAFE_OUTPUT = 3
+
+
+def _nearest_work_tree(path: Path) -> Path | None:
+    """The nearest directory at or above path holding a .git entry (a
+    repository, a linked worktree or a submodule), or None."""
+    for candidate in (path, *path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def unsafe_output_reason(output: Path) -> str | None:
+    """Why writing the harvest to output could put it in a commit, or None.
+
+    The outputs hold exported conversation text, so inside a git work tree
+    every output file must be one git ignores: otherwise `git add -A` stages
+    it. Outside any work tree there is nothing to check. Anything git cannot
+    confirm counts as not ignored.
+    """
+    resolved = output.resolve()
+    root = _nearest_work_tree(resolved)
+    if root is None:
+        return None
+    git = shutil.which("git")
+    if git is None:
+        return f"{resolved} is inside the git work tree at {root}, and git is not on PATH to confirm it is ignored"
+    for name in OUTPUT_FILES:
+        rel = os.path.relpath(resolved / name, root)
+        # Without --no-index, a tracked file is reported as not ignored, which
+        # is right: git would commit changes to it.
+        result = subprocess.run(
+            [git, "-C", str(root), "check-ignore", "-q", "--", rel],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 1:
+            return f"{resolved / name} is inside the git work tree at {root} and is not ignored by git"
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip().splitlines()
+            return (
+                f"{resolved} is inside the git work tree at {root}, and git check-ignore failed"
+                f" ({detail[-1] if detail else f'exit {result.returncode}'}), so it is not known to be ignored"
+            )
+    return None
+
+
 def write_jsonl(path: Path, rows: Iterable[Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
@@ -446,10 +500,31 @@ def main() -> int:
         "credential shapes and values with a sensitive name, not every secret, so read the outputs "
         "before sharing any of them.",
     )
+    parser.add_argument(
+        "--allow-unignored-output",
+        action="store_true",
+        help="Write even when --output is inside a git work tree and git does not ignore it. "
+        "Without it the harvester refuses (exit 3), since git add would stage the conversation text.",
+    )
     args = parser.parse_args()
 
     input_root = Path(args.input)
     output = Path(args.output)
+    unsafe = unsafe_output_reason(output)
+    if unsafe and not args.allow_unignored_output:
+        print(
+            f"refusing to write the harvest: {unsafe}, so `git add` would stage exported conversation text.\n"
+            "Write it outside the work tree or under an ignored directory (the repository ignores any "
+            "`.artifacts/` directory), or pass --allow-unignored-output to write it anyway.",
+            file=sys.stderr,
+        )
+        return EXIT_UNSAFE_OUTPUT
+    if unsafe:
+        print(
+            f"WARNING: {unsafe}. Writing anyway because of --allow-unignored-output; "
+            "do not stage or commit these files.",
+            file=sys.stderr,
+        )
     output.mkdir(parents=True, exist_ok=True)
     project_terms = [t.lower() for t in (PROJECT_TERMS_DEFAULT + args.project_terms)]
 

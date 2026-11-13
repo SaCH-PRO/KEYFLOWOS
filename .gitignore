@@ -57,6 +57,15 @@ screenshot-home.png
 # agent-control worker runtime state (locks, logs, processed-directive cursor)
 .agent-control/.worker/
 
-# Project thread harvester output (scripts/intelligence/README-project-thread-harvester.md);
-# it holds exported conversation text and must stay local.
-.artifacts/thread-harvest/
+# Local artifact directories, at any depth. This covers the project thread
+# harvester's output (scripts/intelligence/README-project-thread-harvester.md),
+# which holds exported conversation text and must stay local wherever the
+# harvester is run from; the harvester refuses an --output inside the work
+# tree that git does not ignore.
+**/.artifacts/
+
+# Python bytecode. CPython folds constant expressions when it compiles, so the
+# harvester test's fixture fragments ("sk_" + "live_" + ...) become whole
+# secret-shaped literals in its .pyc: never commit one.
+__pycache__/
+*.py[cod]

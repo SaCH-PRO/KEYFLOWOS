@@ -39,6 +39,20 @@ python scripts/intelligence/project_thread_harvester.py \
   --project-term "Living System Atlas"
 ```
 
+### Where the output may go
+
+The outputs hold exported conversation text, so they must never be committed.
+The repository ignores any `.artifacts/` directory at any depth, so the
+relative `--output .artifacts/thread-harvest` above is safe from any directory
+inside the checkout. When `--output` lies inside a git work tree, the
+harvester asks `git check-ignore` about every output file first and refuses
+(exit status 3, nothing written) if any of them is not ignored, is tracked, or
+cannot be confirmed. `--allow-unignored-output` writes anyway, with a warning;
+an output outside every work tree is not checked.
+
+Exit status: 0 on success, 2 when some input files failed to parse (the rest
+is still written), 3 when the output location was refused.
+
 ## Redaction
 
 Redaction is on by default (`--no-redact` turns it off) and applies to message
