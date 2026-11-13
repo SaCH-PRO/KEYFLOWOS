@@ -46,8 +46,8 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 ## Summary
 
 - Member routes without an enforced scope at this head: **744** (SWEEP-P0-FOLLOWUP applied 9: the KEY plan
-  controls, the connector form mapping routes, the bank connections; and moved publish and schedule to exempt-check;
-  753 before): 741 write routes and 3
+  controls, the connector form mapping routes, the bank connections; and moved publish and schedule to exempt-check,
+  and, in its repair round, retry, retry-all and the audience preview; 753 before): 741 write routes and 3
   credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
   owner check). 760 write routes under modules/ at 2c49a539; the first review repair read core/
   too (+11 ConnectorController and GoogleSuiteController routes, -2 newly applied, +2 for the D-85
@@ -59,12 +59,12 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
   pushes and the campaign trigger, WHP-1, WHP-2) and moved 2 open rows to exempt-check (the Business
   Profile location, CW-3; connector Connect, CW-4); the round 3 class repair applied the channel
   connection health check (-1, CB-1) and moved the Drive share to exempt-check (WPH2-2).
-  - exempt-check: 63
+  - exempt-check: 66
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 60 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
-  - open: 568
+  - open: 565
 - Routes gated by this packet (applied): **102** (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
   Outlook contacts consent start, SV-3; round 3: and crm read, WPH2-1); and 25 reads of the same controllers (round 2: the
   accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
@@ -276,9 +276,9 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunicationsController.createConnection` | POST | `/communications/businesses/:businessId/connections` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only; SWEEP-P0-FOLLOWUP (round 3 recheck WH3-1, CLASS A): an EMAIL / Gmail or WhatsApp sending account receives every message sent through it, so binding one also needs crm read (check:assertMayBindExport, CONNECTOR_EXPORT_READS.channel_messaging) and records the binder (providerMeta.boundBy, set by the server, never from the body) |
 | `CommunicationsController.createDestination` | POST | `/communications/businesses/:businessId/connections/:connectionId/destinations` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-2: it adds a page under the business's credentialed connection or replaces a page's own access token, ChannelDestination.destinationMeta); the body writes the destination's own fields only, and the answer carries no token |
 | `CommunicationsController.deleteConnection` | DELETE | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
-| `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | applied | `settings:admin` (round 1 class repair, CLASS B, found by the call graph: it copies every social connection's token over the business's channel connection of that provider) |
+| `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | applied | `settings:admin` (round 1 class repair, CLASS B, found by the call graph: it copies every social connection's token over the business's channel connection of that provider); SWEEP-P0-FOLLOWUP repair (review SEC-FU-1): it writes no messaging connection (EMAIL, GOOGLE, WHATSAPP; answered as skipped): a social connection is never a sending account, and the copy swapped the owner-bound mailbox's token for another member's while the recorded binder stayed (CEN-11c pins ChannelConnectionService.syncFromSocial as a writer that skips them) |
 | `CommunicationsController.toggleDestination` | PATCH | `/communications/businesses/:businessId/destinations/:destId/toggle` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-2: it turns a send destination on or off) |
-| `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only (a businessId or id in it moved or renamed the connection); SWEEP-P0-FOLLOWUP (round 3 recheck WH3-1, CLASS A): an EMAIL / Gmail or WhatsApp sending account receives every message sent through it, so binding one also needs crm read (check:assertMayBindExport, CONNECTOR_EXPORT_READS.channel_messaging) and records the binder (providerMeta.boundBy, set by the server, never from the body) |
+| `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only (a businessId or id in it moved or renamed the connection); SWEEP-P0-FOLLOWUP (round 3 recheck WH3-1, CLASS A): an EMAIL / Gmail or WhatsApp sending account receives every message sent through it, so binding one also needs crm read (check:assertMayBindExport, CONNECTOR_EXPORT_READS.channel_messaging) and records the binder (providerMeta.boundBy, set by the server, never from the body); repair (review COR-2): only a change of the stored account (token, refresh token, mailbox, provider meta) rebinds, not a field sent back unchanged (the web's sender form sends its mailbox with every rename), and the refusal names the account in plain words |
 | `ConnectorController.saveCredentials` | POST | `/connectors/businesses/:businessId/credentials/:type` | applied | `settings:admin` (review repair SEC-1: it replaces the account a connector syncs with) |
 | `DeliveryNoteController.cancel` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/cancel` | applied | `storefront:write` |
 | `DeliveryNoteController.create` | POST | `/continental-ops/businesses/:businessId/delivery-notes` | applied | `storefront:write` |
@@ -771,6 +771,44 @@ admin.
 | ConnectorController.smoke for WhatsApp (whatsappsmoke) | the connected verification | records nothing; open to members |
 | PushNotificationController (question 3) | any member's device subscription | the caller's own; the inert settings decorator dropped |
 
+### SWEEP-P0-FOLLOWUP repair round (review SEC-FU-1, SEC-FU-2, COR-1, COR-2, SEC-FU-3)
+
+The review of WH3-1 found five ways past the receiver rule of an audience send (every queued contact is one the
+sending member and the sending account's binder may both open). Real-DB proof through the HTTP routes and KEY's
+dispatcher: sweep-followup-repair-audience (prefix v99d_); census CEN-11c, CEN-11c-guard, CEN-11d.
+
+- **SEC-FU-1.** POST connections/sync-from-social copied a social connection's token over the channel connection of
+  that provider, EMAIL, GOOGLE and WHATSAPP included, without the export binding check and without touching the
+  recorded binder; the manual social connect (a pkt/SWEEP-P0-SCOPES file) accepts any platform name. A settings admin
+  whose map says crm none swapped the owner-bound mailbox's token for their own. The sync now writes no messaging
+  connection. CEN-11b's binds for the channel senders were a hand-written list that left the sync out; CEN-11c reads
+  the doors from the call graph (every route and KEY action that reaches a write of a channel connection's sending
+  account must be one of those binds, or reach it only through a pinned writer that skips messaging providers), and
+  CEN-11c-guard mutation-checks it with five scratch doors and two twins.
+- **SEC-FU-2.** The rule ran only when a delivery was queued. It now runs again for each delivery when it is sent
+  (DeliveryQueueService.executeDelivery, channelSendRefusal: the connection's binder now; a contact it may not open
+  fails RECEIVER_MAY_NOT_OPEN, in plain words), so a PATCH rebind after a send was scheduled, or before a failed
+  delivery is retried, sends nothing to a contact the new binder may not open. Retry and retry-all need content write.
+- **COR-1.** KEY's comms_send_broadcast (FlowOrchestratorService.executeToolAction) named no sending member, so only
+  the binder was checked: KEY sent the owner's PRIVATE contacts for an ADMIN whose own publish leaves them out (D-88).
+  It now names the member the command runs for. CEN-11d: every call that hands an audience send to the queue names
+  the member who sends, hands its caller's input through from a method of the same name, or is the pinned scheduled
+  digest.
+- **COR-2.** A PATCH that sent an account field back unchanged counted as a rebind (the web's sender form sends its
+  mailbox with every rename): an ADMIN who renamed the owner's sender became its binder. Only a change of the stored
+  account rebinds now, and the refusal reads "connecting an email or WhatsApp sending account, which receives the
+  business's contacts, needs crm read access".
+- **SEC-FU-3.** POST audience/expand answered every matching contact (the owner's PRIVATE ones with email and phone)
+  to any member. It needs crm read and answers only the contacts the member may open.
+
+| route | wrote or sent | now |
+| --- | --- | --- |
+| CommunicationsController.syncFromSocial (SEC-FU-1) | a social token over an EMAIL, GOOGLE or WHATSAPP sending account | no messaging connection written (skipped) |
+| every queued delivery when sent; retry, retry-all (SEC-FU-2) | the contact, through the account as bound now | only a contact the account's binder may open now; content write to re-send |
+| KEY comms_send_broadcast (COR-1) | the binder's whole view | the member the command runs for and the binder |
+| CommunicationsController.updateConnection (COR-2) | a rebind on an unchanged field | a rebind on a change of the stored account only |
+| CommunicationsController.expandAudience (SEC-FU-3) | every matching contact | crm read; the contacts the member may open |
+
 ## Census by controller
 
 ### ActionsController (`actions/actions.controller.ts`)
@@ -1145,12 +1183,12 @@ admin.
 | `CommunicationsController.cancel` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/cancel` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.createContent` | POST | `/communications/businesses/:businessId/content` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.deleteContent` | DELETE | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
+| `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | exempt-check | check:assertMemberModuleLevel crm read in the handler (SWEEP-P0-FOLLOWUP repair, review SEC-FU-3: a preview of the audience answers each contact's name, email and phone; it was membership-only and answered the owner's PRIVATE contacts to a member with every module none); only the contacts the member may open (visibilityClause in ChannelConnectionService.expandAudience) |
 | `CommunicationsController.listWhatsAppPhones` | POST | `/communications/businesses/:businessId/whatsapp/list-phones` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.publishNow` | POST | `/communications/businesses/:businessId/content/:id/publish` | exempt-check | check:assertMemberModuleLevel content write in the handler (SWEEP-P0-FOLLOWUP, round 3 recheck WH3-1, CLASS A; not a declared scope: a declared one makes DeliveryQueueService.publishNow governed work that KEY's comms_send_broadcast reaches, which the required Release 0 drift guard in job-role-tool-families.spec.ts refuses until that tool's grant is reviewed); an audience send through an EMAIL or WhatsApp connection also needs the sending member's crm read and reaches only the contacts the member and the sending account's binder may both open (channelRecipients in DeliveryQueueService; an account with no recorded binder is read as a non-owner's) |
 | `CommunicationsController.reschedule` | PATCH | `/communications/businesses/:businessId/deliveries/:deliveryId/reschedule` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.retry` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/retry` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.retryAllFailed` | POST | `/communications/businesses/:businessId/content/:id/retry-all` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
+| `CommunicationsController.retry` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/retry` | exempt-check | check:assertMemberModuleLevel content write in the handler, as publish (SWEEP-P0-FOLLOWUP repair, review SEC-FU-2: a retry sends the delivery again; it was membership-only); the delivery meets the receiver rule again when it is sent (channelSendRefusal in DeliveryQueueService.executeDelivery: a contact the sending account's binder may not open now fails RECEIVER_MAY_NOT_OPEN) |
+| `CommunicationsController.retryAllFailed` | POST | `/communications/businesses/:businessId/content/:id/retry-all` | exempt-check | check:assertMemberModuleLevel content write in the handler, as retry (SWEEP-P0-FOLLOWUP repair, review SEC-FU-2); each delivery meets the receiver rule again when it is sent |
 | `CommunicationsController.schedule` | POST | `/communications/businesses/:businessId/content/:id/schedule` | exempt-check | check:assertMemberModuleLevel content write in the handler (SWEEP-P0-FOLLOWUP, round 3 recheck WH3-1, CLASS A; not a declared scope: a declared one makes DeliveryQueueService.publishNow governed work that KEY's comms_send_broadcast reaches, which the required Release 0 drift guard in job-role-tool-families.spec.ts refuses until that tool's grant is reviewed); an audience send through an EMAIL or WhatsApp connection also needs the sending member's crm read and reaches only the contacts the member and the sending account's binder may both open (channelRecipients in DeliveryQueueService; an account with no recorded binder is read as a non-owner's) |
 | `CommunicationsController.updateContent` | PATCH | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.upsertVariant` | POST | `/communications/businesses/:businessId/content/:id/variants` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |

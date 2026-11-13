@@ -40,6 +40,15 @@ export function connectorExportReads(type: string): readonly CanonicalModule[] |
   return Object.prototype.hasOwnProperty.call(CONNECTOR_EXPORT_READS, type) ? CONNECTOR_EXPORT_READS[type] : null;
 }
 
+/**
+ * SWEEP-P0-FOLLOWUP repair (review COR-2): what the binding refusal calls an export account whose type name is internal,
+ * and what it receives, in plain words ("connecting channel_messaging, which receives the business's crm records" was
+ * what a settings admin renaming the sender read).
+ */
+const EXPORT_ACCOUNT_WORDS: Readonly<Record<string, { account: string; receives: string }>> = {
+  channel_messaging: { account: 'an email or WhatsApp sending account', receives: "the business's contacts" },
+};
+
 /** 403 unless the member binding `type`'s account reads what it exports (a connector that exports nothing: no rule). */
 export async function assertMayBindExport(
   prisma: PrismaService,
@@ -49,7 +58,11 @@ export async function assertMayBindExport(
 ): Promise<void> {
   const reads = connectorExportReads(type);
   if (!reads) return;
-  await assertMayExport(prisma, businessId, actor, reads, `connecting ${type}, which receives the business's ${reads.join(' and ')} records,`);
+  const words = Object.prototype.hasOwnProperty.call(EXPORT_ACCOUNT_WORDS, type) ? EXPORT_ACCOUNT_WORDS[type] : null;
+  const what = words
+    ? `connecting ${words.account}, which receives ${words.receives},`
+    : `connecting ${type}, which receives the business's ${reads.join(' and ')} records,`;
+  await assertMayExport(prisma, businessId, actor, reads, what);
 }
 
 /**

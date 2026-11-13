@@ -36,9 +36,51 @@ export const isMessagingProvider = (provider: unknown): boolean =>
 /** The fields of a connection update that change its account (its token, mailbox or provider meta), so rebind it. */
 export const CHANNEL_ACCOUNT_FIELDS = ['token', 'refreshToken', 'accountEmail', 'providerMeta'] as const;
 
-/** True when an update body changes the connection's account (a label or health change does not). */
-export const rebindsChannelAccount = (data: unknown): boolean =>
-  !!data && typeof data === 'object' && CHANNEL_ACCOUNT_FIELDS.some((k) => (data as Record<string, unknown>)[k] !== undefined);
+/** The account of a stored connection, as rebindsChannelAccount compares it (its token read decrypted). */
+export interface StoredChannelAccount {
+  token?: string | null;
+  refreshToken?: string | null;
+  accountEmail?: string | null;
+  providerMeta?: unknown;
+}
+
+/** A JSON value with object keys in order, so two provider metas compare by content. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/** A provider meta less the binder the server records (a boundBy in a body is never stored, so it changes nothing). */
+function metaWithoutBinder(providerMeta: unknown): Record<string, unknown> {
+  if (!providerMeta || typeof providerMeta !== 'object' || Array.isArray(providerMeta)) return {};
+  const rest = { ...(providerMeta as Record<string, unknown>) };
+  delete rest.boundBy;
+  return rest;
+}
+
+const sameMailbox = (a: unknown, b: unknown) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+
+/**
+ * True when an update body changes the stored connection's account: a token, refresh token, mailbox or provider meta
+ * that differs from what is stored. A field sent back unchanged binds nothing (review COR-2: the web's sender form
+ * always sends {label, accountEmail}, so renaming the sender counted as a rebind: an ADMIN who renamed the owner's
+ * sender became its binder and the owner's PRIVATE contacts dropped out of the owner's own sends, and a settings
+ * admin whose map says crm none could not rename it). A label or health change is never a rebind.
+ */
+export function rebindsChannelAccount(stored: StoredChannelAccount | null | undefined, data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const body = data as Record<string, unknown>;
+  const was = stored ?? {};
+  if (body.token !== undefined && (body.token ?? null) !== (was.token ?? null)) return true;
+  if (body.refreshToken !== undefined && (body.refreshToken ?? null) !== (was.refreshToken ?? null)) return true;
+  if (body.accountEmail !== undefined && !sameMailbox(body.accountEmail, was.accountEmail)) return true;
+  if (body.providerMeta !== undefined && canonicalJson(metaWithoutBinder(body.providerMeta)) !== canonicalJson(metaWithoutBinder(was.providerMeta))) return true;
+  return false;
+}
 
 /** The member a connection's providerMeta records as its binder, or null (none recorded). */
 export function channelBinderOf(providerMeta: unknown): string | null {
@@ -92,4 +134,35 @@ export async function channelRecipients(
     memberIds.push(binder);
   }
   return contactIdsEveryReceiverMayOpen(prisma, businessId, { memberIds, unknownReceiver }, contactIds);
+}
+
+/** The code a delivery fails with when its contact is not one every receiver of the sending account may open now. */
+export const RECEIVER_MAY_NOT_OPEN = 'RECEIVER_MAY_NOT_OPEN';
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (review SEC-FU-2): the receiver rule, again when a queued delivery is sent. channelRecipients
+ * ran when the delivery was queued (publish, schedule, KEY's broadcast, a flow, a sequence), but the delivery goes out
+ * through the connection's account as it is when it is sent: a PATCH that rebinds the account after a send was
+ * scheduled, or before a failed delivery is retried, sent the contacts to the new binder's account although that
+ * binder may not open them. Why the delivery to `contactId` through `connection` may not go out now (its recorded
+ * binder may no longer read crm, or may not open the contact; an account with no recorded binder is read as a
+ * non-owner's), in plain words, or null when it may. A delivery to no contact, or through a connection that sends no
+ * messages, is not held here.
+ */
+export async function channelSendRefusal(
+  prisma: PrismaService,
+  businessId: string,
+  connection: { provider?: string | null; providerMeta?: unknown } | null | undefined,
+  contactId: string | null | undefined,
+): Promise<string | null> {
+  if (!contactId || !connection || !isMessagingProvider(connection.provider)) return null;
+  let open: Set<string>;
+  try {
+    open = await channelRecipients(prisma, businessId, [{ provider: String(connection.provider), providerMeta: connection.providerMeta }], null, [contactId]);
+  } catch (err) {
+    if (err instanceof ForbiddenException) return `Not sent: ${err.message}`;
+    throw err;
+  }
+  if (open.has(contactId)) return null;
+  return 'Not sent: the member who connected the sending account may not open this contact (the account was connected again, or the contact made private, after this send was queued). Send it through an account connected by a member who may open the contact.';
 }
