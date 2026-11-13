@@ -108,7 +108,10 @@ describe("CR-1: ProjectDetail says a refused delete was refused", () => {
     fireEvent.click(trash!.closest("button") as HTMLElement);
     await waitFor(() => expect(sent.some((s) => s.startsWith("DELETE /projects/businesses/biz_1/tasks/t1"))).toBe(true));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(REFUSAL));
-    const dropped = onProjectUpdate.mock.calls.some(([p]: [{ tasks?: Array<{ id: string }> }]) => Array.isArray(p?.tasks) && !p.tasks.some((t) => t.id === "t1"));
+    const dropped = onProjectUpdate.mock.calls.some((call) => {
+      const p = call[0] as { tasks?: Array<{ id: string }> } | undefined;
+      return Array.isArray(p?.tasks) && !p.tasks.some((t) => t.id === "t1");
+    });
     expect(dropped, "the task was dropped from the project").toBe(false);
   });
 
@@ -123,7 +126,10 @@ describe("CR-1: ProjectDetail says a refused delete was refused", () => {
     await waitFor(() => expect(sent.some((s) => s.startsWith("DELETE /projects/businesses/biz_1/projects/p1/milestones/m1"))).toBe(true));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(REFUSAL));
     expect(screen.getByText("Owner milestone one")).toBeTruthy();
-    const dropped = onProjectUpdate.mock.calls.some(([p]: [{ milestones?: Array<{ id: string }> }]) => Array.isArray(p?.milestones) && !p.milestones.some((m) => m.id === "m1"));
+    const dropped = onProjectUpdate.mock.calls.some((call) => {
+      const p = call[0] as { milestones?: Array<{ id: string }> } | undefined;
+      return Array.isArray(p?.milestones) && !p.milestones.some((m) => m.id === "m1");
+    });
     expect(dropped, "the milestone was dropped from the project").toBe(false);
   });
 });

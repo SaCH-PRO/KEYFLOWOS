@@ -434,6 +434,12 @@ export class MarketplaceController {
     return this.commerceIntegration.promoteProductToContent(businessId, productId);
   }
 
+  /**
+   * SWEEP-P0-SCOPES review repair (SEC-4): it creates a Project (CommerceIntegrationService
+   * .createProjectForBundleOrder), so it needs projects write, as POST /projects/businesses/:id does
+   * (BUG-014): a STAFF member on role defaults (projects read) created projects through it.
+   */
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/orders/:orderId/create-project')
   createProjectForBundleOrder(
     @Param('businessId') businessId: string,

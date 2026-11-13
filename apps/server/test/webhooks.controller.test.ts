@@ -291,8 +291,10 @@ describe('WebhooksController', () => {
       .expect(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].url).toBe('https://example.com/hook');
-    // SWEEP-P0-SCOPES (BUG-001): no read answers a signing secret after creation.
-    expect(res.body[0]).not.toHaveProperty('secret');
+    // SWEEP-P0-SCOPES (BUG-001, review repair CR-5): a read answers the signing secret to settings admin
+    // only; every member here is an OWNER with no explicit map (settings admin by role default).
+    // The settings read and write views are pinned by sweep-webhooks-api-keys-settings (WHK-02b).
+    expect(res.body[0].secret).toBe('secret');
   });
 
   it('creates a webhook with a generated secret and selected events', async () => {

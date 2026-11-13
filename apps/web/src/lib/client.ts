@@ -8746,10 +8746,12 @@ export interface WebhookConfig {
   url: string;
   events: string[];
   /**
-   * SWEEP-P0-SCOPES (BUG-001): the signing secret is answered once, by the create route, to the
-   * member who created the webhook; no list answers it.
+   * SWEEP-P0-SCOPES (BUG-001, review repair CR-5): the signing secret is answered by the create
+   * route and, in the list, only to a member with settings admin.
    */
   secret?: string;
+  /** SWEEP-P0-SCOPES review repair (SEC-3): true when `url` is the receiver's origin only (settings read). */
+  urlMasked?: boolean;
   isActive: boolean;
   createdAt: string;
 }

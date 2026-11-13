@@ -1,7 +1,8 @@
 # REST scope census — 2026-11-13 (SWEEP-P0-SCOPES)
 
-Every member write route of `apps/server/src/modules` that checks a business membership and
-nothing else, with what this packet did about it. Pinned by
+Every member write route of `apps/server/src` (modules/, core/ and the app root; review repair
+SEC-1: the first cut read modules/ only and missed core/connectors) that checks a business
+membership and nothing else, with what this packet did about it. Pinned by
 `apps/server/src/core/config/rest-scope-census.spec.ts`: a new membership-only write route fails
 there until it carries an enforced scope (`@RequireModuleScope` on the handler and
 `ModuleScopeGuard` in its chain) or gets a row here.
@@ -29,23 +30,27 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member write routes without an enforced scope at this head: **760**.
-  - exempt-check: 49
+- Member write routes without an enforced scope at this head: **771** (760 under modules/ at
+  2c49a539; the review repair reads core/ too: +11 ConnectorController and GoogleSuiteController
+  routes, -2 newly applied, +2 for the D-85 plan doors that now keep their service check alone).
+  - exempt-check: 55
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 63
-  - open: 595
-- Write routes gated by this packet (applied): **71** (and 19 reads of the same controllers).
-- Secret-bearing reads reviewed: **11**.
+  - open: 600
+- Write routes gated by this packet (applied): **71** (and 20 reads of the same controllers).
+- Secret-bearing reads reviewed: **14**.
 
 Applied in this packet, with real-DB tests through the HTTP routes:
 
 | family | scope | suite |
 | --- | --- | --- |
-| webhooks (BUG-001) | settings read / write; secret answered once at create; URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
-| API keys (BUG-013) | settings read / admin; revoke also needs an OWNER membership | sweep-webhooks-api-keys-settings |
-| projects (BUG-014) | projects read / write on all 35 routes | sweep-projects-module-scope |
+| webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
+| API keys (BUG-013) | settings read / admin (revoke: settings admin, review CR-3) | sweep-webhooks-api-keys-settings |
+| connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules) | sweep-connector-credentials-scope |
+| projects (BUG-014) | projects read / write on 33 routes (analyze-impact write, SEC-5); approve and delete a plan keep D-85's own check (CR-2) | sweep-projects-module-scope |
+| marketplace bundle-order project (review SEC-4) | projects write | sweep-inventory-storefront-scope |
 | marketplace stock, warehouses, listings, shipping zones, delivery config (BUG-015) | storefront write | sweep-inventory-storefront-scope |
 | stock counts, goods receipts, delivery notes, Drive inventory sheet (BUG-015 family) | storefront write | sweep-inventory-storefront-scope |
 | analytics (declared scope was inert) | analytics read / write | sweep-census-families |
@@ -59,9 +64,10 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 
 ## Owner questions
 
-1. API keys record no creator (no schema change in this packet), so revoking any key is the
-   owner's (an OWNER membership): an ADMIN who created a key cannot revoke it. Keep, or add a
-   creator column so a member may revoke their own key?
+1. API keys record no creator (no schema change in this packet). Revoking is settings admin
+   (OWNER and ADMIN by role default; review repair CR-3 dropped the OWNER-only rule no ruling
+   asked for). Should revoking be owner-only, or limited to the key's creator once a creator column
+   exists?
 2. Catalog product writes (`CatalogController`): revenue write, as `CommerceController` requires
    for the same writes? Doing it moves commerce_create_product, commerce_update_product and
    apply_storefront_recommendation from the legacy commerce job-role family to the canonical
@@ -72,6 +78,23 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    writes takes booking handling and own-time logging from default staff. Which do staff keep?
 5. KEY agent and plan controls (`AgentController`, parts of `AiController`): STAFF default ai is
    none; may staff pause, resume or abort KEY plans?
+6. Projects (review CR-7): every task write now needs projects write, so a STAFF member on role
+   defaults (projects read) who is a task's assignee (D-87) can no longer move or complete it
+   (PATCH .../tasks/:id/status, PATCH .../tasks/:id). May the assignee move and complete their own
+   task with projects read? Not decided here: KEY's projects_complete_task / projects_update_task
+   derive projects write from these routes (job-role-tool-families.spec), so an assignee path
+   needs the same rule in KEY's dispatcher, which this packet does not edit.
+7. Analytics (review CR-6): the analytics routes now enforce their declared analytics scope.
+   Members invited through the pre-V1-07 web team form hold an 11-key explicit map with no
+   `analytics` (or `operations`) key, which the guard reads as none (EXPLICIT_MAP_MISSING_KEY,
+   KF-EXEC-AUTH-001), ADMINs included, so they lose the Growth tab as they already lack the
+   operations routes. Backfill those maps (both keys at the role default), or keep them refused
+   until an owner re-grants from the Team page?
+8. Webhooks (review SEC-2): the event reads are checked when a webhook is created or turned back
+   on. A webhook records no creator (no schema change here), so one keeps delivering after its
+   creator's access is narrowed, until a member turns it off. Add a creator column and re-check
+   at delivery? Contact events also carry contacts marked PRIVATE that a non-owner member cannot
+   see (crm visibility); should contact webhooks be owner-only, or skip PRIVATE contacts?
 
 ## KEY follow-ups and seams
 
@@ -87,6 +110,15 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
   routes add a method-level ModuleScopeGuard beside this packet's class-level one (it runs twice,
   harmlessly). Both branches add the same ModuleScopeGuard import line to marketplace.controller.ts.
 - `MarketplaceController.createPurchaseOrder` is left unscoped by both packets (deferred here).
+- Review repair: `MarketplaceController.createProjectForBundleOrder` now carries projects write on
+  its handler (SEC-4), a decorator line away from the purchase-order handlers pkt/PR195-JOURNAL-SCOPE
+  edits (no shared hunk).
+- Review repair CR-4, left for after pkt/PR195-JOURNAL-SCOPE lands: `commerce-inventory-wrapper.tsx`
+  and `marketplace/page.tsx` close the warehouse, stock-set and listing modals with no word on a
+  403 (the BUG-032 pattern). Both handlers are the ones that branch edits for its purchase-order
+  refusal (it adds `toast` and `moduleWriteRefusal` imports and a branch in the same save
+  function), so the same refusal read is applied to their other branches once it lands, with its
+  `moduleWriteRefusal` helper.
 
 ## Applied (this packet)
 
@@ -100,6 +132,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `AnalyticsController.markInsightRead` | POST | `/api/businesses/:businessId/analytics/insights/:id/read` | applied | `analytics:write` |
 | `ApiKeysController.create` | POST | `/api/businesses/:businessId/api-keys` | applied | `settings:admin` |
 | `ApiKeysController.revoke` | DELETE | `/api/businesses/:businessId/api-keys/:keyId` | applied | `settings:admin` |
+| `ConnectorController.saveCredentials` | POST | `/connectors/businesses/:businessId/credentials/:type` | applied | `settings:admin` (review repair SEC-1: it replaces the account a connector syncs with) |
 | `DeliveryNoteController.cancel` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/cancel` | applied | `storefront:write` |
 | `DeliveryNoteController.create` | POST | `/continental-ops/businesses/:businessId/delivery-notes` | applied | `storefront:write` |
 | `DeliveryNoteController.fulfill` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/fulfill` | applied | `storefront:write` |
@@ -115,6 +148,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `GoogleDriveController.pushInventoryToSheet` | POST | `/drive/businesses/:businessId/inventory-sheet/push` | applied | `storefront:write` |
 | `GoogleDriveController.unlinkInventorySheet` | DELETE | `/drive/businesses/:businessId/inventory-sheet/unlink` | applied | `storefront:write` |
 | `MarketplaceController.adjustInventory` | POST | `/marketplace/businesses/:businessId/inventory/adjust` | applied | `storefront:write` |
+| `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | applied | `projects:write` (review repair SEC-4: it creates a Project, the BUG-014 rule) |
 | `MarketplaceController.createListing` | POST | `/marketplace/businesses/:businessId/listings` | applied | `storefront:write` |
 | `MarketplaceController.createShippingZone` | POST | `/marketplace/businesses/:businessId/shipping-zones` | applied | `storefront:write` |
 | `MarketplaceController.createWarehouse` | POST | `/marketplace/businesses/:businessId/warehouses` | applied | `storefront:write` |
@@ -129,8 +163,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `MarketplaceController.updateWarehouse` | PATCH | `/marketplace/businesses/:businessId/warehouses/:warehouseId` | applied | `storefront:write` |
 | `MarketplaceController.upsertInventory` | POST | `/marketplace/businesses/:businessId/inventory` | applied | `storefront:write` |
 | `ProjectsController.addTask` | POST | `/projects/businesses/:businessId/projects/:projectId/tasks` | applied | `projects:write` |
-| `ProjectsController.analyzeImpact` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/analyze-impact` | applied | `projects:read` |
-| `ProjectsController.approvePlan` | POST | `/projects/businesses/:businessId/plans/:planId/approve` | applied | `projects:write` |
+| `ProjectsController.analyzeImpact` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/analyze-impact` | applied | `projects:write` (review repair SEC-5: a metered model call on the business's AI credits) |
 | `ProjectsController.completeOutAppEvent` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/complete` | applied | `projects:write` |
 | `ProjectsController.createDeliverable` | POST | `/projects/businesses/:businessId/projects/:projectId/deliverables` | applied | `projects:write` |
 | `ProjectsController.createFromTemplate` | POST | `/projects/businesses/:businessId/from-template/:templateId` | applied | `projects:write` |
@@ -139,7 +172,6 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `ProjectsController.createTemplate` | POST | `/projects/businesses/:businessId/templates` | applied | `projects:write` |
 | `ProjectsController.deleteDeliverable` | DELETE | `/projects/businesses/:businessId/projects/:projectId/deliverables/:deliverableId` | applied | `projects:write` |
 | `ProjectsController.deleteMilestone` | DELETE | `/projects/businesses/:businessId/projects/:projectId/milestones/:milestoneId` | applied | `projects:write` |
-| `ProjectsController.deletePlan` | DELETE | `/projects/businesses/:businessId/plans/:planId` | applied | `projects:write` |
 | `ProjectsController.deleteProject` | DELETE | `/projects/businesses/:businessId/projects/:projectId` | applied | `projects:write` |
 | `ProjectsController.deleteTask` | DELETE | `/projects/businesses/:businessId/tasks/:taskId` | applied | `projects:write` |
 | `ProjectsController.deleteTemplate` | DELETE | `/projects/businesses/:businessId/templates/:templateId` | applied | `projects:write` |
@@ -168,7 +200,10 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | settings:read; the signing secret is never selected (only the create answer carries it, once) |
+| `WebhooksController.list` | GET | `/webhooks/businesses/:businessId/webhooks` | secret-read | settings:read; the signing secret is selected for settings admin only (review repair CR-5), and below settings write the receiver URL is its origin only (SEC-3: a Slack, Zapier or Make hook's path is its credential) |
+| `WebhooksController.deliveries` | GET | `/webhooks/businesses/:businessId/webhooks/:webhookId/deliveries` | secret-read | settings:read; each delivery's receiver URL is its origin only below settings write (review repair SEC-3) |
+| `ConnectorController.getWebhookInfo` | GET | `/connectors/businesses/:businessId/webhook-info/:type` | secret-read | settings:admin; the inbound form webhook's signing secret (created on the first read) is its whole authentication (review repair SEC-1: a STAFF member read it and forged submissions) |
+| `ConnectorController.getCredentials` | GET | `/connectors/businesses/:businessId/credentials/:type` | secret-read | secret fields answered masked (ConnectorCredentialsService.getMaskedCredentials, the last 4 only); the form schema stays open to members |
 | `ApiKeysController.list` | GET | `/api/businesses/:businessId/api-keys` | secret-read | settings:read; name, prefix and scopes only (the key is hashed; the raw key is answered once at create) |
 | `SocialController.listConnections` | GET | `/social/businesses/:businessId/connections` | secret-read | the OAuth access token and refresh token are stripped from every row (this packet; sweep-census-families CEN-SOC-01) |
 | `SupplierController.getConnections` | GET | `/supplier/businesses/:businessId/connections` | secret-read | credentials removed from every row (SupplierService.getSupplierConnections) |
@@ -655,6 +690,38 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `CommunityController.updatePost` | PATCH | `/businesses/:businessId/community/posts/:postId` | open | membership only; follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule |
 | `CommunityController.updateReferralStatus` | PATCH | `/businesses/:businessId/community/referrals/:referralId/status` | open | membership only; follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule |
 | `CommunityController.withdrawApplication` | POST | `/businesses/:businessId/community/opportunity-applications/:id/withdraw` | open | membership only; follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule |
+
+### ConnectorController (`core/connectors/connector.controller.ts`)
+
+Read since the review repair (SEC-1). POST credentials is applied (above); GET webhook-info is a
+reviewed secret read (above).
+
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
+| `ConnectorController.deleteCredentials` | DELETE | `/connectors/businesses/:businessId/credentials/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin, review repair SEC-1: it clears the connector's stored credentials); gmail and the Google Suite connections keep their owner rules first (GMAIL_OWNER_ONLY D-11, GOOGLE_CONNECT_OWNER_ONLY D-99) |
+| `ConnectorController.disconnect` | POST | `/connectors/businesses/:businessId/disconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: a connector's disconnect clears its stored credentials, QuickBooksConnector.disconnect); gmail and the Google Suite connections keep their owner rules first |
+| `ConnectorController.reconnect` | POST | `/connectors/businesses/:businessId/reconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: it disconnects first); gmail and the Google Suite connections keep their owner rules first |
+| `ConnectorController.authenticate` | POST | `/connectors/businesses/:businessId/authenticate/:type` | open | membership only; follow-up SWEEP-CENSUS: settings admin with the per-provider OAuth start routes (an OAuth start binds the business to the account that completes it); gmail-connect-binding R0-CMF6-K04 pins it open for gmail's status answer |
+| `ConnectorController.runHealthCheck` | POST | `/connectors/businesses/:businessId/health-check/run` | open | membership only; follow-up SWEEP-CENSUS: settings read; it runs provider checks and writes health rows, no credential |
+| `ConnectorController.smoke` | POST | `/connectors/businesses/:businessId/smoke/:type` | open | membership only (gmail: check GMAIL_OWNER_ONLY, D-11); follow-up SWEEP-CENSUS: settings write; a provider self-test, R0-CMF6-K05 pins it open for other connectors |
+| `ConnectorController.sync` | POST | `/connectors/businesses/:businessId/sync/:type` | open | membership only (gmail and Google Suite: owner rules, D-11, D-99); follow-up SWEEP-CENSUS: the synced module's write (crm for contact sources, revenue for accounting); R0-CMF6-K05 and V94D-F02 pin it open for other connectors |
+| `ConnectorController.test` | POST | `/connectors/businesses/:businessId/test/:type` | open | membership only; follow-up SWEEP-CENSUS: settings read; a credential check, no write (R0-CMF6-K04, V94D-F02 pin it open) |
+| `ConnectorController.updateInboxConfig` | PATCH | `/connectors/businesses/:businessId/inbox-config/:type` | open | membership only; follow-up SWEEP-CENSUS: settings write; Key Inbox processing settings only (R0-CMF6-M02 decided it open) |
+
+### GoogleSuiteController (`core/connectors/google-suite.controller.ts`)
+
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
+| `GoogleSuiteController.buildAuthUrl` | POST | `/connect/google-suite/businesses/:businessId/auth-url` | exempt-check | check:assertGoogleConnectOwner (every Google connection is started by the owner, D-99; gmail through GmailService.assertConnectAuthority, D-11) |
+
+### ProjectsController (`projects/projects.controller.ts`)
+
+Every other route is applied (above).
+
+| route | verb | path | disposition | reason |
+| --- | --- | --- | --- | --- |
+| `ProjectsController.approvePlan` | POST | `/projects/businesses/:businessId/plans/:planId/approve` | exempt-check | service-check:assertMayGovernPlans (owner ruling D-85: OWNER/ADMIN or projects:write; review repair CR-2: a handler scope refused the OWNER or ADMIN whose explicit map holds projects below write, which D-85 admits) |
+| `ProjectsController.deletePlan` | DELETE | `/projects/businesses/:businessId/plans/:planId` | exempt-check | service-check:assertMayGovernPlans (owner ruling D-85, as approve; only a draft plan is deleted) |
 
 ### ConnectController (`connect/connect.controller.ts`)
 
@@ -1144,7 +1211,6 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `MarketplaceController.createCustomsDeclaration` | POST | `/marketplace/businesses/:businessId/customs` | exempt-ruled | order fulfilment stays open to every member (D-112: fulfilment status changes stay open; marking PAID and refunds have their own revenue doors, D-77, D-112) |
 | `MarketplaceController.createOrder` | POST | `/marketplace/businesses/:businessId/orders` | open | membership only; follow-up SWEEP-CENSUS: storefront write; an operator order; created paid it goes through the paid door with revenue write (D-77); creation itself is not ruled |
 | `MarketplaceController.createPreOrder` | POST | `/marketplace/businesses/:businessId/pre-orders` | exempt-ruled | order fulfilment stays open to every member (D-112: fulfilment status changes stay open; marking PAID and refunds have their own revenue doors, D-77, D-112) |
-| `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | open | membership only; follow-up SWEEP-CENSUS: projects write |
 | `MarketplaceController.createPurchaseOrder` | POST | `/marketplace/businesses/:businessId/purchase-orders` | deferred | purchase orders are pkt/PR195-JOURNAL-SCOPE's (its receipt doors need expenses write); create is not gated there yet: a follow-up names the module |
 | `MarketplaceController.createShipment` | POST | `/marketplace/businesses/:businessId/shipments` | exempt-ruled | order fulfilment stays open to every member (D-112: fulfilment status changes stay open; marking PAID and refunds have their own revenue doors, D-77, D-112) |
 | `MarketplaceController.fulfillOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/fulfill` | exempt-ruled | order fulfilment stays open to every member (D-112: fulfilment status changes stay open; marking PAID and refunds have their own revenue doors, D-77, D-112) |

@@ -15,10 +15,18 @@ type ActorRequest = { user?: { id?: string } };
  * controller ran AuthGuard and BusinessGuard only, so a STAFF member with projects 'read' created
  * projects and deleted the owner's (only plan approve and delete checked projects:write, in the
  * service, D-85). Now ModuleScopeGuard runs after BusinessGuard and every handler names the
- * projects module (the guard reads handler metadata only): read for a GET and for the read-only
- * analyze-impact (it computes a rearrangement and writes nothing), write for every other route.
+ * projects module (the guard reads handler metadata only): read for a GET, write for every other
+ * route. analyze-impact writes no project row but makes a metered model call on the business's AI
+ * credits (ProjectPlannerService.analyzeRearrangement -> AiUsageService.callAi), so it is write too
+ * (review repair SEC-5): a member who may rearrange the plan may ask what the move does.
  * OWNER and ADMIN hold projects admin by role default, STAFF read; an explicit map binds every
- * role (D-114). The plan doors keep their own D-85 check in ProjectsService beside the guard.
+ * role (D-114).
+ *
+ * Except the two plan doors owner ruling D-85 governs (approve, delete a draft): "OWNER/ADMIN or
+ * projects:write", which ProjectsService.assertMayGovernPlans applies (the role first, then the
+ * projects level). They name no module on the handler, so the guard cannot refuse what D-85
+ * admits: an OWNER or ADMIN whose explicit map holds projects below write (review repair CR-2;
+ * D-114 narrows the ADMIN bypass only for KEY plan money steps).
  */
 @Controller('projects')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -357,7 +365,7 @@ export class ProjectsController {
 
   // PR196-PROJECTS-SERVER (WPD-12, D-85, D-46): OWNER/ADMIN or projects:write, a compare-and-set
   // so a plan is approved and materialized once (409 after), and the approver on the feed.
-  @RequireModuleScope('projects', 'write')
+  // SWEEP-P0-SCOPES review repair CR-2: no module on the handler; D-85 is assertMayGovernPlans'.
   @Post('businesses/:businessId/plans/:planId/approve')
   approvePlan(
     @Param('businessId') businessId: string,
@@ -381,7 +389,7 @@ export class ProjectsController {
 
   // PR196-PROJECTS-SERVER (WPD-14, D-85, D-46): only a draft plan, by OWNER/ADMIN or
   // projects:write, with the actor on the feed.
-  @RequireModuleScope('projects', 'write')
+  // SWEEP-P0-SCOPES review repair CR-2: no module on the handler; D-85 is assertMayGovernPlans'.
   @Delete('businesses/:businessId/plans/:planId')
   deletePlan(
     @Param('businessId') businessId: string,
@@ -413,7 +421,8 @@ export class ProjectsController {
     return this.planner.reorderEvents(businessId, planId, body.updates);
   }
 
-  @RequireModuleScope('projects', 'read')
+  // SWEEP-P0-SCOPES review repair SEC-5: write (a metered model call on the business's AI credits).
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/events/:eventId/analyze-impact')
   analyzeImpact(
     @Param('businessId') businessId: string,

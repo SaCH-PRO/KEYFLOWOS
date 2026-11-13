@@ -7,6 +7,8 @@ import { ConnectorCredentialsService } from './connector-credentials.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../auth/module-scope.guard';
+import { assertMemberModuleLevel } from '../auth/member-module-level';
 import { apiLink } from '../config/runtime-urls';
 import { randomBytes } from 'crypto';
 import type { ConnectorType, ConnectorCredentialField } from './connector.interface';
@@ -29,8 +31,27 @@ const GOOGLE_SUITE_CONNECTOR_TYPES: ReadonlySet<string> = new Set([
   'google_business_profile',
 ]);
 
+/**
+ * SWEEP-P0-SCOPES review repair (finding SEC-1, blocker): a connector's credentials and its inbound
+ * webhook signing secret are settings admin territory. This controller ran AuthGuard and
+ * BusinessGuard only (and the REST scope census did not read core/), so the sweep's STAFF member
+ * (settings none) read the form webhook signing secret (and forged submissions with it), replaced
+ * the owner's QuickBooks credentials with a realm of their own, and could clear any connector's.
+ *
+ * Now ModuleScopeGuard runs after BusinessGuard (it admits a handler that names no module, so the
+ * status reads, sync, test, smoke, health and inbox-config routes are as they were; the census lists
+ * them open), and:
+ *   - GET webhook-info/:type (it creates the secret on the first read and answers it) and
+ *     POST credentials/:type (it writes them) require settings admin on the handler: OWNER and ADMIN
+ *     by role default, STAFF none; an explicit map binds every role (D-114, D-140);
+ *   - DELETE credentials/:type, POST disconnect/:type and POST reconnect/:type (each clears the
+ *     connector's stored credentials) require settings admin in the handler for every connector the
+ *     Google owner rules do not already govern (assertConnectorSettingsAdmin): gmail keeps
+ *     GMAIL_OWNER_ONLY (D-11) and the Google Suite connections GOOGLE_CONNECT_OWNER_ONLY (D-99),
+ *     answered first and unchanged.
+ */
 @Controller('connectors')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class ConnectorController {
   constructor(
     @Inject(ConnectorRegistryService) private readonly registry: ConnectorRegistryService,
@@ -103,6 +124,17 @@ export class ConnectorController {
     await assertGoogleConnectOwner(this.prisma, businessId, req.user);
   }
 
+  /**
+   * SWEEP-P0-SCOPES review repair (SEC-1): clearing a connector's stored credentials (DELETE
+   * credentials, disconnect, reconnect) needs settings admin, except for the connections whose
+   * owner rule already decides (gmail, D-11; the Google Suite connections, D-99): those keep
+   * answering their own 403 first, as their suites pin.
+   */
+  private async assertConnectorSettingsAdmin(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
+    if (type === 'gmail' || GOOGLE_SUITE_CONNECTOR_TYPES.has(type)) return;
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+  }
+
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
     return this.registry.getDashboard(businessId);
@@ -150,6 +182,7 @@ export class ConnectorController {
     @Param('type') type: string,
     @Req() req: ConnectorRequest,
   ) {
+    await this.assertConnectorSettingsAdmin(businessId, type, req);
     if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
     await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
@@ -180,6 +213,7 @@ export class ConnectorController {
     @Param('type') type: string,
     @Req() req: ConnectorRequest,
   ) {
+    await this.assertConnectorSettingsAdmin(businessId, type, req);
     if (type === 'gmail') await this.disconnectBusinessMailbox(businessId, req);
     await this.assertGoogleConnectionAuthority(businessId, type, req);
     try {
@@ -322,7 +356,11 @@ export class ConnectorController {
    * Save credentials for a connector. Secret fields whose value is the masked preview
    * (or empty) are ignored so the user can update only a subset of fields. Returns the
    * updated health record.
+   *
+   * SWEEP-P0-SCOPES review repair (SEC-1): settings admin (it replaces the account the connector
+   * syncs with: a member below it pointed the owner's QuickBooks at a realm of their own).
    */
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/credentials/:type')
   async saveCredentials(
     @Param('businessId') businessId: string,
@@ -364,6 +402,8 @@ export class ConnectorController {
     @Param('type') type: string,
     @Req() req: ConnectorRequest,
   ) {
+    // SWEEP-P0-SCOPES review repair (SEC-1): any other connector's credentials are settings admin's to clear.
+    await this.assertConnectorSettingsAdmin(businessId, type, req);
     await this.assertBusinessMailboxAuthority(businessId, type, req);
     // W9-GOOGLE-DOORS-SERVER review repair SEC-W9GD-1 (D-99, [V94D-H01]): a Google Suite connection's row is the owner's to clear.
     await this.assertGoogleConnectionAuthority(businessId, type, req);
@@ -377,7 +417,12 @@ export class ConnectorController {
    * Returns the per-business webhook URL (and HMAC secret) for connectors that ingest
    * data via inbound webhooks (Typeform, Jotform, generic webhook_form). Generates the
    * secret on first read and persists it in `ConnectorStatus.metadata.encryptedCredentials`.
+   *
+   * SWEEP-P0-SCOPES review repair (SEC-1): settings admin. The secret is the inbound webhook's whole
+   * authentication (POST /webhooks/forms/:businessId/:type compares the signature header with it),
+   * so a member who reads it can post submissions as the form platform: leads and contacts.
    */
+  @RequireModuleScope('settings', 'admin')
   @Get('businesses/:businessId/webhook-info/:type')
   async getWebhookInfo(
     @Param('businessId') businessId: string,
