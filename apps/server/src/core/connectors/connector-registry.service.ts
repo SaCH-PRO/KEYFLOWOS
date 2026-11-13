@@ -234,7 +234,8 @@ export class ConnectorRegistryService {
       };
     }
 
-    if (result.success) {
+    // SWEEP-P0-FOLLOWUP (whatsappsmoke): a connector whose test only reports its check gets no status write.
+    if (result.success && !connector.smokeReportsOnly) {
       try {
         const update: { lastSyncAt: Date; status: string; connectedAccount?: string } = {
           lastSyncAt: new Date(),

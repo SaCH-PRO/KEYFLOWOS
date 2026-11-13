@@ -241,6 +241,15 @@ export class ConnectController {
     return this.connectorForms.getMapping(businessId, ensureSource(source), externalFormId);
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP (round 3 recheck CW3-2; owner ruling D-181, connectorauth: only settings admin connects,
+   * syncs or tests the other connectors): a connector form's mapping and its backfill are the connector's
+   * configuration and sync, kept in its connector_statuses row beside its credentials, so they need settings admin
+   * (they were membership only, and a backfill wrote the revoked credentials back; the writer now changes the
+   * mappings alone: ConnectorFormMappingService.updateFormMappings).
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connector-forms/:source/:externalFormId/mapping')
   saveConnectorFormMapping(
     @Param('businessId') businessId: string,
@@ -258,6 +267,9 @@ export class ConnectController {
     return this.connectorForms.saveMapping(businessId, ensureSource(source), externalFormId, body);
   }
 
+  // SWEEP-P0-FOLLOWUP (CW3-2, D-181): see saveConnectorFormMapping.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/connector-forms/:source/:externalFormId/mapping')
   deleteConnectorFormMapping(
     @Param('businessId') businessId: string,
@@ -267,6 +279,9 @@ export class ConnectController {
     return this.connectorForms.deleteMapping(businessId, ensureSource(source), externalFormId);
   }
 
+  // SWEEP-P0-FOLLOWUP (CW3-2, D-181): see saveConnectorFormMapping.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connector-forms/:source/:leadFormId/backfill')
   backfillConnectorForm(
     @Param('businessId') businessId: string,

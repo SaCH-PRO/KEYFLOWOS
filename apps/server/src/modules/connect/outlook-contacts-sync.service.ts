@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { mergeConnectorMetadata } from '../../core/connectors/connector-metadata';
 import { canonicalContactStatus } from '../crm/crm.constants';
 import { contactWhereWithId } from '../crm/crm.helpers';
 import { CrmService } from '../crm/crm.service';
@@ -141,24 +142,14 @@ export class OutlookContactsSyncService {
       ...(defaultStatus !== undefined ? { defaultStatus } : {}),
       ...(defaultOwnerId !== undefined ? { defaultOwnerId } : {}),
     });
-    const existing = await this.prisma.client.connectorStatus.findUnique({
-      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
-      select: { metadata: true },
-    });
-    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
     // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
     // member a sync writes existing contacts as, whoever runs it (as on Google).
     const configuredBy = configuringMember(businessId, actorUserId);
-    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
-      create: {
-        businessId,
-        connectorType: 'outlook_contacts',
-        status: 'disconnected',
-        metadata: merged as unknown as Prisma.InputJsonValue,
-      },
-      update: { metadata: merged as unknown as Prisma.InputJsonValue },
+    // SWEEP-P0-FOLLOWUP (CW3-2 class): only the rules (and who configured them) are written, merged over the row as
+    // it stands; the metadata read before is never written back (it holds the binder, boundBy).
+    await mergeConnectorMetadata(this.prisma.client, businessId, 'outlook_contacts', {
+      mappingRules: next,
+      ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}),
     });
     return next;
   }

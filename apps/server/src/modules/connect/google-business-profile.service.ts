@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { mergeConnectorMetadata } from '../../core/connectors/connector-metadata';
 import { GoogleTokenHelper } from './google-token.helper';
 
 export interface ScheduledGbpPost {
@@ -246,23 +246,10 @@ export class GoogleBusinessProfileService {
     return ((row?.metadata as SchedulerMetadata | null | undefined) ?? {}) as SchedulerMetadata;
   }
 
+  // SWEEP-P0-FOLLOWUP (CW3-2 class): only the scheduled posts are written, merged over the row as it stands; the
+  // metadata read before is never written back.
   private async writeScheduledPosts(businessId: string, posts: ScheduledGbpPost[]) {
-    const existing = await this.prisma.client.connectorStatus.findUnique({
-      where: { businessId_connectorType: { businessId, connectorType: 'google_business_profile' } },
-      select: { metadata: true },
-    });
-    const meta = ((existing?.metadata ?? {}) as Record<string, unknown>);
-    const merged = { ...meta, scheduledPosts: posts };
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'google_business_profile' } },
-      create: {
-        businessId,
-        connectorType: 'google_business_profile',
-        status: 'disconnected',
-        metadata: merged as unknown as Prisma.InputJsonValue,
-      },
-      update: { metadata: merged as unknown as Prisma.InputJsonValue },
-    });
+    await mergeConnectorMetadata(this.prisma.client, businessId, 'google_business_profile', { scheduledPosts: posts });
   }
 
   async listScheduledPosts(businessId: string): Promise<ScheduledGbpPost[]> {

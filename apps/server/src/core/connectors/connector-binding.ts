@@ -8,5 +8,9 @@
  *
  * The census spec pins it (CEN-10f): every connector class whose smokeTest reaches a credential or
  * binding write on the call graph must be named here.
+ *
+ * SWEEP-P0-FOLLOWUP, whatsappsmoke ruling (recommended option): the WhatsApp test only reports its result and never
+ * switches WhatsApp back on (WhatsAppConnector.smokeTest records nothing; smokeReportsOnly), so it binds nothing
+ * and is open to members again. No connector binds on its check today; the set stays for the next one.
  */
-export const CONNECTORS_BINDING_ON_CHECK: ReadonlySet<string> = new Set(['whatsapp']);
+export const CONNECTORS_BINDING_ON_CHECK: ReadonlySet<string> = new Set([]);

@@ -30,6 +30,9 @@ export const CONNECTOR_EXPORT_READS: Readonly<Record<string, readonly CanonicalM
   mailchimp: ['crm'],
   klaviyo: ['crm'],
   outlook_contacts: ['crm'],
+  // SWEEP-P0-FOLLOWUP (WH3-1): an EMAIL / Gmail or WhatsApp channel connection's sending account receives every
+  // message sent through it, with the recipient's address or phone (modules/communications/channel-audience.ts).
+  channel_messaging: ['crm'],
 };
 
 /** The modules a connector's export carries, or null for a connector that exports nothing. */

@@ -127,7 +127,10 @@ function buildDefaults(level: (module: CanonicalModule) => AccessLevel): Record<
 export const ROLE_DEFAULT_SCOPES: Readonly<Record<string, Record<CanonicalModule, AccessLevel>>> = {
   OWNER: buildDefaults(() => 'admin'),
   ADMIN: buildDefaults((m) => (m === 'team' ? 'write' : 'admin')),
-  STAFF: buildDefaults((m) => ((STAFF_DENIED as readonly string[]).includes(m) ? 'none' : 'read')),
+  // SWEEP-P0-FOLLOWUP, staffbookings ruling (recommended option; REST scope census owner question 4): staff get
+  // booking handling by default, so STAFF's bookings default is write (confirm, move, complete bookings); every
+  // other STAFF default is the guard's original table. Own-time logging waits for Projects (V1.2).
+  STAFF: buildDefaults((m) => ((STAFF_DENIED as readonly string[]).includes(m) ? 'none' : m === 'bookings' ? 'write' : 'read')),
 };
 
 export function defaultScopesForRole(role: string): Record<CanonicalModule, AccessLevel> {

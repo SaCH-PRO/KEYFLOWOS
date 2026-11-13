@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { channelBinderOf, isMessagingProvider, providerMetaBoundBy, rebindsChannelAccount } from './channel-audience';
 
 type ConnectionRecord = Awaited<ReturnType<PrismaService['client']['channelConnection']['findFirst']>>;
 
@@ -80,6 +81,17 @@ export class ChannelConnectionService {
     return conn ? stripSecrets(conn) : null;
   }
 
+  /** SWEEP-P0-FOLLOWUP (WH3-1): the provider of a connection of this business, or null. */
+  async providerOf(businessId: string, id: string): Promise<string | null> {
+    const conn = await this.prisma.client.channelConnection.findFirst({ where: { id, businessId }, select: { provider: true } });
+    return conn?.provider ?? null;
+  }
+
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1): `binder` is the member who binds the account (the route's caller); for a messaging
+   * provider it is recorded as providerMeta.boundBy, the receiver every send through the account is held to
+   * (channelRecipients). A boundBy in the body is never stored.
+   */
   async create(businessId: string, data: {
     provider: string;
     label?: string;
@@ -89,8 +101,12 @@ export class ChannelConnectionService {
     expiresAt?: Date;
     scopes?: string;
     providerMeta?: Record<string, unknown>;
-  }) {
+  }, binder?: { id?: string } | null) {
     const fields = pickFields(data, CONNECTION_CREATE_FIELDS) as typeof data;
+    const boundBy = binder?.id;
+    const providerMeta = providerMetaBoundBy(data.provider, data.providerMeta, boundBy);
+    if (providerMeta !== undefined) fields.providerMeta = providerMeta;
+    else delete fields.providerMeta;
     const conn = await this.prisma.client.channelConnection.create({
       data: { ...fields, businessId },
       include: { destinations: true },
@@ -123,12 +139,23 @@ export class ChannelConnectionService {
     healthMessage?: string;
     lastCheckedAt?: Date;
     providerMeta?: Record<string, unknown>;
-  }) {
+  }, binder?: { id?: string } | null) {
     const existing = await this.prisma.client.channelConnection.findFirst({ where: { id, businessId } });
     if (!existing) return null;
+    const fields = pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data;
+    // SWEEP-P0-FOLLOWUP (WH3-1): a change of a messaging connection's account (its token, mailbox or provider meta)
+    // rebinds it to the member making the change; otherwise the binder recorded stays. A boundBy in the body is
+    // never stored.
+    const rebinds = rebindsChannelAccount(data);
+    if (rebinds || data.providerMeta !== undefined) {
+      const kept = channelBinderOf(existing.providerMeta);
+      const binderId = rebinds && isMessagingProvider(existing.provider) ? binder?.id : kept ?? undefined;
+      const meta = providerMetaBoundBy(existing.provider, data.providerMeta ?? existing.providerMeta, binderId ?? undefined);
+      if (meta !== undefined) fields.providerMeta = meta;
+    }
     const updated = await this.prisma.client.channelConnection.update({
       where: { id },
-      data: pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data,
+      data: fields,
     });
 
     if (existing.provider?.toUpperCase() === 'EMAIL' && data.accountEmail) {
@@ -624,7 +651,7 @@ export class ChannelConnectionService {
     accessToken: string;
     waBusinessAccountId: string;
     label?: string;
-  }) {
+  }, binder?: { id?: string } | null) {
     const { WhatsAppAdapter } = await import('./adapters/whatsapp-adapter');
     const adapter = new WhatsAppAdapter();
 
@@ -643,7 +670,7 @@ export class ChannelConnectionService {
       label: input.label || `WhatsApp (${phones[0].verifiedName})`,
       token: input.accessToken,
       providerMeta: { wabaId: input.waBusinessAccountId },
-    });
+    }, binder);
 
     return {
       connection: conn,

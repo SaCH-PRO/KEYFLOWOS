@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
 import * as webpush from 'web-push';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -46,6 +46,22 @@ export class PushNotificationService {
         businessId,
       },
     });
+  }
+
+  /**
+   * SWEEP-P0-FOLLOWUP (census owner question 3): a member's own device. An endpoint another member's subscription
+   * already holds is not taken over (a browser endpoint is one device: it stays its subscriber's until they remove
+   * it); the caller's own is refreshed.
+   */
+  async subscribeOwn(userId: string, businessId: string, subscription: webpush.PushSubscription) {
+    const existing = await this.prisma.client.pushSubscription.findUnique({ where: { endpoint: subscription.endpoint }, select: { userId: true } });
+    if (existing && existing.userId !== userId) throw new ForbiddenException('This device is subscribed by another member');
+    return this.subscribe(userId, businessId, subscription);
+  }
+
+  /** SWEEP-P0-FOLLOWUP (census owner question 3): removes the caller's own subscription of that endpoint only. */
+  async unsubscribeOwn(userId: string, endpoint: string) {
+    return this.prisma.client.pushSubscription.deleteMany({ where: { endpoint, userId } });
   }
 
   async unsubscribe(endpoint: string) {

@@ -29,6 +29,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertBusinessOwnerMember, BYOK_OWNER_ONLY } from '../../core/auth/business-owner';
 import { KeyCommandService } from './key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
@@ -1478,11 +1479,16 @@ export class AiController {
    * for one of their own (the owner's read answers only '••••••••') and cleared it. The routing mode,
    * writing style and budget caps it also writes are the same business-wide AI settings.
    */
+  // SWEEP-P0-FOLLOWUP, byokkeys ruling (recommended option; census owner question 14): a body that writes, replaces or
+  // clears a BYOK key (byokOpenai, byokAnthropic, byokXai: the provider account that receives every AI call of the
+  // business, prompts carrying customer and money context) is the owner's (assertBusinessOwnerMember,
+  // 403 BYOK_OWNER_ONLY, the whole body refused); settings admins keep the mode, writing style, provider and caps.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
   @Put('businesses/:businessId/ai/preferences')
   async updateAiPreferences(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
     @Body() body: {
       mode?: AiMode;
       /** Null clears the preference and returns routing to the default chain. */
@@ -1494,6 +1500,10 @@ export class AiController {
       budgetCaps?: BudgetCaps | null;
     },
   ) {
+    if (body.byokOpenai !== undefined || body.byokAnthropic !== undefined || body.byokXai !== undefined) {
+      await assertBusinessOwnerMember(this.prisma, businessId, req.user, BYOK_OWNER_ONLY);
+    }
+
     const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
     if (body.mode !== undefined && !validModes.includes(body.mode)) {
       throw new BadRequestException(`Invalid AI mode. Must be one of: ${validModes.join(', ')}`);

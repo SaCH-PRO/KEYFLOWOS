@@ -127,6 +127,8 @@ export class CommunicationsAdapterService {
           channel: command.parameters.channel as 'email' | 'sms' | 'whatsapp',
           body: command.parameters.body as string,
           templateId: command.parameters.templateId as string,
+          // SWEEP-P0-FOLLOWUP (WH3-1): the command's member is a receiver of the audience too.
+          sender: typeof command.userId === 'string' && command.userId ? { id: command.userId } : null,
         });
         return connectorOk(command, start, broadcast);
       }
