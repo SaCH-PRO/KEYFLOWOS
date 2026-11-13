@@ -19,6 +19,10 @@ for boundary rules, drift checks, and the Living System Atlas.
 
 ## Living System Atlas
 
+> Status as of 2026-11-12, main f5d58ef7: design foundation only, never materialized; materializer chain #142-#146 rated NONE (BUILD-MAP-001 (e), PRS-M46). The Mission Control surface that
+> `MISSION-CONTROL-INTEGRATION.md` converges on was never on main (PR #132 closed
+> unmerged; PRS-M45).
+
 `architecture/atlas/` is the semantic navigation layer over the existing architecture memory.
 
 Start with:

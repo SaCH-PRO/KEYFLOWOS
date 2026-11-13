@@ -1,3 +1,6 @@
+# Status as of 2026-11-12, main f5d58ef7: design foundation only, never
+# materialized; materializer chain #142-#146 rated NONE (BUILD-MAP-001 (e),
+# PRS-M46).
 atlas_id: KF-ATLAS-001
 version: 0.1.0
 status: FOUNDATION

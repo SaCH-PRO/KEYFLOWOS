@@ -4,6 +4,13 @@ Status: CONVERGENCE CONTRACT
 Atlas: `KF-ATLAS-001`
 Existing owner surface: issue `#129`, PR `#132`
 
+> **Historical note (2026-11-12, main f5d58ef7).** PR #132 was closed unmerged
+> (2026-10-06). Main has no `/admin/mission-control` route and no
+> `ProjectMissionControlSnapshot`. The later Mission Control consoles, #146
+> (Atlas control panel) and #179 (handoff viewer), are rated NONE
+> (BUILD-MAP-001 (e), PRS-M45). The section below records what was believed
+> on 2026-10-05; it is not current state.
+
 ## Discovery
 
 The repository already contains an active owner/admin Mission Control programme:
@@ -169,6 +176,13 @@ Invalid progress:
 - counting stale proof from an old head;
 - inferring worker state from absence/presence of comments;
 - treating a generated ownership guess as reviewed semantic convergence.
+
+> **Historical note (2026-11-12, main f5d58ef7).** PR #132 was closed unmerged
+> (2026-10-06). Main has no `/admin/mission-control` route and no
+> `ProjectMissionControlSnapshot`. The later Mission Control consoles, #146
+> (Atlas control panel) and #179 (handoff viewer), are rated NONE
+> (BUILD-MAP-001 (e), PRS-M45). The section below describes the unmerged #132
+> branch; none of it is on main.
 
 ## Current Mission Control reality
 

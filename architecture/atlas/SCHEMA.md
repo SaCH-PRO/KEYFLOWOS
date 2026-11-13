@@ -1,5 +1,7 @@
 # Living System Atlas Record Contract
 
+> Status as of 2026-11-12, main f5d58ef7: design foundation only, never materialized; materializer chain #142-#146 rated NONE (BUILD-MAP-001 (e), PRS-M46).
+
 Atlas ID: `KF-ATLAS-001`
 
 This contract defines the minimum shape for atlas nodes and edges. It is intentionally small so it can be generated, reviewed and validated without becoming a second application schema.

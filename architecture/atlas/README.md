@@ -1,5 +1,7 @@
 # KEYFLOWOS Living System Atlas
 
+> Status as of 2026-11-12, main f5d58ef7: design foundation only, never materialized; materializer chain #142-#146 rated NONE (BUILD-MAP-001 (e), PRS-M46).
+
 Status: FOUNDATION
 Atlas ID: `KF-ATLAS-001`
 Baseline main: `6fdffc26c7c7748d5c09900535c97c197864ab54`
