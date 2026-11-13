@@ -310,10 +310,16 @@ export class SocialController {
     return this.social.publishPost(businessId, postId, body?.channelIds);
   }
 
+  /**
+   * SWEEP-P0-SCOPES (REST scope census, secret-bearing read): the rows carry the platform's OAuth
+   * access token and refresh token, which this list answered to every member. They are never
+   * answered now; the server reads them itself to publish and to test a connection.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/connections')
-  listConnections(@Param('businessId') businessId: string) {
-    return this.connections.listConnections(businessId);
+  async listConnections(@Param('businessId') businessId: string) {
+    const rows = await this.connections.listConnections(businessId);
+    return rows.map(({ token: _token, refreshToken: _refreshToken, ...visible }) => visible);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

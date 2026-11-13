@@ -6,6 +6,7 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
 
 @Controller('drive')
@@ -266,7 +267,9 @@ export class GoogleDriveController {
     return this.driveService.getInventorySheetSyncStatus(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/create')
   createInventorySheet(
     @Param('businessId') businessId: string,
@@ -275,7 +278,9 @@ export class GoogleDriveController {
     return this.driveService.createInventorySheet(businessId, body.title || 'Inventory Sync');
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/link')
   linkInventorySheet(
     @Param('businessId') businessId: string,
@@ -284,13 +289,17 @@ export class GoogleDriveController {
     return this.driveService.linkInventorySheet(businessId, body.sheetId, body.sheetName);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/inventory-sheet/unlink')
   unlinkInventorySheet(@Param('businessId') businessId: string) {
     return this.driveService.unlinkInventorySheet(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/push')
   pushInventoryToSheet(@Param('businessId') businessId: string) {
     return this.driveService.pushInventoryToSheet(businessId);
@@ -302,7 +311,9 @@ export class GoogleDriveController {
     return this.driveService.pullInventoryFromSheet(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/apply')
   applyPulledInventory(
     @Param('businessId') businessId: string,

@@ -10,9 +10,10 @@
  *              and ModuleScopeGuard: analytics read for a GET (as declared), analytics write for
  *              every POST (each writes: projections, insights, their read/dismissed state, a
  *              maturity assessment).
- *   CATALOG    CatalogController's product writes (the canonical catalog surface) ran AuthGuard and
+ *   CATALOG    CatalogController's product writes (the canonical catalog surface) run AuthGuard and
  *              BusinessGuard only, while the same writes through CommerceController's deprecated
- *              pass-throughs need revenue write; they now need revenue write too.
+ *              pass-throughs need revenue write. Left open (it.todo): gating them moves KEY tools out
+ *              of the legacy commerce job-role family, which is pinned as an owner decision.
  *   SOCIAL     GET /social/businesses/:id/connections answered every SocialConnection row whole,
  *              its OAuth access token and refresh token included, to every member. A census
  *              secret-bearing read: the tokens are now never answered (the server reads them
@@ -141,7 +142,6 @@ beforeAll(async () => {
   const { MaturityAssessmentService } = await import('../src/modules/analytics/maturity-assessment.service');
   const { CatalogController } = await import('../src/modules/catalog/catalog.controller');
   const { CatalogService } = await import('../src/modules/catalog/catalog.service');
-  const { CreateProductDto } = await import('../src/modules/commerce/dto/create-product.dto');
   const { SocialController } = await import('../src/modules/social/social.controller');
   const { SocialService } = await import('../src/modules/social/social.service');
   const { SocialConnectionsService } = await import('../src/modules/social/social-connections.service');
@@ -154,8 +154,6 @@ beforeAll(async () => {
   // AnalyticsController takes its services without @Inject (tsc's emitDecoratorMetadata, which
   // vitest's esbuild transform does not emit): name them, as production's compiled metadata does.
   Reflect.defineMetadata('design:paramtypes', [AnalyticsEngineService, ProjectionService, GrowthInsightGeneratorService, MaturityAssessmentService], AnalyticsController);
-  // The product body validates as CreateProductDto, as in production.
-  Reflect.defineMetadata('design:paramtypes', [String, CreateProductDto], CatalogController.prototype, 'createProduct');
 
   Logger.overrideLogger(false);
   const moduleRef = await Test.createTestingModule({
@@ -253,32 +251,16 @@ describe('ANALYTICS: the declared analytics scope is enforced', () => {
   });
 });
 
-describe('CATALOG: product writes need revenue write, as the commerce product routes do', () => {
-  const PRODUCT_WRITES = ['createProduct', 'bulkUpdateProducts', 'updateProduct', 'deleteProduct'];
-
-  it('[CEN-CAT-C01] RED-BEFORE: every CatalogController product write runs AuthGuard, BusinessGuard, then ModuleScopeGuard and requires revenue write', () => {
-    const routes = census(controllers.CatalogController).filter((r) => PRODUCT_WRITES.includes(r.handler));
-    expect(routes.map((r) => r.handler).sort()).toEqual([...PRODUCT_WRITES].sort());
-    expect(routes.flatMap((r) => chainProblems(r, { module: 'revenue', minLevel: 'write' }))).toEqual([]);
-  });
-
-  it('[CEN-CAT-01] RED-BEFORE: a member with revenue read (STAFF default) is refused creating, editing and deleting a product; nothing is written', async () => {
-    const before = await db.$queryRawUnsafe(`SELECT to_jsonb(t)::text AS row FROM products t WHERE business_id LIKE ${sqlLikePrefix(P)} ORDER BY id`);
-    const base = `/catalog/businesses/${ID.bizA}/products`;
-    expect((await send('post', base, ID.staffDefault, { name: `${P}Jada product`, price: 5 })).status).toBe(403);
-    expect((await send('patch', `${base}/${ID.product}`, ID.staffDefault, { name: `${P}renamed` })).status).toBe(403);
-    expect((await send('delete', `${base}/${ID.product}`, ID.staffDefault)).status).toBe(403);
-    expect((await send('patch', `${base}/bulk`, ID.staffDefault, { ids: [ID.product], action: 'deactivate' })).status).toBe(403);
-    const after = await db.$queryRawUnsafe(`SELECT to_jsonb(t)::text AS row FROM products t WHERE business_id LIKE ${sqlLikePrefix(P)} ORDER BY id`);
-    expect(after).toEqual(before);
-  });
-
-  it('[CEN-CAT-02] revenue write and the owner create a product', async () => {
-    for (const actor of [ID.revenueWrite, ID.owner]) {
-      const res = await send('post', `/catalog/businesses/${ID.bizA}/products`, actor, { name: `${P}by ${actor}`, price: 7 });
-      expect(res.status, actor).toBe(201);
-    }
-  });
+describe('CATALOG: product writes (left open: a KEY seam needs an owner ruling)', () => {
+  // Withdrawn from this packet after the RED commit: gating CatalogController's product writes with
+  // revenue write (as CommerceController's are) makes CatalogService.createProduct / updateProduct
+  // governed, so the KEY derivation (job-role-tool-families.spec.ts) moves commerce_create_product,
+  // commerce_update_product and apply_storefront_recommendation into CANONICAL_MODULE_TOOLS.revenue
+  // and takes them from the legacy commerce_* job-role family, which job-role-policy.service.spec.ts
+  // pins as an owner decision ("the governed tools a legacy key loses") and ESC-3 pins as reachable.
+  // Recorded as `open` in docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md with that owner question.
+  it.todo('[CEN-CAT-C01] every CatalogController product write requires revenue write (owner ruling on the legacy commerce key first)');
+  it.todo('[CEN-CAT-01] a member with revenue read is refused creating, editing and deleting a product through /catalog');
 });
 
 describe('SOCIAL: a social connection read never answers its OAuth tokens', () => {

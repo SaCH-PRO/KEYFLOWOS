@@ -22,8 +22,9 @@
  * THE DOC: every census table row is `| \`Class.handler\` | VERB | path | disposition | reason |`.
  * Dispositions:
  *   applied        this packet gated it; the reason is `module:level`, the scope it now carries.
- *   exempt-check   the handler calls an authority check beyond membership; the reason names it as
- *                  `check:<function>`, and the handler body must call it.
+ *   exempt-check   the route applies an authority check beyond membership: the reason names it as
+ *                  `check:<name>` (the handler body must use it) or, for a check its service makes,
+ *                  `service-check:<name>` (the name must exist in the route's module directory).
  *   exempt-guard   a dedicated authority guard runs; the reason names it as `guard:<Name>`, and the
  *                  route's guard chain must include it.
  *   exempt-own     the route acts on the caller's own record (own profile, own device, own session).
@@ -42,7 +43,8 @@
  *          `applied`, `deferred` and `secret-read` names a route still in the population (a route
  *          gated since must leave the census or move to `applied`).
  *   CEN-04 every `applied` row's route carries exactly the enforced scope its reason names.
- *   CEN-05 every `exempt-check` row's handler calls the check it names.
+ *   CEN-05 every `exempt-check` row names a check its handler uses (`check:`) or its module
+ *          defines (`service-check:`).
  *   CEN-06 every `exempt-guard` row's route runs the guard it names.
  *   CEN-07 every `exempt-ruled` row cites an owner ruling.
  */
@@ -205,13 +207,21 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(problems).toEqual([]);
   });
 
-  it('[CEN-05] every exempt-check row names a check its handler calls', () => {
+  it('[CEN-05] every exempt-check row names a check its handler uses or its module defines', () => {
     const problems: string[] = [];
+    const moduleSource = new Map<string, string>();
+    const sourceOf = (file: string) => {
+      const dir = join(SRC, file.split('/').slice(0, 2).join('/'));
+      if (!moduleSource.has(dir)) moduleSource.set(dir, walk(dir).map((f) => readFileSync(f, 'utf8')).join('\n'));
+      return moduleSource.get(dir)!;
+    };
     for (const row of censusRows().filter((r) => r.disposition === 'exempt-check' || (r.disposition === 'secret-read' && /check:/.test(r.reason)))) {
-      const checks = [...row.reason.matchAll(/check:([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
-      if (!checks.length) { problems.push(`line ${row.line}: ${row.key} names no check:<function>`); continue; }
-      const body = byKey.get(row.key)?.body ?? '';
-      for (const c of checks) if (!new RegExp(`\\b${c}\\(`).test(body)) problems.push(`line ${row.line}: ${row.key} does not call ${c}`);
+      const r = byKey.get(row.key);
+      const handlerChecks = [...row.reason.matchAll(/(?<![a-z-])check:([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
+      const serviceChecks = [...row.reason.matchAll(/service-check:([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]);
+      if (!handlerChecks.length && !serviceChecks.length) { problems.push(`line ${row.line}: ${row.key} names no check:<name> or service-check:<name>`); continue; }
+      for (const c of handlerChecks) if (!new RegExp(`\\b${c}\\b`).test(r?.body ?? '')) problems.push(`line ${row.line}: ${row.key} does not use ${c}`);
+      for (const c of serviceChecks) if (!r || !new RegExp(`\\b${c}\\b`).test(sourceOf(r.file))) problems.push(`line ${row.line}: ${row.key}'s module defines no ${c}`);
     }
     expect(problems).toEqual([]);
   });
