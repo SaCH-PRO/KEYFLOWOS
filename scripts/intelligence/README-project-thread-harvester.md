@@ -12,7 +12,7 @@ It ingests:
 
 It then:
 1. normalizes threads/messages;
-2. redacts obvious secrets by default;
+2. redacts known secret shapes by default (best-effort; see [Redaction](#redaction));
 3. deduplicates repeated exported messages;
 4. identifies KEYFLOWOS-relevant threads;
 5. scores candidate high-value messages;
@@ -38,6 +38,45 @@ python scripts/intelligence/project_thread_harvester.py \
   --project-term "KEY Cortex" \
   --project-term "Living System Atlas"
 ```
+
+## Redaction
+
+Redaction is on by default (`--no-redact` turns it off) and applies to message
+text and thread titles before anything is written. It replaces the secret with
+`[REDACTED]` and keeps the name, quotes, URL user and host around it. It
+recognises:
+
+- provider token shapes: Stripe secret, restricted and webhook keys
+  (`sk_live_`, `sk_test_`, `rk_`, `whsec_`), GitHub tokens (`ghp_`, `gho_`,
+  `ghs_`, `ghu_`, `ghr_`, `github_pat_`), GitLab and npm tokens, AWS key ids
+  (`AKIA`, `ASIA` and the other IAM prefixes), Slack tokens and webhook URLs,
+  Google API keys and OAuth secrets/tokens, OpenAI (`sk-`, `sk-proj-`) and
+  Anthropic (`sk-ant-`) keys, Supabase access and secret keys, SendGrid keys,
+  Twilio account and API key SIDs, and JSON Web Tokens (`eyJ…`, which covers
+  Supabase anon and service-role keys);
+- PEM private key blocks (`-----BEGIN … PRIVATE KEY-----` through `END`);
+- the password in any `scheme://user:password@host` URL (Postgres, MySQL,
+  MongoDB, Redis and the rest);
+- `Authorization: Bearer|Basic|Token …` headers, and `Bearer <token>` where
+  the token contains a digit;
+- a value whose name ends in a sensitive word, in any of the forms
+  `name=value`, `name: value`, `"name": "value"` (also JSON-escaped) and
+  `'name': 'value'`: `password`, `passwd`, `secret`, `token`, `api_key` /
+  `apiKey`, `access_key`, `private_key`, `credentials` (so `client_secret`,
+  `X-Auth-Token` and `aws_secret_access_key` count; `tokens` and `max_tokens`
+  do not);
+- upper-case environment lines (`KEY=VALUE`, `export KEY=VALUE`, and
+  `KEY_NAME: value` in YAML) whose name has a `SECRET`, `TOKEN`, `KEY`,
+  `PASSWORD`, `PASSWD`, `PASS`, `PWD`, `PRIVATE`, `CREDENTIAL(S)` or `DSN`
+  segment (`JWT_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`; not `KEYFLOW_ENV`);
+- an AWS secret access key in a message that names AWS or holds an AWS key
+  id, and a 32-hex Twilio auth token in a message that names Twilio or holds a
+  Twilio account SID.
+
+It is best-effort. A secret with no recognisable shape and no sensitive name,
+such as a password typed into prose, passes through. Treat every output file
+as sensitive: keep it local, and read `review-queue.md` before pasting any of
+it into an issue, a pull request or a model prompt.
 
 ## Outputs
 

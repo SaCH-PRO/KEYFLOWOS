@@ -21,11 +21,164 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)[^\s,;]+"),
-    re.compile(r"(?i)(token\s*[:=]\s*)[^\s,;]+"),
-    re.compile(r"(?i)(password\s*[:=]\s*)[^\s,;]+"),
-    re.compile(r"(?i)(secret\s*[:=]\s*)[^\s,;]+"),
+# --- secret redaction ---------------------------------------------------------
+#
+# Redaction is on by default and is best-effort: it removes the credential
+# shapes below, and nothing else. A credential with no recognisable shape and
+# no telling name (a bare password in prose, say) still passes through, so the
+# outputs are local working files, never something to paste into an issue, a
+# pull request or a model prompt without reading them first.
+#
+# Every rule replaces only the secret itself with REDACTED, keeping any name,
+# quote, URL user or host around it so the evidence stays readable. The rules
+# are applied in order and are idempotent: REDACTED matches none of them.
+
+REDACTED = "[REDACTED]"
+
+# A value after a sensitive name: quoted (plain, or JSON-escaped inside a
+# string), or bare up to whitespace or a delimiter.
+_VALUE = r"""(?:\\"(?:[^"\\\n]|\\(?!"))*\\"|"[^"\n]*"|'[^'\n]*'|[^\s,;"'\\]+)"""
+
+# An assignment: "=" or ":", but not "==", "=>", "::" or ":=" (code, not data).
+_ASSIGN = r"(?::(?![:=])|=(?![=>]))"
+
+# Names whose value is a secret, matched case-insensitively at the end of an
+# identifier (client_secret, apiKey, X-Auth-Token, aws_secret_access_key,
+# "password"). "tokens", "max_tokens" and "token_count" do not end in one.
+_SENSITIVE_NAME = (
+    r"[A-Za-z0-9_.-]*?"
+    r"(?:api[_-]?key|access[_-]?key|private[_-]?key|secret|token|passw(?:or)?d|credentials?)"
+    r"(?:[_-]?(?:key|value|secret|token|hash))?"
+)
+
+# Upper-case environment names with a sensitive underscore-separated segment
+# (JWT_SECRET, CREDENTIALS_ENCRYPTION_KEY, SSH_PRIVATE). Whole segments only,
+# so KEYFLOW_ENV and MAX_TOKENS are not sensitive.
+_ENV_SEGMENT = r"(?:SECRETS?|TOKEN|KEYS?|APIKEY|PASSWORD|PASSWD|PASS|PWD|PRIVATE|CREDENTIALS?|DSN)"
+_ENV_NAME = rf"(?:[A-Z0-9]+_)*{_ENV_SEGMENT}(?:_[A-Z0-9]+)*"
+_ENV_NAME_COMPOUND = rf"(?:(?:[A-Z0-9]+_)+{_ENV_SEGMENT}(?:_[A-Z0-9]+)*|{_ENV_SEGMENT}(?:_[A-Z0-9]+)+)"
+
+
+def _keep_quotes(value: str) -> str:
+    """REDACTED in place of a value, inside the value's own quotes."""
+    for quote in ('\\"', '"', "'"):
+        if len(value) >= 2 * len(quote) and value.startswith(quote) and value.endswith(quote):
+            return f"{quote}{REDACTED}{quote}"
+    return REDACTED
+
+
+def _redact_value(match: re.Match[str]) -> str:
+    return match.group("keep") + _keep_quotes(match.group("value"))
+
+
+def _redact_whole(match: re.Match[str]) -> str:
+    return REDACTED
+
+
+def _redact_pem(match: re.Match[str]) -> str:
+    label = match.group("label")
+    return f"-----BEGIN {label}-----{REDACTED}-----END {label}-----"
+
+
+_PRIVATE_KEY_LABEL = r"(?P<label>[A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)"
+
+SECRET_RULES: list[tuple[str, re.Pattern[str], Any]] = [
+    # PEM private keys: the whole block, BEGIN to END (or, cut off, to the end
+    # of the base64 that follows BEGIN).
+    (
+        "pem-private-key",
+        re.compile(rf"-----BEGIN {_PRIVATE_KEY_LABEL}-----(?:[\s\S]*?-----END (?P=label)-----|[A-Za-z0-9+/=\s\\]*)"),
+        _redact_pem,
+    ),
+    # scheme://user:password@host, for any scheme: keep the user and host.
+    (
+        "url-credentials",
+        re.compile(r"(?P<keep>\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@\"'<>]*:)(?P<value>[^\s@/\"'<>]+)(?=@)"),
+        _redact_value,
+    ),
+    # Authorization: <scheme> <credential>, as a header or a JSON/YAML field.
+    (
+        "authorization-header",
+        re.compile(
+            r"(?i)(?P<keep>\bauthorization[\"']?\s*[:=]\s*[\"']?(?:bearer|basic|token|bot|digest)\s+)(?P<value>[^\s\"',;]+)"
+        ),
+        _redact_value,
+    ),
+    # Bearer <token> anywhere else. The token must contain a digit, so prose
+    # such as "Bearer authentication" is left alone.
+    (
+        "bearer-token",
+        re.compile(r"(?P<keep>\bBearer\s+)(?P<value>(?=[A-Za-z._~+/-]*\d)[A-Za-z0-9._~+/-]{16,}=*)"),
+        _redact_value,
+    ),
+    # Provider token shapes.
+    ("stripe-key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{10,}"), _redact_whole),
+    ("stripe-webhook-secret", re.compile(r"\bwhsec_[0-9A-Za-z+/=]{10,}"), _redact_whole),
+    ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), _redact_whole),
+    ("github-fine-grained-token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), _redact_whole),
+    ("gitlab-token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}"), _redact_whole),
+    ("npm-token", re.compile(r"\bnpm_[A-Za-z0-9]{36,}"), _redact_whole),
+    ("aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b"), _redact_whole),
+    ("slack-token", re.compile(r"\bxox[abposre]-[0-9A-Za-z-]{10,}"), _redact_whole),
+    ("slack-app-token", re.compile(r"\bxapp-[0-9]-[0-9A-Za-z-]{10,}"), _redact_whole),
+    ("slack-webhook", re.compile(r"(?P<keep>\bhttps://hooks\.slack\.com/(?:services|workflows|triggers)/)(?P<value>[A-Za-z0-9/_-]+)"), _redact_value),
+    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}"), _redact_whole),
+    ("google-oauth-secret", re.compile(r"\bGOCSPX-[0-9A-Za-z_-]{20,}"), _redact_whole),
+    ("google-oauth-token", re.compile(r"\bya29\.[0-9A-Za-z_-]{20,}"), _redact_whole),
+    # OpenAI (sk-, sk-proj-, sk-svcacct-, sk-admin-) and Anthropic (sk-ant-...).
+    ("openai-anthropic-key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), _redact_whole),
+    ("supabase-token", re.compile(r"\b(?:sbp_[0-9a-f]{40}|sb_secret_[0-9A-Za-z_-]{20,})"), _redact_whole),
+    ("sendgrid-key", re.compile(r"\bSG\.[0-9A-Za-z_-]{16,}\.[0-9A-Za-z_-]{16,}"), _redact_whole),
+    # Twilio: account SID (AC) and API key SID (SK), each 32 hex. An auth token
+    # is 32 bare hex; it is caught by name below, or by context further down.
+    ("twilio-sid", re.compile(r"\b(?:AC|SK)[0-9a-fA-F]{32}\b"), _redact_whole),
+    # JSON Web Tokens (Supabase anon and service-role keys are JWTs).
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?"), _redact_whole),
+    # name = value, name: value, "name": "value", with a sensitive name.
+    (
+        "sensitive-assignment",
+        re.compile(
+            rf"""(?ix)
+            (?P<keep>
+              (?<![A-Za-z0-9_.-])
+              (?:\\?["'])?{_SENSITIVE_NAME}(?:\\?["'])?
+              \s*{_ASSIGN}\s*
+            )
+            (?P<value>{_VALUE})
+            """
+        ),
+        _redact_value,
+    ),
+    # KEY=VALUE environment lines (optionally after "export").
+    (
+        "env-assignment",
+        re.compile(rf"(?P<keep>(?<![A-Za-z0-9_])(?:export\s+)?{_ENV_NAME}\s*=(?![=>])\s*)(?P<value>{_VALUE})"),
+        _redact_value,
+    ),
+    # KEY: VALUE (YAML, compose files). Single-word names are excluded, so
+    # "KEY: ..." in prose about the KEY assistant is left alone.
+    (
+        "env-yaml-assignment",
+        re.compile(rf"(?P<keep>(?<![A-Za-z0-9_]){_ENV_NAME_COMPOUND}:(?![:=])[ \t]*)(?P<value>{_VALUE})"),
+        _redact_value,
+    ),
+]
+
+# Secrets with no shape of their own, redacted only when the same message shows
+# whose they are: an AWS secret access key (40 base64 characters, mixed case)
+# in a message that names AWS or holds an AWS key id, and a Twilio auth token
+# (32 hex) in a message that names Twilio or holds a Twilio account SID.
+_CONTEXT_RULES: list[tuple[re.Pattern[str], re.Pattern[str], Any]] = [
+    (
+        re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|(?i:\baws\b)"),
+        re.compile(r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])"),
+        lambda token: any(c.isupper() for c in token) and any(c.islower() for c in token) and any(c.isdigit() or c in "/+" for c in token),
+    ),
+    (
+        re.compile(r"\bAC[0-9a-fA-F]{32}\b|(?i:\btwilio\b)"),
+        re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{32}(?![0-9A-Za-z])"),
+        lambda token: True,
+    ),
 ]
 
 CATEGORY_PATTERNS: dict[str, list[re.Pattern[str]]] = {
@@ -126,9 +279,19 @@ def sha256_text(text: str) -> str:
 
 
 def redact(text: str) -> str:
+    """Replace the credential shapes SECRET_RULES and _CONTEXT_RULES know with REDACTED.
+
+    Best-effort: a secret with neither a known shape nor a sensitive name
+    survives. See the note above SECRET_RULES.
+    """
     out = text
-    for pattern in SECRET_PATTERNS:
-        out = pattern.sub(lambda m: f"{m.group(1)}[REDACTED]", out)
+    for _name, pattern, replace in SECRET_RULES:
+        out = pattern.sub(replace, out)
+    # The context is read from the original text, since the rules above have
+    # already redacted the key id or SID that establishes it.
+    for context, token, accept in _CONTEXT_RULES:
+        if context.search(text):
+            out = token.sub(lambda m: REDACTED if accept(m.group(0)) else m.group(0), out)
     return out
 
 
@@ -276,7 +439,13 @@ def main() -> int:
     parser.add_argument("--output", required=True, help="Output directory.")
     parser.add_argument("--project-term", action="append", dest="project_terms", default=[], help="Additional relevance term.")
     parser.add_argument("--min-score", type=int, default=4, help="Candidate threshold.")
-    parser.add_argument("--no-redact", action="store_true", help="Disable basic secret redaction.")
+    parser.add_argument(
+        "--no-redact",
+        action="store_true",
+        help="Disable secret redaction. Redaction is on by default and best-effort: it removes known "
+        "credential shapes and values with a sensitive name, not every secret, so read the outputs "
+        "before sharing any of them.",
+    )
     args = parser.parse_args()
 
     input_root = Path(args.input)
@@ -317,6 +486,9 @@ def main() -> int:
             msg.text_hash = sha256_text(msg.text)
         unique_messages.append(msg)
     messages = unique_messages
+    if not args.no_redact:
+        for thread in threads:
+            thread.title = redact(thread.title)
 
     by_thread: dict[str, list[MessageRecord]] = {}
     for msg in messages:
