@@ -23,7 +23,8 @@
  *           build), plain, double- or single-quoted, padded with spaces,
  *           behind `export`, with an inline comment, with CRLF line endings,
  *           in an earlier duplicate line, and with env.ts absent (the
- *           script's own copy of the list). Empty, unset, commented-out and
+ *           script's own copy of the list); a value added to env.ts's Set
+ *           is refused too (the list is read from the code being deployed). Empty, unset, commented-out and
  *           real-looking values pass. The server's other boot refusals
  *           (KEYFLOW_DEV_AUTH_BYPASS, the S3 group, the email-verification
  *           trio in main.ts) are refused too. No value is ever printed.
@@ -124,7 +125,7 @@ function git(cwd, args) {
  * A scratch checkout holding the real deploy.sh, a fixture .env.production
  * and (unless envTs is false) the real env.ts; stand-ins on PATH.
  */
-function sandbox({ envFile, envTs = true }) {
+function sandbox({ envFile, envTs = true, envTsTransform = (src) => src }) {
   const dir = mkdtempSync(join(tmpdir(), 'deploy-sh-'));
   const root = join(dir, 'checkout');
   const bin = join(dir, 'bin');
@@ -134,7 +135,7 @@ function sandbox({ envFile, envTs = true }) {
   writeFileSync(join(root, 'docker-compose.production.yml'), 'services: {}\n');
   if (envTs) {
     mkdirSync(join(root, 'apps', 'server', 'src', 'core', 'config'), { recursive: true });
-    copyFileSync(ENV_TS, join(root, 'apps', 'server', 'src', 'core', 'config', 'env.ts'));
+    writeFileSync(join(root, 'apps', 'server', 'src', 'core', 'config', 'env.ts'), envTsTransform(readFileSync(ENV_TS, 'utf8')));
   }
   writeFileSync(join(root, '.gitignore'), '.env.production\n');
   git(root, ['init', '-q']);
@@ -261,6 +262,22 @@ test('[DSH-P3] without env.ts in the checkout (an older ref), the script\'s own 
     const result = await runDeploy(sb);
     assertRefusedBeforeBackup(sb, result, PLACEHOLDER_REASON);
   }));
+
+test('[DSH-P3b] the list is read from the env.ts being deployed: a value added there is refused too', () =>
+  withSandbox(
+    {
+      envFile: BASE_ENV + 'SUPABASE_JWT_SECRET="dsh-newly-listed-placeholder"\n',
+      envTsTransform: (src) => {
+        const out = src.replace(/(PUBLIC_SUPABASE_JWT_SECRET_PLACEHOLDERS\s*=\s*new Set\(\[)/, "$1'dsh-newly-listed-placeholder', ");
+        assert.notEqual(out, src, 'could not add a value to the env.ts Set');
+        return out;
+      },
+    },
+    async (sb) => {
+      const result = await runDeploy(sb);
+      assertRefusedBeforeBackup(sb, result, PLACEHOLDER_REASON);
+    },
+  ));
 
 test('[DSH-P4] the refusal never prints a value from .env.production', () =>
   withSandbox(

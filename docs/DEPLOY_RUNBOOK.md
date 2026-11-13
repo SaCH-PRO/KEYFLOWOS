@@ -7,8 +7,10 @@
 > `/opt/keyflowos`. The Render workspace was deleted on 2026-08-08.
 >
 > **To deploy:** `ssh` to the box, then `./scripts/deploy.sh <git-ref>`.
-> It backs up, verifies the dump, tags rollback images, builds, migrates before
-> traffic, and asserts `/healthz` reports the hash it just built.
+> It refuses an `.env.production` the API would refuse at boot, backs up,
+> verifies the dump, tags rollback images, builds, migrates before traffic, and
+> waits (up to 90 s) for `/healthz` to report status ok, the API reachable and
+> the hash it just built; otherwise it exits 1 with the rollback.
 >
 > **The banner that used to be here is itself a lesson.** It said production had
 > **29 tables** as of 2026-08-03 and a schema frozen since 2025-11-30. A `pg_dump`
