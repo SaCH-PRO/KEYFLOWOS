@@ -252,6 +252,46 @@ export function canTransitionOrder(from: string, to: string): boolean {
 }
 
 /**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-1: the order status a stored status names, read in any case and with any
+ * surrounding spaces (the marketplace vocabulary, or the storefront's through LEGACY_STATUS_MAP); undefined for a label
+ * of neither (e.g. 'on_hold'). PATCH /marketplace/.../status writes any status as sent, so a stored status is not
+ * always spelled as canTransitionOrder's tables are.
+ */
+function namedOrderStatus(status: string): string | undefined {
+  const trimmed = status.trim();
+  for (const spelling of [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()]) {
+    const named = Object.prototype.hasOwnProperty.call(LEGACY_STATUS_MAP, spelling) ? LEGACY_STATUS_MAP[spelling] : spelling;
+    if (Object.prototype.hasOwnProperty.call(VALID_ORDER_TRANSITIONS, named)) return named;
+  }
+  return undefined;
+}
+
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-1 (owner ruling D-136): whether a status edit (PATCH /marketplace/.../status
+ * 'cancelled', PATCH /site/.../status CANCELLED) may cancel an order stored with this status. A status of either
+ * vocabulary, in any case and with any surrounding spaces, may be cancelled as canTransitionOrder says: 'processing',
+ * 'pending' and 'confirmed' are open, a shipped, delivered, completed, cancelled or refunded one is not (D-136). A label
+ * of neither vocabulary (e.g. 'on_hold', written by the marketplace route as sent) names no step past which a cancel is
+ * refused, so it may be cancelled, as it was before the packet. canTransitionOrder alone (case-sensitive) refused every
+ * such open order with 400 'Cannot cancel order in processing status', and the fulfil 'cancel' refuses them too, so no
+ * route could cancel it. The fulfil 'cancel' keeps canTransitionOrder (FulfillmentRoutingService.cancelOrderFulfilment).
+ */
+export function statusEditMayCancel(status: string): boolean {
+  const named = namedOrderStatus(status);
+  return named === undefined || VALID_ORDER_TRANSITIONS[named].includes('cancelled');
+}
+
+/**
+ * W11-ORDER-CANCEL-RELEASE review OCR-COR-2 (D-136): the 409 a status-edit cancel answers when the order's status
+ * changed between releaseOrderFulfilmentForCancel's read (under the routing claim) and the cancel's write (a
+ * compare-and-set on that status). A ship takes no claim (PATCH 'shipped', PATCH /site SHIPPED, the fulfil 'ship'), so it
+ * can commit while the cancel waits for the stock rows; the cancel wrote 'cancelled' over the shipped order by id.
+ */
+export const ORDER_STATUS_CHANGED_DURING_CANCEL =
+  "This order's status changed while it was being cancelled (it was shipped or edited meanwhile): nothing was written. " +
+  'Reload the order and cancel it again if it can still be cancelled';
+
+/**
  * W11-ORDER-CANCEL-RELEASE (F-35; owner ruling D-136): the release of an order's fulfilment for a cancel, on the
  * cancel's own transaction (run with ROUTING_CLAIM_TX_OPTIONS), which then writes the order's cancelled status and step.
  * Every cancel runs it: the fulfil 'cancel' action (FulfillmentRoutingService.cancelOrderFulfilment, which delegates
@@ -270,15 +310,26 @@ export function canTransitionOrder(from: string, to: string): boolean {
  * ts), gives back what each reserved and cancels every route not COMPLETED or CANCELLED. A router that comes after it
  * meets the order cancelled and creates nothing. It releases reservations only: it restocks nothing a paid storefront
  * checkout decremented, and records no refund.
+ *
+ * Review repairs: `mayCancel` is the check on the status read. The fulfil 'cancel' keeps canTransitionOrder (the
+ * default); the status edits pass statusEditMayCancel, which reads the status in any case with any surrounding spaces
+ * (OCR-COR-1). It returns the status it read, on which the status edits' order write is a compare-and-set
+ * (OCR-COR-2): a ship takes no claim, so one that commits while this waits for its stock rows is not written over
+ * (ORDER_STATUS_CHANGED_DURING_CANCEL, 409, the transaction rolled back).
  */
-export async function releaseOrderFulfilmentForCancel(tx: RoutingTx, businessId: string, orderId: string): Promise<void> {
+export async function releaseOrderFulfilmentForCancel(
+  tx: RoutingTx,
+  businessId: string,
+  orderId: string,
+  mayCancel: (status: string) => boolean = (status) => canTransitionOrder(status, 'cancelled'),
+): Promise<string> {
   await claimOrderRouting(tx, businessId, orderId);
   const order = await tx.marketplaceOrder.findFirst({
     where: { id: orderId, businessId },
     select: { status: true, items: { select: { id: true, productId: true, quantity: true } } },
   });
   if (!order) throw new NotFoundException('Order not found');
-  if (!canTransitionOrder(order.status, 'cancelled')) {
+  if (!mayCancel(order.status)) {
     throw new BadRequestException(`Cannot cancel order in ${order.status} status`);
   }
 
@@ -318,6 +369,7 @@ export async function releaseOrderFulfilmentForCancel(tx: RoutingTx, businessId:
     where: { businessId, orderId, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
     data: { status: 'CANCELLED' },
   });
+  return order.status;
 }
 
 @Injectable()

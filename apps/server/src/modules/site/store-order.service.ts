@@ -26,7 +26,12 @@ import {
 } from '../../core/connectors/implementations/wipay-merchant';
 import { paypalCurrencyRefusal, paypalTakesCurrency } from '../payments/paypal-currency';
 import { CommerceIntegrationService } from '../marketplace/commerce-integration.service';
-import { ROUTING_CLAIM_TX_OPTIONS, releaseOrderFulfilmentForCancel } from '../marketplace/fulfillment-routing.service';
+import {
+  ORDER_STATUS_CHANGED_DURING_CANCEL,
+  ROUTING_CLAIM_TX_OPTIONS,
+  releaseOrderFulfilmentForCancel,
+  statusEditMayCancel,
+} from '../marketplace/fulfillment-routing.service';
 import { appendOrderTimeline } from '../marketplace/order-metadata';
 import {
   normalizeStorefrontMethod,
@@ -954,14 +959,25 @@ export class StoreOrderService {
    * cancelled step and CANCELLED. It wrote CANCELLED alone: a routed order's reservations were held for good, an order
    * being routed got its routes after the cancel, and a SHIPPED order was cancelled. It releases reservations only (what
    * a paid checkout decremented is not restocked) and records no refund.
+   *
+   * Review repairs: the status is read in any case, padded or not (statusEditMayCancel, OCR-COR-1): an open order the
+   * marketplace route stored 'processing' was refused 400 by canTransitionOrder alone, and no route could cancel it.
+   * CANCELLED is written compare-and-set on the status read under the claim (OCR-COR-2, D-136): a SHIPPED takes no
+   * claim, so one that committed while the release waited for its stock rows had CANCELLED written over it by id; 409
+   * now, the transaction rolled back (the release with it), nothing written and no event.
    */
   private cancelReleasingFulfilment(businessId: string, orderId: string) {
     return this.prisma.client.$transaction(async (tx) => {
-      await releaseOrderFulfilmentForCancel(tx, businessId, orderId);
+      const readStatus = await releaseOrderFulfilmentForCancel(tx, businessId, orderId, statusEditMayCancel);
       await appendOrderTimeline(tx, businessId, orderId, [
         { status: 'cancelled', timestamp: new Date().toISOString(), note: 'Order cancelled' },
       ]);
-      return tx.marketplaceOrder.update({ where: { id: orderId }, data: { status: 'CANCELLED' }, include: { items: true } });
+      const { count } = await tx.marketplaceOrder.updateMany({
+        where: { id: orderId, businessId, status: readStatus },
+        data: { status: 'CANCELLED' },
+      });
+      if (count === 0) throw new ConflictException(ORDER_STATUS_CHANGED_DURING_CANCEL);
+      return tx.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include: { items: true } });
     }, ROUTING_CLAIM_TX_OPTIONS);
   }
 

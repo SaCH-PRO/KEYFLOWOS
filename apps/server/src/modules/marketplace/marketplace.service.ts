@@ -13,9 +13,11 @@ import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import {
   FulfillmentRoutingService,
+  ORDER_STATUS_CHANGED_DURING_CANCEL,
   ROUTING_CLAIM_TX_OPTIONS,
   canTransitionOrder,
   releaseOrderFulfilmentForCancel,
+  statusEditMayCancel,
 } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { appendOrderTimeline, recordOrderRefundedTotal, setOrderPublicTokenOnce, takeBackOrderTimelineStep } from './order-metadata';
@@ -1188,6 +1190,9 @@ export class MarketplaceService {
    * ('cancelled', any case, padded) releases its fulfilment under the order's
    * routing claim, as the fulfil 'cancel' action does (400 for an order that
    * can no longer be cancelled). Every other status is written as before.
+   * Review repairs: the cancel is stored trimmed (SEC-W11OCR-1), an open
+   * order in any spelling may be cancelled (OCR-COR-1), and the write is a
+   * compare-and-set on the status read under the claim (OCR-COR-2: 409).
    */
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any, actorId: string | null = null) {
     this.assertPlainStatusBody(status, paymentData);
@@ -1268,20 +1273,33 @@ export class MarketplaceService {
       // the status alone: the order's routes stayed RESERVED and their stock reserved for good, an order being routed
       // got its routes and reservations after the cancel, and a shipped order was cancelled. A cancel records no refund
       // and keeps a paid order's payment. One store_order.cancelled once it has committed.
+      // Review SEC-W11OCR-1: the status is stored trimmed, in the case sent (the web's CANCELLED unchanged). Stored
+      // with its spaces (' cancelled '), it was released and announced cancelled, but isClosedStorefrontOrder (upper-
+      // cased, not trimmed) did not read it as closed: the paid doors (PATCH paid, complete-offline, the public
+      // checkout) then recorded a payment on the cancelled order.
+      updateData.status = status.trim();
       const cancelled = await this.prisma.client.$transaction(async (tx) => {
-        await releaseOrderFulfilmentForCancel(tx, businessId, orderId);
+        // Review OCR-COR-1: the status read in any case, padded or not (statusEditMayCancel): an open order stored
+        // 'processing' or 'on_hold' (this route writes any status as sent) was refused 400 by canTransitionOrder alone.
+        const readStatus = await releaseOrderFulfilmentForCancel(tx, businessId, orderId, statusEditMayCancel);
         await appendOrderTimeline(tx, businessId, orderId, [
           { status: 'cancelled', timestamp: new Date().toISOString(), note: 'Order cancelled' },
         ]);
-        if (writesPayment) {
-          const { count } = await tx.marketplaceOrder.updateMany({
-            where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
-            data: updateData,
-          });
-          if (count === 0) throw new ConflictException(ORDER_PAYMENT_STATUS_CHANGED);
-          return tx.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
+        // Review OCR-COR-2 (D-136): compare-and-set on the status read under the claim (and, with payment fields, on
+        // the payment status read above, as below). A ship takes no claim, so one that committed while the release
+        // waited for its stock rows had 'cancelled' written over it by id: 409 now, the transaction rolled back (the
+        // release with it), nothing written and no event.
+        const { count } = await tx.marketplaceOrder.updateMany({
+          where: { id: orderId, businessId, status: readStatus, ...(writesPayment ? { paymentStatus: order.paymentStatus } : {}) },
+          data: updateData,
+        });
+        if (count === 0) {
+          const now = await tx.marketplaceOrder.findFirst({ where: { id: orderId, businessId }, select: { status: true, paymentStatus: true } });
+          throw new ConflictException(
+            writesPayment && now?.status === readStatus ? ORDER_PAYMENT_STATUS_CHANGED : ORDER_STATUS_CHANGED_DURING_CANCEL,
+          );
         }
-        return tx.marketplaceOrder.update({ where: { id: orderId }, data: updateData, include });
+        return tx.marketplaceOrder.findFirstOrThrow({ where: { id: orderId, businessId }, include });
       }, ROUTING_CLAIM_TX_OPTIONS);
       this.emitOrderLifecycleEvent(businessId, cancelled, 'cancelled');
       return cancelled;
