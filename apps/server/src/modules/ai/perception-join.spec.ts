@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
+import { PROMPT_MEMORY_HEADROOM } from '../key-cortex/key-cortex-prompt-context.service';
 
 const src = readFileSync(join(__dirname, 'flow-orchestrator.service.ts'), 'utf8');
 
@@ -41,15 +42,41 @@ function methodSource(name: string): string {
 }
 
 type Fragment = {
+  id?: string;
   sourceType: string;
   title: string;
   content: string;
+  entityType?: string | null;
 };
 
 class MemoryStub {
   fragments: Fragment[] = [];
   retrieveContext = vi.fn(() => Promise.resolve(this.fragments));
 }
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the two reads the block's reader rule makes, answered from
+ * this table. user_1 is a member of biz_1 (BusinessGuard's predicate, userCanAccessBusiness); user_9 is no member.
+ * COGNITION_OWNERS: the member each cognition row of biz_1 is recorded for (null: a member-less row).
+ */
+const MEMBERS: Record<string, string[]> = { biz_1: ['user_1', 'user_2'] };
+const COGNITION_OWNERS: Record<string, string | null> = { cog_own: 'user_1', cog_other: 'user_2', cog_nobody: null };
+const prismaStub = {
+  client: {
+    business: {
+      findFirst: vi.fn(async ({ where }: { where: { id: string; members: { some: { userId: string } } } }) =>
+        (MEMBERS[where.id] ?? []).includes(where.members.some.userId) ? { id: where.id } : null,
+      ),
+    },
+    cognitionMemory: {
+      findMany: vi.fn(async ({ where }: { where: { id: { in: string[] }; businessId: string; userId: string } }) =>
+        where.businessId === 'biz_1'
+          ? where.id.in.filter((id) => COGNITION_OWNERS[id] === where.userId).map((id) => ({ id }))
+          : [],
+      ),
+    },
+  },
+};
 
 /**
  * Runs the REAL method against a stub instance.
@@ -71,6 +98,8 @@ function makeOrchestrator(memory: MemoryStub) {
     moduleRef: { get: () => memory },
     logger: { warn: vi.fn() },
     getUnifiedMemory: () => memory,
+    // W11-FLOW-PERCEPTION-SCOPE: the reader's membership and their own cognition rows are read with it.
+    prisma: prismaStub,
   };
 
   return {
@@ -153,8 +182,21 @@ describe('cost is graded by the thalamus', () => {
 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, Record<string, number>])[1];
     expect(opts.limit).toBeGreaterThan(0);
-    expect(opts.limit).toBeLessThanOrEqual(25);
+    // W11-FLOW-PERCEPTION-SCOPE (SEC-W11MC-3, CR-W10CCS-1): the window (12 for deliberate; it was the whole limit, at
+    // most 25) plus the shared headroom buildMemoryContext asks for, so leaving out the rows that are not the reader's
+    // still fills the window. The headroom is no more than the eight stores can hand back (50 rows each), and the
+    // block renders at most the window (pinned in 'the block renders at most its window' below).
+    expect(opts.limit).toBe(12 + PROMPT_MEMORY_HEADROOM);
+    expect(PROMPT_MEMORY_HEADROOM).toBeGreaterThan(0);
+    expect(PROMPT_MEMORY_HEADROOM).toBeLessThanOrEqual(8 * 50);
     expect(opts.minRankScore).toBeGreaterThan(0);
+  });
+
+  it('the block renders at most its window: 6 fragments for standard, 12 for deliberate, however many the store answers', async () => {
+    memory.fragments = Array.from({ length: 200 }, (_, i) => ({ sourceType: 'genome_memory_event', title: `g${i}`, content: `c${i}` }));
+    const lines = (out: string) => out.split('\n').filter((l) => l.startsWith('- ['));
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard'))).toHaveLength(6);
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate'))).toHaveLength(12);
   });
 
   it('gives up rather than stalling time-to-first-token', async () => {
@@ -232,6 +274,20 @@ describe('personal memory stays personal', () => {
     expect(opts.userId, 'perception is not scoped to the caller').toBe('user_1');
   });
 
+  // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the reader is the caller only while they are a member of
+  // the business (buildMemoryContext's rule). A turn with no member (the Chatwoot support desk, the staff bridge) and
+  // a caller who is no member (a platform SUPER_ADMIN) read no per-member memory: no episodic store at all, rather than
+  // every member's rows (an absent userId used to leave AiExecutionLog and CortexActionLog unnarrowed).
+  it('a turn with no member, or a caller who is no member, reads no episodic memory: the stores are asked for none, and for nobody\'s', async () => {
+    for (const userId of [undefined, 'user_9']) {
+      memory.retrieveContext.mockClear();
+      await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
+      const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string; includeEpisodic?: boolean }])[1];
+      expect(opts.includeEpisodic, String(userId)).toBe(false);
+      expect(opts.userId, String(userId)).toBeUndefined();
+    }
+  });
+
   it('is passed on BOTH chat paths', () => {
     const wired = src.match(/buildPerceptionSection\(businessId, message, triage\?\.tier, userId\)/g) ?? [];
     expect(wired.length, 'a chat path leaks other members’ history').toBe(2);
@@ -288,6 +344,55 @@ describe('personal memory stays personal', () => {
 
     expect(code).not.toMatch(/\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]/);
     expect(code).toMatch(/Structured memory load failed for/);
+  });
+});
+
+describe("only the reader's own cognition memory, and no KEY tool-call record (W11-FLOW-PERCEPTION-SCOPE, SEC-W11MC-3)", () => {
+  // CognitionMemory is per member (what a member typed and KEY's whole answer to them) but the retrieval reads it
+  // business-wide; the business-wide event stores carry every KEY tool call's input and answer. buildMemoryContext keeps
+  // neither (readersOwnCognitionMemory, isToolCallRecord); this block now keeps neither either, through the same helper.
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'cog_other', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OTHER-MEMBER typed' },
+      { id: 'cog_nobody', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: NOBODY typed' },
+      { id: 'be_tool', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'tool_execution', content: 'TOOL-ANSWER' },
+      { id: 'ce_tool', sourceType: 'cognitive_event', title: 'tool.executed', content: 'tool.executed: TOOL-INPUT' },
+      { id: 'cog_own', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OWN typed' },
+      { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+    ];
+  });
+
+  it("keeps a cognition fragment only when it is the reader's own: another member's row and a member-less row are left out", async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).toContain('OWN typed');
+    expect(out).not.toContain('OTHER-MEMBER');
+    expect(out).not.toContain('NOBODY');
+  });
+
+  it('leaves out the business-wide records of KEY tool calls (isToolCallRecord), and keeps the business events that are not one', async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).not.toContain('TOOL-ANSWER');
+    expect(out).not.toContain('TOOL-INPUT');
+    expect(out).toContain('INV-014 overdue');
+  });
+
+  it('a turn with no member, or a caller who is no member, gets no cognition fragment at all', async () => {
+    for (const userId of [undefined, 'user_9']) {
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
+      expect(out, String(userId)).not.toContain('[cognition_memory]');
+      expect(out, String(userId)).toContain('INV-014 overdue');
+    }
+  });
+
+  it('a membership check that cannot be made reads as no member (fail closed), and never fails the request', async () => {
+    prismaStub.client.business.findFirst.mockRejectedValueOnce(new Error('connection reset'));
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(out).not.toContain('[cognition_memory]');
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { includeEpisodic?: boolean }])[1];
+    expect(opts.includeEpisodic).toBe(false);
   });
 });
 

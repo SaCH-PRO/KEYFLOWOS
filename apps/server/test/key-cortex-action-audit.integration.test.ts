@@ -164,6 +164,14 @@
  * review repair (SEC-W11MPS-1) withdraws the row's semantic copies too (ai_memory_embeddings, written by POST
  * .../agent/memory/backfill and read back by GET .../agent/memory/search and the memory block's semantic search).
  *
+ * W11-FLOW-PERCEPTION-SCOPE turned the last residual it.todo (SEC-W11MC-3) live: over POST /ai/businesses/:id/flow/chat
+ * and its stream (the real AiFlowController, AuthGuard, BusinessGuard and FlowOrchestratorService over the real memory
+ * stores), the "WHAT YOU HAVE OBSERVED" block (buildPerceptionSection) keeps what buildMemoryContext keeps, through the
+ * same helpers (key-cortex-prompt-context.service.ts): its reader is the requester when they are a member of the
+ * business, else nobody; it renders only the reader's own cognition memory (a member-less row is nobody's own) and no
+ * KEY tool-call record of the business-wide stores, reads no per-member memory for a turn with no reader (a non-member
+ * SUPER_ADMIN, the Chatwoot support desk), and asks for the same headroom so the reader's own rows still fill it.
+ *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -1243,9 +1251,11 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: `asking` gives the session one message of the member's (the turn's
   // query) and the semantic store to search with it, so the block's semantic fragments ([ai_memory_embedding], what
   // loadSemanticMemory reads from ai_memory_embeddings) are read as well.
+  // W11-FLOW-PERCEPTION-SCOPE: `businessId` names the business the block is read for (ID.memBiz unless named).
   async function memoryContextFor(
     userId: string | undefined,
     asking?: { question: string; semantic: unknown },
+    businessId: string = ID.memBiz,
   ): Promise<{ aiMemory: string; lessons?: string }> {
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
     const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
@@ -1254,9 +1264,9 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
     const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, new KeyCortexLearningService(prisma), prisma);
     const messages = asking ? [{ role: 'user', content: asking.question, timestamp: new Date() }] : [];
-    const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages } as any;
+    const session = { id: `${P}sess_mem_chat`, businessId, userId, messages } as any;
     // W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1: the requester is the session's own member here.
-    const memory = await promptContext.buildMemoryContext(ID.memBiz, session, userId);
+    const memory = await promptContext.buildMemoryContext(businessId, session, userId);
     return { aiMemory: memory.aiMemory ?? '', lessons: memory.lessons };
   }
 
@@ -2636,19 +2646,432 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     }
   }, 60_000);
 
-  // W11-CORTEX-MEMORY-COGNITION review residual (D-130), reproduced on this database at the repair and kept as an
-  // it.todo: its fix is outside the W11-CORTEX-MEMORY-COGNITION write set (the three key-cortex files
-  // key-cortex-prompt-context.service.ts, key-cortex-learning.service.ts and key-cortex-query-pipeline.service.ts).
-  // SEC-W11MC-1's residual (key:chat session ownership) is live above (W11-KEY-CHAT-SESSION-BIND), and SEC-W11MC-2's
-  // (promoted cognition rows) too (W11-MEMORY-PROMOTE-SCOPE).
-  it.todo(
-    'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-3 (D-130, SEC-W10CCS-R2; follow-up packet, outside the write set): ' +
-      'the /ai flow chat and its stream (flow-orchestrator.service.ts buildPerceptionSection) render every member\'s ' +
-      'cognition memory into a member\'s "WHAT YOU HAVE OBSERVED" block, with neither readersOwnCognitionMemory nor ' +
-      'isToolCallRecord (reproduced: the owner\'s typed chat and KEY\'s answer in the STAFF member\'s section). Filtering ' +
-      'its fragments with the shared readersOwnCognitionMemory and isToolCallRecord (key-cortex-prompt-context.service.ts) ' +
-      'closes it.',
-  );
+  // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): was an it.todo (W11-CORTEX-MEMORY-COGNITION review residual,
+  // reproduced: the owner's typed chat and KEY's answer in the STAFF member's section). The /ai flow chat and its stream
+  // (flow-orchestrator.service.ts buildPerceptionSection) rendered the business's memory into a member's "WHAT YOU HAVE
+  // OBSERVED" block by neither of buildMemoryContext's rules: every member's cognition memory (what a member typed and
+  // KEY's whole answer to them) and KEY's member-less rows, every KEY tool-call record of the business-wide stores (another
+  // member's tool answer and typed input), and, for a turn that names no member (the Chatwoot support desk and the staff
+  // bridge pass none), every member's episodic rows. The block now keeps what buildMemoryContext keeps, through the same
+  // shared helpers: the reader is the requester when they are a member of the business (else nobody), only the reader's
+  // own cognition rows, no tool-call record, no per-member memory for a turn with no reader, with the same headroom.
+  describe('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the /ai flow chat perception block', () => {
+    const FPS = {
+      biz: `${P}biz_fps`,
+      /** A platform SUPER_ADMIN who is no member of FPS.biz: BusinessGuard admits them; they are nobody's reader. */
+      admin: `${P}fps_admin`,
+      fact: 'V19C-FPS-FACT: a business-wide fact',
+      turn: 'v19c fps: how are we doing this month?',
+      OWNER_SAID: 'V19C-FPS-OWNER',
+      MEMBER_SAID: 'V19C-FPS-MEMBER',
+      NOBODY_SAID: 'V19C-FPS-NOBODY',
+      /** What the owner typed into their own KEY tool call (key_inbox.get_thread's input). */
+      OWNER_NOTE: 'V19C-FPS-OWNER-TYPED-NOTE',
+    };
+    const PATHS = ['chat', 'stream'] as const;
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    let flow: Awaited<ReturnType<typeof flowChatOverHttp>> | undefined;
+
+    /** One member's cognition row of FPS.biz as recordObservation writes it, or (null) recordOutcome's member-less row. */
+    const fpsCognition = (userId: string | null, said: string, extra: Record<string, unknown> = {}) => ({
+      businessId: FPS.biz,
+      ...(userId ? { userId } : { roleId: 'key_cortex' }),
+      sessionId: `${P}sess_fps_${said}`,
+      query: `${said} typed: what is our net profit this quarter?`,
+      recommendation: `${said} KEY answered: net profit 48213`,
+      userResponse: 'no_action',
+      confidence: 0.9,
+      ...extra,
+    });
+
+    /** The fragment lines of a prompt's "WHAT YOU HAVE OBSERVED" block (a fragment's content may run on below its line). */
+    const observed = (prompt: string): string[] => {
+      const at = prompt.indexOf('WHAT YOU HAVE OBSERVED');
+      return at < 0 ? [] : prompt.slice(at).split('\n').filter((l) => l.startsWith('- ['));
+    };
+    /** A line of a KEY tool call's record in a business-wide store (what isToolCallRecord names). */
+    const toolCallRecordLines = (prompt: string) =>
+      observed(prompt).filter(
+        (l) => /^- \[cognitive_event\] (tool\.|cortex\.action_)/.test(l) || (l.startsWith('- [business_event]') && /tool_execution|AiExecutionLog/.test(l)),
+      );
+
+    /**
+     * POST /ai/businesses/:businessId/flow/chat and .../flow/chat/stream on the real AiFlowController behind its real
+     * AuthGuard, BusinessGuard and CrmRateLimitGuard, over the real FlowOrchestratorService (chat, streamChat and
+     * buildPerceptionSection), whose UnifiedMemoryRetrievalService (reached through moduleRef, as getUnifiedMemory
+     * reaches the app's provider) reads the real stores; no query is passed to it, so its semantic store (a stand-in
+     * answering nothing) is never searched. Stand-ins: identity attachment (a middleware reads `x-v19c-user`, as in
+     * aiMemoryOverHttp), the model provider (aiUsage: records the system prompt it is handed and answers a plain reply),
+     * and the prompt's other context reads (business graph, AI memory block, blueprint, onboarding, attachments); no
+     * triage verdict, as when CognitiveTriageService is absent (the standard window). `turn(userId, path)`: the system
+     * prompt of one turn of that user over HTTP; `deskTurn(path)`: of a turn that names no member, as the Chatwoot
+     * support desk calls chat() (chatwoot.service.ts: no user).
+     */
+    async function flowChatOverHttp(businessId: string) {
+      const { Test } = await import('@nestjs/testing');
+      const { default: request } = await import('supertest');
+      const { ValidationPipe } = await import('@nestjs/common');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiFlowController } = await import('../src/modules/ai/flow.controller');
+      const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+      const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+      const { RoleEngineService } = await import('../src/modules/ai/role-engine.service');
+      const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
+      const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
+      const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+
+      const prompts: string[] = [];
+      const warnings: string[] = [];
+      const usage = { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 };
+      type GatewayRequest = { messages: Array<{ role: string; content: unknown }> };
+      const record = (req: GatewayRequest) =>
+        prompts.push(req.messages.filter((m) => m.role === 'system').map((m) => String(m.content ?? '')).join('\n'));
+      const aiUsage = {
+        checkRateLimit() {},
+        async checkCredits() {
+          return { allowed: true };
+        },
+        async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
+          record(req);
+          return { content: 'v19c fps: noted.', toolCalls: [], usage };
+        },
+        async *trackAndStream(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
+          record(req);
+          yield { type: 'content_delta', content: 'v19c fps: noted.' };
+        },
+      };
+      const recorder = { emit() { return true; }, async recordEvent() { return undefined; }, async create() { return undefined; } };
+      const roleEngine = new RoleEngineService(prisma, {} as any, recorder as any);
+      const jobRolePolicy = new JobRolePolicyService();
+      const providers = new Map<unknown, unknown>();
+      const moduleRef = {
+        get(token: any) {
+          if (!providers.has(token)) throw new Error(`v19c: no provider for ${token?.name ?? String(token)}`);
+          return providers.get(token);
+        },
+      };
+      providers.set(KeyActionBoundaryService, new KeyActionBoundaryService(prisma, moduleRef as any));
+      providers.set(JobRolePolicyService, jobRolePolicy);
+      providers.set(UnifiedMemoryRetrievalService, new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any));
+      const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+        logger: { log() {}, debug() {}, verbose() {}, error() {}, warn: (m: unknown) => warnings.push(String(m)) },
+        prisma,
+        moduleRef,
+        aiUsage,
+        roleEngine,
+        governance: new AiOversightService(prisma, {} as any, {} as any, roleEngine, {} as any, jobRolePolicy),
+        executionLog: { logToolExecution: async () => undefined, log: async () => undefined },
+        businessGraph: {
+          invalidateCache() {},
+          getSnapshot: async () => ({ business: { name: 'V19C FPS Biz' } }),
+          buildContextString: () => '',
+        },
+        memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
+        semanticMemory: { search: async () => [] },
+        genomeFacts: { listTopFacts: async () => [] },
+        buildAttachmentContext: async () => '',
+        buildBlueprintSection: async () => '',
+        buildOnboardingDirective: async () => '',
+        getTriage: () => null,
+        saveConversationHistory: async () => undefined,
+        enforceDoNotSay: async () => undefined,
+      });
+      const testing = await Test.createTestingModule({
+        controllers: [AiFlowController],
+        providers: [
+          { provide: PrismaService, useValue: prisma },
+          AuthGuard,
+          BusinessGuard,
+          CrmRateLimitGuard,
+          { provide: FlowOrchestratorService, useValue: orchestrator },
+        ],
+      }).compile();
+      const http = testing.createNestApplication();
+      http.getHttpAdapter().getInstance().set('trust proxy', true);
+      http.use(async (req: any, _res: any, next: any) => {
+        const id = req.headers['x-v19c-user'];
+        if (typeof id === 'string' && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      http.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+      http.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await http.init();
+
+      let ip = 0;
+      const turn = async (userId: string, path: 'chat' | 'stream'): Promise<string> => {
+        prompts.length = 0;
+        ip += 1;
+        const req = request(http.getHttpServer())
+          .post(`/ai/businesses/${businessId}/flow/chat${path === 'stream' ? '/stream' : ''}`)
+          .set('x-v19c-user', userId)
+          .set('x-forwarded-for', `10.19.3.${ip}`)
+          .send({ message: FPS.turn });
+        if (path === 'chat') {
+          const res = await req;
+          expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+        } else {
+          const res = await req.buffer(true).parse((r: any, cb: any) => {
+            let text = '';
+            r.setEncoding('utf8');
+            r.on('data', (c: string) => {
+              text += c;
+            });
+            r.on('end', () => cb(null, text));
+          });
+          const chunks = String(res.body)
+            .split('\n')
+            .filter((l) => l.startsWith('data: ') && l !== 'data: [DONE]')
+            .map((l) => JSON.parse(l.slice('data: '.length)));
+          expect(chunks.filter((c: any) => c.type === 'error'), String(res.body).slice(0, 400)).toEqual([]);
+        }
+        expect(prompts, `one model call for ${userId} (${path})`).toHaveLength(1);
+        return prompts[0];
+      };
+      const deskTurn = async (path: 'chat' | 'stream'): Promise<string> => {
+        prompts.length = 0;
+        const desk = { route: '/app/helpdesk', surface: 'helpdesk' };
+        if (path === 'chat') {
+          await orchestrator.chat(businessId, FPS.turn, [], undefined, desk, undefined, undefined, `${P}fps_desk_conv`);
+        } else {
+          for await (const chunk of orchestrator.streamChat(businessId, FPS.turn, [], desk, undefined, undefined, `${P}fps_desk_conv`)) {
+            expect((chunk as { type: string }).type, JSON.stringify(chunk).slice(0, 400)).not.toBe('error');
+          }
+        }
+        expect(prompts, `one model call for the support desk (${path})`).toHaveLength(1);
+        return prompts[0];
+      };
+      return { turn, deskTurn, warnings, close: () => http.close() };
+    }
+
+    async function removeFpsRows() {
+      for (const table of [
+        'cortex_action_logs', 'ai_execution_logs', 'business_events', 'cognitive_events', 'cognition_memories',
+        'tool_outcome_scores', 'ai_memories', 'memberships',
+      ]) {
+        await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE business_id = $1`, FPS.biz);
+      }
+      await db.$executeRawUnsafe('DELETE FROM businesses WHERE id = $1', FPS.biz);
+      await db.$executeRawUnsafe('DELETE FROM users WHERE id = $1', FPS.admin);
+    }
+
+    beforeAll(async () => {
+      globalThis.fetch = (async (input: unknown) => {
+        outbound.push(String(input));
+        throw new Error('v19c: no outbound traffic in this case');
+      }) as typeof fetch;
+      await removeFpsRows();
+      await db.user.create({ data: { id: FPS.admin, email: `${P}fps_admin@test.local`, role: 'SUPER_ADMIN' } });
+      await db.business.create({ data: { id: FPS.biz, name: 'V19C FPS Biz', ownerId: ID.owner } });
+      // The owner holds the OWNER membership (D-104); ID.member is a STAFF member on role defaults.
+      await db.membership.createMany({
+        data: [
+          { userId: ID.owner, businessId: FPS.biz, role: 'OWNER' },
+          { userId: ID.member, businessId: FPS.biz, role: 'STAFF' },
+        ],
+      });
+      await db.aiMemory.create({ data: { businessId: FPS.biz, category: 'fact', key: `${P}fps_fact`, value: FPS.fact } });
+      // Each member's own episodic rows (W9-KEY-CORTEX-AUDIT narrows them to the reader).
+      await db.cortexActionLog.createMany({
+        data: (['owner', 'member'] as const).map((who) => ({
+          businessId: FPS.biz,
+          userId: who === 'owner' ? ID.owner : ID.member,
+          sessionId: `${P}sess_fps_${who}`,
+          actionType: `v19c.fps.${who}_action`,
+          status: 'success',
+          description: `v19c fps: the ${who}'s own episode`,
+        })),
+      });
+      await db.aiExecutionLog.createMany({
+        data: (['owner', 'member'] as const).map((who) => ({
+          businessId: FPS.biz,
+          userId: who === 'owner' ? ID.owner : ID.member,
+          action: `v19c.fps.${who}_exec`,
+          success: true,
+          rationale: `v19c fps: the ${who} asked`,
+        })),
+      });
+      flow = await flowChatOverHttp(FPS.biz);
+    }, 60_000);
+
+    afterAll(async () => {
+      globalThis.fetch = realFetch;
+      if (flow) await flow.close();
+      await removeFpsRows();
+    });
+
+    it("W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, was it.todo): over POST /ai/businesses/:id/flow/chat and its stream, a STAFF member's \"WHAT YOU HAVE OBSERVED\" block holds only their own cognition memory: the owner's typed chat and KEY's answer to them, and a member-less row, are not in it; the member's own row, their own episodic rows and the business-wide fact are (control); the owner reads their own row, not the member's; buildMemoryContext's block for the same member holds none of them either (parity)", async () => {
+      await db.cognitionMemory.createMany({
+        data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID), fpsCognition(null, FPS.NOBODY_SAID)],
+      });
+      try {
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(member, path).not.toContain(FPS.OWNER_SAID);
+          expect(member, path).not.toContain(FPS.NOBODY_SAID);
+          expect(member, path).toContain('WHAT YOU HAVE OBSERVED');
+          expect(member, path).toContain(`${FPS.MEMBER_SAID} typed`);
+          expect(member, path).toContain(`${FPS.MEMBER_SAID} KEY answered`);
+          expect(member, path).toContain('v19c.fps.member_action');
+          expect(member, path).not.toContain('v19c.fps.owner_action');
+          expect(member, path).toContain(FPS.fact);
+
+          // The owner (Business.ownerId with its OWNER membership, D-104) reads their own row, not the member's.
+          const owner = await flow!.turn(ID.owner, path);
+          expect(owner, path).not.toContain(FPS.MEMBER_SAID);
+          expect(owner, path).not.toContain(FPS.NOBODY_SAID);
+          expect(owner, path).toContain(`${FPS.OWNER_SAID} typed`);
+          expect(owner, path).toContain(FPS.fact);
+        }
+        // Parity: the memory block POST /cortex/chat renders for the same member (buildMemoryContext) keeps the same rows.
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).toContain(`${FPS.MEMBER_SAID} typed`);
+        expect(block).not.toContain(FPS.OWNER_SAID);
+        expect(block).not.toContain(FPS.NOBODY_SAID);
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    it("W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, SEC-W9KCA-2): over POST /ai/businesses/:id/flow/chat and its stream, the owner's real KEY tool call (the registry's ledger business events and the bus's tool events) is not in a STAFF member's perception block: neither its answer nor the owner's typed input, nor any tool-call record line; the owner's own call reaches the owner only on their own CortexActionLog row; buildMemoryContext's block for the member holds none of it either (parity)", async () => {
+      try {
+        const t = thread('fps_tool');
+        const result = await auditedRegistry.execute(
+          TOOL_ORGAN_THREAD,
+          { businessId: FPS.biz, userId: ID.owner, autonomyLevel: 2, ...t },
+          { threadId: `${P}thread_fps_owner`, note: FPS.OWNER_NOTE },
+        );
+        expect(result).toMatchObject({ success: true, data: { thread: { body: OWNER_THREAD_SECRET } } });
+        await vi.waitFor(
+          async () => {
+            expect(await db.businessEvent.count({ where: { businessId: FPS.biz, subjectType: 'tool_execution' } })).toBe(2);
+            expect(await db.cognitiveEvent.count({ where: { businessId: FPS.biz, eventType: 'tool.executed' } })).toBe(1);
+          },
+          { timeout: 10_000, interval: 100 },
+        );
+
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(toolCallRecordLines(member), path).toEqual([]);
+          expect(member, path).not.toContain(OWNER_THREAD_SECRET);
+          expect(member, path).not.toContain(FPS.OWNER_NOTE);
+          expect(member, path).toContain('v19c.fps.member_action');
+          expect(member, path).toContain(FPS.fact);
+
+          const owner = await flow!.turn(ID.owner, path);
+          expect(toolCallRecordLines(owner), path).toEqual([]);
+          expect(owner, path).not.toContain(FPS.OWNER_NOTE);
+          for (const line of observed(owner).filter((l) => l.includes(OWNER_THREAD_SECRET))) {
+            expect(line, path).toMatch(/^- \[cortex_action_log\] key_inbox\.get_thread: /);
+          }
+        }
+        const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
+        expect(block).not.toContain(OWNER_THREAD_SECRET);
+        expect(block).not.toContain(FPS.OWNER_NOTE);
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM tool_outcome_scores WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cortex_action_logs WHERE business_id = $1 AND action_type = $2', FPS.biz, TOOL_ORGAN_THREAD);
+      }
+    }, 60_000);
+
+    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone; the business-wide fact still reaches them', async () => {
+      await db.cognitionMemory.createMany({
+        data: [fpsCognition(ID.owner, FPS.OWNER_SAID), fpsCognition(ID.member, FPS.MEMBER_SAID), fpsCognition(null, FPS.NOBODY_SAID)],
+      });
+      try {
+        for (const path of PATHS) {
+          for (const [who, prompt] of [
+            ['SUPER_ADMIN', await flow!.turn(FPS.admin, path)],
+            ['support desk', await flow!.deskTurn(path)],
+          ] as const) {
+            const label = `${who} (${path})`;
+            expect(prompt, label).not.toContain(FPS.OWNER_SAID);
+            expect(prompt, label).not.toContain(FPS.MEMBER_SAID);
+            expect(prompt, label).not.toContain(FPS.NOBODY_SAID);
+            expect(prompt, label).not.toContain('v19c.fps.owner_');
+            expect(prompt, label).not.toContain('v19c.fps.member_');
+            expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
+            expect(prompt, label).toContain(FPS.fact);
+          }
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+
+    // CR-W10CCS-1's headroom, as buildMemoryContext's case above: the retrieval reads at most 50 rows of each store, newest
+    // first. Here 49 newer cognition rows of the owner's, 50 newer ledger tool-call records and 50 newer bus tool events
+    // rank above the member's own row (with the fact and the member's own episodic rows, about 150 fragments). The block
+    // asks for its window plus the shared headroom, so the member's row is still read, and kept once the rest is left out.
+    it("W11-FLOW-PERCEPTION-SCOPE (D-130, CR-W10CCS-1 headroom): over POST /ai/businesses/:id/flow/chat and its stream, in a busy business whose most recent memory is another member's cognition rows and KEY tool-call records, a STAFF member's perception block still renders their own older cognition row and none of the rest", async () => {
+      const now = Date.now();
+      const OWNER_SAID = 'V19C-FPS-HEADROOM-OWNER';
+      const MEMBER_SAID = 'V19C-FPS-HEADROOM-MEMBER';
+      const recent = (i: number) => new Date(now - (i + 1) * 60_000);
+      await db.cognitionMemory.createMany({
+        data: [
+          ...Array.from({ length: 49 }, (_, i) => fpsCognition(ID.owner, `${OWNER_SAID}-${i}`, { createdAt: recent(i) })),
+          fpsCognition(ID.member, MEMBER_SAID, { confidence: 0.7, createdAt: new Date(now - 60 * 60_000) }),
+        ],
+      });
+      await db.businessEvent.createMany({
+        data: Array.from({ length: 50 }, (_, i) => ({
+          id: `${P}fps_hr_be_${i}`,
+          businessId: FPS.biz,
+          eventType: 'ACTION_EXECUTED',
+          subjectType: 'tool_execution',
+          subjectId: `${P}fps_hr_call_${i}`,
+          actorType: 'ai',
+          actorId: ID.owner,
+          action: 'execute',
+          source: 'ai',
+          createdAt: recent(i),
+        })),
+      });
+      await db.cognitiveEvent.createMany({
+        data: Array.from({ length: 50 }, (_, i) => ({
+          id: `${P}fps_hr_ce_${i}`,
+          businessId: FPS.biz,
+          sourceType: 'key_cortex',
+          eventType: 'tool.executed',
+          payload: { tool: 'v19c.fps_hr_tool', call: i },
+          confidence: 0.9,
+          createdAt: recent(i),
+        })),
+      });
+      try {
+        for (const path of PATHS) {
+          const member = await flow!.turn(ID.member, path);
+          expect(member, path).toContain(`${MEMBER_SAID} typed`);
+          expect(member, path).not.toContain(OWNER_SAID);
+          expect(member, path).not.toContain('v19c.fps_hr_tool');
+          expect(toolCallRecordLines(member), path).toEqual([]);
+          expect(member, path).toContain(FPS.fact);
+        }
+        expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
+        expect(outbound, 'no outbound request').toEqual([]);
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM business_events WHERE business_id = $1', FPS.biz);
+        await db.$executeRawUnsafe('DELETE FROM cognitive_events WHERE business_id = $1', FPS.biz);
+      }
+    }, 60_000);
+  });
 
   /**
    * W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: a chat turn (processQuery or its stream) in ID.toolBiz in which the
