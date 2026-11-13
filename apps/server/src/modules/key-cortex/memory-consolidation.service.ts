@@ -10,10 +10,28 @@ const PROMOTED_KEY_PREFIX = 'learned:';
 const PROMOTED_SOURCE = 'key_cortex_learning';
 /** How much of a cognition row's recommendation promotion copies. */
 const PROMOTED_VALUE_LENGTH = 500;
+/**
+ * The semantic copies of AiMemory rows in ai_memory_embeddings: source_type 'memory', source_id the row's id.
+ * POST /ai/businesses/:id/agent/memory/backfill (SemanticMemoryService.backfillFromAiMemory) writes one per row,
+ * its content `<category>: <key> = <value>`, so a promoted row's copy starts with COPY_CONTENT_PREFIX.
+ */
+const COPY_SOURCE_TYPE = 'memory';
+const COPY_CONTENT_PREFIX = `${PROMOTED_CATEGORY}: ${PROMOTED_KEY_PREFIX}`;
 
 /** The business-wide AiMemory key a cognition row of `functionId` is promoted into. */
 function promotedKey(functionId: string | null): string {
   return `${PROMOTED_KEY_PREFIX}${functionId ?? 'general'}`;
+}
+
+/**
+ * The promoted row a backfill copy's content was made from (`learning: learned:<fn> = <value>`), or null. The key
+ * ends at the first ' = ' (a function id is a slug and holds none).
+ */
+function promotedRowOfCopy(content: string): { key: string; value: string } | null {
+  if (!content.startsWith(COPY_CONTENT_PREFIX)) return null;
+  const rest = content.slice(`${PROMOTED_CATEGORY}: `.length);
+  const at = rest.indexOf(' = ');
+  return at < 0 ? null : { key: rest.slice(0, at), value: rest.slice(at + ' = '.length) };
 }
 
 /**
@@ -24,7 +42,7 @@ function promotedKey(functionId: string | null): string {
  *  - Resolves conflicts by confidence/recency.
  *  - Promotes high-confidence facts into structured AiMemory: only facts that
  *    belong to no member (W11-MEMORY-PROMOTE-SCOPE), withdrawing any an earlier
- *    run promoted from a member's own row.
+ *    run promoted from a member's own row, with their semantic copies.
  */
 @Injectable()
 export class MemoryConsolidationService {
@@ -93,7 +111,7 @@ export class MemoryConsolidationService {
         this.consolidatedOn.set(business.id, localDay);
         this.logger.log(
           `[consolidation] ${business.id}: decayed ${result.decayed}, promoted ${result.promoted}, ` +
-            `withdrawn ${result.withdrawn}, resolved ${result.conflictsResolved}`,
+            `withdrawn ${result.withdrawn} (copies ${result.withdrawnCopies}), resolved ${result.conflictsResolved}`,
         );
       } catch (err: unknown) {
         // One tenant failing must not stop the rest of the estate's night.
@@ -117,6 +135,7 @@ export class MemoryConsolidationService {
     decayed: number;
     promoted: number;
     withdrawn: number;
+    withdrawnCopies: number;
     conflictsResolved: number;
   }> {
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -124,12 +143,13 @@ export class MemoryConsolidationService {
     const decayed = await this.decayOldMemories(businessId, cutoff);
     const conflictsResolved = await this.resolveConflicts(businessId);
     const promoted = await this.promoteFacts(businessId);
-    const withdrawn = await this.withdrawMemberPromotions(businessId);
+    const { rows: withdrawn, copies: withdrawnCopies } = await this.withdrawMemberPromotions(businessId);
 
     this.logger.log(
-      `[run][${businessId}] decayed=${decayed} promoted=${promoted} withdrawn=${withdrawn} conflicts=${conflictsResolved}`,
+      `[run][${businessId}] decayed=${decayed} promoted=${promoted} withdrawn=${withdrawn} ` +
+        `withdrawnCopies=${withdrawnCopies} conflicts=${conflictsResolved}`,
     );
-    return { decayed, promoted, withdrawn, conflictsResolved };
+    return { decayed, promoted, withdrawn, withdrawnCopies, conflictsResolved };
   }
 
   private async decayOldMemories(businessId: string, cutoff: Date): Promise<number> {
@@ -220,7 +240,7 @@ export class MemoryConsolidationService {
    * W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2): before the packet, promotion
    * copied a member's accepted row too, and those rows stay in AiMemory (served by
    * every reader above; none reads by key, so a reader cannot skip them) until
-   * something removes them. This run withdraws each row promotion wrote
+   * something removes them. This withdraws each row promotion wrote
    * (learning:learned:<functionId>, source key_cortex_learning) whose value is what
    * promotion takes from a member's row of that function (the first 500 characters
    * of its recommendation) and from no member-less row of it: a provable copy of a
@@ -228,8 +248,32 @@ export class MemoryConsolidationService {
    * (it may have decayed below the bar since); the source row itself is untouched,
    * and stays its member's own memory. Rows promoted from member-less rows, and
    * learning memories anyone else wrote, are kept.
+   *
+   * Review SEC-W11MPS-1: a row also has semantic copies in ai_memory_embeddings
+   * (POST .../agent/memory/backfill, which any member may send), which every member
+   * reads back (GET .../agent/memory/search, and KEY's memory block as
+   * [ai_memory_embedding]: buildMemoryContext and chatMemoryFragments search them
+   * with the turn's query). A withdrawn row's copies (source_type 'memory',
+   * source_id the row's id) go with it, in one transaction. A copy whose content is
+   * a member's promoted answer (`learning: learned:<fn> = <value>`, by the same
+   * rule) is withdrawn too, whatever row it names: its row may still exist holding
+   * another value (a member-less row of the function is promoted into the same key
+   * in place, as the base's nightly promotion also did), or be gone (a backfill
+   * that read the row before it was withdrawn writes its copy after; the next run
+   * removes it).
+   *
+   * Review SEC-W11MPS-2 / MPS-COR-1: run() calls it, and only the hourly sweep runs
+   * run(), for a business in its local resting hours (20:00 to 07:00), once that
+   * night; a KEY cron switch (keyCronsDisabled(): KEY_DISABLED, DISABLE_SCHEDULERS,
+   * KF_DISABLE_SCHEDULERS, and any switch added there) stops the sweep before it
+   * reads anything. Until it has run for a business, the rows and copies an earlier
+   * promotion leaked there are still served (GET .../ai/memory reads no KEY switch).
+   * So each business needs one full resting window with the KEY crons on before a
+   * switch goes on, or this is run by hand once per business: it is public for that
+   * one-shot repair, reads no switch, makes no model call, and is idempotent.
    */
-  private async withdrawMemberPromotions(businessId: string): Promise<number> {
+  async withdrawMemberPromotions(businessId: string): Promise<{ rows: number; copies: number }> {
+    const isMemberPromotion = this.memberPromotionRule(businessId);
     const promotedRows = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
@@ -240,43 +284,87 @@ export class MemoryConsolidationService {
       select: { id: true, key: true, value: true },
     });
 
-    let withdrawn = 0;
+    let rows = 0;
+    let copies = 0;
     for (const row of promotedRows) {
-      const functionId = row.key.slice(PROMOTED_KEY_PREFIX.length);
-      // A value shorter than the promoted length is a whole recommendation; one of
-      // that length is the start of a longer one. Prisma's startsWith is a SQL LIKE
-      // prefix that escapes nothing (%, _ and \ in the value would widen or miss the
-      // match), so it reads only the value's leading run free of those characters;
-      // the exact comparison is made below.
-      const recommendation =
-        row.value.length < PROMOTED_VALUE_LENGTH
-          ? { equals: row.value }
-          : { startsWith: row.value.split(/[\\%_]/, 1)[0] };
-      const sources = await this.prisma.client.cognitionMemory.findMany({
-        where: {
-          businessId,
-          ...(functionId === 'general'
-            ? { OR: [{ functionId: null }, { functionId: 'general' }] }
-            : { functionId }),
-          recommendation,
-        },
-        select: { userId: true, functionId: true, recommendation: true },
+      if (!(await isMemberPromotion(row.key, row.value))) continue;
+      const removed = await this.prisma.client.$transaction(async (tx) => {
+        // Only the row as read: one rewritten since (by a member-less promotion) stays.
+        const deleted = await tx.aiMemory.deleteMany({
+          where: { id: row.id, businessId, source: PROMOTED_SOURCE, value: row.value },
+        });
+        if (deleted.count === 0) return { rows: 0, copies: 0 };
+        const deletedCopies = await tx.aiMemoryEmbedding.deleteMany({
+          where: { businessId, sourceType: COPY_SOURCE_TYPE, sourceId: row.id },
+        });
+        return { rows: deleted.count, copies: deletedCopies.count };
       });
-      const promotedFrom = sources.filter(
-        (s) =>
-          promotedKey(s.functionId) === row.key &&
-          s.recommendation.slice(0, PROMOTED_VALUE_LENGTH) === row.value,
-      );
-      const fromAMember = promotedFrom.some((s) => s.userId !== null);
-      const fromNoMember = promotedFrom.some((s) => s.userId === null);
-      if (!fromAMember || fromNoMember) continue;
-
-      // Only the row as read: one rewritten since (by a member-less promotion) stays.
-      const removed = await this.prisma.client.aiMemory.deleteMany({
-        where: { id: row.id, businessId, source: PROMOTED_SOURCE, value: row.value },
-      });
-      withdrawn += removed.count;
+      rows += removed.rows;
+      copies += removed.copies;
     }
-    return withdrawn;
+
+    // Copies of a member's promoted answer whatever row they name (see above). The
+    // prefix holds no LIKE pattern character.
+    const promotedCopies = await this.prisma.client.aiMemoryEmbedding.findMany({
+      where: { businessId, sourceType: COPY_SOURCE_TYPE, content: { startsWith: COPY_CONTENT_PREFIX } },
+      select: { id: true, content: true },
+    });
+    for (const copy of promotedCopies) {
+      const promoted = promotedRowOfCopy(copy.content);
+      if (!promoted || !(await isMemberPromotion(promoted.key, promoted.value))) continue;
+      const deleted = await this.prisma.client.aiMemoryEmbedding.deleteMany({
+        where: { id: copy.id, businessId, sourceType: COPY_SOURCE_TYPE },
+      });
+      copies += deleted.count;
+    }
+    return { rows, copies };
+  }
+
+  /**
+   * Whether `value` under the promoted `key` is what promotion takes from a member's
+   * cognition row of that function and from no member-less row of it (see
+   * withdrawMemberPromotions), answered once per key and value for one business.
+   */
+  private memberPromotionRule(businessId: string): (key: string, value: string) => Promise<boolean> {
+    const answers = new Map<string, Promise<boolean>>();
+    return (key, value) => {
+      const id = JSON.stringify([key, value]);
+      let answer = answers.get(id);
+      if (!answer) {
+        answer = this.isMemberPromotion(businessId, key, value);
+        answers.set(id, answer);
+      }
+      return answer;
+    };
+  }
+
+  private async isMemberPromotion(businessId: string, key: string, value: string): Promise<boolean> {
+    if (!key.startsWith(PROMOTED_KEY_PREFIX)) return false;
+    const functionId = key.slice(PROMOTED_KEY_PREFIX.length);
+    // A value shorter than the promoted length is a whole recommendation; one of
+    // that length is the start of a longer one. Prisma's startsWith is a SQL LIKE
+    // prefix that escapes nothing (%, _ and \ in the value would widen or miss the
+    // match), so it reads only the value's leading run free of those characters;
+    // the exact comparison is made below.
+    const recommendation =
+      value.length < PROMOTED_VALUE_LENGTH
+        ? { equals: value }
+        : { startsWith: value.split(/[\\%_]/, 1)[0] };
+    const sources = await this.prisma.client.cognitionMemory.findMany({
+      where: {
+        businessId,
+        ...(functionId === 'general'
+          ? { OR: [{ functionId: null }, { functionId: 'general' }] }
+          : { functionId }),
+        recommendation,
+      },
+      select: { userId: true, functionId: true, recommendation: true },
+    });
+    const promotedFrom = sources.filter(
+      (s) => promotedKey(s.functionId) === key && s.recommendation.slice(0, PROMOTED_VALUE_LENGTH) === value,
+    );
+    const fromAMember = promotedFrom.some((s) => s.userId !== null);
+    const fromNoMember = promotedFrom.some((s) => s.userId === null);
+    return fromAMember && !fromNoMember;
   }
 }
