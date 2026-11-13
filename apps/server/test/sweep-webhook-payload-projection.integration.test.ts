@@ -109,12 +109,27 @@ function dispatcherEventsFromSource(): string[] {
   return [...new Set([...text.matchAll(/@OnEvent\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]))].sort();
 }
 
-/** Every literal event name the server source emits (emit / emitAsync), any module. */
+/**
+ * Every event name the server source emits, any module. Round 3: not only a literal handed to emit /
+ * emitAsync. An event name is also emitted through a constant (`emit(WORK_OBLIGATION_RAISED)`, a
+ * member of a constant map), a status map (`const eventMap = { SHIPPED: 'store_order.shipped' }`;
+ * `emit(eventMap[status])`) or a buffered event (`{ name: 'invoice.paid', payload }`, emitted later as
+ * `emit(e.name, e.payload)`). Those are read too: every string literal of the source shaped as an
+ * event name (family.action) whose family is a webhook family, and every constant an emit names.
+ */
 function emittedEventNames(): string[] {
   const out = new Set<string>();
-  for (const file of walk(SRC)) {
-    const text = readFileSync(file, 'utf8');
+  const families = new Set(Object.keys(WEBHOOK_EVENT_FAMILY_MODULES));
+  const consts = new Map<string, string>();
+  const texts = walk(SRC).map((file) => readFileSync(file, 'utf8'));
+  for (const text of texts) {
+    for (const m of text.matchAll(/(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=\s*['"]([a-z_]+\.[a-z_.]+)['"]/g)) consts.set(m[1], m[2]);
+    for (const m of text.matchAll(/\b([A-Z][A-Z0-9_]*)\s*:\s*['"]([a-z_]+\.[a-z_.]+)['"]/g)) consts.set(m[1], m[2]);
+  }
+  for (const text of texts) {
     for (const m of text.matchAll(/\.emit(?:Async)?\(\s*['"]([a-z_]+\.[a-z_.]+)['"]/g)) out.add(m[1]);
+    for (const m of text.matchAll(/\.emit(?:Async)?\(\s*(?:[A-Za-z_$][\w$]*\.)?([A-Z][A-Z0-9_]*)\b/g)) if (consts.has(m[1])) out.add(consts.get(m[1])!);
+    for (const m of text.matchAll(/['"]([a-z_]+)\.([a-z_]+)['"]/g)) if (families.has(m[1])) out.add(`${m[1]}.${m[2]}`);
   }
   return [...out].sort();
 }
@@ -304,6 +319,8 @@ describe('CLASS A: one choke point projects every delivery (RC-1 and its sibling
     const emitted = emittedEventNames().filter((e) => Object.prototype.hasOwnProperty.call(WEBHOOK_EVENT_FAMILY_MODULES, e.slice(0, e.indexOf('.'))));
     const all = [...new Set([...dispatched, ...emitted])].sort();
     expect(emitted.length, 'the source scan sees the emitters (guards the guard)').toBeGreaterThan(20);
+    // guards the guard (round 3): the names emitted through a status map and a buffer are seen, not only literal emits
+    expect(emitted).toEqual(expect.arrayContaining(['store_order.shipped', 'store_order.delivered', 'store_order.cancelled', 'invoice.paid', 'invoice.sent']));
     const wh = await db.webhook.create({ data: { id: `${P}wh_all`, businessId: ID.bizA, name: `${P}every event`, url: 'https://203.0.113.90/v99p-all', events: all, secret: `${P}whsecret_${'a'.repeat(40)}`, isActive: true } });
     const privateKeys = contactOnlyKeys();
     expect(privateKeys, 'the datamodel scan sees the contact columns (guards the guard)').toEqual(expect.arrayContaining(['notesInternal', 'lifetimeValue', 'paymentReliability']));

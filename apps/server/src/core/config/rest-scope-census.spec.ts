@@ -76,6 +76,19 @@
  *          D-114; for a public callback, the signed state its start minted) that dominates the call;
  *          a route whose file another branch holds is a `deferred` row naming `held:`. CEN-10c: so
  *          does every KEY module action (a KeyCortex connector adapter's execute).
+ *          Round 3 (CM-1, CM-2, CM-3): a check counts only as its pinned declaration, on the business the
+ *          write uses, and a null-answering check only through a falsy test of its result that ends in
+ *          throw or return; the reader follows typed locals, moduleRef.get(X), injection tokens (their
+ *          provider or their interface's implementers), constant event names and SQL, *AndReturn and
+ *          nested relation writes, and ON CONFLICT DO UPDATE SET; a status lift (connectorStatus
+ *          'connected', ChannelConnection.healthState) and a payment or sending account id are binding
+ *          writes. CEN-10d holds every shape the round 2 and round 3 hunts passed; CEN-10h holds the
+ *          status doors (a status recorded after a provider call lifts no disconnect).
+ *   CEN-11 (round 2, CLASS A; round 3: WPH2-1, WPH2-2) every route and KEY action that reaches a send
+ *          of the business's people or money rows, or a grant on a stored business file, to an account
+ *          outside the server reaches it through the receiver check (assertMayExport,
+ *          assertReceiversMayOpenContacts) or the owner rule; CEN-11b: the account such a send goes to
+ *          is bound only by a member who reads what it receives, and the binder is recorded.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -248,22 +261,28 @@ interface SchemaModel {
   delegate: string;
   table: string;
   fields: Map<string, { db: string; type: string }>;
+  /** Round 3 (CM-2 g06): relation field -> the model it holds, so a nested write (`business.update({ data: { socialConnections: { deleteMany: {} } } })`) is read as a write of that model. */
+  relations: Map<string, string>;
 }
 let schemaCache: Map<string, SchemaModel> | null = null;
-/** The Prisma datamodel as the schema file states it: model -> its delegate, its table, its scalar fields and their columns. */
+/** The Prisma datamodel as the schema file states it: model -> its delegate, its table, its scalar fields and their columns, and its relation fields. */
 function schemaModels(): Map<string, SchemaModel> {
   if (schemaCache) return schemaCache;
   const text = readFileSync(SCHEMA, 'utf8');
   const named = new Set([...text.matchAll(/^(?:model|enum|type|view)\s+(\w+)/gm)].map((m) => m[1]));
+  const models = new Set([...text.matchAll(/^model\s+(\w+)/gm)].map((m) => m[1]));
   const out = new Map<string, SchemaModel>();
   for (const m of text.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
     const fields = new Map<string, { db: string; type: string }>();
+    const relations = new Map<string, string>();
     for (const line of m[2].split('\n')) {
       const f = /^\s+(\w+)\s+(\w+)(\[\]|\?)?(.*)$/.exec(line);
-      if (!f || named.has(f[2])) continue; // a relation or an enum
+      if (!f) continue;
+      if (models.has(f[2])) { relations.set(f[1], f[2]); continue; }
+      if (named.has(f[2])) continue; // an enum
       fields.set(f[1], { db: /@map\("([^"]+)"\)/.exec(f[4])?.[1] ?? f[1], type: f[2] });
     }
-    out.set(m[1], { name: m[1], delegate: m[1][0].toLowerCase() + m[1].slice(1), table: /@@map\("([^"]+)"\)/.exec(m[2])?.[1] ?? m[1], fields });
+    out.set(m[1], { name: m[1], delegate: m[1][0].toLowerCase() + m[1].slice(1), table: /@@map\("([^"]+)"\)/.exec(m[2])?.[1] ?? m[1], fields, relations });
   }
   return (schemaCache = out);
 }
@@ -295,16 +314,21 @@ const BINDING_RULES: Record<string, string[]> = {
   // the account, location and calendar the owner's Google tokens act on (round 2 CW-3; D-99)
   business: ['bpAccountId', 'bpLocationId', 'calendarId'],
   bankConnection: ['providerItemId', '*delete', '*deactivate'],
-  // providerMeta: the WhatsApp business account id a connection sends from
-  channelConnection: ['providerMeta', '*delete', '*create', '*deactivate'],
+  // providerMeta: the WhatsApp business account id a connection sends from.
+  // healthState (round 3, CB-1, CM-3 g14): the sending state a settings admin sets (PATCH connections/:id
+  // 'Disabled' pauses the sender; DeliveryQueueService refuses a campaign whose sender is not 'Connected'),
+  // so a write that sets or recomputes it is a binding write: leaving an admin's 'Disabled' lifts it.
+  channelConnection: ['providerMeta', 'healthState', '*delete', '*create', '*deactivate'],
   // a destination's own page access token and page id (round 2 CW-2): every send goes to it
   channelDestination: ['destinationMeta', '*delete', '*create', '*deactivate'],
   connectorAccount: ['*delete'],
   socialConnection: ['*delete', '*create', '*deactivate'],
   supplierConnection: ['*delete', '*deactivate'],
   integrationConnection: ['*delete', '*deactivate'],
-  // metadata holds encryptedCredentials: a write that replaces it whole wipes them (round 2 CW-5 M13)
-  connectorStatus: ['encryptedCredentials', '*delete', '*deactivate', '*metadata'],
+  // metadata holds encryptedCredentials: a write that replaces it whole wipes them (round 2 CW-5 M13).
+  // *lift (round 3, CM-3 g13): a write whose update sets status 'connected' lifts a disconnect recorded on
+  // the row, for any connector (WhatsApp's recordConnected was the one instance pinned by name).
+  connectorStatus: ['encryptedCredentials', '*delete', '*deactivate', '*metadata', '*lift'],
   // the business's BYOK provider keys (settings / ai_preferences; round 2 CW-1)
   aiMemory: ['byokOpenai', 'byokAnthropic', 'byokXai', 'byokKimi', 'byokGoogle', 'byokNative'],
 };
@@ -324,11 +348,23 @@ function credentialModels(): Record<string, string[]> {
   return (credentialModelsCache = out);
 }
 
-const CREDENTIAL_WRITE_OPS = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
-/** Business.metaData keys that hold a credential (core/security/sanitize-business.ts: WhatsApp, payment and SEO secrets; the GA4 and Search Console entries hold their tokens whole). */
-const META_CREDENTIAL_KEYS = /\b(stripeSecretKey|stripeWebhookSecret|paypalClientSecret|wipayApiKey|accessToken|authToken|refreshToken|accountSid|gsc|ga4)\b/;
+/** Round 3 (CM-2 g05): the *AndReturn forms write too. */
+const CREDENTIAL_WRITE_OPS = new Set(['create', 'createMany', 'createManyAndReturn', 'update', 'updateMany', 'updateManyAndReturn', 'upsert', 'delete', 'deleteMany']);
+/** A nested relation write inside a Prisma write's data (round 3, CM-2 g06). */
+const NESTED_WRITE_OPS = /^(create|createMany|connectOrCreate|update|updateMany|upsert|delete|deleteMany|set|disconnect)$/;
+/**
+ * Business.metaData keys that hold a credential (core/security/sanitize-business.ts: WhatsApp, payment and SEO secrets; the GA4 and
+ * Search Console entries hold their tokens whole), and (round 3, CM-3 g09) the account ids those credentials act on: the WiPay
+ * account number its checkouts name (resolveWipayMerchant), the PayPal client id and sandbox flag, the Stripe publishable key, and
+ * the WhatsApp sending number and business account.
+ */
+const META_CREDENTIAL_KEYS =
+  /\b(stripeSecretKey|stripeWebhookSecret|stripePublishableKey|paypalClientSecret|paypalClientId|paypalSandbox|wipayApiKey|wipayAccountNumber|wipayDeveloperId|accessToken|authToken|refreshToken|accountSid|phoneNumberId|wabaId|gsc|ga4)\b/;
 const DEACTIVATES = /\bisActive\b|['"](DISCONNECTED|disconnected|REVOKED|revoked)['"]/;
 const DEACTIVATES_SQL = /\bis_active"?\s*=\s*false\b|\bstatus"?\s*=\s*'(DISCONNECTED|disconnected|REVOKED|revoked)'/;
+/** Round 3 (CM-3 g13): a status write that marks a connector connected (a literal, or a conditional that can be one). */
+const LIFTS = /\bstatus\s*:\s*(?:[^,{}]*\?\s*)?['"]connected['"]/;
+const LIFTS_SQL = /\bstatus"?\s*=\s*'connected'/;
 const OAUTH_SESSION_STORE = /^(store|save|put|create|issue|mint)\w*O[Aa]uth\w*(Session|State)s?$/;
 
 /**
@@ -352,13 +388,22 @@ function rawSqlLeaf(sql: string): string | null {
     }),
   );
   for (const st of sql.split(';')) {
-    const upd = /\bUPDATE\s+(?:ONLY\s+)?"?(?:public"?\."?)?(\w+)"?(?:\s+(?:AS\s+)?\w+)?\s+SET\s+([\s\S]*)/i.exec(st);
+    const ins = /\bINSERT\s+INTO\s+"?(?:public"?\."?)?(\w+)"?(?:\s*\(([^)]*)\))?/i.exec(st);
+    // Round 3 (CM-2 g08): an INSERT ... ON CONFLICT ... DO UPDATE SET is an UPDATE of the same table.
+    const onConflict = ins ? /\bDO\s+UPDATE\s+SET\s+([\s\S]*)/i.exec(st) : null;
+    const upd = onConflict ? ([st, ins![1], onConflict[1]] as unknown as RegExpExecArray) : /\bUPDATE\s+(?:ONLY\s+)?"?(?:public"?\."?)?(\w+)"?(?:\s+(?:AS\s+)?\w+)?\s+SET\s+([\s\S]*)/i.exec(st);
     const del = /\bDELETE\s+FROM\s+"?(?:public"?\."?)?(\w+)"?/i.exec(st);
-    const ins = /\bINSERT\s+INTO\s+"?(?:public"?\."?)?(\w+)"?/i.exec(st);
     const table = (upd ?? del ?? ins)?.[1]?.toLowerCase();
     if (!table) continue;
     const m = byTable.get(table);
     const rules = m ? models[m.delegate] ?? [] : [];
+    if (ins?.[2] && m) {
+      // an INSERT that names a credential column in its column list
+      const cols = rules.filter((c) => !c.startsWith('*')).map((c) => (m.fields.get(c)?.db ?? c).toLowerCase());
+      const named = ins[2].split(',').map((c) => c.trim().replace(/"/g, '').toLowerCase());
+      const hit = named.filter((c) => cols.includes(c) || (SECRET_COLUMN.test(c) && !appTokens.has(`${table}.${c}`)));
+      if (hit.length) return `raw SQL INSERT INTO ${table} (${hit.join(', ')})`;
+    }
     if (upd) {
       const sets = upd[2].split(/\bWHERE\b|\bRETURNING\b|\bFROM\b/i)[0];
       const assigned = [...sets.matchAll(/"?(\w+)"?\s*=(?!=)/g)].map((x) => x[1].toLowerCase());
@@ -369,6 +414,7 @@ function rawSqlLeaf(sql: string): string | null {
         return `raw SQL UPDATE ${table} SET a JSON credential key`;
       }
       if (rules.includes('*deactivate') && DEACTIVATES_SQL.test(sets)) return `raw SQL UPDATE ${table} (deactivate)`;
+      if (rules.includes('*lift') && LIFTS_SQL.test(sets)) return `raw SQL UPDATE ${table} (status lift)`;
     }
     if (del && rules.includes('*delete')) return `raw SQL DELETE FROM ${table}`;
     if (ins && rules.includes('*create')) return `raw SQL INSERT INTO ${table}`;
@@ -394,45 +440,125 @@ const REFRESH_DOORS: Record<string, string> = {
 };
 
 /**
- * Authority checks that guard a credential write when they dominate it: name -> the arguments the call
- * must carry (if any) and why it counts. A role-only check is not one (KeyConnectorController's
- * requireConnectorWriter admits every ADMIN, and D-114 binds an ADMIN to an explicit map): the route
- * must also hold settings admin by the map. A method or helper that always runs one of these before
- * it can return (assertProfileOwner, assertConnectorSettingsAdmin) counts as one (wrappers, below).
+ * Round 3 (CM-3 g13): writers that mark a connector 'connected' only to record a provider call its
+ * stored credentials just passed (a sent email, a synced page, a charge). Such a write lifts no
+ * disconnect: the connector's own disconnect removes those credentials (so no call can pass after it),
+ * or its connectedness is read from the credentials, never from the stored status. CEN-10h checks both
+ * for each door's connector class, and that the door still writes; a connector whose stored status
+ * decides (WhatsApp: recordConnected, a BINDING_WRITER) cannot be pinned here.
  */
-const CREDENTIAL_CHECKS: Record<string, { args?: RegExp; why: string }> = {
-  assertMemberModuleLevel: { args: /['"]settings['"]\s*,\s*['"]admin['"]/, why: 'settings admin, read as ModuleScopeGuard reads it' },
-  assertConnectorSettingsAdmin: { why: 'settings admin; gmail and the Google Suite connections answer their owner rules (D-11, D-99)' },
-  assertConnectorBindingAuthority: { why: 'settings admin, or the Gmail (D-11, D-42) and Google Suite (D-99) owner rules for those connections, for a route that starts or resumes a binding' },
-  assertGoogleConnectOwner: { why: 'D-99: every Google connection is the owner\'s' },
-  assertConnectAuthority: { why: 'D-11, D-42: the business mailbox is the owner\'s (GMAIL_OWNER_ONLY)' },
-  connectStanding: { why: 'D-11, D-42: the Gmail owner rule assertConnectAuthority runs, answering the standing for the audit row' },
-  assertBusinessOwner: { why: 'D-11: the business profile and its stored secrets are the owner\'s' },
-  assertConfigOwner: { why: 'D-11: the WhatsApp sending identity is the owner\'s' },
-  assertConnectorOwner: { why: 'D-94: GA4 and Search Console are the owner\'s' },
-  assertCommandActorModuleLevel: { args: /['"]settings['"]\s*,\s*['"]admin['"]/, why: 'settings admin for a KEY command\'s human actor, read as ModuleScopeGuard reads it' },
-  verifyState: { why: 'a public provider callback: the signed state its (guarded) start minted' },
-  consumeOAuthSession: { why: 'a provider callback: the OAuth session its (guarded) start stored' },
+const STATUS_DOORS: Record<string, { connector: string; why: string }> = {
+  'GmailConnector.trackActivity': { connector: 'GmailConnector', why: 'records a Gmail send or read the stored mailbox tokens passed' },
+  'GmailIngestionService.syncInbox': { connector: 'GmailConnector', why: 'records an inbox sync the stored mailbox tokens passed' },
+  'GoogleCalendarConnector.trackActivity': { connector: 'GoogleCalendarConnector', why: 'records a calendar call the stored Google tokens passed' },
+  'GoogleDriveConnector.trackActivity': { connector: 'GoogleDriveConnector', why: 'records a Drive call the stored Google tokens passed' },
+  'GoogleContactsSyncService.sync': { connector: 'GoogleContactsConnector', why: 'records a Google Contacts sync the stored tokens passed' },
+  'GoogleContactsSyncService.writeProgress': { connector: 'GoogleContactsConnector', why: 'records the progress of a Google Contacts sync the stored tokens are running' },
+  'GoogleContactsConnector.smokeTest': { connector: 'GoogleContactsConnector', why: 'records a People API check the stored tokens passed' },
+  'GoogleFormsIngestionService.syncForms': { connector: 'GoogleFormsConnector', why: 'records a Forms sync the stored Google tokens passed' },
+  'OutlookContactsSyncService.sync': { connector: 'OutlookContactsConnector', why: 'records an Outlook Contacts sync the stored Microsoft tokens passed' },
+  'QuickbooksConnector.trackActivity': { connector: 'QuickbooksConnector', why: 'records a QuickBooks call the stored credentials passed' },
+  'XeroConnector.trackActivity': { connector: 'XeroConnector', why: 'records a Xero call the stored credentials passed' },
+  'MailchimpConnector.trackActivity': { connector: 'MailchimpConnector', why: 'records a Mailchimp call the stored API key passed' },
+  'KlaviyoConnector.trackActivity': { connector: 'KlaviyoConnector', why: 'records a Klaviyo call the stored API key passed' },
+  'MetaSocialConnector.trackActivity': { connector: 'MetaSocialConnector', why: 'records a Meta call the stored page tokens passed' },
+  'SocialPlatformConnector.trackActivity': { connector: 'SocialPlatformConnector', why: 'records a social platform call the stored tokens passed' },
+  'FormPlatformConnector.trackActivity': { connector: 'FormPlatformConnector', why: 'records a form platform delivery the stored credential passed' },
+  'StripeConnector.trackActivity': { connector: 'StripeConnector', why: "records a Stripe call the owner's stored key (D-11) passed; the connector reads that key, not this status" },
+  'PayPalConnector.trackActivity': { connector: 'PayPalConnector', why: "records a PayPal call the owner's stored keys (D-11) passed; the connector reads those keys, not this status" },
+  'WiPayConnector.trackActivity': { connector: 'WiPayConnector', why: "records a WiPay call the owner's stored key (D-11) passed; the connector reads that key, not this status" },
+};
+
+/**
+ * Authority checks that guard a credential write when they dominate it. A role-only check is not one
+ * (KeyConnectorController's requireConnectorWriter admits every ADMIN, and D-114 binds an ADMIN to an
+ * explicit map): the route must also hold settings admin by the map. A method or helper that always runs
+ * one of these before it can return (assertProfileOwner, assertConnectorSettingsAdmin) counts as one
+ * (wrappers, below).
+ *
+ * Round 3 (CM-1): a check is known by its DECLARATION, not by its name. The call must resolve (through
+ * `this`, a typed property or local, an import, a function of the same file) to one of the pinned
+ * declarations (`decl`: `Class.method`, or `fn:<name>@<file under src>`), so a file-local no-op that
+ * carries a check's name checks nothing. A check that answers null instead of throwing (`gate`:
+ * verifyState, consumeOAuthSession) guards only through a falsy test of its result that ends in throw or
+ * return and dominates the write. A check that names the business it decides for (`biz`: that argument's
+ * index) guards only a write to that business: the argument must be the route's :businessId, or appear
+ * in the call that leads to the write (a member who is OWNER of C and STAFF in A, checked on C, does not
+ * pass for A).
+ */
+interface CheckRule {
+  decl: string[];
+  args?: RegExp;
+  biz?: number;
+  gate?: boolean;
+  why: string;
+}
+const SETTINGS_ADMIN_ARGS = /['"]settings['"]\s*,\s*['"]admin['"]/;
+const CREDENTIAL_CHECKS: Record<string, CheckRule> = {
+  assertMemberModuleLevel: { decl: ['fn:assertMemberModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, why: 'settings admin, read as ModuleScopeGuard reads it' },
+  assertConnectorSettingsAdmin: { decl: ['ConnectorController.assertConnectorSettingsAdmin'], biz: 0, why: 'settings admin; gmail and the Google Suite connections answer their owner rules (D-11, D-99)' },
+  assertConnectorBindingAuthority: { decl: ['ConnectorController.assertConnectorBindingAuthority'], biz: 0, why: 'settings admin, or the Gmail (D-11, D-42) and Google Suite (D-99) owner rules for those connections, for a route that starts or resumes a binding' },
+  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, why: 'D-99: every Google connection is the owner\'s' },
+  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, why: 'D-11, D-42: the business mailbox is the owner\'s (GMAIL_OWNER_ONLY)' },
+  connectStanding: { decl: ['GmailService.connectStanding'], biz: 0, why: 'D-11, D-42: the Gmail owner rule assertConnectAuthority runs, answering the standing for the audit row' },
+  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, why: 'D-11: the business profile and its stored secrets are the owner\'s' },
+  assertConfigOwner: { decl: ['WhatsAppService.assertConfigOwner'], biz: 0, why: 'D-11: the WhatsApp sending identity is the owner\'s' },
+  assertConnectorOwner: { decl: ['SeoController.assertConnectorOwner'], biz: 0, why: 'D-94: GA4 and Search Console are the owner\'s' },
+  assertCommandActorModuleLevel: { decl: ['fn:assertCommandActorModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, why: 'settings admin for a KEY command\'s human actor, read as ModuleScopeGuard reads it' },
+  verifyState: {
+    decl: [
+      'CrmGoogleService.verifyState', 'GoogleDriveService.verifyState', 'MicrosoftOAuthService.verifyState', 'GmailService.verifyState',
+      'CalendarService.verifyState', 'CalendarSyncService.verifyState', 'GoogleSuiteService.verifyState',
+    ],
+    gate: true,
+    why: 'a public provider callback: the signed state its (guarded) start minted',
+  },
+  consumeOAuthSession: { decl: ['SocialConnectionsService.consumeOAuthSession'], gate: true, why: 'a provider callback: the OAuth session its (guarded) start stored' },
 };
 
 // ── Round 2 (CLASS A): the export graph. Same reader, other leaves and checks. ──────────────────
 
 /** An outbound send that carries a body (fetch with POST / PUT / PATCH, an axios or HttpService post / put / patch). */
 const OUTBOUND_SEND = /\bfetch\([\s\S]*?method:\s*['"`](POST|PUT|PATCH)['"`]|\b(axios|httpService|this\.http)\s*\.\s*(post|put|patch)\s*\(/;
+const SEND_METHOD = /method:\s*['"`](POST|PUT|PATCH)['"`]/;
 /** A read of a person or money row (a Contact, an Invoice, a Booking, a store order, a payment, a quote), or such a row included. */
 const RECORD_READ = /\.(contact|contacts|invoice|booking|marketplaceOrder|payment|quote|lead)\s*\.\s*(findUnique|findFirst|findMany|findUniqueOrThrow|findFirstOrThrow)\b|include:\s*\{[^}]*\b(contact|customer|invoice|booking)\s*:\s*(true|\{)/;
+/**
+ * Round 3 (WPH2-2): a send that hands out a stored business file: a grant on a file the business keeps
+ * (Drive's POST files/:id/permissions). The file holds the records (an invoice PDF names the client and
+ * the amounts), so the grant is an export of them even though the method reads no row.
+ */
+const FILE_GRANT = /\/permissions\b/;
+
+/** Round 3: an outbound send call (the call is the leaf, so a check in the same method that dominates it guards it). */
+function isOutboundSend(call: ts.CallExpression, own: string): boolean {
+  const callee = call.expression;
+  if (ts.isIdentifier(callee) && callee.text === 'fetch') {
+    const opts = call.arguments[1];
+    if (!opts) return false;
+    if (ts.isObjectLiteralExpression(opts)) return SEND_METHOD.test(textOf(opts));
+    return SEND_METHOD.test(own); // the options are built elsewhere in the method
+  }
+  if (ts.isPropertyAccessExpression(callee) && /^(post|put|patch)$/.test(callee.name.text)) {
+    return /\b(axios|httpService|http)\b/.test(textOf(callee.expression));
+  }
+  return false;
+}
 
 /**
  * Methods that send records out to a destination every reader of those records may receive, pinned
  * by id with why (CEN-11 checks each still sends). Everything else that sends records out is an
  * export: the route must check the reads the export carries (assertMayExport, the rule webhooks
  * apply at create: core/auth/receiver-reads.ts) before it.
+ *
+ * Round 3 (WPH2-1): OutlookContactsSyncService.pushContact is not one. Its reason here said the sync maps
+ * only contacts its principals may write, but the receiver is the Microsoft account's binder (a settings
+ * admin, crm none under D-114), not the sync's principals: the owner's PRIVATE contacts went to it. It
+ * now checks the receiver itself (assertReceiversMayOpenContacts), and CEN-11 holds it.
  */
 const OUTBOUND_DESTINATIONS: Record<string, string> = {
   'GoogleContactsSyncService.pushContact':
     "the owner's Google account: only the owner connects Google Contacts (D-99), and the owner reads every contact; it sends back a contact the sync already mapped to that account",
-  'OutlookContactsSyncService.pushContact':
-    'the Outlook account a settings admin connected (SV-3): it sends back only a contact the sync mapped to that account, and the sync maps only contacts its principals may write (syncPrincipals, contactWritableBy)',
   'PaymentsService.createStripeCheckout':
     "the business's own Stripe account (its secret key is the owner's profile secret, D-11, or the platform's): a payer's checkout for the invoice they pay",
   'PaymentsService.createWipayCheckout':
@@ -440,16 +566,34 @@ const OUTBOUND_DESTINATIONS: Record<string, string> = {
 };
 
 /** Checks that guard an export when they dominate it: the receiver's reads, or the owner (who reads everything). */
-const EXPORT_CHECKS: Record<string, { args?: RegExp; why: string }> = {
-  assertMayExport: { why: "the reads the export's records need (core/auth/receiver-reads.ts: the module levels, and for contacts every one in view), for the member who sends them to the account bound" },
-  assertGoogleConnectOwner: { why: 'D-99: the owner, who reads every record, owns every Google connection' },
-  assertConnectAuthority: { why: 'D-11, D-42: the owner\'s mailbox' },
-  assertBusinessOwner: { why: 'D-11: the owner' },
+const EXPORT_CHECKS: Record<string, CheckRule> = {
+  assertMayExport: { decl: ['fn:assertMayExport@core/auth/receiver-reads.ts'], biz: 1, why: "the reads the export's records need (core/auth/receiver-reads.ts: the module levels, and for contacts every one in view), for the member who sends them to the account bound" },
+  assertReceiversMayOpenContacts: {
+    decl: ['fn:assertReceiversMayOpenContacts@core/auth/receiver-reads.ts'],
+    biz: 1,
+    why: "round 3 (WPH2-1): every contact sent is one every receiver of the account may open (the account's recorded binder; an account with no recorded binder is read as a non-owner's)",
+  },
+  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, why: 'D-99: the owner, who reads every record, owns every Google connection' },
+  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, why: 'D-11, D-42: the owner\'s mailbox' },
+  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, why: 'D-11: the owner' },
+};
+
+/**
+ * Round 3 (WPH2-1, WPH2-2; CEN-11b): exporters that are not connector classes. Each names the connector
+ * type of the account it sends to, the routes that bind that account (an OAuth consent start) and,
+ * where the binder is a member the sends must be checked for, the callback that records the binder.
+ */
+const EXPORT_ACCOUNTS: Record<string, { type: string; binds: string[]; recordsBinder?: string }> = {
+  OutlookContactsSyncService: { type: 'outlook_contacts', binds: ['MicrosoftOAuthController.buildAuthUrl'], recordsBinder: 'MicrosoftOAuthService.handleCallback' },
+  GoogleDriveService: { type: 'google_drive', binds: ['GoogleDriveController.getAuthUrl'] },
 };
 
 interface GraphClass {
   file: string;
+  /** property -> the type it holds: a class, an interface, or an injection token (`@Inject(TOKEN)`). */
   props: Map<string, string>;
+  /** property -> its declared type annotation, when an injection token names it (round 3, CM-2 g01). */
+  propDecl: Map<string, string>;
   methods: Map<string, ts.Node>;
   /** this.<name> -> a Prisma delegate it holds (a property initialised with one, a getter returning one). */
   aliases: Map<string, string>;
@@ -467,34 +611,50 @@ interface CredentialGraph {
   reaches: Map<string, string[]>;
   /** door id -> the leaves the door excuses. */
   doorWrites: Map<string, string[]>;
-  checkNames: Set<string>;
+  /** Every declaration the source has, as a check's `decl` names it (`Class.method`, `fn:<name>@<file>`). */
+  declarations: Set<string>;
   /** Methods that always run a pinned check before they return. */
   wrappers: Set<string>;
   /** method id -> its own leaves (before doors). */
   leaves: Map<string, string[]>;
 }
 
+interface LeafContext {
+  /** The method's own text. */
+  own: string;
+  /** The method's text, the same-class helpers it calls and the file constants it names. */
+  mention: string;
+  aliases: ReadonlyMap<string, string>;
+  /** The text an expression stands for: a string constant it names (file-level or imported), or its own text (round 3, CM-2 g07). */
+  constText(e: ts.Expression): string;
+}
+
 interface GraphRules {
-  /** The leaf a call makes itself (a credential write), or null. */
-  leafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpression, mention: string, aliases: ReadonlyMap<string, string>): string | null;
-  /** A leaf the method makes as a whole (a consent start, a pinned binding writer, an export), or null. */
+  /** The leaf a call makes itself (a credential write, an export send), or null. */
+  leafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpression, ctx: LeafContext): string | null;
+  /** A leaf the method makes as a whole (a consent start, a pinned binding writer), or null. */
   leafOfMethod(id: string, own: string, mention: string): string | null;
-  checks: Record<string, { args?: RegExp; why: string }>;
+  checks: Record<string, CheckRule>;
   /** Methods whose leaves are excused, id -> why. */
   doors: Record<string, string>;
 }
 
 const textOf = (n: ts.Node) => n.getText(n.getSourceFile());
+const strip = (expr: ts.Expression): ts.Expression => {
+  let e = expr;
+  while (ts.isNonNullExpression(e) || ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isAwaitExpression(e) || ts.isTypeAssertionExpression(e)) e = e.expression;
+  return e;
+};
 
-/** The Prisma delegate an expression names: `x.socialConnection`, `x['socialConnection']`, or a local or class alias of one. */
-function modelOf(expr: ts.Expression, aliases: ReadonlyMap<string, string>): string | null {
-  const models = credentialModels();
-  let e: ts.Expression = expr;
-  while (ts.isNonNullExpression(e) || ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isAwaitExpression(e)) e = e.expression;
-  if (ts.isIdentifier(e)) return aliases.get(e.text) ?? null;
+/** The Prisma delegate an expression names: `x.socialConnection`, `x['socialConnection']`, or a local or class alias of one (any schema model with `any`). */
+function modelOf(expr: ts.Expression, aliases: ReadonlyMap<string, string>, any = false): string | null {
+  const models = any ? Object.fromEntries([...schemaModels().values()].map((m) => [m.delegate, true])) : credentialModels();
+  const e = strip(expr);
+  const known = (m: string | undefined) => (m && Object.hasOwn(models, m) ? m : null);
+  if (ts.isIdentifier(e)) return known(aliases.get(e.text));
   if (ts.isPropertyAccessExpression(e)) {
     if (Object.hasOwn(models, e.name.text)) return e.name.text;
-    if (e.expression.kind === ts.SyntaxKind.ThisKeyword) return aliases.get(`this.${e.name.text}`) ?? null;
+    if (e.expression.kind === ts.SyntaxKind.ThisKeyword) return known(aliases.get(`this.${e.name.text}`));
     return null;
   }
   if (ts.isElementAccessExpression(e) && ts.isStringLiteralLike(e.argumentExpression)) {
@@ -506,16 +666,15 @@ function modelOf(expr: ts.Expression, aliases: ReadonlyMap<string, string>): str
 /** The locals of a body that hold a Prisma delegate (`const repo = tx.socialConnection`, `const { socialConnection } = this.prisma.client`). */
 function aliasesIn(body: ts.Node, base: ReadonlyMap<string, string>): Map<string, string> {
   const out = new Map(base);
-  const models = credentialModels();
+  const models = Object.fromEntries([...schemaModels().values()].map((m) => [m.delegate, true]));
   const holder = (init: ts.Expression) => {
-    let e = init;
-    while (ts.isNonNullExpression(e) || ts.isParenthesizedExpression(e) || ts.isAsExpression(e)) e = e.expression;
+    const e = strip(init);
     return ts.isIdentifier(e) || ts.isPropertyAccessExpression(e) || e.kind === ts.SyntaxKind.ThisKeyword;
   };
   const visit = (n: ts.Node) => {
     if (ts.isVariableDeclaration(n) && n.initializer) {
       if (ts.isIdentifier(n.name)) {
-        const m = modelOf(n.initializer, out);
+        const m = modelOf(n.initializer, out, true);
         if (m) out.set(n.name.text, m);
       } else if (ts.isObjectBindingPattern(n.name) && holder(n.initializer)) {
         for (const el of n.name.elements) {
@@ -530,19 +689,52 @@ function aliasesIn(body: ts.Node, base: ReadonlyMap<string, string>): Map<string
   return out;
 }
 
+/** Round 3 (CM-2 g06): a nested write inside a Prisma write's data on a relation that holds a credential model. */
+function nestedRelationLeaf(model: string, op: string, first: ts.Expression | undefined): string | null {
+  const schema = [...schemaModels().values()].find((m) => m.delegate === model);
+  if (!schema || !first || !ts.isObjectLiteralExpression(first)) return null;
+  const models = credentialModels();
+  const parts = first.properties.filter((p) => p.name && /^(data|create|update)$/.test(p.name.getText(p.getSourceFile())));
+  for (const part of parts) {
+    if (!ts.isPropertyAssignment(part) || !ts.isObjectLiteralExpression(part.initializer)) continue;
+    for (const field of part.initializer.properties) {
+      if (!ts.isPropertyAssignment(field) || !field.name || !ts.isObjectLiteralExpression(field.initializer)) continue;
+      const target = schema.relations.get(field.name.getText(field.getSourceFile()));
+      const delegate = target ? schemaModels().get(target)?.delegate : undefined;
+      const rules = delegate ? models[delegate] : undefined;
+      if (!rules) continue;
+      for (const nested of field.initializer.properties) {
+        const nestedOp = nested.name?.getText(nested.getSourceFile()) ?? '';
+        if (!NESTED_WRITE_OPS.test(nestedOp)) continue;
+        const text = textOf(nested);
+        const cols = rules.filter((c) => !c.startsWith('*') && new RegExp(`\\b${c}\\b`).test(text));
+        const removes = /^(delete|deleteMany|set|disconnect)$/.test(nestedOp) && rules.includes('*delete');
+        const creates = /^(create|createMany|connectOrCreate|upsert)$/.test(nestedOp) && rules.includes('*create');
+        if (cols.length || removes || creates) return `${model}.${op}(nested ${delegate}.${nestedOp}${cols.length ? `: ${cols.join(', ')}` : ''})`;
+      }
+    }
+  }
+  return null;
+}
+
 /** The credential write a call makes itself, or null (CLASS B leaves). */
-function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpression, mention: string, aliases: ReadonlyMap<string, string>): string | null {
+function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpression, ctx: LeafContext): string | null {
+  const { mention, aliases } = ctx;
   if (ts.isTaggedTemplateExpression(call)) {
     return /\$(executeRaw|queryRaw)(Unsafe)?$/.test(textOf(call.tag)) ? rawSqlLeaf(textOf(call.template)) : null;
   }
   const callee = call.expression;
   const argsText = call.arguments.map(textOf).join(', ');
   if (!ts.isPropertyAccessExpression(callee)) return null;
-  if (/^\$(executeRaw|queryRaw)(Unsafe)?$/.test(callee.name.text)) return rawSqlLeaf(argsText);
+  // Round 3 (CM-2 g07): the SQL may be a constant the call names.
+  if (/^\$(executeRaw|queryRaw)(Unsafe)?$/.test(callee.name.text)) return rawSqlLeaf(call.arguments.map((a) => ctx.constText(a)).join(', '));
   if (!CREDENTIAL_WRITE_OPS.has(callee.name.text)) return null;
+  const op = callee.name.text;
+  const anyModel = modelOf(callee.expression, aliases, true);
+  const nested = anyModel ? nestedRelationLeaf(anyModel, op, call.arguments[0]) : null;
+  if (nested) return nested;
   const model = modelOf(callee.expression, aliases);
   if (!model) return null;
-  const op = callee.name.text;
   const cols = credentialModels()[model];
   // the data is built elsewhere: a data / create / update / metadata value that is not an object literal, a shorthand, or a spread
   // (a parenthesised spread, `...(cond && { col: v })`, is still written out in the call)
@@ -552,16 +744,18 @@ function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpress
   const hit = cols.filter((c) => !c.startsWith('*') && new RegExp(`\\b${c}\\b`).test(scope));
   if (hit.length) return `${model}.${op}(${hit.join(', ')})`;
   if (op.startsWith('delete') && cols.includes('*delete')) return `${model}.${op}`;
-  if ((op === 'create' || op === 'createMany' || op === 'upsert') && cols.includes('*create')) return `${model}.${op}`;
-  // an upsert deactivates through its update part only (a create of a disconnected row binds nothing)
+  if ((op.startsWith('create') || op === 'upsert') && cols.includes('*create')) return `${model}.${op}`;
+  // an upsert deactivates (or lifts) through its update part only (a create of a disconnected row binds nothing)
   const first = call.arguments[0];
   const updatePart =
     op === 'upsert' && first && ts.isObjectLiteralExpression(first)
       ? first.properties.filter((p) => p.name && p.name.getText(p.getSourceFile()) === 'update').map(textOf).join(', ')
       : argsText;
-  if ((op.startsWith('update') || op === 'upsert') && cols.includes('*deactivate') && DEACTIVATES.test(updatePart)) return `${model}.${op}(deactivate)`;
+  const writes = op.startsWith('update') || op === 'upsert';
+  if (writes && cols.includes('*deactivate') && DEACTIVATES.test(updatePart)) return `${model}.${op}(deactivate)`;
+  if (writes && cols.includes('*lift') && LIFTS.test(indirect && !/\bstatus\b/.test(updatePart) ? mention : updatePart)) return `${model}.${op}(status lift)`;
   // a JSON column that holds the credentials, replaced by a literal that keeps nothing of the stored one
-  if ((op.startsWith('update') || op === 'upsert') && cols.includes('*metadata') && /\bmetadata\s*:\s*\{(?![^{}]*\.\.\.)/.test(updatePart)) return `${model}.${op}(metadata replaced)`;
+  if (writes && cols.includes('*metadata') && /\bmetadata\s*:\s*\{(?![^{}]*\.\.\.)/.test(updatePart)) return `${model}.${op}(metadata replaced)`;
   if (model === 'business' && /\bmetaData\b/.test(indirect ? mention : argsText) && META_CREDENTIAL_KEYS.test(mention)) return 'business.metaData(credential keys)';
   return null;
 }
@@ -577,12 +771,16 @@ const CREDENTIAL_RULES: GraphRules = {
     return null;
   },
   checks: CREDENTIAL_CHECKS,
-  doors: REFRESH_DOORS,
+  doors: { ...REFRESH_DOORS, ...Object.fromEntries(Object.entries(STATUS_DOORS).map(([id, d]) => [id, d.why])) },
 };
 
 const EXPORT_RULES: GraphRules = {
-  leafOfCall: () => null,
-  leafOfMethod: (id, own, mention) => (OUTBOUND_SEND.test(own) && RECORD_READ.test(mention) ? `export (${id}: sends records out)` : null),
+  leafOfCall: (call, ctx) => {
+    if (!ts.isCallExpression(call) || !isOutboundSend(call, ctx.own)) return null;
+    if (FILE_GRANT.test(call.arguments[0] ? textOf(call.arguments[0]) : '')) return 'export (hands out a stored business file)';
+    return RECORD_READ.test(ctx.mention) ? 'export (sends records out)' : null;
+  },
+  leafOfMethod: () => null,
   checks: EXPORT_CHECKS,
   doors: OUTBOUND_DESTINATIONS,
 };
@@ -590,10 +788,23 @@ const EXPORT_RULES: GraphRules = {
 function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGraph {
   const classes = new Map<string, GraphClass>();
   const interfaces = new Map<string, string[]>();
-  const functions = new Map<string, Array<{ body: ts.Node; sf: ts.SourceFile }>>();
+  const functions = new Map<string, Array<{ body: ts.Node; sf: ts.SourceFile; params: readonly ts.ParameterDeclaration[] }>>();
+  /** Round 3: a top-level function's declared return type (`Promise<GmailService>` -> GmailService). */
+  const functionReturns = new Map<string, string>();
   const listeners = new Map<string, string[]>();
-  const definedNames = new Set<string>();
+  const declarations = new Set<string>();
   const keyEntries: string[] = [];
+  /** Round 3 (CM-2 g01): an injection token -> the provider classes bound to it (`{ provide: TOKEN, useClass: X }`). */
+  const providers = new Map<string, string[]>();
+  /** Round 3 (CM-2 g04, g07): top-level constants (initializers) by file, and by name across the source. */
+  const fileConsts = new Map<ts.SourceFile, Map<string, ts.Expression>>();
+  const constsByPath = new Map<string, Map<string, ts.Expression>>();
+  const knownFiles = new Set(files.map(({ sf }) => relative(SRC, sf.fileName)));
+  /** Round 3 (CM-1): per file, an imported name -> the file (under src) and the name it is declared with. */
+  const imports = new Map<ts.SourceFile, Map<string, { file: string; name: string }>>();
+  /** Method parameters, and declared return types, by method id. */
+  const methodParams = new Map<string, readonly ts.ParameterDeclaration[]>();
+  const methodReturns = new Map<string, string>();
   const decorators = (n: ts.Node) => (ts.canHaveDecorators(n) ? ts.getDecorators(n) ?? [] : []);
   const injected = (sf: ts.SourceFile, n: ts.Node) => {
     const inj = decorators(n).find((d) => ts.isCallExpression(d.expression) && d.expression.expression.getText(sf) === 'Inject');
@@ -601,16 +812,102 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     if (!a) return undefined;
     if (ts.isIdentifier(a)) return a.text;
     if (ts.isArrowFunction(a)) return a.body.getText(sf);
+    if (ts.isStringLiteralLike(a)) return a.text;
     return undefined;
   };
-  const cleanType = (t: string) => t.replace(/\s*\|\s*(undefined|null)/g, '').trim();
+  const cleanType = (t: string) => t.replace(/\s*\|\s*(undefined|null)/g, '').replace(/^Promise<(.*)>$/, '$1').trim();
+  const relFile = (sf: ts.SourceFile) => relative(SRC, sf.fileName);
+
+  for (const { sf } of files) {
+    const consts = new Map<string, ts.Expression>();
+    const imported = new Map<string, { file: string; name: string }>();
+    for (const node of sf.statements) {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text.startsWith('.')) {
+        const target = relative(SRC, resolve(join(sf.fileName, '..'), node.moduleSpecifier.text));
+        const file = target.endsWith('.ts') ? target : knownFiles.has(`${target}.ts`) || !knownFiles.has(`${target}/index.ts`) ? `${target}.ts` : `${target}/index.ts`;
+        const named = node.importClause?.namedBindings;
+        if (named && ts.isNamedImports(named)) for (const el of named.elements) imported.set(el.name.text, { file, name: (el.propertyName ?? el.name).text });
+      }
+      if (ts.isVariableStatement(node)) {
+        for (const d of node.declarationList.declarations) {
+          if (ts.isIdentifier(d.name) && d.initializer) {
+            consts.set(d.name.text, d.initializer);
+          }
+        }
+      }
+    }
+    fileConsts.set(sf, consts);
+    constsByPath.set(relFile(sf), consts);
+    imports.set(sf, imported);
+    const visitProviders = (n: ts.Node) => {
+      if (ts.isObjectLiteralExpression(n)) {
+        const prop = (k: string) => n.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText(sf) === k);
+        const provide = prop('provide');
+        const use = prop('useClass') ?? prop('useExisting');
+        const factory = prop('useFactory');
+        const cls = use ? use.initializer.getText(sf) : factory ? /\bnew\s+([A-Z]\w*)/.exec(factory.initializer.getText(sf))?.[1] : undefined;
+        if (provide && cls) {
+          const token = ts.isStringLiteralLike(provide.initializer) ? provide.initializer.text : provide.initializer.getText(sf);
+          providers.set(token, [...new Set([...(providers.get(token) ?? []), cls])]);
+        }
+      }
+      n.forEachChild(visitProviders);
+    };
+    visitProviders(sf);
+  }
+
+  /** The string values an expression may stand for: a literal, a constant (local, file-level or imported, or a member of a constant object), a conditional's branches, a map's values. */
+  const stringValues = (expr: ts.Expression | undefined, sf: ts.SourceFile, scope?: ts.Node, depth = 0): string[] => {
+    if (!expr || depth > 6) return [];
+    const e = strip(expr);
+    if (ts.isStringLiteralLike(e)) return [e.text];
+    if (ts.isConditionalExpression(e)) return [...stringValues(e.whenTrue, sf, scope, depth + 1), ...stringValues(e.whenFalse, sf, scope, depth + 1)];
+    const objectValues = (o: ts.Expression | undefined): string[] => {
+      const v = o ? strip(o) : undefined;
+      if (!v || !ts.isObjectLiteralExpression(v)) return [];
+      return v.properties.flatMap((p) => (ts.isPropertyAssignment(p) ? stringValues(p.initializer, sf, scope, depth + 1) : []));
+    };
+    const constOf = (name: string): ts.Expression | undefined => {
+      if (scope) {
+        let found: ts.Expression | undefined;
+        const visit = (n: ts.Node) => {
+          if (!found && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer) found = n.initializer;
+          if (!found) n.forEachChild(visit);
+        };
+        visit(scope);
+        if (found) return found;
+      }
+      const local = fileConsts.get(sf)?.get(name);
+      if (local) return local;
+      const imp = imports.get(sf)?.get(name);
+      return imp ? constsByPath.get(imp.file)?.get(imp.name) : undefined;
+    };
+    if (ts.isIdentifier(e)) {
+      const init = constOf(e.text);
+      if (!init) return [];
+      const v = strip(init);
+      // `const eventName = eventMap[status]`: every value of the map
+      if (ts.isElementAccessExpression(v) && ts.isIdentifier(strip(v.expression))) return objectValues(constOf((strip(v.expression) as ts.Identifier).text));
+      return stringValues(init, sf, scope, depth + 1);
+    }
+    if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression)) {
+      const obj = constOf(e.expression.text);
+      const o = obj ? strip(obj) : undefined;
+      if (o && ts.isObjectLiteralExpression(o)) {
+        const p = o.properties.find((x): x is ts.PropertyAssignment => ts.isPropertyAssignment(x) && x.name.getText(x.getSourceFile()) === e.name.text);
+        return p ? stringValues(p.initializer, sf, scope, depth + 1) : [];
+      }
+    }
+    if (ts.isElementAccessExpression(e) && ts.isIdentifier(strip(e.expression))) return objectValues(constOf((strip(e.expression) as ts.Identifier).text));
+    return [];
+  };
   const eventsOf = (sf: ts.SourceFile, n: ts.Node): string[] => {
     const out: string[] = [];
     for (const d of decorators(n)) {
       if (!ts.isCallExpression(d.expression) || d.expression.expression.getText(sf) !== 'OnEvent') continue;
       const a = d.expression.arguments[0];
-      if (a && ts.isStringLiteralLike(a)) out.push(a.text);
-      if (a && ts.isArrayLiteralExpression(a)) for (const e of a.elements) if (ts.isStringLiteralLike(e)) out.push(e.text);
+      if (a && ts.isArrayLiteralExpression(a)) for (const e of a.elements) out.push(...stringValues(e, sf));
+      else out.push(...stringValues(a, sf));
     }
     return out;
   };
@@ -619,19 +916,20 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     for (const node of sf.statements) {
       if (ts.isInterfaceDeclaration(node)) interfaces.set(node.name.text, node.members.filter((m) => m.name).map((m) => m.name!.getText(sf)));
       if (ts.isFunctionDeclaration(node) && node.name && node.body) {
-        functions.set(node.name.text, [...(functions.get(node.name.text) ?? []), { body: node.body, sf }]);
-        definedNames.add(node.name.text);
+        functions.set(node.name.text, [...(functions.get(node.name.text) ?? []), { body: node.body, sf, params: node.parameters }]);
+        declarations.add(`fn:${node.name.text}@${relFile(sf)}`);
+        if (node.type) functionReturns.set(node.name.text, cleanType(node.type.getText(sf)));
       }
       if (ts.isVariableStatement(node)) {
         for (const d of node.declarationList.declarations) {
           if (ts.isIdentifier(d.name) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))) {
-            functions.set(d.name.text, [...(functions.get(d.name.text) ?? []), { body: d.initializer.body, sf }]);
-            definedNames.add(d.name.text);
+            functions.set(d.name.text, [...(functions.get(d.name.text) ?? []), { body: d.initializer.body, sf, params: d.initializer.parameters }]);
+            declarations.add(`fn:${d.name.text}@${relFile(sf)}`);
           }
         }
       }
       if (!ts.isClassDeclaration(node) || !node.name) continue;
-      const cls: GraphClass = { file: relative(SRC, sf.fileName), props: new Map(), methods: new Map(), aliases: new Map(), implementsNames: [] };
+      const cls: GraphClass = { file: relFile(sf), props: new Map(), propDecl: new Map(), methods: new Map(), aliases: new Map(), implementsNames: [] };
       // A class name defined twice keeps its first file (both are read: the second under file@name).
       const key = classes.has(node.name.text) ? `${node.name.text}@${cls.file}` : node.name.text;
       for (const h of node.heritageClauses ?? []) {
@@ -646,24 +944,29 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
             if (!ts.isIdentifier(p.name)) continue;
             const type = injected(sf, p) ?? (p.type ? p.type.getText(sf) : undefined);
             if (type) cls.props.set(p.name.text, cleanType(type));
+            if (p.type) cls.propDecl.set(p.name.text, cleanType(p.type.getText(sf)));
           }
         } else if (ts.isPropertyDeclaration(m) && ts.isIdentifier(m.name)) {
           if (m.initializer && (ts.isArrowFunction(m.initializer) || ts.isFunctionExpression(m.initializer))) {
             cls.methods.set(m.name.text, m.initializer.body);
-            definedNames.add(m.name.text);
+            methodParams.set(`${key}.${m.name.text}`, m.initializer.parameters);
+            declarations.add(`${key}.${m.name.text}`);
             continue;
           }
-          const alias = m.initializer ? modelOf(m.initializer, new Map()) : null;
+          const alias = m.initializer ? modelOf(m.initializer, new Map(), true) : null;
           if (alias) cls.aliases.set(`this.${m.name.text}`, alias);
           const type = injected(sf, m) ?? (m.type ? m.type.getText(sf) : m.initializer && ts.isNewExpression(m.initializer) ? m.initializer.expression.getText(sf) : undefined);
           if (type) cls.props.set(m.name.text, cleanType(type));
+          if (m.type) cls.propDecl.set(m.name.text, cleanType(m.type.getText(sf)));
         } else if ((ts.isMethodDeclaration(m) || ts.isGetAccessorDeclaration(m)) && m.body && m.name) {
           const name = m.name.getText(sf);
           cls.methods.set(name, m.body);
-          definedNames.add(name);
+          methodParams.set(`${key}.${name}`, m.parameters);
+          if (m.type) methodReturns.set(`${key}.${name}`, cleanType(m.type.getText(sf)));
+          declarations.add(`${key}.${name}`);
           if (ts.isGetAccessorDeclaration(m)) {
             const ret = m.body.statements.find(ts.isReturnStatement);
-            const alias = ret?.expression ? modelOf(ret.expression, new Map()) : null;
+            const alias = ret?.expression ? modelOf(ret.expression, new Map(), true) : null;
             if (alias) cls.aliases.set(`this.${name}`, alias);
           }
           if (name === 'execute' && ts.isMethodDeclaration(m) && m.parameters[0]?.type?.getText(sf) === 'ConnectorCommand') keyEntries.push(`${node.name.text}.execute`);
@@ -683,12 +986,13 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     }
     return out;
   };
-  const resolve = (cls: string, method: string) => [cls, ...supers(cls)].map((k) => `${k}.${method}`).find((id) => methodBody(id)) ?? null;
+  const resolveMethod = (cls: string, method: string) => [cls, ...supers(cls)].map((k) => `${k}.${method}`).find((id) => methodBody(id)) ?? null;
   const methodBody = (id: string): ts.Node | undefined => {
     const dot = id.lastIndexOf('.');
     return classes.get(id.slice(0, dot))?.methods.get(id.slice(dot + 1));
   };
   const propType = (cls: string, prop: string) => [cls, ...supers(cls)].map((k) => classes.get(k)?.props.get(prop)).find(Boolean);
+  const propDeclType = (cls: string, prop: string) => [cls, ...supers(cls)].map((k) => classes.get(k)?.propDecl.get(prop)).find(Boolean);
   const classAliases = (cls: string) => new Map([cls, ...supers(cls)].reverse().flatMap((k) => [...(classes.get(k)?.aliases ?? [])]));
 
   // A method only one class defines; a method of an interface several classes implement (connector dispatch).
@@ -713,7 +1017,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     for (const m of interfaces.get(iface) ?? []) {
       if (COMMON.has(m)) continue;
       for (const c of impls) {
-        const target = resolve(c, m);
+        const target = resolveMethod(c, m);
         if (target && !(dispatch.get(m) ?? []).includes(target)) dispatch.set(m, [...(dispatch.get(m) ?? []), target]);
       }
     }
@@ -731,50 +1035,164 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
   };
 
   /**
-   * The methods a call may run (precise: only through `this`, a typed injected property or a top-level
-   * function, never by name alone). Round 2 (CW-5 M5): a call on any other receiver (a chained call,
-   * `this.registry.get(type)!.disconnect(b)`, an element, a parenthesised value) goes by name too.
+   * Round 3 (CM-2 g01, g02, g03): the methods `method` runs on a value of `type`: a class; the provider
+   * classes an injection token is bound to; the implementers of an interface (one is enough). null when
+   * the type names none of these.
    */
-  const targets = (call: ts.CallExpression, cls: string | null, precise = false): string[] => {
+  const methodsOfType = (type: string | undefined, method: string): string[] | null => {
+    if (!type) return null;
+    if (classes.has(type)) return [resolveMethod(type, method)].filter((x): x is string => !!x);
+    const bound = providers.get(type);
+    if (bound?.length) return bound.flatMap((c) => (classes.has(c) ? [resolveMethod(c, method)] : [])).filter((x): x is string => !!x);
+    const impls = implementers.get(type);
+    if (impls?.length) return impls.map((c) => resolveMethod(c, method)).filter((x): x is string => !!x);
+    return null;
+  };
+
+  /** Round 3 (CM-2 g02, g03): the class a receiver expression holds, where it can be read. */
+  type Locals = ReadonlyMap<string, string>;
+  const typeOfExpr = (expr: ts.Expression, cls: string | null, locals: Locals): string | undefined => {
+    const e = strip(expr);
+    if (ts.isAsExpression(expr) && ts.isTypeReferenceNode(expr.type)) return expr.type.getText();
+    if (ts.isPropertyAccessExpression(e) && e.expression.kind === ts.SyntaxKind.ThisKeyword && cls) return propType(cls, e.name.text);
+    if (ts.isIdentifier(e)) return locals.get(e.text);
+    if (ts.isNewExpression(e)) return e.expression.getText();
+    if (ts.isCallExpression(e)) {
+      const callee = e.expression;
+      // moduleRef.get(X) / .resolve(X) / .create(X): an instance of X
+      const first = e.arguments[0] ? strip(e.arguments[0]) : undefined;
+      if (ts.isPropertyAccessExpression(callee) && /^(get|resolve|create)$/.test(callee.name.text) && first && ts.isIdentifier(first) && classes.has(first.text)) return first.text;
+      if (ts.isIdentifier(callee)) return functionReturns.get(callee.text);
+      // a method whose declared return type is a class (`gmailBinding(): Promise<GmailService>`)
+      const to = targets(e, cls, locals, true);
+      const returns = [...new Set(to.map((t) => methodReturns.get(t)).filter((t): t is string => !!t && classes.has(t)))];
+      if (returns.length === 1) return returns[0];
+    }
+    return undefined;
+  };
+  /** The typed locals of a body: parameters with a class type, and `const x = <a receiver whose class is known>`. */
+  const localTypes = (body: ts.Node, cls: string | null, params: readonly ts.ParameterDeclaration[] = []): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const p of params) if (ts.isIdentifier(p.name) && p.type) out.set(p.name.text, cleanType(p.type.getText()));
+    const visit = (n: ts.Node) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)) {
+        const t = n.type ? cleanType(n.type.getText()) : n.initializer ? typeOfExpr(n.initializer, cls, out) : undefined;
+        if (t) out.set(n.name.text, t);
+      }
+      n.forEachChild(visit);
+    };
+    visit(body);
+    return out;
+  };
+
+  /**
+   * The methods a call may run (precise: only through `this`, a typed property or local, or a top-level
+   * function, never by name alone). Round 2 (CW-5 M5): a call on any other receiver goes by name too.
+   * Round 3: a receiver whose class is known resolves through it, whatever the method's name (a COMMON
+   * name such as create, update or delete included); an injection token resolves to its provider or to
+   * its interface's implementers; one that resolves to neither goes by name (not precise).
+   */
+  const targets = (call: ts.CallExpression, cls: string | null, locals: Locals, precise = false): string[] => {
     const callee = call.expression;
     if (ts.isIdentifier(callee)) return functions.has(callee.text) ? [`fn:${callee.text}`] : [];
     if (!ts.isPropertyAccessExpression(callee)) return [];
     const method = callee.name.text;
     const recv = callee.expression;
-    if (recv.kind === ts.SyntaxKind.ThisKeyword) return cls ? [resolve(cls, method)].filter((x): x is string => !!x) : [];
-    if (ts.isPropertyAccessExpression(recv) && recv.expression.kind === ts.SyntaxKind.ThisKeyword && cls) {
-      const type = propType(cls, recv.name.text);
-      if (type && classes.has(type)) return [resolve(type, method)].filter((x): x is string => !!x);
-      if (type || precise) return [];
-      return byName(method);
+    if (recv.kind === ts.SyntaxKind.ThisKeyword) return cls ? [resolveMethod(cls, method)].filter((x): x is string => !!x) : [];
+    const recvProp = strip(recv);
+    if (ts.isPropertyAccessExpression(recvProp) && recvProp.expression.kind === ts.SyntaxKind.ThisKeyword && cls) {
+      const found = methodsOfType(propType(cls, recvProp.name.text), method) ?? methodsOfType(propDeclType(cls, recvProp.name.text), method);
+      if (found) return found;
+      return precise ? [] : byName(method);
     }
-    if (precise) return [];
-    return byName(method);
+    const found = methodsOfType(typeOfExpr(recv, cls, locals), method);
+    if (found) return found;
+    return precise ? [] : byName(method);
   };
 
-  /** Round 2 (CW-5 M8): an event a call emits goes to every listener of it (`@OnEvent('a.b')`, or a pattern `a.*`). */
-  const emitted = (call: ts.CallExpression): string[] => {
+  /** Round 2 (CW-5 M8): an event a call emits goes to every listener of it (`@OnEvent('a.b')`, or a pattern `a.*`). Round 3 (CM-2 g04): the name may be a constant. */
+  const emitted = (call: ts.CallExpression, scope: ts.Node): string[] => {
     const callee = call.expression;
     if (!ts.isPropertyAccessExpression(callee) || !/^emit(Async)?$/.test(callee.name.text)) return [];
-    const a = call.arguments[0];
-    if (!a || !ts.isStringLiteralLike(a)) return [];
+    const names = stringValues(call.arguments[0], call.getSourceFile(), scope);
     const out: string[] = [];
-    for (const [event, ids] of listeners) {
-      const pattern = new RegExp(`^${event.split('.').map((s) => (s === '*' ? '[^.]+' : s === '**' ? '.+' : s.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&'))).join('\\.')}$`);
-      if (event === a.text || pattern.test(a.text)) out.push(...ids);
+    for (const name of names) {
+      for (const [event, ids] of listeners) {
+        const pattern = new RegExp(`^${event.split('.').map((s) => (s === '*' ? '[^.]+' : s === '**' ? '.+' : s.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&'))).join('\\.')}$`);
+        if (event === name || pattern.test(name)) out.push(...ids);
+      }
     }
-    return out;
+    return [...new Set(out)];
   };
 
-  /** Methods and helpers that always run a pinned check before they return (a wrapper such as assertProfileOwner). */
-  const wrappers = new Set<string>();
-  const isCheck = (call: ts.CallExpression, cls: string | null): boolean => {
+  /** Round 3 (CM-1): the declarations a call resolves to (`Class.method`, `fn:<name>@<file>`), for a check. */
+  const declsOf = (call: ts.CallExpression, cls: string | null, locals: Locals): string[] => {
+    const callee = call.expression;
+    if (ts.isIdentifier(callee)) {
+      const sf = call.getSourceFile();
+      if (fileConsts.get(sf)?.has(callee.text) || sf.statements.some((s) => ts.isFunctionDeclaration(s) && s.name?.text === callee.text)) return [`fn:${callee.text}@${relFile(sf)}`];
+      const imp = imports.get(sf)?.get(callee.text);
+      return imp ? [`fn:${imp.name}@${imp.file}`] : [];
+    }
+    return targets(call, cls, locals, true);
+  };
+
+  interface Site {
+    cls: string | null;
+    body: ts.Node;
+    locals: Locals;
+    /** The parameter bound to the route's :businessId, if the method has one. */
+    routeBusiness?: string;
+  }
+  /** Round 3 (CM-1): the business a check names is the business the guarded call acts on. */
+  const sameBusiness = (arg: ts.Expression | undefined, guarded: ts.Node | undefined, site: Site): boolean => {
+    if (!arg) return false;
+    const a = textOf(strip(arg)).replace(/\s+/g, '');
+    // `command.businessId` checked, `command` handed on whole
+    const holder = /^([A-Za-z_$][\w$]*)\.businessId$/.exec(a)?.[1];
+    if (site.routeBusiness && (a === site.routeBusiness || holder === site.routeBusiness)) return true;
+    if (!guarded) return false;
+    const target = ts.isCallExpression(guarded) || ts.isTaggedTemplateExpression(guarded) ? guarded : undefined;
+    const text = target ? (ts.isCallExpression(target) ? target.arguments.map(textOf).join(', ') : textOf(target.template)) : textOf(guarded);
+    const esc = (s: string) => s.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&');
+    const names = (t: string) => {
+      const flat = t.replace(/\s+/g, '');
+      return new RegExp(`(^|[^\\w$.])${esc(a)}(?![\\w$]|:)`).test(flat) || (!!holder && new RegExp(`(^|[^\\w$.])${esc(holder)}(?![\\w$]|:)`).test(flat));
+    };
+    if (names(text)) return true;
+    // one local between them: `const state = { businessId, ... }; this.signState(state)`
+    for (const id of new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? [])) {
+      let init: ts.Expression | undefined;
+      const visit = (n: ts.Node) => {
+        if (!init && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === id && n.initializer) init = n.initializer;
+        if (!init) n.forEachChild(visit);
+      };
+      visit(site.body);
+      if (init && names(textOf(init))) return true;
+    }
+    return false;
+  };
+
+  /** Methods and helpers that always run a pinned check before they return (a wrapper such as assertProfileOwner), with the parameter that names the business it checks (null: none). */
+  const wrappers = new Map<string, number | null>();
+  /** A call that is a pinned check (resolved to its declaration, carrying its arguments, for the guarded call's business), or a wrapper of one. */
+  const isCheck = (call: ts.CallExpression, site: Site, guarded: ts.Node | undefined, gateOk: boolean): boolean => {
     const callee = call.expression;
     const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : '';
     const rule = Object.hasOwn(rules.checks, name) ? rules.checks[name] : undefined;
-    if (rule) return !rule.args || rule.args.test(call.arguments.map(textOf).join(', '));
-    const to = targets(call, cls, true);
-    return to.length > 0 && to.every((t) => wrappers.has(t));
+    if (rule) {
+      if (rule.gate && !gateOk) return false;
+      const decls = declsOf(call, site.cls, site.locals);
+      if (!decls.length || !decls.every((d) => rule.decl.includes(d))) return false;
+      if (rule.args && !rule.args.test(call.arguments.map(textOf).join(', '))) return false;
+      return rule.biz === undefined || sameBusiness(call.arguments[rule.biz], guarded, site);
+    }
+    const to = targets(call, site.cls, site.locals, true);
+    if (!to.length || !to.every((t) => wrappers.has(t))) return false;
+    return to.every((t) => {
+      const biz = wrappers.get(t);
+      return biz === null || biz === undefined || sameBusiness(call.arguments[biz], guarded, site);
+    });
   };
   const callsIn = (n: ts.Node, out: ts.CallExpression[] = [], nested = true): ts.CallExpression[] => {
     n.forEachChild((c) => {
@@ -793,56 +1211,111 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
   };
   const containsReturn = (n: ts.Node): boolean =>
     ts.isReturnStatement(n) || (!ts.isFunctionLike(n) && (n.forEachChild((c) => (containsReturn(c) ? true : undefined)) ?? false));
+  /** A branch that ends in return or throw. */
+  const exits = (st: ts.Statement): boolean =>
+    ts.isReturnStatement(st) || ts.isThrowStatement(st) || (ts.isBlock(st) && st.statements.length > 0 && exits(st.statements[st.statements.length - 1]));
+  /** Round 3 (CM-1): a condition that is true when `name` (or a call) is falsy: `!x`, `!x?.y`, `x == null`, `x === undefined`, as one operand of `||`. */
+  const falsyOperands = (cond: ts.Expression): ts.Expression[] => {
+    const e = strip(cond);
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.BarBarToken) return [...falsyOperands(e.left), ...falsyOperands(e.right)];
+    if (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.ExclamationToken) {
+      let x = strip(e.operand);
+      while (ts.isPropertyAccessExpression(x)) x = strip(x.expression);
+      return [x];
+    }
+    if (ts.isBinaryExpression(e) && /^(==|===)$/.test(e.operatorToken.getText()) && /^(null|undefined)$/.test(e.right.getText())) return [strip(e.left)];
+    return [];
+  };
+  /** A gate: `if (<falsy test of a gate check's result>) throw | return`, the result held in a local an earlier statement of `block` assigned. */
+  const gateChecks = (st: ts.Statement, earlier: readonly ts.Statement[], site: Site, guarded: ts.Node | undefined): boolean => {
+    if (!ts.isIfStatement(st) || !exits(st.thenStatement)) return false;
+    for (const operand of falsyOperands(st.expression)) {
+      if (ts.isCallExpression(operand) && isCheck(operand, site, guarded, true)) return true;
+      if (!ts.isIdentifier(operand)) continue;
+      for (const prev of earlier) {
+        if (!ts.isVariableStatement(prev)) continue;
+        for (const d of prev.declarationList.declarations) {
+          if (!ts.isIdentifier(d.name) || d.name.text !== operand.text || !d.initializer) continue;
+          if (callsIn(d.initializer, [], false).concat(ts.isCallExpression(strip(d.initializer)) ? [strip(d.initializer) as ts.CallExpression] : []).some((c) => isCheck(c, site, guarded, true))) return true;
+        }
+      }
+    }
+    return false;
+  };
   /** A branch that runs a check before it can return. */
-  const branchChecks = (st: ts.Statement, cls: string | null): boolean => {
-    if (!ts.isBlock(st)) return statementChecks(st, cls);
-    for (const inner of st.statements) {
-      if (statementChecks(inner, cls)) return true;
+  const branchChecks = (st: ts.Statement, site: Site, guarded: ts.Node | undefined): boolean => {
+    if (!ts.isBlock(st)) return statementChecks(st, [], site, guarded);
+    for (let i = 0; i < st.statements.length; i++) {
+      const inner = st.statements[i];
+      if (statementChecks(inner, st.statements.slice(0, i), site, guarded)) return true;
       if (containsReturn(inner)) return false;
     }
     return false;
   };
-  const statementChecks = (st: ts.Statement, cls: string | null): boolean => {
-    // an `if` counts when its condition runs a check, or when each of its branches does (`if (gmail) ownerRuleA else ownerRuleB`)
+  const statementChecks = (st: ts.Statement, earlier: readonly ts.Statement[], site: Site, guarded: ts.Node | undefined): boolean => {
+    if (gateChecks(st, earlier, site, guarded)) return true;
+    // an `if` counts when its condition runs a (throwing) check, or when each of its branches does (`if (gmail) ownerRuleA else ownerRuleB`)
     if (ts.isIfStatement(st)) {
-      return callsIn(st.expression, [], false).some((c) => isCheck(c, cls)) || (!!st.elseStatement && branchChecks(st.thenStatement, cls) && branchChecks(st.elseStatement, cls));
+      return callsIn(st.expression, [], false).some((c) => isCheck(c, site, guarded, false)) || (!!st.elseStatement && branchChecks(st.thenStatement, site, guarded) && branchChecks(st.elseStatement, site, guarded));
     }
-    if (ts.isExpressionStatement(st) || ts.isVariableStatement(st) || ts.isReturnStatement(st)) return callsIn(st, [], false).some((c) => isCheck(c, cls));
+    if (ts.isExpressionStatement(st) || ts.isVariableStatement(st) || ts.isReturnStatement(st)) return callsIn(st, [], false).some((c) => isCheck(c, site, guarded, false));
     return false;
   };
   /** A pinned check (or a wrapper of one) is called in an earlier statement of a block enclosing the call, within the method. */
-  const dominated = (call: ts.Node, body: ts.Node, cls: string | null): boolean => {
+  const dominated = (call: ts.Node, site: Site): boolean => {
     let node: ts.Node = call;
-    while (node !== body && node.parent) {
+    while (node !== site.body && node.parent) {
       const parent = node.parent;
       if (ts.isBlock(parent) || ts.isSourceFile(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
         const i = parent.statements.indexOf(node as ts.Statement);
-        if (parent.statements.slice(0, Math.max(i, 0)).some((st) => statementChecks(st, cls))) return true;
+        const before = parent.statements.slice(0, Math.max(i, 0));
+        if (before.some((st, j) => statementChecks(st, before.slice(0, j), site, call))) return true;
       }
-      if (ts.isIfStatement(parent) && node !== parent.expression && callsIn(parent.expression, [], false).some((c) => isCheck(c, cls))) return true;
+      if (ts.isIfStatement(parent) && node !== parent.expression && callsIn(parent.expression, [], false).some((c) => isCheck(c, site, call, false))) return true;
       node = parent;
     }
     return false;
   };
-  /** The body runs a check in a top-level statement and returns nowhere before it. */
-  const alwaysChecks = (body: ts.Node, cls: string | null) => {
-    if (!ts.isBlock(body)) return false;
-    for (const st of body.statements) {
-      if (statementChecks(st, cls)) return true;
-      if (containsReturn(st)) return false;
+  const routeBusinessOf = (params: readonly ts.ParameterDeclaration[] = []): string | undefined =>
+    params.find((p) => decorators(p).some((d) => /^Param\(\s*['"]businessId['"]\s*\)$/.test(textOf(d.expression))) && ts.isIdentifier(p.name))?.name.getText();
+  const siteOf = (id: string, body: ts.Node, cls: string | null, params?: readonly ts.ParameterDeclaration[]): Site => ({
+    cls,
+    body,
+    locals: localTypes(body, cls, params),
+    routeBusiness: routeBusinessOf(params),
+  });
+  /** The body runs a check in a top-level statement and returns nowhere before it; the answer is the parameter that names the business checked (null: none), or undefined (no wrapper). */
+  const alwaysChecks = (site: Site, params: readonly ts.ParameterDeclaration[] = []): number | null | undefined => {
+    const body = site.body;
+    if (!ts.isBlock(body)) return undefined;
+    const names = params.map((p) => (ts.isIdentifier(p.name) ? p.name.text : ''));
+    for (let i = 0; i < body.statements.length; i++) {
+      const st = body.statements[i];
+      // a wrapper's check names the business through one of its parameters (or names none)
+      for (let k = -1; k < names.length; k++) {
+        const probe: Site = { ...site, routeBusiness: k >= 0 ? names[k] : undefined };
+        if (statementChecks(st, body.statements.slice(0, i), probe, undefined)) return k >= 0 ? k : null;
+      }
+      if (containsReturn(st)) return undefined;
     }
-    return false;
+    return undefined;
   };
+  const sites = new Map<string, { site: Site; params: readonly ts.ParameterDeclaration[] }>();
+  for (const [name, c] of classes) for (const [m, body] of c.methods) {
+    const params = methodParams.get(`${name}.${m}`) ?? [];
+    sites.set(`${name}.${m}`, { site: siteOf(`${name}.${m}`, body, name, params), params });
+  }
   for (let changed = true; changed; ) {
     changed = false;
-    for (const [name, c] of classes) {
-      for (const [m, body] of c.methods) {
-        const id = `${name}.${m}`;
-        if (!wrappers.has(id) && alwaysChecks(body, name)) { wrappers.add(id); changed = true; }
-      }
+    for (const [id, { site, params }] of sites) {
+      if (wrappers.has(id)) continue;
+      const biz = alwaysChecks(site, params);
+      if (biz !== undefined) { wrappers.set(id, biz); changed = true; }
     }
     for (const [name, list] of functions) {
-      if (!wrappers.has(`fn:${name}`) && list.every((f) => alwaysChecks(f.body, null))) { wrappers.add(`fn:${name}`); changed = true; }
+      if (wrappers.has(`fn:${name}`)) continue;
+      const each = list.map((f) => alwaysChecks(siteOf(`fn:${name}`, f.body, null, f.params), f.params));
+      if (each.every((b) => b !== undefined && b === each[0])) { wrappers.set(`fn:${name}`, each[0]!); changed = true; }
     }
   }
 
@@ -853,47 +1326,44 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
   const nodes = new Map<string, GraphNode>();
   const doorWrites = new Map<string, string[]>();
   const ownLeaves = new Map<string, string[]>();
-  // Top-level constants by file (a field list such as CONNECTION_UPDATE_FIELDS names the columns a write keeps).
-  const constants = new Map<ts.SourceFile, Map<string, string>>();
-  const constantsOf = (sf: ts.SourceFile) => {
-    if (!constants.has(sf)) {
-      const m = new Map<string, string>();
-      for (const st of sf.statements) {
-        if (!ts.isVariableStatement(st)) continue;
-        for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer) m.set(d.name.text, d.initializer.getText(sf));
-      }
-      constants.set(sf, m);
-    }
-    return constants.get(sf)!;
-  };
-  const add = (id: string, body: ts.Node, cls: string | null) => {
+  const add = (id: string, body: ts.Node, cls: string | null, params?: readonly ts.ParameterDeclaration[]) => {
+    const sf = body.getSourceFile();
     let mention = textOf(body);
-    const fileConstants = constantsOf(body.getSourceFile());
+    const fileConstants = fileConsts.get(sf) ?? new Map<string, ts.Expression>();
     for (const ident of new Set(textOf(body).match(/\b[A-Z][A-Z0-9_]{2,}\b/g) ?? [])) {
       const value = fileConstants.get(ident);
-      if (value) mention += '\n' + value;
+      if (value) mention += '\n' + textOf(value);
     }
     if (cls) {
       for (const c of callsIn(body)) {
         const callee = c.expression;
         if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
-          const helper = methodBody(resolve(cls, callee.name.text) ?? '');
+          const helper = methodBody(resolveMethod(cls, callee.name.text) ?? '');
           if (helper && helper !== body) mention += '\n' + textOf(helper);
         }
       }
     }
-    const aliases = aliasesIn(body, cls ? classAliases(cls) : new Map());
+    const site = siteOf(id, body, cls, params);
+    const ctx: LeafContext = {
+      own: textOf(body),
+      mention,
+      aliases: aliasesIn(body, cls ? classAliases(cls) : new Map()),
+      constText: (e) => {
+        const values = stringValues(e, sf, body);
+        return values.length ? values.join('\n') : textOf(e);
+      },
+    };
     const node: GraphNode = { leaves: [], edges: [] };
     const whole = rules.leafOfMethod(id, textOf(body), mention);
     if (whole) node.leaves.push({ write: whole, guarded: false });
     for (const sql of rawSqlIn(body)) {
-      const leaf = rules.leafOfCall(sql, mention, aliases);
-      if (leaf) node.leaves.push({ write: leaf, guarded: dominated(sql, body, cls) });
+      const leaf = rules.leafOfCall(sql, ctx);
+      if (leaf) node.leaves.push({ write: leaf, guarded: dominated(sql, site) });
     }
     for (const call of callsIn(body)) {
-      const leaf = rules.leafOfCall(call, mention, aliases);
-      if (leaf) node.leaves.push({ write: leaf, guarded: dominated(call, body, cls) });
-      for (const to of [...targets(call, cls), ...emitted(call)]) if (to !== id) node.edges.push({ to, guarded: dominated(call, body, cls) });
+      const leaf = rules.leafOfCall(call, ctx);
+      if (leaf) node.leaves.push({ write: leaf, guarded: dominated(call, site) });
+      for (const to of [...targets(call, cls, site.locals), ...emitted(call, body)]) if (to !== id) node.edges.push({ to, guarded: dominated(call, site) });
     }
     ownLeaves.set(id, node.leaves.map((l) => l.write));
     if (Object.hasOwn(rules.doors, id)) {
@@ -902,8 +1372,8 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     }
     nodes.set(id, node);
   };
-  for (const [name, c] of classes) for (const [m, body] of c.methods) add(`${name}.${m}`, body, name);
-  for (const [name, list] of functions) for (const f of list) add(`fn:${name}`, f.body, null);
+  for (const [name, c] of classes) for (const [m, body] of c.methods) add(`${name}.${m}`, body, name, methodParams.get(`${name}.${m}`));
+  for (const [name, list] of functions) for (const f of list) add(`fn:${name}`, f.body, null, f.params);
 
   // Least fixed points: a method reaches a leaf (any path), and reaches one by a path with no check.
   const solve = (guardedCounts: boolean) => {
@@ -925,7 +1395,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     }
     return out;
   };
-  return { classes, keyEntries, unguarded: solve(true), reaches: solve(false), doorWrites, checkNames: definedNames, wrappers, leaves: ownLeaves };
+  return { classes, keyEntries, unguarded: solve(true), reaches: solve(false), doorWrites, declarations, wrappers: new Set(wrappers.keys()), leaves: ownLeaves };
 }
 
 const buildCredentialGraph = (files?: Parsed[]) => buildGraph(CREDENTIAL_RULES, files);
@@ -953,15 +1423,58 @@ const HUNT_EXPECTED_UNGUARDED = [
   'Cen10dHuntController.m12AccountIds', // M12 business.update({ bpAccountId, bpLocationId })
   'Cen10dHuntController.m13MetadataWipe', // M13 connectorStatus.update({ status: 'disconnected', metadata: {} })
   'Cen10dHuntController.m14MetaKeyDelete', // M14 delete meta.gsc; business.update({ metaData: meta })
+  // Round 3 (CM-1, CM-2, CM-3): the shapes the round 3 hunt passed through the reader (all 18 CEN cases green with them in the tree).
+  'Cen10dHuntController.r3g01InterfaceToken', // CM-2 g01 @Inject(TOKEN) store: <interface>; store.setCredentials
+  'Cen10dHuntController.r3g01bProviderToken', // CM-2 g01 @Inject(TOKEN) bound by { provide: TOKEN, useClass: X } to a writer
+  'Cen10dHuntController.r3g02CommonNameViaLocal', // CM-2 g02 const conns = this.channelConnections; conns.delete(...)
+  'Cen10dHuntController.r3g03CommonNameViaModuleRef', // CM-2 g03 this.moduleRef.get(ChannelConnectionService).update(...)
+  'Cen10dHuntController.r3g04EventConstant', // CM-2 g04 emit(CONST) -> @OnEvent(CONST) -> setCredentials
+  'Cen10dHuntController.r3g05UpdateManyAndReturn', // CM-2 g05 socialConnection.updateManyAndReturn({ data: { token } })
+  'Cen10dHuntController.r3g06NestedRelationWrite', // CM-2 g06 business.update({ data: { socialConns: { deleteMany: {} } } }) (the Business relation to SocialConnection)
+  'Cen10dHuntController.r3g07RawSqlConstant', // CM-2 g07 $executeRawUnsafe(SQL_CONST, ...)
+  'Cen10dHuntController.r3g08RawUpsertOnConflict', // CM-2 g08 INSERT ... ON CONFLICT DO UPDATE SET metadata = jsonb_set(..., '{encryptedCredentials}', ...)
+  'Cen10dHuntController.r3g09MetaAccountId', // CM-3 g09 metaData { wipayAccountNumber, paypalClientId }
+  'Cen10dHuntController.r3g10NoopCheckByName', // CM-1 a file-local no-op named assertConfigOwner
+  'Cen10dHuntController.r3g11VerifyStateIgnored', // CM-1 verifyState(state) whose null result gates nothing
+  'Cen10dHuntController.r3g12CheckOtherBusiness', // CM-1 settings admin checked on another business than the one written
+  'Cen10dHuntController.r3g13ConnectedLift', // CM-3 g13 connectorStatus.update({ status: 'connected' })
+  'Cen10dHuntController.r3g14ChannelHealthState', // CM-3 g14 channelConnection.updateMany({ healthState: 'Disabled' })
 ];
 const HUNT_EXPECTED_GUARDED = [
   'Cen10dHuntController.g1SettingsAdminCheck', // the M1 write after assertMemberModuleLevel(settings, admin)
   'Cen10dHuntController.g2SettingsAdminRoute', // the M5 write under an enforced settings admin scope
+  'Cen10dHuntController.r3t11VerifyStateGated', // the g11 write after `if (!state) throw` on the pinned verifyState's result
+  'Cen10dHuntController.r3t12CheckSameBusiness', // the g12 write after settings admin on the route's own :businessId
 ];
 function HUNT_SHAPES(): Parsed {
   const text = `
-import { Body, Controller, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
+
+export const CEN10D_CRED_STORE = 'CEN10D_CRED_STORE';
+export const CEN10D_BOUND_STORE = 'CEN10D_BOUND_STORE';
+export const CEN10D_BIND_EVENT = 'cen10d.r3.bind';
+const CEN10D_SET_TOKEN_SQL = 'UPDATE social_connections SET token = $1 WHERE business_id = $2';
+
+export interface Cen10dCredentialStore {
+  setCredentials(businessId: string, type: string, values: Record<string, string>): Promise<void>;
+}
+
+/** a no-op that carries a pinned check's name (round 3, CM-1) */
+function assertConfigOwner(_businessId: string, _actor: unknown): void {
+  return;
+}
+
+export class Cen10dBoundStore {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  async set(businessId: string, token: string) {
+    await this.prisma.client.socialConnection.updateMany({ where: { businessId }, data: { token } });
+  }
+}
+
+export const CEN10D_PROVIDERS = [{ provide: CEN10D_BOUND_STORE, useClass: Cen10dBoundStore }];
 
 @Controller('cen10d-hunt')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -972,7 +1485,109 @@ export class Cen10dHuntController {
     @Inject(ConnectorRegistryService) private readonly registry: ConnectorRegistryService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(CEN10D_CRED_STORE) private readonly store: Cen10dCredentialStore,
+    @Inject(CEN10D_BOUND_STORE) private readonly bound: unknown,
+    @Inject(ChannelConnectionService) private readonly channelConnections: ChannelConnectionService,
+    @Inject(CalendarService) private readonly calendar: CalendarService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  @Get('businesses/:businessId/r3g01')
+  async r3g01InterfaceToken(@Param('businessId') businessId: string, @Query('t') t: string) {
+    await this.store.setCredentials(businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3g01b')
+  async r3g01bProviderToken(@Param('businessId') businessId: string, @Query('t') t: string) {
+    await (this.bound as any).set(businessId, t);
+  }
+
+  @Get('businesses/:businessId/r3g02')
+  async r3g02CommonNameViaLocal(@Param('businessId') businessId: string, @Query('id') id: string) {
+    const conns = this.channelConnections;
+    await conns.delete(businessId, id);
+  }
+
+  @Get('businesses/:businessId/r3g03')
+  async r3g03CommonNameViaModuleRef(@Param('businessId') businessId: string, @Query('id') id: string, @Query('t') t: string) {
+    await this.moduleRef.get(ChannelConnectionService, { strict: false }).update(businessId, id, { token: t });
+  }
+
+  @Get('businesses/:businessId/r3g04')
+  r3g04EventConstant(@Param('businessId') businessId: string, @Query('t') t: string) {
+    this.events.emit(CEN10D_BIND_EVENT, { businessId, t });
+  }
+
+  @Get('businesses/:businessId/r3g05')
+  async r3g05UpdateManyAndReturn(@Param('businessId') businessId: string, @Query('t') t: string) {
+    await this.prisma.client.socialConnection.updateManyAndReturn({ where: { businessId }, data: { token: t } });
+  }
+
+  @Get('businesses/:businessId/r3g06')
+  async r3g06NestedRelationWrite(@Param('businessId') businessId: string) {
+    await this.prisma.client.business.update({ where: { id: businessId }, data: { socialConns: { deleteMany: {} } } });
+  }
+
+  @Get('businesses/:businessId/r3g07')
+  async r3g07RawSqlConstant(@Param('businessId') businessId: string, @Query('t') t: string) {
+    await this.prisma.client.$executeRawUnsafe(CEN10D_SET_TOKEN_SQL, t, businessId);
+  }
+
+  @Get('businesses/:businessId/r3g08')
+  async r3g08RawUpsertOnConflict(@Param('businessId') businessId: string, @Query('t') t: string) {
+    await this.prisma.client.$executeRaw\`INSERT INTO connector_statuses (id, business_id, connector_type, status, updated_at) VALUES (gen_random_uuid()::text, \${businessId}, 'shopify', 'connected', now()) ON CONFLICT (business_id, connector_type) DO UPDATE SET metadata = jsonb_set(coalesce(connector_statuses.metadata, '{}'::jsonb), '{encryptedCredentials}', to_jsonb(\${t}::text))\`;
+  }
+
+  @Get('businesses/:businessId/r3g09')
+  async r3g09MetaAccountId(@Param('businessId') businessId: string, @Query('acct') acct: string) {
+    const row = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { metaData: true } });
+    const meta = (row?.metaData as Record<string, unknown>) ?? {};
+    await this.prisma.client.business.update({ where: { id: businessId }, data: { metaData: { ...meta, wipayAccountNumber: acct, paypalClientId: acct } } });
+  }
+
+  @Get('businesses/:businessId/r3g10')
+  async r3g10NoopCheckByName(@Param('businessId') businessId: string, @Query('t') t: string, @Req() req: any) {
+    assertConfigOwner(businessId, req.user);
+    await this.credentials.setCredentials(businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3g11')
+  async r3g11VerifyStateIgnored(@Param('businessId') businessId: string, @Query('state') state: string, @Query('t') t: string) {
+    this.calendar.verifyState(state);
+    await this.credentials.setCredentials(businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3t11')
+  async r3t11VerifyStateGated(@Query('state') state: string, @Query('t') t: string) {
+    const parsed = this.calendar.verifyState(state);
+    if (!parsed) throw new Error('invalid state');
+    await this.credentials.setCredentials(parsed.businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3g12')
+  async r3g12CheckOtherBusiness(@Param('businessId') businessId: string, @Query('other') other: string, @Query('t') t: string, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, other, req.user, 'settings', 'admin');
+    await this.credentials.setCredentials(businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3t12')
+  async r3t12CheckSameBusiness(@Param('businessId') businessId: string, @Query('t') t: string, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    await this.credentials.setCredentials(businessId, 'shopify', { shopDomain: 'x', accessToken: t });
+  }
+
+  @Get('businesses/:businessId/r3g13')
+  async r3g13ConnectedLift(@Param('businessId') businessId: string) {
+    await this.prisma.client.connectorStatus.update({
+      where: { businessId_connectorType: { businessId, connectorType: 'stripe' } },
+      data: { status: 'connected', connectedAt: new Date() },
+    });
+  }
+
+  @Get('businesses/:businessId/r3g14')
+  async r3g14ChannelHealthState(@Param('businessId') businessId: string, @Query('id') id: string) {
+    await this.prisma.client.channelConnection.updateMany({ where: { id, businessId }, data: { healthState: 'Disabled' } });
+  }
 
   @Post('businesses/:businessId/m1')
   async m1SetCredentials(@Param('businessId') businessId: string, @Body() body: any) {
@@ -1072,6 +1687,11 @@ export class Cen10dHuntController {
 
 export class Cen10dHuntListener {
   constructor(@Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService) {}
+
+  @OnEvent(CEN10D_BIND_EVENT)
+  async onBindConst(payload: { businessId: string; t: string }) {
+    await this.credentials.setCredentials(payload.businessId, 'shopify', { shopDomain: 'x', accessToken: payload.t });
+  }
 
   @OnEvent('cen10d.bind')
   async onBind(payload: { businessId: string; values: Record<string, string> }) {
@@ -1253,7 +1873,11 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       if (!why.trim()) problems.push(`${door} names no reason`);
       if (!(g.doorWrites.get(door) ?? []).length) problems.push(`${door} is not a credential writer (any more): drop it from REFRESH_DOORS`);
     }
-    for (const name of Object.keys(CREDENTIAL_CHECKS)) if (!g.checkNames.has(name)) problems.push(`CREDENTIAL_CHECKS names ${name}, which no source defines`);
+    // Round 3 (CM-1): a check is its pinned declarations; each must exist (a renamed or moved check fails here, never silently by name).
+    for (const [name, rule] of Object.entries(CREDENTIAL_CHECKS)) {
+      if (!rule.decl.length) problems.push(`CREDENTIAL_CHECKS ${name} pins no declaration`);
+      for (const d of rule.decl) if (!g.declarations.has(d)) problems.push(`CREDENTIAL_CHECKS ${name} pins ${d}, which no source declares`);
+    }
     expect(problems).toEqual([]);
   });
 
@@ -1277,7 +1901,7 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     const problems = g.keyEntries.filter((k) => g.unguarded.has(k)).map((k) => g.unguarded.get(k)!.join(' -> '));
     expect(problems).toEqual([]);
   });
-  it('[CEN-10d] (round 2, CW-5) guards the guard: the reader reports, as unguarded, a membership-only handler for every credential-writer shape the round 2 hunt passed through it, and not its settings-admin twin', () => {
+  it('[CEN-10d] (round 2, CW-5; round 3, CM-1..CM-3) guards the guard: the reader reports, as unguarded, a membership-only handler for every credential-writer shape the round 2 and round 3 hunts passed through it, and not its guarded twin', () => {
     const synthetic = HUNT_SHAPES();
     const g = buildCredentialGraph([...parsed(), synthetic]);
     const hunt = routes([synthetic]);
@@ -1340,6 +1964,26 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(problems).toEqual([]);
   });
 
+  it('[CEN-10h] (round 3, CM-3 g13) a status door lifts no disconnect: it still writes a status lift, and its connector\'s disconnect removes the credentials (a credential write that is no deactivation, or clearCredentials) or its connectedness is read from the credentials, never from the stored status', () => {
+    const g = credentialGraph();
+    const problems: string[] = [];
+    for (const [door, { connector, why }] of Object.entries(STATUS_DOORS)) {
+      if (!why.trim()) problems.push(`${door} names no reason`);
+      if (!(g.doorWrites.get(door) ?? []).some((w) => /status lift/.test(w))) problems.push(`${door} writes no status lift (any more): drop it from STATUS_DOORS`);
+      const cls = g.classes.get(connector);
+      const disconnect = cls?.methods.get('disconnect');
+      const health = cls?.methods.get('healthCheck');
+      if (!cls || !disconnect || !health) { problems.push(`${door}: ${connector} has no disconnect and healthCheck`); continue; }
+      const clears = (g.leaves.get(`${connector}.disconnect`) ?? []).some((l) => !/\((deactivate|status lift)\)/.test(l)) || /\bclearCredentials\(/.test(textOf(disconnect));
+      const readsCredentials = !/\bstored\??\.status\b|\bstatus\s*===\s*['"]connected['"]/.test(textOf(health));
+      if (!clears && !readsCredentials) problems.push(`${door}: ${connector}'s disconnect keeps the credentials and its health reads the stored status, so this write lifts a disconnect`);
+    }
+    // guards the guard: WhatsApp's health reads the stored status (its disconnect is a record), so it could never be pinned here
+    const wa = g.classes.get('WhatsAppConnector')?.methods.get('healthCheck');
+    expect(wa && /\bstored\??\.status\b/.test(textOf(wa))).toBe(true);
+    expect(problems).toEqual([]);
+  });
+
   it('[CEN-11] (round 2, CLASS A: WHP-1, WHP-2) every route (member or public, any verb) and every KEY module action that reaches a send of the business\'s people or money rows to an account outside the server reaches it only through the export read check (or the owner rule) that dominates the call, or the send is a pinned destination every reader of those rows may receive', () => {
     const g = exportGraph();
     const exports = [...g.leaves].filter(([, l]) => l.length).map(([id]) => id);
@@ -1351,14 +1995,22 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       'XeroConnector.pushCustomer',
       'MailchimpConnector.subscribeContacts',
       'KlaviyoConnector.subscribeContacts',
+      // round 3: the Outlook contacts push (WPH2-1) and a Drive share of a stored file (WPH2-2)
+      'OutlookContactsSyncService.pushContact',
+      'GoogleDriveService.shareFile',
     ]));
     for (const key of ['AccountingController.pushInvoice', 'AccountingController.pushCustomers', 'MarketingSyncController.pushContacts']) expect(g.reaches.has(key), key).toBe(true);
+    // round 3: every edit of a contact reaches the Outlook push (contact.updated -> ContactSyncService.onContactUpdated), and the Drive share route reaches its grant
+    for (const key of ['CrmController.updateContact', 'GoogleDriveController.share']) expect(g.reaches.has(key), key).toBe(true);
     const problems: string[] = [];
     for (const [door, why] of Object.entries(OUTBOUND_DESTINATIONS)) {
       if (!why.trim()) problems.push(`${door} names no reason`);
       if (!(g.doorWrites.get(door) ?? []).length) problems.push(`${door} sends no records out (any more): drop it from OUTBOUND_DESTINATIONS`);
     }
-    for (const name of Object.keys(EXPORT_CHECKS)) if (!g.checkNames.has(name)) problems.push(`EXPORT_CHECKS names ${name}, which no source defines`);
+    for (const [name, rule] of Object.entries(EXPORT_CHECKS)) {
+      if (!rule.decl.length) problems.push(`EXPORT_CHECKS ${name} pins no declaration`);
+      for (const d of rule.decl) if (!g.declarations.has(d)) problems.push(`EXPORT_CHECKS ${name} pins ${d}, which no source declares`);
+    }
     const rows = new Map(censusRows().map((r) => [r.key, r]));
     for (const r of all) {
       const path = g.unguarded.get(r.key);
@@ -1380,12 +2032,32 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       : new Set<string>();
     if (!existsSync(exportFile)) problems.push('core/connectors/connector-exports.ts (CONNECTOR_EXPORT_READS) does not exist');
     const exportClasses = new Set([...g.leaves].filter(([id, l]) => l.length && !Object.hasOwn(OUTBOUND_DESTINATIONS, id)).map(([id]) => id.slice(0, id.lastIndexOf('.'))));
+    const byKey = new Map(all.map((r) => [r.key, r]));
     for (const cls of exportClasses) {
       const file = g.classes.get(cls)?.file;
       const text = file ? readFileSync(join(SRC, file), 'utf8') : '';
-      const type = /const CONNECTOR_TYPE\s*=\s*'([a-z_]+)'/.exec(text)?.[1] ?? /\btype:\s*'([a-z_]+)'/.exec(text)?.[1];
-      if (!type) { problems.push(`${cls} exports records and is no connector: its route rule is CEN-11's alone`); continue; }
-      if (!declared.has(type)) problems.push(`${cls} (${type}) exports records and CONNECTOR_EXPORT_READS does not name its reads`);
+      const account = Object.hasOwn(EXPORT_ACCOUNTS, cls) ? EXPORT_ACCOUNTS[cls] : undefined;
+      const type = account?.type ?? /const CONNECTOR_TYPE\s*=\s*'([a-z_]+)'/.exec(text)?.[1] ?? /\btype:\s*'([a-z_]+)'/.exec(text)?.[1];
+      if (!type) { problems.push(`${cls} exports records and is neither a connector nor an EXPORT_ACCOUNTS entry naming the account it sends to and the routes that bind it`); continue; }
+      if (!account) {
+        if (!declared.has(type)) problems.push(`${cls} (${type}) exports records and CONNECTOR_EXPORT_READS does not name its reads`);
+        continue;
+      }
+      // Round 3 (WPH2-1, WPH2-2): a service that sends to an account bound elsewhere (an OAuth consent): the routes that bind it
+      // check the binder's reads of what it receives (assertMayBindExport, with its type in CONNECTOR_EXPORT_READS) or the owner rule.
+      for (const bind of account.binds) {
+        const body = byKey.get(bind)?.body ?? '';
+        if (!byKey.has(bind)) problems.push(`${cls}: its account's binding route ${bind} is not a route`);
+        else if (/\bassertGoogleConnectOwner\b/.test(body)) continue;
+        else if (!/\bassertMayBindExport\b/.test(body)) problems.push(`${cls} (${type}): ${bind} binds the account it sends to without checking the binder reads what it receives (assertMayBindExport)`);
+        else if (!declared.has(type)) problems.push(`${cls} (${type}) exports records and CONNECTOR_EXPORT_READS does not name its reads`);
+      }
+      // the callback that completes the binding records the binder, the receiver every later send is checked for
+      if (account.recordsBinder) {
+        const [c, m] = account.recordsBinder.split('.');
+        const body = g.classes.get(c)?.methods.get(m);
+        if (!body || !/\bboundBy\b/.test(textOf(body))) problems.push(`${cls} (${type}): ${account.recordsBinder} does not record the binder (metadata.boundBy)`);
+      }
     }
     const save = all.find((r) => r.key === 'ConnectorController.saveCredentials');
     if (!/\bassertMayBindExport\b/.test(save?.body ?? '')) problems.push('ConnectorController.saveCredentials does not check the export reads of the connector it binds (assertMayBindExport)');
