@@ -1,0 +1,61 @@
+snapshot:
+  repository: SaCH-PRO/KEYFLOWOS
+  main_sha: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+  task_head_sha: 1b196d1c74c808baaf0606b608e7fa23da571054
+  packet_id: KF-EXEC-TENANT-001
+  generated_from:
+    - source: historical packet
+      revision: KF-EXEC-TENANT-001
+task:
+  objective: establish membership-first tenant genesis without guessing ambiguous legacy state
+  change_classes:
+    - TENANT_ISOLATION_CHANGE
+    - DATA_OWNERSHIP_CHANGE
+    - AUTHORITY_MIGRATION
+    - BACKFILL_MIGRATION
+  stop_conditions:
+    - ambiguous legacy ownership cannot be deterministically resolved
+    - incomplete tenant-source reads
+authority:
+  current:
+    source: historical repository evidence
+    identifier: KF-EXEC-TENANT-001
+    revision: e52fcbfad43d2cc7f844dfb23386ee61a40f8d2a
+    freshness: CURRENT
+  conflicts: []
+semantic_context:
+  owners:
+    - tenant membership
+    - identity
+  execution_paths:
+    - authenticated creation -> Business + founding Membership
+    - discovery -> Membership-first query + owner compatibility arm
+    - backfill -> classify -> deterministic repair only
+  invariants:
+    - claim: ambiguous legacy rows are reported rather than guessed
+      source: TENANT packet
+      revision: 1b196d1c74c808baaf0606b608e7fa23da571054
+      authority_class: HISTORICAL_EVIDENCE
+      freshness: CURRENT
+  hotspots:
+    - TENANT_AUTHORITY_DATA_BOUNDARY
+  historical_failure_classes:
+    - PAGINATION_COMPLETENESS
+    - DATA_DISCLOSURE
+    - MOCK_FIDELITY
+    - MIGRATION_BACKFILL
+    - AUTHORITY_IDENTITY
+    - ARCHITECTURE_MAP_DRIFT
+unresolved:
+  contradictions: []
+  unknowns: []
+  missing_required_sources: []
+provenance:
+  claims: []
+excluded:
+  sources: []
+research_context:
+  items:
+    - source: The Programmer's Brain
+      status: EXTRACTING
+      contribution: distinguish retrieval failure from overload and representation failure

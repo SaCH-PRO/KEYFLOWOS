@@ -1,0 +1,119 @@
+schema_version: 1
+artifact: KEYFLOWOS_CONTEXT_BUNDLE
+authority: RESEARCH_ONLY
+description: >
+  Machine-readable candidate contract for a deterministic, provenance-rich
+  task context projection. This artifact is not a source of truth and must
+  never silently resolve conflicts among canonical sources.
+
+health_values:
+  - VALID
+  - DEGRADED
+  - INVALID
+
+authority_classes:
+  - EXECUTION_AUTHORITY
+  - IMPLEMENTATION_TRUTH
+  - CANONICAL_ARCHITECTURE
+  - DERIVED_PROJECTION
+  - HISTORICAL_EVIDENCE
+  - RESEARCH_ONLY
+
+freshness_values:
+  - CURRENT
+  - STALE
+  - SUPERSEDED
+  - UNVERIFIABLE
+
+required_fields:
+  - schema_version
+  - generator
+  - snapshot
+  - health
+  - task
+  - authority
+  - semantic_context
+  - proof_context
+  - unresolved
+  - provenance
+  - excluded
+
+contract:
+  schema_version: integer
+  generator:
+    name: string
+    version: string
+    deterministic: boolean
+  snapshot:
+    repository: string
+    main_sha: string
+    task_head_sha: string_or_null
+    packet_id: string_or_null
+    generated_from:
+      - source
+      - revision
+  health:
+    status: VALID|DEGRADED|INVALID
+    reasons: list[string]
+  task:
+    objective: string
+    change_classes: list[string]
+    allowed_scope: list[string]
+    prohibited_scope: list[string]
+    stop_conditions: list[string]
+  authority:
+    current:
+      source: string
+      identifier: string
+      revision: string_or_null
+      freshness: CURRENT|STALE|SUPERSEDED|UNVERIFIABLE
+    conflicts: list[provenanced_claim]
+  semantic_context:
+    owners: list[string]
+    journeys: list[string]
+    kernels: list[string]
+    execution_paths: list[string]
+    invariants: list[provenanced_claim]
+    hotspots: list[string]
+    historical_failure_classes: list[string]
+  proof_context:
+    reachability_checks: list[string]
+    fastest_falsification: list[string]
+    semantic_proofs: list[string]
+    adversarial_proofs: list[string]
+    final_admission: list[string]
+  unresolved:
+    contradictions: list[provenanced_claim]
+    unknowns: list[provenanced_claim]
+    missing_required_sources: list[string]
+  provenance:
+    claims: list[provenanced_claim]
+  excluded:
+    sources:
+      - source: string
+        revision: string_or_null
+        reason: IRRELEVANT|STALE|SUPERSEDED|TOO_BROAD|DUPLICATE
+  research_context:
+    optional: true
+    items:
+      - source: string
+        status: string
+        contribution: string
+
+provenanced_claim:
+  claim: string
+  source: string
+  revision: string_or_null
+  authority_class: EXECUTION_AUTHORITY|IMPLEMENTATION_TRUTH|CANONICAL_ARCHITECTURE|DERIVED_PROJECTION|HISTORICAL_EVIDENCE|RESEARCH_ONLY
+  freshness: CURRENT|STALE|SUPERSEDED|UNVERIFIABLE
+  confidence: number_or_null
+
+invariants:
+  - identical input snapshot and generator version MUST yield semantically identical output
+  - research-only material MUST NOT be promoted to canonical authority by projection
+  - unresolved source conflicts MUST remain visible
+  - missing required authority MUST make health DEGRADED or INVALID
+  - derived projections MUST NOT outrank their source authority
+  - excluded sources MUST be auditable
+  - the bundle MUST identify exact source revisions where available
+  - bundle validity MUST NOT imply implementation correctness or final admission

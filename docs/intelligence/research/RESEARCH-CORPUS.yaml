@@ -1,0 +1,304 @@
+schema_version: 1
+programme: KEYFLOWOS_MULTI_LENS_RND
+status: ACTIVE
+authority: RESEARCH_ONLY
+promotion_requires:
+  - repository_pressure_test
+  - anti_duplication_check
+  - standards_frontier_pressure_test
+  - canonical_finding_or_recommendation
+  - backward_reaudit
+  - convergence
+
+sources:
+  - id: BOOK-WEINBERG-PSYCHOLOGY-COMPUTER-PROGRAMMING
+    title: The Psychology of Computer Programming
+    author: Gerald M. Weinberg
+    first_published: 1971
+    preferred_edition: Silver Anniversary Edition
+    lens: social_and_organizational_cognition
+    status: REPO_PRESSURE_TESTED
+    primary_questions:
+      - How do programmers and teams produce software reality?
+      - How do ego, communication, environment, tools and feedback affect quality?
+      - How should multi-agent development avoid private competing truths?
+
+  - id: BOOK-HERMANS-PROGRAMMERS-BRAIN
+    title: The Programmer's Brain
+    author: Felienne Hermans
+    published: 2021
+    lens: individual_cognition
+    status: EXTRACTING
+    primary_questions:
+      - How do working memory, long-term memory and cognitive load affect code comprehension?
+      - How should KEY distinguish missing knowledge, retrieval failure, overload and reasoning failure?
+      - How should context be chunked and presented to agents?
+
+  - id: BOOK-MARTIN-CLEAN-CODE
+    title: Clean Code
+    author: Robert C. Martin
+    published: 2008
+    lens: local_code_design
+    status: QUEUED
+    caution: Treat prescriptions as hypotheses; classify empirical support and context dependence.
+
+  - id: BOOK-KLEPPMANN-DDIA
+    title: Designing Data-Intensive Applications
+    author: Martin Kleppmann
+    published: 2017
+    lens: distributed_state_and_truth
+    status: TRANSLATED
+
+  - id: BOOK-SICP
+    title: Structure and Interpretation of Computer Programs
+    authors:
+      - Harold Abelson
+      - Gerald Jay Sussman
+      - Julie Sussman
+    lens: computational_abstraction_and_interpretation
+    status: QUEUED
+
+  - id: BOOK-NORMAN-DESIGN-EVERYDAY-THINGS
+    title: The Design of Everyday Things
+    author: Don Norman
+    first_published: 1988
+    lens: human_system_interaction
+    status: QUEUED
+
+  - id: BOOK-KAHNEMAN-THINKING-FAST-SLOW
+    title: Thinking, Fast and Slow
+    author: Daniel Kahneman
+    published: 2011
+    lens: judgment_and_decision_making
+    status: QUEUED
+    caution: Re-verify important empirical claims against current replication and methodological literature before adoption.
+
+  - id: BOOK-BROOKS-MYTHICAL-MAN-MONTH
+    title: The Mythical Man-Month
+    author: Frederick P. Brooks Jr.
+    first_published: 1975
+    lens: software_project_dynamics
+    status: QUEUED
+
+  - id: BOOK-PEOPLEWARE
+    title: Peopleware: Productive Projects and Teams
+    authors:
+      - Tom DeMarco
+      - Timothy Lister
+    first_published: 1987
+    lens: team_environment_and_productivity
+    status: QUEUED
+
+  - id: BOOK-KERNIGHAN-PIKE-PRACTICE-PROGRAMMING
+    title: The Practice of Programming
+    authors:
+      - Brian Kernighan
+      - Rob Pike
+    published: 1999
+    lens: pragmatic_engineering
+    status: QUEUED
+
+  - id: BOOK-ALGORITHMS-TO-LIVE-BY
+    title: Algorithms to Live By
+    authors:
+      - Brian Christian
+      - Tom Griffiths
+    published: 2016
+    lens: computational_decision_policy
+    status: QUEUED
+
+  - id: BOOK-TORNHILL-SOFTWARE-DESIGN-XRAYS
+    title: Software Design X-Rays
+    author: Adam Tornhill
+    published: 2018
+    lens: behavioral_code_analysis
+    status: TRANSLATED
+
+  - id: BOOK-HOFSTADTER-GEB
+    title: "Gödel, Escher, Bach: An Eternal Golden Braid"
+    author: Douglas R. Hofstadter
+    lens: self_reference_formal_systems_emergence
+    status: QUEUED
+
+  - id: BOOK-HOFSTADTER-STRANGE-LOOP
+    title: I Am a Strange Loop
+    author: Douglas R. Hofstadter
+    lens: self_reference_identity_emergent_cognition
+    status: QUEUED
+
+  - id: BOOK-LOGICOMIX
+    title: "Logicomix: An Epic Search for Truth"
+    authors: [Apostolos Doxiadis, Christos H. Papadimitriou]
+    lens: formal_logic_foundations_and_human_reasoning
+    status: QUEUED
+
+  - id: BOOK-LITTLE-PROVER
+    title: The Little Prover
+    authors: [Daniel P. Friedman, Carl Eastlund]
+    published: 2015
+    lens: formal_proof_program_correctness
+    status: QUEUED
+    evidence_note: MIT Press describes it as an introduction to inductive proofs about computer programs using a simple proof assistant.
+
+  - id: BOOK-HARDY-MATHEMATICIANS-APOLOGY
+    title: A Mathematician's Apology
+    author: G. H. Hardy
+    first_published: 1940
+    lens: mathematical_aesthetics_creativity_and_design
+    status: QUEUED
+
+  - id: BOOK-BRADEN-WISDOM-CODES
+    title: "The Wisdom Codes: Ancient Words to Rewire Our Brains and Heal Our Hearts"
+    author: Gregg Braden
+    published: 2020
+    lens: comparative_wisdom_language_and_cognition
+    status: QUEUED
+    evidence_class: SPECULATIVE_OR_CONTESTED
+    caution: Preserve as a source of hypotheses/metaphors; independently verify neuroscience and causal claims before any technical adoption.
+
+  - id: BOOK-JAMES-TAO-PROGRAMMING
+    title: The Tao of Programming
+    author: Geoffrey James
+    lens: philosophy_metaphor_and_programming_culture
+    status: QUEUED
+    evidence_class: PHILOSOPHICAL_METAPHOR
+
+  - id: BOOK-TOLOOEE-FIBONACCI-CODEX
+    title: "The Fibonacci Codex: Ascending the Spiral Staircase to God"
+    author: Hossein Tolooee
+    stated_publication: 2025
+    lens: sacred_geometry_numerical_symbolism
+    status: SOURCE_VERIFICATION_REQUIRED
+    evidence_class: SPECULATIVE_OR_METAPHORICAL
+    caution: Bibliographic identity and substantive claims require verification before extraction.
+
+  - id: BOOK-HAIDT-HAPPINESS-HYPOTHESIS
+    title: "The Happiness Hypothesis: Ancient Wisdom Meets Modern Psychology"
+    author: Jonathan Haidt
+    lens: comparative_wisdom_moral_psychology_wellbeing
+    status: QUEUED
+    caution: Re-verify material empirical psychology claims before technical adoption.
+
+  - id: BOOK-SCHNEIDER-CONSTRUCTING-UNIVERSE
+    title: "A Beginner's Guide to Constructing the Universe"
+    author: Michael S. Schneider
+    lens: mathematical_archetypes_geometry_and_pattern
+    status: QUEUED
+    evidence_class: MIXED_MATHEMATICAL_AND_SYMBOLIC
+    caution: Separate demonstrable mathematics from symbolic, metaphysical, or sacred-geometry interpretation.
+
+  - id: TEXT-PANINI-ASHTADHYAYI
+    title: Ashtadhyayi
+    author: Panini
+    lens: generative_grammar_rule_systems_metalanguage
+    status: QUEUED
+    evidence_class: HISTORICAL_PRIMARY_TEXT
+    caution: Study genuine rule-system properties and modern formal-language comparisons; do not assume claims about nervous-system optimization or spiritual cognitive states.
+
+  - id: TEXT-I-CHING
+    title: I Ching / Book of Changes
+    lens: combinatorial_symbol_system_and_historical_binary_comparison
+    status: QUEUED
+    evidence_class: HISTORICAL_AND_COMPARATIVE
+    caution: Distinguish the historical Leibniz/I Ching relationship from claims that the text is literally a modern binary computer or psychological state machine.
+
+  - id: TEXT-SEFER-YETZIRAH
+    title: Sefer Yetzirah
+    lens: historical_symbolic_cosmology_letters_numbers_and_combinatorics
+    status: QUEUED
+    evidence_class: RELIGIOUS_MYSTICAL_PRIMARY_TEXT
+    caution: Treat computational analogies as comparative models unless independently supported.
+
+  - id: BOOK-POWER-OF-KABBALAH
+    title: "The Power of Kabbalah: Technology for the Soul"
+    author: Yehuda Berg
+    lens: spiritual_self_help_using_technology_metaphors
+    status: QUEUED
+    evidence_class: SPIRITUAL_METAPHOR
+    caution: Technology/source-code language is metaphorical and must not be represented as evidence of computational laws of reality.
+
+  - id: SOURCE-ALGORITHMIC-KABBALAH-AI-ZOHAR
+    title: "Algorithmic Kabbalah: AI Through the Zohar"
+    lens: kabbalah_ai_comparative_metaphor
+    status: SOURCE_VERIFICATION_REQUIRED
+    evidence_class: UNVERIFIED_SOURCE
+    caution: Do not attribute claims or treat as a published book until bibliographic identity is independently verified.
+
+  - id: BOOK-THOMAS-HUNT-PRAGMATIC-PROGRAMMER
+    title: The Pragmatic Programmer
+    authors:
+      - David Thomas
+      - Andrew Hunt
+    lens: developer_efficiency_pragmatism_automation_and_feedback
+    status: EXTRACTING
+    primary_questions:
+      - Which practices reduce repeated mental work and shorten feedback loops?
+      - How can tracer-bullet development, automation, orthogonality, contracts and fail-fast behavior reduce rework in KEYFLOWOS?
+      - Which practices can be operationalized in the agent control plane rather than left as human advice?
+    caution: Treat slogans such as DRY and orthogonality as context-dependent design heuristics, not absolute rules.
+
+  - id: BOOK-CSIKSZENTMIHALYI-FLOW
+    title: "Flow: The Psychology of Optimal Experience"
+    author: Mihaly Csikszentmihalyi
+    lens: attention_flow_and_work_state
+    status: QUEUED
+    primary_questions:
+      - What conditions support sustained high-quality problem solving?
+      - What is the agent-system analogue of interruption, unclear goals, delayed feedback and task-skill mismatch?
+      - Can development orchestration reduce cognitive switching and preserve momentum?
+    caution: Human flow-state research may inform developer workflow design; do not anthropomorphize AI agents as literally experiencing flow.
+
+  - id: BOOK-OUSTERHOUT-PHILOSOPHY-SOFTWARE-DESIGN
+    title: A Philosophy of Software Design
+    author: John Ousterhout
+    lens: complexity_management_deep_modules_and_interface_design
+    status: EXTRACTING
+    primary_questions:
+      - Where can KEYFLOWOS hide legitimate complexity behind small stable semantic interfaces?
+      - Which modules are shallow wrappers that increase cognitive load?
+      - How can information hiding and deep modules reduce agent context requirements?
+    caution: Pressure-test module depth and interface simplicity against domain ownership and observability; hiding complexity must not hide critical truth.
+
+  - id: BOOK-FOWLER-REFACTORING
+    title: "Refactoring: Improving the Design of Existing Code"
+    author: Martin Fowler
+    lens: incremental_design_change_and_safe_refactoring
+    status: TRANSLATED
+    primary_questions:
+      - How can large architecture changes be decomposed into behavior-preserving transformations?
+      - Which refactoring patterns can be safely automated by coding agents?
+      - How should tests, characterization and rollback evidence gate refactors?
+
+  - id: BOOK-BECK-TDD-BY-EXAMPLE
+    title: "Test-Driven Development: By Example"
+    author: Kent Beck
+    lens: test_driven_feedback_and_incremental_design
+    status: TRANSLATED
+    primary_questions:
+      - Where does test-first development shorten feedback and force clearer contracts?
+      - Which KEYFLOWOS changes benefit from TDD versus characterization-first or integration-first proof?
+      - How do we prevent green tests from becoming fake evidence?
+    caution: TDD can improve feedback and design discipline but does not guarantee correctness, completeness, or production safety.
+
+expansion_protocol:
+  default_status: QUEUED
+  duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
+  source_rule: Prefer primary text or authoritative edition metadata for claims about a book.
+  citation_rule: Record chapter/page/section provenance when extracting source claims.
+
+
+  - id: RND-FICTIONAL-INTELLIGENCE-GENOME
+    title: KEY Fictional Intelligence Genome Programme
+    lens: fictional_speculative_intelligence_architecture
+    status: CONVERGING_AND_REPO_PRESSURE_TESTING
+    evidence_class: DESIGN_HYPOTHESIS_GENERATOR
+    state_file: docs/intelligence/research/fictional-intelligence-genome/CURRENT-STATE.md
+    convergence_file: docs/intelligence/research/fictional-intelligence-genome/GENOME-V0.1-CONVERGENCE.md
+    repository_pressure_test: docs/intelligence/research/fictional-intelligence-genome/GENOME-V0.1-REPO-PRESSURE-TEST.md
+    contribution_ledger: docs/intelligence/research/fictional-intelligence-genome/RESEARCH-CONTRIBUTION-ADOPTION-LEDGER.md
+    primary_questions:
+      - Which recurring mechanisms across fictional intelligence systems are useful design hypotheses for KEY?
+      - Which mechanisms converge independently across references and current repository evidence?
+      - Which failure modes belong in KEY's anti-genome?
+      - Which candidates survive repository pressure testing without duplicating existing primitives?
+    caution: Fictional canon is evidence only of the fictional mechanism. Engineering adoption requires independent real-world evidence, repository pressure testing, anti-duplication review, and canonical promotion.
