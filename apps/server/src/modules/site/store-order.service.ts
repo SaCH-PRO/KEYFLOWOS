@@ -1267,6 +1267,12 @@ export class StoreOrderService {
     // The protection itself is unchanged. A product that IS tracked still
     // cannot oversell, still needs a warehouse and a stock row, and still
     // rolls the checkout back — see the loop below.
+    //
+    // W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): only the business's
+    // own stock rows count as stock kept for the product. A row of another
+    // business (a planted row on this product, left for an operator by D-137)
+    // is not this business's stock: counted, it made a product with no
+    // inventoryMode tracked and the decrement below then sold from that row.
     const productIds = order.items.map((i) => i.productId);
     const products = await this.prisma.client.product.findMany({
       where: { id: { in: productIds } },
@@ -1275,7 +1281,7 @@ export class StoreOrderService {
         inventoryMode: true,
         outOfStockBehavior: true,
         name: true,
-        _count: { select: { inventoryStocks: true } },
+        _count: { select: { inventoryStocks: { where: { businessId: order.businessId } } } },
       },
     });
     const productMode = new Map(
@@ -1381,6 +1387,17 @@ export class StoreOrderService {
       //    fail the entire checkout (rolling back invoice + payment) so
       //    we never sell stock we can't fulfill. Untracked / virtual
       //    products are explicitly skipped per their inventoryMode.
+      //
+      //    W11-CHECKOUT-PAIR-SCOPE (W11SEAM-SM-CR-1, D-137): the row read and
+      //    written is the business's own row of the (product, default
+      //    warehouse) pair, the one lockStockRowsInOrder locked above. The pair
+      //    is unique across every business, so a planted row of another
+      //    business can hold it; read by the pair alone, that row was
+      //    decremented without its lock, given this business's 'sale' movement,
+      //    and costed by no COGS (onProductSold reads this business's rows). A
+      //    pair held by another business's row is no stock of this business:
+      //    the same refusal as a missing own row, and the other row is never
+      //    written.
       const decrementedProductIds: string[] = [];
       const trackedItems = input.stockMovesOnFulfilment
         ? []
@@ -1399,12 +1416,11 @@ export class StoreOrderService {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
           continue;
         }
-        const stock = await tx.inventoryStock.findUnique({
+        const stock = await tx.inventoryStock.findFirst({
           where: {
-            productId_warehouseId: {
-              productId: item.productId,
-              warehouseId: defaultWarehouse!.id,
-            },
+            businessId: order.businessId,
+            productId: item.productId,
+            warehouseId: defaultWarehouse!.id,
           },
         });
         if (!stock) {
