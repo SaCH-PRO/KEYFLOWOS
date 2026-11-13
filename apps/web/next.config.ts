@@ -282,7 +282,10 @@ const nextConfig: NextConfig = {
     // Production: Next.js/Vercel owns Cache-Control for hashed /_next/static
     // assets. Overriding it here produces a Next.js warning and can interfere
     // with framework-managed caching semantics, so only security headers are
-    // applied explicitly.
+    // applied explicitly. Next's own server (`next start` and the standalone
+    // server.js, which the VPS image runs behind Caddy) already sends
+    // "public, max-age=31536000, immutable" for files under /_next/static
+    // when no custom Cache-Control is set, so long caching is kept.
     if (isProd) {
       return [
         {
