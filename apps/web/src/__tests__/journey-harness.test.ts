@@ -13,6 +13,11 @@
  *   - .github/workflows/e2e-live.yml runs both projects in the ai-disabled and
  *     key-disabled variants (ai-on only on dispatch, in its own environment),
  *     with release0-live.spec.ts in every variant, against the production build.
+ *   - Review repair (SEC-GH-1, SEC-GH-2, GH-COR-2, GH-COR-1, GH-COR-4): every
+ *     browser context a journey makes is watched, not only the owner's page
+ *     (off-host, 5xx, and release0-live.spec.ts's "only the selected business"
+ *     rule, ported); a customer's context starts with no session; Release 0's
+ *     results and verdict stay apart from the journeys' RED report.
  *
  * The harness modules are loaded per test, so a missing one fails the cases
  * that need it and not the file.
@@ -213,10 +218,22 @@ describe("GATE-HARNESS: 3G timing and KEY UI", () => {
 
 describe("GATE-HARNESS: e2e-live.yml", () => {
   const WORKFLOW = path.join(ROOT, ".github/workflows/e2e-live.yml");
-  type Step = { name?: string; run?: string; if?: string; env?: Record<string, string> };
+  type Step = {
+    name?: string;
+    id?: string;
+    run?: string;
+    uses?: string;
+    if?: string;
+    env?: Record<string, string>;
+    with?: Record<string, string>;
+    "continue-on-error"?: string | boolean;
+  };
   type Job = { if?: string; environment?: string; strategy?: { matrix?: { variant?: string[] } }; env?: Record<string, string>; steps?: Step[] };
 
-  async function workflow(): Promise<{ text: string; doc: { on: Record<string, { inputs?: Record<string, { type?: string }> }>; jobs: Record<string, Job> } }> {
+  async function workflow(): Promise<{
+    text: string;
+    doc: { on: Record<string, { inputs?: Record<string, { type?: string; default?: unknown }> }>; jobs: Record<string, Job> };
+  }> {
     const { parseYaml } = (await import(/* @vite-ignore */ path.join(ROOT, "scripts/agent-control/lib/yaml.mjs"))) as {
       parseYaml: (text: string) => never;
     };
@@ -268,7 +285,7 @@ describe("GATE-HARNESS: e2e-live.yml", () => {
       expect(r0, "the Release 0 live journey step").toHaveLength(1);
       expect(r0[0].run).toMatch(/--project=phone --project=desktop/);
       expect(r0[0].if ?? null, "the Release 0 step is unconditional").toBeNull();
-      const journeys = stepRunning(job, /playwright test e2e\/journeys\//);
+      const journeys = stepRunning(job, /playwright test e2e\/journeys\/ /);
       expect(journeys, "the journey step").toHaveLength(1);
       expect(journeys[0].run).toMatch(/--project=phone --project=desktop/);
       for (const step of [...r0, ...journeys]) {
@@ -278,6 +295,148 @@ describe("GATE-HARNESS: e2e-live.yml", () => {
       const build = stepRunning(job, /pnpm run build/).find((s) => /apps\/web/.test(s.run ?? ""));
       expect(build?.run).toMatch(/NEXT_PUBLIC_FF_/);
       expect(Object.keys(build?.env ?? {}).filter((k) => k.startsWith("NEXT_PUBLIC_FF_"))).toEqual([]);
+    }
+  });
+
+  // Review repair GH-COR-1: Playwright empties its output folder when a run
+  // starts, so the journeys step deleted the Release 0 step's traces (the
+  // R0-25 closedBy evidence) before the upload.
+  const outputOf = (step: Step) => (step.run ?? "").match(/--output[= ](\S+)/)?.[1] ?? null;
+
+  it("gives every Playwright step its own --output folder, and uploads Release 0's as its own artifact whatever happened", async () => {
+    const { doc } = await workflow();
+    for (const [name, job] of Object.entries(doc.jobs)) {
+      const runs = stepRunning(job, /playwright test /);
+      expect(runs.length, `${name}: Playwright steps`).toBeGreaterThanOrEqual(3);
+      const outputs = runs.map(outputOf);
+      expect(outputs.filter((o) => o === null), `${name}: every Playwright step names its --output`).toEqual([]);
+      expect(new Set(outputs).size, `${name}: each Playwright step writes a folder of its own`).toBe(outputs.length);
+      for (const o of outputs) expect(o, `${name}: outputs live under test-results/`).toMatch(/^test-results\/[a-z0-9-]+$/);
+      const r0 = stepRunning(job, /playwright test e2e\/release0-live\.spec\.ts/)[0];
+      const uploads = (job.steps ?? []).filter((s) => /actions\/upload-artifact/.test(s.uses ?? ""));
+      const r0Upload = uploads.find((u) => (u.with?.path ?? "").split(/\s+/).includes(`apps/web/${outputOf(r0)}/`));
+      expect(r0Upload, `${name}: an upload of apps/web/${outputOf(r0)}/`).toBeDefined();
+      expect(r0Upload?.with?.name, `${name}: the Release 0 artifact keeps its name`).toMatch(/^release0-live-trace/);
+      expect(r0Upload?.if, `${name}: uploaded whether the run passes or fails`).toMatch(/always\(\)/);
+      // Each folder is uploaded somewhere.
+      const uploaded = uploads.flatMap((u) => (u.with?.path ?? "").split(/\s+/));
+      for (const o of outputs) expect(uploaded, `${name}: ${o} is uploaded`).toContain(`apps/web/${o}/`);
+    }
+  });
+
+  // Review repair GH-COR-4: the journeys are RED by design until the packets
+  // that fix them land, so they must not decide the job's verdict about Release 0.
+  it("keeps the Release 0 verdict apart: release0-live never continues on error, the journeys report RED unless dispatched with journeys_required, and the summary names each verdict", async () => {
+    const { doc } = await workflow();
+    const input = doc.on.workflow_dispatch?.inputs?.journeys_required;
+    expect(input?.type, "a journeys_required dispatch input").toBe("boolean");
+    expect(input?.default, "journeys are a RED report by default (GATE-JOURNEY-RUN dispatches with journeys_required)").toBe(false);
+    for (const [name, job] of Object.entries(doc.jobs)) {
+      const r0 = stepRunning(job, /playwright test e2e\/release0-live\.spec\.ts/)[0];
+      const harness = stepRunning(job, /playwright test e2e\/journeys\/harness-self-check\.spec\.ts/);
+      const journeys = stepRunning(job, /playwright test e2e\/journeys\/ /)[0];
+      expect(r0["continue-on-error"] ?? false, `${name}: Release 0 decides the job`).toBe(false);
+      expect(harness, `${name}: the harness self-check runs as its own step`).toHaveLength(1);
+      expect(harness[0]["continue-on-error"] ?? false, `${name}: the harness self-check decides the job`).toBe(false);
+      expect(harness[0].run).toMatch(/--project=phone --project=desktop/);
+      expect(harness[0].if, `${name}: the self-check runs even when Release 0 failed`).toMatch(/!cancelled\(\)/);
+      expect(String(journeys["continue-on-error"]), `${name}: journeys continue on error unless required`).toMatch(
+        /^\$\{\{\s*!\s*inputs\.journeys_required\s*\}\}$/,
+      );
+      expect(journeys.run, `${name}: the journeys' report leaves the self-check to its own step`).toMatch(/--grep-invert @harness/);
+      const summary = (job.steps ?? []).find((s) => /GITHUB_STEP_SUMMARY/.test(s.run ?? ""));
+      expect(summary, `${name}: a step writes the verdicts to the job summary`).toBeDefined();
+      expect(summary?.if).toMatch(/always\(\)/);
+      const env = JSON.stringify(summary?.env ?? {});
+      for (const step of [r0, harness[0], journeys]) {
+        expect(step.id, `${name}: "${step.name}" has an id`).toBeTruthy();
+        expect(env, `${name}: the summary reads ${step.id}'s outcome`).toContain(`steps.${step.id}.outcome`);
+      }
+    }
+  });
+});
+
+describe("GATE-HARNESS: every person's browser is watched (review SEC-GH-1, SEC-GH-2, GH-COR-2)", () => {
+  const API = "http://localhost:3001";
+  const call = (method: string, p: string, status: number) => ({ method, url: `${API}${p}`, status });
+
+  it("names an API call that names a business other than the context's own, as release0-live.spec.ts does (callsNamingAnotherBusiness, ported)", async () => {
+    const s = await settings();
+    const calls = [
+      call("GET", "/crm/businesses/biz_a/contacts", 200),
+      call("GET", "/crm/businesses/biz_b/contacts", 403),
+      call("GET", "/crm/businesses/biz_b/contacts", 403),
+      call("GET", "/identity/businesses/slug/my-shop", 200),
+      call("GET", "/identity/me", 200),
+      call("GET", "/bookings/public/businesses/biz%5Fa/services", 200),
+      call("POST", "/commerce/businesses/biz_c/invoices", 404),
+    ];
+    expect(s.callsNamingAnotherBusiness(calls, "biz_a")).toEqual([
+      "403 GET /crm/businesses/biz_b/contacts",
+      "404 POST /commerce/businesses/biz_c/invoices",
+    ]);
+    expect(s.callsNamingAnotherBusiness(calls, ["biz_a", "biz_b", "biz_c"])).toEqual([]);
+  });
+
+  it("reports what every watched context did, each under who did it: requests off localhost, 5xx, and another business named", async () => {
+    const s = await settings();
+    const findings = s.journeyWatchFindings([
+      { who: "owner", businessIds: ["biz_a"], offHost: [], serverErrors: [], apiCalls: [call("GET", "/crm/businesses/biz_a/contacts", 200)] },
+      {
+        who: "customer 1",
+        businessIds: ["biz_a"],
+        offHost: ["GET https://fonts.googleapis.com/css2?family=Lato"],
+        serverErrors: [],
+        apiCalls: [call("GET", "/bookings/public/businesses/biz_a/services", 200)],
+      },
+      {
+        who: "second tenant",
+        businessIds: ["biz_b"],
+        offHost: [],
+        serverErrors: [`500 GET ${API}/x`],
+        apiCalls: [call("GET", "/crm/businesses/biz_a/contacts", 403)],
+      },
+    ]);
+    expect(findings.map(s.describeFinding)).toEqual([
+      "customer 1: left localhost: GET https://fonts.googleapis.com/css2?family=Lato",
+      `second tenant: 5xx: 500 GET ${API}/x`,
+      "second tenant: named another business: 403 GET /crm/businesses/biz_a/contacts",
+    ]);
+  });
+
+  it("fails a journey on every finding; only the harness self-check declares the findings it provokes, and each one must be raised", async () => {
+    const s = await settings();
+    const findings = [
+      { kind: "left localhost", who: "customer 1", line: "GET https://offhost.invalid/customer" },
+      { kind: "named another business", who: "owner", line: "403 GET /crm/businesses/biz_b/contacts" },
+    ] as const;
+    const none = s.sortFindings([...findings], []);
+    expect(none.unexpected.map(s.describeFinding)).toEqual(findings.map(s.describeFinding));
+    expect(none.missing).toEqual([]);
+    const declared = s.sortFindings([...findings], [/^customer 1: left localhost: GET https:\/\/offhost\.invalid\/customer$/]);
+    expect(declared.unexpected.map(s.describeFinding)).toEqual(["owner: named another business: 403 GET /crm/businesses/biz_b/contacts"]);
+    expect(declared.missing).toEqual([]);
+    const unraised = s.sortFindings([], [/^member: left localhost: /]);
+    expect(unraised.missing).toEqual(["/^member: left localhost: /"]);
+    expect(s.SELF_CHECK_SPEC.test(path.join(WEB, "e2e/journeys/harness-self-check.spec.ts"))).toBe(true);
+    expect(s.SELF_CHECK_SPEC.test(path.join(WEB, "e2e/journeys/d-quote-deposit.spec.ts"))).toBe(false);
+  });
+
+  it("starts a customer's context from an explicit empty session, never the owner's (Playwright fills an omitted storageState from the test's)", async () => {
+    const s = await settings();
+    expect(s.anonymousStorageState()).toEqual({ cookies: [], origins: [] });
+    expect(s.anonymousStorageState(), "a fresh object each time").not.toBe(s.anonymousStorageState());
+  });
+
+  it("tells spec authors to make other people's contexts through the harness, never a bare browser.newContext()", () => {
+    const readme = fs.readFileSync(path.join(WEB, "e2e/journeys/README.md"), "utf8");
+    const helpers = fs.readFileSync(path.join(WEB, "e2e/journeys/journey-helpers.ts"), "utf8");
+    for (const [name, doc] of [["README.md", readme], ["journey-helpers.ts", helpers]] as const) {
+      expect(doc, `${name} must not send a customer to a bare browser.newContext()`).not.toMatch(/anonymous\s+`?browser\.newContext\(\)/);
+      expect(doc, `${name} must not make a member with freshTenant()`).not.toMatch(/member[^.]*freshTenant\(\)/);
+    }
+    for (const helper of ["anonymousContext(browser", "signedInContext(browser", "memberOf(request", "allowBusinessNamed("]) {
+      expect(readme, `README.md documents ${helper}`).toContain(helper);
     }
   });
 });
