@@ -82,9 +82,10 @@ export async function approveRun(
 export async function markRunPaid(
   businessId: string,
   runId: string,
+  input: { paymentAccountId?: string; paymentMethod?: string },
 ): Promise<{ data: PayrollRun | null; error: string | null }> {
   return apiPost<PayrollRun>({
     path: `/payroll/businesses/${encodeURIComponent(businessId)}/runs/${encodeURIComponent(runId)}/mark-paid`,
-    body: {},
+    body: input,
   });
 }

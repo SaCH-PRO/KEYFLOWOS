@@ -138,6 +138,20 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // finance_view_receivables: GET receivables/aging and customers/:contactId/balance (FOLLOW3-A6, D-57)
     finance_balance_sheet: 'read', finance_cashflow: 'read', finance_profit_and_loss: 'read',
     finance_revenue_breakdown: 'read', finance_tax_summary: 'read',
+    // finance_post_journal_entry: POST finance journal-entries requires revenue write (PR195-JOURNAL-SCOPE,
+    // review finding CR-P195-4), so the legacy `finance` key no longer reaches it
+    finance_post_journal_entry: 'write',
+    // finance_auto_match_bank, reconcile_run_auto_match, reconcile_match_line: the statement import, the
+    // auto-match (which applies the bank rules, so posts) and the manual match require revenue write, the
+    // Books' module (PR195-BOOKS-DOORS, review finding SEC-P195JS-1), so the legacy `finance` key no longer
+    // reaches finance_auto_match_bank (D-35's narrowing)
+    finance_auto_match_bank: 'write', reconcile_match_line: 'write', reconcile_run_auto_match: 'write',
+    // finance_list_bank_accounts (GET accounts), finance_customer_balance (GET customers/:contactId/balance),
+    // finance_list_action_items (GET intelligence/actions), reconcile_list_unmatched (GET accounts/:accountId/
+    // bank-transactions): the Books reads need revenue read (owner rulings D-57, D-146; PR195-KEY-GATES, review
+    // findings SEC-P195BW-4/5), so the legacy `finance` key no longer reaches the three finance_* reads (D-35's narrowing)
+    finance_customer_balance: 'read', finance_list_action_items: 'read', finance_list_bank_accounts: 'read',
+    reconcile_list_unmatched: 'read',
     payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',
@@ -154,6 +168,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   expenses: {
     expenses_create: 'write', expenses_list: 'read', finance_create_bill: 'write',
     finance_list_bills: 'read', finance_pay_bill: 'write', finance_view_payables: 'read',
+    // inventory_advance_purchase_order: POST marketplace purchase-orders/:poId/advance requires expenses write,
+    // since a purchase order's receipt posts the purchase (PR195-BOOKS-DOORS, review finding SEC-P195JS-1)
+    inventory_advance_purchase_order: 'write',
   },
   automations: {},
   storefront: {},

@@ -848,6 +848,26 @@
       "packet": "V1-97 (W11-D116-CONNECTION-OWNER)"
     },
     {
+      "prefix": "v98p_",
+      "owner": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "packet": "V1-98 (PR195-PORT)"
+    },
+    {
+      "prefix": "v98j_",
+      "owner": "apps/server/test/journal-write-scope.integration.test.ts",
+      "packet": "V1-98 (PR195-JOURNAL-SCOPE)"
+    },
+    {
+      "prefix": "v98b_",
+      "owner": "apps/server/test/books-write-scope.integration.test.ts",
+      "packet": "V1-98 (PR195-BOOKS-DOORS)"
+    },
+    {
+      "prefix": "v98k_",
+      "owner": "apps/server/test/books-read-doors.integration.test.ts",
+      "packet": "V1-98 (PR195-KEY-GATES)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

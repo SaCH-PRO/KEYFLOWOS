@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { toast } from "sonner";
+import { moduleWriteRefusal } from "@/lib/module-access";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -267,6 +269,14 @@ function MarketplacePageInner() {
         case "purchase-order":
           if (editingItem) {
             res = await apiPatch(`${basePath}/purchase-orders/${editingItem.id}`, formData);
+            // PR195-KEY-GATES (review finding CRR-P195BD-1): an edit can move the order (a status in the body), so it
+            // needs expenses write on the server; a refusal is said and the form stays open, nothing claimed.
+            const refused = moduleWriteRefusal(res, "expenses", "change purchase orders");
+            if (refused) {
+              toast.error(refused);
+              setSaving(false);
+              return;
+            }
           } else {
             res = await apiPost({ path: `${basePath}/purchase-orders`, body: formData });
           }

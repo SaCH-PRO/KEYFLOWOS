@@ -15,6 +15,7 @@ import {
   type FinanceSettings, type FinancialAccountRow, type ChartOfAccountRow, type TaxRateRow,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 const SECTIONS = [
   { key: "general", label: "General", icon: SettingsIcon },
@@ -66,6 +67,9 @@ export default function FinanceSettingsPage() {
 function GeneralSection({ businessId }: { businessId: string }) {
   const [settings, setSettings] = useState<FinanceSettings | null>(null);
   const [accounts, setAccounts] = useState<FinancialAccountRow[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-1/2): GET accounts needs revenue read (D-146); the pickers say why they
+  // list no account rather than offering an empty list.
+  const [accountsError, setAccountsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -74,7 +78,13 @@ function GeneralSection({ businessId }: { businessId: string }) {
       fetchFinanceAccounts(businessId),
     ]);
     if (s.data) setSettings(s.data);
-    if (a.data) setAccounts(a.data.items);
+    if (a.error) {
+      setAccounts([]);
+      setAccountsError(moduleReadRefusal(a, "revenue", "the financial accounts") ?? `Couldn't load the financial accounts: ${a.error}`);
+    } else {
+      setAccountsError(null);
+      if (a.data) setAccounts(a.data.items);
+    }
   }, [businessId]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
@@ -165,6 +175,7 @@ function GeneralSection({ businessId }: { businessId: string }) {
       <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
         <h2 className="text-sm font-semibold">Default accounts</h2>
         <p className="text-xs text-muted-foreground">Used when posting to the ledger if no account is specified.</p>
+        {accountsError && <p className="text-xs text-amber-500" role="alert">{accountsError}</p>}
         <DefaultAccountSelect label="Cash / Bank" value={settings.defaultCashAccountId} options={accountOptions} onChange={(v) => update({ defaultCashAccountId: v })} />
         <DefaultAccountSelect label="Accounts Receivable" value={settings.defaultArAccountId} options={accountOptions} onChange={(v) => update({ defaultArAccountId: v })} />
         <DefaultAccountSelect label="Accounts Payable" value={settings.defaultApAccountId} options={accountOptions} onChange={(v) => update({ defaultApAccountId: v })} />
@@ -206,6 +217,8 @@ const ACCOUNT_TYPES = ["CASH", "BANK", "PAYMENT_PROCESSOR", "CREDIT_CARD", "LOAN
 
 function AccountsSection({ businessId }: { businessId: string }) {
   const [items, setItems] = useState<FinancialAccountRow[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-1): a refused or failed list is said as such, not "No accounts yet".
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ name: "", type: "BANK", openingBalance: 0, institution: "" });
@@ -213,7 +226,13 @@ function AccountsSection({ businessId }: { businessId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     const r = await fetchFinanceAccounts(businessId);
-    if (r.data) setItems(r.data.items);
+    if (r.error) {
+      setItems([]);
+      setLoadError(moduleReadRefusal(r, "revenue", "the financial accounts") ?? `Couldn't load the financial accounts: ${r.error}`);
+    } else {
+      setLoadError(null);
+      if (r.data) setItems(r.data.items);
+    }
     setLoading(false);
   }, [businessId]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -270,7 +289,9 @@ function AccountsSection({ businessId }: { businessId: string }) {
         </div>
       )}
 
-      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : items.length === 0 ? (
+      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : loadError ? (
+        <p className="text-sm text-amber-500" role="alert">{loadError}</p>
+      ) : items.length === 0 ? (
         <EmptyState icon={Wallet} title="No accounts yet" description="Add a bank or cash account to get started." variant="compact" />
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/40 overflow-hidden">

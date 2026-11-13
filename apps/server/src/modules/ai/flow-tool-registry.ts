@@ -4460,19 +4460,21 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
-    manualEquivalentRoute: '/app/finance',
+    manualEquivalentRoute: '/app/finance/journal',
     changedEntities: ['journalEntry', 'ledgerEntry'],
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', description: 'Entry type: INCOME, EXPENSE, TRANSFER, REFUND, TAX, ADJUSTMENT, OPENING_BALANCE' },
+        // PR195-BOOKS-DOORS (review SEC-P195JS-3): the General Journal's post, as POST journal-entries makes it:
+        // an ADJUSTMENT (any other type is refused), its amount the lines' debits.
+        type: { type: 'string', description: 'ADJUSTMENT, the only type the General Journal posts (optional; any other is refused)' },
         date: { type: 'string', description: 'Posting date (ISO)' },
-        amount: { type: 'number', description: 'Total entry amount (each side)' },
+        amount: { type: 'number', description: 'Total entry amount (each side; the posted amount is the sum of the debits)' },
         currency: { type: 'string', description: 'Currency code (optional)' },
         description: { type: 'string', description: 'Narration/memo' },
         entries: { type: 'array', description: 'Lines: [{ accountId, debit?, credit?, memo? }] — debits must equal credits' },
       },
-      required: ['type', 'date', 'amount', 'entries'],
+      required: ['date', 'entries'],
     },
     outputSchema: { type: 'object', description: 'Posted journal entry', fields: { id: { type: 'string', description: 'Journal entry ID' }, status: { type: 'string', description: 'Posting status' } } },
   },
@@ -4997,16 +4999,25 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
   {
     name: 'payroll_mark_paid',
-    description: 'Mark an approved payroll run as paid.',
+    description: 'Mark an approved payroll run as paid and post the disbursement to the general ledger.',
     family: 'execute',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
     manualEquivalentRoute: '/app/payroll',
-    changedEntities: ['payrollRun'],
+    changedEntities: ['payrollRun', 'financialTransaction', 'ledgerEntry'],
     parameters: {
       type: 'object',
       properties: {
         runId: { type: 'string', description: 'Payroll run ID' },
+        paymentAccountId: {
+          type: 'string',
+          description: 'Active FinancialAccount ID (CASH, BANK, or PAYMENT_PROCESSOR) from which payroll is disbursed',
+        },
+        paymentMethod: {
+          type: 'string',
+          description: 'Disbursement method when paymentAccountId is not specified (cash, bank_transfer, wire, ach, cheque, wipay, paypal, stripe)',
+          enum: ['cash', 'bank_transfer', 'wire', 'ach', 'cheque', 'wipay', 'paypal', 'stripe'],
+        },
       },
       required: ['runId'],
     },

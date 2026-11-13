@@ -3,6 +3,7 @@ import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { BusinessMemberGuard } from '../../core/auth/business-member.guard';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 
 /**
@@ -21,7 +22,7 @@ export class BillsController {
     return this.expenses.listExpenses(businessId, { status: 'BILL', limit: 200 });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'bill_created', 'expense')
@@ -58,7 +59,7 @@ export class BillsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'bill_paid', 'expense')
@@ -76,7 +77,7 @@ export class BillsController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'bill_voided', 'expense')

@@ -969,8 +969,15 @@ describe('review SEC-V15-2: only the owner or an admin opens and shuts the posti
 
   it('LWD-09: STAFF close / reopen -> 403 and nothing changes; the owner and an ADMIN close and reopen; each change is audited with its actor; unauthenticated -> 401', async () => {
     const last = monthFromNow(-1);
-    const created = await gate('', ID.staff, last);
-    expect(created.status, JSON.stringify(created.body)).toBe(201); // an OPEN period gates nothing
+    // PR195-BOOKS-DOORS (review SEC-P195JS-1): an accounting period is a Books record, so its create needs
+    // revenue write too; STAFF on role defaults (revenue read) is refused before the handler and no period is
+    // written. Before, any member created one ("an OPEN period gates nothing"); the owner creates it here.
+    const staffCreate = await gate('', ID.staff, last);
+    expect(staffCreate.status, JSON.stringify(staffCreate.body)).toBe(403);
+    expect(staffCreate.body).toMatchObject({ message: 'Insufficient permissions: revenue requires write access (you have read)' });
+    expect(await db.accountingPeriod.count({ where: { businessId: ID.bizGate, year: last.year, month: last.month } })).toBe(0);
+    const created = await gate('', ID.owner, last);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
     const id: string = created.body.id;
     const state = async () => {
       const row = await db.accountingPeriod.findUnique({ where: { id } });

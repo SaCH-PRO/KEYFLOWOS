@@ -1,4 +1,4 @@
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../../core/prisma/prisma.service';
 import type { GenomeRecommendationService } from './genome-recommendation.service';
 import type { GenomeSignalService } from './genome-signal.service';
@@ -80,11 +80,7 @@ export async function genomeReaderRevenueLevel(prisma: PrismaService, businessId
     select: { role: true, permissionScopes: true },
   });
   if (!membership) return 'none';
-  const scopes: Record<string, string> =
-    membership.permissionScopes && typeof membership.permissionScopes === 'object'
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-  return scopes.revenue || 'none';
+  return memberModuleLevel(membership, 'revenue');
 }
 
 /** Whether `reader` reads revenue in `businessId` (D-100), by genomeReaderRevenueLevel. */

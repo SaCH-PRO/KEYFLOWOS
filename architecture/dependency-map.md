@@ -112,6 +112,25 @@ The surfaces see the `ActionContext` type only through the orchestrator's method
 
 No new module edge: `AiModule`, `KeyAutonomyModule` and `KeyCortexModule` already `forwardRef` each other, which is why every cross-module collaborator above is resolved lazily.
 
+## Payroll → Finance Ledger & Treasury Sight
+
+Owner PR #195, ported onto the head's money rules (`execution-paths.md` §14). `PayrollModule` imports `FinanceModule` so a payroll disbursement posts through the one ledger door in the run's transaction. Cash is read from the ledger by `CashPositionService` (V1-34); nothing converts currencies (D-13):
+
+```
+payroll.module.ts                       → finance/finance.module.ts
+payroll.service.ts                      → finance/expense-posting.service.ts (onPayrollRunPaid, PAYROLL_DISBURSEMENT_METHODS)
+                                        → finance/finance-accounting.util.ts (invalidateBusinessFinancialSnapshotCache)
+expense-posting.service.ts              → finance/posting.service.ts (PostingService.post)
+posting.service.ts                      → finance/finance-accounting.util.ts (snapshot revision bump)
+safe-to-spend.service.ts                → finance/cash-position.service.ts (ledger cash)
+ai/business-graph.service.ts            → finance/cash-position.service.ts, finance/finance-accounting.util.ts,
+                                          core/authority/module-vocabulary.ts (keyContextSight: memberModuleLevel)
+payroll.service.ts                      → core/authority/module-vocabulary.ts (memberModuleLevel),
+                                          core/auth/system-actor.ts (KEY_SYSTEM_ACTOR_ID)
+core/auth/module-scope.guard.ts         → core/authority/module-vocabulary.ts (memberModuleLevel, shared with the above
+                                          and business-genome/key-genome/genome-finance-scope.ts)
+```
+
 ## External Integration Dependencies
 
 | Integration | Primary Server Files | Primary Web Files |

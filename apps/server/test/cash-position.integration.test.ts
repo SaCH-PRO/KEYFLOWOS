@@ -849,9 +849,13 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
 
   it("CP-05 TENANT: B's entries are never counted in A's figure, even through a link to B's BANK row", async () => {
     await pay(ID.bizB, ID.invB, ID.ownerB, 70, 'v34a-cash-70');
-    // FinanceAccountsService.create accepts any chartOfAccountId: A links an account to B's BANK row.
+    // PR195-KEY-GATES (review SEC-P195BW-6): FinanceAccountsService.create no longer accepts another business's
+    // chartOfAccountId (404, nothing written). A link written before that, a legacy row, is planted directly.
     const bBank = await coaSeeder.getBySystemKey(ID.bizB, 'BANK');
-    await accounts.create(ID.bizA, { name: 'V34A Linked', type: 'BANK', chartOfAccountId: bBank.id, currency: 'TTD' });
+    await expect(accounts.create(ID.bizA, { name: 'V34A Linked', type: 'BANK', chartOfAccountId: bBank.id, currency: 'TTD' }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(await db.financialAccount.count({ where: { businessId: ID.bizA, chartOfAccountId: bBank.id } })).toBe(0);
+    await db.financialAccount.create({ data: { businessId: ID.bizA, chartOfAccountId: bBank.id, name: 'V34A Linked', type: 'BANK', currency: 'TTD' } });
 
     await expectCash(ID.bizA, ID.ownerA, 1025.05);
     await expectCash(ID.bizB, ID.ownerB, 5070);
@@ -991,8 +995,10 @@ describe('V1-37b account opening balances are posted through the door (CR-34-01)
     await expect(accounts.create(ID.bizD, { name: 'V34A Euro D', type: 'BANK', currency: 'EUR', openingBalance: 40 }))
       .rejects.toMatchObject({ status: 400 });
     const bBank = await coaSeeder.getBySystemKey(ID.bizB, 'BANK');
+    // PR195-KEY-GATES (review SEC-P195BW-6): another business's chart row is refused before the door, 404 in the words an
+    // unknown id gets (it was the ledger door's 400 when the opening was non-zero, and accepted when it was 0).
     await expect(accounts.create(ID.bizD, { name: 'V34A Foreign D', type: 'BANK', chartOfAccountId: bBank.id, openingBalance: 40 }))
-      .rejects.toMatchObject({ status: 400 });
+      .rejects.toMatchObject({ status: 404 });
     expect(await db.financialAccount.count({ where: { businessId: ID.bizD } })).toBe(rowsBefore);
     expect(await db.ledgerEntry.count({ where: { businessId: ID.bizD } })).toBe(entriesBefore);
     // TENANT: B's book is untouched.
@@ -1155,7 +1161,19 @@ describe('V1-37b review repairs: account opening balances', () => {
   }, 60_000);
 
   it('CP-13 (review SEC-V37b-2) RED-BEFORE: an account create writes a finance audit row naming the member and the opening posting, or why it was not posted', async () => {
-    // A STAFF member whose every module scope is none: the route is membership-only (residual).
+    // PR195-BOOKS-DOORS (review SEC-P195JS-1): the route is no longer membership-only. A create posts the
+    // opening balance into the books, so it needs revenue write: a STAFF member whose every module scope is
+    // none is refused 403 before the handler, and no account, opening or audit row is written.
+    const refused = await request(financeApp.getHttpServer())
+      .post(`/finance/businesses/${ID.bizH}/accounts`)
+      .set(HEADER, ID.staffH)
+      .send({ name: 'V34A Staff Bank H', type: 'BANK', openingBalance: 1000 });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ message: 'Insufficient permissions: revenue requires write access (you have none)' });
+    expect(await db.financialAccount.count({ where: { businessId: ID.bizH, name: 'V34A Staff Bank H' } })).toBe(0);
+    expect(await db.teamActivityLog.count({ where: { businessId: ID.bizH, module: 'finance', userId: ID.staffH } })).toBe(0);
+    // The same STAFF member granted revenue write creates it, and the audit names them.
+    await db.membership.update({ where: { id: `${ID.staffH}_m` }, data: { permissionScopes: { ...ALL_SCOPES_NONE, revenue: 'write' } } });
     const res = await request(financeApp.getHttpServer())
       .post(`/finance/businesses/${ID.bizH}/accounts`)
       .set(HEADER, ID.staffH)

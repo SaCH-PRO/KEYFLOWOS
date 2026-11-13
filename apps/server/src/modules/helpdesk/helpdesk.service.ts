@@ -165,11 +165,12 @@ export class HelpdeskService {
       },
     });
 
-    // A reply reopens an open/resolved conversation unless explicitly closed.
-    if (ticket.status === 'resolved' || ticket.status === 'closed') {
+    // A reply reopens a resolved/closed conversation using the canonical uppercase status.
+    const normalizedStatus = (ticket.status ?? '').toUpperCase();
+    if (normalizedStatus === 'RESOLVED' || normalizedStatus === 'CLOSED') {
       await this.prisma.client.supportTicket.update({
         where: { id: ticketId },
-        data: { status: 'open' },
+        data: { status: 'OPEN' },
       });
     }
 

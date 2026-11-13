@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { BookOpen, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, Loader2, ChevronLeft, ChevronRight, ArrowRightLeft } from "lucide-react";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -54,6 +55,15 @@ export default function GeneralLedgerPage() {
       subtitle="Detailed transaction history with running balances."
       icon={BookOpen}
       maxWidth="6xl"
+      headerActions={
+        <Link
+          href="/app/finance/journal"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[hsl(var(--kf-accent1))] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
+        >
+          <ArrowRightLeft className="h-3.5 w-3.5" />
+          Journal Entries
+        </Link>
+      }
     >
       <div className="space-y-4">
         {error && (

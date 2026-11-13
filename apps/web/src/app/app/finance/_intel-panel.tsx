@@ -11,6 +11,7 @@ import {
   runFinanceIntelScan,
   type FinanceIntelActionItem,
 } from "@/lib/client";
+import { moduleReadRefusal } from "@/lib/module-access";
 
 /**
  * FIN8 — "Needs Attention" panel. The daily insight strip is rendered
@@ -27,6 +28,9 @@ export function FinanceIntelPanel({
   compact?: boolean;
 }) {
   const [items, setItems] = useState<FinanceIntelActionItem[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-1): GET intelligence/actions needs revenue read (D-146). A refused or
+  // failed read is said as such, never as "All clear" (CRR-P195BD-1's rule).
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -34,7 +38,13 @@ export function FinanceIntelPanel({
   const load = useCallback(async () => {
     setLoading(true);
     const r = await fetchFinanceIntelActions(businessId, { status: "OPEN" });
-    if (r.data) setItems(r.data.items);
+    if (r.error) {
+      setItems([]);
+      setLoadError(moduleReadRefusal(r, "revenue", "the finance action items") ?? `Couldn't load the finance action items: ${r.error}`);
+    } else {
+      setLoadError(null);
+      if (r.data) setItems(r.data.items);
+    }
     setLoading(false);
   }, [businessId]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -102,6 +112,8 @@ export function FinanceIntelPanel({
             <li key={i} className="h-12 rounded-lg bg-muted/30 animate-pulse" />
           ))}
         </ul>
+      ) : loadError ? (
+        <p className="text-xs text-amber-500" role="alert">{loadError}</p>
       ) : visible.length === 0 ? (
         <p className="text-xs text-muted-foreground">All clear — no open finance issues detected.</p>
       ) : (

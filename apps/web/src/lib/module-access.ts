@@ -109,3 +109,8 @@ export function filterByOperationsAccess<T extends { href: string }>(items: read
 export function canOfferOperationsActions(access: OperationsAccess): boolean {
   return access !== "denied";
 }
+
+// PR195-KEY-GATES review repair (CRR-P195KG-1): the module-scope refusal helpers live in a module with no client
+// imports, so a server component (the finance insight strip) reads a refusal the same way; re-exported here for the
+// pages that import them from this file.
+export { isModuleScopeRefusal, moduleReadRefusal, moduleWriteRefusal } from "./module-scope-refusal";

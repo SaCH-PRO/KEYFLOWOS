@@ -3,6 +3,7 @@ import { ExpensesService } from './expenses.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { BusinessMemberGuard } from '../../core/auth/business-member.guard';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { Response } from 'express';
 import { DocumentIntelligenceService } from '../ai/document-intelligence.service';
@@ -139,7 +140,7 @@ export class ExpensesController {
     return this.expenses.getExpense(businessId, expenseId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'expense_created', 'expense')
@@ -168,7 +169,7 @@ export class ExpensesController {
     return this.expenses.createExpense({ ...body, businessId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'expense_updated', 'expense')
@@ -198,7 +199,7 @@ export class ExpensesController {
     return this.expenses.updateExpense({ ...body, businessId, expenseId });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'expense_deleted', 'expense')

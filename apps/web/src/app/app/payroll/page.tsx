@@ -28,6 +28,19 @@ import {
   type PayrollRun,
   type PayrollRunListItem,
 } from "@/lib/api/payroll";
+import { fetchFinanceAccounts, type FinancialAccountRow } from "@/lib/client";
+import { moduleReadRefusal } from "@/lib/module-access";
+
+const DISBURSEMENT_METHODS = [
+  { value: "bank_transfer", label: "Bank Transfer" },
+  { value: "cash", label: "Cash" },
+  { value: "wire", label: "Wire Transfer" },
+  { value: "ach", label: "ACH" },
+  { value: "cheque", label: "Cheque" },
+  { value: "wipay", label: "WiPay" },
+  { value: "stripe", label: "Stripe" },
+  { value: "paypal", label: "PayPal" },
+];
 
 function formatDate(value?: string | null) {
   if (!value) return "—";
@@ -43,6 +56,12 @@ export default function PayrollPage() {
 
   const [rates, setRates] = useState<PayRate[]>([]);
   const [runs, setRuns] = useState<PayrollRunListItem[]>([]);
+  const [disbursementAccounts, setDisbursementAccounts] = useState<FinancialAccountRow[]>([]);
+  // PR195-KEY-GATES review repair (CRR-P195KG-2): GET accounts needs revenue read (D-146), which the operator D-146
+  // authorises to pay payroll (operations and expenses write) may not hold. Mark paid then offers payment methods only,
+  // and says why its financial accounts are not listed.
+  const [accountsNotice, setAccountsNotice] = useState<string | null>(null);
+  const [selectedDisbursement, setSelectedDisbursement] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<PayrollRun | null>(null);
@@ -52,11 +71,31 @@ export default function PayrollPage() {
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
-    const [ratesRes, runsRes] = await Promise.all([listRates(businessId), listRuns(businessId)]);
+    const [ratesRes, runsRes, accountsRes] = await Promise.all([
+      listRates(businessId),
+      listRuns(businessId),
+      fetchFinanceAccounts(businessId).catch(() => null),
+    ]);
     if (ratesRes.error) toast.error(ratesRes.error);
     else if (ratesRes.data) setRates(ratesRes.data);
     if (runsRes.error) toast.error(runsRes.error);
     else if (runsRes.data) setRuns(runsRes.data);
+    if (accountsRes?.error) {
+      setDisbursementAccounts([]);
+      const refusal = moduleReadRefusal(accountsRes, "revenue", "the financial accounts");
+      setAccountsNotice(
+        `${refusal ?? `Couldn't load the financial accounts: ${accountsRes.error}`} Mark paid lists payment methods only: the run posts to that method's default account.`,
+      );
+    } else {
+      setAccountsNotice(null);
+      if (accountsRes?.data?.items) {
+        const eligible = accountsRes.data.items.filter(
+          (a: FinancialAccountRow) =>
+            a.isActive && ["CASH", "BANK", "PAYMENT_PROCESSOR"].includes(a.type),
+        );
+        setDisbursementAccounts(eligible);
+      }
+    }
     setLoading(false);
   }, [businessId]);
 
@@ -98,11 +137,32 @@ export default function PayrollPage() {
     setActionLoading(null);
   };
 
+  const getDefaultSelectionForRun = (run: PayrollRunListItem): string => {
+    const matchingAccounts = disbursementAccounts.filter(
+      (a) => (a.currency ?? "TTD").toUpperCase() === (run.currency ?? "TTD").toUpperCase(),
+    );
+    const bankOrDefault =
+      matchingAccounts.find((a) => a.type === "BANK") ??
+      matchingAccounts.find((a) => a.isDefault) ??
+      matchingAccounts[0];
+    if (bankOrDefault) return `account:${bankOrDefault.id}`;
+    return "method:bank_transfer";
+  };
+
   const handleMarkPaid = async (run: PayrollRunListItem) => {
     if (!businessId) return;
+    const selection = selectedDisbursement[run.id] ?? getDefaultSelectionForRun(run);
+    if (!selection) {
+      toast.error("Select a payment account or disbursement method first");
+      return;
+    }
+    const payload = selection.startsWith("account:")
+      ? { paymentAccountId: selection.slice("account:".length) }
+      : { paymentMethod: selection.replace(/^method:/, "") };
+
     if (!window.confirm(`Mark payroll run for ${formatDate(run.periodStart)} – ${formatDate(run.periodEnd)} as paid?`)) return;
     setActionLoading(run.id);
-    const { error } = await markRunPaid(businessId, run.id);
+    const { error } = await markRunPaid(businessId, run.id, payload);
     if (error) toast.error(error);
     else {
       toast.success("Payroll run marked as paid");
@@ -170,6 +230,9 @@ export default function PayrollPage() {
         </SectionCard>
 
         <SectionCard title="Payroll runs" subtitle="Click a run to see its line items" icon={Banknote} noPadding>
+          {accountsNotice && runs.some((r) => r.status === "APPROVED") && (
+            <p className="px-4 py-2 text-xs text-amber-500 border-b border-border/40" role="alert">{accountsNotice}</p>
+          )}
           {loading && runs.length === 0 ? (
             <div className="p-4">
               <SkeletonList rows={4} cols={4} />
@@ -202,6 +265,13 @@ export default function PayrollPage() {
                     detail={expandedRunId === run.id ? runDetail : null}
                     detailLoading={expandedRunId === run.id && detailLoading}
                     actionLoading={actionLoading === run.id}
+                    disbursementAccounts={disbursementAccounts.filter(
+                      (a) => (a.currency ?? "TTD").toUpperCase() === (run.currency ?? "TTD").toUpperCase(),
+                    )}
+                    selectedDisbursement={selectedDisbursement[run.id] ?? getDefaultSelectionForRun(run)}
+                    onSelectDisbursement={(val) =>
+                      setSelectedDisbursement((prev) => ({ ...prev, [run.id]: val }))
+                    }
                     onToggle={() => toggleRun(run.id)}
                     onApprove={() => handleApprove(run)}
                     onMarkPaid={() => handleMarkPaid(run)}
@@ -222,6 +292,9 @@ function RunRow({
   detail,
   detailLoading,
   actionLoading,
+  disbursementAccounts,
+  selectedDisbursement,
+  onSelectDisbursement,
   onToggle,
   onApprove,
   onMarkPaid,
@@ -231,6 +304,9 @@ function RunRow({
   detail: PayrollRun | null;
   detailLoading: boolean;
   actionLoading: boolean;
+  disbursementAccounts: FinancialAccountRow[];
+  selectedDisbursement: string;
+  onSelectDisbursement: (val: string) => void;
   onToggle: () => void;
   onApprove: () => void;
   onMarkPaid: () => void;
@@ -264,10 +340,36 @@ function RunRow({
               </Button>
             )}
             {canMarkPaid && (
-              <Button size="sm" onClick={onMarkPaid} disabled={actionLoading}>
-                {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Banknote className="w-3 h-3 mr-1" />}
-                Mark paid
-              </Button>
+              <>
+                <select
+                  aria-label="Disbursement account or method"
+                  value={selectedDisbursement}
+                  onChange={(e) => onSelectDisbursement(e.target.value)}
+                  disabled={actionLoading}
+                  className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                >
+                  {disbursementAccounts.length > 0 && (
+                    <optgroup label="Financial Accounts">
+                      {disbursementAccounts.map((acc) => (
+                        <option key={acc.id} value={`account:${acc.id}`}>
+                          {acc.name} ({acc.type})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Payment Methods">
+                    {DISBURSEMENT_METHODS.map((m) => (
+                      <option key={m.value} value={`method:${m.value}`}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                <Button size="sm" onClick={onMarkPaid} disabled={actionLoading}>
+                  {actionLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Banknote className="w-3 h-3 mr-1" />}
+                  Mark paid
+                </Button>
+              </>
             )}
           </div>
         </td>

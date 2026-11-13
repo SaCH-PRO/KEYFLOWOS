@@ -473,10 +473,11 @@ describe('SEC-W9PS-1 / CR-W9PS-2 (W9-PROJECTS-SERVER repair, D-100 withholding r
   });
 
   it('SEC-W9PS-1: a KEY run with no member (an inbound conversation, a caller that declares nothing) reads no costs: it fails closed', async () => {
+    // PR195-KEY-GATES (review SEC-P195BW-1/2): a run with no member now runs only the customer-safe allowlist
+    // (memberless-key-tools.ts), which projects_get_budget is not on: it is refused before the dispatcher reads
+    // the project at all (this case kept "no costs" before; nothing at all is read now).
     for (const action of [{ surface: 'INBOUND_CONVERSATION' }, { surface: 'PHONE_STREAM' }, undefined]) {
-      const budget = await keyBudget(action);
-      expect(budget, String(action?.surface)).toMatchObject(KEY_BUDGET_KEPT);
-      for (const field of COST_FIELDS) expect(budget[field], `${String(action?.surface)} ${field}`).toBeNull();
+      await expect(keyBudget(action), String(action?.surface)).rejects.toThrow(/names no member it runs for, so KEY does not run it \(D-73\)/);
     }
   });
 
