@@ -5,6 +5,7 @@ import {
   Inject,
   Param,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -12,12 +13,15 @@ import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { assertMayBindExport } from '../../core/connectors/connector-exports';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { MicrosoftOAuthService } from './microsoft-oauth.service';
 
 @Controller('connect/microsoft')
 export class MicrosoftOAuthController {
   constructor(
     @Inject(MicrosoftOAuthService) private readonly svc: MicrosoftOAuthService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // Auth URL is path-scoped to :businessId so BusinessGuard can enforce
@@ -33,11 +37,23 @@ export class MicrosoftOAuthController {
   // Starting it needs settings admin, as the connector credentials do (OWNER
   // and ADMIN by role default, STAFF none; an explicit map binds every role,
   // D-114). The Google connections keep their owner rule (D-99).
+  //
+  // SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-1): the
+  // account this consent binds receives the business's contacts (the Outlook
+  // contacts push sends every linked contact's edits to it), so the member who
+  // starts it reads crm too (assertMayBindExport, CONNECTOR_EXPORT_READS
+  // outlook_contacts), as the integration pushes' binders do. The signed state
+  // names that member, and the callback records them as the account's binder,
+  // the receiver every push is checked for.
   @Get('businesses/:businessId/auth-url')
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
-  buildAuthUrl(@Param('businessId') businessId: string): { authUrl: string } {
-    return { authUrl: this.svc.buildAuthUrl(businessId) };
+  async buildAuthUrl(
+    @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
+  ): Promise<{ authUrl: string }> {
+    await assertMayBindExport(this.prisma, businessId, req.user, 'outlook_contacts');
+    return { authUrl: this.svc.buildAuthUrl(businessId, req.user?.id ?? '') };
   }
 
   @Get('callback')

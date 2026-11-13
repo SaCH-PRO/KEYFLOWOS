@@ -69,6 +69,7 @@ export async function contactIdsEveryReceiverMayOpen(
   businessId: string,
   audience: ExportAudience,
   candidateIds: readonly string[],
+  opts: { includeDeleted?: boolean } = {},
 ): Promise<Set<string>> {
   if (candidateIds.length === 0) return new Set();
   const clauses: Array<Record<string, unknown>> = [];
@@ -82,9 +83,41 @@ export async function contactIdsEveryReceiverMayOpen(
     if (clause) clauses.push(clause);
   }
   if (audience.unknownReceiver) clauses.push({ visibility: { in: ['TEAM', 'SHARED'] } });
+  if (opts.includeDeleted) {
+    // The soft-delete extension (packages/db) adds deletedAt null to every Contact find and count;
+    // aggregate is the read it leaves as written (assertContactVisible's includeDeleted reads the same way).
+    const open = new Set<string>();
+    for (const id of new Set(candidateIds)) {
+      const found = await prisma.client.contact.aggregate({ where: { businessId, id, AND: clauses }, _count: { _all: true } });
+      if (found._count._all > 0) open.add(id);
+    }
+    return open;
+  }
   const rows: Array<{ id: string }> = await prisma.client.contact.findMany({
     where: { businessId, deletedAt: null, id: { in: [...candidateIds] }, AND: clauses },
     select: { id: true },
   });
   return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-1): 403 unless every receiver of `audience` may
+ * open every contact of `contactIds` (contactIdsEveryReceiverMayOpen). A sender that sends contacts one at a
+ * time to an account it does not choose per send (the Outlook contacts push, on every contact.updated) runs
+ * this before the send: the account's binder may open the contact, or nothing is sent. `includeDeleted`
+ * reads a contact in the trash by its visibility too (a push that removes it from the account).
+ */
+export async function assertReceiversMayOpenContacts(
+  prisma: PrismaService,
+  businessId: string,
+  audience: ExportAudience,
+  contactIds: readonly string[],
+  what: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<void> {
+  const open = await contactIdsEveryReceiverMayOpen(prisma, businessId, audience, contactIds, opts);
+  const refused = contactIds.filter((id) => !open.has(id));
+  if (refused.length > 0) {
+    throw new ForbiddenException(`${what}: ${refused.length === 1 ? 'the contact is' : `${refused.length} contacts are`} not one every receiver of it may open`);
+  }
 }

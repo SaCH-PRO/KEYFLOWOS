@@ -45,7 +45,7 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member routes without an enforced scope at this head: **754**: 751 write routes and 3
+- Member routes without an enforced scope at this head: **753**: 750 write routes and 3
   credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
   owner check). 760 write routes under modules/ at 2c49a539; the first review repair read core/
   too (+11 ConnectorController and GoogleSuiteController routes, -2 newly applied, +2 for the D-85
@@ -55,15 +55,16 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
   the three supplier connection writes, the channel sync from social); the round 2 class repair
   applied 7 (-7: the BYOK keys, CW-1; the destination writes, CW-2; the accounting and marketing
   pushes and the campaign trigger, WHP-1, WHP-2) and moved 2 open rows to exempt-check (the Business
-  Profile location, CW-3; connector Connect, CW-4).
-  - exempt-check: 60
+  Profile location, CW-3; connector Connect, CW-4); the round 3 class repair applied the channel
+  connection health check (-1, CB-1) and moved the Drive share to exempt-check (WPH2-2).
+  - exempt-check: 61
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 63 (three of them `held:` credential writers, the bank connections)
-  - open: 578
-- Routes gated by this packet (applied): **92**: 91 write routes and one credential-binding GET (the
-  Outlook contacts consent start, SV-3); and 25 reads of the same controllers (round 2: the
+  - open: 576
+- Routes gated by this packet (applied): **93**: 92 write routes and one credential-binding GET (the
+  Outlook contacts consent start, SV-3; round 3: and crm read, WPH2-1); and 25 reads of the same controllers (round 2: the
   accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
   round 1 class repair added a settings admin check to routes that already enforced another scope
   (IntegrationHubController connect and disconnect keep `connect:write` and check settings admin in
@@ -81,6 +82,8 @@ Applied in this packet, with real-DB tests through the HTTP routes:
 | webhook deliveries, every family (round 1 class repair, CLASS A; RC-1 invoice.*) | one door projects every delivery (WebhookDispatcherService.dispatch, webhook-payload.ts): every person row is the fixed person view { id, firstName, lastName, email } (name for a member or staff row), a row of a module the subscriber was not checked for is its id, no credential or contact-private key at any depth; the events are derived from the dispatcher's @OnEvent metadata and the source's emitters, every family has a read rule; round 2 (WHP-3): a person row is told by the columns only a Contact or a User row carries, never by a name, so the event record's own JSON columns (an order's shipping and billing address) go out as read | sweep-webhook-payload-projection |
 | provider credential writers the call graph found (round 1 class repair, CLASS B; RC-2 Shopify) | settings admin: Shopify connect; supplier connection create / update / deactivate; the channel sync from social; the Outlook contacts disconnect; the KEY action social.connect_account / disconnect_account; settings admin added to what was there: integration hub connect / disconnect and KEY settings.configure_integration (connect write kept), KEY connector connect / disconnect (D-111 role kept, settings admin by the map, D-114) | sweep-credential-writers-scope, sweep-channel-connections-scope, key-connector-authority, settings-adapter.service.spec, social-adapter.service.spec |
 | integration pushes, every export connector (round 2 class repair, CLASS A; WHP-1, WHP-2) | binding QuickBooks, Xero, Mailchimp or Klaviyo needs, beside settings admin, read on what the account receives (CONNECTOR_EXPORT_READS: revenue and crm; crm), and records the binder as the receiver; the accounting push is revenue write and the marketing push content write, each with read on what it sends, and each sends only the contacts the pushing member and the binder may both open (a legacy binding with no recorded binder is read as a non-owner's); the accounting reads need revenue read; Mailchimp's host is pinned to a data center | sweep-export-receivers-scope |
+| Outlook contacts push, Drive share and tracked documents (round 3 class repair, CLASS A; WPH2-1, WPH2-2) | the Outlook consent start needs crm read beside settings admin and names its member, the callback records them as the binder, every push sends only a contact the binder may open (a legacy binding is read as a non-owner's) and the sync links only such contacts; a Drive share is the owner's (D-99); the tracked documents list follows the module reads | sweep-class-r3-scope |
+| channel connection health check (round 3 class repair, CLASS B; CB-1) | settings admin; a health check keeps an admin's Disabled | sweep-class-r3-scope |
 | credential writers the schema-led call graph found (round 2 class repair, CLASS B; CW-1..CW-4) | settings admin: the BYOK keys (AI preferences), the channel destination writes (a destination read answers no token); D-99 owner: the Business Profile account and location; Connect (POST authenticate on a connector not yet connected): settings admin or the Google owner rules; WhatsApp's smoke test (its passed check is Connect): settings admin | sweep-credential-writers-r2-scope, business-profile-active-location-refusal (web) |
 | API keys (BUG-013) | settings read / admin (revoke: settings admin, review CR-3) | sweep-webhooks-api-keys-settings |
 | connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules); the handler checks read a stored JSON array as the guard does, every module none (second review SV-4) | sweep-connector-credentials-scope |
@@ -178,6 +181,21 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 16. Marketing push default segment (seen in round 2, not changed): it selects `doNotContact: { not:
    true }`, which in SQL also excludes every contact whose flag was never set (NULL), so a default push
    skips most contacts. Count NULL as "may contact"?
+17. Payment connector disconnect (seen in round 3, not changed): POST disconnect/stripe, paypal and
+   wipay mark the connector row disconnected only; the owner's keys stay in Business.metaData (D-11)
+   and the connectors read connectedness and charge with those keys, so the disconnect does not stop
+   them (it is why their status recorders can be pinned as STATUS_DOORS: they lift nothing the
+   connector reads). Should those disconnects clear the keys (owner-only, D-11), or be removed?
+18. Drive files (round 3, WPH2-2): a share is now the owner's, and the tracked documents list follows
+   the module reads. The Drive file routes themselves (list, get, content, rename, move, trash,
+   delete) stay open to members by the W8 note on D-99, so a member with revenue none still reads an
+   invoice PDF's metadata and HTML content by its id, and may trash it. Hold a tracked document's
+   reads and writes to its module, or the Drive routes to a scope?
+19. Accountant export email (seen in round 3, held): POST finance .../accountant-export/email is
+   revenue read and sends the export to any address the sender names; `saveRecipient` writes
+   Business.accountantEmail, the default receiver, under revenue read. The sender reads everything
+   sent, so no read leaks, but the saved default is a receiver binding: settings admin or the owner
+   for `saveRecipient`? finance.controller.ts is held for the PR195 merge.
 
 ## KEY follow-ups and seams
 
@@ -265,7 +283,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `MarketplaceController.updateShippingZone` | PATCH | `/marketplace/businesses/:businessId/shipping-zones/:zoneId` | applied | `storefront:write` |
 | `MarketplaceController.updateWarehouse` | PATCH | `/marketplace/businesses/:businessId/warehouses/:warehouseId` | applied | `storefront:write` |
 | `MarketplaceController.upsertInventory` | POST | `/marketplace/businesses/:businessId/inventory` | applied | `storefront:write` |
-| `MicrosoftOAuthController.buildAuthUrl` | GET | `/connect/microsoft/businesses/:businessId/auth-url` | applied | `settings:admin` (second review repair SV-3: a credential-binding start: its signed state names the business, and the public callback stores the Outlook contacts tokens of whoever completes the consent on it) |
+| `MicrosoftOAuthController.buildAuthUrl` | GET | `/connect/microsoft/businesses/:businessId/auth-url` | applied | `settings:admin` (second review repair SV-3: a credential-binding start: its signed state names the business, and the public callback stores the Outlook contacts tokens of whoever completes the consent on it); round 3 (WPH2-1): and crm read (assertMayBindExport outlook_contacts: the account receives the business's contacts), the state names the member, and the callback records them as the account's binder |
+| `CommunicationsController.healthCheck` | POST | `/communications/businesses/:businessId/connections/:id/health-check` | applied | `settings:admin` (round 3 class repair, CLASS B, CB-1: it writes the connection's healthState, the sending state a settings admin sets; a member lifted the admin's Disabled back to Connected and the delivery queue sent from the sender again; a health check now also keeps an admin's Disabled) |
 | `ProjectsController.addTask` | POST | `/projects/businesses/:businessId/projects/:projectId/tasks` | applied | `projects:write` |
 | `ProjectsController.analyzeImpact` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/analyze-impact` | applied | `projects:write` (review repair SEC-5: a metered model call on the business's AI credits) |
 | `ProjectsController.completeOutAppEvent` | POST | `/projects/businesses/:businessId/plans/:planId/events/:eventId/complete` | applied | `projects:write` |
@@ -487,7 +506,7 @@ send now answers to:
 | MailchimpConnector.subscribeContacts | the account of the stored key, at <dc>.api.mailchimp.com (dc validated) | export: binding needs crm read; POST marketing .../push-contacts is content write, assertMayExport, the same contact filter |
 | KlaviyoConnector.subscribeContacts | the account of the stored key | the same |
 | GoogleContactsSyncService.pushContact | the owner's Google account | destination pinned (OUTBOUND_DESTINATIONS): D-99, the owner reads every contact |
-| OutlookContactsSyncService.pushContact | the Outlook account a settings admin connected | destination pinned: it sends back only contacts the sync mapped, under its principals' write rule |
+| OutlookContactsSyncService.pushContact | the Outlook account a settings admin connected | (round 3, WPH2-1: no longer pinned; the receiver is the account's binder, see below) |
 | PaymentsService.createStripeCheckout, createWipayCheckout | the business's own payment account | destination pinned: a payer's checkout; the keys are the owner's profile secrets (D-11) or the platform's |
 
 Other outbound senders carry no people or money rows to a member-chosen account: the social publishers
@@ -496,6 +515,152 @@ the contact they name), the Google Calendar sync (the owner's account, D-99), th
 BYOK keys are settings admin now; question 14), the KEY connector health checks (the Mailchimp server
 prefix is pinned to a data center like the connector's), Chatwoot and diagnostics (platform hosts) and
 SlackService (no caller).
+
+## Round 3 class repair (CLASS A every outbound sender, CLASS B call-graph census)
+
+**CLASS A.** Round 2's export graph pinned the Outlook contacts push as a safe destination. It also could
+not see a send that hands out a stored file. Two live instances followed:
+
+- WPH2-1. Every `contact.updated` reached `OutlookContactsSyncService.pushContact`, which PATCHed the
+  contact to the Microsoft account in the stored token. That account belongs to whoever completed the
+  consent, a settings admin since SV-3, which includes an ADMIN whose map says crm none (D-114). The
+  callback recorded no binder. The pin's reason ("the sync maps only contacts its principals may
+  write") was about the sync's principals, not the account's receiver. When the owner ran a routine
+  sync, the owner's PRIVATE contacts were linked to the binder's mailbox, and every later edit went
+  there.
+- WPH2-2. `POST /drive/.../files/:fileId/share` was membership only. It granted a Drive permission
+  with the owner's token (D-99), of any type (`anyone` included) and any role. So a STAFF member with
+  every module none could hand the invoice PDFs to their own account. The `GET generated-documents`
+  list showed the file ids to any member.
+
+The rule now, with real-DB tests through the routes and the real event bus
+(sweep-class-r3-scope, R3O-01..06 and R3D-01..03):
+
+| send | destination | rule now |
+| --- | --- | --- |
+| OutlookContactsSyncService.pushContact (every contact.updated: CRM edits, imports, enrichment, KEY CRM actions, flows) | the Microsoft account whose consent was completed | Starting the consent needs settings admin and crm read (`assertMayBindExport`, `CONNECTOR_EXPORT_READS.outlook_contacts`). The signed state names the member. The callback re-checks that member and records them as the binder (`ConnectorStatus metadata.boundBy`). A state that names no binder binds nothing. Before any send, the push runs `assertReceiversMayOpenContacts`: the binder may open the contact, by crm visibility, which also applies to a contact in the trash. A binding with no recorded binder is read as a non-owner's (TEAM and SHARED only). If the binder may no longer read crm, nothing is sent. The sync links, and writes from the mailbox into, only a contact the binder may open; a mailbox tombstone deletes only such a contact. |
+| GoogleDriveService.shareFile (POST .../files/:fileId/share) | the account or domain named, or anyone | The owner rule (`assertGoogleConnectOwner`, D-99): a grant made with the owner's Google account is the owner's, and the owner reads every record a file holds. |
+| GET .../generated-documents (the handles to those files) | the member | A tracked document is listed only to a member who reads its module (`GENERATED_DOCUMENT_MODULES`): revenue for invoice, quote, payment, journal and report; expenses for expense. Asking for one type needs read on its module. |
+
+The census reader now holds the class (CEN-11, CEN-11b):
+
+- An export leaf is the send call itself, so a check inside the method that dominates the call
+  guards it.
+- A POST to a file's `/permissions` counts as an export ("hands out a stored business file").
+- An exporter that is not a connector class is named in `EXPORT_ACCOUNTS`, with:
+  - the account type it sends to;
+  - the routes that bind that account, each of which must run `assertMayBindExport` or the owner
+    rule;
+  - the callback that must record the binder.
+- `OUTBOUND_DESTINATIONS` keeps only:
+  - the owner's Google Contacts push (D-99);
+  - the payer checkouts on the business's own payment accounts.
+
+Every outbound sender of `apps/server/src`, by what it sends and to whom (77 files with a fetch, axios,
+HttpService or provider SDK call; the census's CLASS A inventory):
+
+| sender | sends | to | handled by |
+| --- | --- | --- | --- |
+| WebhookDispatcherService (17 listeners: contact.created / updated / merged, booking.created / confirmed / completed, invoice.paid / reopened / sent / overdue, post.published, store_order.created / paid / shipped / delivered / cancelled) | the event's record | the subscriber's URL | A single projector, `projectWebhookPayload`, is applied recursively to the whole payload: person keys and rows with Contact or User columns are reduced to the person view; another module's rows are reduced to their id; no credential or private CRM key is sent. Every family has a read rule in webhook-events.ts, checked when a webhook is created or re-enabled. WPP-03 subscribes one webhook to every event name in the source and checks for no non-allowlisted key: literal emits, constants, status maps and buffered names. |
+| QuickBooks, Xero (pushInvoice, pushCustomer); Mailchimp, Klaviyo (subscribeContacts) | invoices and customers; contacts | the account in the stored credentials | Round 2: binding checks the export reads, the binder is recorded, and only contacts every receiver may open are sent. |
+| OutlookContactsSyncService.pushContact | a contact's name, email, phone, company and job title | the binder's Microsoft account | Round 3 (above). |
+| GoogleContactsSyncService.pushContact | the same | the owner's Google account | D-99 destination. |
+| GoogleDriveService.shareFile | a grant on a stored file | any account, or the public | Round 3: the owner rule. |
+| GoogleDriveService uploads (save-document, generated documents, inventory sheet push), Drive create, rename, move, trash and delete | business documents | the owner's Drive (D-99) | The owner reads everything. The file routes stay open to members by the W8 note on D-99 (question 18). |
+| PaymentsService checkouts (Stripe, WiPay, PayPal) | the invoice a payer pays | the business's own payment account | Destination (D-11 owner keys, or the platform's). |
+| Gmail sends (invoices, quotes, receipts, reminders), email adapter, WhatsApp and Meta adapters, KEY inbox replies | a message | the contact the record names | The record's own subject, by the sending module's write scope. No member-chosen account receives it. |
+| Social publishers (Facebook, Instagram, LinkedIn, TikTok, X) | the business's posts | the business's destinations | Destinations are settings admin (round 2, CW-2). |
+| Google Calendar sync | bookings | the owner's calendar (D-99) | The owner reads everything. |
+| AI model gateway, Langfuse, code executor, document parsing, ElevenLabs | prompts and content | the platform's providers, or a BYOK key | BYOK keys are settings admin (round 2, CW-1; question 14). |
+| Apollo enrichment | a contact's email and name | the platform's Apollo key | The enrich route enforces crm; a platform processor. |
+| AccountantExportEmailService (FinanceController, revenue:read) | the accountant export ZIP | the email the sender names, or the saved default | The sender reads everything sent. The route is held by pkt/PR195-JOURNAL-SCOPE (question 19). |
+| OAuth token exchanges and refreshes, provider health checks and syncs (GETs), Supabase auth, RISC, currency rates, HIBP, Chatwoot replies, diagnostics, SlackService (no caller), contract asset fetches | no people or money rows | provider and platform hosts | Not a send of records. |
+
+**CLASS B.** The round 3 hunt passed fifteen shapes through the reader with all 18 CEN cases green (CM-1,
+CM-2, CM-3). It also found one live instance:
+
+- CB-1. `POST .../connections/:id/health-check` recomputed `healthState` from the token facts. Any
+  member could therefore lift the `Disabled` a settings admin had set, and DeliveryQueueService
+  would send from that sender again.
+
+Now:
+
+- `CommunicationsController.healthCheck` is settings admin.
+- `ChannelConnectionService.runHealthCheck` keeps an admin's `Disabled`; only PATCH connections/:id
+  lifts it (R3H-01..03).
+
+Reader changes in rest-scope-census.spec.ts:
+
+- A check is its pinned declaration, `CheckRule.decl` (`Class.method` or `fn:<name>@<file>`). It is
+  resolved through:
+  - `this`;
+  - a typed property or local;
+  - an import;
+  - a same-file function.
+
+  So a file-local no-op named after a check checks nothing.
+- A check that answers null (`verifyState`, `consumeOAuthSession`) counts only through a falsy test
+  of its result that ends in throw or return.
+- A check that names a business counts only for a write to that business: the route's :businessId,
+  or the business the guarded call carries, directly or through one local.
+- Calls are followed through:
+  - typed locals;
+  - `moduleRef.get(X)`;
+  - an injection token: its `{ provide, useClass }` binding, or its interface's implementers, else
+    by name;
+  - a method's declared return class.
+
+  A COMMON method name (create, update, delete) resolves when the receiver's class is known.
+- Event names and SQL are read through constants (file or imported, a constant map's member, a
+  status map's values).
+- These writes are read as leaves:
+  - the `*AndReturn` forms;
+  - nested relation writes on credential models;
+  - INSERT ... ON CONFLICT DO UPDATE SET;
+  - an INSERT's column list.
+- New binding leaves:
+  - the payment and sending account ids in Business.metaData (wipayAccountNumber, wipayDeveloperId,
+    paypalClientId, paypalSandbox, stripePublishableKey, phoneNumberId, wabaId);
+  - a ConnectorStatus status lift (`*lift`: 'connected' in an update);
+  - `ChannelConnection.healthState`.
+- `STATUS_DOORS` pins the writers that only record a provider call the stored credentials passed:
+  each connector's trackActivity, and the Gmail, Google Contacts, Google Forms and Outlook syncs.
+  CEN-10h checks that each door still writes, and that its connector either removes the credentials
+  on disconnect or reads its connectedness from them. WhatsApp's health reads the stored status, so
+  WhatsApp could never be a door.
+- CEN-10d holds every round 2 and round 3 hunt shape, and two guarded twins.
+
+The full CLASS B inventory at this head comes from the graph: 59 routes reach a credential or binding
+write, member or public, any verb. Through each one's guard:
+
+- **settings admin enforced** (20): the AI preferences; communications connection create, update and
+  delete, WhatsApp connect, sync from social, the destination create and toggle, and the health
+  check; connector credentials save and webhook-info; the Outlook consent start; Shopify connect;
+  social manual connect, OAuth start and callback, and delete; supplier connection create, update
+  and delete.
+- **a pinned check dominating the write** (36):
+  - `assertConnectorSettingsAdmin`: connector delete credentials, disconnect, reconnect.
+  - `assertConnectorBindingAuthority`: authenticate, smoke.
+  - `assertGoogleConnectOwner`, the Google starts and their settings and disconnects:
+    - Calendar via bookings and calendar;
+    - Drive;
+    - Google Suite;
+    - CRM Google;
+    - the Google Contacts source;
+    - the Business Profile location.
+  - `assertConnectAuthority` and `connectStanding`: the Gmail start, confirm and disconnect.
+  - `assertBusinessOwner`: the business profile's payment secrets and account ids.
+  - `assertConfigOwner`: WhatsApp config.
+  - `assertConnectorOwner`: GA4 and Search Console.
+  - `assertMemberModuleLevel` settings admin: the integration hub connect and disconnect.
+  - `requireConnectorAdmin` with settings admin: KEY connector connect and disconnect.
+  - The public callbacks, through `verifyState` / `consumeOAuthSession` with their null gates:
+    Calendar (bookings and calendar), Gmail, Drive, Google Suite, Microsoft, CRM Google.
+- **`held:`** (3): the bank connections. finance.controller.ts belongs to the PR195 merge; they need
+  settings admin after it.
+
+The KEY entries (SettingsAdapterService, SocialAdapterService, and every adapter that reaches a door)
+are guarded (CEN-10c).
 
 ## Census by controller
 
@@ -872,7 +1037,6 @@ SlackService (no caller).
 | `CommunicationsController.createContent` | POST | `/communications/businesses/:businessId/content` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.deleteContent` | DELETE | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.healthCheck` | POST | `/communications/businesses/:businessId/connections/:id/health-check` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.listWhatsAppPhones` | POST | `/communications/businesses/:businessId/whatsapp/list-phones` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.publishNow` | POST | `/communications/businesses/:businessId/content/:id/publish` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.reschedule` | PATCH | `/communications/businesses/:businessId/deliveries/:deliveryId/reschedule` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -1274,7 +1438,7 @@ Every other route is applied (above).
 | `GoogleDriveController.move` | PATCH | `/drive/businesses/:businessId/files/:fileId/move` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.rename` | PATCH | `/drive/businesses/:businessId/files/:fileId/rename` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.saveDocument` | POST | `/drive/businesses/:businessId/save-document` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
-| `GoogleDriveController.share` | POST | `/drive/businesses/:businessId/files/:fileId/share` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
+| `GoogleDriveController.share` | POST | `/drive/businesses/:businessId/files/:fileId/share` | exempt-check | check:assertGoogleConnectOwner (round 3 class repair, CLASS A, WPH2-2: a grant made with the owner's Drive token hands a stored business file, an invoice PDF naming the client and the amounts, to the account named or to anyone; it is the owner's, D-99, and the owner reads every record a file holds; it was membership only) |
 | `GoogleDriveController.trash` | PATCH | `/drive/businesses/:businessId/files/:fileId/trash` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.untrash` | PATCH | `/drive/businesses/:businessId/files/:fileId/untrash` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |
 | `GoogleDriveController.updateFileContent` | PATCH | `/drive/businesses/:businessId/files/:fileId/content` | open | membership only; follow-up SWEEP-CENSUS: operations write; documents_ / drive_ map to operations in the KEY member map |

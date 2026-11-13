@@ -328,7 +328,8 @@ const BINDING_RULES: Record<string, string[]> = {
   // metadata holds encryptedCredentials: a write that replaces it whole wipes them (round 2 CW-5 M13).
   // *lift (round 3, CM-3 g13): a write whose update sets status 'connected' lifts a disconnect recorded on
   // the row, for any connector (WhatsApp's recordConnected was the one instance pinned by name).
-  connectorStatus: ['encryptedCredentials', '*delete', '*deactivate', '*metadata', '*lift'],
+  // boundBy (round 3, WPH2-1): the member an export account's sends are checked for (its receiver); writing it binds.
+  connectorStatus: ['encryptedCredentials', 'boundBy', '*delete', '*deactivate', '*metadata', '*lift'],
   // the business's BYOK provider keys (settings / ai_preferences; round 2 CW-1)
   aiMemory: ['byokOpenai', 'byokAnthropic', 'byokXai', 'byokKimi', 'byokGoogle', 'byokNative'],
 };

@@ -13,7 +13,11 @@ import { assertMayExport, receiverReadRefusal, type ExportAudience } from '../au
  *   - quickbooks, xero: the accounting push (POST /accounting/.../invoices/push and /customers/push)
  *     sends each invoice's lines and amounts and each customer's name, email, company and phone;
  *   - mailchimp, klaviyo: the marketing push (POST /marketing/.../lists/push-contacts) sends each
- *     contact's email, name and (Klaviyo) phone.
+ *     contact's email, name and (Klaviyo) phone;
+ *   - outlook_contacts (round 3, WPH2-1): the Outlook contacts push (every contact.updated of a contact the
+ *     sync linked) sends the contact's name, email, phone, company and job title to the Microsoft account
+ *     whose consent was completed. Its binder is the member who started that consent (the signed state
+ *     names them; MicrosoftOAuthController.buildAuthUrl checks these reads, the callback records them).
  *
  * The rule: the member who binds such an account (POST /connectors/.../credentials/:type) reads these
  * modules (assertMayBindExport), and is recorded as the account's receiver (ConnectorStatus
@@ -25,6 +29,7 @@ export const CONNECTOR_EXPORT_READS: Readonly<Record<string, readonly CanonicalM
   xero: ['revenue', 'crm'],
   mailchimp: ['crm'],
   klaviyo: ['crm'],
+  outlook_contacts: ['crm'],
 };
 
 /** The modules a connector's export carries, or null for a connector that exports nothing. */

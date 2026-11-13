@@ -448,8 +448,8 @@ describe('SV-3: the Outlook contacts consent binds the business, so its start is
     }
   });
 
-  it('[MSO-02] the owner and an ADMIN on role defaults get the consent URL, its state naming the business', async () => {
-    for (const actor of [ID.owner, ID.admin, ID.settingsAdmin]) {
+  it('[MSO-02] the owner and an ADMIN on role defaults get the consent URL, its state naming the business and (round 3, WPH2-1) the member who starts it; a settings admin whose explicit map names no crm read does not (the account receives the business\'s contacts)', async () => {
+    for (const actor of [ID.owner, ID.admin]) {
       const res = await send('get', microsoft(), actor);
       expect(res.status, actor).toBe(200);
       const url = new URL(res.body.authUrl);
@@ -458,7 +458,11 @@ describe('SV-3: the Outlook contacts consent binds the business, so its start is
       const decoded = Buffer.from(url.searchParams.get('state') ?? '', 'base64').toString('utf8');
       const payload = JSON.parse(decoded.slice(0, decoded.lastIndexOf('.')));
       expect(payload.businessId, actor).toBe(ID.bizA);
+      expect(payload.boundBy, actor).toBe(actor);
     }
+    const refused = await send('get', microsoft(), ID.settingsAdmin);
+    expect(refused.status).toBe(403);
+    expect(String(refused.body?.message ?? '')).toMatch(/crm read access \(you have none\)/);
   });
 
   it('[MSO-03] a member of another business is refused (BusinessGuard, unchanged)', async () => {

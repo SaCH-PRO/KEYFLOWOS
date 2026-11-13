@@ -392,6 +392,17 @@ describe('CLASS A (WPH2-1): the Outlook account receives only what its binder ma
     const paula = await db.contact.findUnique({ where: { id: ID.cPrivate }, select: { companyName: true } });
     expect(paula.companyName).toBe('Paula Holdings');
   });
+
+  it('[R3O-07] the rule is the binder\'s view, not a ban (control): an account the owner bound (the owner opens every contact) receives the PRIVATE contact\'s edit and the TEAM contact\'s', async () => {
+    await resetOutlook();
+    await bindOutlookAs(ID.owner);
+    expect((await connectorMeta('outlook_contacts')).boundBy).toBe(ID.owner);
+    await mapBoth();
+    outbound.length = 0;
+    await pushBoth();
+    expect(graphWrites().filter((w) => w.url.endsWith(`${P}AAMk-paula`) && w.method === 'PATCH').length).toBe(1);
+    expect(graphWrites().filter((w) => w.url.endsWith(`${P}AAMk-tom`) && w.method === 'PATCH').length).toBe(1);
+  });
 });
 
 // ── CLASS A, WPH2-2: a Drive share hands out a stored business file ────────────────────────────

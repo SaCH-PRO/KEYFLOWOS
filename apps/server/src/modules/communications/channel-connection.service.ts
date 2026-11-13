@@ -43,6 +43,9 @@ const DESTINATION_CREATE_FIELDS = ['platform', 'platformId', 'displayName', 'ava
 const CONNECTION_CREATE_FIELDS = ['provider', 'label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'providerMeta'] as const;
 const CONNECTION_UPDATE_FIELDS = ['label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'healthState', 'healthMessage', 'lastCheckedAt', 'providerMeta'] as const;
 
+/** The sending state only a settings admin sets and lifts (PATCH connections/:id); a health check keeps it (round 3, CB-1). */
+const ADMIN_DISABLED = 'Disabled';
+
 function pickFields<K extends string>(data: unknown, fields: readonly K[]): Partial<Record<K, unknown>> {
   const out: Partial<Record<K, unknown>> = {};
   if (!data || typeof data !== 'object' || Array.isArray(data)) return out;
@@ -244,12 +247,31 @@ export class ChannelConnectionService {
     };
   }
 
+  /**
+   * Recomputes a connection's health from its token facts. SWEEP-P0-SCOPES round 3 class repair (CB-1): an
+   * admin's 'Disabled' is a decision, not a token fact, so a health check keeps it (it stamps the check and
+   * answers the stored state); only PATCH connections/:id, settings admin, lifts it.
+   */
   async runHealthCheck(businessId: string, id: string) {
     const conn = await this.prisma.client.channelConnection.findFirst({
       where: { id, businessId },
       include: { destinations: true },
     });
     if (!conn) throw new NotFoundException('Connection not found');
+    if (conn.healthState === ADMIN_DISABLED) {
+      const kept = await this.prisma.client.channelConnection.update({
+        where: { id },
+        data: { lastCheckedAt: new Date() },
+        include: { destinations: true },
+      });
+      return {
+        id: kept.id,
+        healthState: kept.healthState,
+        healthMessage: kept.healthMessage,
+        lastCheckedAt: kept.lastCheckedAt,
+        destinations: kept.destinations,
+      };
+    }
 
     let healthState = 'Connected';
     let healthMessage: string | null = null;

@@ -103,7 +103,16 @@ export class CommunicationsController {
     return this.connections.delete(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS B; finding CB-1): settings admin, as the connection writes are
+   * (SV-2). A health check writes the connection's healthState, the sending state a settings admin sets (PATCH
+   * connections/:id 'Disabled' pauses the sender; DeliveryQueueService refuses a campaign whose sender is not
+   * 'Connected'). It ran membership only and recomputed the state from the token facts, so any member lifted
+   * the admin's 'Disabled' back to 'Connected'. A health check also keeps an admin's 'Disabled'
+   * (ChannelConnectionService.runHealthCheck): only PATCH connections/:id lifts it.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:id/health-check')
   async healthCheck(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.connections.runHealthCheck(businessId, id);
