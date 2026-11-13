@@ -635,6 +635,120 @@ const EXPORT_ACCOUNTS: Record<string, { type: string; binds: string[]; recordsBi
   },
 };
 
+/**
+ * SWEEP-P0-FOLLOWUP repair (review SEC-FU-1): the binds of the channel_messaging accounts above were a hand-written
+ * list, and POST connections/sync-from-social (ChannelConnectionService.syncFromSocial: every social connection's
+ * token copied over the channel connection of that provider, EMAIL, GOOGLE and WHATSAPP included) was a door it left
+ * out: a settings admin whose map says crm none swapped the owner-bound mailbox's token for their own while the
+ * recorded binder still named the owner. CEN-11c now reads the doors from the call graph: every route and KEY module
+ * action that reaches a write of a channel connection's sending account (channelAccountLeaf) must be one of those
+ * binds (assertMayBindExport, the binder recorded) or reach the write only through a writer pinned here, which skips
+ * every messaging provider (isMessagingProvider ... continue) before it writes.
+ */
+const CHANNEL_NON_MESSAGING_WRITERS: Record<string, string> = {
+  'ChannelConnectionService.syncFromSocial':
+    'a social connection is a page or profile (Facebook, Instagram, LinkedIn, X, TikTok), never a sending mailbox or WhatsApp account: the sync skips EMAIL, GOOGLE and WHATSAPP, which only the binding routes above write',
+};
+/** The writer skips a messaging provider before it writes (CHANNEL_NON_MESSAGING_WRITERS). */
+const SKIPS_MESSAGING = /if\s*\(\s*isMessagingProvider\([^)]*\)\s*\)\s*(?:\{[^{}]*?\bcontinue\b|continue\b)/;
+
+/**
+ * A write of a channel connection's sending account: a new connection, or a write of its token, refresh token or
+ * provider meta (or data handed whole), by Prisma, raw SQL or a nested relation write. A health, lift, deactivation
+ * or delete write is not one (CEN-10 holds those).
+ */
+function channelAccountLeaf(leaf: string | null): string | null {
+  if (!leaf) return null;
+  const own = /^channelConnection\.(\w+)(?:\((.*)\))?$/.exec(leaf);
+  if (own) {
+    const [, op, cols = ''] = own;
+    if (/^(create|createMany|createManyAndReturn|upsert)$/.test(op) && !/^(deactivate|status lift)$/.test(cols)) return leaf;
+    return /^update/.test(op) && /\b(token|refreshToken|providerMeta)\b|data handed whole/.test(cols) ? leaf : null;
+  }
+  if (/^raw SQL INSERT INTO channel_connections\b/.test(leaf)) return leaf;
+  if (/^raw SQL UPDATE channel_connections SET\b/.test(leaf) && /\b(token|refresh_token|provider_meta|a JSON credential key)\b/.test(leaf)) return leaf;
+  if (/\(nested channelConnection\.(create|createMany|connectOrCreate|upsert|update|updateMany)\b/.test(leaf)) return leaf;
+  return null;
+}
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (review COR-1): the methods that hand an audience send to the queue with no sending member,
+ * each with why. Every other call of CommunicationsService.sendBroadcast or DeliveryQueueService.publishNow / schedule
+ * names the member who sends (a `sender`, held to channelRecipients beside the account's binder), or hands its own
+ * caller's input through from a method of the same name (whose callers CEN-11d reads in turn). KEY's
+ * comms_send_broadcast (FlowOrchestratorService.executeToolAction) sent no member, so only the binder was checked and
+ * KEY reached contacts the same member's HTTP publish leaves out (D-88).
+ */
+const MEMBERLESS_AUDIENCE_SENDS: Record<string, string> = {
+  'KeyCortexDigestService.sendDigest':
+    "the scheduled digest: no member starts it; the send still reaches only the contacts the sending account's binder may open (channelRecipients)",
+};
+
+interface AudienceSendCall {
+  /** The method that makes the call (`Class.method`). */
+  at: string;
+  call: string;
+  /** The call names the member who sends. */
+  namesSender: boolean;
+  /** The call hands its method's own parameter through whole (sendBroadcast(input)). */
+  passThrough: boolean;
+}
+
+/** Every call that hands an audience send to the queue: sendBroadcast, and publishNow / schedule on the delivery queue. */
+function audienceSendCalls(files: Parsed[] = parsed()): AudienceSendCall[] {
+  const out: AudienceSendCall[] = [];
+  const enclosing = (n: ts.Node): { cls: string; method: string; params: string[] } => {
+    let method = '';
+    let params: string[] = [];
+    for (let p: ts.Node | undefined = n.parent; p; p = p.parent) {
+      if (!method && (ts.isMethodDeclaration(p) || ts.isFunctionDeclaration(p)) && p.name) {
+        method = p.name.getText();
+        params = p.parameters.map((x) => (ts.isIdentifier(x.name) ? x.name.text : ''));
+      }
+      if (ts.isClassDeclaration(p) && p.name) return { cls: p.name.text, method, params };
+    }
+    return { cls: '', method, params };
+  };
+  const nullish = (e: ts.Expression) => {
+    const v = strip(e);
+    return v.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(v) && v.text === 'undefined');
+  };
+  for (const { sf } of files) {
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+        const name = n.expression.name.text;
+        const receiver = n.expression.expression.getText(sf);
+        const broadcast = name === 'sendBroadcast';
+        const queue = (name === 'publishNow' || name === 'schedule') && /deliver/i.test(receiver);
+        if (broadcast || queue) {
+          const { cls, method, params } = enclosing(n);
+          let namesSender = false;
+          let passThrough = false;
+          if (broadcast) {
+            const arg = n.arguments[0] ? strip(n.arguments[0]) : undefined;
+            if (arg && ts.isObjectLiteralExpression(arg)) {
+              namesSender = arg.properties.some(
+                (p) =>
+                  (ts.isPropertyAssignment(p) && p.name.getText(sf) === 'sender' && !nullish(p.initializer)) ||
+                  (ts.isShorthandPropertyAssignment(p) && p.name.text === 'sender'),
+              );
+            } else if (arg && ts.isIdentifier(arg)) {
+              passThrough = method === 'sendBroadcast' && params.includes(arg.text);
+            }
+          } else {
+            const at = name === 'publishNow' ? 3 : 5;
+            namesSender = n.arguments.length > at && !nullish(n.arguments[at]);
+          }
+          out.push({ at: `${cls}.${method}`, call: `${receiver}.${name}`, namesSender, passThrough });
+        }
+      }
+      n.forEachChild(visit);
+    };
+    visit(sf);
+  }
+  return out;
+}
+
 interface GraphClass {
   file: string;
   /** property -> the type it holds: a class, an interface, or an injection token (`@Inject(TOKEN)`). */
@@ -1643,6 +1757,117 @@ let graphCache: CredentialGraph | null = null;
 const credentialGraph = () => (graphCache ??= buildCredentialGraph());
 let exportGraphCache: CredentialGraph | null = null;
 const exportGraph = () => (exportGraphCache ??= buildGraph(EXPORT_RULES));
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (SEC-FU-1): the channel account graph. Same reader; its leaves are the writes of a channel
+ * connection's sending account (channelAccountLeaf), and the writers pinned in CHANNEL_NON_MESSAGING_WRITERS excuse
+ * theirs. CEN-11c reads `reaches`: a door is any route or KEY action with a path to such a write.
+ */
+const CHANNEL_ACCOUNT_RULES: GraphRules = {
+  leafOfCall: (call, ctx) => channelAccountLeaf(credentialLeafOfCall(call, ctx)),
+  leafOfMethod: () => null,
+  checks: {},
+  doors: CHANNEL_NON_MESSAGING_WRITERS,
+};
+let channelAccountGraphCache: CredentialGraph | null = null;
+const channelAccountGraph = () => (channelAccountGraphCache ??= buildGraph(CHANNEL_ACCOUNT_RULES));
+/** The routes of `list` that write a channel connection's sending account and are no channel_messaging bind of EXPORT_ACCOUNTS, with the path. */
+function unboundChannelAccountWriters(g: CredentialGraph, list: Route[]): Array<{ key: string; why: string }> {
+  const binds = new Set(Object.values(EXPORT_ACCOUNTS).filter((a) => a.type === 'channel_messaging').flatMap((a) => a.binds));
+  const out: Array<{ key: string; why: string }> = [];
+  for (const r of list) {
+    const path = g.reaches.get(r.key);
+    if (path && !binds.has(r.key)) out.push({ key: r.key, why: `${r.key} (${r.verb} ${r.path}) writes a channel connection's sending account and is no channel_messaging bind of EXPORT_ACCOUNTS (assertMayBindExport, the binder recorded): ${path.join(' -> ')}` });
+  }
+  return out;
+}
+/**
+ * SWEEP-P0-FOLLOWUP repair (SEC-FU-1): the mutation check of CEN-11c. A scratch controller of settings-admin routes,
+ * parsed beside the real source: each `h*` handler writes a channel connection's sending account a way the binding
+ * routes do not check (through the service, on the delegate, a new connection, raw SQL), and must be reported; each
+ * `t*` twin (the pinned sync, a health write) must not.
+ */
+const CEN11C_EXPECTED_UNBOUND = [
+  'Cen11cHuntController.h1ServiceToken',
+  'Cen11cHuntController.h2DelegateToken',
+  'Cen11cHuntController.h3DelegateCreate',
+  'Cen11cHuntController.h4RawProviderMeta',
+  'Cen11cHuntController.h5CopyLikeTheSync',
+];
+const CEN11C_EXPECTED_TWINS = ['Cen11cHuntController.t1PinnedSync', 'Cen11cHuntController.t2HealthWrite'];
+function CEN11C_HUNT(): Parsed {
+  const text = `
+import { Body, Controller, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { RequireModuleScope } from '../../core/auth/require-module-scope.decorator';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { ChannelConnectionService } from '../communications/channel-connection.service';
+
+@Controller('cen11c-hunt')
+export class Cen11cHuntController {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ChannelConnectionService) private readonly channels: ChannelConnectionService,
+  ) {}
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Patch('businesses/:businessId/h1/:id')
+  h1ServiceToken(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.channels.update(businessId, id, { token: body.token });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h2/:id')
+  h2DelegateToken(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.prisma.client.channelConnection.update({ where: { id }, data: { token: body.token } });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h3')
+  h3DelegateCreate(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.prisma.client.channelConnection.create({ data: { businessId, provider: 'EMAIL', token: body.token } });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h4/:id')
+  h4RawProviderMeta(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.prisma.client.$executeRawUnsafe('UPDATE channel_connections SET provider_meta = $1 WHERE id = $2', body.meta, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h5')
+  async h5CopyLikeTheSync(@Param('businessId') businessId: string) {
+    for (const sc of await this.prisma.client.socialConnection.findMany({ where: { businessId } })) {
+      const existing = await this.prisma.client.channelConnection.findFirst({ where: { businessId, provider: sc.platform } });
+      if (existing) await this.prisma.client.channelConnection.update({ where: { id: existing.id }, data: { token: sc.token, refreshToken: sc.refreshToken } });
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/t1')
+  t1PinnedSync(@Param('businessId') businessId: string) {
+    return this.channels.syncFromSocial(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/t2/:id')
+  t2HealthWrite(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.prisma.client.channelConnection.updateMany({ where: { id, businessId }, data: { healthState: 'Disabled' } });
+  }
+}
+`;
+  const file = join(SRC, 'modules/cen11c-hunt/cen11c-hunt.controller.ts');
+  return { file, text, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
+}
 /**
  * Round 2 (CW-5): the shapes the round 2 hunt added to a scratch controller, one membership-only
  * handler each, all of which passed CEN-* at e740575c. CEN-10d parses them beside the real source
@@ -2528,6 +2753,84 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     }
     const save = all.find((r) => r.key === 'ConnectorController.saveCredentials');
     if (!/\bassertMayBindExport\b/.test(save?.body ?? '')) problems.push('ConnectorController.saveCredentials does not check the export reads of the connector it binds (assertMayBindExport)');
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-11c] (SWEEP-P0-FOLLOWUP repair, SEC-FU-1) a messaging channel connection\'s sending account is bound only through the export binding check: every route (member or public, any verb) and KEY module action that reaches a write of a channel connection\'s sending account (the call graph) is a channel_messaging bind of EXPORT_ACCOUNTS, or reaches it only through a pinned writer that skips every messaging provider before it writes', () => {
+    const g = channelAccountGraph();
+    // guards the guard: the binding doors the call graph finds, and the sync it now passes through a pinned writer
+    expect(all.filter((r) => g.reaches.has(r.key)).map((r) => r.key)).toEqual(
+      expect.arrayContaining(['CommunicationsController.createConnection', 'CommunicationsController.updateConnection', 'CommunicationsController.connectWhatsApp']),
+    );
+    expect(g.doorWrites.get('ChannelConnectionService.syncFromSocial')?.length ?? 0, 'the sync still writes channel connections (through its pinned door)').toBeGreaterThan(0);
+    const problems = unboundChannelAccountWriters(g, all).map((u) => u.why);
+    for (const k of g.keyEntries) if (g.reaches.has(k)) problems.push(`KEY ${k} writes a channel connection's sending account: ${g.reaches.get(k)!.join(' -> ')}`);
+    for (const [door, why] of Object.entries(CHANNEL_NON_MESSAGING_WRITERS)) {
+      if (!why.trim()) problems.push(`${door} names no reason`);
+      if (!(g.doorWrites.get(door) ?? []).length) problems.push(`${door} writes no channel connection's sending account (any more): drop it from CHANNEL_NON_MESSAGING_WRITERS`);
+      const [cls, method] = door.split('.');
+      const body = g.classes.get(cls)?.methods.get(method);
+      if (!body || !SKIPS_MESSAGING.test(textOf(body))) problems.push(`${door} does not skip a messaging provider (EMAIL, GOOGLE, WHATSAPP: if (isMessagingProvider(...)) continue) before it writes a channel connection's sending account`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-11c-guard] (SWEEP-P0-FOLLOWUP repair, SEC-FU-1) guards the guard (mutation check): parsed beside the real source, every scratch settings-admin handler that writes a channel connection\'s sending account outside the binding routes is reported, and its twins (the pinned sync, a health write) are not', () => {
+    const hunt = CEN11C_HUNT();
+    const g = buildGraph(CHANNEL_ACCOUNT_RULES, [...parsed(), hunt]);
+    const huntRoutes = routes([hunt]);
+    expect(huntRoutes.map((r) => r.key).sort()).toEqual([...CEN11C_EXPECTED_UNBOUND, ...CEN11C_EXPECTED_TWINS].sort());
+    expect(unboundChannelAccountWriters(g, huntRoutes).map((u) => u.key).sort()).toEqual([...CEN11C_EXPECTED_UNBOUND].sort());
+    // the mutation the review made: the sync with its messaging skip taken out is a door again
+    const unskipped = parsed().map((p) => {
+      if (!p.file.endsWith('modules/communications/channel-connection.service.ts')) return p;
+      const text = p.text.replace(/if\s*\(\s*isMessagingProvider\([^)]*\)\s*\)\s*(?:\{[^{}]*?\bcontinue\b[^{}]*?\}|continue\s*;?)/g, '');
+      return { ...p, text, sf: ts.createSourceFile(p.file, text, ts.ScriptTarget.Latest, true) };
+    });
+    const gm = buildGraph(CHANNEL_ACCOUNT_RULES, unskipped);
+    const body = gm.classes.get('ChannelConnectionService')?.methods.get('syncFromSocial');
+    expect(!!body, 'the reader still sees the sync').toBe(true);
+    expect(SKIPS_MESSAGING.test(textOf(body!)), 'with the skip taken out, CEN-11c reports the sync').toBe(false);
+    expect((gm.doorWrites.get('ChannelConnectionService.syncFromSocial') ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('[CEN-11d] (SWEEP-P0-FOLLOWUP repair, COR-1) every call that hands an audience send to the queue (CommunicationsService.sendBroadcast, DeliveryQueueService.publishNow and schedule) names the member who sends, hands its caller\'s input through from a method of the same name, or is a pinned memberless send (the scheduled digest)', () => {
+    const calls = audienceSendCalls();
+    // guards the guard: the reader sees the senders the review traced
+    expect(calls.map((c) => c.at)).toEqual(
+      expect.arrayContaining([
+        'FlowOrchestratorService.executeToolAction',
+        'CommunicationsAdapterService.execute',
+        'CommunicationsAdapterService.sendBroadcast',
+        'KeyCortexDigestService.sendDigest',
+        'CommunicationsService.sendBroadcast',
+        'CommunicationsController.publishNow',
+        'CommunicationsController.schedule',
+      ]),
+    );
+    const problems: string[] = [];
+    for (const c of calls) {
+      if (c.namesSender || c.passThrough) continue;
+      if (Object.hasOwn(MEMBERLESS_AUDIENCE_SENDS, c.at)) continue;
+      problems.push(`${c.at}: ${c.call}(...) hands an audience send to the queue without the member who sends (sender), so only the sending account's binder is checked`);
+    }
+    for (const [at, why] of Object.entries(MEMBERLESS_AUDIENCE_SENDS)) {
+      if (!why.trim()) problems.push(`${at} names no reason`);
+      if (!calls.some((c) => c.at === at && !c.namesSender)) problems.push(`${at} hands no memberless audience send to the queue (any more): drop it from MEMBERLESS_AUDIENCE_SENDS`);
+    }
+    // guards the guard (mutation check): a sendBroadcast with no sender, or with sender: null, and a publishNow with three arguments are reported
+    const scratch = `
+export class Cen11dHunt {
+  constructor(private readonly comms: any, private readonly deliveryQueue: any) {}
+  async noSender(businessId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x' }); }
+  async nullSender(businessId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x', sender: null }); }
+  async threeArgs(businessId: string, id: string) { return this.deliveryQueue.publishNow(businessId, id, []); }
+  async named(businessId: string, userId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x', sender: { id: userId } }); }
+}
+`;
+    const file = join(SRC, 'modules/cen11d-hunt/cen11d-hunt.ts');
+    const hunt = audienceSendCalls([{ file, text: scratch, sf: ts.createSourceFile(file, scratch, ts.ScriptTarget.Latest, true) }]);
+    expect(hunt.filter((c) => !c.namesSender && !c.passThrough).map((c) => c.at).sort()).toEqual(['Cen11dHunt.noSender', 'Cen11dHunt.nullSender', 'Cen11dHunt.threeArgs']);
     expect(problems).toEqual([]);
   });
 });

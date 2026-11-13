@@ -883,6 +883,11 @@
       "packet": "V1-99 (SWEEP-P0-FOLLOWUP: WH3-1 audience export through channel connections, owner question 16)"
     },
     {
+      "prefix": "v99d_",
+      "owner": "apps/server/test/sweep-followup-repair-audience.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP repair: SEC-FU-1 sync-from-social, SEC-FU-2 receiver rule at send and re-send, COR-1 KEY broadcast member, COR-2 rebind on change only, SEC-FU-3 audience preview)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"
