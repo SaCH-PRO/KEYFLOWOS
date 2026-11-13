@@ -6,6 +6,8 @@
 **Authority:** https://github.com/SaCH-PRO/KEYFLOWOS/issues/80  
 **Purpose:** Integrate eight recovery/delivery workstreams with existing packet ownership, proof requirements, and governance without creating a competing control plane.
 
+> **Historical note (2026-11-12, convergence tie-off).** This plan was never activated. `docs/reconstruction/BUILD-MAP-001.md` (with `BUILD-QUEUE-001.json`) superseded it as the working plan, and PR #197 landed that plan on main `f5d58ef7`. IRP-01 (F9) landed at `b1948d27`: `scripts/agent-control/lib/merge-grant.mjs` requires a separate #80 merge grant, so the "Interim F9 containment" rule below is moot. IRP-02 (#155) was ported as V1-02 (ruling D-17). IRP-07's lead-to-revenue journey became Release 0 and the build-map queue. IRP-03 (#169/#175) and IRP-04 (#173/#157) were still open control items in BUILD-MAP-001 at `f5d58ef7`. Nothing in this file is current instruction.
+
 ## 1. Precedence and safe boundaries
 
 - Actual code, current PR heads and CI prove what exists. The newest **valid** typed ChatGPT authority on issue #80 determines what can occur. `node scripts/agent-control/status.mjs --verify` folds this authority over the reviewed programme checkpoint. Reading the checkpoint alone is not a fresh live-state verification.
