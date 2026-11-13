@@ -13,9 +13,10 @@ import {
  * 375x812, desktop 1440x900) and in each variant (E2E_VARIANT).
  *
  *   1. A fresh owner, signed in as the journeys sign one in, opens Today.
- *   2. Under KEY_DISABLED no KEY UI renders: no KEY bubble, no header
- *      'Ask KEY' button, no KEY drawer opening by itself, and Ctrl+J / Cmd+J
- *      open nothing (journey K, KEY-off; SWP-KEY-SHELL-SMOKE).
+ *   2. Under KEY_DISABLED no KEY UI renders: no button or link naming KEY (the
+ *      KEY bubble, the header's 'Ask KEY', Today's KEY doors), no KEY drawer
+ *      opening by itself, and Ctrl+J / Cmd+J open nothing (journey K, KEY-off;
+ *      SWP-KEY-SHELL-SMOKE). In the other variants the KEY UI is recorded only.
  *   3. Nothing covers a primary button (intuitiveness principle "Nothing covers
  *      the primary button, and nothing opens by itself"; journey F "No primary
  *      button is covered at any point"): Today's header "New" once the shell
