@@ -160,6 +160,14 @@ jobs:
               return;
             }
 
+            // This comment is posted by the workflow token, an author the
+            // AUTO_MERGE recorder and audit trust, and any commenter's RETURN
+            // wakes it with its packet_id copied verbatim. Echo a packet_id
+            // only when it reads as one, so a stranger cannot put text (a
+            // merge marker, say) into a trusted comment. (SECOPS-2)
+            const PACKET_ID = /^[A-Z0-9][A-Z0-9_.-]{0,80}$/;
+            const packetId = typeof event.packet_id === 'string' && PACKET_ID.test(event.packet_id) ? event.packet_id : 'null';
+
             const body = [
               marker,
               '```yaml',
@@ -168,7 +176,7 @@ jobs:
               'sender: github-autopilot',
               'kind: ' + event.kind,
               'idempotency_key: ' + event.idempotency_key,
-              'packet_id: ' + (event.packet_id || 'null'),
+              'packet_id: ' + packetId,
               'pr_number: ' + (event.pr_number ?? 'null'),
               'workflow: ' + (event.workflow || 'null'),
               'conclusion: ' + (event.conclusion || 'null'),

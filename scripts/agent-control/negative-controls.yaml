@@ -953,6 +953,34 @@ negative_controls:
     proof_command: node --test --test-name-pattern="the audit step fails the job" scripts/agent-control/tests/merge-record-audit.spec.mjs
     timeout_ms: 120000
 
+  # A merge marker anywhere but the start of a trusted comment is a stranger's
+  # text: the workflow token's AUTO_EVENT echoed the packet_id of any
+  # commenter's RETURN, and every merge SHA is public (SECOPS-2). Each control
+  # below restores one half of that path.
+
+  - id: NC-MERGE-RECORD-MARKER-MUST-OPEN-THE-COMMENT
+    claim: >
+      Only a trusted comment that opens with a merge's marker is a statement
+      about that merge. Counted anywhere, a marker echoed into a trusted
+      comment makes the hourly audit fail for any past merge, permanently.
+    mutation:
+      file: scripts/agent-control/lib/merge-record.mjs
+      find: "[0].startsWith(record.marker);"
+      replace: "[0].startsWith(record.marker) || body.includes(record.marker);"
+    proof_command: node --test --test-name-pattern="neither a record nor a conflict" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-WAKE-EVENT-ECHOES-ONLY-A-PACKET-ID
+    claim: >
+      The wake comment, posted as the workflow token, echoes a packet_id only
+      when it reads as one.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "              'packet_id: ' + packetId,"
+      replace: "              'packet_id: ' + (event.packet_id || 'null'),"
+    proof_command: node --test --test-name-pattern="wake event" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
 
   - id: NC-RECONCILE-GATE-BYPASS

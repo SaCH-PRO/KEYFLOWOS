@@ -15,12 +15,18 @@
  * "Finds the record" means a comment by a trusted author whose whole content
  * is the record for THIS merge -- the same PR, admitted head and merge commit,
  * every field, nothing else. A marker alone proves none of that. A trusted
- * comment that carries the marker and says anything different is a conflict:
- * the true record is still made sure of, and the recorder then fails, because
- * two trusted statements about one merge that disagree are not evidence.
+ * comment that OPENS with the marker (its first line) and says anything
+ * different is a conflict: the true record is still made sure of, and the
+ * recorder then fails, because two trusted statements about one merge that
+ * disagree are not evidence.
  *
  * A marker from anyone else is ignored. The repository is public, and a marker
  * pasted by a stranger must not be able to suppress or contest a real record.
+ * That includes a stranger's text inside a trusted comment: the workflow token
+ * also posts AUTO_EVENT wake comments, which echo fields of the comment that
+ * woke them, and every merge SHA is public. So a marker anywhere but the start
+ * of a trusted comment is not a claim about the merge, and is neither a record
+ * nor a conflict (SECOPS-2).
  *
  * Concurrency. Listing and posting are two API calls and GitHub offers no
  * conditional create, so two recorders running at once for one merge can both
@@ -119,6 +125,12 @@ export function recordProblems(body, record) {
   return problems.length ? [...new Set(problems)] : ['differs_from_record'];
 }
 
+/**
+ * Whether a comment is a statement about this merge: its first line, after
+ * line endings and surrounding whitespace, starts with the merge's marker.
+ */
+const claimsMerge = (body, record) => normalize(body).split('\n', 1)[0].startsWith(record.marker);
+
 const trusted = (comment) => {
   const login = String(comment?.user?.login || '').toLowerCase();
   return RECORD_AUTHORS.some((a) => a.toLowerCase() === login);
@@ -136,15 +148,15 @@ export class MergeRecordConflict extends Error {
 
 /**
  * What the control room already says about one merge: the trusted comments
- * that ARE its record, and the trusted comments that carry its marker and are
- * not. Shared by the recorder and by the audit (lib/merge-record-audit.mjs),
+ * that ARE its record, and the trusted comments that open with its marker and
+ * are not. Shared by the recorder and by the audit (lib/merge-record-audit.mjs),
  * so "is this merge recorded" has one answer.
  */
 export function existingRecordsFor(record, existing) {
   const records = [];
   const conflicts = [];
   for (const c of existing) {
-    if (typeof c?.body !== 'string' || !c.body.includes(record.marker) || !trusted(c)) continue;
+    if (typeof c?.body !== 'string' || !claimsMerge(c.body, record) || !trusted(c)) continue;
     const problems = recordProblems(c.body, record);
     if (problems.length === 0) records.push(c);
     else conflicts.push({ comment_id: c.id ?? null, author: c.user.login, url: c.html_url ?? null, problems });
