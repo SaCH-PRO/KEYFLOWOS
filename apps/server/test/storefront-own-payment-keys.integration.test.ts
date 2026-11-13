@@ -49,6 +49,13 @@
  *           settled once through the paid door; (c) a store with its own pair
  *           and no webhook id of its own: 400, the platform's webhook id is not
  *           mixed in, nothing recorded
+ *   OPK-07  a capture settles a storefront order only when the webhook was
+ *           verified with that order's own store's app: (a) a PayPal order
+ *           event verified with store A's own app whose second purchase unit
+ *           names store B's order settles A's order only, B's stays UNPAID;
+ *           (b) an order event whose first purchase unit names nothing KeyFlow
+ *           knows (verified with the platform's app, as before) settles none
+ *           of the storefront orders its other units name
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, PublicRateLimitGuard (real Redis, this suite's namespace),
@@ -330,6 +337,22 @@ function orderCompleted(eventId: string, paypalOrderId: string, captureId: strin
           payments: { captures: [{ id: captureId, amount: { value: ORDER_TOTAL.toFixed(2), currency_code: 'USD' } }] },
         },
       ],
+    },
+  };
+}
+
+/** PayPal's CHECKOUT.ORDER.COMPLETED with one captured purchase unit per [customId, captureId]. */
+function multiUnitOrderCompleted(eventId: string, paypalOrderId: string, units: Array<[customId: string, captureId: string]>) {
+  return {
+    id: eventId,
+    event_type: 'CHECKOUT.ORDER.COMPLETED',
+    resource: {
+      id: paypalOrderId,
+      purchase_units: units.map(([customId, captureId]) => ({
+        reference_id: customId,
+        custom_id: customId,
+        payments: { captures: [{ id: captureId, amount: { value: ORDER_TOTAL.toFixed(2), currency_code: 'USD' } }] },
+      })),
     },
   };
 }
@@ -832,5 +855,36 @@ describe('W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront offers PayPal and Str
     expect(paypalRequests(), '(c): nothing is asked of PayPal').toEqual([]);
     expect(await counts(ID.bizMixed), '(c): nothing recorded').toEqual(before);
     expect(await orderState(mixedOrder)).toBe('PENDING/UNPAID/');
+  });
+
+  it("OPK-07 (D-138) a PayPal capture settles a storefront order only when the webhook was verified with that order's own store's app: (a) an order event verified with store A's own app whose second purchase unit names store B's order settles A's order only, B's stays UNPAID with nothing recorded; (b) an order event whose first purchase unit names nothing KeyFlow knows (verified with the platform's app) settles none of the storefront orders its other units name", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    await setSettings(ID.bizMixed, { ...OWN_PAYPAL, paypalWebhookId: fake('mixed', 'paypal', 'webhook') });
+
+    // (a) Store A (bizOwn) verifies the event; its second unit names store B's (bizMixed's) order.
+    const orderA = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const orderB = await seedOrder(ID.bizMixed, ID.prodMixed, 'PAYPAL');
+    const beforeB = await counts(ID.bizMixed);
+    requests = [];
+    const res = await paypalWebhook(multiUnitOrderCompleted(`${P}WH_7a`, `${P}pp_7a`, [[orderA, `${P}cap_7a_own`], [orderB, `${P}cap_7a_other`]]));
+    expect(res.status, `(a): ${JSON.stringify(res.body)}`).toBe(201);
+    const [token] = paypalRequests();
+    expect(token?.authorization, "(a): verified with store A's own app").toBe(basic(OWN_PAYPAL.paypalClientId, OWN_PAYPAL.paypalClientSecret));
+    expect((await db.marketplaceOrder.findUnique({ where: { id: orderA } })).paymentStatus, "(a): A's order is settled").toBe('PAID');
+    // At the base: B's order PAID too (the event was verified with the platform's app and every unit settled).
+    expect(await orderState(orderB), "(a): B's order is not settled by A's app").toBe('PENDING/UNPAID/');
+    expect(await counts(ID.bizMixed), "(a): nothing recorded for B").toEqual({ ...beforeB, webhookEvents: beforeB.webhookEvents + 1 });
+
+    // (b) The first unit names nothing KeyFlow knows: verified with the platform's app (the env-level check, as before).
+    const orderC = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const beforeC = await counts(ID.bizOwn);
+    requests = [];
+    const res2 = await paypalWebhook(multiUnitOrderCompleted(`${P}WH_7b`, `${P}pp_7b`, [[`${P}unknown_ref`, `${P}cap_7b_unknown`], [orderC, `${P}cap_7b_store`]]));
+    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
+    const [platformToken] = paypalRequests();
+    expect(platformToken?.authorization, "(b): the platform's app verified it").toBe(basic(PLATFORM_PAYPAL.PAYPAL_CLIENT_ID, PLATFORM_PAYPAL.PAYPAL_CLIENT_SECRET));
+    // At the base: the store's order PAID through the paid door on a capture into the platform's account.
+    expect(await orderState(orderC), "(b): the platform's app settles no store's order").toBe('PENDING/UNPAID/');
+    expect(await counts(ID.bizOwn), '(b): nothing recorded for the store').toEqual({ ...beforeC, webhookEvents: beforeC.webhookEvents + 1 });
   });
 });
