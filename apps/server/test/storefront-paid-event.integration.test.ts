@@ -1187,7 +1187,9 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     const market = app.get(MarketplaceService);
 
     // The outbound webhook receivers of business A and business B (fetch answered here: no network).
-    const HOOK = { A: 'https://v18a-hooks-a.test.invalid/store-order-paid', B: 'https://v18a-hooks-b.test.invalid/store-order-paid' };
+    // SWEEP-P0-SCOPES (BUG-001): TEST-NET-3 address literals (never routed): every delivery now passes the
+    // outbound-address guard, which resolves a name; an IP literal is checked without DNS.
+    const HOOK = { A: 'https://203.0.113.22/store-order-paid', B: 'https://203.0.113.23/store-order-paid' };
     await db.webhook.create({
       data: { id: `${P}wh_a`, businessId: ID.biz, name: 'V18-T2 A', url: HOOK.A, events: ['store_order.paid'], secret: `${P}fake_signing_value_a` },
     });

@@ -58,6 +58,12 @@
  *   CR-2        concurrent completions each emitted project_task.completed and wrote a feed row.
  *               A status or completion write is conditional on the row it was decided from.
  *
+ * SWEEP-P0-SCOPES (browser sweep BUG-014): every ProjectsController route now requires the projects
+ * module (write for every write), so the cases that drove a task or plan door as `staffRead`
+ * (projects read by role default) act as `staffWrite` (explicit projects write): each tests the
+ * door (the evidence gate, the named fields, the compare-and-set), not who may open it, and a
+ * projects-read member is now refused 403 before the door (sweep-projects-module-scope).
+ *
  * Fixtures: prefix `v88c_` (registered in test/helpers/fixture-prefixes.json),
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll.
  */
@@ -312,14 +318,14 @@ describe('WPD-08: PATCH .../tasks/:taskId/status goes through the same door as u
 
   it('moving a completed task to IN_PROGRESS reopens it; project_task.updated and the feed name the member', async () => {
     const task = await freshTask('reopen', { status: 'DONE', isCompleted: true });
-    const res = await as(ID.staffRead).patch(`${base()}/tasks/${task.id}/status`, { status: 'IN_PROGRESS' });
+    const res = await as(ID.staffWrite).patch(`${base()}/tasks/${task.id}/status`, { status: 'IN_PROGRESS' });
     expect(res.status).toBe(200);
     expect(await db.projectTask.findUnique({ where: { id: task.id }, select: { status: true, isCompleted: true } }))
       .toEqual({ status: 'IN_PROGRESS', isCompleted: false });
-    expect(eventsNamed('project_task.updated', task.id).map(([, p]) => p.actorId)).toEqual([ID.staffRead]);
+    expect(eventsNamed('project_task.updated', task.id).map(([, p]) => p.actorId)).toEqual([ID.staffWrite]);
     expect(eventsNamed('project_task.completed', task.id)).toHaveLength(0);
     expect(await db.activity.findMany({ where: { businessId: ID.bizA, entityId: task.id }, select: { action: true, actorId: true } }))
-      .toEqual([{ action: 'task_status_changed', actorId: ID.staffRead }]);
+      .toEqual([{ action: 'task_status_changed', actorId: ID.staffWrite }]);
   });
 
   it('an unknown status is 400 and writes nothing', async () => {
@@ -547,7 +553,7 @@ describe('review SEC-V88C-2: the evidence gate resolves the evidence ids it is h
     const filedInB = await attachEvidence(task.id, ID.bizB);
     for (const evidenceIds of [[`${P}made-up`], [othersEvidence.id], [filedInB.id]]) {
       for (const body of [{ status: 'DONE', evidenceIds }, { isCompleted: true, evidenceIds }]) {
-        const res = await as(ID.staffRead).patch(`${base()}/tasks/${task.id}`, body);
+        const res = await as(ID.staffWrite).patch(`${base()}/tasks/${task.id}`, body);
         expect(res.status, JSON.stringify(body)).toBe(400);
       }
     }
@@ -561,12 +567,12 @@ describe('review SEC-V88C-2: the evidence gate resolves the evidence ids it is h
   it('control: the id of evidence filed on this task completes it, and project_task.completed carries that id', async () => {
     const task = await freshTask('real-evidence', { evidenceRequired: true });
     const evidence = await attachEvidence(task.id);
-    const res = await as(ID.staffRead).patch(`${base()}/tasks/${task.id}`, { status: 'DONE', evidenceIds: [evidence.id] });
+    const res = await as(ID.staffWrite).patch(`${base()}/tasks/${task.id}`, { status: 'DONE', evidenceIds: [evidence.id] });
     expect(res.status).toBe(200);
     expect(await taskState(task.id)).toEqual({ status: 'DONE', isCompleted: true });
     const completed = eventsNamed('project_task.completed', task.id);
     expect(completed).toHaveLength(1);
-    expect(completed[0][1]).toMatchObject({ evidenceIds: [evidence.id], actorId: ID.staffRead });
+    expect(completed[0][1]).toMatchObject({ evidenceIds: [evidence.id], actorId: ID.staffWrite });
   });
 });
 
@@ -584,7 +590,7 @@ describe("review SEC-V88C-3: completing a plan event completes its task through 
 
   it('an event whose task requires evidence, with none filed, is 400: the task and the event are left as they were', async () => {
     const { planId, eventId, taskId } = await approvedPlanWithGatedStep('event-gated');
-    const res = await as(ID.staffRead).post(`${base()}/plans/${planId}/events/${eventId}/complete`, { evidence: 'done, trust me' });
+    const res = await as(ID.staffWrite).post(`${base()}/plans/${planId}/events/${eventId}/complete`, { evidence: 'done, trust me' });
     expect(res.status).toBe(400);
     expect(await taskState(taskId)).toEqual({ status: 'TODO', isCompleted: false });
     expect(await db.projectPlanEvent.findUnique({ where: { id: eventId }, select: { status: true, completedAt: true } }))
@@ -595,13 +601,13 @@ describe("review SEC-V88C-3: completing a plan event completes its task through 
   it('with its evidence filed, the event completes and its task is DONE; project_task.completed and the feed name the member', async () => {
     const { planId, eventId, taskId } = await approvedPlanWithGatedStep('event-evidenced');
     await attachEvidence(taskId);
-    const res = await as(ID.staffRead).post(`${base()}/plans/${planId}/events/${eventId}/complete`, {});
+    const res = await as(ID.staffWrite).post(`${base()}/plans/${planId}/events/${eventId}/complete`, {});
     expect(res.status).toBe(201);
     expect(await taskState(taskId)).toEqual({ status: 'DONE', isCompleted: true });
     expect((await db.projectPlanEvent.findUnique({ where: { id: eventId }, select: { status: true } })).status).toBe('completed');
-    expect(eventsNamed('project_task.completed', taskId).map(([, p]) => p.actorId)).toEqual([ID.staffRead]);
+    expect(eventsNamed('project_task.completed', taskId).map(([, p]) => p.actorId)).toEqual([ID.staffWrite]);
     expect(await db.activity.findMany({ where: { businessId: ID.bizA, entityId: taskId }, select: { action: true, actorType: true, actorId: true } }))
-      .toEqual([{ action: 'task_completed', actorType: 'USER', actorId: ID.staffRead }]);
+      .toEqual([{ action: 'task_completed', actorType: 'USER', actorId: ID.staffWrite }]);
   });
 
   it("an event is completed only under its own plan: another plan's id in the path is 404 and nothing is written", async () => {
@@ -618,7 +624,7 @@ describe('review SEC-V88C-4: PATCH .../plans/:planId/events/:eventId writes name
     const mine = await freshPlan('event-reloc');
     const theirs = await freshPlan('event-reloc-theirs', {}, ID.bizB);
     const victim = await freshTask('event-victim', { evidenceRequired: true });
-    const res = await as(ID.staffRead).patch(`${base()}/plans/${mine}/events/${mine}_e1`, {
+    const res = await as(ID.staffWrite).patch(`${base()}/plans/${mine}/events/${mine}_e1`, {
       planId: theirs, projectTaskId: victim.id, status: 'completed', title: `${P}retitled`,
     });
     expect(res.status).toBe(200);
@@ -626,7 +632,7 @@ describe('review SEC-V88C-4: PATCH .../plans/:planId/events/:eventId writes name
       .toEqual({ planId: mine, projectTaskId: null, status: 'pending', title: `${P}retitled` });
     expect(await db.projectPlanEvent.count({ where: { planId: theirs } })).toBe(2);
 
-    expect((await as(ID.staffRead).post(`${base()}/plans/${mine}/events/${mine}_e1/complete`, {})).status).toBe(201);
+    expect((await as(ID.staffWrite).post(`${base()}/plans/${mine}/events/${mine}_e1/complete`, {})).status).toBe(201);
     expect(await taskState(victim.id)).toEqual({ status: 'TODO', isCompleted: false });
     expect(eventsNamed('project_task.completed', victim.id)).toHaveLength(0);
   });
@@ -637,9 +643,9 @@ describe('review SEC-V88C-1: no status write lands while an approve holds the pl
     const planId = await freshPlan('claimed');
     await db.projectPlan.update({ where: { id: planId }, data: { status: 'approved' } });
     const before = await planState(planId);
-    expect((await as(ID.staffRead).patch(`${base()}/plans/${planId}`, { status: 'draft' })).status).toBe(409);
-    expect((await as(ID.staffRead).patch(`${base()}/plans/${planId}`, { status: 'rejected', strategySummary: `${P}rewritten` })).status).toBe(409);
-    expect((await as(ID.staffRead).post(`${base()}/plans/${planId}/reject`)).status).toBe(409);
+    expect((await as(ID.staffWrite).patch(`${base()}/plans/${planId}`, { status: 'draft' })).status).toBe(409);
+    expect((await as(ID.staffWrite).patch(`${base()}/plans/${planId}`, { status: 'rejected', strategySummary: `${P}rewritten` })).status).toBe(409);
+    expect((await as(ID.staffWrite).post(`${base()}/plans/${planId}/reject`)).status).toBe(409);
     expect((await as(ID.admin).post(`${base()}/plans/${planId}/approve`)).status).toBe(409);
     expect(await planState(planId)).toEqual(before);
     expect(await projectsOf(planId)).toBe(0);
@@ -667,8 +673,8 @@ describe('review SEC-V88C-1: no status write lands while an approve holds the pl
         for (let i = 0; i < 100 && (await planState(planId))?.status !== 'approved'; i++) await new Promise((r) => setTimeout(r, 20));
         expect((await planState(planId))?.status).toBe('approved');
         const mid = how === 'reject'
-          ? await as(ID.staffRead).post(`${base()}/plans/${planId}/reject`)
-          : await as(ID.staffRead).patch(`${base()}/plans/${planId}`, { status: 'draft' });
+          ? await as(ID.staffWrite).post(`${base()}/plans/${planId}/reject`)
+          : await as(ID.staffWrite).patch(`${base()}/plans/${planId}`, { status: 'draft' });
         second = as(ID.admin).post(`${base()}/plans/${planId}/approve`).then((r: any) => r);
         expect(mid.status).toBe(409);
       } finally {
@@ -687,10 +693,10 @@ describe('review SEC-V88C-1: no status write lands while an approve holds the pl
 
   it('control: PATCH status and reject still change a plan no approve holds', async () => {
     const planId = await freshPlan('unclaimed');
-    const patched = await as(ID.staffRead).patch(`${base()}/plans/${planId}`, { status: 'reviewing', strategySummary: `${planId} summary` });
+    const patched = await as(ID.staffWrite).patch(`${base()}/plans/${planId}`, { status: 'reviewing', strategySummary: `${planId} summary` });
     expect(patched.status).toBe(200);
     expect(patched.body).toMatchObject({ id: planId, status: 'reviewing' });
-    const rejected = await as(ID.staffRead).post(`${base()}/plans/${planId}/reject`);
+    const rejected = await as(ID.staffWrite).post(`${base()}/plans/${planId}/reject`);
     expect(rejected.status).toBe(201);
     expect(rejected.body).toMatchObject({ id: planId, status: 'rejected' });
     expect(await planState(planId)).toEqual({ status: 'rejected', projectId: null, strategySummary: `${planId} summary` });

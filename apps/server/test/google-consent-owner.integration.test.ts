@@ -933,14 +933,14 @@ describe('W8-GOOGLE-CONSENT-OWNER review repair: the platform Google Calendar sy
 });
 
 describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callbacks complete only their own single-use state (D-99; SEC-W8GCO-1)', () => {
-  it('[V94D-E01] RED-BEFORE (D-99; SEC-W8GCO-1): GET /drive/callback refuses (reason invalid_state) a bookings calendar state and a calendar sync state the owner obtained, and the Outlook state a STAFF member obtains at GET /connect/microsoft/businesses/:b/auth-url (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset); the stored drive connection stays the business\'s', async () => {
+  it('[V94D-E01] RED-BEFORE (D-99; SEC-W8GCO-1): GET /drive/callback refuses (reason invalid_state) a bookings calendar state and a calendar sync state the owner obtained, and the Outlook state an ADMIN obtains at GET /connect/microsoft/businesses/:b/auth-url (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset; since SWEEP-P0-SCOPES second review SV-3 that start needs settings admin, so a STAFF member obtains none); the stored drive connection stays the business\'s', async () => {
     await connect(ID.biz);
-    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.admin);
     expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
     const foreign: Array<[string, string]> = [
       ['bookings calendar state', stateOf((await calendarAuthUrl(ID.biz, ID.owner)).body.url)],
       ['calendar sync state', stateOf((await syncConnect(ID.biz, ID.owner)).body.url)],
-      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+      ['Outlook state (ADMIN)', stateOf(microsoft.body.authUrl)],
     ];
     for (const [label, state] of foreign) {
       const res = await landAt(CALLBACKS.drive, state, `${P}code-${label.length}`);
@@ -950,13 +950,13 @@ describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callback
     }
   });
 
-  it('[V94D-E02] RED-BEFORE (D-99; SEC-W8GCO-1): GET /bookings/calendar/callback and GET /calendar/sync/google/callback refuse (reason invalid_state) the owner\'s Drive state and a STAFF member\'s Outlook state; the stored calendar connection stays the business\'s', async () => {
+  it('[V94D-E02] RED-BEFORE (D-99; SEC-W8GCO-1): GET /bookings/calendar/callback and GET /calendar/sync/google/callback refuse (reason invalid_state) the owner\'s Drive state and an ADMIN\'s Outlook state (settings admin since SV-3); the stored calendar connection stays the business\'s', async () => {
     await connect(ID.biz);
-    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.admin);
     expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
     const foreign: Array<[string, string]> = [
       ['Drive state', stateOf((await driveAuthUrl(ID.biz, ID.owner)).body.url)],
-      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+      ['Outlook state (ADMIN)', stateOf(microsoft.body.authUrl)],
     ];
     for (const [label, state] of foreign) {
       for (const callback of [CALLBACKS.bookingsCalendar, CALLBACKS.syncCalendar]) {
@@ -1037,11 +1037,18 @@ describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suit
     }
   });
 
-  it('[V94D-F02] control (D-99, W9-GOOGLE-DOORS-SERVER): the ruling covers Google connections and their start, sync and disconnect only: an ADMIN and a STAFF member still sync, disconnect and reconnect a non-Google connector (typeform) and test google_calendar (a credential check), and the registry is reached; a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401) before the registry', async () => {
+  it('[V94D-F02] control (D-99, W9-GOOGLE-DOORS-SERVER): the ruling covers Google connections and their start, sync and disconnect only: an ADMIN still syncs, disconnects and reconnects a non-Google connector (typeform), a STAFF member still syncs it (disconnect and reconnect clear its credentials: settings admin, SWEEP-P0-SCOPES review SEC-1), and both test google_calendar (a credential check), and the registry is reached; a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401) before the registry', async () => {
     for (const member of [ID.admin, ID.staff]) {
       for (const op of CONNECTOR_DOORS) {
         clearConnectorRegistry();
         const res = await connectorDoor(op, ID.biz, NON_GOOGLE_CONNECTOR, member);
+        if (member === ID.staff && op !== 'sync') {
+          // SWEEP-P0-SCOPES review repair SEC-1: the STAFF member (bookings write, settings none) is refused.
+          expect(res.status, `${member} ${op} ${JSON.stringify(res.body)}`).toBe(403);
+          expect(String(res.body?.message ?? ''), `${member} ${op}`).toMatch(/settings requires admin access/);
+          expect(connectorRegistry[REGISTRY_DOOR[op]]).not.toHaveBeenCalled();
+          continue;
+        }
         expect(res.status, `${member} ${op} ${JSON.stringify(res.body)}`).toBe(201);
         expect(connectorRegistry[REGISTRY_DOOR[op]]).toHaveBeenCalledWith(NON_GOOGLE_CONNECTOR, ID.biz);
       }
@@ -1131,7 +1138,7 @@ describe('W9-GOOGLE-DOORS-SERVER review repair: clearing a Google Suite connecti
     await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1`, ID.biz);
   });
 
-  it('[V94D-H02] control (D-99, SEC-W9GD-1): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN clear each Google Suite connection\'s connector credentials (row disconnected, account and connection time cleared); an ADMIN and a STAFF member still clear a non-Google connector\'s (typeform); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with the row unchanged', async () => {
+  it('[V94D-H02] control (D-99, SEC-W9GD-1): the owner, a co-owner by OWNER membership, the distinguished owner on their own business and a SUPER_ADMIN clear each Google Suite connection\'s connector credentials (row disconnected, account and connection time cleared); an ADMIN still clears a non-Google connector\'s (typeform), which a STAFF member may not (settings admin, SWEEP-P0-SCOPES review SEC-1); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with the row unchanged', async () => {
     for (const [businessId, actor] of [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]]) {
       for (const type of GOOGLE_SUITE_CONNECTORS) {
         await seedConnectorRow(businessId, type);
@@ -1141,7 +1148,12 @@ describe('W9-GOOGLE-DOORS-SERVER review repair: clearing a Google Suite connecti
         expect(await connectorRowOf(businessId, type), `${actor} ${type}`).toEqual({ status: 'disconnected', connected_account: null, connected_at: null });
       }
     }
-    for (const member of [ID.admin, ID.staff]) {
+    // SWEEP-P0-SCOPES review repair SEC-1: clearing a non-Google connector's credentials needs settings admin.
+    await seedConnectorRow(ID.biz, NON_GOOGLE_CONNECTOR);
+    const staffRes = await deleteConnectorCredentials(ID.biz, NON_GOOGLE_CONNECTOR, ID.staff);
+    expect(staffRes.status, JSON.stringify(staffRes.body)).toBe(403);
+    expect(await connectorRowOf(ID.biz, NON_GOOGLE_CONNECTOR)).toEqual({ status: 'connected', connected_account: `${ID.biz}-${NON_GOOGLE_CONNECTOR}@test.local`, connected_at: ROW_CONNECTED_AT });
+    for (const member of [ID.admin]) {
       await seedConnectorRow(ID.biz, NON_GOOGLE_CONNECTOR);
       const res = await deleteConnectorCredentials(ID.biz, NON_GOOGLE_CONNECTOR, member);
       expect(res.status, `${member} ${JSON.stringify(res.body)}`).toBe(200);

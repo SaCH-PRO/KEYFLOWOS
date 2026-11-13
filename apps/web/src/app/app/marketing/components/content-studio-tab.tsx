@@ -706,8 +706,12 @@ function SocialConnectionsSection({ socialConnections, businessId, onRefresh }: 
 
   const handleDisconnect = async (platform: string) => {
     setDisconnecting(platform);
-    await disconnectSocial(platform, businessId);
-    toast.success(`${platform} disconnected`);
+    // SWEEP-P0-SCOPES second review repair (SV-2): disconnecting removes the business's credential, so
+    // it needs settings admin; a refused disconnect says why. It said "<platform> disconnected"
+    // whatever the server answered.
+    const res = await disconnectSocial(platform, businessId);
+    if (res.error) toast.error(res.error);
+    else toast.success(`${platform} disconnected`);
     setConfirmDisconnect(null);
     setDisconnecting(null);
     onRefresh();

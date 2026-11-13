@@ -373,7 +373,8 @@ describe('W11-KEY-ORGAN-OUTPUT-REDACT review SEC-W11OR-1: key_connector.execute_
     const prisma = {
       client: {
         user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
-        membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: { connect: 'admin' } })) },
+        // connect admin (R0-09c ST-6) and settings admin (SWEEP-P0-SCOPES round 1 class repair: binding an integration).
+        membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: { connect: 'admin', settings: 'admin' } })) },
       },
     };
     const settings = new SettingsAdapterService({} as never, integrations as never, prisma as never);

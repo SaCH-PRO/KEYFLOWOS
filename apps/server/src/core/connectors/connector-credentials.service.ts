@@ -29,12 +29,16 @@ export class ConnectorCredentialsService {
   /**
    * Encrypt + persist credentials for a connector. Marks the ConnectorStatus row as
    * connected and records the optional `accountLabel` for display in the dashboard.
+   *
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS A; WHP-1, WHP-2): `boundBy` records the member who
+   * bound the account (the export's receiver; core/connectors/connector-exports.ts). A save that names
+   * no binder (a webhook secret added beside the stored credentials) keeps the one recorded.
    */
   async setCredentials(
     businessId: string,
     connectorType: ConnectorType,
     values: Record<string, string>,
-    opts: { accountLabel?: string } = {},
+    opts: { accountLabel?: string; boundBy?: string } = {},
   ): Promise<void> {
     const encrypted = encrypt(values);
     const existing = await this.prisma.client.connectorStatus.findUnique({
@@ -46,6 +50,7 @@ export class ConnectorCredentialsService {
         ? (existing.metadata as Record<string, unknown>)
         : {}),
       encryptedCredentials: encrypted,
+      ...(opts.boundBy ? { boundBy: opts.boundBy } : {}),
     };
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType } },
@@ -131,6 +136,8 @@ export class ConnectorCredentialsService {
       ? { ...(existing.metadata as Record<string, unknown>) }
       : {}) as Record<string, unknown>;
     delete meta.encryptedCredentials;
+    // the account is gone, and with it its receiver (round 2, CLASS A)
+    delete meta.boundBy;
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType } },
       create: { businessId, connectorType, status: 'disconnected', metadata: meta },

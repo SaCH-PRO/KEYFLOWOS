@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Globe, Plus, Pencil, Trash2, Save, Loader2, X } from "lucide-react";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { toast } from "sonner";
 
 type ShippingZone = {
   id: string;
@@ -72,16 +73,22 @@ export function ShippingZonesPanel({ businessId }: { businessId: string }) {
       carrier: form.carrier || null,
     };
 
-    if (editing) {
-      await apiPatch(
-        `/marketplace/businesses/${businessId}/shipping-zones/${editing}`,
-        body,
-      );
-    } else {
-      await apiPost({
-        path: `/marketplace/businesses/${businessId}/shipping-zones`,
-        body,
-      });
+    // SWEEP-P0-SCOPES round 1 class repair (RC-3, the BUG-032 pattern): the zone writes need
+    // storefront write. A refused save shows the server's refusal and keeps the form open with what
+    // was typed; it does not close the form as if it were saved.
+    const res = editing
+      ? await apiPatch(
+          `/marketplace/businesses/${businessId}/shipping-zones/${editing}`,
+          body,
+        )
+      : await apiPost({
+          path: `/marketplace/businesses/${businessId}/shipping-zones`,
+          body,
+        });
+    if (res.error) {
+      toast.error(res.error);
+      setSaving(false);
+      return;
     }
 
     await loadZones();
@@ -107,9 +114,11 @@ export function ShippingZonesPanel({ businessId }: { businessId: string }) {
   };
 
   const handleDelete = async (zoneId: string) => {
-    await apiDelete(
+    const res = await apiDelete(
       `/marketplace/businesses/${businessId}/shipping-zones/${zoneId}`,
     );
+    // RC-3: a refused delete says why; the zone stays listed (it is still stored).
+    if (res.error) toast.error(res.error);
     await loadZones();
   };
 

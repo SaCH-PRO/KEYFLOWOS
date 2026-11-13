@@ -813,6 +813,66 @@
       "packet": "V1-96 (W10-DATA-CLEANUP-SCRIPTS)"
     },
     {
+      "prefix": "v99w_",
+      "owner": "apps/server/test/sweep-webhooks-api-keys-settings.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES, BUG-001, BUG-013)"
+    },
+    {
+      "prefix": "v99j_",
+      "owner": "apps/server/test/sweep-projects-module-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES, BUG-014)"
+    },
+    {
+      "prefix": "v99i_",
+      "owner": "apps/server/test/sweep-inventory-storefront-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES, BUG-015)"
+    },
+    {
+      "prefix": "v99c_",
+      "owner": "apps/server/test/sweep-contact-documents-filter.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES, BUG-030)"
+    },
+    {
+      "prefix": "v99f_",
+      "owner": "apps/server/test/sweep-census-families.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES census families)"
+    },
+    {
+      "prefix": "v99k_",
+      "owner": "apps/server/test/sweep-connector-credentials-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES review repair SEC-1, connector credentials)"
+    },
+    {
+      "prefix": "v99m_",
+      "owner": "apps/server/test/sweep-channel-connections-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES second review repair SV-2, SV-3, channel and account credentials)"
+    },
+    {
+      "prefix": "v99p_",
+      "owner": "apps/server/test/sweep-webhook-payload-projection.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS A webhook payload projection)"
+    },
+    {
+      "prefix": "v99q_",
+      "owner": "apps/server/test/sweep-credential-writers-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS B credential writers)"
+    },
+    {
+      "prefix": "v99x_",
+      "owner": "apps/server/test/sweep-export-receivers-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 2 class repair, CLASS A integration push receivers)"
+    },
+    {
+      "prefix": "v99y_",
+      "owner": "apps/server/test/sweep-credential-writers-r2-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 2 class repair, CLASS B credential writers CW-1..CW-4)"
+    },
+    {
+      "prefix": "v99z_",
+      "owner": "apps/server/test/sweep-class-r3-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 3 class repair, CLASS A Outlook push and Drive share receivers, CLASS B channel health lift)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"

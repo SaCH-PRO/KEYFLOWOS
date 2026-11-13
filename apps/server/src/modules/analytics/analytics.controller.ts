@@ -12,11 +12,20 @@ import { AnalyticsEngineService } from './analytics-engine.service';
 import { ProjectionService } from './projection.service';
 import { GrowthInsightGeneratorService } from './growth-insight-generator.service';
 import { MaturityAssessmentService } from './maturity-assessment.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 
+/**
+ * SWEEP-P0-SCOPES (REST scope census): every handler here declared @RequireModuleScope('analytics')
+ * but the controller ran BusinessGuard only (no AuthGuard, no ModuleScopeGuard), so the declaration
+ * was inert: ModuleScopeGuard is what reads it, and a member whose map says analytics 'none'
+ * generated projections and dismissed insights. It now runs AuthGuard, BusinessGuard, then
+ * ModuleScopeGuard: analytics read for every GET (as declared), analytics write for every POST
+ * (each writes: projections, insights and their read/dismissed state, a maturity assessment).
+ */
 @Controller('api/businesses/:businessId/analytics')
-@UseGuards(BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class AnalyticsController {
   constructor(
     private readonly engine: AnalyticsEngineService,
@@ -61,7 +70,7 @@ export class AnalyticsController {
   }
 
   @Post('projections/revenue')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async generateRevenueProjection(
     @Param('businessId') businessId: string,
     @Query('months', new DefaultValuePipe(3), ParseIntPipe) months: number,
@@ -70,7 +79,7 @@ export class AnalyticsController {
   }
 
   @Post('projections/contacts')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async generateContactProjection(
     @Param('businessId') businessId: string,
     @Query('months', new DefaultValuePipe(3), ParseIntPipe) months: number,
@@ -85,7 +94,7 @@ export class AnalyticsController {
   }
 
   @Post('insights/generate')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async generateInsights(@Param('businessId') businessId: string) {
     return this.intelligence.generateInsights(businessId);
   }
@@ -110,19 +119,19 @@ export class AnalyticsController {
   }
 
   @Post('insights/:id/read')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async markInsightRead(@Param('id') id: string) {
     return this.intelligence.markInsightRead(id);
   }
 
   @Post('insights/:id/dismiss')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async dismissInsight(@Param('id') id: string) {
     return this.intelligence.dismissInsight(id);
   }
 
   @Post('maturity/assess')
-  @RequireModuleScope('analytics')
+  @RequireModuleScope('analytics', 'write')
   async assessMaturity(@Param('businessId') businessId: string) {
     return this.maturity.assessBusiness(businessId);
   }

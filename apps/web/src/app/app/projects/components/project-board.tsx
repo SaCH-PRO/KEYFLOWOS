@@ -99,6 +99,11 @@ export function ProjectBoard({
     if (res.data) {
       onProjectsChange((prev: Project[]) => [res.data!, ...prev]);
       setExpandedProjects((prev) => new Set(prev).add(res.data!.id));
+    } else {
+      // SWEEP-P0-SCOPES (BUG-014): creating a project needs projects write; say why it was refused
+      // and keep the form, so nothing reads as created.
+      toast.error(res.error || "Failed to create project");
+      return;
     }
     setNewProjectName("");
     setNewProjectDueDate("");
@@ -112,6 +117,8 @@ export function ProjectBoard({
       const res = await updateProject(businessId, projectId, { status });
       if (res.data) {
         onProjectsChange((prev: Project[]) => prev.map((p) => (p.id === projectId ? { ...p, status } : p)));
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update project status"); }
     setMenuOpen(null);
@@ -120,8 +127,14 @@ export function ProjectBoard({
   const handleDeleteProject = async (projectId: string) => {
     if (!businessId) return;
     try {
-      await deleteProject(businessId, projectId);
-      onProjectsChange((prev: Project[]) => prev.filter((p) => p.id !== projectId));
+      // SWEEP-P0-SCOPES (BUG-014): a refused delete keeps the project and says why (it was removed
+      // from the board whatever the server answered).
+      const res = await deleteProject(businessId, projectId);
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        onProjectsChange((prev: Project[]) => prev.filter((p) => p.id !== projectId));
+      }
     } catch { toast.error("Failed to delete project"); }
     setMenuOpen(null);
   };
@@ -136,6 +149,8 @@ export function ProjectBoard({
             p.id === projectId ? { ...p, tasks: [...(p.tasks || []), res.data!] } : p,
           ),
         );
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to add task"); }
   };
@@ -153,6 +168,8 @@ export function ProjectBoard({
               : p,
           ),
         );
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update task"); }
   };
@@ -160,7 +177,11 @@ export function ProjectBoard({
   const handleDeleteTask = async (projectId: string, taskId: string) => {
     if (!businessId) return;
     try {
-      await deleteProjectTask(businessId, taskId);
+      const res = await deleteProjectTask(businessId, taskId);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       onProjectsChange((prev: Project[]) =>
         prev.map((p) =>
           p.id === projectId ? { ...p, tasks: p.tasks.filter((t) => t.id !== taskId) } : p,
@@ -182,6 +203,8 @@ export function ProjectBoard({
               : p,
           ),
         );
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update task"); }
   };
@@ -409,6 +432,7 @@ export function ProjectBoard({
                               <button
                                 onClick={() => setMenuOpen(menuOpen === project.id ? null : project.id)}
                                 className="p-1 text-muted-foreground hover:text-foreground rounded"
+                                aria-label={`Actions for ${project.name}`}
                               >
                                 <MoreHorizontal className="w-4 h-4" />
                               </button>

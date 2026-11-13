@@ -56,6 +56,9 @@ export default function DevelopersSettingsPage() {
   const [newKey, setNewKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // SWEEP-P0-SCOPES (BUG-013): the server's refusal of the key list (settings read), shown instead
+  // of "No API keys yet".
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -69,6 +72,7 @@ export default function DevelopersSettingsPage() {
     try {
       const res = await apiGet<{ keys: ApiKey[] }>(`/api/businesses/${businessId}/api-keys`);
       if (res.data?.keys) setApiKeys(res.data.keys);
+      setLoadError(res.data ? null : res.error ?? null);
     } catch {}
     setLoading(false);
   }, [businessId]);
@@ -89,6 +93,9 @@ export default function DevelopersSettingsPage() {
         setApiKeys((prev) => [res.data!.apiKey, ...prev]);
         setForm({ name: "", scopes: new Set() });
         toast.success("API key created");
+      } else {
+        // SWEEP-P0-SCOPES (BUG-013): creating a key is settings admin; say why it was refused.
+        toast.error(res.error || "Failed to create API key");
       }
     } catch {
       toast.error("Failed to create API key");
@@ -100,7 +107,14 @@ export default function DevelopersSettingsPage() {
     if (!businessId) return;
     setDeleting(id);
     try {
-      await apiDelete(`/api/businesses/${businessId}/api-keys/${id}`);
+      // SWEEP-P0-SCOPES (BUG-013): revoking is the owner's; a refused revoke keeps the key listed
+      // and says why (it was shown as revoked whatever the server answered).
+      const res = await apiDelete(`/api/businesses/${businessId}/api-keys/${id}`);
+      if (res.error) {
+        toast.error(res.error);
+        setDeleting(null);
+        return;
+      }
       setApiKeys((prev) => prev.filter((k) => k.id !== id));
       toast.success("API key revoked");
     } catch {
@@ -208,6 +222,12 @@ export default function DevelopersSettingsPage() {
           <div className="py-6 text-center">
             <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
           </div>
+        ) : loadError ? (
+          <div role="alert" className="py-6 text-center">
+            <Shield className="w-8 h-8 mx-auto mb-2 text-red-400/60" />
+            <p className="text-sm font-medium">API keys are not available to you</p>
+            <p className="text-xs text-muted-foreground">{loadError}</p>
+          </div>
         ) : apiKeys.length === 0 ? (
           <div className="py-8 text-center">
             <Key className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
@@ -232,6 +252,7 @@ export default function DevelopersSettingsPage() {
                 <button
                   onClick={() => handleDelete(key.id)}
                   disabled={deleting === key.id}
+                  aria-label={`Revoke ${key.name}`}
                   className="text-red-400/60 hover:text-red-400 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
                 >
                   {deleting === key.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}

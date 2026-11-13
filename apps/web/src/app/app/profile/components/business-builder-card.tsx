@@ -1488,7 +1488,8 @@ function RoadmapView({ roadmap }: { roadmap: RoadmapPhase[] }) {
   );
 }
 
-function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
+/** Exported for its refusal test (SWEEP-P0-SCOPES review CR-4); rendered by BusinessBuilderCard. */
+export function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessId: string | null }) {
   const router = useRouter();
   const [creatingTask, setCreatingTask] = useState<number | null>(null);
   const [createdTasks, setCreatedTasks] = useState<Set<number>>(new Set());
@@ -1510,9 +1511,13 @@ function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessI
           body: { name: "Business Intelligence Actions", description: "Tasks generated from your AI intelligence package" },
         });
         projectId = newProj.data?.id ?? null;
+        if (!projectId && newProj.error) throw new Error(newProj.error);
       }
       if (projectId) {
-        await apiPost({
+        // SWEEP-P0-SCOPES review repair (CR-4): creating a task needs projects write; the api client
+        // answers a refusal as { error } and does not throw, so the answer is read and a refused
+        // create shows the server's reason instead of the "Task created" badge.
+        const created = await apiPost({
           path: `/projects/businesses/${businessId}/projects/${projectId}/tasks`,
           body: {
             title: action.action,
@@ -1521,10 +1526,11 @@ function ActionsView({ actions, businessId }: { actions: ActionItem[]; businessI
             status: "TODO",
           },
         });
+        if (created.error) throw new Error(created.error);
         setCreatedTasks((prev) => new Set(prev).add(idx));
       }
-    } catch {
-      setTaskError("Failed to create task. Please try again.");
+    } catch (err: unknown) {
+      setTaskError(err instanceof Error && err.message ? err.message : "Failed to create task. Please try again.");
       setTimeout(() => setTaskError(null), 4000);
     }
     setCreatingTask(null);

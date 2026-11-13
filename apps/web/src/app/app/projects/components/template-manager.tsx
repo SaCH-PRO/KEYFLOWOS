@@ -107,6 +107,10 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
         setShowCreate(false);
         setNewTemplateServiceType("general");
         toast.success("Template created");
+      } else if (res.error) {
+        // SWEEP-P0-SCOPES second review repair (CRV-2): a refused create (projects write) says why and
+        // keeps the form as typed.
+        toast.error(res.error);
       }
     } catch {
       toast.error("Failed to create template");
@@ -117,7 +121,14 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
   const handleDelete = async (id: string) => {
     if (!businessId) return;
     try {
-      await deleteProjectTemplate(businessId, id);
+      // SWEEP-P0-SCOPES second review repair (CRV-1): the api client answers a refusal (projects
+      // write) as { error } and does not throw; a refused delete keeps the template and says why.
+      // It was dropped from the list and reported deleted whatever the server answered.
+      const res = await deleteProjectTemplate(businessId, id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       setTemplates((prev) => prev.filter((t) => t.id !== id));
       toast.success("Template deleted");
     } catch {
@@ -132,6 +143,9 @@ export function TemplateManager({ businessId, onProjectCreated }: Props) {
       if (res.data) {
         toast.success(`Project "${res.data.name}" created from template`);
         onProjectCreated?.();
+      } else if (res.error) {
+        // SWEEP-P0-SCOPES second review repair (CRV-2): a refused "Use Template" says why.
+        toast.error(res.error);
       }
     } catch {
       toast.error("Failed to create project from template");

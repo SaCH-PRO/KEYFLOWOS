@@ -46,6 +46,8 @@ export function PlanGenerator({ businessId, goals, onPlanCreated, onPlanApproved
    * both actions rather than offering what will be refused.
    */
   const [governDenied, setGovernDenied] = useState(false);
+  /** The server's answer to a refused generate, shown beside the form. */
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const currency = getCachedBusiness()?.currency ?? "TTD";
 
   const notice = (planId: string, message: string | null) =>
@@ -108,8 +110,13 @@ export function PlanGenerator({ businessId, goals, onPlanCreated, onPlanApproved
       },
     });
     if ('data' in res && res.data) {
+      setGenerateError(null);
       setResult(res.data);
       onPlanCreated?.(res.data);
+    } else {
+      // SWEEP-P0-SCOPES second review repair (CRV-2): a refused generate (projects write) says why;
+      // the hook recorded the error and the screen showed nothing.
+      setGenerateError(res.error ?? "The plan could not be generated");
     }
   };
 
@@ -212,6 +219,9 @@ export function PlanGenerator({ businessId, goals, onPlanCreated, onPlanApproved
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparkles className="w-4 h-4 mr-2" />}
             {loading ? "Key is thinking..." : "Generate Plan with Key"}
           </Button>
+          {generateError && (
+            <p role="alert" className="text-xs text-destructive">{generateError}</p>
+          )}
         </div>
       </Card>
 
