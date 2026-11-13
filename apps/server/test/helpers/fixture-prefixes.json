@@ -843,6 +843,11 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES review repair SEC-1, connector credentials)"
     },
     {
+      "prefix": "v99m_",
+      "owner": "apps/server/test/sweep-channel-connections-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES second review repair SV-2, SV-3, channel and account credentials)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"

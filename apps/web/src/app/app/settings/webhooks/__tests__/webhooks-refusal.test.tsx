@@ -121,4 +121,27 @@ describe("webhooks settings page: refusal states", () => {
     expect(within(card).getByText("https://hooks.example.com/***")).toBeInTheDocument();
     expect(within(card).getByText(/full receiver url is hidden/i)).toBeInTheDocument();
   });
+
+  it("[WEB-WHK-07] RED-BEFORE (second review SV-5): the notes say a webhook's secret and full URL also need read access to the modules its events come from (a settings admin who cannot read them is answered neither)", async () => {
+    client.fetchWebhooks.mockResolvedValue({ data: [], error: null });
+    client.createWebhook.mockResolvedValue({
+      data: { ...OWNER_HOOK, id: "wh_new", name: "New hook", secret: "a".repeat(64) },
+      error: null,
+    });
+    render(<WebhooksSettingsPage />);
+    fireEvent.click(await screen.findByText("Add Your First Webhook"));
+    fireEvent.change(screen.getByPlaceholderText(/https:\/\//i), { target: { value: "https://sink.example.com/hook" } });
+    fireEvent.click(screen.getByRole("button", { name: /create webhook/i }));
+    const created = (await screen.findByText("New hook")).closest("div.p-4") as HTMLElement;
+    expect(within(created).getByText(/only members with settings admin can see it again, and only for a webhook whose events they can read/i)).toBeInTheDocument();
+    cleanup();
+
+    client.fetchWebhooks.mockResolvedValue({
+      data: [{ ...OWNER_HOOK, url: "https://hooks.example.com/***", urlMasked: true }],
+      error: null,
+    });
+    render(<WebhooksSettingsPage />);
+    const masked = (await screen.findByText("Owner ERP")).closest("div.p-4") as HTMLElement;
+    expect(within(masked).getByText(/full receiver url is hidden: it needs settings write access and read access to the modules this webhook's events come from/i)).toBeInTheDocument();
+  });
 });

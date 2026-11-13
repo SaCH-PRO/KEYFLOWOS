@@ -24,7 +24,10 @@
  *     GMAIL_OWNER_ONLY, D-11; the Google Suite connections: GOOGLE_CONNECT_OWNER_ONLY, D-99; their
  *     suites, gmail-connect-binding and google-consent-owner, pin those), checked in the handler
  *     before anything is cleared;
- *   - GET .../credentials/:type (the masked form) and the status reads stay open to members.
+ *   - GET .../credentials/:type (the masked form) and the status reads stay open to members;
+ *   - the handler checks read a membership exactly as ModuleScopeGuard does (second review SV-4): a
+ *     stored JSON array is an explicit map in which every module is none, not "no map" (the role
+ *     defaults), so an ADMIN whose scopes the owner set to [] is refused the clearing routes too.
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService, AuthGuard,
  * BusinessGuard, ModuleScopeGuard, the global ValidationPipe and GlobalHttpExceptionFilter,
@@ -56,6 +59,7 @@ const ID = {
   owner: `${P}owner`, // OWNER of bizA, no explicit map (settings admin by role default)
   admin: `${P}admin`, // ADMIN of bizA, no explicit map (settings admin by role default)
   adminNone: `${P}adminNone`, // ADMIN of bizA, explicit settings 'none' (an explicit map binds ADMIN too, D-114)
+  adminArray: `${P}adminArray`, // ADMIN of bizA whose stored scopes are a JSON array [] (second review SV-4: an explicit map, every module none)
   staffNone: `${P}staffNone`, // STAFF of bizA, the sweep's member: settings/team/ai/connect/revenue/expenses none
   staffDefault: `${P}staffDefault`, // STAFF of bizA, no explicit map (settings none by role default)
   settingsWrite: `${P}settingsWrite`, // STAFF of bizA, explicit settings 'write'
@@ -203,13 +207,15 @@ beforeAll(async () => {
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V99K Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V99K Biz B', ownerId: ID.outsider } });
-  const m = (user: string, biz: string, role: string, permissionScopes?: Record<string, string>) =>
+  const m = (user: string, biz: string, role: string, permissionScopes?: Record<string, string> | unknown[]) =>
     db.membership.create({
       data: { id: `${P}m_${user.slice(P.length)}_${biz.slice(P.length)}`, userId: user, businessId: biz, role, permissionScopes: permissionScopes ?? undefined },
     });
   await m(ID.owner, ID.bizA, 'OWNER');
   await m(ID.admin, ID.bizA, 'ADMIN');
   await m(ID.adminNone, ID.bizA, 'ADMIN', { crm: 'admin', settings: 'none' });
+  // As the owner's team route stores it (PATCH .../team/:m/permissions { scopes: [] } answers 200).
+  await m(ID.adminArray, ID.bizA, 'ADMIN', []);
   await m(ID.staffNone, ID.bizA, 'STAFF', { crm: 'read', settings: 'none', team: 'none', ai: 'none', connect: 'none', revenue: 'none', expenses: 'none' });
   await m(ID.staffDefault, ID.bizA, 'STAFF');
   await m(ID.settingsWrite, ID.bizA, 'STAFF', { settings: 'write' });
@@ -303,6 +309,35 @@ describe("SEC-1: a connector's credentials are settings admin territory", () => 
     expect(registry.reconnectConnector).not.toHaveBeenCalled();
     expect(await connectorRows()).toEqual(before);
     expect(await credentials.getCredentials(ID.bizA, 'quickbooks')).toEqual(OWNER_QBO);
+  });
+
+  it("[CON-SV4-01] RED-BEFORE (second review SV-4): an ADMIN whose stored scopes are a JSON array is read as ModuleScopeGuard reads it (an explicit map with every module none), so the handler checks refuse them too: DELETE credentials, disconnect and reconnect of the owner's QuickBooks answer 403 and nothing is cleared, as GET webhook-info (the guard) already does", async () => {
+    await seedOwnerQuickBooks();
+    registry.disconnectConnector.mockClear();
+    registry.reconnectConnector.mockClear();
+    const before = await connectorRows();
+    const guarded = await send('get', `${conn()}/webhook-info/webhook_form`, ID.adminArray);
+    expect(guarded.status, 'the guard').toBe(403);
+    expect(String(guarded.body?.message ?? '')).toMatch(/settings requires admin access \(you have none\)/);
+    const del = await send('delete', `${conn()}/credentials/quickbooks`, ID.adminArray);
+    expect(del.status, 'delete').toBe(403);
+    expect(String(del.body?.message ?? '')).toMatch(/settings requires admin access \(you have none\)/);
+    expect((await send('post', `${conn()}/disconnect/quickbooks`, ID.adminArray)).status, 'disconnect').toBe(403);
+    expect((await send('post', `${conn()}/reconnect/quickbooks`, ID.adminArray)).status, 'reconnect').toBe(403);
+    expect(registry.disconnectConnector).not.toHaveBeenCalled();
+    expect(registry.reconnectConnector).not.toHaveBeenCalled();
+    expect(await connectorRows()).toEqual(before);
+    expect(await credentials.getCredentials(ID.bizA, 'quickbooks')).toEqual(OWNER_QBO);
+  });
+
+  it('[CON-SV4-02] RED-BEFORE (second review SV-4): memberModuleLevel reads a stored JSON array as ModuleScopeGuard does: an explicit map in which every module is none (an object map and a missing map are read as before)', async () => {
+    const { memberModuleLevel } = await import('../src/core/auth/member-module-level');
+    const prisma = { client: db };
+    expect(await memberModuleLevel(prisma as any, ID.bizA, { id: ID.adminArray, role: 'USER' }, 'settings')).toBe('none');
+    expect(await memberModuleLevel(prisma as any, ID.bizA, { id: ID.adminArray, role: 'USER' }, 'crm')).toBe('none');
+    expect(await memberModuleLevel(prisma as any, ID.bizA, { id: ID.admin, role: 'USER' }, 'settings')).toBe('admin');
+    expect(await memberModuleLevel(prisma as any, ID.bizA, { id: ID.adminNone, role: 'USER' }, 'crm')).toBe('admin');
+    expect(await memberModuleLevel(prisma as any, ID.bizA, { id: ID.adminNone, role: 'USER' }, 'settings')).toBe('none');
   });
 
   it('[CON-05] settings admin admits: the owner, an ADMIN and a settings-admin STAFF member save QuickBooks credentials; an ADMIN clears them and disconnects', async () => {

@@ -933,14 +933,14 @@ describe('W8-GOOGLE-CONSENT-OWNER review repair: the platform Google Calendar sy
 });
 
 describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callbacks complete only their own single-use state (D-99; SEC-W8GCO-1)', () => {
-  it('[V94D-E01] RED-BEFORE (D-99; SEC-W8GCO-1): GET /drive/callback refuses (reason invalid_state) a bookings calendar state and a calendar sync state the owner obtained, and the Outlook state a STAFF member obtains at GET /connect/microsoft/businesses/:b/auth-url (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset); the stored drive connection stays the business\'s', async () => {
+  it('[V94D-E01] RED-BEFORE (D-99; SEC-W8GCO-1): GET /drive/callback refuses (reason invalid_state) a bookings calendar state and a calendar sync state the owner obtained, and the Outlook state an ADMIN obtains at GET /connect/microsoft/businesses/:b/auth-url (signed with GOOGLE_STATE_SECRET while MICROSOFT_STATE_SECRET is unset; since SWEEP-P0-SCOPES second review SV-3 that start needs settings admin, so a STAFF member obtains none); the stored drive connection stays the business\'s', async () => {
     await connect(ID.biz);
-    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.admin);
     expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
     const foreign: Array<[string, string]> = [
       ['bookings calendar state', stateOf((await calendarAuthUrl(ID.biz, ID.owner)).body.url)],
       ['calendar sync state', stateOf((await syncConnect(ID.biz, ID.owner)).body.url)],
-      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+      ['Outlook state (ADMIN)', stateOf(microsoft.body.authUrl)],
     ];
     for (const [label, state] of foreign) {
       const res = await landAt(CALLBACKS.drive, state, `${P}code-${label.length}`);
@@ -950,13 +950,13 @@ describe('W8-GOOGLE-CONSENT-OWNER review repair: the Drive and calendar callback
     }
   });
 
-  it('[V94D-E02] RED-BEFORE (D-99; SEC-W8GCO-1): GET /bookings/calendar/callback and GET /calendar/sync/google/callback refuse (reason invalid_state) the owner\'s Drive state and a STAFF member\'s Outlook state; the stored calendar connection stays the business\'s', async () => {
+  it('[V94D-E02] RED-BEFORE (D-99; SEC-W8GCO-1): GET /bookings/calendar/callback and GET /calendar/sync/google/callback refuse (reason invalid_state) the owner\'s Drive state and an ADMIN\'s Outlook state (settings admin since SV-3); the stored calendar connection stays the business\'s', async () => {
     await connect(ID.biz);
-    const microsoft = await microsoftAuthUrl(ID.biz, ID.staff);
+    const microsoft = await microsoftAuthUrl(ID.biz, ID.admin);
     expect(microsoft.status, JSON.stringify(microsoft.body)).toBe(200);
     const foreign: Array<[string, string]> = [
       ['Drive state', stateOf((await driveAuthUrl(ID.biz, ID.owner)).body.url)],
-      ['Outlook state (STAFF)', stateOf(microsoft.body.authUrl)],
+      ['Outlook state (ADMIN)', stateOf(microsoft.body.authUrl)],
     ];
     for (const [label, state] of foreign) {
       for (const callback of [CALLBACKS.bookingsCalendar, CALLBACKS.syncCalendar]) {

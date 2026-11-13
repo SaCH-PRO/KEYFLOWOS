@@ -21,6 +21,14 @@
  * route counts as membership-only). Public routes (no member guard) are pinned by
  * core/auth/public-surface.spec.ts and are not this census.
  *
+ * A GET joins the population when it starts a credential binding (second review SV-3): its path names
+ * an OAuth consent start (`auth-url`, `authorize`, `oauth/start`, `oauth/url`) or its handler is an
+ * auth-URL builder (`...AuthUrl`). Such a GET is a write in effect: it signs a state naming the
+ * business, and the provider's callback stores the account of whoever completes the consent on that
+ * business (GET /connect/microsoft/businesses/:b/auth-url was membership-only, the SEC-1 class, and
+ * had no row because the census counted write verbs only). A GET whose write is hidden in a service
+ * under another name is not visible to this reader; a binding start is the class the reviews found.
+ *
  * THE DOC: every census table row is `| \`Class.handler\` | VERB | path | disposition | reason |`.
  * Dispositions:
  *   applied        this packet gated it; the reason is `module:level`, the scope it now carries.
@@ -53,6 +61,9 @@
  *   CEN-07 every `exempt-ruled` row cites an owner ruling.
  *   CEN-08 every `secret-read` row whose reason starts with a scope carries exactly that enforced
  *          scope (the read that answers a secret is gated where the census says it is).
+ *   CEN-09 no credential-binding start (any verb: the GETs above, a POST `oauth/start`) is left
+ *          membership-only on purpose: its row is `applied`, `exempt-check`, `exempt-guard` or
+ *          `exempt-ruled`, never `open` or `deferred` (second review SV-2, SV-3).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -130,6 +141,11 @@ function routes(): Route[] {
 const enforced = (r: Route) => !!r.scope && r.guards.includes('ModuleScopeGuard');
 const isMember = (r: Route) => r.guards.some((g) => MEMBER_GUARDS.includes(g));
 
+/** Second review SV-3: a route that starts a credential binding (an OAuth consent start), by its path or handler name. */
+const BINDING_START_PATH = /\/(auth-url|authorize|oauth\/(start|url|authorize))(\/|$)/i;
+const BINDING_START_HANDLER = /AuthUrl$/;
+const isBindingStart = (r: Route) => BINDING_START_PATH.test(r.path) || BINDING_START_HANDLER.test(r.key.split('.')[1] ?? '');
+
 interface Row {
   key: string;
   verb: string;
@@ -153,7 +169,7 @@ function censusRows(): Row[] {
 describe('REST scope census (SWEEP-P0-SCOPES)', () => {
   const all = routes();
   const byKey = new Map(all.map((r) => [r.key, r]));
-  const population = all.filter((r) => WRITE_VERBS.has(r.verb) && isMember(r) && !enforced(r));
+  const population = all.filter((r) => (WRITE_VERBS.has(r.verb) || (r.verb === 'GET' && isBindingStart(r))) && isMember(r) && !enforced(r));
 
   it('the reader sees the controllers (guards the guard)', () => {
     expect(all.length).toBeGreaterThan(2000);
@@ -166,6 +182,18 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     // review SEC-1: controllers outside modules/ are read too (core/connectors)
     expect(byKey.get('ConnectorController.saveCredentials')?.file).toBe('core/connectors/connector.controller.ts');
     expect(byKey.get('ConnectorController.getWebhookInfo')?.verb).toBe('GET');
+    // second review SV-3: the credential-binding GETs are seen (an auth-URL start, by path and by handler name)
+    const bindingGets = all.filter((r) => r.verb === 'GET' && isMember(r) && isBindingStart(r)).map((r) => r.key).sort();
+    expect(bindingGets).toEqual(expect.arrayContaining([
+      'BookingsController.getCalendarAuthUrl',
+      'CommerceController.getGmailAuthUrl',
+      'CrmGoogleController.getGoogleAuthUrl',
+      'GoogleDriveController.getAuthUrl',
+      'MicrosoftOAuthController.buildAuthUrl',
+    ]));
+    expect(isBindingStart(byKey.get('SocialController.oauthStart')!)).toBe(true);
+    expect(isBindingStart(byKey.get('SocialController.oauthAvailability')!)).toBe(false);
+    expect(isBindingStart(byKey.get('CommunicationsController.listConnections')!)).toBe(false);
   });
 
   it('[CEN-01] the census doc parses: unique rows, known dispositions, a reason on every row', () => {
@@ -253,6 +281,20 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       const r = byKey.get(row.key);
       if (!r || !enforced(r) || r.scope?.module !== named[1] || r.scope?.minLevel !== named[2]) {
         problems.push(`line ${row.line}: ${row.key} carries ${r?.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no scope'}${r && enforced(r) ? '' : ' (not enforced)'}, not ${named[1]}:${named[2]}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-09] no credential-binding start is left membership-only on purpose: its row gates it (applied, exempt-check, exempt-guard, exempt-ruled), never open or deferred', () => {
+    const rows = new Map(censusRows().map((r) => [r.key, r]));
+    const problems: string[] = [];
+    for (const r of all.filter((x) => isMember(x) && isBindingStart(x) && (WRITE_VERBS.has(x.verb) || x.verb === 'GET'))) {
+      const row = rows.get(r.key);
+      if (enforced(r)) continue;
+      if (!row) { problems.push(`${r.key} (${r.verb} ${r.path}) starts a credential binding and has no row`); continue; }
+      if (!['exempt-check', 'exempt-guard', 'exempt-ruled'].includes(row.disposition)) {
+        problems.push(`line ${row.line}: ${r.key} (${r.verb} ${r.path}) starts a credential binding and is ${row.disposition}`);
       }
     }
     expect(problems).toEqual([]);

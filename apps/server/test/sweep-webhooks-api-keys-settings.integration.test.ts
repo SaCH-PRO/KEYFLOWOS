@@ -25,7 +25,14 @@
  *     so the member who creates one, or turns one back on, must hold read on the module of every
  *     event it subscribes to (revenue for invoice.*, crm with every contact in view for contact.*,
  *     bookings for booking.*, storefront for store_order.*, ...; review SEC-2, D-114, D-100); an
- *     event the server does not know is a 400;
+ *     event the server does not know is a 400; a contact row carries the stored money signals, so
+ *     contact.* also needs revenue read (second review SV-1, D-100);
+ *   - a booking event carries the booking's contact as the bookings routes answer it (id, name,
+ *     email, phone), never the whole row (second review SV-1: a PRIVATE contact's owner, internal
+ *     note and money signals went to a bookings-read member's URL);
+ *   - a webhook's signing secret and full URL go only to a reader who could have created it: the
+ *     settings level above and the reads its events need (second review SV-5: an ADMIN bound by
+ *     D-114 read the owner's invoice webhook's secret and signed forged invoice.paid deliveries);
  *   - a webhook URL must be http(s) to a public address: the repo's outbound-address guard
  *     (core/security/outbound-address.ts) refuses a loopback, private, link-local (cloud metadata)
  *     or otherwise non-public host at create (400, nothing written) and again at every delivery,
@@ -76,7 +83,9 @@ const ID = {
   settingsWriteCrm: `${P}settingsWriteCrm`, // STAFF of bizA, explicit settings 'write' and crm 'read'
   settingsWriteCrmOwned: `${P}settingsWriteCrmOwned`, // STAFF of bizA, settings 'write', crm 'read' but crm_view 'owned' (their own book only)
   adminSettingsOnly: `${P}adminSettingsOnly`, // ADMIN of bizA, explicit {settings: admin, revenue: none, crm: none} (D-114 binds the ADMIN)
-  settingsAdmin: `${P}settingsAdmin`, // STAFF of bizA, explicit settings 'admin'
+  settingsAdmin: `${P}settingsAdmin`, // STAFF of bizA, explicit settings 'admin' (every other module absent: none)
+  settingsAdminRevenue: `${P}settingsAdminRevenue`, // STAFF of bizA, explicit settings 'admin' and revenue 'read' (crm none)
+  settingsWriteCrmRevenue: `${P}settingsWriteCrmRevenue`, // STAFF of bizA, explicit settings 'write', crm 'read' and revenue 'read'
   outsider: `${P}outsider`, // OWNER of bizB, no membership in bizA
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -95,6 +104,9 @@ let sinkPort = 0;
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM webhooks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM api_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -252,6 +264,8 @@ beforeAll(async () => {
   await m(ID.settingsWriteCrmOwned, ID.bizA, 'STAFF', { settings: 'write', crm: 'read', crm_view: 'owned' });
   await m(ID.adminSettingsOnly, ID.bizA, 'ADMIN', { settings: 'admin', revenue: 'none', crm: 'none' });
   await m(ID.settingsAdmin, ID.bizA, 'STAFF', { settings: 'admin' });
+  await m(ID.settingsAdminRevenue, ID.bizA, 'STAFF', { settings: 'admin', revenue: 'read' });
+  await m(ID.settingsWriteCrmRevenue, ID.bizA, 'STAFF', { settings: 'write', crm: 'read', revenue: 'read' });
   await m(ID.outsider, ID.bizB, 'OWNER');
 }, 120_000);
 
@@ -305,9 +319,9 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     }
   });
 
-  it('[WHK-02] (review CR-5) a member with settings admin (the owner, a co-owner, an ADMIN, a settings-admin STAFF member) lists the webhooks with the full URL and the signing secret, so an existing webhook\'s secret can be read again', async () => {
+  it('[WHK-02] (review CR-5; second review SV-5) a member with settings admin who reads the module of the webhook\'s events (the owner, a co-owner, an ADMIN on role defaults, a settings-admin STAFF member with revenue read for this invoice webhook) lists the webhooks with the full URL and the signing secret, so an existing webhook\'s secret can be read again', async () => {
     const wh = await seedWebhook();
-    for (const actor of [ID.owner, ID.coOwner, ID.admin, ID.settingsAdmin]) {
+    for (const actor of [ID.owner, ID.coOwner, ID.admin, ID.settingsAdminRevenue]) {
       const res = await send('get', hooks(), actor);
       expect(res.status, actor).toBe(200);
       const row = (res.body as any[]).find((w) => w.id === wh.id);
@@ -317,9 +331,9 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     }
   });
 
-  it('[WHK-02b] RED-BEFORE (review SEC-3): a settings write member lists the full URL and no secret; a settings read member gets the receiver origin only (the path, where a Slack or Zapier hook carries its token, is hidden) and no secret', async () => {
+  it('[WHK-02b] RED-BEFORE (review SEC-3): a settings write member (who reads the events\' module: revenue for this invoice webhook) lists the full URL and no secret; a settings read member gets the receiver origin only (the path, where a Slack or Zapier hook carries its token, is hidden) and no secret', async () => {
     const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.78/services/T0000/B0000/XXXXSLACKTOKENXXXX?k=v' });
-    const writer = await send('get', hooks(), ID.settingsWrite);
+    const writer = await send('get', hooks(), ID.settingsWriteRevenue);
     expect(writer.status).toBe(200);
     const writerRow = (writer.body as any[]).find((w) => w.id === wh.id);
     expect(writerRow.url).toBe(wh.url);
@@ -389,7 +403,7 @@ describe('BUG-001: webhook configuration and signing secrets are settings territ
     expect((ok.body as any[]).length).toBeGreaterThan(0);
     for (const entry of ok.body as any[]) expect(entry.url).toBe('https://203.0.113.79/***');
     expect(JSON.stringify(ok.body)).not.toContain('SECRETPATH');
-    const full = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.settingsWrite);
+    const full = await send('get', `${hooks()}/${wh.id}/deliveries`, ID.settingsWriteRevenue);
     expect((full.body as any[])[0].url).toBe(wh.url);
   });
 
@@ -413,7 +427,7 @@ describe('review SEC-2: a webhook delivers only what its creator may read', () =
     expect(await webhookRows()).toEqual(before);
   });
 
-  it('[WHK-EV-02] RED-BEFORE: a settings write member is refused an event whose module they cannot read (invoice.* without revenue read, contact.* without crm read, or with crm read limited to their own contacts); the module they hold is admitted', async () => {
+  it('[WHK-EV-02] RED-BEFORE: a settings write member is refused an event whose module they cannot read (invoice.* without revenue read, contact.* without crm read, or with crm read limited to their own contacts, or without revenue read: second review SV-1, D-100, a contact row carries the stored money signals); the modules they hold are admitted', async () => {
     const before = await webhookRows();
     const refused: Array<[string, string[]]> = [
       [ID.settingsWrite, ['invoice.paid']],
@@ -421,13 +435,14 @@ describe('review SEC-2: a webhook delivers only what its creator may read', () =
       [ID.settingsWriteRevenue, ['contact.updated']],
       [ID.settingsWriteCrm, ['invoice.paid']],
       [ID.settingsWriteCrmOwned, ['contact.created']],
+      [ID.settingsWriteCrm, ['contact.created']],
     ];
     for (const [actor, events] of refused) {
       const res = await send('post', hooks(), actor, { url: 'https://203.0.113.77/exfil', events });
       expect(res.status, `${actor} ${events}`).toBe(403);
     }
     expect(await webhookRows()).toEqual(before);
-    const crm = await send('post', hooks(), ID.settingsWriteCrm, { url: 'https://203.0.113.77/crm', events: ['contact.created', 'contact.updated'] });
+    const crm = await send('post', hooks(), ID.settingsWriteCrmRevenue, { url: 'https://203.0.113.77/crm', events: ['contact.created', 'contact.updated'] });
     expect(crm.status).toBe(201);
     const revenue = await send('post', hooks(), ID.settingsWriteRevenue, { url: 'https://203.0.113.77/rev', events: ['invoice.paid'] });
     expect(revenue.status).toBe(201);
@@ -457,6 +472,174 @@ describe('review SEC-2: a webhook delivers only what its creator may read', () =
   it('[WHK-EV-05] the owner (every module by role default) subscribes to invoice, contact, booking and store order events', async () => {
     const res = await send('post', hooks(), ID.owner, { url: 'https://203.0.113.77/all', events: ['invoice.paid', 'contact.created', 'booking.created', 'store_order.created', 'post.published'] });
     expect(res.status).toBe(201);
+  });
+});
+
+/**
+ * Second review SV-1: booking.* is mapped to bookings read, and a booking event carried the booking's
+ * contact whole (BookingsService reads the booking with include { contact: true }; the dispatcher
+ * stripped businessId only), at data.contact and again at data.booking.contact. The bookings read
+ * routes answer that contact as { id, firstName, lastName, email, phone }. A delivery now carries the
+ * same: no visibility or ownerId (a PRIVATE contact), no notesInternal, no money signals (D-100).
+ *
+ * The deliveries are read from the dispatcher's own send step (sendWithLogging, replaced for these
+ * cases by a recorder): what it would sign and POST. Nothing leaves the machine.
+ */
+describe('second review SV-1: a booking event carries the booking\'s contact as the bookings routes answer it', () => {
+  const CONTACT_KEYS = ['email', 'firstName', 'id', 'lastName', 'phone'];
+  /** Contact fields the bookings routes do not answer (a Booking row has none of these keys of its own). */
+  const HIDDEN = ['visibility', 'ownerId', 'notesInternal', 'lifetimeValue', 'averageSpend', 'paymentReliability', 'riskFlags', 'leadScore'];
+
+  async function seedPrivateBooking() {
+    seq += 1;
+    const contact = await db.contact.create({
+      data: {
+        id: `${P}c_private_${seq}`,
+        businessId: ID.bizA,
+        firstName: 'Private',
+        lastName: `Client ${seq}`,
+        email: `${P}private${seq}@client.example`,
+        phone: `+1868555${String(1000 + seq)}`,
+        visibility: 'PRIVATE',
+        ownerId: ID.owner,
+        notesInternal: `${P}Owner-only note: negotiating 40% discount`,
+        lifetimeValue: 98765.43,
+        averageSpend: 4321.09,
+        paymentReliability: 37,
+        riskFlags: ['poor_payment_history'],
+      },
+    });
+    const service = await db.service.create({ data: { id: `${P}svc_${seq}`, businessId: ID.bizA, name: `${P}Consult`, duration: 60, price: 250 } });
+    const startTime = new Date(Date.UTC(2031, 0, 1 + seq, 14, 0, 0));
+    await db.booking.create({
+      data: { id: `${P}bk_${seq}`, businessId: ID.bizA, contactId: contact.id, serviceId: service.id, startTime, endTime: new Date(startTime.getTime() + 3_600_000) },
+    });
+    // As BookingsService.createBooking and confirmBookingForPaidInvoice read it.
+    const booking = await db.booking.findUnique({ where: { id: `${P}bk_${seq}` }, include: { contact: true } });
+    return { contact, booking };
+  }
+
+  async function capture(run: () => Promise<void>) {
+    const sent: Array<{ webhookId: string; event: string; body: any }> = [];
+    const spy = vi.spyOn(dispatcher as any, 'sendWithLogging').mockImplementation((async (wh: any, event: string, _ts: string, body: string) => {
+      sent.push({ webhookId: wh.id, event, body: JSON.parse(body) });
+      return { status: 'success' } as any;
+    }) as any);
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return sent;
+  }
+
+  it('[WHK-BK-01] RED-BEFORE: booking.created and booking.confirmed deliveries carry the contact as { id, firstName, lastName, email, phone } at data.contact and data.booking.contact; no visibility, owner, internal note or money signal of a PRIVATE contact', async () => {
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/bookadmin-collector', events: ['booking.created', 'booking.confirmed', 'booking.completed'] });
+    const { contact, booking } = await seedPrivateBooking();
+    expect(booking.contact.notesInternal, 'the stand-in reads the contact whole, as BookingsService does').toContain('Owner-only note');
+
+    const sent = await capture(async () => {
+      await dispatcher.onBookingCreated({ booking, contact: booking.contact, businessId: ID.bizA, eventName: 'booking.created' });
+      await dispatcher.onBookingConfirmed({ booking, contact: booking.contact, businessId: ID.bizA, eventName: 'booking.confirmed' });
+    });
+    const mine = sent.filter((s) => s.webhookId === wh.id);
+    expect(mine.map((s) => s.event)).toEqual(['booking.created', 'booking.confirmed']);
+    for (const delivery of mine) {
+      const { data } = delivery.body;
+      for (const [label, shown] of [['data.contact', data.contact], ['data.booking.contact', data.booking?.contact]] as const) {
+        expect(Object.keys(shown ?? {}).sort(), `${delivery.event} ${label}`).toEqual(CONTACT_KEYS);
+        expect(shown, `${delivery.event} ${label}`).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email, phone: contact.phone });
+      }
+      const text = JSON.stringify(delivery.body);
+      expect(text, delivery.event).not.toContain('Owner-only note');
+      expect(text, delivery.event).not.toContain('98765.43');
+      expect(text, delivery.event).not.toContain('PRIVATE');
+      for (const key of HIDDEN) expect(text, `${delivery.event} ${key}`).not.toContain(`"${key}"`);
+      // The booking itself is delivered as the bookings routes answer it (its own fields stay).
+      expect(data.booking.id, delivery.event).toBe(booking.id);
+      expect(data.booking.serviceId, delivery.event).toBe(booking.serviceId);
+    }
+  });
+
+  it('[WHK-BK-02] RED-BEFORE: a booking.completed delivery, and any booking event whose booking carries the contact whole, delivers the same five contact fields; a booking with no contact delivers contact null', async () => {
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.79/bookadmin-collector-2', events: ['booking.completed', 'booking.created'] });
+    const { contact, booking } = await seedPrivateBooking();
+    const sent = await capture(async () => {
+      await dispatcher.onBookingCompleted({ booking, contact: booking.contact, businessId: ID.bizA });
+      await dispatcher.onBookingCreated({ booking: { ...booking, contact: undefined }, contact: undefined, businessId: ID.bizA });
+    });
+    const mine = sent.filter((s) => s.webhookId === wh.id);
+    expect(mine.map((s) => s.event)).toEqual(['booking.completed', 'booking.created']);
+    expect(mine[0].body.data.booking.contact).toEqual({ id: contact.id, firstName: 'Private', lastName: contact.lastName, email: contact.email, phone: contact.phone });
+    expect(JSON.stringify(mine[0].body)).not.toContain('Owner-only note');
+    expect(mine[1].body.data.contact).toBeNull();
+  });
+
+  it('[WHK-BK-03] RED-BEFORE (D-100): a contact.* webhook delivers the stored contact row, money signals included, so its creator needs revenue read as well as crm read with every contact in view; settings write with crm read alone is refused with nothing written', async () => {
+    const before = await webhookRows();
+    const res = await send('post', hooks(), ID.settingsWriteCrm, { url: 'https://203.0.113.77/crm-only', events: ['contact.created'] });
+    expect(res.status).toBe(403);
+    expect(String(res.body?.message ?? '')).toMatch(/contact\.created needs revenue read access/);
+    expect(await webhookRows()).toEqual(before);
+    const ok = await send('post', hooks(), ID.settingsWriteCrmRevenue, { url: 'https://203.0.113.77/crm-rev', events: ['contact.created'] });
+    expect(ok.status).toBe(201);
+  });
+});
+
+/**
+ * Second review SV-5: the CR-5 repair answered every webhook's signing secret, and its full URL, to
+ * every settings admin member, whatever modules the webhook's events belong to. An ADMIN bound by
+ * D-114 (revenue none, crm none) could not create an invoice.paid webhook, yet read the owner's
+ * invoice webhook's secret (and signed forged invoice.paid deliveries to the owner's receiver with it)
+ * and its full URL (for a Slack hook, the credential itself). A reader now gets a webhook's secret
+ * and full URL only if they could have created it: the settings level as before, and the reads its
+ * events need (assertMayReceiveEvents); otherwise no secret and the receiver origin only.
+ */
+describe('second review SV-5: a webhook\'s secret and full URL go only to a member who may receive its events', () => {
+  it('[WHK-SV5-01] RED-BEFORE: a settings admin member who cannot read the events\' modules (an ADMIN bound by D-114, a settings-admin STAFF member) lists the owner\'s invoice and contact webhook with no secret and the receiver origin only, and its delivery log masked; the owner and an ADMIN on role defaults read both', async () => {
+    const wh = await seedWebhook(ID.bizA, { url: 'https://203.0.113.78/services/T0000/B0000/XXXXSLACKTOKENXXXX', events: ['invoice.paid', 'contact.created'] });
+    (dispatcher as any).addLog({
+      id: `${P}log_sv5`, webhookId: wh.id, businessId: ID.bizA, event: 'invoice.paid', url: wh.url,
+      status: 'success', statusCode: 200, attempts: 1, duration: 3, error: null, timestamp: new Date().toISOString(),
+    });
+    for (const actor of [ID.adminSettingsOnly, ID.settingsAdmin, ID.settingsAdminRevenue, ID.settingsWrite]) {
+      const res = await send('get', hooks(), actor);
+      expect(res.status, actor).toBe(200);
+      const row = (res.body as any[]).find((w) => w.id === wh.id);
+      expect(row, actor).toBeTruthy();
+      expect(row, actor).not.toHaveProperty('secret');
+      expect(row.url, actor).toBe('https://203.0.113.78/***');
+      expect(row.urlMasked, actor).toBe(true);
+      expect(JSON.stringify(res.body), actor).not.toContain(wh.secret);
+      expect(JSON.stringify(res.body), actor).not.toContain('XXXXSLACKTOKENXXXX');
+      const log = await send('get', `${hooks()}/${wh.id}/deliveries`, actor);
+      expect(log.status, actor).toBe(200);
+      expect((log.body as any[]).length, actor).toBeGreaterThan(0);
+      expect(JSON.stringify(log.body), actor).not.toContain('XXXXSLACKTOKENXXXX');
+    }
+    for (const actor of [ID.owner, ID.admin]) {
+      const res = await send('get', hooks(), actor);
+      const row = (res.body as any[]).find((w) => w.id === wh.id);
+      expect(row.secret, actor).toBe(wh.secret);
+      expect(row.url, actor).toBe(wh.url);
+      expect(row.urlMasked, actor).toBeUndefined();
+      const log = await send('get', `${hooks()}/${wh.id}/deliveries`, actor);
+      expect((log.body as any[])[0].url, actor).toBe(wh.url);
+    }
+  });
+
+  it('[WHK-SV5-02] the same reader is answered per webhook: a settings-admin member with revenue read reads the secret and URL of an invoice-only webhook, and not those of a webhook that also sends contact events', async () => {
+    const invoiceOnly = await seedWebhook(ID.bizA, { url: 'https://203.0.113.78/v99w-invoice-only', events: ['invoice.paid'] });
+    const mixed = await seedWebhook(ID.bizA, { url: 'https://203.0.113.78/v99w-mixed/SECRETPATH', events: ['invoice.paid', 'contact.updated'] });
+    const res = await send('get', hooks(), ID.settingsAdminRevenue);
+    expect(res.status).toBe(200);
+    const a = (res.body as any[]).find((w) => w.id === invoiceOnly.id);
+    const b = (res.body as any[]).find((w) => w.id === mixed.id);
+    expect(a.secret).toBe(invoiceOnly.secret);
+    expect(a.url).toBe(invoiceOnly.url);
+    expect(b).not.toHaveProperty('secret');
+    expect(b.url).toBe('https://203.0.113.78/***');
+    expect(JSON.stringify(res.body)).not.toContain(mixed.secret);
   });
 });
 
