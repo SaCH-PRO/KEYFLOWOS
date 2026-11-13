@@ -212,11 +212,11 @@ async function bindEmail(actor: string, mailbox: string) {
 const destinationOf = async (connectionId: string) => (await db.channelDestination.findFirst({ where: { connectionId } }))?.id as string;
 
 describe('WH3-1: binding a messaging connection is binding an export account', () => {
-  it('[SFA-WH31-BIND-01] RED-BEFORE: a settings admin whose map says crm none is refused 403 binding an EMAIL or WhatsApp sending account (connections, whatsapp/connect), and no connection is written', async () => {
+  it('[SFA-WH31-BIND-01] RED-BEFORE: a settings admin whose map says crm none is refused 403 (it needs crm read) binding an EMAIL or WhatsApp sending account (connections, whatsapp/connect), and no connection is written', async () => {
     const before = (await connectionsOf()).length;
     const email = await bindEmail(ID.setAdminCrmNone, 'attacker');
     expect(email.status, said(email)).toBe(403);
-    expect(said(email)).toMatch(/crm requires read access/);
+    expect(said(email)).toMatch(/needs crm read access/);
     const wa = await send('post', `/communications/businesses/${ID.bizA}/connections`, ID.setAdminCrmNone, {
       provider: 'WHATSAPP', token: secret(P, 'binder', 'waba'), providerMeta: { phoneNumber: '+18685550777', phoneNumberId: `${P}binder_pnid` },
     });
@@ -246,7 +246,7 @@ describe('WH3-1: an audience send queues only the contacts every receiver may op
     expect(said(staff)).toMatch(/content requires write/);
     const crmNone = await send('post', `/communications/businesses/${ID.bizA}/content/${contentId}/publish`, ID.setAdminCrmNone, { destinationIds: [dest] });
     expect(crmNone.status, said(crmNone)).toBe(403);
-    expect(said(crmNone)).toMatch(/crm requires read access/);
+    expect(said(crmNone)).toMatch(/needs crm read access/);
     const sched = await send('post', `/communications/businesses/${ID.bizA}/content/${contentId}/schedule`, ID.staffDefault, { destinationIds: [dest], scheduledAt: '2031-01-01T10:00:00' });
     expect(sched.status, said(sched)).toBe(403);
     expect(await queuedFor(contentId)).toEqual([]);

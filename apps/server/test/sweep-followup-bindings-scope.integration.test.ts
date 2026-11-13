@@ -95,6 +95,7 @@ async function cleanup() {
     `DELETE FROM integration_connections WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM integration_providers WHERE key LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM push_subscriptions WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -177,9 +178,11 @@ beforeAll(async () => {
   const { CalendarPermissionService } = await import('../src/modules/calendar/calendar-permission.service');
   const { CalendarProjectionService } = await import('../src/modules/calendar/calendar-projection.service');
   const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+  const { PushNotificationController } = await import('../src/modules/push-notifications/push-notification.controller');
+  const { PushNotificationService } = await import('../src/modules/push-notifications/push-notification.service');
 
   moduleRef = await Test.createTestingModule({
-    controllers: [GoogleDriveController, ConnectController, FinanceController, IntegrationHubController, AgentController, AiController, ConnectorController, CalendarController],
+    controllers: [GoogleDriveController, ConnectController, FinanceController, IntegrationHubController, AgentController, AiController, ConnectorController, CalendarController, PushNotificationController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -198,6 +201,7 @@ beforeAll(async () => {
       CalendarQueryService,
       CalendarPermissionService,
       CalendarProjectionService,
+      PushNotificationService,
       { provide: EventEmitter2, useValue: { emit: () => true, emitAsync: async () => [], on: () => undefined } },
     ],
   })
@@ -434,10 +438,10 @@ describe('Owner question 11: binding an integration needs settings admin alone; 
 
 describe('staffbookings (recommended option): a STAFF member on role defaults handles bookings', () => {
   it('[SFB-STAFFBK-01] RED-BEFORE: a STAFF member with no explicit map creates a calendar booking event (bookings write by role default); STAFF with bookings none is still refused', async () => {
-    const res = await send('post', `/calendar/businesses/${ID.bizA}/events`, ID.staffDefault, { title: `${P}Fitting`, type: 'MEETING', startAt: '2031-05-01T14:00:00.000Z', endAt: '2031-05-01T15:00:00.000Z' });
+    const res = await send('post', `/calendar/businesses/${ID.bizA}/events`, ID.staffDefault, { title: `${P}Fitting`, type: 'BOOKING', startAt: '2031-05-01T14:00:00.000Z', endAt: '2031-05-01T15:00:00.000Z' });
     expect(res.status, said(res)).toBe(201);
     expect(await db.calendarEvent.count({ where: { businessId: ID.bizA, title: `${P}Fitting` } })).toBe(1);
-    const none = await send('post', `/calendar/businesses/${ID.bizA}/events`, ID.staffStore, { title: `${P}Nope`, type: 'MEETING', startAt: '2031-05-01T14:00:00.000Z' });
+    const none = await send('post', `/calendar/businesses/${ID.bizA}/events`, ID.staffStore, { title: `${P}Nope`, type: 'BOOKING', startAt: '2031-05-01T14:00:00.000Z' });
     expect(none.status).toBe(403);
     expect(said(none)).toMatch(/bookings requires write/);
   });
@@ -533,5 +537,29 @@ describe('whatsappsmoke (recommended option): the WhatsApp test only reports its
     expect(smoke.status, said(smoke)).toBe(201);
     expect(smoke.body?.success, said(smoke)).toBe(true);
     expect(await whatsappRow()).toEqual({ status: null, record: null });
+  });
+});
+
+describe('Owner question 3 (answered by default): the push subscription routes are the member\'s own device, open to members', () => {
+  const push = `/api/businesses/${ID.bizA}/push`;
+  const sub = (tag: string) => ({ endpoint: `https://203.0.113.50/push/${P}${tag}`, keys: { p256dh: `${P}p256dh_${tag}`, auth: `${P}auth_${tag}` } });
+  const rowOf = (tag: string) => db.pushSubscription.findUnique({ where: { endpoint: sub(tag).endpoint }, select: { userId: true, businessId: true } });
+
+  it('[SFB-PUSH-01] RED-BEFORE: a STAFF member on role defaults subscribes their device (201), and the subscription is theirs whatever userId the body names (the owner\'s pushes never reach it)', async () => {
+    const res = await send('post', `${push}/subscribe`, ID.staffDefault, { userId: ID.owner, subscription: sub('staff_device') });
+    expect(res.status, said(res)).toBe(201);
+    expect(await rowOf('staff_device')).toEqual({ userId: ID.staffDefault, businessId: ID.bizA });
+  });
+
+  it('[SFB-PUSH-02] RED-BEFORE: a member cannot take over or remove another member\'s device: re-subscribing the owner\'s endpoint or unsubscribing it leaves the owner\'s subscription as it was', async () => {
+    const own = await send('post', `${push}/subscribe`, ID.owner, { userId: ID.owner, subscription: sub('owner_device') });
+    expect(own.status, said(own)).toBe(201);
+    expect(await rowOf('owner_device')).toEqual({ userId: ID.owner, businessId: ID.bizA });
+    const take = await send('post', `${push}/subscribe`, ID.staffDefault, { userId: ID.staffDefault, subscription: sub('owner_device') });
+    expect([201, 403]).toContain(take.status);
+    expect(await rowOf('owner_device')).toEqual({ userId: ID.owner, businessId: ID.bizA });
+    const drop = await send('post', `${push}/unsubscribe`, ID.staffDefault, { endpoint: sub('owner_device').endpoint });
+    expect([201, 200]).toContain(drop.status);
+    expect(await rowOf('owner_device')).toEqual({ userId: ID.owner, businessId: ID.bizA });
   });
 });
