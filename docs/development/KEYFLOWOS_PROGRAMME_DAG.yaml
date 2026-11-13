@@ -2,7 +2,8 @@
 #
 # Canonical source of packet topology:
 #   docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md
-#   on branch docs/keyflow-intelligence-foundation
+#   in this repository since the 2026-11-13 tie-off (D-141), as a dated
+#   historical record; it was on branch docs/keyflow-intelligence-foundation
 #
 # This file is the EXECUTABLE projection of that board. It is static topology
 # only. It holds no live packet state. Live state is the fold of issue #80
@@ -45,7 +46,7 @@ programme: KEYFLOWOS
 packets_total: 35
 phases_total: 37
 canonical_board: docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md
-canonical_board_branch: docs/keyflow-intelligence-foundation
+canonical_board_branch: main   # in main since the 2026-11-13 tie-off (D-141); formerly docs/keyflow-intelligence-foundation
 forensic_baseline: 8f173bfe79f1418159cf4099ea18b0d60d203ec2
 
 # Named dependency groups. The board expresses two Wave E dependencies as prose

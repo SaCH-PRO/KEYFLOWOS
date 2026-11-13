@@ -16,7 +16,7 @@ review_status: PENDING_CHATGPT_REVIEW
 This map turns three condensed family maps (product domains, programme corpus, open-PR triage) into one ordered, tests-first build queue. It was also checked against these sources:
 
 - **Scope and constitution:** `docs/reconstruction/product/V1-MODULE-SCOPE.md` and `docs/reconstruction/product/VOLUME-01-CONSTITUTION.md` (read from origin/docs/keyflow-reconstruction-20261029, tip `1b143fa3`; in this repository since the 2026-11-12 tie-off).
-- **Wave board:** origin/docs/keyflow-intelligence-foundation.
+- **Wave board:** `docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md` (read from origin/docs/keyflow-intelligence-foundation; in this repository since the 2026-11-13 tie-off, D-141, as a dated historical record).
 - **Release 0 target:** issue #186, read through the REST API.
 - **Revenue test contract:** `REVENUE-AUTH-NEGATIVE-CONTROLS-001.md`, revision 2.
 - **Live repository state:** the branch log, the packet branches and worktrees, and the latest local journey run.

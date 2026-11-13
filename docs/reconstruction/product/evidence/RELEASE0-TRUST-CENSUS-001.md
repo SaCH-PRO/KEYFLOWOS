@@ -12,7 +12,7 @@ prepared: 2026-11-03
 sources:
   matrix: docs/intelligence/governance/IRONCLAD-ASSURANCE-MATRIX.yaml     # 68 domains, adopted 2026-09-28
   register: docs/intelligence/governance/CATASTROPHIC-FAILURE-REGISTER.yaml # 50 scenarios, adopted 2026-09-28
-  source_ref: origin/docs/keyflow-intelligence-foundation (b4e5bb54)
+  source_ref: docs/intelligence/governance/ (in main since the 2026-11-13 tie-off, D-141; both files unchanged from origin/docs/keyflow-intelligence-foundation b4e5bb54, where this census read them)
 state_changes: none               # proposals only; census section 9B moves a state only on accepted proof
 review_status: PENDING_OWNER_REVIEW
 ```
