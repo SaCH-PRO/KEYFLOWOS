@@ -280,3 +280,13 @@ test('NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyo
   assert.equal(hawk.length, 1, `the feature inventory has one "${HAWKSCAN}" row`);
   assert.match(hawk[0], /manual-only/i, `the "${HAWKSCAN}" row says it is manual-only`);
 });
+
+// ------------------------------------- CAPTURED FAILURES ARE RE-RAISED
+// Ported from #114 (impl/kf-meta-proof-integrity-001, caebaa12).
+
+test('capture-and-reraise remains explicit for Branch divergence', () => {
+  const divergence = read('.github/workflows/branch-divergence.yml');
+  const tolerated = (divergence.match(/continue-on-error:\s*true/g) || []).length;
+  assert.ok(tolerated >= 1, 'branch divergence intentionally captures command status to render evidence');
+  assert.match(divergence, /Fail when thresholds exceeded[\s\S]*?exit 1/, 'captured divergence failure must be re-raised explicitly');
+});
