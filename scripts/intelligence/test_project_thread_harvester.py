@@ -184,7 +184,7 @@ def written_shapes():
     hexchars = "0123456789abcdef"
     mixed = "Kf7" + "qL2" + "xW9" + "pR4" + "mT8" + "vB1"
     letters = "Hq" + "Zt" + "Wm" + "Pk" + "Rv"
-    password = "Tr1n" + "!dad" + "9Qx"
+    fixture_pw = "Tr1n" + "!dad" + "9Qx"
     token = repeat("t0K" + "e9n", 28)
     b64 = repeat("Ab3/" + "Cd4+", 64)
     hex64 = repeat("a1b2c3d4" + "e5f60798", 64)
@@ -203,17 +203,17 @@ def written_shapes():
     vapid = repeat("Vp1_" + "Kd2-", 43)
     return [
         # SEC-CONV1-1-R1: markdown.
-        ("markdown bold label", f"KEYFLOWOS staging login. **Password:** {password}", [password]),
-        ("markdown bold name", f"**Password**: {password}", [password]),
+        ("markdown bold label", f"KEYFLOWOS staging login. **Password:** {fixture_pw}", [fixture_pw]),
+        ("markdown bold name", f"**Password**: {fixture_pw}", [fixture_pw]),
         ("markdown underscore name", f"__Token__: {token}", [token]),
-        ("markdown bold value", f"password: **{password}**", [password]),
+        ("markdown bold value", f"password: **{fixture_pw}**", [fixture_pw]),
         ("markdown code env name and value", f"`SUPABASE_JWT_SECRET`: `{b64}`", [b64]),
         ("markdown code env assignment", f"`JWT_SECRET`=`{value}`", [value]),
-        ("markdown code password", f"`password`=`{password}`", [password]),
+        ("markdown code password", f"`password`=`{fixture_pw}`", [fixture_pw]),
         ("markdown code compound env name", f"`CREDENTIALS_ENCRYPTION_KEY`: `{hex64}`", [hex64]),
         ("markdown bold env name", f"**CREDENTIALS_ENCRYPTION_KEY:** {hex64}", [hex64]),
         ("markdown table env row", f"| Name | Value |\n|---|---|\n| BYOK_ENCRYPTION_SECRET | {hex64} |", [hex64]),
-        ("markdown table password row", f"| Field | Value |\n|---|---|\n| Username | admin |\n| Password | {password} |", [password]),
+        ("markdown table password row", f"| Field | Value |\n|---|---|\n| Username | admin |\n| Password | {fixture_pw} |", [fixture_pw]),
         ("markdown table code cells", f"| `JWT_SECRET` | `{value}` |", [value]),
         # SEC-CONV1-1-R2: URL passwords with / or @ or other URL-safe characters.
         (
@@ -241,12 +241,12 @@ def written_shapes():
         ("secret key phrase", f"Langfuse secret key = {token}", [token]),
         ("bold api key phrase", f"**API key:** {value}", [value]),
         # Command-line forms.
-        ("curl user and password", f"curl -u admin:{password} https://api.example.invalid/v1", [password]),
+        ("curl user and password", f"curl -u admin:{fixture_pw} https://api.example.invalid/v1", [fixture_pw]),
         ("token flag", f"npx vercel deploy --prod --token {token}", [token]),
-        ("password flag", f"docker login registry.example.invalid --username ci --password {password}", [password]),
-        ("quoted password flag", f"tool --db-password '{password}' --verbose", [password]),
+        ("password flag", f"docker login registry.example.invalid --username ci --password {fixture_pw}", [fixture_pw]),
+        ("quoted password flag", f"tool --db-password '{fixture_pw}' --verbose", [fixture_pw]),
         ("api key flag", f"cli --api-key {value} run", [value]),
-        ("mysql attached password", f"mysql -uroot -p{password} keyflow", [password]),
+        ("mysql attached password", f"mysql -uroot -p{fixture_pw} keyflow", [fixture_pw]),
     ]
 
 

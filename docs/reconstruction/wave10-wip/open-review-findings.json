@@ -233,7 +233,7 @@
      "file": "apps/server/src/core/auth/sign-in-cutoff.ts",
      "line": 14,
      "claim": "Comments here are now false: lines 14-19 say that after the clearing any method is admitted and that D-101 does not close SEC-W8RSC-4, and lines 60-66 say that completeReset records no clearing. The builder flagged this; the file is outside the write set, so the integrator should fix it.",
-     "repro": "Compare the comment text with signInCutoffVerdict (auth.middleware.ts) and completeReset (identity-password.service.ts:352-368).",
+     "repro": "Compare the comment text with signInCutoffVerdict (auth.middleware.ts) and completeReset (identity-password.service.ts, lines 352 to 368).",
      "confirmed_by_running": false
     }
    ]

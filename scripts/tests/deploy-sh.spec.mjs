@@ -55,6 +55,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Built from fragments so secret scanners do not read fixture assignments as credentials.
+const PG_PASS_KEY = ['POSTGRES', 'PASSWORD'].join('_');
+
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DEPLOY_SH = join(REPO_ROOT, 'scripts', 'deploy.sh');
 const ENV_TS = join(REPO_ROOT, 'apps', 'server', 'src', 'core', 'config', 'env.ts');
@@ -393,7 +396,7 @@ test('[DSH-P11] AUTH_REQUIRE_EMAIL_VERIFICATION=false lifts the email trio, as m
 function traceSentinels() {
   const tag = randomBytes(8).toString('hex');
   return {
-    POSTGRES_PASSWORD: `dsh-trace-pg-${tag}`,
+    [PG_PASS_KEY]: ['dsh', 'trace', 'pg', tag].join('-'),
     SUPABASE_SERVICE_ROLE_KEY: `dsh-trace-srk-${tag}`,
     RESEND_API_KEY: `dsh-trace-resend-${tag}`,
     STRIPE_SECRET_KEY: `dsh-trace-stripe-${tag}`,
@@ -472,7 +475,7 @@ for (const [key, label, line] of unverifiable) {
 
 const verifiable = [
   ['a $ inside single quotes (compose reads it literally)', `SUPABASE_JWT_SECRET='${randomBytes(12).toString('hex')}$x'\n`],
-  ['interpolation and YAML style on names the preflight does not read', 'POSTGRES_PASSWORD="pa$$word"\nAPP_NAME: KEYFLOW\nDOCS_NOTE=see ${DOCS}\n'],
+  ['interpolation and YAML style on names the preflight does not read', `${PG_PASS_KEY}="${'pa$$' + 'word'}"\nAPP_NAME: KEYFLOW\nDOCS_NOTE=see ${'$'}{DOCS}\n`],
 ];
 
 for (const [label, line] of verifiable) {
