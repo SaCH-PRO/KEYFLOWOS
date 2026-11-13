@@ -146,7 +146,16 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
           return settle(inner(ID.bizA, TOOL, { ...ARGS }));
         },
       });
-      const outcome = await orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, { surface: 'CUSTOM_LOGIC' });
+      // PR195-KEY-GATES (review SEC-P195BW-1): a snippet run for no one is a turn that names no member, which runs only
+      // the customer-safe allowlist: the snippet itself is refused before it runs (memberless-key-tools.ts), so its
+      // inner call never reaches the boundary.
+      await expect(
+        orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, { surface: 'CUSTOM_LOGIC' }),
+      ).rejects.toThrow(/names no member it runs for, so KEY does not run it \(D-73\)/);
+      await noTickets();
+      expect(await fx.actions(ID.bizA)).toHaveLength(0);
+      // Run for a member (the outer turn's), the inner call still reaches the boundary requested by nobody.
+      const outcome = await orchestrator.executeToolByName(ID.bizA, 'execute_custom_logic', { code: '/* calls the tool */', inputs: {} }, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId: ID.owner });
       expect(outcome.err).toBeInstanceOf(fx.errors.ActionNotClearedError);
       expect(outcome.err.disposition).toBe('AWAITING_APPROVAL');
       await noTickets();

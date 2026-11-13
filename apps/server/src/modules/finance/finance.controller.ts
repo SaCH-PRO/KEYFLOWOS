@@ -69,6 +69,15 @@ import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.con
  * ModuleScopeGuard refuses below it with 403 before the handler, so a refused call reads and writes
  * nothing. ensureAccess stays on every route: the guard passes a platform SUPER_ADMIN, and one who is
  * not a member writes none of the business's Books (D-46).
+ *
+ * PR195-KEY-GATES (review finding SEC-P195BW-4; owner ruling D-146: "Books reads ... need revenue read"): the
+ * Books reads that carry figures run the same guard at revenue read: the accounts with their balances, a bank
+ * account's statement lines and the ledger postings offered beside them, the bank rules, the reconciliations and
+ * their reports, the tax liabilities (with the PAID invoices behind one, and the tax calendar), the fixed assets
+ * and their depreciation, the accounting periods, the cash reserves and the finance action items. GET
+ * expense-breakdown sums the month's expenses against their budgets, the rows GET expenses/summary serves, so it
+ * takes that route's expenses read. The reads that carry no figure of the business (settings, tax rates, the
+ * chart, exchange rates, bank-connection status) stay membership-only; books-read-scope.spec.ts pins both lists.
  */
 @Controller('finance/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -350,6 +359,8 @@ export class FinanceController {
     return this.overview.getOverview(businessId, viewer);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('expenses', 'read')
   @Get('expense-breakdown')
   async getExpenseBreakdown(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -396,6 +407,8 @@ export class FinanceController {
   }
 
   // ---------- FIN8: Finance intelligence / action queue ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('intelligence/actions')
   async listIntelActions(
     @Param('businessId') businessId: string,
@@ -435,6 +448,8 @@ export class FinanceController {
     return this.intel.dismiss(businessId, id, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('intelligence/insight')
   async getIntelInsight(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -442,6 +457,8 @@ export class FinanceController {
   }
 
   // ---------- FinancialAccount ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accounts')
   async listAccounts(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -581,6 +598,8 @@ export class FinanceController {
   }
 
   // ---------- Bank Rules ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('bank-rules')
   async listBankRules(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -600,6 +619,8 @@ export class FinanceController {
     return this.bankRules.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('bank-rules/:id')
   async getBankRule(
     @Param('businessId') businessId: string,
@@ -858,6 +879,8 @@ export class FinanceController {
   }
 
   /** Split-view payload for the reconciliation UI: bank rows + ledger candidates. */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accounts/:accountId/bank-transactions')
   async listBankTransactions(
     @Param('businessId') businessId: string,
@@ -928,6 +951,8 @@ export class FinanceController {
     return this.bankMatch.ignore(businessId, bankTransactionId, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('reconciliations')
   async listReconciliations(
     @Param('businessId') businessId: string,
@@ -959,6 +984,8 @@ export class FinanceController {
     }, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('reconciliations/:id')
   async getReconciliation(
     @Param('businessId') businessId: string,
@@ -981,6 +1008,8 @@ export class FinanceController {
     return this.reconciliation.complete(businessId, id, req.user.id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('reconciliations/:id/report')
   async reconciliationReport(
     @Param('businessId') businessId: string,
@@ -991,6 +1020,8 @@ export class FinanceController {
     return this.reconciliation.getReport(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('reconciliations/:id/report.csv')
   @Header('Content-Type', 'text/csv; charset=utf-8')
   async reconciliationReportCsv(
@@ -1006,6 +1037,8 @@ export class FinanceController {
   }
 
   // ---------- FIN7: Tax Liabilities ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax-liabilities')
   async listTaxLiabilities(
     @Param('businessId') businessId: string,
@@ -1028,6 +1061,8 @@ export class FinanceController {
     return this.taxLiability.recompute(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax-liabilities/:id')
   async getTaxLiability(
     @Param('businessId') businessId: string,
@@ -1038,6 +1073,8 @@ export class FinanceController {
     return this.taxLiability.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax-liabilities/:id/contributing-invoices')
   async taxContributingInvoices(
     @Param('businessId') businessId: string,
@@ -1048,6 +1085,8 @@ export class FinanceController {
     return this.taxLiability.contributingInvoices(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax-calendar')
   async taxCalendar(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1093,6 +1132,8 @@ export class FinanceController {
   // The canonical handlers above live under `/tax-liabilities`; the
   // FIN7 spec uses `/tax/liabilities`. Both paths are first-class and
   // delegate to the same logic.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax/liabilities')
   listTaxLiabilitiesAlias(
     @Param('businessId') businessId: string,
@@ -1108,6 +1149,8 @@ export class FinanceController {
     @Req() req: any,
   ) { return this.recomputeTaxLiabilities(businessId, req); }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax/liabilities/:id')
   getTaxLiabilityAlias(
     @Param('businessId') businessId: string,
@@ -1115,6 +1158,8 @@ export class FinanceController {
     @Req() req: any,
   ) { return this.getTaxLiability(businessId, id, req); }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('tax/liabilities/:id/contributing-invoices')
   taxContributingInvoicesAlias(
     @Param('businessId') businessId: string,
@@ -1326,6 +1371,8 @@ export class FinanceController {
   }
 
   // ---------- Cash Reserve Buckets ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('reserves')
   async listReserves(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1455,6 +1502,8 @@ export class FinanceController {
   }
 
   // ---------- Accounting Periods ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accounting-periods')
   async listAccountingPeriods(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1474,6 +1523,8 @@ export class FinanceController {
     return this.accountingPeriods.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accounting-periods/:id')
   async getAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1605,6 +1656,8 @@ export class FinanceController {
   }
 
   // ---------- Fixed Assets ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('fixed-assets')
   async listFixedAssets(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1620,6 +1673,8 @@ export class FinanceController {
     return this.fixedAssets.create(businessId, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('fixed-assets/:id')
   async getFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1646,6 +1701,8 @@ export class FinanceController {
     return this.fixedAssets.runDepreciation(businessId, id, body.asOf ? new Date(body.asOf) : undefined);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('fixed-assets/:id/depreciation')
   async calculateDepreciation(
     @Param('businessId') businessId: string,

@@ -465,6 +465,11 @@ export async function assertMayRunGraphAction(
     if (!membership && NO_MEMBER_LEDGER_WRITE_TOOLS.has(toolName)) {
       throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not post its money to the ledger (D-46)');
     }
+    // PR195-KEY-GATES (review SEC-P195BW-7, D-46): nor its expenses: an expense, a bill and a bill's payment post the
+    // ledger as the Books doors do (POST expenses, bills, bills/:id/pay refuse that SUPER_ADMIN now: BusinessMemberGuard).
+    if (!membership && requirement.scopes.some((s) => s.module === 'expenses' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
+      throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not post its expenses or pay its bills (D-46)');
+    }
     return;
   }
   if (!membership) throw new ForbiddenException('Not a member of this business');

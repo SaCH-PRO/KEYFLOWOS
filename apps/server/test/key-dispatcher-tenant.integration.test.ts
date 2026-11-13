@@ -665,9 +665,13 @@ describe('W7-KEY-MARK-PAID-PROJECTION review — commerce_mark_invoice_paid and 
         ((await chat.selectToolsForRequest(ID.bizA, [], 'mark the invoice paid, update the invoice, record the payment', undefined, who)) as Array<{
           function: { name: string };
         }>).map((t) => t.function.name);
+      // PR195-KEY-GATES (review SEC-P195BW-3/5): the menu now holds a member to the module scope of each tool's routes,
+      // reads included: memberA (STAFF defaults, revenue read) keeps the invoice list; ownerB holds no membership of A
+      // (BusinessGuard refuses them the chat route itself), so no module scope and no invoice list.
       for (const who of [ID.memberA, ID.ownerB]) {
         const offered = await menu(who);
-        expect(offered, who).toContain('commerce_list_invoices');
+        if (who === ID.memberA) expect(offered, who).toContain('commerce_list_invoices');
+        else expect(offered, who).not.toContain('commerce_list_invoices');
         expect(offered, `${who} update_status_with_confirmation`).toContain('update_status_with_confirmation');
         for (const [tool] of MONEY_TOOLS.filter(([name]) => name !== 'update_status_with_confirmation')) {
           expect(offered, `${who} ${tool}`).not.toContain(tool);

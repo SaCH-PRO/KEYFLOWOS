@@ -38,6 +38,7 @@ interface RecurringExpenseUpdateBody {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { BusinessMemberGuard } from '../../core/auth/business-member.guard';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 
 @Controller('expenses')
@@ -85,7 +86,7 @@ export class RecurringExpensesController {
     return this.svc.cancel(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, BusinessMemberGuard)
   @RequireModuleScope('expenses', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('expenses', 'recurring_run_now', 'recurring_expense')

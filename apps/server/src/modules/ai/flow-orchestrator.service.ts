@@ -39,6 +39,7 @@ import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { CANONICAL_MODULE_TOOLS, HOLDER_ONLY_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { memberlessKeyToolRefusal } from './memberless-key-tools';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
@@ -130,7 +131,16 @@ import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
  * by that member's CRM view (D-64). A member's view can only narrow what the OWNER's view, the
  * no-member answer, would bind, so a stale or unauthenticated id here refuses, never widens.
  */
-export type KeyDispatchAction = ActionContext & { onBehalfOfUserId?: string | null };
+export type KeyDispatchAction = ActionContext & {
+  onBehalfOfUserId?: string | null;
+  /**
+   * PR195-KEY-GATES (review SEC-P195BW-1): set by chat() alone, on a WhatsApp/SMS staff bridge turn (a position
+   * envelope the server issued, no principal). Such a turn is bounded by its envelope (JobRolePolicyService), so it is
+   * not held to the customer-safe allowlist of a turn with no member (memberlessKeyTurn); it still writes no money
+   * (noMemberMoneyWriteRefusal, D-73). Never read from a request: every KeyDispatchAction is built on the server.
+   */
+  staffBridge?: boolean;
+};
 
 
 export interface FlowAttachment {
@@ -224,7 +234,7 @@ interface GovernedToolCall {
    * Context for the executor: the surface's own (its member as principalUserId) for a tool the
    * action boundary has not adopted, and the boundary's, with its action id, for one it prepared.
    */
-  action?: ActionContext;
+  action?: KeyDispatchAction;
   /** The boundary is waiting for the requester to confirm this id. */
   confirmationId?: string;
   /** The boundary filed this id as a proposal for a human approver. */
@@ -348,7 +358,7 @@ export interface FlowServerContext {
  * Pinned through the real chat() in test/staff-bridge-boundary.integration.test.ts (CR-W7CTC-2,
  * SEC-W9KDI-1) and by flow-chat-tool-action.spec.ts.
  */
-export function chatToolAction(base: ActionContext, toolName: string, server?: FlowServerContext): KeyDispatchAction {
+export function chatToolAction(base: KeyDispatchAction, toolName: string, server?: FlowServerContext): KeyDispatchAction {
   const holder = server?.positionHolderUserId;
   if (!holder || base.principalUserId || !HOLDER_ONLY_TOOLS.includes(toolName)) return base;
   return { ...base, onBehalfOfUserId: holder };
@@ -435,16 +445,6 @@ function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmati
   return { bound: v as unknown as FlowBoundConfirmation, args: args as Record<string, unknown> };
 }
 
-/**
- * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The level the routes require for a
- * KEY tool CANONICAL_MODULE_TOOLS.operations lists (the command-centre items, procurement and the
- * other operations routes); undefined for every other tool, which this rule leaves alone.
- */
-function operationsLevelFor(toolName: string): 'read' | 'write' | 'admin' | undefined {
-  const tools = CANONICAL_MODULE_TOOLS.operations;
-  return Object.prototype.hasOwnProperty.call(tools, toolName) ? tools[toolName] : undefined;
-}
-
 /** The surfaces a member's own chat turn arrives on (E1 to E3); their principal is that member. */
 const MEMBER_CHAT_SURFACES: ReadonlySet<string> = new Set(['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']);
 
@@ -472,12 +472,33 @@ function memberRevenueGateMember(action?: KeyDispatchAction): string | null {
 }
 
 /**
- * PR195-BOOKS-DOORS (review SEC-P195JS-4): the surfaces memberRevenueGateMember reads a member from. One
- * that names none (memberRevenueGateMember null) is refused every money write (noMemberMoneyWriteRefusal,
- * D-73), not waved through: the Chatwoot support desk runs chat with no user, on customer-written text.
+ * PR195-KEY-GATES (review SEC-P195BW-1): the surfaces a stored plan step, an approved proposal and the Pro Auto
+ * monitor arrive on. Each is held to its member before dispatch (memberToolRunAuthority: every module scope, D-71),
+ * and one with no member to D-73 (noMemberToolRefusal: no money, no contact read, nothing unmapped), so the dispatch
+ * gates below leave them to that.
  */
-function memberDrivenSurface(action: KeyDispatchAction): boolean {
-  return MEMBER_CHAT_SURFACES.has(action.surface) || action.surface === 'PLAN_HTTP' || action.surface === 'CORTEX_BRIDGE';
+const PRE_DISPATCH_HELD_SURFACES: ReadonlySet<string> = new Set(['PLAN_QUEUE', 'PROPOSAL', 'PRO_AUTO_MONITOR']);
+
+/** Surfaces on which nobody authenticated drives KEY: a customer's DM, a phone caller, a caller that declares nothing. */
+const NO_MEMBER_SURFACES: ReadonlySet<string> = new Set(['INBOUND_CONVERSATION', 'PHONE_STREAM', 'UNDECLARED']);
+
+/**
+ * PR195-KEY-GATES (review SEC-P195BW-1, SEC-P195BW-2; D-73): whether this dispatch is a turn that names no member,
+ * which may use only the customer-safe allowlist (memberless-key-tools.ts), DENIED BY DEFAULT. True for a call that
+ * declares no action (UNDECLARED), for INBOUND_CONVERSATION, PHONE_STREAM and UNDECLARED, and for every other surface
+ * that carries neither a principal nor a member it runs for: the Chatwoot support desk's chat (CHAT with no user),
+ * CHAT_STREAM, CHAT_CONFIRM, PLAN_HTTP and GRAPH_ACTION with no principal, CORTEX_BRIDGE and CUSTOM_LOGIC run for no
+ * one, and any surface added later. False for the surfaces held to their member before dispatch
+ * (PRE_DISPATCH_HELD_SURFACES) and for the staff bridge's turn (KeyDispatchAction.staffBridge: its issued envelope).
+ * The packet before inverted this: it refused money writes only on an allowlist of member-driven surfaces, so every
+ * other surface with no member fell through (review RVS-K2, RVS-K3).
+ */
+export function memberlessKeyTurn(action?: KeyDispatchAction): boolean {
+  if (!action) return true;
+  if (PRE_DISPATCH_HELD_SURFACES.has(action.surface)) return false;
+  if (NO_MEMBER_SURFACES.has(action.surface)) return true;
+  if (action.staffBridge) return false;
+  return !(action.principalUserId || action.onBehalfOfUserId);
 }
 
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
@@ -1676,45 +1697,29 @@ export class FlowOrchestratorService {
       candidates = all;
     }
 
-    // V1-84 (FOLLOW3-D16, owner ruling D-40): in a member's own chat, an operations tool is offered
-    // only when the member's operations level reaches the level its routes require, as
-    // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
-    // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
-    // W8-KEY-REVENUE-GATE (owner ruling D-98): likewise a money-writing tool is offered only when the
-    // member's revenue level reaches what its routes require (keyRevenueMenuLevel, the rule
-    // memberScopeRefusal refuses a call with). Review CR-W8KRG-1: a tool whose money write depends on
-    // its arguments (update_status_with_confirmation, which also moves contact statuses) stays offered,
-    // and its call is judged by its arguments when it runs.
-    // PR195-JOURNAL-SCOPE (review finding CR-P195-4 and the PR195-PORT repair's open item): finance_post_journal_entry
-    // is a revenue write in the derived table now that its route needs revenue write, so the revenue rule above
-    // withholds it from a member below revenue write (a non-member SUPER_ADMIN included: no membership is none, D-46);
-    // and a tool whose authority map entry names an extra scope beside its own module (keyMemberExtraScopes:
-    // payroll_mark_paid's expenses write) is offered only when the member holds it, as memberScopeRefusal refuses
-    // its call.
-    // PR195-BOOKS-DOORS (review SEC-P195JS-5 / CRR-P195JS-1): the revenue rule reads memberRevenueReader, so a
-    // platform SUPER_ADMIN who is a member is offered a Books tool (KEY_BOOKS_REVENUE_TOOLS) as its web door
-    // admits them, and an invoice or payment tool only with its membership's revenue write, as theirs do.
-    // And (review SEC-P195JS-4) a member chat turn that names no member, the Chatwoot support desk's, is
-    // offered no money write at all (noMemberMoneyWriteRefusal, D-73), as memberScopeRefusal refuses its call.
+    // PR195-KEY-GATES (review SEC-P195BW-3, SEC-P195BW-5, CRR-P195BD-2): in a member's own chat a tool is offered
+    // only when the member holds every module scope its REST routes require, read or write (keyMemberMenuScopes,
+    // derived from CANONICAL_MODULE_TOOLS, the governed part of a GOVERNED_UNGRANTED tool and the authority map's
+    // extra scopes), as ModuleScopeGuard would let them do the same work by hand; memberScopeRefusal refuses the
+    // call with the same reader. D-40's operations gate, D-98's revenue writes (a SUPER_ADMIN member admitted to
+    // the Books tools only, as their doors admit them) and payroll's extra expenses write are cases of it. A tool
+    // whose money write depends on its arguments (update_status_with_confirmation) is offered on its floor and
+    // judged by its arguments when it runs (review CR-W8KRG-1).
+    // A position envelope (the staff bridge) already bounds the turn by its holder's membership
+    // (JobRolePolicyService); the turn names no member, so it is offered no money write either (D-73), as
+    // memberScopeRefusal refuses its call. Any other turn that names no member (the Chatwoot support desk calls
+    // chat with no user) is offered the customer-safe allowlist and nothing else (memberless-key-tools.ts,
+    // review SEC-P195BW-1/2: DENIED BY DEFAULT; the packet before offered it every read, the Books included).
+    // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
     if (!envelope && principalUserId) {
-      const level = await this.memberOperationsLevel(businessId, principalUserId);
-      // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-      const { keyMemberExtraScopes, keyRevenueMenuLevel, memberExtraScopeReader, memberRevenueReader } = await import('./plan-step-authority');
-      const revenueRefusal = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
-        ? await memberRevenueReader(this.prisma, businessId, principalUserId)
-        : () => null;
-      const extraRefusal = candidates.some((t) => keyMemberExtraScopes(t.function.name).length > 0)
-        ? await memberExtraScopeReader(this.prisma, businessId, principalUserId)
-        : () => null;
-      candidates = candidates.filter((t) => {
-        const required = operationsLevelFor(t.function.name);
-        if (required && rankOf(level) < LEVEL_RANK[required]) return false;
-        if (extraRefusal(t.function.name)) return false;
-        return !revenueRefusal(t.function.name, keyRevenueMenuLevel(t.function.name));
-      });
-    } else if (!envelope) {
+      const { keyMemberMenuScopes, memberToolScopeReader } = await import('./plan-step-authority');
+      const refusal = await memberToolScopeReader(this.prisma, businessId, principalUserId);
+      candidates = candidates.filter((t) => !refusal(t.function.name, keyMemberMenuScopes(t.function.name)));
+    } else if (envelope) {
       const { noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
       candidates = candidates.filter((t) => !noMemberMoneyWriteRefusal(t.function.name));
+    } else {
+      candidates = candidates.filter((t) => !memberlessKeyToolRefusal(t.function.name));
     }
 
     // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
@@ -2293,12 +2298,16 @@ ${triage.standingContext}`;
           const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           // W9-KEY-DISPATCH-INCLUDES (CR-W7CTC-2; D-73, D-88): a staff position's call_create_task
           // runs for its holder (chatToolAction); every other call keeps this context.
+          // PR195-KEY-GATES (review SEC-P195BW-1): a staff position's turn (an envelope, no principal) is marked so,
+          // so the dispatch holds it to its envelope and D-73 rather than to the customer allowlist of a turn with
+          // no member (the support desk's, which passes no envelope).
           return this.governToolCall(businessId, tc, decision, chatToolAction({
             surface: 'CHAT',
             principalUserId: userId ?? null,
             crew,
             sourceId: tc.id,
             sessionId: effectiveSessionId,
+            ...(envelope && !userId ? { staffBridge: true } : {}),
           }, tc.name, server));
         }),
       );
@@ -2961,13 +2970,13 @@ ${triage.standingContext}`;
     businessId: string,
     tc: FlowToolCall,
     legacy: GovernanceDecision,
-    ctx: ActionContext,
+    ctx: KeyDispatchAction,
   ): Promise<GovernedToolCall> {
     const boundary = this.getActionBoundary();
     if (!legacy.allowed) return { tc, decision: legacy };
     // V1-84 (FOLLOW3-D16, owner ruling D-40): a call the member's operations scope does not reach is
     // neither proposed for confirmation nor filed for approval. It goes to the executor, which
-    // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
+    // refuses it as a tool error before anything is written (memberScopeRefusal), so the
     // member and the model are told why. W8-KEY-REVENUE-GATE (D-98): so is a money-writing call
     // the member's revenue scope does not reach (memberScopeRefusal; judged with the call's arguments,
     // review CR-W8KRG-1).
@@ -3494,73 +3503,39 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     action?: KeyDispatchAction,
   ): Promise<unknown> {
+    // PR195-KEY-GATES (review SEC-P195BW-1): this door reaches the dispatcher without executeTool (the phone stream's
+    // receptionist, an execute_custom_logic snippet's inner call), so a turn that names no member is held to the
+    // customer-safe allowlist here too, before anything is read or written. A member's inner call was held before it
+    // got here, with its outer turn's context (execute_custom_logic: withinMemberScope).
+    if (memberlessKeyTurn(action)) {
+      const refusal = memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
+      if (refusal) throw new ForbiddenException(refusal);
+    }
     return this.executeToolAction(businessId, toolName, args, action);
   }
 
   /**
-   * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The member's `operations` level, read
-   * exactly as ModuleScopeGuard reads it for the routes behind CANONICAL_MODULE_TOOLS.operations
-   * (the command-centre items, procurement and the other operations routes): a platform
-   * SUPER_ADMIN passes every requirement; else the membership's explicit permissionScopes map,
-   * where a missing key is none; else the role defaults (OWNER and ADMIN admin, STAFF read). No
-   * membership is none.
-   */
-  private async memberOperationsLevel(businessId: string, userId: string): Promise<string> {
-    const [user, membership] = await Promise.all([
-      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
-      this.prisma.client.membership.findUnique({
-        where: { userId_businessId: { userId, businessId } },
-        select: { role: true, permissionScopes: true },
-      }),
-    ]);
-    if (user?.role === 'SUPER_ADMIN') return 'admin';
-    if (!membership) return 'none';
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object'
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    return scopes.operations || 'none';
-  }
-
-  /**
-   * V1-84 (FOLLOW3-D16, D-40). Why a member's chat call may not run `toolName`, in the words
-   * ModuleScopeGuard answers the route with: an operations tool whose routes require a level above
-   * the member's operations level. null for every other tool, for a level that reaches it, and for
-   * a call with no member or from another surface: the staff bridge (whose issued envelope
-   * JobRolePolicyService already bounds by the holder's membership), the support desk and the
-   * system surfaces are unchanged. execute_custom_logic asks it for each inner api.callTool with
-   * the member's outer chat context (review SEC-D16-1), so a snippet reaches no further than the
-   * member's own calls do.
-   */
-  private async operationsScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
-    const required = operationsLevelFor(toolName);
-    if (!required || !action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
-    const level = await this.memberOperationsLevel(businessId, action.principalUserId);
-    if (rankOf(level) >= LEVEL_RANK[required]) return null;
-    return `Insufficient permissions: ${toolName} needs operations ${required} access (you have ${level})`;
-  }
-
-  /**
-   * Why a member's call may not run `toolName`: the operations scope on the member's own chat (D-40,
-   * operationsScopeRefusal), then W8-KEY-REVENUE-GATE (owner ruling D-98; review residuals
-   * SEC-W7IAR-2, SEC-W7KMP-2): KEY's money-writing tools (keyRevenueWriteLevel: mark an invoice
-   * paid, update, send or bulk-move an invoice, the other revenue writes the routes govern) need the
-   * driving member's own revenue write, read as PATCH .../paid reads it (memberRevenueWriteRefusal, the
-   * rule plan-step-authority.ts shares with the plan queue and approved proposals). A revenue:read
-   * member had KEY mark an invoice PAID that the route refuses them. The driving member is
-   * memberRevenueGateMember's: a member chat turn's principal, the caller who runs an approved plan
-   * over HTTP (review SEC-W8KRG-1), the member a KEY-cortex turn's bridged call runs for (review
-   * SEC-W8KRG-2). `args`: the call's arguments, so a tool whose money write depends on them
-   * (update_status_with_confirmation moving contacts) is judged by them (review CR-W8KRG-1). null for
-   * every other tool and for a member whose scopes reach it. PR195-BOOKS-DOORS (review SEC-P195JS-4): a
-   * member-driven surface (member chat, PLAN_HTTP, CORTEX_BRIDGE) that names no member, the Chatwoot
-   * support desk's chat among them, is refused every money write (noMemberMoneyWriteRefusal, D-73); the
-   * surfaces that are not member-driven are unchanged: the staff bridge (its issued envelope already
-   * bounds the holder) and the system surfaces; the plan queue, an approved proposal and the monitor are
-   * held before dispatch (memberToolRunAuthority, D-71), and a plan or a monitor with no member writes no
-   * money (D-73).
-   * Checked when the call runs (executeTool), before it is proposed (governToolCall), for each inner
-   * call of an execute_custom_logic snippet, and on the tool menu (selectToolsForRequest).
+   * Why KEY may not run `toolName` with `args` on this dispatch, or null. Checked when the call runs (executeTool),
+   * before it is proposed (governToolCall), for each inner call of an execute_custom_logic snippet (with the outer
+   * turn's context), and, in the same terms, on the tool menu (selectToolsForRequest).
+   *
+   * PR195-KEY-GATES (review findings SEC-P195BW-1..3, SEC-P195BW-5, CRR-P195BD-2), in order:
+   *   - a turn that names no member (memberlessKeyTurn: a customer's DM on INBOUND_CONVERSATION, the Chatwoot support
+   *     desk's chat, a phone caller, a CORTEX_BRIDGE or CUSTOM_LOGIC call run for no one, a caller that declares
+   *     nothing, any surface added later) runs only the customer-safe allowlist (memberlessKeyToolRefusal), DENIED BY
+   *     DEFAULT; the packet before refused money writes on an allowlist of member-driven surfaces only, so a
+   *     customer's DM posted an expense and the support desk read the Books;
+   *   - a member driving KEY (memberRevenueGateMember: their own chat turn's principal, the caller of a plan run over
+   *     HTTP, the member a KEY-cortex turn's bridged call runs for) needs every module scope the tool's REST routes
+   *     require, read or write, judged with the call's arguments (memberToolScopeRefusal: derived from the canonical
+   *     tool table; D-40's operations gate, D-98's revenue writes and payroll's extra expenses write are cases of it;
+   *     a platform SUPER_ADMIN is held as ModuleScopeGuard and each door hold them, and one who is not a member writes
+   *     no money, D-46);
+   *   - the staff bridge (an issued position envelope, no principal) is bounded by its envelope and writes no money
+   *     (noMemberMoneyWriteRefusal, D-73);
+   *   - the plan queue, an approved proposal and the Pro Auto monitor are held to their member before dispatch
+   *     (memberToolRunAuthority, D-71; noMemberToolRefusal with no member, D-73), the graph route by
+   *     assertMayRunGraphAction, so they pass here.
    */
   private async memberScopeRefusal(
     businessId: string,
@@ -3568,25 +3543,13 @@ ${triage.standingContext}`;
     action?: KeyDispatchAction,
     args?: unknown,
   ): Promise<string | null> {
-    const operations = await this.operationsScopeRefusal(businessId, toolName, action);
-    if (operations) return operations;
-    const memberId = memberRevenueGateMember(action);
+    if (memberlessKeyTurn(action)) return memberlessKeyToolRefusal(toolName, args, action?.surface ?? 'UNDECLARED');
     // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-    const { memberExtraScopeRefusal, memberRevenueWriteRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
-    if (!memberId) {
-      // PR195-BOOKS-DOORS (review SEC-P195JS-4; D-73): a member-driven surface that names no member (the
-      // Chatwoot support desk calls chat with no user; a PLAN_HTTP or CORTEX_BRIDGE call with none) writes
-      // no money and no books: the gates below need a member to read, so it is refused, fail closed. The
-      // other surfaces (the staff bridge, the plan queue, proposals, the monitor, the system) are held as
-      // before.
-      return action && memberDrivenSurface(action) ? noMemberMoneyWriteRefusal(toolName, args, action.surface) : null;
-    }
-    // PR195-JOURNAL-SCOPE (the PR195-PORT repair's open item; SEC-P195-3): and the authority map's extra
-    // scope a money write needs beside its own module (payroll_mark_paid: expenses write), refused here,
-    // before dispatch, for the same member, as PayrollService would refuse it inside dispatch.
-    const extra = await memberExtraScopeRefusal(this.prisma, businessId, memberId, toolName);
-    if (extra) return extra;
-    return memberRevenueWriteRefusal(this.prisma, businessId, memberId, toolName, args);
+    const { memberToolScopeRefusal, noMemberMoneyWriteRefusal } = await import('./plan-step-authority');
+    const memberId = memberRevenueGateMember(action);
+    if (memberId) return memberToolScopeRefusal(this.prisma, businessId, memberId, toolName, args);
+    if (action?.staffBridge) return noMemberMoneyWriteRefusal(toolName, args, action.surface);
+    return null;
   }
 
   /**
@@ -6294,6 +6257,12 @@ ${triage.standingContext}`;
           orderBy: { startAt: 'asc' },
           take: 10,
         });
+        // PR195-KEY-GATES (review SEC-P195BW-1/2): a turn that names no member (a customer's DM, the support desk,
+        // a phone caller) learns whether the time is free and when it is busy, never whose event it is: no title,
+        // note, contact or id (memberless-key-tools.ts). A member's turn is answered as before.
+        if (memberlessKeyTurn(action)) {
+          return { hasConflict: conflicts.length > 0, conflicts: conflicts.map((c) => ({ startAt: c.startAt, endAt: c.endAt })) };
+        }
         return { hasConflict: conflicts.length > 0, conflicts };
       }
 
@@ -7141,7 +7110,7 @@ ${triage.standingContext}`;
       case 'execute_custom_logic': {
         // V1-84 (FOLLOW3-D16 review SEC-D16-1, D-40): every api.callTool the snippet makes is a call
         // of the member whose chat turn ran it, so the operations scope that turn's own calls are
-        // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
+        // held to (memberScopeRefusal on this outer context) refuses it before it runs. The
         // inner call itself still arrives on CUSTOM_LOGIC. W8-KEY-REVENUE-GATE (D-98): and the
         // revenue write a money-writing inner call needs (memberScopeRefusal).
         const withinMemberScope = async (bizId: string, name: string, toolArgs?: unknown): Promise<void> => {

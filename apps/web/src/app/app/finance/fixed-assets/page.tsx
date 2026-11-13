@@ -7,12 +7,23 @@ import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchFixedAssets, createFixedAsset, depreciateFixedAsset, deleteFixedAsset, type FixedAsset } from "@/lib/api/finance";
+import { moduleReadRefusal, moduleWriteRefusal } from "@/lib/module-access";
+
+/**
+ * PR195-KEY-GATES (review finding CRR-P195BD-1): a fixed asset's writes need revenue write on the server (its
+ * depreciation and disposal post to the books; PR195-BOOKS-DOORS), and the register revenue read (D-146). The api
+ * helpers answer a refusal as { error, status } rather than throwing, so each write reads its answer: a refusal is
+ * said, nothing claims success, no row the server kept leaves the screen; a refused register is a refusal.
+ */
+const WRITE = "change the asset register";
 
 export default function FixedAssetsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The server refused this member the register (revenue read, D-146): no list, no Add Asset. */
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -30,7 +41,10 @@ export default function FixedAssetsPage() {
     setError(null);
     try {
       const res = await fetchFixedAssets(businessId);
-      if (res.data) setAssets(res.data.items ?? []);
+      const refused = moduleReadRefusal(res, "revenue", "the asset register");
+      setRefusal(refused);
+      if (!refused && res.error) setError(res.error);
+      setAssets(!res.error && res.data ? (res.data.items ?? []) : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load fixed assets");
     } finally {
@@ -55,6 +69,11 @@ export default function FixedAssetsPage() {
         usefulLifeMonths: Number(usefulLifeMonths),
         depreciationMethod,
       });
+      const refused = moduleWriteRefusal(res, "revenue", WRITE);
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       if (res.data) {
         setAssets((prev) => [...prev, res.data!]);
         setShowAdd(false);
@@ -76,6 +95,11 @@ export default function FixedAssetsPage() {
     if (!businessId) return;
     try {
       const res = await depreciateFixedAsset(businessId, id);
+      const refused = moduleWriteRefusal(res, "revenue", "run depreciation");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       if (res.data) {
         load();
         toast.success("Depreciation run completed");
@@ -89,7 +113,12 @@ export default function FixedAssetsPage() {
     if (!businessId) return;
     if (!window.confirm("Are you sure? This cannot be undone.")) return;
     try {
-      await deleteFixedAsset(businessId, id);
+      const res = await deleteFixedAsset(businessId, id);
+      const refused = moduleWriteRefusal(res, "revenue", WRITE);
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       setAssets((prev) => prev.filter((a) => a.id !== id));
       toast.success("Fixed asset deleted");
     } catch (e) {
@@ -104,7 +133,7 @@ export default function FixedAssetsPage() {
       icon={Package}
       maxWidth="5xl"
       headerActions={
-        <button
+        refusal ? undefined : <button
           onClick={() => setShowAdd(!showAdd)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
         >
@@ -114,13 +143,18 @@ export default function FixedAssetsPage() {
       }
     >
       <div className="space-y-4">
+        {refusal && (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {refusal}
+          </div>
+        )}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
             <button onClick={load} className="ml-2 underline">Retry</button>
           </div>
         )}
-        {showAdd && (
+        {showAdd && !refusal && (
           <div className="kf-card p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
@@ -199,7 +233,7 @@ export default function FixedAssetsPage() {
           </div>
         )}
 
-        <DataTable
+        {!refusal && <DataTable
           data={assets as unknown as Record<string, unknown>[]}
           keyField="id"
           pageSize={25}
@@ -231,7 +265,7 @@ export default function FixedAssetsPage() {
             }},
           ]}
           emptyMessage="No fixed assets yet."
-        />
+        />}
       </div>
     </UnifiedPageShell>
   );

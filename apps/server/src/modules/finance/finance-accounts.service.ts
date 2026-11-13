@@ -142,6 +142,10 @@ export class FinanceAccountsService {
       throw new BadRequestException(`Unknown account type: ${input.type}`);
     }
     let coaId = input.chartOfAccountId ?? null;
+    // PR195-KEY-GATES (review SEC-P195BW-6): a named chart row is this business's, whatever the opening balance
+    // (postOpening checked it only when the opening was non-zero, so an account with opening 0 linked another
+    // business's row, and an id that exists nowhere answered 500: an existence oracle).
+    if (coaId) await this.assertOwnChartRow(businessId, coaId);
     if (!coaId) {
       const coa = await this.coaSeeder.getBySystemKey(businessId, this.coaSystemKeyForType(input.type));
       if (!coa) throw new BadRequestException('Could not resolve chart-of-account for this type');
@@ -431,11 +435,26 @@ export class FinanceAccountsService {
     if (input.accountLast4 !== undefined) data.accountLast4 = input.accountLast4;
     if (input.isDefault != null) data.isDefault = input.isDefault;
     if (input.isActive != null) data.isActive = input.isActive;
-    if (input.chartOfAccountId != null) data.chartOfAccountId = input.chartOfAccountId;
+    if (input.chartOfAccountId != null) {
+      // PR195-KEY-GATES (review SEC-P195BW-6): the account is relinked only to a chart row of this business.
+      await this.assertOwnChartRow(businessId, input.chartOfAccountId);
+      data.chartOfAccountId = input.chartOfAccountId;
+    }
 
     const updated = await this.prisma.client.financialAccount.update({ where: { id }, data });
     invalidateBusinessFinancialSnapshotCache(businessId); // PR195-PORT
     return updated;
+  }
+
+  /**
+   * PR195-KEY-GATES (review SEC-P195BW-6): a chart row an account names is this business's. Refused 404 in the words
+   * the ledger door and the recurring templates use (RecurringJournalEntryService.assertOwnChartRows), so another
+   * business's id and an id that exists nowhere read the same (no existence oracle), before anything is written.
+   */
+  private async assertOwnChartRow(businessId: string, chartOfAccountId: string): Promise<void> {
+    const id = String(chartOfAccountId);
+    const own = await this.prisma.client.chartOfAccount.findFirst({ where: { id, businessId }, select: { id: true } });
+    if (!own) throw new NotFoundException(`Chart-of-account id(s) not found in this business: ${id}`);
   }
 
   async archive(businessId: string, id: string) {

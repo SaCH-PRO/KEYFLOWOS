@@ -146,6 +146,12 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // Books' module (PR195-BOOKS-DOORS, review finding SEC-P195JS-1), so the legacy `finance` key no longer
     // reaches finance_auto_match_bank (D-35's narrowing)
     finance_auto_match_bank: 'write', reconcile_match_line: 'write', reconcile_run_auto_match: 'write',
+    // finance_list_bank_accounts (GET accounts), finance_customer_balance (GET customers/:contactId/balance),
+    // finance_list_action_items (GET intelligence/actions), reconcile_list_unmatched (GET accounts/:accountId/
+    // bank-transactions): the Books reads need revenue read (owner rulings D-57, D-146; PR195-KEY-GATES, review
+    // findings SEC-P195BW-4/5), so the legacy `finance` key no longer reaches the three finance_* reads (D-35's narrowing)
+    finance_customer_balance: 'read', finance_list_action_items: 'read', finance_list_bank_accounts: 'read',
+    reconcile_list_unmatched: 'read',
     payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',

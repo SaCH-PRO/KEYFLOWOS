@@ -849,9 +849,13 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
 
   it("CP-05 TENANT: B's entries are never counted in A's figure, even through a link to B's BANK row", async () => {
     await pay(ID.bizB, ID.invB, ID.ownerB, 70, 'v34a-cash-70');
-    // FinanceAccountsService.create accepts any chartOfAccountId: A links an account to B's BANK row.
+    // PR195-KEY-GATES (review SEC-P195BW-6): FinanceAccountsService.create no longer accepts another business's
+    // chartOfAccountId (404, nothing written). A link written before that, a legacy row, is planted directly.
     const bBank = await coaSeeder.getBySystemKey(ID.bizB, 'BANK');
-    await accounts.create(ID.bizA, { name: 'V34A Linked', type: 'BANK', chartOfAccountId: bBank.id, currency: 'TTD' });
+    await expect(accounts.create(ID.bizA, { name: 'V34A Linked', type: 'BANK', chartOfAccountId: bBank.id, currency: 'TTD' }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(await db.financialAccount.count({ where: { businessId: ID.bizA, chartOfAccountId: bBank.id } })).toBe(0);
+    await db.financialAccount.create({ data: { businessId: ID.bizA, chartOfAccountId: bBank.id, name: 'V34A Linked', type: 'BANK', currency: 'TTD' } });
 
     await expectCash(ID.bizA, ID.ownerA, 1025.05);
     await expectCash(ID.bizB, ID.ownerB, 5070);
@@ -991,8 +995,10 @@ describe('V1-37b account opening balances are posted through the door (CR-34-01)
     await expect(accounts.create(ID.bizD, { name: 'V34A Euro D', type: 'BANK', currency: 'EUR', openingBalance: 40 }))
       .rejects.toMatchObject({ status: 400 });
     const bBank = await coaSeeder.getBySystemKey(ID.bizB, 'BANK');
+    // PR195-KEY-GATES (review SEC-P195BW-6): another business's chart row is refused before the door, 404 in the words an
+    // unknown id gets (it was the ledger door's 400 when the opening was non-zero, and accepted when it was 0).
     await expect(accounts.create(ID.bizD, { name: 'V34A Foreign D', type: 'BANK', chartOfAccountId: bBank.id, openingBalance: 40 }))
-      .rejects.toMatchObject({ status: 400 });
+      .rejects.toMatchObject({ status: 404 });
     expect(await db.financialAccount.count({ where: { businessId: ID.bizD } })).toBe(rowsBefore);
     expect(await db.ledgerEntry.count({ where: { businessId: ID.bizD } })).toBe(entriesBefore);
     // TENANT: B's book is untouched.

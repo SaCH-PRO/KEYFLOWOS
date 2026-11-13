@@ -140,21 +140,23 @@ describe('KMS-01: the gate is derived from the canonical tool table', () => {
     }
   });
 
-  it('KMS-01 RED-BEFORE: a GOVERNED_UNGRANTED tool needs its governed floor; update_status_with_confirmation needs revenue write only to move invoices; payroll_mark_paid needs expenses write beside operations', () => {
+  it('KMS-01 RED-BEFORE: a GOVERNED_UNGRANTED tool needs its governed floor; update_status_with_confirmation needs the scope of the route whose work its arguments do; payroll_mark_paid needs expenses write beside operations', () => {
     for (const tool of Object.keys(GOVERNED_UNGRANTED).filter((t) => t !== 'execute_custom_logic')) {
       const requirement = graphActionRequirement(tool) as { scopes: Array<{ module: string; minLevel: string }> };
-      expect(keyMemberToolScopes(tool, { entityType: 'invoice' }), tool).toContainEqual(requirement.scopes[0]);
+      expect(keyMemberToolScopes(tool), tool).toContainEqual(requirement.scopes[0]);
     }
     expect(keyMemberToolScopes('commerce_send_invoice', {})).toEqual([{ module: 'revenue', minLevel: 'write' }]);
-    expect(keyMemberToolScopes('update_status_with_confirmation', { entityType: 'invoice', ids: ['i'], newStatus: 'PAID' })).toEqual([
+    // update_status_with_confirmation does the work of one of two routes, by its arguments: an invoice move is PATCH
+    // commerce invoices/bulk's (revenue write), a contact move PATCH crm contacts/bulk's (crm write)
+    expect(keyMemberToolScopes('update_status_with_confirmation', { entityType: 'invoice', ids: ['i'], newStatus: 'PAID' })).toEqual([{ module: 'revenue', minLevel: 'write' }]);
+    expect(keyMemberToolScopes('update_status_with_confirmation', { entityType: 'contact', ids: ['c'], newStatus: 'CUSTOMER' })).toEqual([{ module: 'crm', minLevel: 'write' }]);
+    // the menu offers it; the call is judged by its arguments (review CR-W8KRG-1)
+    expect(keyMemberMenuScopes('update_status_with_confirmation')).toEqual([]);
+    // omitted arguments need both (fail closed)
+    expect(keyMemberToolScopes('update_status_with_confirmation')).toEqual([
       { module: 'crm', minLevel: 'write' },
       { module: 'revenue', minLevel: 'write' },
     ]);
-    expect(keyMemberToolScopes('update_status_with_confirmation', { entityType: 'contact', ids: ['c'], newStatus: 'CUSTOMER' })).toEqual([{ module: 'crm', minLevel: 'write' }]);
-    // the menu offers it on its floor; the call is judged by its arguments (review CR-W8KRG-1)
-    expect(keyMemberMenuScopes('update_status_with_confirmation')).toEqual([{ module: 'crm', minLevel: 'write' }]);
-    // omitted arguments are read as an invoice move (fail closed)
-    expect(keyMemberToolScopes('update_status_with_confirmation')).toContainEqual({ module: 'revenue', minLevel: 'write' });
     expect(keyMemberToolScopes('payroll_mark_paid', {})).toEqual([
       { module: 'operations', minLevel: 'write' },
       { module: 'expenses', minLevel: 'write' },
