@@ -863,6 +863,11 @@
       "packet": "V1-98 (PR195-BOOKS-DOORS)"
     },
     {
+      "prefix": "v98k_",
+      "owner": "apps/server/test/books-read-doors.integration.test.ts",
+      "packet": "V1-98 (PR195-KEY-GATES)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

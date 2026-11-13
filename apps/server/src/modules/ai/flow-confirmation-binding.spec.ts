@@ -599,7 +599,10 @@ describe('V1-31 review SEC-V131-2 — the member who confirmed is named on what 
 
   it('a tool run with no member to name (a plan, a direct call) is logged as before: nothing is added and nothing waits', async () => {
     const h = makeHarness({ realExecuteTool: true });
-    const result = await (h.orchestrator as any).executeTool(BIZ, TOOL, ARGS, 'tc_9', { planId: 'p_1', planStepId: 's_1' });
+    // PR195-KEY-GATES (SEC-P195BW-1): a call that declares no surface is a turn with no member, which runs only
+    // the customer-safe allowlist (memberless-key-allowlist.spec.ts), so "a plan" is declared as the plan queue
+    // declares it (its member was held before dispatch, D-73). This case is about the log row, not the gate.
+    const result = await (h.orchestrator as any).executeTool(BIZ, TOOL, ARGS, 'tc_9', { planId: 'p_1', planStepId: 's_1' }, { surface: 'PLAN_QUEUE', planId: 'p_1', planStepId: 's_1' });
     expect(result).toMatchObject({ success: true, toolCallId: 'tc_9' });
     await new Promise((resolve) => setImmediate(resolve));
     expect(h.executionLog.logToolExecution).toHaveBeenCalledTimes(1);

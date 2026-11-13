@@ -137,12 +137,15 @@ describe('FB-01/02 (SEC-P195JS-4): a member-driven turn that names no member wri
     expect(manualMatch).not.toHaveBeenCalled();
   });
 
-  it('FB-02 RED-BEFORE: the menu of a chat turn with no member (the support desk) offers no money write; a read still is', async () => {
+  it('FB-02 RED-BEFORE: the menu of a chat turn with no member (the support desk) offers no money write, and no Books read either', async () => {
     const { orchestrator } = orchestratorFor(MEMBERS);
     for (const who of [null, undefined]) {
       const names = await menu(orchestrator, who);
       for (const [tool] of MONEY_CALLS) expect(names, `${String(who)} ${tool}`).not.toContain(tool);
-      expect(names).toContain('finance_view_receivables');
+      // PR195-KEY-GATES (review SEC-P195BW-2): this case used to pin the leak (expect toContain
+      // finance_view_receivables). A turn with no member is offered only the customer-safe allowlist
+      // (memberless-key-allowlist.spec.ts MKA-05), so no Books read is on it.
+      expect(names).not.toContain('finance_view_receivables');
     }
   });
 });
