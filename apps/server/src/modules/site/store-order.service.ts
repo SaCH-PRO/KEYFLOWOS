@@ -35,9 +35,9 @@ import {
 import { appendOrderTimeline } from '../marketplace/order-metadata';
 import {
   normalizeStorefrontMethod,
-  paypalConfigured,
+  storePaypalCredentials,
+  storeStripeCredentials,
   storefrontMethodNotOffered,
-  stripeConfigured,
 } from '../payments/storefront-checkout-methods';
 
 /**
@@ -477,14 +477,20 @@ export class StoreOrderService {
       }
       // W11-STORE-CHECKOUT-METHOD-GATE (F-21; D-106: the payer sees which
       // methods can pay it): PayPal and Stripe only where the storefront's
-      // gateway list offers them (getAvailableGateways reads the same
-      // paypalConfigured / stripeConfigured). A store with neither its own nor
-      // the platform's PayPal was a 500 from createStorePayment, and one with no
-      // Stripe a 400, both after the order and its promo use had committed.
-      if (method === 'PAYPAL' && !paypalConfigured(meta)) {
+      // gateway list offers them (getStorefrontGateways reads the same
+      // storePaypalCredentials / storeStripeCredentials). A store with no PayPal
+      // was a 500 from createStorePayment, and one with no Stripe a 400, both
+      // after the order and its promo use had committed.
+      // W11-STORE-OWN-PAYMENT-KEYS (owner ruling D-138): the store's own
+      // complete set only (PayPal: client id and secret; Stripe: publishable
+      // key, secret key and webhook secret, in its settings). The platform's
+      // PayPal / Stripe env never stands in for a store, and a store's key is
+      // never completed by a platform key: refused here before anything is
+      // written, as createStorePayment refuses it.
+      if (method === 'PAYPAL' && !storePaypalCredentials(meta)) {
         throw new BadRequestException(storefrontMethodNotOffered('PAYPAL'));
       }
-      if (method === 'STRIPE' && !stripeConfigured(meta)) {
+      if (method === 'STRIPE' && !storeStripeCredentials(meta)) {
         throw new BadRequestException(storefrontMethodNotOffered('STRIPE'));
       }
     }
