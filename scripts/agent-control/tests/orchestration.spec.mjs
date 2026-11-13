@@ -236,3 +236,20 @@ test('the builder adapter never puts the prompt on the command line', () => {
   assert.ok(!/\['-p',\s*task\.prompt/.test(source), 'prompt must not be an argv element');
   assert.match(source, /input: task\.prompt/, 'prompt must be passed on stdin');
 });
+
+test('a wait for a builder still names the packet, its state and the step that is waiting', () => {
+  // Published from a GitHub runner the bare probe text ("claude is not on
+  // PATH") was the whole reason, on every event, with no packet in it.
+  const state = emptyState();
+  state.programme.state = 'FIXING_PROOF_FAILURES';
+  state.programme.active_packet = 'KF-EXEC-AUTH-FAIL-CLOSED-001';
+  state.programme.pr_number = 155;
+  const out = decide({ state, reconciliation: CONSISTENT, registry: [unauthedBuilder] });
+  assert.equal(out.action, ACTIONS.WAIT_EXTERNAL_AGENT);
+  assert.equal(out.packet_id, 'KF-EXEC-AUTH-FAIL-CLOSED-001');
+  assert.equal(out.packet_state, 'FIXING_PROOF_FAILURES');
+  assert.equal(out.pr_number, 155);
+  assert.equal(out.waiting_for, ACTIONS.DISPATCH_BUILDER);
+  assert.match(out.reason, /^packet KF-EXEC-AUTH-FAIL-CLOSED-001 is FIXING_PROOF_FAILURES; builder work is the next legal step, and no builder is ready here: /);
+  assert.ok(out.reason.endsWith(out.builder_detail), 'the probe detail is kept, after what it explains');
+});

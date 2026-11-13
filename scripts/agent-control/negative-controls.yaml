@@ -4057,3 +4057,144 @@ negative_controls:
       replace: "main().then((code) => process.exit(code));"
     proof_command: node --test --test-name-pattern="drains its stdout pipe before it exits" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
     timeout_ms: 180000
+
+  # --- observability: the worker's queue, and gates main has moved under ------
+
+  - id: NC-OBSERVE-REPEATING-ERROR-REPORTED
+    claim: >
+      The same error ending tick after tick is reported. This is the signal
+      that was missing while a dead worker logged 1,650 identical errors.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  return count >= REPEATING_ERROR_TICKS ? {"
+      replace: "  return false ? {"
+    proof_command: node --test --test-name-pattern="the same error ending tick after tick" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-SILENT-LOOP-REPORTED
+    claim: >
+      A directive that is offered every tick and fails before it is counted
+      shows as queued but not delivered.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  if (queued.length && repeating) attention.push("
+      replace: "  if (false) attention.push("
+    proof_command: node --test --test-name-pattern="the silent loop" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-STOPPED-WORKER-REPORTED
+    claim: >
+      A worker that has stopped ticking is flagged.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "  else if (!running && tickAge > STALE_TICK_SECONDS) attention.push("
+      replace: "  else if (false) attention.push("
+    proof_command: node --test --test-name-pattern="stopped ticking, is paused" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-OBSERVE-UNREADABLE-STATE-NOT-EMPTY
+    claim: >
+      State that cannot be parsed is reported as unreadable. Read as empty, a
+      truncated cursor or ledger would look like a worker with nothing wrong.
+    mutation:
+      file: scripts/agent-control/lib/worker-observation.mjs
+      find: "    return { present: true, value: null, error: error.message };"
+      replace: "    return { present: true, value: null, error: null };"
+    proof_command: node --test --test-name-pattern="state it cannot read is reported" scripts/agent-control/tests/worker-observation.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-ORCHESTRATOR-WAIT-NAMES-ITS-PACKET
+    claim: >
+      A wait for a builder names the packet and the step that is waiting.
+      Published from a runner, the bare probe text hid both.
+    mutation:
+      file: scripts/agent-control/lib/orchestrator.mjs
+      find: "          packet_id: p.active_packet || null,"
+      replace: "          packet_id: null,"
+    proof_command: node --test --test-name-pattern="still names the packet, its state" scripts/agent-control/tests/orchestration.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-BEHIND-MAIN-DETECTED
+    claim: >
+      An impl PR behind main by a non-control file is reported stale, whatever
+      colour its last gate run shows.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "  const behind = f.compare.behind_by > 0 && (nonControl.length > 0 || f.compare.truncated);"
+      replace: "  const behind = false;"
+    proof_command: node --test --test-name-pattern="behind main by a non-control file" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-FAILED-READ-IS-NOT-CURRENT
+    claim: >
+      A PR whose facts could not be read is never reported as not stale.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "        throw error;"
+      replace: "        return null;"
+    proof_command: node --test --test-name-pattern="any other failed read fails the whole report" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-STALE-GATE-REPAIR-KEEPS-FRESH-REVIEW
+    claim: >
+      The repair the detector names always owes a fresh independent review of
+      the new head.
+    mutation:
+      file: scripts/agent-control/lib/stale-gates.mjs
+      find: "a FRESH independent semantic review of the new head is then owed before admission"
+      replace: "the existing review carries over"
+    proof_command: node --test --test-name-pattern="the only repair it names keeps the fresh review" scripts/agent-control/tests/stale-gates.spec.mjs
+    timeout_ms: 120000
+
+  # --- branch divergence: a captured failure is re-raised (#114 part 1) -------
+  # The divergence check is continue-on-error so its summary and report still
+  # render; "Fail when thresholds exceeded" re-raises it. Proof:
+  # tests/workflow-integrity.spec.mjs, read per job from the parsed workflow.
+
+  - id: NC-DIVERGENCE-PUSH-RERAISE-NEUTRALIZED
+    claim: >
+      Each job that captures the divergence status re-raises it itself. The
+      push job's re-raise exiting 0 lets a drifted branch push go green, and
+      the PR job's intact re-raise must not cover for it.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 1
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+      replace: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 0
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-RERAISE-FAIL-OPEN
+    claim: >
+      The re-raise fails closed: it runs on any recorded status but 0, an
+      empty one included. A condition that runs only on status 1 lets a check
+      that crashed (status 2, or no status recorded) conclude green.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "if: steps.check.outputs.status != '0'"
+      replace: "if: steps.check.outputs.status == '1'"
+      # Both capturing jobs carry this condition and the claim covers both.
+      replace_all: true
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-JOB-SOFT-GATE
+    claim: >
+      No job that captures the divergence status is itself continue-on-error;
+      a job-level continue-on-error swallows the re-raise and the PR check
+      concludes green past the thresholds.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "name: Check divergence vs main (PR)"
+      replace: "name: Check divergence vs main (PR)\n    continue-on-error: true"
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
