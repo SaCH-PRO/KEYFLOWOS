@@ -39,7 +39,7 @@ sources:
     author: Robert C. Martin
     published: 2008
     lens: local_code_design
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
     caution: Treat prescriptions as hypotheses; classify empirical support and context dependence.
 
   - id: BOOK-KLEPPMANN-DDIA
@@ -56,21 +56,21 @@ sources:
       - Gerald Jay Sussman
       - Julie Sussman
     lens: computational_abstraction_and_interpretation
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-NORMAN-DESIGN-EVERYDAY-THINGS
     title: The Design of Everyday Things
     author: Don Norman
     first_published: 1988
     lens: human_system_interaction
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-KAHNEMAN-THINKING-FAST-SLOW
     title: Thinking, Fast and Slow
     author: Daniel Kahneman
     published: 2011
     lens: judgment_and_decision_making
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
     caution: Re-verify important empirical claims against current replication and methodological literature before adoption.
 
   - id: BOOK-BROOKS-MYTHICAL-MAN-MONTH
@@ -78,7 +78,7 @@ sources:
     author: Frederick P. Brooks Jr.
     first_published: 1975
     lens: software_project_dynamics
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-PEOPLEWARE
     title: Peopleware: Productive Projects and Teams
@@ -87,7 +87,7 @@ sources:
       - Timothy Lister
     first_published: 1987
     lens: team_environment_and_productivity
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-KERNIGHAN-PIKE-PRACTICE-PROGRAMMING
     title: The Practice of Programming
@@ -96,7 +96,7 @@ sources:
       - Rob Pike
     published: 1999
     lens: pragmatic_engineering
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-ALGORITHMS-TO-LIVE-BY
     title: Algorithms to Live By
@@ -105,7 +105,7 @@ sources:
       - Tom Griffiths
     published: 2016
     lens: computational_decision_policy
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-TORNHILL-SOFTWARE-DESIGN-XRAYS
     title: Software Design X-Rays
@@ -137,7 +137,7 @@ sources:
     authors: [Daniel P. Friedman, Carl Eastlund]
     published: 2015
     lens: formal_proof_program_correctness
-    status: QUEUED
+    status: TARGETED_TRANSLATION_PASS_1
     evidence_note: MIT Press describes it as an introduction to inductive proofs about computer programs using a simple proof assistant.
 
   - id: BOOK-HARDY-MATHEMATICIANS-APOLOGY
