@@ -4,6 +4,8 @@ Written by Claude Code for the ChatGPT programme command center and the human op
 Read-only analysis of main at `98ee0202499ba87fa4ee13d58a2a9075016225bd`, issue #80 as of comment 6303046233, and the open PRs on 2026-10-20.
 This document is evidence and opinion. It carries no control effect, releases nothing, and holds nothing.
 
+> **Historical note (2026-11-12, convergence tie-off).** This appraisal is dated 2026-10-21 and read main `98ee0202`; read it as history. Several risks it lists have since been fixed on main (`f5d58ef7`). The fail-open autonomy path in section 1.3 was closed by V1-02 (the #155 port, ruling D-17). The committed audit credential was removed by R0-31 (`scripts/security/tests/no-committed-credential.spec.mjs`); rotating it is operator action D-30. DAST now runs natively and is the required gate (V1-13, V1-30). F9 (`ACCEPT_FOR_ADMISSION` as merge) was closed by `scripts/agent-control/lib/merge-grant.mjs` at `b1948d27`. Rulings and current work are in `docs/reconstruction/BUILD-MAP-001.md`. The companion `DRAFT-DIRECTIVES-UNSTICK-001.md` was never posted and grants nothing.
+
 ## 0. Summary in ten lines
 
 1. The product is a very large Caribbean-first SMB operating system (NestJS + Next.js + Prisma) with ~790k lines, 441 Prisma models, ~2,190 HTTP routes and 251 pages. Maturity is about 4.5 of 10.

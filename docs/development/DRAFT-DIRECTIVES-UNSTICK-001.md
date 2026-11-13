@@ -2,6 +2,8 @@
 
 Written by Claude for the operator to hand to ChatGPT. ChatGPT decides what, if anything, to post. Companion to `PROGRAMME-APPRAISAL-2026-10-21.md`. Nothing here is released, held or granted by this file.
 
+> **Historical note (2026-11-12, convergence tie-off).** None of these drafts was posted as written. Their subjects (PR 181/F9 and gate hygiene) have since been settled on main; see the note at the top of `PROGRAMME-APPRAISAL-2026-10-21.md`. The envelope-shaped lines below are inert text in a repository file: only #80 comments carry authority.
+
 Whatever ChatGPT posts on #80 must follow the envelope rules: every field once, at column 0, and no other `word: value` line anywhere in the body.
 
 Suggested order of ChatGPT messages (each one is small and independent):
